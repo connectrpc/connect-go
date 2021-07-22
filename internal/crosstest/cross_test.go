@@ -25,7 +25,7 @@ import (
 	"github.com/akshayjshah/rerpc/internal/crosstest/crosspb/v0"
 )
 
-const errMsg = "oh no"
+const errMsg = "soirée 🎉" // readable non-ASCII
 
 type combinedError struct {
 	err *rerpc.Error
