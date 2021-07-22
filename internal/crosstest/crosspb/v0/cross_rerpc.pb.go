@@ -26,24 +26,30 @@ type CrosstestClientReRPC interface {
 }
 
 type crosstestClientReRPC struct {
-	url  string
-	doer rerpc.Doer
+	url     string
+	doer    rerpc.Doer
+	options []rerpc.CallOption
 }
 
 // NewCrosstestClientReRPC constructs a client for the
-// rerpc.internal.crosstest.cross.v0.Crosstest service.
-func NewCrosstestClientReRPC(url string, doer rerpc.Doer) CrosstestClientReRPC {
+// rerpc.internal.crosstest.cross.v0.Crosstest service. Call options passed here
+// apply to all calls made with this client.
+func NewCrosstestClientReRPC(url string, doer rerpc.Doer, opts ...rerpc.CallOption) CrosstestClientReRPC {
 	return &crosstestClientReRPC{
-		url:  strings.TrimRight(url, "/"),
-		doer: doer,
+		url:     strings.TrimRight(url, "/"),
+		doer:    doer,
+		options: opts,
 	}
 }
 
 // Ping calls rerpc.internal.crosstest.cross.v0.Crosstest/Ping.
 func (c *crosstestClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error) {
+	options := make([]rerpc.CallOption, 0, len(opts)+len(c.options))
+	options = append(options, c.options...)
+	options = append(options, opts...)
 	res := &PingResponse{}
 	url := c.url + "/rerpc.internal.crosstest.cross.v0.Crosstest/Ping"
-	if err := rerpc.Invoke(ctx, url, c.doer, req, res); err != nil {
+	if err := rerpc.Invoke(ctx, url, c.doer, req, res, options...); err != nil {
 		return nil, err
 	}
 	return res, nil
@@ -51,9 +57,12 @@ func (c *crosstestClientReRPC) Ping(ctx context.Context, req *PingRequest, opts 
 
 // Fail calls rerpc.internal.crosstest.cross.v0.Crosstest/Fail.
 func (c *crosstestClientReRPC) Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error) {
+	options := make([]rerpc.CallOption, 0, len(opts)+len(c.options))
+	options = append(options, c.options...)
+	options = append(options, opts...)
 	res := &FailResponse{}
 	url := c.url + "/rerpc.internal.crosstest.cross.v0.Crosstest/Fail"
-	if err := rerpc.Invoke(ctx, url, c.doer, req, res); err != nil {
+	if err := rerpc.Invoke(ctx, url, c.doer, req, res, options...); err != nil {
 		return nil, err
 	}
 	return res, nil
@@ -70,31 +79,33 @@ type CrosstestServerReRPC interface {
 
 // NewCrosstestHandlerReRPC wraps the service implementation in an HTTP handler.
 // It returns the handler and the path on which to mount it.
-func NewCrosstestHandlerReRPC(svc CrosstestServerReRPC) (string, http.Handler) {
+func NewCrosstestHandlerReRPC(svc CrosstestServerReRPC, opts ...rerpc.HandlerOption) (string, http.Handler) {
 	mux := http.NewServeMux()
 
-	ping := rerpc.Handler{
-		Implementation: func(ctx context.Context, req proto.Message) (proto.Message, error) {
+	ping := rerpc.NewHandler(
+		func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*PingRequest)
 			if !ok {
-				return nil, rerpc.Errorf(rerpc.CodeInternal, "can't call rerpc.internal.crosstest.cross.v0.Crosstest/Ping with a %T", req)
+				return nil, rerpc.Errorf(rerpc.CodeInternal, "can't call rerpc.internal.crosstest.cross.v0.Crosstest/Ping with a %v", req.ProtoReflect().Descriptor().FullName())
 			}
 			return svc.Ping(ctx, typed)
 		},
-	}
+		opts...,
+	)
 	mux.HandleFunc("/rerpc.internal.crosstest.cross.v0.Crosstest/Ping", func(w http.ResponseWriter, r *http.Request) {
 		ping.Serve(w, r, &PingRequest{})
 	})
 
-	fail := rerpc.Handler{
-		Implementation: func(ctx context.Context, req proto.Message) (proto.Message, error) {
+	fail := rerpc.NewHandler(
+		func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*FailRequest)
 			if !ok {
-				return nil, rerpc.Errorf(rerpc.CodeInternal, "can't call rerpc.internal.crosstest.cross.v0.Crosstest/Fail with a %T", req)
+				return nil, rerpc.Errorf(rerpc.CodeInternal, "can't call rerpc.internal.crosstest.cross.v0.Crosstest/Fail with a %v", req.ProtoReflect().Descriptor().FullName())
 			}
 			return svc.Fail(ctx, typed)
 		},
-	}
+		opts...,
+	)
 	mux.HandleFunc("/rerpc.internal.crosstest.cross.v0.Crosstest/Fail", func(w http.ResponseWriter, r *http.Request) {
 		fail.Serve(w, r, &FailRequest{})
 	})

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -16,12 +17,71 @@ import (
 
 var (
 	// Always advertise that reRPC accepts gzip compression.
-	acceptEncodingValue = strings.Join([]string{CompressionGzip, CompressionIdentity}, ", ")
+	acceptEncodingValue = strings.Join([]string{CompressionGzip, CompressionIdentity}, ",")
 	acceptPostValue     = strings.Join(
 		[]string{TypeDefaultGRPC, TypeProtoGRPC, TypeJSON},
-		", ",
+		",",
 	)
 )
+
+type handlerCfg struct {
+	MinTimeout          time.Duration
+	MaxTimeout          time.Duration
+	DisableGzipResponse bool
+	MaxRequestBytes     int
+}
+
+type HandlerOption interface {
+	apply(*handlerCfg)
+}
+
+type handlerOptionFunc func(*handlerCfg)
+
+func (f handlerOptionFunc) apply(cfg *handlerCfg) { f(cfg) }
+
+// HandlerMinTimeout sets the minimum allowable timeout. Requests with less
+// than the minimum timeout fail immediately with CodeDeadlineExceeded.
+//
+// By default, any positive timeout is allowed.
+func HandlerMinTimeout(d time.Duration) HandlerOption {
+	return handlerOptionFunc(func(cfg *handlerCfg) {
+		cfg.MinTimeout = d
+	})
+}
+
+// HandlerMaxTimeout sets the maximum allowable timeout. Calls with timeouts
+// greater than the max (including calls with no timeout) are clamped to the
+// maximum allowed timeout. Setting the max timeout to zero allows any timeout.
+//
+// By default, there's no enforced max timeout.
+func HandlerMaxTimeout(d time.Duration) HandlerOption {
+	return handlerOptionFunc(func(cfg *handlerCfg) {
+		cfg.MaxTimeout = d
+	})
+}
+
+// GzipResponses enables or disables gzip compression of the response message.
+// Note that even when gzip compression is enabled, it's only used if the
+// client supports it.
+//
+// By default, responses are gzipped whenever possible.
+func GzipResponses(enable bool) HandlerOption {
+	return handlerOptionFunc(func(cfg *handlerCfg) {
+		cfg.DisableGzipResponse = !enable
+	})
+}
+
+// HandlerMaxRequestBytes sets the maximum allowable request size (after
+// compression, if applicable). Requests larger than the configured size fail
+// early, and the data is never read into memory. Setting the maximum to zero
+// allows any request size.
+//
+// By default, the client allows any request size.
+func HandlerMaxRequestBytes(n int) HandlerOption {
+	return handlerOptionFunc(func(cfg *handlerCfg) {
+		cfg.MaxRequestBytes = n
+	})
+}
 
 // A Handler is the server-side implementation of a single RPC defined by a
 // protocol buffer service. It's the interface between the reRPC library and
@@ -31,7 +91,20 @@ var (
 // To see an example of how Handler is used in the generated code, see the
 // internal/pingpb/v0 package.
 type Handler struct {
-	Implementation func(context.Context, proto.Message) (proto.Message, error)
+	implementation func(context.Context, proto.Message) (proto.Message, error)
+	config         handlerCfg
+}
+
+// NewHandler constructs a Handler.
+func NewHandler(impl func(context.Context, proto.Message) (proto.Message, error), opts ...HandlerOption) *Handler {
+	var cfg handlerCfg
+	for _, opt := range opts {
+		opt.apply(&cfg)
+	}
+	return &Handler{
+		implementation: impl,
+		config:         cfg,
+	}
 }
 
 // Serve executes the handler, much like the standard library's http.Handler.
@@ -74,11 +147,13 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, msg proto.Messag
 }
 
 func (h *Handler) serveJSON(w http.ResponseWriter, r *http.Request, msg proto.Message) {
-	var closeWriter func()
-	w, closeWriter = maybeGzipWriter(w, r)
-	defer closeWriter()
+	if !h.config.DisableGzipResponse {
+		var returnToPool func()
+		w, returnToPool = maybeGzipWriter(w, r)
+		defer returnToPool()
+	}
 
-	r, cancel, err := applyTimeout(r)
+	r, cancel, err := applyTimeout(r, h.config.MinTimeout, h.config.MaxTimeout)
 	if err != nil {
 		// Errors here indicate that the client sent an invalid timeout header, so
 		// the exact error is safe to send back.
@@ -95,13 +170,20 @@ func (h *Handler) serveJSON(w http.ResponseWriter, r *http.Request, msg proto.Me
 	}
 	defer closeReader()
 
+	if max := h.config.MaxRequestBytes; max > 0 {
+		body = &io.LimitedReader{
+			R: body,
+			N: int64(max),
+		}
+	}
+
 	if err := unmarshalJSON(body, msg); err != nil {
 		// TODO: observability
 		writeErrorJSON(w, errorf(CodeInvalidArgument, "can't unmarshal JSON body"))
 		return
 	}
 
-	res, implErr := h.Implementation(r.Context(), msg)
+	res, implErr := h.implementation(r.Context(), msg)
 	if implErr != nil {
 		// It's the user's job to sanitize the error string.
 		writeErrorJSON(w, implErr)
@@ -122,7 +204,8 @@ func (h *Handler) serveGRPC(w http.ResponseWriter, r *http.Request, msg proto.Me
 	// We always send grpc-accept-encoding. Set it here so it's ready to go in
 	// future error cases.
 	w.Header().Set("Grpc-Accept-Encoding", acceptEncodingValue)
-	// From here on, every gRPC response will have these trailers.
+	w.Header().Set("User-Agent", UserAgent)
+	// Every gRPC response will have these trailers.
 	w.Header().Add("Trailer", "Grpc-Status")
 	w.Header().Add("Trailer", "Grpc-Message")
 	w.Header().Add("Trailer", "Grpc-Status-Details-Bin")
@@ -136,8 +219,9 @@ func (h *Handler) serveGRPC(w http.ResponseWriter, r *http.Request, msg proto.Me
 			requestCompression = CompressionGzip
 		default:
 			// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
-			// should return CodeUnimplemented.
-			writeErrorGRPC(w, errorf(CodeUnimplemented, "compression %q isn't supported", me))
+			// should return CodeUnimplemented and specify acceptable compression(s)
+			// (in addition to setting the Grpc-Accept-Encoding header).
+			writeErrorGRPC(w, errorf(CodeUnimplemented, "unknown compression %q: accepted grpc-encoding values are %v", me, acceptEncodingValue))
 			return
 		}
 	}
@@ -149,18 +233,21 @@ func (h *Handler) serveGRPC(w http.ResponseWriter, r *http.Request, msg proto.Me
 	if mae := r.Header.Get("Grpc-Accept-Encoding"); mae != "" {
 		for _, enc := range strings.FieldsFunc(mae, splitOnCommasAndSpaces) {
 			switch enc {
+			case CompressionGzip: // prefer gzip
+				responseCompression = CompressionGzip
+				break
 			case CompressionIdentity:
 				responseCompression = CompressionIdentity
-				break
-			case CompressionGzip:
-				responseCompression = CompressionGzip
 				break
 			}
 		}
 	}
+	if h.config.DisableGzipResponse {
+		responseCompression = CompressionIdentity
+	}
 	w.Header().Set("Grpc-Encoding", responseCompression)
 
-	r, cancel, err := applyTimeout(r)
+	r, cancel, err := applyTimeout(r, h.config.MinTimeout, h.config.MaxTimeout)
 	if err != nil {
 		// Errors here indicate that the client sent an invalid timeout header, so
 		// the exact error is safe to send back.
@@ -169,13 +256,13 @@ func (h *Handler) serveGRPC(w http.ResponseWriter, r *http.Request, msg proto.Me
 	}
 	defer cancel()
 
-	if err := unmarshalLPM(r.Body, msg, requestCompression, 0 /* maxSize */); err != nil {
+	if err := unmarshalLPM(r.Body, msg, requestCompression, h.config.MaxRequestBytes); err != nil {
 		// TODO: observability
 		writeErrorGRPC(w, errorf(CodeInvalidArgument, "can't unmarshal protobuf request"))
 		return
 	}
 
-	res, implErr := h.Implementation(r.Context(), msg)
+	res, implErr := h.implementation(r.Context(), msg)
 	if implErr != nil {
 		// It's the user's job to sanitize the error string.
 		writeErrorGRPC(w, implErr)

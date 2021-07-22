@@ -164,7 +164,11 @@ func TestServerProtoGRPC(t *testing.T) {
 			testPing(t, client)
 			testErrors(t, client)
 		})
-		// TODO: ping and fail gzip
+		t.Run("gzip", func(t *testing.T) {
+			client := pingpb.NewPingClientReRPC(server.URL, server.Client(), rerpc.GzipRequests(true))
+			testPing(t, client)
+			testErrors(t, client)
+		})
 	}
 
 	t.Run("http1", func(t *testing.T) {
