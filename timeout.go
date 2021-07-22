@@ -61,6 +61,9 @@ func parseTimeout(timeout string) (time.Duration, error) {
 }
 
 func encodeTimeout(t time.Duration) (string, error) {
+	if t <= 0 {
+		return "0n", nil
+	}
 	for _, pair := range timeoutUnits {
 		if digits := strconv.FormatInt(int64(t/pair.size), 10 /* base */); len(digits) < maxTimeoutChars {
 			return digits + string(pair.char), nil
