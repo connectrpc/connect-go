@@ -16,19 +16,31 @@ help: ## Describe useful make targets
 .PHONY: clean
 clean: ## Delete build output and generated code
 	rm -f bin/{protoc-gen-go-grpc,protoc-gen-go-rerpc}
+	rm -rf internal/crosstest/crosspb/{v0,.faux}
 	rm -rf internal/pingpb/{v0,.faux}
 	rm -rf internal/statuspb/{v0,.faux}
+	find . -type f -name "*.proto" -exec touch {} +
 
 .PHONY: test
 test: gen $(HANDWRITTEN) ## Run unit tests
-	go test -race ./...
-	cd internal/crosstest && go test -race ./...
+	go test -race -cover ./...
+	cd internal/crosstest && go test -race -cover ./...
 
 .PHONY: gen
 gen: genpb ## Regenerate code
 
 .PHONY: genpb
-genpb: internal/statuspb/.faux internal/pingpb/.faux
+genpb: internal/statuspb/.faux internal/pingpb/.faux internal/crosstest/crosspb/.faux
+
+internal/crosstest/crosspb/.faux: internal/crosstest/crosspb/cross.proto bin/protoc-gen-go-grpc bin/protoc-gen-go-rerpc
+	PATH="./bin:$(PATH)" protoc internal/crosstest/crosspb/cross.proto \
+		--go_out=. \
+		--go_opt=module=$(MODULE) \
+		--go-grpc_out=. \
+		--go-grpc_opt=module=$(MODULE) \
+		--go-rerpc_out=. \
+		--go-rerpc_opt=module=$(MODULE)
+	touch $(@)
 
 internal/statuspb/.faux: internal/statuspb/status.proto
 	protoc internal/statuspb/status.proto \
