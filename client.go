@@ -114,6 +114,7 @@ func extractError(h http.Header) *Error {
 	if codeIsSuccess {
 		return nil
 	}
+
 	code, err := strconv.Atoi(codeHeader)
 	if err != nil {
 		return errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
@@ -134,6 +135,9 @@ func extractError(h http.Header) *Error {
 			return errorf(CodeUnknown, "server returned invalid protobuf for error details")
 		}
 		ret.details = status.Details
+		// Prefer the protobuf-encoded data to the headers (grpc-go does this too).
+		ret.code = Code(status.Code)
+		ret.err = errors.New(status.Message)
 	}
 
 	return ret
