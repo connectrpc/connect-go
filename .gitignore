@@ -1,3 +1,4 @@
 bin/
 cover.out
+internal/pingpb/.faux
 internal/statuspb/.faux

@@ -15,7 +15,8 @@ help: ## Describe useful make targets
 
 .PHONY: clean
 clean: ## Delete build output and generated code
-   rm -f bin/protoc-gen-go-grpc
+	rm -f bin/{protoc-gen-go-grpc,protoc-gen-go-rerpc}
+	rm -rf internal/pingpb/{v0,.faux}
 	rm -rf internal/statuspb/{v0,.faux}
 
 .PHONY: test
@@ -27,7 +28,7 @@ test: gen $(HANDWRITTEN) ## Run unit tests
 gen: genpb ## Regenerate code
 
 .PHONY: genpb
-genpb: internal/statuspb/.faux
+genpb: internal/statuspb/.faux internal/pingpb/.faux
 
 internal/statuspb/.faux: internal/statuspb/status.proto
 	protoc internal/statuspb/status.proto \
@@ -35,7 +36,17 @@ internal/statuspb/.faux: internal/statuspb/status.proto
 		--go_opt=module=$(MODULE)
 	touch $(@)
 
+internal/pingpb/.faux: internal/pingpb/ping.proto bin/protoc-gen-go-rerpc
+	PATH="./bin:$(PATH)" protoc internal/pingpb/ping.proto \
+		--go_out=. \
+		--go_opt=module=$(MODULE) \
+		--go-rerpc_out=. \
+		--go-rerpc_opt=module=$(MODULE)
+	touch $(@)
+
 bin/protoc-gen-go-grpc: internal/crosstest/go.mod
 	GOBIN=$(PWD)/bin cd internal/crosstest && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc
 	touch $(@)
 
+bin/protoc-gen-go-rerpc: $(shell ls cmd/protoc-gen-go-rerpc/*.go) go.mod
+	go build -o $(@) ./cmd/protoc-gen-go-rerpc
