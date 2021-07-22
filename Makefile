@@ -13,12 +13,27 @@ MODULE=github.com/akshayjshah/rerpc
 help: ## Describe useful make targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-30s %s\n", $$1, $$2}'
 
+.PHONY: clean
 clean: ## Delete build output and generated code
-	rm -f bin/protoc-gen-go-grpc
+   rm -f bin/protoc-gen-go-grpc
+	rm -rf internal/statuspb/{v0,.faux}
 
-test: $(HANDWRITTEN) ## Run unit tests
+.PHONY: test
+test: gen $(HANDWRITTEN) ## Run unit tests
 	go test -race ./...
 	cd internal/crosstest && go test -race ./...
+
+.PHONY: gen
+gen: genpb ## Regenerate code
+
+.PHONY: genpb
+genpb: internal/statuspb/.faux
+
+internal/statuspb/.faux: internal/statuspb/status.proto
+	protoc internal/statuspb/status.proto \
+		--go_out=. \
+		--go_opt=module=$(MODULE)
+	touch $(@)
 
 bin/protoc-gen-go-grpc: internal/crosstest/go.mod
 	GOBIN=$(PWD)/bin cd internal/crosstest && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc
