@@ -14,7 +14,10 @@ import (
 )
 
 func TestErrorCodeOK(t *testing.T) {
-	assert.Nil(t, Errorf(CodeOK, "everything is fine"), "error with code ok")
+	// Must use == rather than assert.Equal to avoid being fooled by
+	// typed nils.
+	assert.True(t, Wrap(CodeOK, errors.New("ok")) == nil, "wrap code ok")
+	assert.True(t, Errorf(CodeOK, "ok") == nil, "errorf code ok")
 }
 
 func TestErrorFormatting(t *testing.T) {

@@ -32,6 +32,15 @@ type Error struct {
 // Wrap annotates any error with a gRPC status code. If the code is CodeOK, the
 // returned error is nil.
 func Wrap(c Code, err error) error {
+	if e := wrap(c, err); e != nil {
+		return e
+	}
+	return nil
+}
+
+// For internal use: lets us distinguish code-carrying errors from generic
+// errors (which may leak server details) at the type level without casts.
+func wrap(c Code, err error) *Error {
 	// TODO: should we allow re-wrapping?
 	if c == CodeOK {
 		return nil
@@ -45,7 +54,16 @@ func Wrap(c Code, err error) error {
 // Errorf calls errors.Errorf with the supplied template and arguments, then
 // wraps the resulting error. If the code is CodeOK, the returned error is nil.
 func Errorf(c Code, template string, args ...interface{}) error {
-	return Wrap(c, fmt.Errorf(template, args...))
+	if e := errorf(c, template, args...); e != nil {
+		return e
+	}
+	return nil
+}
+
+// For internal use: lets us distinguish code-carrying errors from generic
+// errors (which may leak server details) at the type level without casts.
+func errorf(c Code, template string, args ...interface{}) *Error {
+	return wrap(c, fmt.Errorf(template, args...))
 }
 
 // AsError uses errors.As to unwrap any error and look for a reRPC Error.
