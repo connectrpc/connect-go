@@ -8,11 +8,10 @@ package pingpb
 
 import (
 	context "context"
-	http "net/http"
-	strings "strings"
-
 	rerpc "github.com/akshayjshah/rerpc"
 	proto "google.golang.org/protobuf/proto"
+	http "net/http"
+	strings "strings"
 )
 
 // This is a compile-time assertion to ensure that this generated file and the
