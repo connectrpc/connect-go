@@ -46,7 +46,7 @@ func invoke(ctx context.Context, url string, doer Doer, req, res proto.Message) 
 		return errorf(CodeInvalidArgument, "can't marshal request as protobuf: %w", err)
 	}
 
-	request, err := http.NewRequest(http.MethodPost, url, body)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
 	if err != nil {
 		return errorf(CodeInternal, "can't create HTTP request: %w", err)
 	}
@@ -67,6 +67,12 @@ func invoke(ctx context.Context, url string, doer Doer, req, res proto.Message) 
 
 	response, err := doer.Do(request)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return errorf(CodeCanceled, "context canceled")
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return errorf(CodeDeadlineExceeded, "context deadline exceeded")
+		}
 		// TODO: observability
 		return wrap(CodeUnknown, errors.New("error making request (no usable response or status code)"))
 	}

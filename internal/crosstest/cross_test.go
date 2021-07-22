@@ -106,6 +106,24 @@ func testWithReRPCClient(t *testing.T, client crosspb.CrosstestClientReRPC) {
 		assert.Equal(t, rerr.Error(), "ResourceExhausted: "+errMsg, "error message")
 		assert.Zero(t, rerr.Details(), "error details")
 	})
+	t.Run("cancel", func(t *testing.T) {
+		req := &crosspb.PingRequest{}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		cancel()
+		_, err := client.Ping(ctx, req)
+		rerr := assertErrorReRPC(t, err, "error after canceling context")
+		assert.Equal(t, rerr.Code(), rerpc.CodeCanceled, "error code")
+		assert.Equal(t, rerr.Error(), "Canceled: context canceled", "error message")
+	})
+	t.Run("exceed_deadline", func(t *testing.T) {
+		req := &crosspb.PingRequest{Sleep: durationpb.New(time.Second)}
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		_, err := client.Ping(ctx, req)
+		rerr := assertErrorReRPC(t, err, "deadline exceeded error")
+		assert.Equal(t, rerr.Code(), rerpc.CodeDeadlineExceeded, "error code")
+		assert.Equal(t, rerr.Error(), "DeadlineExceeded: context deadline exceeded", "error message")
+	})
 }
 
 func testWithGRPCClient(t *testing.T, client crosspb.CrosstestClient, opts ...grpc.CallOption) {
@@ -132,6 +150,9 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrosstestClient, opts ...gr
 		_, err := client.Ping(ctx, req, opts...)
 		s := assertErrorGRPC(t, err, "error after canceling context")
 		assert.Equal(t, s.Code(), codes.Canceled, "error code")
+		// Generally bad practice to assert error messages we don't own, but
+		// we'll want to keep rerpc's message in sync with grpc-go's.
+		assert.Equal(t, s.Message(), "context canceled", "error message")
 	})
 	t.Run("exceed_deadline", func(t *testing.T) {
 		req := &crosspb.PingRequest{Sleep: durationpb.New(time.Second)}
@@ -140,6 +161,9 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrosstestClient, opts ...gr
 		_, err := client.Ping(ctx, req, opts...)
 		s := assertErrorGRPC(t, err, "deadline exceeded error")
 		assert.Equal(t, s.Code(), codes.DeadlineExceeded, "error code")
+		// Generally bad practice to assert error messages we don't own, but
+		// we'll want to keep rerpc's message in sync with grpc-go's.
+		assert.Equal(t, s.Message(), "context deadline exceeded", "error message")
 	})
 }
 
