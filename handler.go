@@ -182,7 +182,7 @@ func (h *Handler) serveGRPC(w http.ResponseWriter, r *http.Request, msg proto.Me
 		return
 	}
 
-	if err := marshalLPM(w, res, responseCompression); err != nil {
+	if err := marshalLPM(w, res, responseCompression, 0 /* maxBytes */); err != nil {
 		// It's safe to write gRPC errors even after we've started writing the
 		// body.
 		// TODO: observability

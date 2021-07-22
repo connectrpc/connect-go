@@ -42,7 +42,7 @@ func Invoke(ctx context.Context, url string, doer Doer, req, res proto.Message) 
 
 func invoke(ctx context.Context, url string, doer Doer, req, res proto.Message) *Error {
 	body := &bytes.Buffer{}
-	if err := marshalLPM(body, req, CompressionIdentity); err != nil {
+	if err := marshalLPM(body, req, CompressionIdentity, 0 /* maxBytes */); err != nil {
 		return errorf(CodeInvalidArgument, "can't marshal request as protobuf: %w", err)
 	}
 
