@@ -3,6 +3,7 @@ package rerpc
 import (
 	"math"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/akshayjshah/rerpc/internal/assert"
@@ -34,4 +35,18 @@ func TestEncodeTimeout(t *testing.T) {
 	to, err = encodeTimeout(time.Duration(math.MaxInt64))
 	assert.Nil(t, err, "max duration")
 	assert.Equal(t, to, "2562047H", "max duration")
+	to, err = encodeTimeout(-1 * time.Hour)
+	assert.Nil(t, err, "negative duration")
+	assert.Equal(t, to, "0n", "negative duration")
+}
+
+func TestEncodeTimeoutQuick(t *testing.T) {
+	// Ensure that the error case is actually unreachable.
+	encode := func(d time.Duration) bool {
+		_, err := encodeTimeout(d)
+		return err == nil
+	}
+	if err := quick.Check(encode, nil); err != nil {
+		t.Error(err)
+	}
 }
