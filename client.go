@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -21,8 +22,69 @@ type Doer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// TODO: placeholder, used in generated code
-type CallOption struct{}
+type invokeCfg struct {
+	MinTimeout        time.Duration
+	MaxTimeout        time.Duration
+	EnableGzipRequest bool
+	MaxResponseBytes  int
+}
+
+// A CallOption configures a reRPC client or a single call.
+type CallOption interface {
+	apply(*invokeCfg)
+}
+
+type callOptionFunc func(*invokeCfg)
+
+func (f callOptionFunc) apply(cfg *invokeCfg) { f(cfg) }
+
+// CallMinTimeout sets the minimum allowable timeout. Attempting a call with
+// less than the minimum timeout immediately fails with CodeDeadlineExceeded.
+//
+// By default, any positive timeout is allowed.
+func CallMinTimeout(d time.Duration) CallOption {
+	return callOptionFunc(func(cfg *invokeCfg) {
+		cfg.MinTimeout = d
+	})
+}
+
+// CallMaxTimeout sets the maximum allowable timeout. Timeouts greater than the
+// configured max (including calls with no timeout) are reduced to the maximum
+// allowed. Setting the max timeout to zero allows any timeout.
+//
+// By default, there's no enforced max timeout.
+func CallMaxTimeout(d time.Duration) CallOption {
+	return callOptionFunc(func(cfg *invokeCfg) {
+		cfg.MaxTimeout = d
+	})
+}
+
+// GzipRequests enables or disables gzip compression of the request message.
+// The client always requests gzipped responses, but most gRPC servers only
+// support symmetrical compression.
+//
+// Since some gRPC servers don't support compression, requests are uncompressed
+// by default.
+func GzipRequests(enable bool) CallOption {
+	// NB, the default is required by
+	// https://github.com/grpc/grpc/blob/master/doc/compression.md - see test
+	// case 6.
+	return callOptionFunc(func(cfg *invokeCfg) {
+		cfg.EnableGzipRequest = enable
+	})
+}
+
+// CallMaxResponseBytes sets the maximum allowable response size (after
+// compression, if applicable). Responses larger than the configured size fail
+// early, and the data is never read into memory. Setting the maximum to zero
+// allows any response size.
+//
+// By default, the client allows any response size.
+func CallMaxResponseBytes(n int) CallOption {
+	return callOptionFunc(func(cfg *invokeCfg) {
+		cfg.MaxResponseBytes = n
+	})
+}
 
 // Invoke is the client-side implementation of a single RPC defined by a
 // protocol buffer service. It's the interface between the reRPC library and
@@ -31,18 +93,55 @@ type CallOption struct{}
 //
 // To see an example of how Invoke is used in the generated code, see the
 // internal/pingpb/v0 package.
-func Invoke(ctx context.Context, url string, doer Doer, req, res proto.Message) error {
+func Invoke(ctx context.Context, url string, doer Doer, req, res proto.Message, opts ...CallOption) error {
 	// directly returning invoke's output puts a typed nil into the error
 	// interface, so the error is mysteriously non-nil.
-	if err := invoke(ctx, url, doer, req, res); err != nil {
+	if err := invoke(ctx, url, doer, req, res, opts); err != nil {
 		return err
 	}
 	return nil
 }
 
-func invoke(ctx context.Context, url string, doer Doer, req, res proto.Message) *Error {
+func invoke(ctx context.Context, url string, doer Doer, req, res proto.Message, opts []CallOption) *Error {
+	cfg := &invokeCfg{}
+	for _, opt := range opts {
+		opt.apply(cfg)
+	}
+
+	deadline, hasDeadline := ctx.Deadline()
+	var encodedTimeout string
+	untilDeadline := time.Duration(math.MaxInt64)
+	if hasDeadline {
+		untilDeadline = time.Until(deadline)
+	}
+	if max := cfg.MaxTimeout; max > 0 && untilDeadline > max {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, max)
+		defer cancel()
+		hasDeadline = true
+		untilDeadline = max
+	}
+	if untilDeadline < 0 {
+		return errorf(CodeDeadlineExceeded, "no time to make RPC: timeout is %v", untilDeadline)
+	}
+	if untilDeadline < cfg.MinTimeout {
+		return errorf(CodeDeadlineExceeded, "no time to make RPC: timeout is %v, configured min is %v", untilDeadline, cfg.MinTimeout)
+	}
+	if hasDeadline {
+		if timeout, err := encodeTimeout(untilDeadline); err == nil {
+			// Tests verify that the error in encodeTimeout is unreachable, so we
+			// should be safe without observability for the error case.
+			encodedTimeout = timeout
+		}
+	}
+
+	requestCompression := CompressionGzip
+	if !cfg.EnableGzipRequest {
+		requestCompression = CompressionIdentity
+	}
+
 	body := &bytes.Buffer{}
-	if err := marshalLPM(body, req, CompressionIdentity, 0 /* maxBytes */); err != nil {
+	if err := marshalLPM(body, req, requestCompression, 0 /* maxBytes */); err != nil {
 		return errorf(CodeInvalidArgument, "can't marshal request as protobuf: %w", err)
 	}
 
@@ -50,20 +149,14 @@ func invoke(ctx context.Context, url string, doer Doer, req, res proto.Message) 
 	if err != nil {
 		return errorf(CodeInternal, "can't create HTTP request: %w", err)
 	}
+	request.Header.Set("User-Agent", UserAgent)
 	request.Header.Set("Content-Type", TypeDefaultGRPC)
-	request.Header.Set("Te", "trailers")
-
-	if deadline, ok := ctx.Deadline(); ok {
-		untilDeadline := time.Until(deadline)
-		if untilDeadline <= 0 {
-			return errorf(CodeDeadlineExceeded, "no time to make RPC: timeout is %v", untilDeadline)
-		}
-		if timeout, err := encodeTimeout(untilDeadline); err == nil {
-			// Tests verify that the error in encodeTimeout is unreachable, so we
-			// should be safe without observability for the error case.
-			request.Header.Set("Grpc-Timeout", timeout)
-		}
+	request.Header.Set("Grpc-Encoding", requestCompression)
+	request.Header.Set("Grpc-Accept-Encoding", acceptEncodingValue) // always advertise identity & gzip
+	if encodedTimeout != "" {
+		request.Header.Set("Grpc-Timeout", encodedTimeout)
 	}
+	request.Header.Set("Te", "trailers")
 
 	response, err := doer.Do(request)
 	if err != nil {
@@ -90,6 +183,14 @@ func invoke(ctx context.Context, url string, doer Doer, req, res proto.Message) 
 	if compression == "" {
 		compression = CompressionIdentity
 	}
+	switch compression {
+	case CompressionIdentity, CompressionGzip:
+	default:
+		// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
+		// should return CodeInternal and specify acceptable compression(s) (in
+		// addition to setting the Grpc-Accept-Encoding header).
+		return errorf(CodeInternal, "unknown compression %q: accepted grpc-encoding values are %v", compression, acceptEncodingValue)
+	}
 
 	// When there's no body, errors sent from the first-party gRPC servers will
 	// be in the headers.
@@ -98,7 +199,7 @@ func invoke(ctx context.Context, url string, doer Doer, req, res proto.Message) 
 	}
 
 	// Handling this error is a little complicated - read on.
-	unmarshalErr := unmarshalLPM(response.Body, res, compression, 0 /* maxSize */)
+	unmarshalErr := unmarshalLPM(response.Body, res, compression, cfg.MaxResponseBytes)
 	// To ensure that we've read the trailers, read the body to completion.
 	io.Copy(io.Discard, response.Body)
 	serverErr := extractError(response.Trailer)

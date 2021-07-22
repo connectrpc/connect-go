@@ -119,19 +119,23 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	g.P("type ", unexport(name), " struct {")
 	g.P("url string")
 	g.P("doer ", rerpcPackage.Ident("Doer"))
+	g.P("options []", rerpcPackage.Ident("CallOption"))
 	g.P("}")
 	g.P()
 
 	// Client constructor.
-	comment(g, "New", name, " constructs a client for the ", service.Desc.FullName(), " service.")
+	comment(g, "New", name, " constructs a client for the ", service.Desc.FullName(),
+		" service. Call options passed here apply to all calls made with this client.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
 	}
-	g.P("func New", name, " (url string, doer ", rerpcPackage.Ident("Doer"), ") ", name, " {")
+	g.P("func New", name, " (url string, doer ", rerpcPackage.Ident("Doer"),
+		", opts ...", rerpcPackage.Ident("CallOption"), ") ", name, " {")
 	g.P("return &", unexport(name), "{")
 	g.P("url: ", stringsPackage.Ident("TrimRight"), `(url, "/"),`)
 	g.P("doer: doer,")
+	g.P("options: opts,")
 	g.P("}")
 	g.P("}")
 	g.P()
@@ -152,9 +156,12 @@ func clientMethod(g *protogen.GeneratedFile, method *protogen.Method) {
 		deprecated(g)
 	}
 	g.P("func (c *", unexport(service.GoName), "ClientReRPC) ", clientSignature(g, method), "{")
+	g.P("options := make([]", rerpcPackage.Ident("CallOption"), ", 0, len(opts)+len(c.options))")
+	g.P("options = append(options, c.options...)")
+	g.P("options = append(options, opts...)")
 	g.P("res := &", method.Output.GoIdent, "{}")
 	g.P(`url := c.url + "/`, fqn, `"`)
-	g.P("if err := ", rerpcPackage.Ident("Invoke"), "(ctx, url, c.doer, req, res); err != nil {")
+	g.P("if err := ", rerpcPackage.Ident("Invoke"), "(ctx, url, c.doer, req, res, options...); err != nil {")
 	g.P("return nil, err")
 	g.P("}")
 	g.P("return res, nil")
@@ -198,22 +205,24 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		g.P("//")
 		deprecated(g)
 	}
-	g.P("func New", service.GoName, "HandlerReRPC(svc ", name, ") (string, ", httpPackage.Ident("Handler"), ") {")
+	g.P("func New", service.GoName, "HandlerReRPC(svc ", name, ", opts ...", rerpcPackage.Ident("HandlerOption"),
+		") (string, ", httpPackage.Ident("Handler"), ") {")
 	g.P("mux := ", httpPackage.Ident("NewServeMux"), "()")
 	g.P()
 	for _, method := range unaryMethods(service) {
 		fqn := fmt.Sprintf("%s/%s", sname, method.Desc.Name())
 		hname := unexport(string(method.Desc.Name()))
-		g.P(hname, " := ", rerpcPackage.Ident("Handler"), "{")
-		g.P("Implementation: func(ctx ", contextPackage.Ident("Context"), ", req ", protoPackage.Ident("Message"), ") (",
+		g.P(hname, " := ", rerpcPackage.Ident("NewHandler"), "(")
+		g.P("func(ctx ", contextPackage.Ident("Context"), ", req ", protoPackage.Ident("Message"), ") (",
 			protoPackage.Ident("Message"), ", error) {")
 		g.P("typed, ok := req.(*", method.Input.GoIdent, ")")
 		g.P("if !ok {")
-		g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(", rerpcPackage.Ident("CodeInternal"), `, "can't call `, fqn, ` with a %T", req)`)
+		g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(", rerpcPackage.Ident("CodeInternal"), `, "can't call `, fqn, ` with a %v", req.ProtoReflect().Descriptor().FullName())`)
 		g.P("}")
 		g.P("return svc.", method.GoName, "(ctx, typed)")
 		g.P("},")
-		g.P("}")
+		g.P("opts...,")
+		g.P(")")
 		g.P(`mux.HandleFunc("/`, fqn, `", func(w `, httpPackage.Ident("ResponseWriter"), ", r *", httpPackage.Ident("Request"), ") {")
 		g.P(hname, ".Serve(w, r, &", method.Input.GoIdent, "{})")
 		g.P("})")

@@ -176,11 +176,14 @@ func TestReRPCServer(t *testing.T) {
 	defer server.Close()
 
 	t.Run("rerpc_client", func(t *testing.T) {
+		t.Run("gzip", func(t *testing.T) {
+			client := crosspb.NewCrosstestClientReRPC(server.URL, server.Client(), rerpc.GzipRequests(true))
+			testWithReRPCClient(t, client)
+		})
 		t.Run("identity", func(t *testing.T) {
 			client := crosspb.NewCrosstestClientReRPC(server.URL, server.Client())
 			testWithReRPCClient(t, client)
 		})
-		// TODO: gzip
 	})
 	t.Run("grpc_client", func(t *testing.T) {
 		pool := x509.NewCertPool()

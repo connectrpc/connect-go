@@ -72,14 +72,23 @@ func encodeTimeout(t time.Duration) (string, error) {
 	return "", errNoTimeout // shouldn't reach here
 }
 
-func applyTimeout(r *http.Request) (*http.Request, func(), error) {
+func applyTimeout(r *http.Request, min, max time.Duration) (*http.Request, func(), error) {
 	if to, err := parseTimeout(r.Header.Get("Grpc-Timeout")); err != nil && err != errNoTimeout {
 		return nil, nil, err
+	} else if err == errNoTimeout && max > 0 {
+		ctx, cancel := context.WithTimeout(r.Context(), max)
+		r = r.WithContext(ctx)
+		return r, cancel, nil
 	} else if err != nil {
+		if to < min {
+			return nil, nil, errorf(CodeDeadlineExceeded, "insufficient timeout %v", to)
+		}
+		if to > max {
+			to = max
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), to)
 		r = r.WithContext(ctx)
 		return r, cancel, nil
 	}
-	// TODO: support a default timeout
 	return r, func() {}, nil
 }

@@ -25,24 +25,29 @@ type PingClientReRPC interface {
 }
 
 type pingClientReRPC struct {
-	url  string
-	doer rerpc.Doer
+	url     string
+	doer    rerpc.Doer
+	options []rerpc.CallOption
 }
 
 // NewPingClientReRPC constructs a client for the rerpc.internal.ping.v0.Ping
-// service.
-func NewPingClientReRPC(url string, doer rerpc.Doer) PingClientReRPC {
+// service. Call options passed here apply to all calls made with this client.
+func NewPingClientReRPC(url string, doer rerpc.Doer, opts ...rerpc.CallOption) PingClientReRPC {
 	return &pingClientReRPC{
-		url:  strings.TrimRight(url, "/"),
-		doer: doer,
+		url:     strings.TrimRight(url, "/"),
+		doer:    doer,
+		options: opts,
 	}
 }
 
 // Ping calls rerpc.internal.ping.v0.Ping/Ping.
 func (c *pingClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error) {
+	options := make([]rerpc.CallOption, 0, len(opts)+len(c.options))
+	options = append(options, c.options...)
+	options = append(options, opts...)
 	res := &PingResponse{}
 	url := c.url + "/rerpc.internal.ping.v0.Ping/Ping"
-	if err := rerpc.Invoke(ctx, url, c.doer, req, res); err != nil {
+	if err := rerpc.Invoke(ctx, url, c.doer, req, res, options...); err != nil {
 		return nil, err
 	}
 	return res, nil
@@ -50,9 +55,12 @@ func (c *pingClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...re
 
 // Fail calls rerpc.internal.ping.v0.Ping/Fail.
 func (c *pingClientReRPC) Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error) {
+	options := make([]rerpc.CallOption, 0, len(opts)+len(c.options))
+	options = append(options, c.options...)
+	options = append(options, opts...)
 	res := &FailResponse{}
 	url := c.url + "/rerpc.internal.ping.v0.Ping/Fail"
-	if err := rerpc.Invoke(ctx, url, c.doer, req, res); err != nil {
+	if err := rerpc.Invoke(ctx, url, c.doer, req, res, options...); err != nil {
 		return nil, err
 	}
 	return res, nil
@@ -69,31 +77,33 @@ type PingServerReRPC interface {
 
 // NewPingHandlerReRPC wraps the service implementation in an HTTP handler. It
 // returns the handler and the path on which to mount it.
-func NewPingHandlerReRPC(svc PingServerReRPC) (string, http.Handler) {
+func NewPingHandlerReRPC(svc PingServerReRPC, opts ...rerpc.HandlerOption) (string, http.Handler) {
 	mux := http.NewServeMux()
 
-	ping := rerpc.Handler{
-		Implementation: func(ctx context.Context, req proto.Message) (proto.Message, error) {
+	ping := rerpc.NewHandler(
+		func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*PingRequest)
 			if !ok {
-				return nil, rerpc.Errorf(rerpc.CodeInternal, "can't call rerpc.internal.ping.v0.Ping/Ping with a %T", req)
+				return nil, rerpc.Errorf(rerpc.CodeInternal, "can't call rerpc.internal.ping.v0.Ping/Ping with a %v", req.ProtoReflect().Descriptor().FullName())
 			}
 			return svc.Ping(ctx, typed)
 		},
-	}
+		opts...,
+	)
 	mux.HandleFunc("/rerpc.internal.ping.v0.Ping/Ping", func(w http.ResponseWriter, r *http.Request) {
 		ping.Serve(w, r, &PingRequest{})
 	})
 
-	fail := rerpc.Handler{
-		Implementation: func(ctx context.Context, req proto.Message) (proto.Message, error) {
+	fail := rerpc.NewHandler(
+		func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*FailRequest)
 			if !ok {
-				return nil, rerpc.Errorf(rerpc.CodeInternal, "can't call rerpc.internal.ping.v0.Ping/Fail with a %T", req)
+				return nil, rerpc.Errorf(rerpc.CodeInternal, "can't call rerpc.internal.ping.v0.Ping/Fail with a %v", req.ProtoReflect().Descriptor().FullName())
 			}
 			return svc.Fail(ctx, typed)
 		},
-	}
+		opts...,
+	)
 	mux.HandleFunc("/rerpc.internal.ping.v0.Ping/Fail", func(w http.ResponseWriter, r *http.Request) {
 		fail.Serve(w, r, &FailRequest{})
 	})
