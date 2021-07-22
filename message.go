@@ -16,6 +16,7 @@ import (
 var (
 	jsonpbMarshaler   = protojson.MarshalOptions{}
 	jsonpbUnmarshaler = protojson.UnmarshalOptions{DiscardUnknown: true}
+	sizeZeroPrefix    = make([]byte, 4)
 )
 
 func marshalJSON(w io.Writer, msg proto.Message) error {
@@ -91,7 +92,11 @@ func unmarshalLPM(r io.Reader, msg proto.Message, compression string, maxBytes i
 	// four-byte unsigned integer indicating the message length.
 	prefixes := make([]byte, 5)
 	n, err := r.Read(prefixes)
-	if err != nil || n < 5 {
+	if err != nil && errors.Is(err, io.EOF) && n == 5 && bytes.Equal(prefixes[1:5], sizeZeroPrefix) {
+		// Successfully read prefix, expect no additional data, and got an EOF, so
+		// there's nothing left to do - the zero value of the msg is correct.
+		return nil
+	} else if err != nil || n < 5 {
 		// Even an EOF is unacceptable here, since we always need a message for
 		// unary RPC.
 		return fmt.Errorf("gRPC protocol error: missing length-prefixed message metadata: %w", err)
