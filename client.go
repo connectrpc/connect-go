@@ -98,7 +98,7 @@ func invoke(ctx context.Context, url string, doer Doer, req, res proto.Message) 
 	}
 
 	// Handling this error is a little complicated - read on.
-	unmarshalErr := unmarshalLPM(response.Body, res, compression)
+	unmarshalErr := unmarshalLPM(response.Body, res, compression, 0 /* maxSize */)
 	// To ensure that we've read the trailers, read the body to completion.
 	io.Copy(io.Discard, response.Body)
 	serverErr := extractError(response.Trailer)

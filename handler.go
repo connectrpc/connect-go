@@ -169,7 +169,7 @@ func (h *Handler) serveGRPC(w http.ResponseWriter, r *http.Request, msg proto.Me
 	}
 	defer cancel()
 
-	if err := unmarshalLPM(r.Body, msg, requestCompression); err != nil {
+	if err := unmarshalLPM(r.Body, msg, requestCompression, 0 /* maxSize */); err != nil {
 		// TODO: observability
 		writeErrorGRPC(w, errorf(CodeInvalidArgument, "can't unmarshal protobuf request"))
 		return
