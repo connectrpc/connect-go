@@ -35,13 +35,11 @@ func decodeBinaryHeader(data string) ([]byte, error) {
 // HTTP/1 headers, while still maximizing readability of the data on the wire.
 //
 // The grpc-message trailer (used for human-readable error messages) should be
-// percent-encoded. As of Jul 2021, the implementation of percent-encoding in
-// grpc-go looks incorrect, so this implementation is modeled on Envoy instead.
+// percent-encoded.
 //
 // References:
 //   https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#responses
 //   https://datatracker.ietf.org/doc/html/rfc3986#section-2.1
-//   https://gitlab.cncf.ci/envoyproxy/envoy/commit/f326331cbee73c634fc3f945311a566fcf5acb39
 func percentEncode(msg string) string {
 	for i := 0; i < len(msg); i++ {
 		// Characters that need to be escaped are defined in gRPC's HTTP/2 spec.
