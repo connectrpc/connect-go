@@ -3,3 +3,4 @@ cover.out
 internal/crosstest/crosspb/.faux
 internal/pingpb/.faux
 internal/statuspb/.faux
+todo
