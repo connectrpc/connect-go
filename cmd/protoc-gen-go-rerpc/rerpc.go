@@ -213,6 +213,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		fqn := fmt.Sprintf("%s/%s", sname, method.Desc.Name())
 		hname := unexport(string(method.Desc.Name()))
 		g.P(hname, " := ", rerpcPackage.Ident("NewHandler"), "(")
+		g.P(`"`, method.Desc.FullName(), `",`)
 		g.P("func(ctx ", contextPackage.Ident("Context"), ", req ", protoPackage.Ident("Message"), ") (",
 			protoPackage.Ident("Message"), ", error) {")
 		g.P("typed, ok := req.(*", method.Input.GoIdent, ")")

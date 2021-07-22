@@ -83,6 +83,7 @@ func NewCrosstestHandlerReRPC(svc CrosstestServerReRPC, opts ...rerpc.HandlerOpt
 	mux := http.NewServeMux()
 
 	ping := rerpc.NewHandler(
+		"rerpc.internal.crosstest.cross.v0.Crosstest.Ping",
 		func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*PingRequest)
 			if !ok {
@@ -97,6 +98,7 @@ func NewCrosstestHandlerReRPC(svc CrosstestServerReRPC, opts ...rerpc.HandlerOpt
 	})
 
 	fail := rerpc.NewHandler(
+		"rerpc.internal.crosstest.cross.v0.Crosstest.Fail",
 		func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*FailRequest)
 			if !ok {

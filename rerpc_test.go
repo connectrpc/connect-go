@@ -17,6 +17,7 @@ import (
 	"github.com/akshayjshah/rerpc"
 	"github.com/akshayjshah/rerpc/internal/assert"
 	"github.com/akshayjshah/rerpc/internal/pingpb/v0"
+	reflectionpb "github.com/akshayjshah/rerpc/internal/reflectionpb/v1alpha"
 	"github.com/akshayjshah/rerpc/internal/statuspb/v0"
 )
 
@@ -132,8 +133,10 @@ func TestHandlerJSON(t *testing.T) {
 
 func TestServerProtoGRPC(t *testing.T) {
 	const errMsg = "oh no"
+	reg := rerpc.NewRegistrar()
 	mux := http.NewServeMux()
-	mux.Handle(pingpb.NewPingHandlerReRPC(pingServer{}))
+	mux.Handle(pingpb.NewPingHandlerReRPC(pingServer{}, reg))
+	mux.Handle(rerpc.NewReflectionHandler(reg))
 
 	testPing := func(t *testing.T, client pingpb.PingClientReRPC) {
 		t.Run("ping", func(t *testing.T) {
@@ -156,6 +159,139 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.Equal(t, rerr.Code(), rerpc.CodeResourceExhausted, "error code")
 			assert.Equal(t, rerr.Error(), "ResourceExhausted: "+errMsg, "error message")
 			assert.Zero(t, rerr.Details(), "error details")
+		})
+	}
+	testReflection := func(t *testing.T, url string, doer rerpc.Doer, opts ...rerpc.CallOption) {
+		url = url + "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo"
+		pingRequestFQN := string((&pingpb.PingRequest{}).ProtoReflect().Descriptor().FullName())
+		assert.Equal(t, reg.Services(), []string{
+			"grpc.reflection.v1alpha.ServerReflection",
+			"rerpc.internal.ping.v0.Ping",
+		}, "services registered in memory")
+		t.Run("list_services", func(t *testing.T) {
+			req := &reflectionpb.ServerReflectionRequest{
+				Host: "some-host",
+				MessageRequest: &reflectionpb.ServerReflectionRequest_ListServices{
+					ListServices: "ignored per proto documentation",
+				},
+			}
+			var res reflectionpb.ServerReflectionResponse
+			assert.Nil(
+				t,
+				rerpc.Invoke(context.Background(), url, doer, req, &res, opts...),
+				"reflection RPC",
+			)
+			expect := &reflectionpb.ServerReflectionResponse{
+				ValidHost:       req.Host,
+				OriginalRequest: req,
+				MessageResponse: &reflectionpb.ServerReflectionResponse_ListServicesResponse{
+					ListServicesResponse: &reflectionpb.ListServiceResponse{
+						Service: []*reflectionpb.ServiceResponse{
+							&reflectionpb.ServiceResponse{Name: "grpc.reflection.v1alpha.ServerReflection"},
+							&reflectionpb.ServiceResponse{Name: "rerpc.internal.ping.v0.Ping"},
+						},
+					},
+				},
+			}
+			assert.Equal(t, &res, expect, "response")
+		})
+		t.Run("file_by_filename", func(t *testing.T) {
+			req := &reflectionpb.ServerReflectionRequest{
+				Host: "some-host",
+				MessageRequest: &reflectionpb.ServerReflectionRequest_FileByFilename{
+					FileByFilename: "internal/pingpb/ping.proto",
+				},
+			}
+			var res reflectionpb.ServerReflectionResponse
+			assert.Nil(
+				t,
+				rerpc.Invoke(context.Background(), url, doer, req, &res, opts...),
+				"reflection RPC",
+			)
+			assert.Nil(t, res.GetErrorResponse(), "error in response")
+			fds := res.GetFileDescriptorResponse()
+			assert.NotNil(t, fds, "file descriptor response")
+			assert.Equal(t, len(fds.FileDescriptorProto), 1, "number of fds returned")
+			assert.True(
+				t,
+				bytes.Contains(fds.FileDescriptorProto[0], []byte(pingRequestFQN)),
+				"fd should contain PingRequest struct",
+			)
+		})
+		t.Run("file_containing_symbol", func(t *testing.T) {
+			req := &reflectionpb.ServerReflectionRequest{
+				Host: "some-host",
+				MessageRequest: &reflectionpb.ServerReflectionRequest_FileContainingSymbol{
+					FileContainingSymbol: pingRequestFQN,
+				},
+			}
+			var res reflectionpb.ServerReflectionResponse
+			assert.Nil(
+				t,
+				rerpc.Invoke(context.Background(), url, doer, req, &res, opts...),
+				"reflection RPC",
+			)
+			assert.Nil(t, res.GetErrorResponse(), "error in response")
+			fds := res.GetFileDescriptorResponse()
+			assert.NotNil(t, fds, "file descriptor response")
+			assert.Equal(t, len(fds.FileDescriptorProto), 1, "number of fds returned")
+			assert.True(
+				t,
+				bytes.Contains(fds.FileDescriptorProto[0], []byte(pingRequestFQN)),
+				"fd should contain PingRequest struct",
+			)
+		})
+		t.Run("file_containing_extension", func(t *testing.T) {
+			req := &reflectionpb.ServerReflectionRequest{
+				Host: "some-host",
+				MessageRequest: &reflectionpb.ServerReflectionRequest_FileContainingExtension{
+					FileContainingExtension: &reflectionpb.ExtensionRequest{
+						ContainingType:  pingRequestFQN,
+						ExtensionNumber: 42,
+					},
+				},
+			}
+			var res reflectionpb.ServerReflectionResponse
+			assert.Nil(
+				t,
+				rerpc.Invoke(context.Background(), url, doer, req, &res, opts...),
+				"reflection RPC",
+			)
+			expect := &reflectionpb.ServerReflectionResponse{
+				ValidHost:       req.Host,
+				OriginalRequest: req,
+				MessageResponse: &reflectionpb.ServerReflectionResponse_ErrorResponse{
+					ErrorResponse: &reflectionpb.ErrorResponse{
+						ErrorCode:    int32(rerpc.CodeNotFound),
+						ErrorMessage: "proto: not found",
+					},
+				},
+			}
+			assert.Equal(t, &res, expect, "response")
+		})
+		t.Run("all_extension_numbers_of_type", func(t *testing.T) {
+			req := &reflectionpb.ServerReflectionRequest{
+				Host: "some-host",
+				MessageRequest: &reflectionpb.ServerReflectionRequest_AllExtensionNumbersOfType{
+					AllExtensionNumbersOfType: pingRequestFQN,
+				},
+			}
+			var res reflectionpb.ServerReflectionResponse
+			assert.Nil(
+				t,
+				rerpc.Invoke(context.Background(), url, doer, req, &res, opts...),
+				"reflection RPC",
+			)
+			expect := &reflectionpb.ServerReflectionResponse{
+				ValidHost:       req.Host,
+				OriginalRequest: req,
+				MessageResponse: &reflectionpb.ServerReflectionResponse_AllExtensionNumbersResponse{
+					AllExtensionNumbersResponse: &reflectionpb.ExtensionNumberResponse{
+						BaseTypeName: pingRequestFQN,
+					},
+				},
+			}
+			assert.Equal(t, &res, expect, "response")
 		})
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server) {
@@ -182,5 +318,6 @@ func TestServerProtoGRPC(t *testing.T) {
 		server.StartTLS()
 		defer server.Close()
 		testMatrix(t, server)
+		testReflection(t, server.URL, server.Client())
 	})
 }
