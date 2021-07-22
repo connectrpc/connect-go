@@ -34,6 +34,7 @@ type handlerCfg struct {
 	DisableGzipResponse bool
 	DisableJSON         bool
 	MaxRequestBytes     int
+	Registrar           *Registrar
 }
 
 type HandlerOption interface {
@@ -107,14 +108,29 @@ func HandlerSupportJSON(enable bool) HandlerOption {
 // internal/pingpb/v0 package.
 type Handler struct {
 	implementation func(context.Context, proto.Message) (proto.Message, error)
-	config         handlerCfg
+	// rawGRPC is used only for our hand-rolled reflection handler, which needs
+	// bidi streaming
+	rawGRPC func(
+		http.ResponseWriter,
+		*http.Request,
+		string, // request compression
+		string, // response compression
+	)
+	config handlerCfg
 }
 
 // NewHandler constructs a Handler.
-func NewHandler(impl func(context.Context, proto.Message) (proto.Message, error), opts ...HandlerOption) *Handler {
+func NewHandler(
+	fqn string, // fully-qualified protobuf method name
+	impl func(context.Context, proto.Message) (proto.Message, error),
+	opts ...HandlerOption,
+) *Handler {
 	var cfg handlerCfg
 	for _, opt := range opts {
 		opt.apply(&cfg)
+	}
+	if reg := cfg.Registrar; reg != nil {
+		reg.register(fqn)
 	}
 	return &Handler{
 		implementation: impl,
@@ -214,10 +230,6 @@ func (h *Handler) serveJSON(w http.ResponseWriter, r *http.Request, msg proto.Me
 		// TODO: observability
 		return
 	}
-
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
 }
 
 func (h *Handler) serveGRPC(w http.ResponseWriter, r *http.Request, msg proto.Message) {
@@ -276,6 +288,11 @@ func (h *Handler) serveGRPC(w http.ResponseWriter, r *http.Request, msg proto.Me
 	}
 	defer cancel()
 
+	if raw := h.rawGRPC; raw != nil {
+		raw(w, r, requestCompression, responseCompression)
+		return
+	}
+
 	if err := unmarshalLPM(r.Body, msg, requestCompression, h.config.MaxRequestBytes); err != nil {
 		// TODO: observability
 		writeErrorGRPC(w, errorf(CodeInvalidArgument, "can't unmarshal protobuf request"))
@@ -298,9 +315,6 @@ func (h *Handler) serveGRPC(w http.ResponseWriter, r *http.Request, msg proto.Me
 	}
 
 	writeErrorGRPC(w, nil)
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
 }
 
 func splitOnCommasAndSpaces(c rune) bool {

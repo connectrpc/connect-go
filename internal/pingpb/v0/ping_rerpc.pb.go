@@ -8,10 +8,11 @@ package pingpb
 
 import (
 	context "context"
-	rerpc "github.com/akshayjshah/rerpc"
-	proto "google.golang.org/protobuf/proto"
 	http "net/http"
 	strings "strings"
+
+	rerpc "github.com/akshayjshah/rerpc"
+	proto "google.golang.org/protobuf/proto"
 )
 
 // This is a compile-time assertion to ensure that this generated file and the
@@ -81,6 +82,7 @@ func NewPingHandlerReRPC(svc PingServerReRPC, opts ...rerpc.HandlerOption) (stri
 	mux := http.NewServeMux()
 
 	ping := rerpc.NewHandler(
+		"rerpc.internal.ping.v0.Ping.Ping",
 		func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*PingRequest)
 			if !ok {
@@ -95,6 +97,7 @@ func NewPingHandlerReRPC(svc PingServerReRPC, opts ...rerpc.HandlerOption) (stri
 	})
 
 	fail := rerpc.NewHandler(
+		"rerpc.internal.ping.v0.Ping.Fail",
 		func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*FailRequest)
 			if !ok {
