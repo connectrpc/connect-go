@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -19,6 +20,7 @@ import (
 	"google.golang.org/grpc/credentials" // register gzip compressor
 	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/akshayjshah/rerpc"
 	"github.com/akshayjshah/rerpc/internal/assert"
@@ -57,11 +59,33 @@ type crossServer struct {
 }
 
 func (c crossServer) Ping(ctx context.Context, req *crosspb.PingRequest) (*crosspb.PingResponse, error) {
+	if err := req.Sleep.CheckValid(); req.Sleep != nil && err != nil {
+		return nil, NewCombinedError(rerpc.Errorf(rerpc.CodeInvalidArgument, err.Error()).(*rerpc.Error))
+	}
+	if d := req.Sleep.AsDuration(); d > 0 {
+		time.Sleep(d)
+	}
 	return &crosspb.PingResponse{Number: req.Number}, nil
 }
 
 func (c crossServer) Fail(ctx context.Context, req *crosspb.FailRequest) (*crosspb.FailResponse, error) {
 	return nil, NewCombinedError(rerpc.Errorf(rerpc.CodeResourceExhausted, errMsg).(*rerpc.Error))
+}
+
+func assertErrorGRPC(t testing.TB, err error, msg string) *status.Status {
+	t.Helper()
+	assert.NotNil(t, err, msg)
+	s, ok := status.FromError(err)
+	assert.True(t, ok, "conversion to *status.Status")
+	return s
+}
+
+func assertErrorReRPC(t testing.TB, err error, msg string) *rerpc.Error {
+	t.Helper()
+	assert.NotNil(t, err, msg)
+	rerr, ok := rerpc.AsError(err)
+	assert.True(t, ok, "conversion to *rerpc.Error")
+	return rerr
 }
 
 func testWithReRPCClient(t *testing.T, client crosspb.CrosstestClientReRPC) {
@@ -77,10 +101,7 @@ func testWithReRPCClient(t *testing.T, client crosspb.CrosstestClientReRPC) {
 		req := &crosspb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)}
 		res, err := client.Fail(context.Background(), req)
 		assert.Nil(t, res, "fail RPC response")
-		assert.NotNil(t, err, "fail RPC error")
-		rerr, ok := rerpc.AsError(err)
-		assert.True(t, ok, "conversion to *rerpc.Error")
-		t.Log(rerr.Error())
+		rerr := assertErrorReRPC(t, err, "fail RPC error")
 		assert.Equal(t, rerr.Code(), rerpc.CodeResourceExhausted, "error code")
 		assert.Equal(t, rerr.Error(), "ResourceExhausted: "+errMsg, "error message")
 		assert.Zero(t, rerr.Details(), "error details")
@@ -98,14 +119,27 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrosstestClient, opts ...gr
 	})
 	t.Run("errors", func(t *testing.T) {
 		req := &crosspb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)}
-		res, err := client.Fail(context.Background(), req, opts...)
-		assert.Nil(t, res, "fail RPC response")
-		assert.NotNil(t, err, "fail RPC error")
-		s, ok := status.FromError(err)
-		assert.True(t, ok, "conversion to *status.Status")
+		_, err := client.Fail(context.Background(), req, opts...)
+		s := assertErrorGRPC(t, err, "fail RPC error")
 		assert.Equal(t, s.Code(), codes.ResourceExhausted, "error code")
 		assert.Equal(t, s.Message(), errMsg, "error message")
 		assert.Equal(t, s.Details(), []interface{}{}, "error details")
+	})
+	t.Run("cancel", func(t *testing.T) {
+		req := &crosspb.PingRequest{}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		cancel()
+		_, err := client.Ping(ctx, req, opts...)
+		s := assertErrorGRPC(t, err, "error after canceling context")
+		assert.Equal(t, s.Code(), codes.Canceled, "error code")
+	})
+	t.Run("exceed_deadline", func(t *testing.T) {
+		req := &crosspb.PingRequest{Sleep: durationpb.New(time.Second)}
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		_, err := client.Ping(ctx, req, opts...)
+		s := assertErrorGRPC(t, err, "deadline exceeded error")
+		assert.Equal(t, s.Code(), codes.DeadlineExceeded, "error code")
 	})
 }
 

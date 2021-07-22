@@ -4,8 +4,11 @@ package rerpc.internal.crosstest.cross.v0;
 
 option go_package = "github.com/akshayjshah/rerpc/internal/crosstest/crosspb/v0;crosspb";
 
+import "google/protobuf/duration.proto";
+
 message PingRequest {
     int64 number = 1;
+    google.protobuf.Duration sleep = 2;
 }
 
 message PingResponse {
