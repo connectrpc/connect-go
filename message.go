@@ -82,7 +82,7 @@ func marshalLPM(w io.Writer, msg proto.Message, compression string) error {
 	return nil
 }
 
-func unmarshalLPM(r io.Reader, msg proto.Message, compression string) error {
+func unmarshalLPM(r io.Reader, msg proto.Message, compression string, maxBytes int) error {
 	// Each length-prefixed message starts with 5 bytes of metadata: a one-byte
 	// unsigned integer indicating whether the payload is compressed, and a
 	// four-byte unsigned integer indicating the message length.
@@ -113,6 +113,9 @@ func unmarshalLPM(r io.Reader, msg proto.Message, compression string) error {
 	size := int(binary.BigEndian.Uint32(prefixes[1:5]))
 	if size < 0 {
 		return fmt.Errorf("message size %d overflows uint32", size)
+	}
+	if maxBytes > 0 && size > maxBytes {
+		return fmt.Errorf("message too large: got %d bytes, max is %d", size, maxBytes)
 	}
 
 	raw := make([]byte, size)
