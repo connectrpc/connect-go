@@ -40,7 +40,7 @@ func unmarshalJSON(r io.Reader, msg proto.Message) error {
 	return nil
 }
 
-func marshalLPM(w io.Writer, msg proto.Message, compression string) error {
+func marshalLPM(w io.Writer, msg proto.Message, compression string, maxBytes int) error {
 	raw, err := proto.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("couldn't marshal protobuf message: %w", err)
@@ -65,6 +65,9 @@ func marshalLPM(w io.Writer, msg proto.Message, compression string) error {
 	}
 
 	size := data.Len()
+	if maxBytes > 0 && size > maxBytes {
+		return fmt.Errorf("message too large: got %d bytes, max is %d", size, maxBytes)
+	}
 	prefixes := [5]byte{}
 	if compression == CompressionIdentity {
 		prefixes[0] = 0
