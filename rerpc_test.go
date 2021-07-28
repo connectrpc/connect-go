@@ -16,6 +16,7 @@ import (
 
 	"github.com/akshayjshah/rerpc"
 	"github.com/akshayjshah/rerpc/internal/assert"
+	healthpb "github.com/akshayjshah/rerpc/internal/healthpb/v1"
 	"github.com/akshayjshah/rerpc/internal/pingpb/v0"
 	reflectionpb "github.com/akshayjshah/rerpc/internal/reflectionpb/v1alpha"
 	"github.com/akshayjshah/rerpc/internal/statuspb/v0"
@@ -136,6 +137,10 @@ func TestServerProtoGRPC(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	mux := http.NewServeMux()
 	mux.Handle(pingpb.NewPingHandlerReRPC(pingServer{}, reg))
+	mux.Handle(rerpc.NewHealthHandler(
+		rerpc.DefaultCheckFunc(reg),
+		reg,
+	))
 	mux.Handle(rerpc.NewReflectionHandler(reg))
 
 	testPing := func(t *testing.T, client pingpb.PingClientReRPC) {
@@ -161,10 +166,53 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.Zero(t, rerr.Details(), "error details")
 		})
 	}
+	testHealth := func(t *testing.T, url string, doer rerpc.Doer, opts ...rerpc.CallOption) {
+		t.Run("health", func(t *testing.T) {
+			checkURL := url + "/grpc.health.v1.Health/Check"
+			watchURL := url + "/grpc.health.v1.Health/Watch"
+			pingFQN := "rerpc.internal.ping.v0.Ping"
+			const unknown = "foobar"
+			assert.True(t, reg.IsRegistered(pingFQN), "ping service registered")
+			assert.False(t, reg.IsRegistered(unknown), "unknown service registered")
+			t.Run("process", func(t *testing.T) {
+				req := &healthpb.HealthCheckRequest{}
+				var res healthpb.HealthCheckResponse
+				err := rerpc.Invoke(context.Background(), checkURL, doer, req, &res, opts...)
+				assert.Nil(t, err, "rpc error")
+				assert.Equal(t, rerpc.HealthStatus(res.Status), rerpc.HealthServing, "status")
+			})
+			t.Run("known", func(t *testing.T) {
+				req := &healthpb.HealthCheckRequest{Service: pingFQN}
+				var res healthpb.HealthCheckResponse
+				err := rerpc.Invoke(context.Background(), checkURL, doer, req, &res, opts...)
+				assert.Nil(t, err, "rpc error")
+				assert.Equal(t, rerpc.HealthStatus(res.Status), rerpc.HealthServing, "status")
+			})
+			t.Run("unknown", func(t *testing.T) {
+				req := &healthpb.HealthCheckRequest{Service: unknown}
+				var res healthpb.HealthCheckResponse
+				err := rerpc.Invoke(context.Background(), checkURL, doer, req, &res, opts...)
+				assert.NotNil(t, err, "rpc error")
+				rerr, ok := rerpc.AsError(err)
+				assert.True(t, ok, "convert to rerpc error")
+				assert.Equal(t, rerr.Code(), rerpc.CodeNotFound, "error code")
+			})
+			t.Run("watch", func(t *testing.T) {
+				req := &healthpb.HealthCheckRequest{Service: pingFQN}
+				var res healthpb.HealthCheckResponse
+				err := rerpc.Invoke(context.Background(), watchURL, doer, req, &res, opts...)
+				assert.NotNil(t, err, "rpc error")
+				rerr, ok := rerpc.AsError(err)
+				assert.True(t, ok, "convert to rerpc error")
+				assert.Equal(t, rerr.Code(), rerpc.CodeUnimplemented, "error code")
+			})
+		})
+	}
 	testReflection := func(t *testing.T, url string, doer rerpc.Doer, opts ...rerpc.CallOption) {
 		url = url + "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo"
 		pingRequestFQN := string((&pingpb.PingRequest{}).ProtoReflect().Descriptor().FullName())
 		assert.Equal(t, reg.Services(), []string{
+			"grpc.health.v1.Health",
 			"grpc.reflection.v1alpha.ServerReflection",
 			"rerpc.internal.ping.v0.Ping",
 		}, "services registered in memory")
@@ -187,6 +235,7 @@ func TestServerProtoGRPC(t *testing.T) {
 				MessageResponse: &reflectionpb.ServerReflectionResponse_ListServicesResponse{
 					ListServicesResponse: &reflectionpb.ListServiceResponse{
 						Service: []*reflectionpb.ServiceResponse{
+							&reflectionpb.ServiceResponse{Name: "grpc.health.v1.Health"},
 							&reflectionpb.ServiceResponse{Name: "grpc.reflection.v1alpha.ServerReflection"},
 							&reflectionpb.ServiceResponse{Name: "rerpc.internal.ping.v0.Ping"},
 						},
@@ -257,17 +306,10 @@ func TestServerProtoGRPC(t *testing.T) {
 				rerpc.Invoke(context.Background(), url, doer, req, &res, opts...),
 				"reflection RPC",
 			)
-			expect := &reflectionpb.ServerReflectionResponse{
-				ValidHost:       req.Host,
-				OriginalRequest: req,
-				MessageResponse: &reflectionpb.ServerReflectionResponse_ErrorResponse{
-					ErrorResponse: &reflectionpb.ErrorResponse{
-						ErrorCode:    int32(rerpc.CodeNotFound),
-						ErrorMessage: "proto: not found",
-					},
-				},
-			}
-			assert.Equal(t, &res, expect, "response")
+			err := res.GetErrorResponse()
+			assert.NotNil(t, res, "error in response proto")
+			assert.Equal(t, int32(rerpc.CodeNotFound), err.ErrorCode, "error code")
+			assert.NotZero(t, err.ErrorMessage, "error message")
 		})
 		t.Run("all_extension_numbers_of_type", func(t *testing.T) {
 			req := &reflectionpb.ServerReflectionRequest{
@@ -299,11 +341,13 @@ func TestServerProtoGRPC(t *testing.T) {
 			client := pingpb.NewPingClientReRPC(server.URL, server.Client())
 			testPing(t, client)
 			testErrors(t, client)
+			testHealth(t, server.URL, server.Client())
 		})
 		t.Run("gzip", func(t *testing.T) {
 			client := pingpb.NewPingClientReRPC(server.URL, server.Client(), rerpc.GzipRequests(true))
 			testPing(t, client)
 			testErrors(t, client)
+			testHealth(t, server.URL, server.Client(), rerpc.GzipRequests(true))
 		})
 	}
 

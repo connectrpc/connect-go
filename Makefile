@@ -30,7 +30,7 @@ test: gen $(HANDWRITTEN) ## Run unit tests
 gen: genpb ## Regenerate code
 
 .PHONY: genpb
-genpb: internal/statuspb/.faux internal/reflectionpb/.faux internal/pingpb/.faux internal/crosstest/crosspb/.faux
+genpb: internal/statuspb/.faux internal/reflectionpb/.faux internal/healthpb/.faux internal/pingpb/.faux internal/crosstest/crosspb/.faux
 
 internal/crosstest/crosspb/.faux: internal/crosstest/crosspb/cross.proto bin/protoc-gen-go-grpc bin/protoc-gen-go-rerpc
 	PATH="./bin:$(PATH)" protoc internal/crosstest/crosspb/cross.proto \
@@ -50,6 +50,12 @@ internal/statuspb/.faux: internal/statuspb/status.proto
 
 internal/reflectionpb/.faux: internal/reflectionpb/reflection.proto
 	protoc internal/reflectionpb/reflection.proto \
+		--go_out=. \
+		--go_opt=module=$(MODULE)
+	touch $(@)
+
+internal/healthpb/.faux: internal/healthpb/health.proto
+	protoc internal/healthpb/health.proto \
 		--go_out=. \
 		--go_opt=module=$(MODULE)
 	touch $(@)

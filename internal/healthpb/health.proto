@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+// This package is intended for internal use by reRPC, and provides no backward
+// compatibility guarantees whatsoever.
+//
+// The types here must remain wire-compatible with the types in
+// grpc.health.v1:
+//   https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto
+package rerpc.internal.health.v1;
+
+option go_package = "github.com/akshayjshah/rerpc/internal/healthpb/v1;healthpb";
+
+message HealthCheckRequest {
+  string service = 1;
+}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+    SERVICE_UNKNOWN = 3;  // Used only by the Watch method.
+  }
+  ServingStatus status = 1;
+}
