@@ -186,7 +186,7 @@ func TestReRPCServer(t *testing.T) {
 
 	t.Run("rerpc_client", func(t *testing.T) {
 		t.Run("gzip", func(t *testing.T) {
-			client := crosspb.NewCrosstestClientReRPC(server.URL, server.Client(), rerpc.GzipRequests(true))
+			client := crosspb.NewCrosstestClientReRPC(server.URL, server.Client(), rerpc.Gzip(true))
 			testWithReRPCClient(t, client)
 		})
 		t.Run("identity", func(t *testing.T) {

@@ -66,7 +66,7 @@ func (r *Registrar) register(method string) {
 	r.services[method[:i]] = struct{}{}
 }
 
-func (r *Registrar) apply(cfg *handlerCfg) {
+func (r *Registrar) applyToHandler(cfg *handlerCfg) {
 	cfg.Registrar = r
 }
 
@@ -89,12 +89,12 @@ func (r *Registrar) apply(cfg *handlerCfg) {
 func NewReflectionHandler(reg *Registrar) (string, http.Handler) {
 	const fqn = "grpc.reflection.v1alpha.ServerReflection.ServerReflectionInfo"
 	reg.register(fqn)
-	raw := &rawReflectionHandler{*reg}
 	h := NewHandler(
 		fqn,
-		nil,                       // no unary implementation
-		HandlerSupportJSON(false), // no JSON streaming
+		nil,              // no unary implementation
+		ServeJSON(false), // no JSON streaming
 	)
+	raw := &rawReflectionHandler{*reg}
 	h.rawGRPC = raw.rawGRPC
 	httpHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.Serve(w, r, nil)
@@ -148,7 +148,6 @@ func (rh *rawReflectionHandler) serve(req *rpb.ServerReflectionRequest) (*rpb.Se
 	// Note that the server reflection API sends file descriptors as uncompressed
 	// proto-serialized bytes.
 	fileDescriptorsSent := &fdset{}
-	_ = fileDescriptorsSent // FIXME
 	res := &rpb.ServerReflectionResponse{
 		ValidHost:       req.Host,
 		OriginalRequest: req,
