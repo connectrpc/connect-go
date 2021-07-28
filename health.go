@@ -11,15 +11,14 @@ import (
 )
 
 // HealthStatus describes the health of a service.
-type HealthStatus int32
-
-// Constants representing the known health states.
 //
 // These correspond to the ServingStatus enum in gRPC's health.proto. Because
 // reRPC doesn't support watching health, SERVICE_UNKNOWN isn't exposed here.
 //
 // For details, see the protobuf schema:
 //   https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto
+type HealthStatus int32
+
 const (
 	HealthUnknown    HealthStatus = 0 // health state indeterminate
 	HealthServing    HealthStatus = 1 // ready to accept requests

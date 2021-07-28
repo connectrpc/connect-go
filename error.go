@@ -29,10 +29,11 @@ type Error struct {
 	details []*anypb.Any
 }
 
-// Wrap annotates any error with a gRPC status code. If the code is CodeOK, the
-// returned error is nil.
-func Wrap(c Code, err error) error {
+// Wrap annotates any error with a gRPC status code and error details. If the
+// code is CodeOK, the returned error is nil.
+func Wrap(c Code, err error, details []proto.Message) error {
 	if e := wrap(c, err); e != nil {
+		e.SetDetails(details...)
 		return e
 	}
 	return nil
@@ -51,8 +52,8 @@ func wrap(c Code, err error) *Error {
 	}
 }
 
-// Errorf calls errors.Errorf with the supplied template and arguments, then
-// wraps the resulting error. If the code is CodeOK, the returned error is nil.
+// Errorf calls fmt.Errorf with the supplied template and arguments, then wraps
+// the resulting error. If the code is CodeOK, the returned error is nil.
 func Errorf(c Code, template string, args ...interface{}) error {
 	if e := errorf(c, template, args...); e != nil {
 		return e
