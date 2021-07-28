@@ -16,8 +16,12 @@ import (
 )
 
 // This is a compile-time assertion to ensure that this generated file and the
-// rerpc package are compatible.
-const _ = rerpc.SupportsCodeGenV0 // reRPC v0.0.1 or later
+// rerpc package are compatible. If you get a compiler error that this constant
+// isn't defined, this code was generated with a version of rerpc newer than the
+// one compiled into your binary. You can fix the problem by either regenerating
+// this code with an older version of rerpc or updating the rerpc version
+// compiled into your binary.
+const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 
 // PingClientReRPC is a client for the rerpc.internal.ping.v0.Ping service.
 type PingClientReRPC interface {
@@ -26,50 +30,61 @@ type PingClientReRPC interface {
 }
 
 type pingClientReRPC struct {
-	url     string
-	doer    rerpc.Doer
-	options []rerpc.CallOption
+	ping rerpc.Client
+	fail rerpc.Client
 }
 
 // NewPingClientReRPC constructs a client for the rerpc.internal.ping.v0.Ping
 // service. Call options passed here apply to all calls made with this client.
-func NewPingClientReRPC(url string, doer rerpc.Doer, opts ...rerpc.CallOption) PingClientReRPC {
+//
+// The URL supplied here should be the base URL for the gRPC server (e.g.,
+// https://api.acme.com or https://acme.com/api/grpc).
+func NewPingClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) PingClientReRPC {
+	baseURL = strings.TrimRight(baseURL, "/")
 	return &pingClientReRPC{
-		url:     strings.TrimRight(url, "/"),
-		doer:    doer,
-		options: opts,
+		ping: *rerpc.NewClient(
+			doer,
+			baseURL+"/rerpc.internal.ping.v0.Ping/Ping", // complete URL to call method
+			"rerpc.internal.ping.v0.Ping.Ping",          // fully-qualified protobuf identifier
+			opts...,
+		),
+		fail: *rerpc.NewClient(
+			doer,
+			baseURL+"/rerpc.internal.ping.v0.Ping/Fail", // complete URL to call method
+			"rerpc.internal.ping.v0.Ping.Fail",          // fully-qualified protobuf identifier
+			opts...,
+		),
 	}
 }
 
-// Ping calls rerpc.internal.ping.v0.Ping/Ping.
+// Ping calls rerpc.internal.ping.v0.Ping.Ping. Call options passed here apply
+// only to this call.
 func (c *pingClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error) {
-	options := make([]rerpc.CallOption, 0, len(opts)+len(c.options))
-	options = append(options, c.options...)
-	options = append(options, opts...)
 	res := &PingResponse{}
-	url := c.url + "/rerpc.internal.ping.v0.Ping/Ping"
-	if err := rerpc.Invoke(ctx, url, c.doer, req, res, options...); err != nil {
+	if err := c.ping.Call(ctx, req, res, opts...); err != nil {
 		return nil, err
 	}
 	return res, nil
 }
 
-// Fail calls rerpc.internal.ping.v0.Ping/Fail.
+// Fail calls rerpc.internal.ping.v0.Ping.Fail. Call options passed here apply
+// only to this call.
 func (c *pingClientReRPC) Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error) {
-	options := make([]rerpc.CallOption, 0, len(opts)+len(c.options))
-	options = append(options, c.options...)
-	options = append(options, opts...)
 	res := &FailResponse{}
-	url := c.url + "/rerpc.internal.ping.v0.Ping/Fail"
-	if err := rerpc.Invoke(ctx, url, c.doer, req, res, options...); err != nil {
+	if err := c.fail.Call(ctx, req, res, opts...); err != nil {
 		return nil, err
 	}
 	return res, nil
 }
 
-// PingServerReRPC is a server for the Ping service. For forward compatibility,
-// all implementations must embed UnimplementedPingServerReRPC. See
-// grpc/grpc-go#3794 for details.
+// PingServerReRPC is a server for the rerpc.internal.ping.v0.Ping service. To
+// make sure that adding methods to this protobuf service doesn't break all
+// implementations of this interface, all implementations must embed
+// UnimplementedPingServerReRPC.
+//
+// By default, recent versions of grpc-go have a similar forward compatibility
+// requirement. See https://github.com/grpc/grpc-go/issues/3794 for a longer
+// discussion.
 type PingServerReRPC interface {
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
 	Fail(context.Context, *FailRequest) (*FailResponse, error)
@@ -83,13 +98,17 @@ func NewPingHandlerReRPC(svc PingServerReRPC, opts ...rerpc.HandlerOption) (stri
 
 	ping := rerpc.NewHandler(
 		"rerpc.internal.ping.v0.Ping.Ping",
-		func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		rerpc.UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*PingRequest)
 			if !ok {
-				return nil, rerpc.Errorf(rerpc.CodeInternal, "can't call rerpc.internal.ping.v0.Ping/Ping with a %v", req.ProtoReflect().Descriptor().FullName())
+				return nil, rerpc.Errorf(
+					rerpc.CodeInternal,
+					"error in generated code: expected req to be a *PingRequest, got a %T",
+					req,
+				)
 			}
 			return svc.Ping(ctx, typed)
-		},
+		}),
 		opts...,
 	)
 	mux.HandleFunc("/rerpc.internal.ping.v0.Ping/Ping", func(w http.ResponseWriter, r *http.Request) {
@@ -98,13 +117,17 @@ func NewPingHandlerReRPC(svc PingServerReRPC, opts ...rerpc.HandlerOption) (stri
 
 	fail := rerpc.NewHandler(
 		"rerpc.internal.ping.v0.Ping.Fail",
-		func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		rerpc.UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*FailRequest)
 			if !ok {
-				return nil, rerpc.Errorf(rerpc.CodeInternal, "can't call rerpc.internal.ping.v0.Ping/Fail with a %v", req.ProtoReflect().Descriptor().FullName())
+				return nil, rerpc.Errorf(
+					rerpc.CodeInternal,
+					"error in generated code: expected req to be a *FailRequest, got a %T",
+					req,
+				)
 			}
 			return svc.Fail(ctx, typed)
-		},
+		}),
 		opts...,
 	)
 	mux.HandleFunc("/rerpc.internal.ping.v0.Ping/Fail", func(w http.ResponseWriter, r *http.Request) {
@@ -114,9 +137,11 @@ func NewPingHandlerReRPC(svc PingServerReRPC, opts ...rerpc.HandlerOption) (stri
 	return "/rerpc.internal.ping.v0.Ping/", mux
 }
 
-// UnimplementedPingServerReRPC returns an UNIMPLEMENTED error from all methods.
-// To maintain forward compatibility, all implementations of PingServerReRPC
-// must embed UnimplementedPingServerReRPC. See grpc/grpc-go#3794 for details.
+var _ PingServerReRPC = (*UnimplementedPingServerReRPC)(nil) // verify interface implementation
+
+// UnimplementedPingServerReRPC returns CodeUnimplemented from all methods. To
+// maintain forward compatibility, all implementations of PingServerReRPC must
+// embed UnimplementedPingServerReRPC.
 type UnimplementedPingServerReRPC struct{}
 
 func (UnimplementedPingServerReRPC) Ping(context.Context, *PingRequest) (*PingResponse, error) {

@@ -33,3 +33,8 @@ const (
 	CompressionIdentity = "identity"
 	CompressionGzip     = "gzip"
 )
+
+// For compile-time handshake with generated code.
+const (
+	SupportsCodeGenV0 = iota
+)

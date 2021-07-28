@@ -15,8 +15,12 @@ import (
 )
 
 // This is a compile-time assertion to ensure that this generated file and the
-// rerpc package are compatible.
-const _ = rerpc.SupportsCodeGenV0 // reRPC v0.0.1 or later
+// rerpc package are compatible. If you get a compiler error that this constant
+// isn't defined, this code was generated with a version of rerpc newer than the
+// one compiled into your binary. You can fix the problem by either regenerating
+// this code with an older version of rerpc or updating the rerpc version
+// compiled into your binary.
+const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 
 // CrosstestClientReRPC is a client for the
 // rerpc.internal.crosstest.cross.v0.Crosstest service.
@@ -26,51 +30,62 @@ type CrosstestClientReRPC interface {
 }
 
 type crosstestClientReRPC struct {
-	url     string
-	doer    rerpc.Doer
-	options []rerpc.CallOption
+	ping rerpc.Client
+	fail rerpc.Client
 }
 
 // NewCrosstestClientReRPC constructs a client for the
 // rerpc.internal.crosstest.cross.v0.Crosstest service. Call options passed here
 // apply to all calls made with this client.
-func NewCrosstestClientReRPC(url string, doer rerpc.Doer, opts ...rerpc.CallOption) CrosstestClientReRPC {
+//
+// The URL supplied here should be the base URL for the gRPC server (e.g.,
+// https://api.acme.com or https://acme.com/api/grpc).
+func NewCrosstestClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) CrosstestClientReRPC {
+	baseURL = strings.TrimRight(baseURL, "/")
 	return &crosstestClientReRPC{
-		url:     strings.TrimRight(url, "/"),
-		doer:    doer,
-		options: opts,
+		ping: *rerpc.NewClient(
+			doer,
+			baseURL+"/rerpc.internal.crosstest.cross.v0.Crosstest/Ping", // complete URL to call method
+			"rerpc.internal.crosstest.cross.v0.Crosstest.Ping",          // fully-qualified protobuf identifier
+			opts...,
+		),
+		fail: *rerpc.NewClient(
+			doer,
+			baseURL+"/rerpc.internal.crosstest.cross.v0.Crosstest/Fail", // complete URL to call method
+			"rerpc.internal.crosstest.cross.v0.Crosstest.Fail",          // fully-qualified protobuf identifier
+			opts...,
+		),
 	}
 }
 
-// Ping calls rerpc.internal.crosstest.cross.v0.Crosstest/Ping.
+// Ping calls rerpc.internal.crosstest.cross.v0.Crosstest.Ping. Call options
+// passed here apply only to this call.
 func (c *crosstestClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error) {
-	options := make([]rerpc.CallOption, 0, len(opts)+len(c.options))
-	options = append(options, c.options...)
-	options = append(options, opts...)
 	res := &PingResponse{}
-	url := c.url + "/rerpc.internal.crosstest.cross.v0.Crosstest/Ping"
-	if err := rerpc.Invoke(ctx, url, c.doer, req, res, options...); err != nil {
+	if err := c.ping.Call(ctx, req, res, opts...); err != nil {
 		return nil, err
 	}
 	return res, nil
 }
 
-// Fail calls rerpc.internal.crosstest.cross.v0.Crosstest/Fail.
+// Fail calls rerpc.internal.crosstest.cross.v0.Crosstest.Fail. Call options
+// passed here apply only to this call.
 func (c *crosstestClientReRPC) Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error) {
-	options := make([]rerpc.CallOption, 0, len(opts)+len(c.options))
-	options = append(options, c.options...)
-	options = append(options, opts...)
 	res := &FailResponse{}
-	url := c.url + "/rerpc.internal.crosstest.cross.v0.Crosstest/Fail"
-	if err := rerpc.Invoke(ctx, url, c.doer, req, res, options...); err != nil {
+	if err := c.fail.Call(ctx, req, res, opts...); err != nil {
 		return nil, err
 	}
 	return res, nil
 }
 
-// CrosstestServerReRPC is a server for the Crosstest service. For forward
-// compatibility, all implementations must embed
-// UnimplementedCrosstestServerReRPC. See grpc/grpc-go#3794 for details.
+// CrosstestServerReRPC is a server for the
+// rerpc.internal.crosstest.cross.v0.Crosstest service. To make sure that adding
+// methods to this protobuf service doesn't break all implementations of this
+// interface, all implementations must embed UnimplementedCrosstestServerReRPC.
+//
+// By default, recent versions of grpc-go have a similar forward compatibility
+// requirement. See https://github.com/grpc/grpc-go/issues/3794 for a longer
+// discussion.
 type CrosstestServerReRPC interface {
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
 	Fail(context.Context, *FailRequest) (*FailResponse, error)
@@ -84,13 +99,17 @@ func NewCrosstestHandlerReRPC(svc CrosstestServerReRPC, opts ...rerpc.HandlerOpt
 
 	ping := rerpc.NewHandler(
 		"rerpc.internal.crosstest.cross.v0.Crosstest.Ping",
-		func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		rerpc.UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*PingRequest)
 			if !ok {
-				return nil, rerpc.Errorf(rerpc.CodeInternal, "can't call rerpc.internal.crosstest.cross.v0.Crosstest/Ping with a %v", req.ProtoReflect().Descriptor().FullName())
+				return nil, rerpc.Errorf(
+					rerpc.CodeInternal,
+					"error in generated code: expected req to be a *PingRequest, got a %T",
+					req,
+				)
 			}
 			return svc.Ping(ctx, typed)
-		},
+		}),
 		opts...,
 	)
 	mux.HandleFunc("/rerpc.internal.crosstest.cross.v0.Crosstest/Ping", func(w http.ResponseWriter, r *http.Request) {
@@ -99,13 +118,17 @@ func NewCrosstestHandlerReRPC(svc CrosstestServerReRPC, opts ...rerpc.HandlerOpt
 
 	fail := rerpc.NewHandler(
 		"rerpc.internal.crosstest.cross.v0.Crosstest.Fail",
-		func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		rerpc.UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*FailRequest)
 			if !ok {
-				return nil, rerpc.Errorf(rerpc.CodeInternal, "can't call rerpc.internal.crosstest.cross.v0.Crosstest/Fail with a %v", req.ProtoReflect().Descriptor().FullName())
+				return nil, rerpc.Errorf(
+					rerpc.CodeInternal,
+					"error in generated code: expected req to be a *FailRequest, got a %T",
+					req,
+				)
 			}
 			return svc.Fail(ctx, typed)
-		},
+		}),
 		opts...,
 	)
 	mux.HandleFunc("/rerpc.internal.crosstest.cross.v0.Crosstest/Fail", func(w http.ResponseWriter, r *http.Request) {
@@ -115,10 +138,11 @@ func NewCrosstestHandlerReRPC(svc CrosstestServerReRPC, opts ...rerpc.HandlerOpt
 	return "/rerpc.internal.crosstest.cross.v0.Crosstest/", mux
 }
 
-// UnimplementedCrosstestServerReRPC returns an UNIMPLEMENTED error from all
-// methods. To maintain forward compatibility, all implementations of
-// CrosstestServerReRPC must embed UnimplementedCrosstestServerReRPC. See
-// grpc/grpc-go#3794 for details.
+var _ CrosstestServerReRPC = (*UnimplementedCrosstestServerReRPC)(nil) // verify interface implementation
+
+// UnimplementedCrosstestServerReRPC returns CodeUnimplemented from all methods.
+// To maintain forward compatibility, all implementations of
+// CrosstestServerReRPC must embed UnimplementedCrosstestServerReRPC.
 type UnimplementedCrosstestServerReRPC struct{}
 
 func (UnimplementedCrosstestServerReRPC) Ping(context.Context, *PingRequest) (*PingResponse, error) {

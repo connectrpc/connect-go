@@ -72,8 +72,11 @@ func content(file *protogen.File, g *protogen.GeneratedFile) {
 
 func handshake(g *protogen.GeneratedFile) {
 	comment(g, "This is a compile-time assertion to ensure that this generated file ",
-		"and the rerpc package are compatible.")
-	g.P("const _ = ", rerpcPackage.Ident("SupportsCodeGenV0"), " // reRPC v0.0.1 or later")
+		"and the rerpc package are compatible. If you get a compiler error that this constant ",
+		"isn't defined, this code was generated with a version of rerpc newer than the one ",
+		"compiled into your binary. You can fix the problem by either regenerating this code ",
+		"with an older version of rerpc or updating the rerpc version compiled into your binary.")
+	g.P("const _ = ", rerpcPackage.Ident("SupportsCodeGenV0"), " // requires reRPC v0.0.1 or later")
 	g.P()
 }
 
@@ -117,25 +120,35 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method) string 
 func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, name string) {
 	// Client struct.
 	g.P("type ", unexport(name), " struct {")
-	g.P("url string")
-	g.P("doer ", rerpcPackage.Ident("Doer"))
-	g.P("options []", rerpcPackage.Ident("CallOption"))
+	for _, method := range unaryMethods(service) {
+		g.P(unexport(method.GoName), " ", rerpcPackage.Ident("Client"))
+	}
 	g.P("}")
 	g.P()
 
 	// Client constructor.
 	comment(g, "New", name, " constructs a client for the ", service.Desc.FullName(),
 		" service. Call options passed here apply to all calls made with this client.")
+	g.P("//")
+	comment(g, "The URL supplied here should be the base URL for the gRPC server ",
+		"(e.g., https://api.acme.com or https://acme.com/api/grpc).")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
 	}
-	g.P("func New", name, " (url string, doer ", rerpcPackage.Ident("Doer"),
+	g.P("func New", name, " (baseURL string, doer ", rerpcPackage.Ident("Doer"),
 		", opts ...", rerpcPackage.Ident("CallOption"), ") ", name, " {")
+	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
 	g.P("return &", unexport(name), "{")
-	g.P("url: ", stringsPackage.Ident("TrimRight"), `(url, "/"),`)
-	g.P("doer: doer,")
-	g.P("options: opts,")
+	for _, method := range unaryMethods(service) {
+		path := fmt.Sprintf("%s/%s", service.Desc.FullName(), method.Desc.Name())
+		g.P(unexport(method.GoName), ": *", rerpcPackage.Ident("NewClient"), "(")
+		g.P("doer,")
+		g.P(`baseURL + "/`, path, `", // complete URL to call method`)
+		g.P(`"`, method.Desc.FullName(), `", // fully-qualified protobuf identifier`)
+		g.P("opts...,")
+		g.P("),")
+	}
 	g.P("}")
 	g.P("}")
 	g.P()
@@ -147,21 +160,15 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 }
 
 func clientMethod(g *protogen.GeneratedFile, method *protogen.Method) {
-	service := method.Parent
-	fqn := fmt.Sprintf("%s/%s", service.Desc.FullName(), method.Desc.Name())
-
-	comment(g, method.GoName, " calls ", fqn, ".")
+	comment(g, method.GoName, " calls ", method.Desc.FullName(), ".",
+		" Call options passed here apply only to this call.")
 	if method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
 	}
-	g.P("func (c *", unexport(service.GoName), "ClientReRPC) ", clientSignature(g, method), "{")
-	g.P("options := make([]", rerpcPackage.Ident("CallOption"), ", 0, len(opts)+len(c.options))")
-	g.P("options = append(options, c.options...)")
-	g.P("options = append(options, opts...)")
+	g.P("func (c *", unexport(method.Parent.GoName), "ClientReRPC) ", clientSignature(g, method), "{")
 	g.P("res := &", method.Output.GoIdent, "{}")
-	g.P(`url := c.url + "/`, fqn, `"`)
-	g.P("if err := ", rerpcPackage.Ident("Invoke"), "(ctx, url, c.doer, req, res, options...); err != nil {")
+	g.P("if err := c.", unexport(method.GoName), ".Call(ctx, req, res, opts...); err != nil {")
 	g.P("return nil, err")
 	g.P("}")
 	g.P("return res, nil")
@@ -170,9 +177,13 @@ func clientMethod(g *protogen.GeneratedFile, method *protogen.Method) {
 }
 
 func serverInterface(g *protogen.GeneratedFile, service *protogen.Service, name string) {
-	comment(g, name, " is a server for the ", service.GoName,
-		" service. For forward compatibility, all implementations must embed Unimplemented",
-		name, ". See grpc/grpc-go#3794 for details.")
+	comment(g, name, " is a server for the ", service.Desc.FullName(),
+		" service. To make sure that adding methods to this protobuf service doesn't break all ",
+		"implementations of this interface, all implementations must embed Unimplemented",
+		name, ".")
+	g.P("//")
+	comment(g, "By default, recent versions of grpc-go have a similar forward compatibility ",
+		"requirement. See https://github.com/grpc/grpc-go/issues/3794 for a longer discussion.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
@@ -210,21 +221,26 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 	g.P("mux := ", httpPackage.Ident("NewServeMux"), "()")
 	g.P()
 	for _, method := range unaryMethods(service) {
-		fqn := fmt.Sprintf("%s/%s", sname, method.Desc.Name())
+		path := fmt.Sprintf("%s/%s", sname, method.Desc.Name())
 		hname := unexport(string(method.Desc.Name()))
 		g.P(hname, " := ", rerpcPackage.Ident("NewHandler"), "(")
 		g.P(`"`, method.Desc.FullName(), `",`)
-		g.P("func(ctx ", contextPackage.Ident("Context"), ", req ", protoPackage.Ident("Message"), ") (",
+		g.P(rerpcPackage.Ident("UnaryHandler"), "(func(ctx ", contextPackage.Ident("Context"),
+			", req ", protoPackage.Ident("Message"), ") (",
 			protoPackage.Ident("Message"), ", error) {")
 		g.P("typed, ok := req.(*", method.Input.GoIdent, ")")
 		g.P("if !ok {")
-		g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(", rerpcPackage.Ident("CodeInternal"), `, "can't call `, fqn, ` with a %v", req.ProtoReflect().Descriptor().FullName())`)
+		g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(")
+		g.P(rerpcPackage.Ident("CodeInternal"), ",")
+		g.P(`"error in generated code: expected req to be a *`, method.Input.GoIdent, `, got a %T",`)
+		g.P("req,")
+		g.P(")")
 		g.P("}")
 		g.P("return svc.", method.GoName, "(ctx, typed)")
-		g.P("},")
+		g.P("}),")
 		g.P("opts...,")
 		g.P(")")
-		g.P(`mux.HandleFunc("/`, fqn, `", func(w `, httpPackage.Ident("ResponseWriter"), ", r *", httpPackage.Ident("Request"), ") {")
+		g.P(`mux.HandleFunc("/`, path, `", func(w `, httpPackage.Ident("ResponseWriter"), ", r *", httpPackage.Ident("Request"), ") {")
 		g.P(hname, ".Serve(w, r, &", method.Input.GoIdent, "{})")
 		g.P("})")
 		g.P()
@@ -235,11 +251,12 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 }
 
 func serverImplementation(g *protogen.GeneratedFile, service *protogen.Service, name string) {
+	g.P("var _ ", name, " = (*Unimplemented", name, ")(nil) // verify interface implementation")
+	g.P()
 	// Unimplemented server implementation (for forward compatibility).
-	comment(g, "Unimplemented", name, " returns an UNIMPLEMENTED error from",
+	comment(g, "Unimplemented", name, " returns CodeUnimplemented from",
 		" all methods. To maintain forward compatibility, all implementations",
-		" of ", name, " must embed Unimplemented", name, ". ",
-		"See grpc/grpc-go#3794 for details.")
+		" of ", name, " must embed Unimplemented", name, ". ")
 	g.P("type Unimplemented", name, " struct {}")
 	g.P()
 	for _, method := range unaryMethods(service) {
