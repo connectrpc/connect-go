@@ -31,7 +31,7 @@ type Error struct {
 
 // Wrap annotates any error with a gRPC status code and error details. If the
 // code is CodeOK, the returned error is nil.
-func Wrap(c Code, err error, details []proto.Message) error {
+func Wrap(c Code, err error, details ...proto.Message) error {
 	if e := wrap(c, err); e != nil {
 		e.SetDetails(details...)
 		return e
