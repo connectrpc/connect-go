@@ -24,7 +24,14 @@ clean: ## Delete build output and generated code
 .PHONY: test
 test: gen $(HANDWRITTEN) ## Run unit tests
 	@go test -race -cover ./...
-	@cd internal/crosstest && go test -race -cover ./...
+	@cd internal/crosstest && go test -race ./...
+
+.PHONY: cover
+cover: cover.out ## Browse coverage for the main package
+	@go tool cover -html cover.out
+
+cover.out: gen $(HANDWRITTEN)
+	@go test -cover -coverprofile=$(@) .
 
 .PHONY: gen
 gen: genpb ## Regenerate code
