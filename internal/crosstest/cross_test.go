@@ -1,9 +1,11 @@
 package crosstest
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"io"
 	"math/rand"
 	"net"
 	"net/http"
@@ -13,12 +15,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fullstorydev/grpcurl"
+	jsonpbv1 "github.com/golang/protobuf/jsonpb"
+	protov1 "github.com/golang/protobuf/proto"
+	"github.com/jhump/protoreflect/grpcreflect"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials" // register gzip compressor
 	"google.golang.org/grpc/encoding/gzip"
+	grpb "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
@@ -168,8 +175,10 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrosstestClient, opts ...gr
 }
 
 func TestReRPCServer(t *testing.T) {
+	reg := rerpc.NewRegistrar()
 	mux := http.NewServeMux()
-	mux.Handle(crosspb.NewCrosstestHandlerReRPC(crossServer{}))
+	mux.Handle(crosspb.NewCrosstestHandlerReRPC(crossServer{}, reg))
+	mux.Handle(rerpc.NewReflectionHandler(reg))
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
@@ -193,12 +202,44 @@ func TestReRPCServer(t *testing.T) {
 			grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(pool, "" /* server name */)),
 		)
 		assert.Nil(t, err, "grpc dial")
+		defer gconn.Close()
 		client := crosspb.NewCrosstestClient(gconn)
 		t.Run("identity", func(t *testing.T) {
 			testWithGRPCClient(t, client)
 		})
 		t.Run("gzip", func(t *testing.T) {
 			testWithGRPCClient(t, client, grpc.UseCompressor(gzip.Name))
+		})
+		t.Run("reflection", func(t *testing.T) {
+			client := grpcreflect.NewClient(context.Background(), grpb.NewServerReflectionClient(gconn))
+			source := grpcurl.DescriptorSourceFromServer(context.Background(), client)
+			out := &bytes.Buffer{}
+			eventHandler := grpcurl.NewDefaultEventHandler(
+				out,
+				source,
+				grpcurl.NewTextFormatter(false /* separator */),
+				false, // verbose
+			)
+			var calls int
+			msg := func(msg protov1.Message) error {
+				calls++
+				if calls == 1 {
+					return jsonpbv1.UnmarshalString(`{"number": "42"}`, msg)
+				}
+				return io.EOF
+			}
+			err := grpcurl.InvokeRPC(
+				context.Background(),
+				source,
+				gconn,
+				"rerpc.internal.crosstest.cross.v0.Crosstest.Ping",
+				nil, // headers
+				eventHandler,
+				msg, // request data
+			)
+			assert.Nil(t, err, "grpcurl error")
+			t.Log(out.String())
+			assert.True(t, strings.Contains(out.String(), "number: 42"), "grpcurl output")
 		})
 	})
 }
