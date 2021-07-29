@@ -11,15 +11,16 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/akshayjshah/rerpc"
 	"github.com/akshayjshah/rerpc/internal/assert"
 	healthpb "github.com/akshayjshah/rerpc/internal/healthpb/v1"
-	"github.com/akshayjshah/rerpc/internal/pingpb/v0"
+	pingpb "github.com/akshayjshah/rerpc/internal/pingpb/v0"
 	reflectionpb "github.com/akshayjshah/rerpc/internal/reflectionpb/v1alpha"
-	"github.com/akshayjshah/rerpc/internal/statuspb/v0"
+	statuspb "github.com/akshayjshah/rerpc/internal/statuspb/v0"
 )
 
 const errMsg = "oh no"
@@ -38,7 +39,11 @@ func (p pingServer) Fail(ctx context.Context, req *pingpb.FailRequest) (*pingpb.
 
 func TestHandlerJSON(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.Handle(pingpb.NewPingHandlerReRPC(pingServer{}))
+	chain := rerpc.NewChain(rerpc.ClampTimeout(0, time.Minute))
+	mux.Handle(pingpb.NewPingHandlerReRPC(
+		pingServer{},
+		chain,
+	))
 
 	server := httptest.NewServer(mux)
 	defer server.Close()
@@ -135,11 +140,17 @@ func TestHandlerJSON(t *testing.T) {
 func TestServerProtoGRPC(t *testing.T) {
 	const errMsg = "oh no"
 	reg := rerpc.NewRegistrar()
+	chain := rerpc.NewChain(rerpc.ClampTimeout(0, time.Minute))
 	mux := http.NewServeMux()
-	mux.Handle(pingpb.NewPingHandlerReRPC(pingServer{}, reg))
+	mux.Handle(pingpb.NewPingHandlerReRPC(
+		pingServer{},
+		reg,
+		chain,
+	))
 	mux.Handle(rerpc.NewHealthHandler(
 		rerpc.DefaultCheckFunc(reg),
 		reg,
+		chain,
 	))
 	mux.Handle(rerpc.NewReflectionHandler(reg))
 
@@ -343,13 +354,18 @@ func TestServerProtoGRPC(t *testing.T) {
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server) {
 		t.Run("identity", func(t *testing.T) {
-			client := pingpb.NewPingClientReRPC(server.URL, server.Client())
+			client := pingpb.NewPingClientReRPC(server.URL, server.Client(), chain)
 			testPing(t, client)
 			testErrors(t, client)
 			testHealth(t, server.URL, server.Client())
 		})
 		t.Run("gzip", func(t *testing.T) {
-			client := pingpb.NewPingClientReRPC(server.URL, server.Client(), rerpc.Gzip(true))
+			client := pingpb.NewPingClientReRPC(
+				server.URL,
+				server.Client(),
+				rerpc.Gzip(true),
+				chain,
+			)
 			testPing(t, client)
 			testErrors(t, client)
 			testHealth(t, server.URL, server.Client(), rerpc.Gzip(true))
