@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"net/textproto"
 	"strconv"
 	"strings"
@@ -139,4 +140,128 @@ func percentDecodeSlow(encoded string, offset int) string {
 		i += 2
 	}
 	return out.String()
+}
+
+// ImmutableHeader provides read-only access to HTTP headers.
+type ImmutableHeader struct {
+	raw http.Header
+}
+
+// NewImmutableHeader constructs an ImmutableHeader.
+func NewImmutableHeader(raw http.Header) *ImmutableHeader {
+	return &ImmutableHeader{raw}
+}
+
+// Get returns the first value associated with the given key. Like the standard
+// library's http.Header, keys are case-insensitive and canonicalized with
+// textproto.CanonicalMIMEHeaderKey.
+func (h *ImmutableHeader) Get(key string) string {
+	return h.raw.Get(key)
+}
+
+// GetBinary is similar to Get, but for binary values encoded according to the
+// gRPC specification. Briefly, binary headers have keys ending in "-Bin" and
+// base64-encoded values.
+//
+// Like grpc-go, GetBinary automatically appends the "-Bin" suffix to the
+// supplied key and base64-decodes the value.
+//
+// For details on gRPC's treatment of binary headers, see
+// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md.
+func (h *ImmutableHeader) GetBinary(key string) ([]byte, error) {
+	return decodeBinaryHeader(h.raw.Get(key + "-Bin"))
+}
+
+// Values returns all values associated with the given key. Like the standard
+// library's http.Header, keys are case-insensitive and canonicalized with
+// textproto.CanonicalMIMEHeaderKey.
+//
+// Unlike the standard library's http.Header.Clone, the returned slice is a
+// copy.
+func (h *ImmutableHeader) Values(key string) []string {
+	mutable := h.raw.Values(key)
+	// http.Header does *not* return a copy, but we need to prevent mutation.
+	return append(make([]string, 0, len(mutable)), mutable...)
+}
+
+// Clone returns a copy of the underlying HTTP headers, including all reserved
+// keys.
+func (h *ImmutableHeader) Clone() http.Header {
+	return h.raw.Clone()
+}
+
+// MutableHeader provides read-write access to HTTP headers.
+type MutableHeader struct {
+	ImmutableHeader
+
+	raw http.Header
+}
+
+// NewMutableHeader constructs a MutableHeader.
+func NewMutableHeader(raw http.Header) *MutableHeader {
+	return &MutableHeader{
+		ImmutableHeader: *NewImmutableHeader(raw),
+		raw:             raw,
+	}
+}
+
+// Set the value associated with the given key, overwriting any existing
+// values. Like the standard library's http.Header, keys are case-insensitive
+// and canonicalized with textproto.CanonicalMIMEHeaderKey.
+//
+// Attempting to set a reserved header (as defined by IsReservedHeader) returns
+// an error. See IsReservedHeader for backward compatibility guarantees.
+func (h *MutableHeader) Set(key, value string) error {
+	if err := IsReservedHeader(key); err != nil {
+		return err
+	}
+	h.raw.Set(key, value)
+	return nil
+}
+
+// SetBinary is similar to Set, but for binary values encoded according to the
+// gRPC specification. Briefly, binary headers have keys ending in "-Bin" and
+// base64-encoded values.
+//
+// Like grpc-go, SetBinary automatically appends the "-Bin" suffix to the
+// supplied key and base64-encodes the value.
+//
+// For details on gRPC's treatment of binary headers, see
+// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md.
+func (h *MutableHeader) SetBinary(key string, value []byte) error {
+	key = key + "-Bin"
+	if err := IsReservedHeader(key); err != nil {
+		return err
+	}
+	h.raw.Set(key, encodeBinaryHeader(value))
+	return nil
+}
+
+// Add a key-value pair to the header, appending to any existing values
+// associated with the key. Like the standard library's http.Header, keys are
+// case-insensitive and canonicalized with textproto.CanonicalMIMEHeaderKey.
+//
+// Attempting to add to a reserved header (as defined by IsReservedHeader)
+// returns an error. See IsReservedHeader for backward compatibility
+// guarantees.
+func (h *MutableHeader) Add(key, value string) error {
+	if err := IsReservedHeader(key); err != nil {
+		return err
+	}
+	h.raw.Add(key, value)
+	return nil
+}
+
+// Del deletes all values associated with the key. Like the standard library's
+// http.Header, keys are case-insensitive and canonicalized with
+// textproto.CanonicalMIMEHeaderKey.
+//
+// Attempting delete a reserved header (as defined by IsReservedHeader) returns
+// an error. See IsReservedHeader for backward compatibility guarantees.
+func (h *MutableHeader) Del(key string) error {
+	if err := IsReservedHeader(key); err != nil {
+		return err
+	}
+	h.raw.Del(key)
+	return nil
 }

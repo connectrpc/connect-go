@@ -34,6 +34,7 @@ type handlerCfg struct {
 	MaxRequestBytes     int
 	Registrar           *Registrar
 	Interceptor         HandlerInterceptor
+	Header              *http.Header
 }
 
 // A HandlerOption configures a Handler.
@@ -121,18 +122,18 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 		return
 	}
 
-	md := &MD{
+	spec := &Specification{
 		Method:              h.methodFQN,
 		ContentType:         r.Header.Get("Content-Type"),
 		RequestCompression:  CompressionIdentity,
 		ResponseCompression: CompressionIdentity,
 	}
-	if md.ContentType == TypeJSON && h.config.DisableJSON {
+	if spec.ContentType == TypeJSON && h.config.DisableJSON {
 		w.Header().Set("Accept-Post", acceptPostValueWithoutJSON)
 		w.WriteHeader(http.StatusUnsupportedMediaType)
 		return
 	}
-	if ct := md.ContentType; ct != TypeDefaultGRPC && ct != TypeProtoGRPC && ct != TypeJSON {
+	if ct := spec.ContentType; ct != TypeDefaultGRPC && ct != TypeProtoGRPC && ct != TypeJSON {
 		// grpc-go returns 500, but the spec recommends 415.
 		// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#requests
 		w.Header().Set("Accept-Post", acceptPostValueDefault)
@@ -159,22 +160,22 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 		r = r.WithContext(ctx)
 	} // else err == errNoTimeout, nothing to do
 
-	if md.ContentType == TypeJSON {
+	if spec.ContentType == TypeJSON {
 		if r.Header.Get("Content-Encoding") == "gzip" {
-			md.RequestCompression = CompressionGzip
+			spec.RequestCompression = CompressionGzip
 		}
 		// TODO: Actually parse Accept-Encoding instead of this hackery.
 		if !h.config.DisableGzipResponse && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			md.ResponseCompression = CompressionGzip
+			spec.ResponseCompression = CompressionGzip
 		}
 	} else {
-		md.RequestCompression = CompressionIdentity
+		spec.RequestCompression = CompressionIdentity
 		if me := r.Header.Get("Grpc-Encoding"); me != "" {
 			switch me {
 			case CompressionIdentity:
-				md.RequestCompression = CompressionIdentity
+				spec.RequestCompression = CompressionIdentity
 			case CompressionGzip:
-				md.RequestCompression = CompressionGzip
+				spec.RequestCompression = CompressionGzip
 			default:
 				// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
 				// should return CodeUnimplemented and specify acceptable compression(s)
@@ -191,17 +192,17 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 		// Follow https://github.com/grpc/grpc/blob/master/doc/compression.md.
 		// (The grpc-go implementation doesn't read the "grpc-accept-encoding" header
 		// and doesn't support compression method asymmetry.)
-		md.ResponseCompression = md.RequestCompression
+		spec.ResponseCompression = spec.RequestCompression
 		if h.config.DisableGzipResponse {
-			md.ResponseCompression = CompressionIdentity
+			spec.ResponseCompression = CompressionIdentity
 		} else if mae := r.Header.Get("Grpc-Accept-Encoding"); mae != "" {
 			for _, enc := range strings.FieldsFunc(mae, splitOnCommasAndSpaces) {
 				switch enc {
 				case CompressionGzip: // prefer gzip
-					md.ResponseCompression = CompressionGzip
+					spec.ResponseCompression = CompressionGzip
 					break
 				case CompressionIdentity:
-					md.ResponseCompression = CompressionIdentity
+					spec.ResponseCompression = CompressionIdentity
 					break
 				}
 			}
@@ -210,36 +211,37 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 
 	// We may write to the body in the implementation (e.g., reflection handler), so we should
 	// set headers here.
-	w.Header().Set("Content-Type", md.ContentType)
-	if md.ContentType != TypeJSON {
+	w.Header().Set("Content-Type", spec.ContentType)
+	if spec.ContentType != TypeJSON {
 		w.Header().Set("Grpc-Accept-Encoding", acceptEncodingValue)
-		w.Header().Set("Grpc-Encoding", md.ResponseCompression)
+		w.Header().Set("Grpc-Encoding", spec.ResponseCompression)
 		// Every gRPC response will have these trailers.
 		w.Header().Add("Trailer", "Grpc-Status")
 		w.Header().Add("Trailer", "Grpc-Message")
 		w.Header().Add("Trailer", "Grpc-Status-Details-Bin")
 	}
 
+	ctx := NewHandlerContext(r.Context(), *spec, r.Header, w.Header())
 	var implementation UnaryHandler
 	if failed != nil {
 		implementation = UnaryHandler(func(context.Context, proto.Message) (proto.Message, error) {
 			return nil, failed
 		})
-	} else if md.ContentType == TypeJSON {
-		implementation = h.implementationJSON(w, r, md)
+	} else if spec.ContentType == TypeJSON {
+		implementation = h.implementationJSON(w, r, spec)
 	} else {
-		implementation = h.implementationGRPC(w, r, md)
+		implementation = h.implementationGRPC(w, r, spec)
 	}
-	res, err := h.wrap(implementation)(r.Context(), req)
-	if err := h.writeResult(r.Context(), w, md, res, err); err != nil {
+	res, err := h.wrap(implementation)(ctx, req)
+	if err := h.writeResult(r.Context(), w, spec, res, err); err != nil {
 		// TODO: observability
 	}
 }
 
-func (h *Handler) implementationJSON(w http.ResponseWriter, r *http.Request, md *MD) UnaryHandler {
+func (h *Handler) implementationJSON(w http.ResponseWriter, r *http.Request, spec *Specification) UnaryHandler {
 	return UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 		var body io.Reader = r.Body
-		if md.RequestCompression == CompressionGzip {
+		if spec.RequestCompression == CompressionGzip {
 			gr, err := gzip.NewReader(body)
 			if err != nil {
 				return nil, errorf(CodeInvalidArgument, "can't read gzipped body")
@@ -260,31 +262,31 @@ func (h *Handler) implementationJSON(w http.ResponseWriter, r *http.Request, md 
 	})
 }
 
-func (h *Handler) implementationGRPC(w http.ResponseWriter, r *http.Request, md *MD) UnaryHandler {
+func (h *Handler) implementationGRPC(w http.ResponseWriter, r *http.Request, spec *Specification) UnaryHandler {
 	return UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 		if raw := h.rawGRPC; raw != nil {
-			raw(w, r, md.RequestCompression, md.ResponseCompression)
+			raw(w, r, spec.RequestCompression, spec.ResponseCompression)
 			return nil, nil
 		}
-		if err := unmarshalLPM(r.Body, req, md.RequestCompression, h.config.MaxRequestBytes); err != nil {
+		if err := unmarshalLPM(r.Body, req, spec.RequestCompression, h.config.MaxRequestBytes); err != nil {
 			return nil, errorf(CodeInvalidArgument, "can't unmarshal protobuf body")
 		}
 		return h.implementation(ctx, req)
 	})
 }
 
-func (h *Handler) writeResult(ctx context.Context, w http.ResponseWriter, md *MD, res proto.Message, err error) error {
-	if md.ContentType == TypeJSON {
-		return h.writeResultJSON(ctx, w, md, res, err)
+func (h *Handler) writeResult(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) error {
+	if spec.ContentType == TypeJSON {
+		return h.writeResultJSON(ctx, w, spec, res, err)
 	}
-	return h.writeResultGRPC(ctx, w, md, res, err)
+	return h.writeResultGRPC(ctx, w, spec, res, err)
 }
 
-func (h *Handler) writeResultJSON(ctx context.Context, w http.ResponseWriter, md *MD, res proto.Message, err error) error {
+func (h *Handler) writeResultJSON(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) error {
 	// Even if the client requested gzip compression, check Content-Encoding to
 	// make sure some other HTTP middleware hasn't already swapped out the
 	// ResponseWriter.
-	if md.ResponseCompression == CompressionGzip && w.Header().Get("Content-Encoding") == "" {
+	if spec.ResponseCompression == CompressionGzip && w.Header().Get("Content-Encoding") == "" {
 		w.Header().Set("Content-Encoding", "gzip")
 		gw := gzWriterPool.Get().(*gzip.Writer)
 		gw.Reset(w)
@@ -301,12 +303,12 @@ func (h *Handler) writeResultJSON(ctx context.Context, w http.ResponseWriter, md
 	return marshalJSON(w, res)
 }
 
-func (h *Handler) writeResultGRPC(ctx context.Context, w http.ResponseWriter, md *MD, res proto.Message, err error) error {
+func (h *Handler) writeResultGRPC(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) error {
 	if err != nil {
 		writeErrorGRPC(w, err)
 		return nil
 	}
-	if err := marshalLPM(w, res, md.ResponseCompression, 0 /* maxBytes */); err != nil {
+	if err := marshalLPM(w, res, spec.ResponseCompression, 0 /* maxBytes */); err != nil {
 		// It's safe to write gRPC errors even after we've started writing the
 		// body.
 		writeErrorGRPC(w, errorf(CodeUnknown, "can't marshal protobuf response"))

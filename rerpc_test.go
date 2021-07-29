@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/akshayjshah/rerpc"
 	"github.com/akshayjshah/rerpc/internal/assert"
@@ -421,4 +422,55 @@ func TestClampTimeoutIntegration(t *testing.T) {
 		client := pingpb.NewPingClientReRPC(server.URL, server.Client(), chain)
 		assertDeadline(t, client)
 	})
+}
+
+type metadataIntegrationInterceptor struct {
+	tb         testing.TB
+	key, value string
+}
+
+func (i *metadataIntegrationInterceptor) WrapCall(next rerpc.UnaryCall) rerpc.UnaryCall {
+	return rerpc.UnaryCall(func(ctx context.Context, req, res proto.Message) error {
+		md, ok := rerpc.CallMeta(ctx)
+		assert.True(i.tb, ok, "get call metadata")
+		// Headers that interceptors can't modify should have been set already.
+		assert.Equal(i.tb, md.Request.Get("User-Agent"), rerpc.UserAgent(), "request user agent")
+		// Server will verify that it received this header.
+		assert.Nil(i.tb, md.Request.Set(i.key, i.value), "set custom request header")
+
+		err := next(ctx, req, res)
+
+		// Server should have sent this response header.
+		assert.Equal(i.tb, md.Response.Get(i.key), i.value, "custom header %q from server", assert.Fmt(i.key))
+		return err
+	})
+}
+
+func (i *metadataIntegrationInterceptor) WrapHandler(next rerpc.UnaryHandler) rerpc.UnaryHandler {
+	return rerpc.UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		md, ok := rerpc.HandlerMeta(ctx)
+		assert.True(i.tb, ok, "get handler metadata")
+		// Client should have sent both of these headers.
+		assert.Equal(i.tb, md.Request.Get("User-Agent"), rerpc.UserAgent(), "user agent sent by client")
+		assert.Equal(i.tb, md.Request.Get(i.key), i.value, "custom header %q from client", assert.Fmt(i.key))
+
+		res, err := next(ctx, req)
+
+		// Client will verify that it receives this header.
+		assert.Nil(i.tb, md.Response.Set(i.key, i.value), "set custom response header")
+		return res, err
+	})
+}
+
+func TestCallMetadataIntegration(t *testing.T) {
+	chain := rerpc.NewChain(&metadataIntegrationInterceptor{tb: t, key: "Foo-Bar", value: "baz"})
+	mux := http.NewServeMux()
+	mux.Handle(pingpb.NewPingHandlerReRPC(pingServer{}, chain))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := pingpb.NewPingClientReRPC(server.URL, server.Client(), chain)
+
+	res, err := client.Ping(context.Background(), &pingpb.PingRequest{})
+	assert.Nil(t, err, "call error")
+	assert.Equal(t, res, &pingpb.PingResponse{}, "call response")
 }
