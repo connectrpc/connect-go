@@ -34,7 +34,7 @@ type handlerCfg struct {
 	MaxRequestBytes     int
 	Registrar           *Registrar
 	Interceptor         HandlerInterceptor
-	Header              *http.Header
+	Hooks               *Hooks
 }
 
 // A HandlerOption configures a Handler.
@@ -75,10 +75,12 @@ type Handler struct {
 	// rawGRPC is used only for our hand-rolled reflection handler, which needs
 	// bidi streaming
 	rawGRPC func(
+		context.Context,
 		http.ResponseWriter,
 		*http.Request,
 		string, // request compression
 		string, // response compression
+		*Hooks,
 	)
 	config handlerCfg
 }
@@ -247,9 +249,7 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 		implementation = h.implementationGRPC(w, r, spec)
 	}
 	res, err := h.wrap(implementation)(ctx, req)
-	if err := h.writeResult(r.Context(), w, spec, res, err); err != nil {
-		// TODO: observability
-	}
+	h.writeResult(r.Context(), w, spec, res, err)
 }
 
 func (h *Handler) implementationJSON(w http.ResponseWriter, r *http.Request, spec *Specification) UnaryHandler {
@@ -279,7 +279,7 @@ func (h *Handler) implementationJSON(w http.ResponseWriter, r *http.Request, spe
 func (h *Handler) implementationGRPC(w http.ResponseWriter, r *http.Request, spec *Specification) UnaryHandler {
 	return UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 		if raw := h.rawGRPC; raw != nil {
-			raw(w, r, spec.RequestCompression, spec.ResponseCompression)
+			raw(ctx, w, r, spec.RequestCompression, spec.ResponseCompression, h.config.Hooks)
 			return nil, nil
 		}
 		if err := unmarshalLPM(r.Body, req, spec.RequestCompression, h.config.MaxRequestBytes); err != nil {
@@ -289,14 +289,15 @@ func (h *Handler) implementationGRPC(w http.ResponseWriter, r *http.Request, spe
 	})
 }
 
-func (h *Handler) writeResult(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) error {
+func (h *Handler) writeResult(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) {
 	if spec.ContentType == TypeJSON {
-		return h.writeResultJSON(ctx, w, spec, res, err)
+		h.writeResultJSON(ctx, w, spec, res, err)
+		return
 	}
-	return h.writeResultGRPC(ctx, w, spec, res, err)
+	h.writeResultGRPC(ctx, w, spec, res, err)
 }
 
-func (h *Handler) writeResultJSON(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) error {
+func (h *Handler) writeResultJSON(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) {
 	// Even if the client requested gzip compression, check Content-Encoding to
 	// make sure some other HTTP middleware hasn't already swapped out the
 	// ResponseWriter.
@@ -312,24 +313,24 @@ func (h *Handler) writeResultJSON(ctx context.Context, w http.ResponseWriter, sp
 		}()
 	}
 	if err != nil {
-		return writeErrorJSON(w, err)
+		writeErrorJSON(ctx, w, err, h.config.Hooks)
+		return
 	}
-	return marshalJSON(w, res)
+	marshalJSON(ctx, w, res, h.config.Hooks)
 }
 
-func (h *Handler) writeResultGRPC(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) error {
+func (h *Handler) writeResultGRPC(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) {
 	if err != nil {
-		writeErrorGRPC(w, err)
-		return nil
+		writeErrorGRPC(ctx, w, err, h.config.Hooks)
+		return
 	}
-	if err := marshalLPM(w, res, spec.ResponseCompression, 0 /* maxBytes */); err != nil {
+	if err := marshalLPM(ctx, w, res, spec.ResponseCompression, 0 /* maxBytes */, h.config.Hooks); err != nil {
 		// It's safe to write gRPC errors even after we've started writing the
 		// body.
-		writeErrorGRPC(w, errorf(CodeUnknown, "can't marshal protobuf response"))
-		return err
+		writeErrorGRPC(ctx, w, errorf(CodeUnknown, "can't marshal protobuf response"), h.config.Hooks)
+		return
 	}
-	writeErrorGRPC(w, nil)
-	return nil
+	writeErrorGRPC(ctx, w, nil, h.config.Hooks)
 }
 
 func (h *Handler) wrap(uh UnaryHandler) UnaryHandler {
@@ -343,20 +344,26 @@ func splitOnCommasAndSpaces(c rune) bool {
 	return c == ',' || c == ' '
 }
 
-func writeErrorJSON(w http.ResponseWriter, err error) error {
+func writeErrorJSON(ctx context.Context, w http.ResponseWriter, err error, hooks *Hooks) {
 	s := statusFromError(err)
 	bs, err := jsonpbMarshaler.Marshal(s)
 	if err != nil {
+		hooks.onMarshalError(ctx, err)
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"code": %d, "message": "error marshaling status with code %d"}`, CodeInternal, s.Code)
-		return err
+		const tmpl = `{"code": %d, "message": "error marshaling status with code %d"}`
+		if _, nerr := fmt.Fprintf(w, tmpl, CodeInternal, s.Code); nerr != nil {
+			hooks.onNetworkError(ctx, nerr)
+		}
+		return
 	}
 	w.WriteHeader(Code(s.Code).http())
 	_, err = w.Write(bs)
-	return err
+	if err != nil {
+		hooks.onNetworkError(ctx, err)
+	}
 }
 
-func writeErrorGRPC(w http.ResponseWriter, err error) {
+func writeErrorGRPC(ctx context.Context, w http.ResponseWriter, err error, hooks *Hooks) {
 	if err == nil {
 		w.Header().Set("Grpc-Status", strconv.Itoa(int(CodeOK)))
 		w.Header().Set("Grpc-Message", "")
@@ -374,6 +381,7 @@ func writeErrorGRPC(w http.ResponseWriter, err error) {
 	if bin, err := proto.Marshal(s); err != nil {
 		w.Header().Set("Grpc-Status", strconv.Itoa(int(CodeInternal)))
 		w.Header().Set("Grpc-Message", percentEncode("error marshaling protobuf status with code "+code))
+		hooks.onMarshalError(ctx, err)
 	} else {
 		w.Header().Set("Grpc-Status", code)
 		w.Header().Set("Grpc-Message", percentEncode(s.Message))
