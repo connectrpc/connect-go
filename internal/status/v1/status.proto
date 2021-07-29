@@ -2,11 +2,11 @@ syntax = "proto3";
 
 // This package is for internal use by reRPC, and provides no
 // backward compatibility guarantees whatsoever.
-package rerpc.internal.status.v0;
+package internal.status.v1;
 
 import "google/protobuf/any.proto";
 
-option go_package = "github.com/akshayjshah/rerpc/internal/statuspb/v0;statuspb";
+option go_package = "github.com/akshayjshah/rerpc/internal/status/v1;statuspb";
 
 // See https://cloud.google.com/apis/design/errors.
 //

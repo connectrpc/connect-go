@@ -13,7 +13,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/akshayjshah/rerpc/internal/statuspb/v0"
+	statuspb "github.com/akshayjshah/rerpc/internal/status/v1"
 	"github.com/akshayjshah/rerpc/internal/twirp"
 )
 

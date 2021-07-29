@@ -18,16 +18,16 @@ import (
 
 	"github.com/akshayjshah/rerpc"
 	"github.com/akshayjshah/rerpc/internal/assert"
-	healthpb "github.com/akshayjshah/rerpc/internal/healthpb/v1"
-	pingpb "github.com/akshayjshah/rerpc/internal/pingpb/v0"
-	reflectionpb "github.com/akshayjshah/rerpc/internal/reflectionpb/v1alpha"
+	healthpb "github.com/akshayjshah/rerpc/internal/health/v1"
+	pingpb "github.com/akshayjshah/rerpc/internal/ping/v1test"
+	reflectionpb "github.com/akshayjshah/rerpc/internal/reflection/v1alpha1"
 	"github.com/akshayjshah/rerpc/internal/twirp"
 )
 
 const errMsg = "oh no"
 
 type pingServer struct {
-	pingpb.UnimplementedPingServerReRPC
+	pingpb.UnimplementedPingServiceReRPC
 }
 
 func (p pingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingpb.PingResponse, error) {
@@ -41,7 +41,7 @@ func (p pingServer) Fail(ctx context.Context, req *pingpb.FailRequest) (*pingpb.
 func TestHandlerTwirp(t *testing.T) {
 	mux := http.NewServeMux()
 	chain := rerpc.NewChain(rerpc.ClampTimeout(0, time.Minute))
-	mux.Handle(pingpb.NewPingHandlerReRPC(
+	mux.Handle(pingpb.NewPingServiceHandlerReRPC(
 		pingServer{},
 		chain,
 	))
@@ -69,7 +69,7 @@ func TestHandlerTwirp(t *testing.T) {
 		t.Run("zero", func(t *testing.T) {
 			r, err := http.NewRequest(
 				http.MethodPost,
-				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Ping", server.URL),
+				fmt.Sprintf("%s/internal.ping.v1test.PingService/Ping", server.URL),
 				bytes.NewReader(nil),
 			)
 			assert.Nil(t, err, "create request")
@@ -86,7 +86,7 @@ func TestHandlerTwirp(t *testing.T) {
 			probe := `{"number":"42"}`
 			r, err := http.NewRequest(
 				http.MethodPost,
-				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Ping", server.URL),
+				fmt.Sprintf("%s/internal.ping.v1test.PingService/Ping", server.URL),
 				strings.NewReader(probe),
 			)
 			assert.Nil(t, err, "create request")
@@ -109,7 +109,7 @@ func TestHandlerTwirp(t *testing.T) {
 
 			r, err := http.NewRequest(
 				http.MethodPost,
-				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Ping", server.URL),
+				fmt.Sprintf("%s/internal.ping.v1test.PingService/Ping", server.URL),
 				buf,
 			)
 			assert.Nil(t, err, "create request")
@@ -132,7 +132,7 @@ func TestHandlerTwirp(t *testing.T) {
 			probe := fmt.Sprintf(`{"code":%d}`, rerpc.CodeResourceExhausted)
 			r, err := http.NewRequest(
 				http.MethodPost,
-				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Fail", server.URL),
+				fmt.Sprintf("%s/internal.ping.v1test.PingService/Fail", server.URL),
 				strings.NewReader(probe),
 			)
 			assert.Nil(t, err, "create request")
@@ -172,7 +172,7 @@ func TestHandlerTwirp(t *testing.T) {
 		t.Run("zero", func(t *testing.T) {
 			r, err := http.NewRequest(
 				http.MethodPost,
-				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Ping", server.URL),
+				fmt.Sprintf("%s/internal.ping.v1test.PingService/Ping", server.URL),
 				bytes.NewReader(nil),
 			)
 			assert.Nil(t, err, "create request")
@@ -188,7 +188,7 @@ func TestHandlerTwirp(t *testing.T) {
 		t.Run("ping", func(t *testing.T) {
 			r, err := http.NewRequest(
 				http.MethodPost,
-				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Ping", server.URL),
+				fmt.Sprintf("%s/internal.ping.v1test.PingService/Ping", server.URL),
 				newProtobufReader(t, &pingpb.PingRequest{Number: 42}),
 			)
 			assert.Nil(t, err, "create request")
@@ -211,7 +211,7 @@ func TestHandlerTwirp(t *testing.T) {
 
 			r, err := http.NewRequest(
 				http.MethodPost,
-				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Ping", server.URL),
+				fmt.Sprintf("%s/internal.ping.v1test.PingService/Ping", server.URL),
 				buf,
 			)
 			assert.Nil(t, err, "create request")
@@ -234,7 +234,7 @@ func TestHandlerTwirp(t *testing.T) {
 			probe := newProtobufReader(t, &pingpb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)})
 			r, err := http.NewRequest(
 				http.MethodPost,
-				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Fail", server.URL),
+				fmt.Sprintf("%s/internal.ping.v1test.PingService/Fail", server.URL),
 				probe,
 			)
 			assert.Nil(t, err, "create request")
@@ -264,7 +264,7 @@ func TestServerProtoGRPC(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	chain := rerpc.NewChain(rerpc.ClampTimeout(0, time.Minute))
 	mux := http.NewServeMux()
-	mux.Handle(pingpb.NewPingHandlerReRPC(
+	mux.Handle(pingpb.NewPingServiceHandlerReRPC(
 		pingServer{},
 		reg,
 		chain,
@@ -276,7 +276,7 @@ func TestServerProtoGRPC(t *testing.T) {
 	))
 	mux.Handle(rerpc.NewReflectionHandler(reg))
 
-	testPing := func(t *testing.T, client pingpb.PingClientReRPC) {
+	testPing := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
 		t.Run("ping", func(t *testing.T) {
 			num := rand.Int63()
 			req := &pingpb.PingRequest{Number: num}
@@ -286,7 +286,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.Equal(t, res, expect, "ping response")
 		})
 	}
-	testErrors := func(t *testing.T, client pingpb.PingClientReRPC) {
+	testErrors := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
 		t.Run("errors", func(t *testing.T) {
 			req := &pingpb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)}
 			res, err := client.Fail(context.Background(), req)
@@ -307,7 +307,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			healthFQN := healthPFQN + ".Health"
 			checkFQN := healthFQN + ".Check"
 			watchFQN := healthFQN + ".Watch"
-			pingFQN := "rerpc.internal.ping.v0.Ping"
+			pingFQN := "internal.ping.v1test.PingService"
 			bg := context.Background()
 			const unknown = "foobar"
 			assert.True(t, reg.IsRegistered(pingFQN), "ping service registered")
@@ -360,7 +360,7 @@ func TestServerProtoGRPC(t *testing.T) {
 		assert.Equal(t, reg.Services(), []string{
 			"grpc.health.v1.Health",
 			"grpc.reflection.v1alpha.ServerReflection",
-			"rerpc.internal.ping.v0.Ping",
+			"internal.ping.v1test.PingService",
 		}, "services registered in memory")
 		t.Run("list_services", func(t *testing.T) {
 			req := &reflectionpb.ServerReflectionRequest{
@@ -381,9 +381,9 @@ func TestServerProtoGRPC(t *testing.T) {
 				MessageResponse: &reflectionpb.ServerReflectionResponse_ListServicesResponse{
 					ListServicesResponse: &reflectionpb.ListServiceResponse{
 						Service: []*reflectionpb.ServiceResponse{
-							&reflectionpb.ServiceResponse{Name: "grpc.health.v1.Health"},
-							&reflectionpb.ServiceResponse{Name: "grpc.reflection.v1alpha.ServerReflection"},
-							&reflectionpb.ServiceResponse{Name: "rerpc.internal.ping.v0.Ping"},
+							{Name: "grpc.health.v1.Health"},
+							{Name: "grpc.reflection.v1alpha.ServerReflection"},
+							{Name: "internal.ping.v1test.PingService"},
 						},
 					},
 				},
@@ -394,7 +394,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			req := &reflectionpb.ServerReflectionRequest{
 				Host: "some-host",
 				MessageRequest: &reflectionpb.ServerReflectionRequest_FileByFilename{
-					FileByFilename: "internal/pingpb/ping.proto",
+					FileByFilename: "internal/ping/v1test/ping.proto",
 				},
 			}
 			var res reflectionpb.ServerReflectionResponse
@@ -484,13 +484,13 @@ func TestServerProtoGRPC(t *testing.T) {
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server) {
 		t.Run("identity", func(t *testing.T) {
-			client := pingpb.NewPingClientReRPC(server.URL, server.Client(), chain)
+			client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client(), chain)
 			testPing(t, client)
 			testErrors(t, client)
 			testHealth(t, server.URL, server.Client())
 		})
 		t.Run("gzip", func(t *testing.T) {
-			client := pingpb.NewPingClientReRPC(
+			client := pingpb.NewPingServiceClientReRPC(
 				server.URL,
 				server.Client(),
 				rerpc.Gzip(true),
@@ -521,7 +521,7 @@ func TestClampTimeoutIntegration(t *testing.T) {
 	const min = 10 * time.Second
 	chain := rerpc.NewChain(rerpc.ClampTimeout(min, time.Minute))
 
-	assertDeadline := func(t testing.TB, client pingpb.PingClientReRPC) {
+	assertDeadline := func(t testing.TB, client pingpb.PingServiceClientReRPC) {
 		ctx, cancel := context.WithTimeout(context.Background(), min-1)
 		defer cancel()
 		_, err := client.Ping(ctx, &pingpb.PingRequest{})
@@ -532,23 +532,23 @@ func TestClampTimeoutIntegration(t *testing.T) {
 	t.Run("server", func(t *testing.T) {
 		// Clamped server, unclamped client.
 		mux := http.NewServeMux()
-		mux.Handle(pingpb.NewPingHandlerReRPC(
+		mux.Handle(pingpb.NewPingServiceHandlerReRPC(
 			pingServer{},
 			chain,
 		))
 		server := httptest.NewServer(mux)
 		defer server.Close()
-		client := pingpb.NewPingClientReRPC(server.URL, server.Client())
+		client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client())
 		assertDeadline(t, client)
 	})
 
 	t.Run("client", func(t *testing.T) {
 		// Unclamped server, clamped client.
 		mux := http.NewServeMux()
-		mux.Handle(pingpb.NewPingHandlerReRPC(pingServer{}))
+		mux.Handle(pingpb.NewPingServiceHandlerReRPC(pingServer{}))
 		server := httptest.NewServer(mux)
 		defer server.Close()
-		client := pingpb.NewPingClientReRPC(server.URL, server.Client(), chain)
+		client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client(), chain)
 		assertDeadline(t, client)
 	})
 }
@@ -594,10 +594,10 @@ func (i *metadataIntegrationInterceptor) WrapHandler(next rerpc.UnaryHandler) re
 func TestCallMetadataIntegration(t *testing.T) {
 	chain := rerpc.NewChain(&metadataIntegrationInterceptor{tb: t, key: "Foo-Bar", value: "baz"})
 	mux := http.NewServeMux()
-	mux.Handle(pingpb.NewPingHandlerReRPC(pingServer{}, chain))
+	mux.Handle(pingpb.NewPingServiceHandlerReRPC(pingServer{}, chain))
 	server := httptest.NewServer(mux)
 	defer server.Close()
-	client := pingpb.NewPingClientReRPC(server.URL, server.Client(), chain)
+	client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client(), chain)
 
 	res, err := client.Ping(context.Background(), &pingpb.PingRequest{})
 	assert.Nil(t, err, "call error")

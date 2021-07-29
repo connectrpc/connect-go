@@ -14,7 +14,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
-	rpb "github.com/akshayjshah/rerpc/internal/reflectionpb/v1alpha"
+	rpb "github.com/akshayjshah/rerpc/internal/reflection/v1alpha1"
 )
 
 // A Registrar collects information to support gRPC server reflection
@@ -38,7 +38,7 @@ func (r *Registrar) Services() []string {
 	defer r.mu.RUnlock()
 
 	names := make([]string, 0, len(r.services))
-	for n, _ := range r.services {
+	for n := range r.services {
 		names = append(names, n)
 	}
 	sort.Strings(names)

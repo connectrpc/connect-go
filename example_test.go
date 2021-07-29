@@ -6,13 +6,13 @@ import (
 	"time"
 
 	"github.com/akshayjshah/rerpc"
-	pingpb "github.com/akshayjshah/rerpc/internal/pingpb/v0"
+	pingpb "github.com/akshayjshah/rerpc/internal/ping/v1test"
 )
 
 // ExamplePingServer implements some trivial business logic. The protobuf
 // definition for this API is in internal/pingpb/ping.proto.
 type ExamplePingServer struct {
-	pingpb.UnimplementedPingServerReRPC
+	pingpb.UnimplementedPingServiceReRPC
 }
 
 // Ping implements pingpb.PingServerReRPC.
@@ -29,10 +29,10 @@ func Example() {
 	checker := rerpc.NewChecker(reg) // basic health checks
 
 	mux := http.NewServeMux()
-	mux.Handle(pingpb.NewPingHandlerReRPC(ping, reg)) // business logic
-	mux.Handle(rerpc.NewReflectionHandler(reg))       // server reflection
-	mux.Handle(rerpc.NewHealthHandler(checker, reg))  // health checks
-	mux.Handle("/", rerpc.NewBadRouteHandler())       // Twirp-compatible 404s
+	mux.Handle(pingpb.NewPingServiceHandlerReRPC(ping, reg)) // business logic
+	mux.Handle(rerpc.NewReflectionHandler(reg))              // server reflection
+	mux.Handle(rerpc.NewHealthHandler(checker, reg))         // health checks
+	mux.Handle("/", rerpc.NewBadRouteHandler())              // Twirp-compatible 404s
 
 	srv := &http.Server{
 		Addr:           ":http",

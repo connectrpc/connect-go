@@ -6,25 +6,36 @@ SHELL := bash
 MAKEFLAGS += --warn-undefined-variables
 MAKEFLAGS += --no-builtin-rules
 
-HANDWRITTEN=$(shell find . -name '*.go' | grep -v -e '\.pb\.go$$' -e '_string.go')
-MODULE=github.com/akshayjshah/rerpc
+HANDWRITTEN=$(shell find . -type f -name '*.go' | grep -v -e '\.pb\.go$$' -e '_string.go')
+PROTOBUFS=$(shell find . -type f -name '*.proto')
 
 .PHONY: help
 help: ## Describe useful make targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-30s %s\n", $$1, $$2}'
 
 .PHONY: clean
-clean: ## Delete build output and generated code
-	rm -f bin/{protoc-gen-go-grpc,protoc-gen-go-rerpc}
-	rm -rf internal/crosstest/crosspb/{v0,.faux}
-	rm -rf internal/pingpb/{v0,.faux}
-	rm -rf internal/statuspb/{v0,.faux}
-	find . -type f -name "*.proto" -exec touch {} +
+clean: ## Delete build output
+	rm -f bin/{buf,protoc-gen-*}
+	rm -f .faux.pb
+	touch $(PROTOBUFS)
 
 .PHONY: test
 test: gen $(HANDWRITTEN) ## Run unit tests
 	@go test -race -cover ./...
 	@cd internal/crosstest && go test -race ./...
+
+.PHONY: lint
+lint: lintpb ## Lint Go and protobuf
+	test -z "$$(gofmt -s -l . | tee /dev/stderr)"
+
+.PHONY: lintfix
+lintfix: ## Automatically fix some lint errors
+	gofmt -s -w .
+
+.PHONY: lintpb
+lintpb: bin/buf $(PROTOBUFS)
+	@./bin/buf lint
+	@./bin/buf breaking --against image_v1.bin
 
 .PHONY: cover
 cover: cover.out ## Browse coverage for the main package
@@ -34,56 +45,27 @@ cover.out: gen $(HANDWRITTEN)
 	@go test -cover -coverprofile=$(@) .
 
 .PHONY: gen
-gen: genpb ## Regenerate code
+gen: .faux.pb ## Regenerate code
 
-.PHONY: genpb
-genpb: internal/statuspb/.faux internal/reflectionpb/.faux internal/healthpb/.faux internal/pingpb/.faux internal/crosstest/crosspb/.faux
-
-internal/crosstest/crosspb/.faux: internal/crosstest/crosspb/cross.proto bin/protoc-gen-go-grpc bin/protoc-gen-go-rerpc bin/protoc-gen-twirp
-	PATH="./bin:$(PATH)" protoc internal/crosstest/crosspb/cross.proto \
-		--go_out=. \
-		--go_opt=module=$(MODULE) \
-		--go-grpc_out=. \
-		--go-grpc_opt=module=$(MODULE) \
-		--go-rerpc_out=. \
-		--go-rerpc_opt=module=$(MODULE) \
-		--twirp_out=. \
-		--twirp_opt=module=$(MODULE)
+.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go-grpc bin/protoc-gen-twirp bin/protoc-gen-go-rerpc buf.gen.yaml
+	./bin/buf generate
+	rm internal/ping/v1test/ping{.twirp,_grpc.pb}.go
 	touch $(@)
 
-internal/statuspb/.faux: internal/statuspb/status.proto
-	protoc internal/statuspb/status.proto \
-		--go_out=. \
-		--go_opt=module=$(MODULE)
-	touch $(@)
-
-internal/reflectionpb/.faux: internal/reflectionpb/reflection.proto
-	protoc internal/reflectionpb/reflection.proto \
-		--go_out=. \
-		--go_opt=module=$(MODULE)
-	touch $(@)
-
-internal/healthpb/.faux: internal/healthpb/health.proto
-	protoc internal/healthpb/health.proto \
-		--go_out=. \
-		--go_opt=module=$(MODULE)
-	touch $(@)
-
-internal/pingpb/.faux: internal/pingpb/ping.proto bin/protoc-gen-go-rerpc
-	PATH="./bin:$(PATH)" protoc internal/pingpb/ping.proto \
-		--go_out=. \
-		--go_opt=module=$(MODULE) \
-		--go-rerpc_out=. \
-		--go-rerpc_opt=module=$(MODULE)
-	touch $(@)
+# Don't make this depend on $(PROTOBUFS), since we don't want to keep
+# regenerating it.
+image_v1.bin: bin/buf
+	./bin/buf build -o $(@)
 
 bin/protoc-gen-go-grpc: internal/crosstest/go.mod
-	GOBIN=$(PWD)/bin cd internal/crosstest && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc
-	touch $(@)
+	cd internal/crosstest && GOBIN=$(PWD)/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc
 
 bin/protoc-gen-go-rerpc: $(shell ls cmd/protoc-gen-go-rerpc/*.go) go.mod
 	go build -o $(@) ./cmd/protoc-gen-go-rerpc
 
 bin/protoc-gen-twirp: internal/crosstest/go.mod
-	GOBIN=$(PWD)/bin cd internal/crosstest && go install github.com/twitchtv/twirp/protoc-gen-twirp
-	touch $(@)
+	cd internal/crosstest && GOBIN=$(PWD)/bin go install github.com/twitchtv/twirp/protoc-gen-twirp
+
+bin/buf: internal/crosstest/go.mod
+	cd internal/crosstest && GOBIN=$(PWD)/bin go install github.com/bufbuild/buf/cmd/buf
+

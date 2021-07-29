@@ -82,7 +82,7 @@ func handshake(g *protogen.GeneratedFile) {
 
 func service(file *protogen.File, g *protogen.GeneratedFile, service *protogen.Service) {
 	clientName := service.GoName + "ClientReRPC"
-	serverName := service.GoName + "ServerReRPC"
+	serverName := service.GoName + "ReRPC"
 
 	clientInterface(g, service, clientName)
 	clientImplementation(g, service, clientName)
@@ -268,7 +268,7 @@ func serverImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	g.P()
 	for _, method := range unaryMethods(service) {
 		g.P("func (Unimplemented", name, ") ", serverSignature(g, method), "{")
-		g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(", rerpcPackage.Ident("CodeUnimplemented"), `, "method `, method.GoName, ` not implemented")`)
+		g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(", rerpcPackage.Ident("CodeUnimplemented"), `, "`, method.Desc.FullName(), ` isn't implemented")`)
 		g.P("}")
 		g.P()
 	}
