@@ -17,13 +17,8 @@ Deadline has passed. If it has passed, they should override the cancellation
 with Trailers with one that has a Status Code of DEADLINE_EXCEEDED.
 
 [ ] Restructure client code so we can have nicer signatures, like Twirp
-[ ] package GoDoc
-[ ] contributing
-[ ] CoC
 [ ] examples
-[ ] Implement grpc-web protocol (and re-familiarize myself with how it's different)
 [ ] dependabot
-[ ] support vtprotobuf
 
 [ ] upstream Twirp issue for putting timeout on the wire
 [ ] upstream Twirp issue for context cancellation and deadline exceeded errors
