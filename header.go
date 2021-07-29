@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"net/textproto"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -13,6 +15,43 @@ const (
 	tildeByte   = '~'
 	percentByte = '%'
 )
+
+// IsReservedHeader checks whether the supplied key is reserved for use by
+// reRPC, gRPC, or Twirp. Keys are canonicalized using
+// textproto.CanonicalMIMEHeaderKey before checking. Unreserved headers are
+// available for use by applications, but exercise caution: setting widely-used
+// HTTP headers (e.g., Transfer-Encoding, Content-Length) may break your
+// application in unexpected and difficult-to-debug ways.
+//
+// The signature of IsReservedHeader obeys semantic versioning, but the list of
+// reserved headers may expand in minor releases to keep up with evolutions of
+// the gRPC and Twirp protocols. To minimize the chance of breakage,
+// applications should namespace their headers with a consistent prefix (e.g.,
+// "Google-Cloud-").
+//
+// Current, the following keys are reserved: Accept, Accept-Encoding,
+// Accept-Post, Allow, Content-Encoding, Content-Type, and Te. Keys prefixed
+// with "Grpc-", "Rerpc-", and "Twirp-" are also reserved.
+func IsReservedHeader(key string) error {
+	canonical := textproto.CanonicalMIMEHeaderKey(key)
+	switch canonical {
+	case "Accept", "Accept-Encoding", "Accept-Post",
+		"Allow",
+		"Content-Encoding", "Content-Type",
+		"Te":
+		return fmt.Errorf("%q is a reserved header", key)
+	}
+	switch {
+	case strings.HasPrefix(canonical, "Grpc-"):
+		return fmt.Errorf("%q is reserved for the gRPC protocol", key)
+	case strings.HasPrefix(canonical, "Rerpc-"):
+		return fmt.Errorf("%q is reserved for future use by reRPC", key)
+	case strings.HasPrefix(canonical, "Twirp-"):
+		return fmt.Errorf("%q is reserved for future use by the Twirp protocol", key)
+	default:
+		return nil
+	}
+}
 
 func encodeBinaryHeader(data []byte) string {
 	// Implementations should emit unpadded values.
