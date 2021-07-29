@@ -55,6 +55,10 @@ func (r *Registrar) IsRegistered(service string) bool {
 }
 
 func (r *Registrar) register(service string) {
+	if service == "" {
+		// Typically BadRouteHandler.
+		return
+	}
 	r.mu.Lock()
 	r.services[service] = struct{}{}
 	r.mu.Unlock()

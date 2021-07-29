@@ -8,6 +8,7 @@ require (
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/jhump/protoreflect v1.9.0 // indirect
 	github.com/kisielk/gotool v1.0.0 // indirect
+	github.com/twitchtv/twirp v8.1.0+incompatible // indirect
 	golang.org/x/net v0.0.0-20210614182718-04defd469f4e // indirect
 	google.golang.org/grpc v1.39.0 // indirect
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0 // indirect
