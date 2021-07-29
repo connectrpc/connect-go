@@ -116,7 +116,7 @@ func (c *Client) call(ctx context.Context, req, res proto.Message, cfg *callCfg)
 		if enc, err := encodeTimeout(untilDeadline); err == nil {
 			// Tests verify that the error in encodeTimeout is unreachable, so we
 			// should be safe without observability for the error case.
-			md.Request.raw.Set("Grpc-Timeout", enc)
+			md.req.raw.Set("Grpc-Timeout", enc)
 		}
 	}
 
@@ -129,7 +129,7 @@ func (c *Client) call(ctx context.Context, req, res proto.Message, cfg *callCfg)
 	if err != nil {
 		return errorf(CodeInternal, "can't create HTTP request: %w", err)
 	}
-	request.Header = md.Request.raw
+	request.Header = md.req.raw
 
 	response, err := c.doer.Do(request)
 	if err != nil {
@@ -144,7 +144,7 @@ func (c *Client) call(ctx context.Context, req, res proto.Message, cfg *callCfg)
 	}
 	defer response.Body.Close()
 	defer io.Copy(ioutil.Discard, response.Body)
-	*md.Response = *NewImmutableHeader(response.Header)
+	*md.res = NewImmutableHeader(response.Header)
 
 	if response.StatusCode != http.StatusOK {
 		code := CodeUnknown

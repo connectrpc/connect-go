@@ -434,14 +434,14 @@ func (i *metadataIntegrationInterceptor) WrapCall(next rerpc.UnaryCall) rerpc.Un
 		md, ok := rerpc.CallMeta(ctx)
 		assert.True(i.tb, ok, "get call metadata")
 		// Headers that interceptors can't modify should have been set already.
-		assert.Equal(i.tb, md.Request.Get("User-Agent"), rerpc.UserAgent(), "request user agent")
+		assert.Equal(i.tb, md.Request().Get("User-Agent"), rerpc.UserAgent(), "request user agent")
 		// Server will verify that it received this header.
-		assert.Nil(i.tb, md.Request.Set(i.key, i.value), "set custom request header")
+		assert.Nil(i.tb, md.Request().Set(i.key, i.value), "set custom request header")
 
 		err := next(ctx, req, res)
 
 		// Server should have sent this response header.
-		assert.Equal(i.tb, md.Response.Get(i.key), i.value, "custom header %q from server", assert.Fmt(i.key))
+		assert.Equal(i.tb, md.Response().Get(i.key), i.value, "custom header %q from server", assert.Fmt(i.key))
 		return err
 	})
 }
@@ -451,13 +451,13 @@ func (i *metadataIntegrationInterceptor) WrapHandler(next rerpc.UnaryHandler) re
 		md, ok := rerpc.HandlerMeta(ctx)
 		assert.True(i.tb, ok, "get handler metadata")
 		// Client should have sent both of these headers.
-		assert.Equal(i.tb, md.Request.Get("User-Agent"), rerpc.UserAgent(), "user agent sent by client")
-		assert.Equal(i.tb, md.Request.Get(i.key), i.value, "custom header %q from client", assert.Fmt(i.key))
+		assert.Equal(i.tb, md.Request().Get("User-Agent"), rerpc.UserAgent(), "user agent sent by client")
+		assert.Equal(i.tb, md.Request().Get(i.key), i.value, "custom header %q from client", assert.Fmt(i.key))
 
 		res, err := next(ctx, req)
 
 		// Client will verify that it receives this header.
-		assert.Nil(i.tb, md.Response.Set(i.key, i.value), "set custom response header")
+		assert.Nil(i.tb, md.Response().Set(i.key, i.value), "set custom response header")
 		return res, err
 	})
 }
