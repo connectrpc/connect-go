@@ -85,11 +85,29 @@ func (c *Client) Call(ctx context.Context, req, res proto.Message, opts ...CallO
 	if cfg.Interceptor != nil {
 		next = cfg.Interceptor.WrapCall(next)
 	}
+	spec := &Specification{
+		Method:             c.method,
+		RequestCompression: CompressionGzip,
+	}
+	if !cfg.EnableGzipRequest {
+		spec.RequestCompression = CompressionIdentity
+	}
+	reqHeader := make(http.Header, 5)
+	reqHeader.Set("User-Agent", UserAgent())
+	reqHeader.Set("Content-Type", TypeDefaultGRPC)
+	reqHeader.Set("Grpc-Encoding", spec.RequestCompression)
+	reqHeader.Set("Grpc-Accept-Encoding", acceptEncodingValue) // always advertise identity & gzip
+	reqHeader.Set("Te", "trailers")
+	ctx = NewCallContext(ctx, *spec, reqHeader, make(http.Header))
 	return next(ctx, req, res)
 }
 
 func (c *Client) call(ctx context.Context, req, res proto.Message, cfg *callCfg) *Error {
-	var encodedTimeout string
+	md, hasMD := CallMeta(ctx)
+	if !hasMD {
+		return errorf(CodeInternal, "no call metadata available on context")
+	}
+
 	if deadline, ok := ctx.Deadline(); ok {
 		untilDeadline := time.Until(deadline)
 		if untilDeadline <= 0 {
@@ -98,17 +116,12 @@ func (c *Client) call(ctx context.Context, req, res proto.Message, cfg *callCfg)
 		if enc, err := encodeTimeout(untilDeadline); err == nil {
 			// Tests verify that the error in encodeTimeout is unreachable, so we
 			// should be safe without observability for the error case.
-			encodedTimeout = enc
+			md.Request.raw.Set("Grpc-Timeout", enc)
 		}
 	}
 
-	requestCompression := CompressionGzip
-	if !cfg.EnableGzipRequest {
-		requestCompression = CompressionIdentity
-	}
-
 	body := &bytes.Buffer{}
-	if err := marshalLPM(body, req, requestCompression, 0 /* maxBytes */); err != nil {
+	if err := marshalLPM(body, req, md.Spec.RequestCompression, 0 /* maxBytes */); err != nil {
 		return errorf(CodeInvalidArgument, "can't marshal request as protobuf: %w", err)
 	}
 
@@ -116,14 +129,7 @@ func (c *Client) call(ctx context.Context, req, res proto.Message, cfg *callCfg)
 	if err != nil {
 		return errorf(CodeInternal, "can't create HTTP request: %w", err)
 	}
-	request.Header.Set("User-Agent", UserAgent)
-	request.Header.Set("Content-Type", TypeDefaultGRPC)
-	request.Header.Set("Grpc-Encoding", requestCompression)
-	request.Header.Set("Grpc-Accept-Encoding", acceptEncodingValue) // always advertise identity & gzip
-	if encodedTimeout != "" {
-		request.Header.Set("Grpc-Timeout", encodedTimeout)
-	}
-	request.Header.Set("Te", "trailers")
+	request.Header = md.Request.raw
 
 	response, err := c.doer.Do(request)
 	if err != nil {
@@ -138,6 +144,7 @@ func (c *Client) call(ctx context.Context, req, res proto.Message, cfg *callCfg)
 	}
 	defer response.Body.Close()
 	defer io.Copy(ioutil.Discard, response.Body)
+	*md.Response = *NewImmutableHeader(response.Header)
 
 	if response.StatusCode != http.StatusOK {
 		code := CodeUnknown
