@@ -25,17 +25,17 @@ support.
 
 ## A Small Example
 
-Curious what all this looks like in practice? Here's the smallest possible
-server. You can find more realistic examples in the [API documentation][godoc].
+Curious what all this looks like in practice? Here's a small, insecure server:
 
 ```go
 package main
 
 import (
-  "context"
   "net/http"
 
-  "github.com/akshayjshah/rerpc"
+  "golang.org/x/net/http2"
+  "golang.org/x/net/http2/h2c"
+
   pingpb "github.com/akshayjshah/rerpc/internal/pingpb/v0" // generated
 )
 
@@ -47,9 +47,22 @@ func main() {
   ping := &PingServer{}
   mux := http.NewServeMux()
   mux.Handle(pingpb.NewPingHandlerReRPC(ping))
-  http.ListenAndServeTLS(":https", "cert.pem", "key.pem", mux)
+  handler := h2c.NewHandler(mux, &http2.Server{})
+  http.ListenAndServe(":8081", handler)
 }
 ```
+
+With that server running, you can make requests with any gRPC client or cURL:
+
+```bash
+$ curl --request POST \
+  --header "Content-Type: application/json" \
+  http://localhost:8081/rerpc.internal.ping.v0.Ping/Ping
+
+{"code":"unimplemented","msg":"rerpc.internal.ping.v0.Ping.Ping isn't implemented"}
+```
+
+You can find more realistic examples in the [API documentation][godoc].
 
 ## Status
 
@@ -77,18 +90,18 @@ Offered under the [MIT license][license]. This is a personal project, developed
 in my spare time - it's not endorsed by, supported by, or (as far as I know)
 used by my employer.
 
-[protobuf]: https://developers.google.com/protocol-buffers
+[APIv2]: https://blog.golang.org/protobuf-apiv2
+[envoy]: https://www.envoyproxy.io/
+[godoc]: https://pkg.go.dev/github.com/akshayjshah/rerpc
+[go-support-policy]: https://golang.org/doc/devel/release#policy
+[grpc-gateway]: https://grpc-ecosystem.github.io/grpc-gateway/
 [grpc]: https://grpc.io/
 [grpc-implementations]: https://grpc.io/docs/languages/
 [grpcurl]: https://github.com/fullstorydev/grpcurl
-[grpc-gateway]: https://grpc-ecosystem.github.io/grpc-gateway/
-[envoy]: https://www.envoyproxy.io/
+[license]: https://github.com/akshayjshah/rerpc/blob/main/LICENSE.txt
+[maintainers-issue]: https://github.com/akshayjshah/rerpc/issues/2
+[proto3]: https://cloud.google.com/apis/design/proto3
+[protobuf]: https://developers.google.com/protocol-buffers
+[streaming-issue]: https://github.com/akshayjshah/rerpc/issues/1
 [twirp]: https://twitchtv.github.io/twirp/
 [twirp-implementations]: https://github.com/twitchtv/twirp#implementations-in-other-languages
-[streaming-issue]: https://github.com/akshayjshah/rerpc/issues/1
-[maintainers-issue]: https://github.com/akshayjshah/rerpc/issues/2
-[go-support-policy]: https://golang.org/doc/devel/release#policy
-[license]: https://github.com/akshayjshah/rerpc/blob/main/LICENSE.txt
-[godoc]: https://pkg.go.dev/github.com/akshayjshah/rerpc
-[proto3]: https://cloud.google.com/apis/design/proto3
-[APIv2]: https://blog.golang.org/protobuf-apiv2
