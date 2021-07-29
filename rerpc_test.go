@@ -453,8 +453,8 @@ func TestServerProtoGRPC(t *testing.T) {
 				"reflection RPC",
 			)
 			err := res.GetErrorResponse()
-			assert.NotNil(t, res, "error in response proto")
-			assert.Equal(t, int32(rerpc.CodeNotFound), err.ErrorCode, "error code")
+			assert.NotNil(t, err, "error in response proto")
+			assert.Equal(t, err.ErrorCode, int32(rerpc.CodeNotFound), "error code")
 			assert.NotZero(t, err.ErrorMessage, "error message")
 		})
 		t.Run("all_extension_numbers_of_type", func(t *testing.T) {

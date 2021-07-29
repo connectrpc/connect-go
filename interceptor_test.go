@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/akshayjshah/rerpc/internal/assert"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/akshayjshah/rerpc/internal/assert"
 )
 
 func assertingCall(f func(context.Context)) UnaryCall {

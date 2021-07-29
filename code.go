@@ -84,7 +84,7 @@ var (
 	}
 )
 
-// A Code is one of gRPC's canonical error codes. There are no user-defined
+// A Code is one of gRPC's canonical status codes. There are no user-defined
 // codes, so only the codes enumerated below are valid.
 //
 // See the specification at

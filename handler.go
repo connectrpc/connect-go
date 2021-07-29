@@ -219,13 +219,16 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 		} else if mae := r.Header.Get("Grpc-Accept-Encoding"); mae != "" {
 			for _, enc := range strings.FieldsFunc(mae, splitOnCommasAndSpaces) {
 				switch enc {
-				case CompressionGzip: // prefer gzip
+				case CompressionGzip:
 					spec.ResponseCompression = CompressionGzip
-					break
+					// prefer gzip, so no continue
 				case CompressionIdentity:
 					spec.ResponseCompression = CompressionIdentity
-					break
+					continue
+				default:
+					continue
 				}
+				break
 			}
 		}
 	}

@@ -6,7 +6,7 @@ SHELL := bash
 MAKEFLAGS += --warn-undefined-variables
 MAKEFLAGS += --no-builtin-rules
 
-HANDWRITTEN=$(shell find . -type f -name '*.go' | grep -v -e '\.pb\.go$$' -e '_string.go')
+HANDWRITTEN=$(shell find . -type f -name '*.go' | grep -v -e '\.pb\.go$$' -e '\.twirp\.go$$' -e '_string.go')
 PROTOBUFS=$(shell find . -type f -name '*.proto')
 
 .PHONY: help
@@ -15,22 +15,30 @@ help: ## Describe useful make targets
 
 .PHONY: clean
 clean: ## Delete build output
-	rm -f bin/{buf,protoc-gen-*}
+	rm -f bin/{buf,goimports,staticcheck,protoc-gen-*}
 	rm -f .faux.pb
 	touch $(PROTOBUFS)
 
 .PHONY: test
 test: gen $(HANDWRITTEN) ## Run unit tests
-	@go test -race -cover ./...
-	@cd internal/crosstest && go test -race ./...
+	@go test -vet=off -race -cover ./...
+	@cd internal/crosstest && go test -vet=off -race ./...
 
 .PHONY: lint
-lint: lintpb ## Lint Go and protobuf
-	test -z "$$(gofmt -s -l . | tee /dev/stderr)"
+lint: lintpb bin/goimports ## Lint Go and protobuf
+	@echo "Checking with gofmt..."
+	@test -z "$$(gofmt -s -l . | tee /dev/stderr)"
+	@echo "Checking with goimports..."
+	@test -z "$$(./bin/goimports -local github.com/akshayjshah/rerpc -l $(HANDWRITTEN) | tee /dev/stderr)"
+	@echo "Checking with go vet..."
+	@go vet ./...
+	@echo "Checking with staticcheck..."
+	@staticcheck -checks "inherit,ST1020,ST1021,ST1022" ./...
 
 .PHONY: lintfix
 lintfix: ## Automatically fix some lint errors
-	gofmt -s -w .
+	@gofmt -s -w .
+	@./bin/goimports -local github.com/akshayjshah/rerpc -w $(HANDWRITTEN)
 
 .PHONY: lintpb
 lintpb: bin/buf $(PROTOBUFS)
@@ -68,4 +76,10 @@ bin/protoc-gen-twirp: internal/crosstest/go.mod
 
 bin/buf: internal/crosstest/go.mod
 	cd internal/crosstest && GOBIN=$(PWD)/bin go install github.com/bufbuild/buf/cmd/buf
+
+bin/goimports: internal/crosstest/go.mod
+	cd internal/crosstest && GOBIN=$(PWD)/bin go install golang.org/x/tools/cmd/goimports
+
+bin/staticcheck: internal/crosstest/go.mod
+	cd internal/crosstest && GOBIN=$(PWD)/bin go install honnef.co/go/tools/cmd/staticcheck
 

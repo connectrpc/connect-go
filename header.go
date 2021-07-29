@@ -10,12 +10,6 @@ import (
 	"unicode/utf8"
 )
 
-const (
-	spaceByte   = ' '
-	tildeByte   = '~'
-	percentByte = '%'
-)
-
 // IsReservedHeader checks whether the supplied key is reserved for use by
 // reRPC, gRPC, or Twirp. Keys are canonicalized using
 // textproto.CanonicalMIMEHeaderKey before checking. Unreserved headers are

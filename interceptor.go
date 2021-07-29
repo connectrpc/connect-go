@@ -60,7 +60,7 @@ type Chain struct {
 	interceptors []Interceptor
 }
 
-// A Chain composes multiple interceptors into one. The first interceptor
+// NewChain composes multiple interceptors into one. The first interceptor
 // provided is the outermost layer of the onion: it acts first on the context
 // and request, and last on the response and error.
 func NewChain(interceptors ...Interceptor) *Chain {

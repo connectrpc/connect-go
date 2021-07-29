@@ -96,7 +96,7 @@ func NewReflectionHandler(reg *Registrar) (string, http.Handler) {
 		nil,               // no unary implementation
 		ServeTwirp(false), // no reflection in Twirp
 	)
-	raw := &rawReflectionHandler{*reg}
+	raw := &rawReflectionHandler{reg}
 	h.rawGRPC = raw.rawGRPC
 	httpHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.Serve(w, r, nil)
@@ -105,7 +105,7 @@ func NewReflectionHandler(reg *Registrar) (string, http.Handler) {
 }
 
 type rawReflectionHandler struct {
-	reg Registrar
+	reg *Registrar
 }
 
 func (rh *rawReflectionHandler) rawGRPC(ctx context.Context, w http.ResponseWriter, r *http.Request, requestCompression, responseCompression string, hooks *Hooks) {
