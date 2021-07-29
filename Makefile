@@ -39,14 +39,16 @@ gen: genpb ## Regenerate code
 .PHONY: genpb
 genpb: internal/statuspb/.faux internal/reflectionpb/.faux internal/healthpb/.faux internal/pingpb/.faux internal/crosstest/crosspb/.faux
 
-internal/crosstest/crosspb/.faux: internal/crosstest/crosspb/cross.proto bin/protoc-gen-go-grpc bin/protoc-gen-go-rerpc
+internal/crosstest/crosspb/.faux: internal/crosstest/crosspb/cross.proto bin/protoc-gen-go-grpc bin/protoc-gen-go-rerpc bin/protoc-gen-twirp
 	PATH="./bin:$(PATH)" protoc internal/crosstest/crosspb/cross.proto \
 		--go_out=. \
 		--go_opt=module=$(MODULE) \
 		--go-grpc_out=. \
 		--go-grpc_opt=module=$(MODULE) \
 		--go-rerpc_out=. \
-		--go-rerpc_opt=module=$(MODULE)
+		--go-rerpc_opt=module=$(MODULE) \
+		--twirp_out=. \
+		--twirp_opt=module=$(MODULE)
 	touch $(@)
 
 internal/statuspb/.faux: internal/statuspb/status.proto
@@ -81,3 +83,7 @@ bin/protoc-gen-go-grpc: internal/crosstest/go.mod
 
 bin/protoc-gen-go-rerpc: $(shell ls cmd/protoc-gen-go-rerpc/*.go) go.mod
 	go build -o $(@) ./cmd/protoc-gen-go-rerpc
+
+bin/protoc-gen-twirp: internal/crosstest/go.mod
+	GOBIN=$(PWD)/bin cd internal/crosstest && go install github.com/twitchtv/twirp/protoc-gen-twirp
+	touch $(@)
