@@ -2,8 +2,10 @@ package rerpc
 
 import (
 	"bytes"
+	"math/rand"
 	"testing"
 	"testing/quick"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/akshayjshah/rerpc/internal/assert"
@@ -50,4 +52,51 @@ func TestPercentEncoding(t *testing.T) {
 	roundtrip("foo bar")
 	roundtrip(`foo%bar`)
 	roundtrip("fiancée")
+}
+
+func TestIsReservedHeader(t *testing.T) {
+	tests := []struct {
+		key      string
+		reserved bool
+	}{
+		{"Accept", true},
+		{"Accept-Encoding", true},
+		{"Accept-Post", true},
+		{"Allow", true},
+		{"Content-Encoding", true},
+		{"Content-Type", true},
+		{"Te", true},
+		{"Grpc-Foo", true},
+		{"Rerpc-Foo", true},
+		{"Twirp-Foo", true},
+
+		{"Content-Length", false},
+		{"Transfer-Encoding", false},
+		{"Grpcfoo", false},
+		{"Rerpcfoo", false},
+		{"Twirpfoo", false},
+		{"Google-Cloud-Trace-Id", false},
+	}
+	for _, tt := range tests {
+		// Should be case-insensitive
+		bs := []byte(tt.key)
+		for i := 0; i < 10; i++ {
+			if i > 0 {
+				idx := rand.Intn(len(bs))
+				r := rune(bs[idx])
+				if unicode.IsLower(r) {
+					bs[idx] = byte(unicode.ToUpper(r))
+				} else {
+					bs[idx] = byte(unicode.ToLower(r))
+				}
+			}
+			k := string(bs)
+			err := IsReservedHeader(k)
+			if tt.reserved {
+				assert.NotNil(t, err, "expected key %q to be reserved", assert.Fmt(k))
+			} else {
+				assert.Nil(t, err, "expected key %q to be available for application use", assert.Fmt(k))
+			}
+		}
+	}
 }
