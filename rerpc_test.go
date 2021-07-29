@@ -66,6 +66,22 @@ func TestHandlerTwirp(t *testing.T) {
 	}
 
 	t.Run("json", func(t *testing.T) {
+		t.Run("zero", func(t *testing.T) {
+			r, err := http.NewRequest(
+				http.MethodPost,
+				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Ping", server.URL),
+				bytes.NewReader(nil),
+			)
+			assert.Nil(t, err, "create request")
+			r.Header.Set("Content-Type", rerpc.TypeJSON)
+
+			response, err := server.Client().Do(r)
+			assert.Nil(t, err, "make request")
+
+			testHeaders(t, response)
+			assert.Equal(t, response.StatusCode, http.StatusOK, "HTTP status code")
+			assertBodyEquals(t, response.Body, "{}") // zero value
+		})
 		t.Run("ping", func(t *testing.T) {
 			probe := `{"number":"42"}`
 			r, err := http.NewRequest(
@@ -153,6 +169,22 @@ func TestHandlerTwirp(t *testing.T) {
 			assert.Nil(t, proto.Unmarshal(bs, &res), "unmarshal body")
 			return &res
 		}
+		t.Run("zero", func(t *testing.T) {
+			r, err := http.NewRequest(
+				http.MethodPost,
+				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Ping", server.URL),
+				bytes.NewReader(nil),
+			)
+			assert.Nil(t, err, "create request")
+			r.Header.Set("Content-Type", rerpc.TypeProtoTwirp)
+
+			response, err := server.Client().Do(r)
+			assert.Nil(t, err, "make request")
+
+			testHeaders(t, response)
+			assert.Equal(t, response.StatusCode, http.StatusOK, "HTTP status code")
+			assertBodyEquals(t, response.Body, "") // zero value
+		})
 		t.Run("ping", func(t *testing.T) {
 			r, err := http.NewRequest(
 				http.MethodPost,
