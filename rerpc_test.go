@@ -238,7 +238,7 @@ func TestServerProtoGRPC(t *testing.T) {
 		chain,
 	))
 	mux.Handle(rerpc.NewHealthHandler(
-		rerpc.DefaultCheckFunc(reg),
+		rerpc.NewChecker(reg),
 		reg,
 		chain,
 	))
