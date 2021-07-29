@@ -1,7 +1,6 @@
 package rerpc
 
 import (
-	"bytes"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -94,9 +93,8 @@ func percentEncode(msg string) string {
 // msg needs some percent-escaping. Bytes before offset don't require
 // percent-encoding, so they can be copied to the output as-is.
 func percentEncodeSlow(msg string, offset int) string {
-	// TODO: pool these buffers
-	// worst-case, percent-encoding triples length
-	out := bytes.NewBuffer(make([]byte, 0, len(msg)*3))
+	out := getBuffer()
+	defer putBuffer(out)
 	out.WriteString(msg[:offset])
 	for i := offset; i < len(msg); i++ {
 		c := msg[i]
@@ -121,8 +119,8 @@ func percentDecode(encoded string) string {
 // Similar to percentEncodeSlow: encoded is percent-encoded, and needs to be
 // decoded byte-by-byte starting at offset.
 func percentDecodeSlow(encoded string, offset int) string {
-	// TODO: pool these buffers
-	out := bytes.NewBuffer(make([]byte, 0, len(encoded)))
+	out := getBuffer()
+	defer putBuffer(out)
 	out.WriteString(encoded[:offset])
 	for i := offset; i < len(encoded); i++ {
 		c := encoded[i]
