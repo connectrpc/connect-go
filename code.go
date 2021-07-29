@@ -28,17 +28,20 @@ var (
 	}
 	grpcToHTTP = map[Code]int{
 		// Codes are numbers rather than net/http constants to make copying from
-		// the specification easy.
+		// the specification easy. Since we only use these for the application/json
+		// and application/protobuf content types, these are the Twirp mappings
+		// rather than the gRPC ones. See
+		// https://github.com/twitchtv/twirp/blob/main/PROTOCOL.md.
 		CodeOK:                 200,
-		CodeCanceled:           499,
+		CodeCanceled:           408, // 499 in gRPC
 		CodeUnknown:            500,
 		CodeInvalidArgument:    400,
-		CodeDeadlineExceeded:   504,
+		CodeDeadlineExceeded:   408, // 504 in gRPC
 		CodeNotFound:           404,
 		CodeAlreadyExists:      409,
 		CodePermissionDenied:   403,
 		CodeResourceExhausted:  429,
-		CodeFailedPrecondition: 400,
+		CodeFailedPrecondition: 412, // 400 in gRPC
 		CodeAborted:            409,
 		CodeOutOfRange:         400,
 		CodeUnimplemented:      501,
@@ -46,6 +49,25 @@ var (
 		CodeUnavailable:        503,
 		CodeDataLoss:           500,
 		CodeUnauthenticated:    401,
+	}
+	grpcToTwirp = map[Code]string{
+		CodeOK:                 "ok",
+		CodeCanceled:           "canceled",
+		CodeUnknown:            "unknown",
+		CodeInvalidArgument:    "invalid_argument",
+		CodeDeadlineExceeded:   "deadline_exceeded",
+		CodeNotFound:           "not_found",
+		CodeAlreadyExists:      "already_exists",
+		CodePermissionDenied:   "permission_denied",
+		CodeResourceExhausted:  "resource_exhausted",
+		CodeFailedPrecondition: "failed_precondition",
+		CodeAborted:            "aborted",
+		CodeOutOfRange:         "out_of_range",
+		CodeUnimplemented:      "unimplemented",
+		CodeInternal:           "internal",
+		CodeUnavailable:        "unavailable",
+		CodeDataLoss:           "dataloss",
+		CodeUnauthenticated:    "unauthenticated",
 	}
 	// From https://github.com/grpc/grpc/blob/master/doc/http-grpc-status-mapping.md.
 	// Note that these are not the inverse of the previous mapping.
@@ -61,8 +83,6 @@ var (
 		// all other HTTP status codes map to CodeUnknown
 	}
 )
-
-//go:generate stringer -type=Code
 
 // A Code is one of gRPC's canonical error codes. There are no user-defined
 // codes, so only the codes enumerated below are valid.
@@ -125,6 +145,14 @@ func (c Code) http() int {
 		return http.StatusInternalServerError
 	}
 	return grpcToHTTP[c]
+}
+
+func (c Code) twirp() string {
+	if c < minCode || c > maxCode {
+		// Code is invalid, which is definitely "internal"
+		return grpcToTwirp[CodeInternal]
+	}
+	return grpcToTwirp[c]
 }
 
 func (c Code) String() string {

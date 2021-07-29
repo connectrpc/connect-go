@@ -3,6 +3,7 @@ package rerpc
 import (
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -13,6 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/akshayjshah/rerpc/internal/statuspb/v0"
+	"github.com/akshayjshah/rerpc/internal/twirp"
 )
 
 var (
@@ -30,7 +32,7 @@ var (
 
 type handlerCfg struct {
 	DisableGzipResponse bool
-	DisableJSON         bool
+	DisableTwirp        bool
 	MaxRequestBytes     int
 	Registrar           *Registrar
 	Interceptor         HandlerInterceptor
@@ -45,19 +47,21 @@ type HandlerOption interface {
 	applyToHandler(*handlerCfg)
 }
 
-type serveJSONOption struct {
+type serveTwirpOption struct {
 	Disable bool
 }
 
-func (o *serveJSONOption) applyToHandler(cfg *handlerCfg) {
-	cfg.DisableJSON = o.Disable
+func (o *serveTwirpOption) applyToHandler(cfg *handlerCfg) {
+	cfg.DisableTwirp = o.Disable
 }
 
-// ServeJSON enables or disables support for JSON requests and responses.
+// ServeTwirp enables or disables support for Twirp's JSON and protobuf
+// formats. Disable Twirp if you only want your handlers to speak the gRPC
+// protocol.
 //
-// By default, handlers support JSON.
-func ServeJSON(enable bool) HandlerOption {
-	return &serveJSONOption{!enable}
+// By default, handlers support Twirp.
+func ServeTwirp(enable bool) HandlerOption {
+	return &serveTwirpOption{!enable}
 }
 
 // A Handler is the server-side implementation of a single RPC defined by a
@@ -145,12 +149,12 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 		RequestCompression:  CompressionIdentity,
 		ResponseCompression: CompressionIdentity,
 	}
-	if spec.ContentType == TypeJSON && h.config.DisableJSON {
+	if (spec.ContentType == TypeJSON || spec.ContentType == TypeProtoTwirp) && h.config.DisableTwirp {
 		w.Header().Set("Accept-Post", acceptPostValueWithoutJSON)
 		w.WriteHeader(http.StatusUnsupportedMediaType)
 		return
 	}
-	if ct := spec.ContentType; ct != TypeDefaultGRPC && ct != TypeProtoGRPC && ct != TypeJSON {
+	if ct := spec.ContentType; ct != TypeDefaultGRPC && ct != TypeProtoGRPC && ct != TypeProtoTwirp && ct != TypeJSON {
 		// grpc-go returns 500, but the spec recommends 415.
 		// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#requests
 		w.Header().Set("Accept-Post", acceptPostValueDefault)
@@ -177,7 +181,7 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 		r = r.WithContext(ctx)
 	} // else err == errNoTimeout, nothing to do
 
-	if spec.ContentType == TypeJSON {
+	if spec.ContentType == TypeJSON || spec.ContentType == TypeProtoTwirp {
 		if r.Header.Get("Content-Encoding") == "gzip" {
 			spec.RequestCompression = CompressionGzip
 		}
@@ -229,7 +233,7 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 	// We may write to the body in the implementation (e.g., reflection handler), so we should
 	// set headers here.
 	w.Header().Set("Content-Type", spec.ContentType)
-	if spec.ContentType != TypeJSON {
+	if spec.ContentType != TypeJSON && spec.ContentType != TypeProtoTwirp {
 		w.Header().Set("Grpc-Accept-Encoding", acceptEncodingValue)
 		w.Header().Set("Grpc-Encoding", spec.ResponseCompression)
 		// Every gRPC response will have these trailers.
@@ -244,8 +248,8 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 		implementation = UnaryHandler(func(context.Context, proto.Message) (proto.Message, error) {
 			return nil, failed
 		})
-	} else if spec.ContentType == TypeJSON {
-		implementation = h.implementationJSON(w, r, spec)
+	} else if spec.ContentType == TypeJSON || spec.ContentType == TypeProtoTwirp {
+		implementation = h.implementationTwirp(w, r, spec)
 	} else {
 		implementation = h.implementationGRPC(w, r, spec)
 	}
@@ -253,7 +257,7 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 	h.writeResult(r.Context(), w, spec, res, err)
 }
 
-func (h *Handler) implementationJSON(w http.ResponseWriter, r *http.Request, spec *Specification) UnaryHandler {
+func (h *Handler) implementationTwirp(w http.ResponseWriter, r *http.Request, spec *Specification) UnaryHandler {
 	return UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 		var body io.Reader = r.Body
 		if spec.RequestCompression == CompressionGzip {
@@ -270,8 +274,14 @@ func (h *Handler) implementationJSON(w http.ResponseWriter, r *http.Request, spe
 				N: int64(max),
 			}
 		}
-		if err := unmarshalJSON(body, req); err != nil {
-			return nil, errorf(CodeInvalidArgument, "can't unmarshal JSON body")
+		if spec.ContentType == TypeJSON {
+			if err := unmarshalJSON(body, req); err != nil {
+				return nil, wrap(CodeInvalidArgument, newMalformedError("can't unmarshal JSON body"))
+			}
+		} else {
+			if err := unmarshalTwirpProto(body, req); err != nil {
+				return nil, wrap(CodeInvalidArgument, newMalformedError("can't unmarshal Twirp protobuf body"))
+			}
 		}
 		return h.implementation(ctx, req)
 	})
@@ -291,14 +301,14 @@ func (h *Handler) implementationGRPC(w http.ResponseWriter, r *http.Request, spe
 }
 
 func (h *Handler) writeResult(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) {
-	if spec.ContentType == TypeJSON {
-		h.writeResultJSON(ctx, w, spec, res, err)
+	if spec.ContentType == TypeJSON || spec.ContentType == TypeProtoTwirp {
+		h.writeResultTwirp(ctx, w, spec, res, err)
 		return
 	}
 	h.writeResultGRPC(ctx, w, spec, res, err)
 }
 
-func (h *Handler) writeResultJSON(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) {
+func (h *Handler) writeResultTwirp(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) {
 	// Even if the client requested gzip compression, check Content-Encoding to
 	// make sure some other HTTP middleware hasn't already swapped out the
 	// ResponseWriter.
@@ -314,10 +324,15 @@ func (h *Handler) writeResultJSON(ctx context.Context, w http.ResponseWriter, sp
 		}()
 	}
 	if err != nil {
+		// Twirp always writes errors as JSON.
 		writeErrorJSON(ctx, w, err, h.config.Hooks)
 		return
 	}
-	marshalJSON(ctx, w, res, h.config.Hooks)
+	if spec.ContentType == TypeJSON {
+		marshalJSON(ctx, w, res, h.config.Hooks)
+	} else {
+		marshalTwirpProto(ctx, w, res, h.config.Hooks)
+	}
 }
 
 func (h *Handler) writeResultGRPC(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) {
@@ -346,18 +361,21 @@ func splitOnCommasAndSpaces(c rune) bool {
 }
 
 func writeErrorJSON(ctx context.Context, w http.ResponseWriter, err error, hooks *Hooks) {
-	s := statusFromError(err)
-	bs, err := jsonpbMarshaler.Marshal(s)
-	if err != nil {
-		hooks.onMarshalError(ctx, err)
+	// Even if the caller sends TypeProtoTwirp, we respond with TypeJSON on errors.
+	w.Header().Set("Content-Type", TypeJSON)
+	s := newTwirpStatus(err)
+	bs, merr := json.Marshal(s)
+	if merr != nil {
+		hooks.onMarshalError(ctx, merr)
 		w.WriteHeader(http.StatusInternalServerError)
-		const tmpl = `{"code": %d, "message": "error marshaling status with code %d"}`
-		if _, nerr := fmt.Fprintf(w, tmpl, CodeInternal, s.Code); nerr != nil {
+		// codes don't need to be escaped in JSON, so this is okay
+		const tmpl = `{"code": "%s", "msg": "error marshaling error with code %s"}`
+		if _, nerr := fmt.Fprintf(w, tmpl, CodeInternal.twirp(), s.Code); nerr != nil {
 			hooks.onNetworkError(ctx, nerr)
 		}
 		return
 	}
-	w.WriteHeader(Code(s.Code).http())
+	w.WriteHeader(CodeOf(err).http())
 	_, err = w.Write(bs)
 	if err != nil {
 		hooks.onNetworkError(ctx, err)
@@ -401,6 +419,18 @@ func statusFromError(err error) *statuspb.Status {
 		if e := re.Unwrap(); e != nil {
 			s.Message = e.Error() // don't repeat code
 		}
+	}
+	return s
+}
+
+func newTwirpStatus(err error) *twirp.Status {
+	gs := statusFromError(err)
+	s := &twirp.Status{
+		Code:    Code(gs.Code).twirp(),
+		Message: gs.Message,
+	}
+	if te, ok := asTwirpError(err); ok {
+		s.Code = te.TwirpCode()
 	}
 	return s
 }

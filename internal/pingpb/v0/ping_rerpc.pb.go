@@ -142,6 +142,9 @@ func NewPingHandlerReRPC(svc PingServerReRPC, opts ...rerpc.HandlerOption) (stri
 		fail.Serve(w, r, &FailRequest{})
 	})
 
+	// Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.
+	mux.Handle("/", rerpc.NewBadRouteHandler(opts...))
+
 	return "/rerpc.internal.ping.v0.Ping/", mux
 }
 

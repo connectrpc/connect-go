@@ -13,11 +13,12 @@ const Version = "0.0.1"
 const MaxHeaderBytes = 1024 * 8
 
 // ReRPC's supported HTTP content types. The gRPC variants follow gRPC's
-// HTTP/2 protocol, while the JSON variant uses a closely-related protocol
-// outlined in reRPC's PROTOCOL.md.
+// HTTP/2 protocol, while the Twirp and JSON variants follow Twirp's protocol.
+// See reRPC's PROTOCOL.md for details.
 const (
 	TypeDefaultGRPC = "application/grpc"
 	TypeProtoGRPC   = "application/grpc+proto"
+	TypeProtoTwirp  = "application/protobuf"
 	TypeJSON        = "application/json"
 )
 
