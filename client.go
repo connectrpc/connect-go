@@ -25,6 +25,7 @@ type callCfg struct {
 	EnableGzipRequest bool
 	MaxResponseBytes  int
 	Interceptor       CallInterceptor
+	Hooks             *Hooks
 }
 
 // A CallOption configures a reRPC client or a single call.
@@ -128,7 +129,7 @@ func (c *Client) call(ctx context.Context, req, res proto.Message, cfg *callCfg)
 	}
 
 	body := &bytes.Buffer{}
-	if err := marshalLPM(body, req, md.Spec.RequestCompression, 0 /* maxBytes */); err != nil {
+	if err := marshalLPM(ctx, body, req, md.Spec.RequestCompression, 0 /* maxBytes */, cfg.Hooks); err != nil {
 		return errorf(CodeInvalidArgument, "can't marshal request as protobuf: %w", err)
 	}
 

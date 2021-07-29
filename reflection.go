@@ -1,6 +1,7 @@
 package rerpc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -103,7 +104,7 @@ type rawReflectionHandler struct {
 	reg Registrar
 }
 
-func (rh *rawReflectionHandler) rawGRPC(w http.ResponseWriter, r *http.Request, requestCompression, responseCompression string) {
+func (rh *rawReflectionHandler) rawGRPC(ctx context.Context, w http.ResponseWriter, r *http.Request, requestCompression, responseCompression string, hooks *Hooks) {
 	if r.ProtoMajor < 2 {
 		w.WriteHeader(http.StatusHTTPVersionNotSupported)
 		io.WriteString(w, "bidirectional streaming requires HTTP/2")
@@ -112,21 +113,21 @@ func (rh *rawReflectionHandler) rawGRPC(w http.ResponseWriter, r *http.Request, 
 	for {
 		var req rpb.ServerReflectionRequest
 		if err := unmarshalLPM(r.Body, &req, requestCompression, 0); err != nil && errors.Is(err, io.EOF) {
-			writeErrorGRPC(w, nil)
+			writeErrorGRPC(ctx, w, nil, hooks)
 			return
 		} else if err != nil {
-			writeErrorGRPC(w, errorf(CodeUnknown, "can't unmarshal protobuf"))
+			writeErrorGRPC(ctx, w, errorf(CodeUnknown, "can't unmarshal protobuf"), hooks)
 			return
 		}
 
 		res, serr := rh.serve(&req)
 		if serr != nil {
-			writeErrorGRPC(w, serr)
+			writeErrorGRPC(ctx, w, serr, hooks)
 			return
 		}
 
-		if err := marshalLPM(w, res, responseCompression, 0); err != nil {
-			writeErrorGRPC(w, errorf(CodeUnknown, "can't marshal protobuf"))
+		if err := marshalLPM(ctx, w, res, responseCompression, 0, hooks); err != nil {
+			writeErrorGRPC(ctx, w, errorf(CodeUnknown, "can't marshal protobuf"), hooks)
 			return
 		}
 

@@ -3,6 +3,7 @@ package rerpc
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -19,15 +20,16 @@ var (
 	sizeZeroPrefix    = make([]byte, 4)
 )
 
-func marshalJSON(w io.Writer, msg proto.Message) error {
+func marshalJSON(ctx context.Context, w io.Writer, msg proto.Message, hooks *Hooks) {
 	bs, err := jsonpbMarshaler.Marshal(msg)
 	if err != nil {
-		return fmt.Errorf("couldn't marshal protobuf message: %w", err)
+		hooks.onMarshalError(ctx, fmt.Errorf("couldn't marshal protobuf message: %w", err))
+		return
 	}
 	if _, err := w.Write(bs); err != nil {
-		return fmt.Errorf("couldn't write JSON: %w", err)
+		hooks.onNetworkError(ctx, fmt.Errorf("couldn't write JSON: %w", err))
+		return
 	}
-	return nil
 }
 
 func unmarshalJSON(r io.Reader, msg proto.Message) error {
@@ -41,10 +43,12 @@ func unmarshalJSON(r io.Reader, msg proto.Message) error {
 	return nil
 }
 
-func marshalLPM(w io.Writer, msg proto.Message, compression string, maxBytes int) error {
+func marshalLPM(ctx context.Context, w io.Writer, msg proto.Message, compression string, maxBytes int, hooks *Hooks) error {
 	raw, err := proto.Marshal(msg)
 	if err != nil {
-		return fmt.Errorf("couldn't marshal protobuf message: %w", err)
+		err = fmt.Errorf("couldn't marshal protobuf message: %w", err)
+		hooks.onMarshalError(ctx, err)
+		return err
 	}
 	data := &bytes.Buffer{}
 	var dataW io.Writer = data
@@ -53,15 +57,21 @@ func marshalLPM(w io.Writer, msg proto.Message, compression string, maxBytes int
 	case CompressionGzip:
 		dataW = gzip.NewWriter(data)
 	default:
-		return fmt.Errorf("unsupported compression %q", compression)
+		err := fmt.Errorf("unsupported length-prefixed message compression %q", compression)
+		hooks.onInternalError(ctx, err)
+		return err
 	}
 	_, err = dataW.Write(raw) // returns uncompressed size, which isn't useful
 	if err != nil {
-		return fmt.Errorf("couldn't compress with %q: %w", compression, err)
+		err = fmt.Errorf("couldn't compress with %q: %w", compression, err)
+		hooks.onInternalError(ctx, err)
+		return err
 	}
 	if c, ok := dataW.(io.Closer); ok {
 		if err := c.Close(); err != nil {
-			return fmt.Errorf("couldn't compress with %q: %w", compression, err)
+			err = fmt.Errorf("couldn't close writer with compression %q: %w", compression, err)
+			hooks.onInternalError(ctx, err)
+			return err
 		}
 	}
 
@@ -78,10 +88,14 @@ func marshalLPM(w io.Writer, msg proto.Message, compression string, maxBytes int
 	binary.BigEndian.PutUint32(prefixes[1:5], uint32(size))
 
 	if _, err := w.Write(prefixes[:]); err != nil {
-		return fmt.Errorf("couldn't write prefix of length-prefixed message: %w", err)
+		err = fmt.Errorf("couldn't write prefix of length-prefixed message: %w", err)
+		hooks.onNetworkError(ctx, err)
+		return err
 	}
 	if _, err := io.Copy(w, data); err != nil {
-		return fmt.Errorf("couldn't write data portion of length-prefixed message: %w", err)
+		err = fmt.Errorf("couldn't write data portion of length-prefixed message: %w", err)
+		hooks.onNetworkError(ctx, err)
+		return err
 	}
 	return nil
 }
