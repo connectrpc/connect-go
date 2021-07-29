@@ -42,7 +42,6 @@ func Wrap(c Code, err error, details ...proto.Message) error {
 // For internal use: lets us distinguish code-carrying errors from generic
 // errors (which may leak server details) at the type level without casts.
 func wrap(c Code, err error) *Error {
-	// TODO: should we allow re-wrapping?
 	if c == CodeOK {
 		return nil
 	}
