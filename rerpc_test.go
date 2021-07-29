@@ -386,3 +386,39 @@ func TestServerProtoGRPC(t *testing.T) {
 		testReflection(t, server.URL, server.Client())
 	})
 }
+
+func TestClampTimeoutIntegration(t *testing.T) {
+	const min = 10 * time.Second
+	chain := rerpc.NewChain(rerpc.ClampTimeout(min, time.Minute))
+
+	assertDeadline := func(t testing.TB, client pingpb.PingClientReRPC) {
+		ctx, cancel := context.WithTimeout(context.Background(), min-1)
+		defer cancel()
+		_, err := client.Ping(ctx, &pingpb.PingRequest{})
+		assert.NotNil(t, err, "ping error")
+		assert.Equal(t, rerpc.CodeOf(err), rerpc.CodeDeadlineExceeded, "error code")
+	}
+
+	t.Run("server", func(t *testing.T) {
+		// Clamped server, unclamped client.
+		mux := http.NewServeMux()
+		mux.Handle(pingpb.NewPingHandlerReRPC(
+			pingServer{},
+			chain,
+		))
+		server := httptest.NewServer(mux)
+		defer server.Close()
+		client := pingpb.NewPingClientReRPC(server.URL, server.Client())
+		assertDeadline(t, client)
+	})
+
+	t.Run("client", func(t *testing.T) {
+		// Unclamped server, clamped client.
+		mux := http.NewServeMux()
+		mux.Handle(pingpb.NewPingHandlerReRPC(pingServer{}))
+		server := httptest.NewServer(mux)
+		defer server.Close()
+		client := pingpb.NewPingClientReRPC(server.URL, server.Client(), chain)
+		assertDeadline(t, client)
+	})
+}
