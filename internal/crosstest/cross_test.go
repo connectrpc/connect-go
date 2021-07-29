@@ -255,7 +255,10 @@ func TestReRPCServerH2C(t *testing.T) {
 			client := crosspb.NewCrosstestClientReRPC(server.URL, server.Client())
 			testWithReRPCClient(t, client)
 		})
-		// TODO: gzip
+		t.Run("gzip", func(t *testing.T) {
+			client := crosspb.NewCrosstestClientReRPC(server.URL, server.Client(), rerpc.Gzip(true))
+			testWithReRPCClient(t, client)
+		})
 	})
 	t.Run("grpc_client", func(t *testing.T) {
 		gconn, err := grpc.Dial(
@@ -289,20 +292,23 @@ func TestGRPCServer(t *testing.T) {
 	defer server.GracefulStop()
 
 	t.Run("rerpc_client", func(t *testing.T) {
-		t.Run("identity", func(t *testing.T) {
-			// This is wildly insecure!
-			hclient := &http.Client{
-				Transport: &http2.Transport{
-					AllowHTTP: true,
-					DialTLS: func(netw, addr string, cfg *tls.Config) (net.Conn, error) {
-						return net.Dial(netw, addr)
-					},
+		// This is wildly insecure - don't do this in production!
+		hclient := &http.Client{
+			Transport: &http2.Transport{
+				AllowHTTP: true,
+				DialTLS: func(netw, addr string, cfg *tls.Config) (net.Conn, error) {
+					return net.Dial(netw, addr)
 				},
-			}
+			},
+		}
+		t.Run("identity", func(t *testing.T) {
 			client := crosspb.NewCrosstestClientReRPC("http://"+lis.Addr().String(), hclient)
 			testWithReRPCClient(t, client)
 		})
-		// TODO: gzip
+		t.Run("gzip", func(t *testing.T) {
+			client := crosspb.NewCrosstestClientReRPC("http://"+lis.Addr().String(), hclient, rerpc.Gzip(true))
+			testWithReRPCClient(t, client)
+		})
 	})
 	t.Run("grpc_client", func(t *testing.T) {
 		gconn, err := grpc.Dial(
