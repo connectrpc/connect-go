@@ -23,9 +23,12 @@ features over multiple protocols, reRPC only supports unary (request-response)
 RPCs. There's an [open issue][streaming-issue] for discussion of streaming
 support.
 
+For more on reRPC, including a walkthrough and comparison to alternatives, see
+the [docs][].
+
 ## A Small Example
 
-Curious what all this looks like in practice? Here's a small, insecure server:
+Curious what all this looks like in practice? Here's a small h2c server:
 
 ```go
 package main
@@ -62,7 +65,7 @@ $ curl --request POST \
 {"code":"unimplemented","msg":"rerpc.internal.ping.v0.Ping.Ping isn't implemented"}
 ```
 
-You can find more realistic examples in the [API documentation][godoc].
+You can find more production-ready examples in the [documentation][docs].
 
 ## Status
 
@@ -91,6 +94,7 @@ in my spare time - it's not endorsed by, supported by, or (as far as I know)
 used by my employer.
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
+[docs]: https://github.com/akshayjshah/rerpc/wiki
 [envoy]: https://www.envoyproxy.io/
 [godoc]: https://pkg.go.dev/github.com/akshayjshah/rerpc
 [go-support-policy]: https://golang.org/doc/devel/release#policy
