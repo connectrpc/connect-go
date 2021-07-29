@@ -38,7 +38,7 @@ func IsReservedHeader(key string) error {
 	case "Accept", "Accept-Encoding", "Accept-Post",
 		"Allow",
 		"Content-Encoding", "Content-Type",
-		"Te":
+		"Te", "Trailer":
 		return fmt.Errorf("%q is a reserved header", key)
 	}
 	switch {
