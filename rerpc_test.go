@@ -182,8 +182,10 @@ func TestServerProtoGRPC(t *testing.T) {
 		t.Run("health", func(t *testing.T) {
 			checkURL := url + "/grpc.health.v1.Health/Check"
 			watchURL := url + "/grpc.health.v1.Health/Watch"
-			checkFQN := "grpc.health.v1.Health.Check"
-			watchFQN := "grpc.health.v1.Health.Watch"
+			healthPFQN := "grpc.health.v1"
+			healthFQN := healthPFQN + ".Health"
+			checkFQN := healthFQN + ".Check"
+			watchFQN := healthFQN + ".Watch"
 			pingFQN := "rerpc.internal.ping.v0.Ping"
 			bg := context.Background()
 			const unknown = "foobar"
@@ -192,21 +194,24 @@ func TestServerProtoGRPC(t *testing.T) {
 			t.Run("process", func(t *testing.T) {
 				req := &healthpb.HealthCheckRequest{}
 				var res healthpb.HealthCheckResponse
-				err := rerpc.NewClient(doer, checkURL, checkFQN).Call(bg, req, &res, opts...)
+				err := rerpc.NewClient(doer, checkURL, checkFQN, healthFQN, healthPFQN).
+					Call(bg, req, &res, opts...)
 				assert.Nil(t, err, "rpc error")
 				assert.Equal(t, rerpc.HealthStatus(res.Status), rerpc.HealthServing, "status")
 			})
 			t.Run("known", func(t *testing.T) {
 				req := &healthpb.HealthCheckRequest{Service: pingFQN}
 				var res healthpb.HealthCheckResponse
-				err := rerpc.NewClient(doer, checkURL, checkFQN).Call(bg, req, &res, opts...)
+				err := rerpc.NewClient(doer, checkURL, checkFQN, healthFQN, healthPFQN).
+					Call(bg, req, &res, opts...)
 				assert.Nil(t, err, "rpc error")
 				assert.Equal(t, rerpc.HealthStatus(res.Status), rerpc.HealthServing, "status")
 			})
 			t.Run("unknown", func(t *testing.T) {
 				req := &healthpb.HealthCheckRequest{Service: unknown}
 				var res healthpb.HealthCheckResponse
-				err := rerpc.NewClient(doer, checkURL, checkFQN).Call(bg, req, &res, opts...)
+				err := rerpc.NewClient(doer, checkURL, checkFQN, healthFQN, healthPFQN).
+					Call(bg, req, &res, opts...)
 				assert.NotNil(t, err, "rpc error")
 				rerr, ok := rerpc.AsError(err)
 				assert.True(t, ok, "convert to rerpc error")
@@ -215,7 +220,8 @@ func TestServerProtoGRPC(t *testing.T) {
 			t.Run("watch", func(t *testing.T) {
 				req := &healthpb.HealthCheckRequest{Service: pingFQN}
 				var res healthpb.HealthCheckResponse
-				err := rerpc.NewClient(doer, watchURL, watchFQN).Call(bg, req, &res, opts...)
+				err := rerpc.NewClient(doer, watchURL, watchFQN, healthFQN, healthPFQN).
+					Call(bg, req, &res, opts...)
 				assert.NotNil(t, err, "rpc error")
 				rerr, ok := rerpc.AsError(err)
 				assert.True(t, ok, "convert to rerpc error")
@@ -226,7 +232,9 @@ func TestServerProtoGRPC(t *testing.T) {
 	testReflection := func(t *testing.T, url string, doer rerpc.Doer, opts ...rerpc.CallOption) {
 		bg := context.Background()
 		url = url + "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo"
-		reflectFQN := "grpc.reflection.v1alpha.ServerReflection.ServerReflectionInfo"
+		reflectPFQN := "grpc.reflection.v1alpha"
+		reflectSFQN := reflectPFQN + ".ServerReflection"
+		reflectFQN := reflectSFQN + ".ServerReflectionInfo"
 		pingRequestFQN := string((&pingpb.PingRequest{}).ProtoReflect().Descriptor().FullName())
 		assert.Equal(t, reg.Services(), []string{
 			"grpc.health.v1.Health",
@@ -243,7 +251,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			var res reflectionpb.ServerReflectionResponse
 			assert.Nil(
 				t,
-				rerpc.NewClient(doer, url, reflectFQN).Call(bg, req, &res, opts...),
+				rerpc.NewClient(doer, url, reflectFQN, reflectSFQN, reflectPFQN).Call(bg, req, &res, opts...),
 				"reflection RPC",
 			)
 			expect := &reflectionpb.ServerReflectionResponse{
@@ -271,7 +279,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			var res reflectionpb.ServerReflectionResponse
 			assert.Nil(
 				t,
-				rerpc.NewClient(doer, url, reflectFQN).Call(bg, req, &res, opts...),
+				rerpc.NewClient(doer, url, reflectFQN, reflectSFQN, reflectPFQN).Call(bg, req, &res, opts...),
 				"reflection RPC",
 			)
 			assert.Nil(t, res.GetErrorResponse(), "error in response")
@@ -294,7 +302,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			var res reflectionpb.ServerReflectionResponse
 			assert.Nil(
 				t,
-				rerpc.NewClient(doer, url, reflectFQN).Call(bg, req, &res, opts...),
+				rerpc.NewClient(doer, url, reflectFQN, reflectSFQN, reflectPFQN).Call(bg, req, &res, opts...),
 				"reflection RPC",
 			)
 			assert.Nil(t, res.GetErrorResponse(), "error in response")
@@ -320,7 +328,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			var res reflectionpb.ServerReflectionResponse
 			assert.Nil(
 				t,
-				rerpc.NewClient(doer, url, reflectFQN).Call(bg, req, &res, opts...),
+				rerpc.NewClient(doer, url, reflectFQN, reflectSFQN, reflectPFQN).Call(bg, req, &res, opts...),
 				"reflection RPC",
 			)
 			err := res.GetErrorResponse()
@@ -338,7 +346,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			var res reflectionpb.ServerReflectionResponse
 			assert.Nil(
 				t,
-				rerpc.NewClient(doer, url, reflectFQN).Call(bg, req, &res, opts...),
+				rerpc.NewClient(doer, url, reflectFQN, reflectSFQN, reflectPFQN).Call(bg, req, &res, opts...),
 				"reflection RPC",
 			)
 			expect := &reflectionpb.ServerReflectionResponse{

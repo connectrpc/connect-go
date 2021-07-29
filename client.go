@@ -42,26 +42,31 @@ type CallOption interface {
 // To see an example of how Client is used in the generated code, see the
 // internal/pingpb/v0 package.
 type Client struct {
-	doer   Doer
-	url    string
-	method string
-	opts   []CallOption
+	doer       Doer
+	url        string
+	methodFQN  string
+	serviceFQN string
+	packageFQN string
+	opts       []CallOption
 }
 
 // NewClient creates a Client. The supplied URL must be the full,
-// method-specific URL, without trailing slashes. The supplied method must be a
-// fully-qualified protobuf identifier.
+// method-specific URL, without trailing slashes. The supplied method, service,
+// and package must be fully-qualified protobuf identifiers.
 //
 // For example, the URL https://api.acme.com/acme.foo.v1.Foo/Bar corresponds to
-// method acme.foo.v1.Foo.Bar. Remember that NewClient is usually called
-// from generated code - most users won't need to deal with long URLs or
-// protobuf identifiers directly.
-func NewClient(doer Doer, url, method string, opts ...CallOption) *Client {
+// method "acme.foo.v1.Foo.Bar", service "acme.foo.v1.Foo", and package
+// "acme.foo.v1". Remember that NewClient is usually called from generated code
+// - most users won't need to deal with long URLs or protobuf identifiers
+// directly.
+func NewClient(doer Doer, url, methodFQN, serviceFQN, packageFQN string, opts ...CallOption) *Client {
 	return &Client{
-		doer:   doer,
-		url:    url,
-		method: method,
-		opts:   opts,
+		doer:       doer,
+		url:        url,
+		methodFQN:  methodFQN,
+		serviceFQN: serviceFQN,
+		packageFQN: packageFQN,
+		opts:       opts,
 	}
 }
 
@@ -86,7 +91,9 @@ func (c *Client) Call(ctx context.Context, req, res proto.Message, opts ...CallO
 		next = cfg.Interceptor.WrapCall(next)
 	}
 	spec := &Specification{
-		Method:             c.method,
+		Method:             c.methodFQN,
+		Service:            c.serviceFQN,
+		Package:            c.packageFQN,
 		RequestCompression: CompressionGzip,
 	}
 	if !cfg.EnableGzipRequest {

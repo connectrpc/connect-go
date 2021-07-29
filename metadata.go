@@ -13,9 +13,14 @@ const (
 )
 
 // Specification is a description of a client call or a handler invocation.
+//
+// Note that the Method, Service, and Package are fully-qualified protobuf
+// names, not Go import paths or identifiers.
 type Specification struct {
-	Method string
-	// TODO: service and package too?
+	Method  string // full protobuf name, e.g. "acme.foo.v1.Foo.Bar"
+	Service string // full protobuf name, e.g. "acme.foo.v1.Foo"
+	Package string // full protobuf name, e.g. "acme.foo.v1"
+
 	ContentType         string
 	RequestCompression  string
 	ResponseCompression string

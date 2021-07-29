@@ -61,13 +61,16 @@ func NewHealthHandler(
 	check func(context.Context, string) (HealthStatus, error),
 	opts ...HandlerOption,
 ) (string, http.Handler) {
-	const serviceFQN = "grpc.health.v1.Health"
+	const packageFQN = "grpc.health.v1"
+	const serviceFQN = packageFQN + ".Health"
 	const checkFQN = serviceFQN + ".Check"
 	const watchFQN = serviceFQN + ".Watch"
 
 	mux := http.NewServeMux()
 	checkHandler := NewHandler(
 		checkFQN,
+		serviceFQN,
+		packageFQN,
 		func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*healthpb.HealthCheckRequest)
 			if !ok {
@@ -94,6 +97,8 @@ func NewHealthHandler(
 
 	watch := NewHandler(
 		watchFQN,
+		serviceFQN,
+		packageFQN,
 		func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			return nil, errorf(CodeUnimplemented, "reRPC doesn't support watching health state")
 		},
