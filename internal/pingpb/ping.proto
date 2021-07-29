@@ -9,7 +9,7 @@ message PingRequest {
 }
 
 message PingResponse {
-    int64 number = 2;
+    int64 number = 1;
 }
 
 message FailRequest {
