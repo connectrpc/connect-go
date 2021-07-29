@@ -15,7 +15,8 @@ import (
 )
 
 var (
-	jsonpbMarshaler   = protojson.MarshalOptions{}
+	// Marshal JSON with the options required by Twirp.
+	jsonpbMarshaler   = protojson.MarshalOptions{UseProtoNames: true}
 	jsonpbUnmarshaler = protojson.UnmarshalOptions{DiscardUnknown: true}
 	sizeZeroPrefix    = make([]byte, 4)
 )
@@ -32,13 +33,36 @@ func marshalJSON(ctx context.Context, w io.Writer, msg proto.Message, hooks *Hoo
 	}
 }
 
+func marshalTwirpProto(ctx context.Context, w io.Writer, msg proto.Message, hooks *Hooks) {
+	bs, err := proto.Marshal(msg)
+	if err != nil {
+		hooks.onMarshalError(ctx, fmt.Errorf("couldn't marshal protobuf message: %w", err))
+		return
+	}
+	if _, err := w.Write(bs); err != nil {
+		hooks.onNetworkError(ctx, fmt.Errorf("couldn't write Twirp protobuf: %w", err))
+		return
+	}
+}
+
 func unmarshalJSON(r io.Reader, msg proto.Message) error {
 	bs, err := io.ReadAll(r)
 	if err != nil {
 		return fmt.Errorf("can't read data: %w", err)
 	}
 	if err := jsonpbUnmarshaler.Unmarshal(bs, msg); err != nil {
-		return fmt.Errorf("can't unmarshal data into type %T: %w", msg, err)
+		return fmt.Errorf("can't unmarshal JSON data into type %T: %w", msg, err)
+	}
+	return nil
+}
+
+func unmarshalTwirpProto(r io.Reader, msg proto.Message) error {
+	bs, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("can't read data: %w", err)
+	}
+	if err := proto.Unmarshal(bs, msg); err != nil {
+		return fmt.Errorf("can't unmarshal protobuf data into type %T: %w", msg, err)
 	}
 	return nil
 }

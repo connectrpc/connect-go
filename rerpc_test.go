@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
@@ -13,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/akshayjshah/rerpc"
@@ -21,7 +21,7 @@ import (
 	healthpb "github.com/akshayjshah/rerpc/internal/healthpb/v1"
 	pingpb "github.com/akshayjshah/rerpc/internal/pingpb/v0"
 	reflectionpb "github.com/akshayjshah/rerpc/internal/reflectionpb/v1alpha"
-	statuspb "github.com/akshayjshah/rerpc/internal/statuspb/v0"
+	"github.com/akshayjshah/rerpc/internal/twirp"
 )
 
 const errMsg = "oh no"
@@ -38,7 +38,7 @@ func (p pingServer) Fail(ctx context.Context, req *pingpb.FailRequest) (*pingpb.
 	return nil, rerpc.Errorf(rerpc.Code(req.Code), errMsg)
 }
 
-func TestHandlerJSON(t *testing.T) {
+func TestHandlerTwirp(t *testing.T) {
 	mux := http.NewServeMux()
 	chain := rerpc.NewChain(rerpc.ClampTimeout(0, time.Minute))
 	mux.Handle(pingpb.NewPingHandlerReRPC(
@@ -65,76 +65,165 @@ func TestHandlerJSON(t *testing.T) {
 		assert.Equal(t, string(contents), expected, "body contents")
 	}
 
-	t.Run("ping", func(t *testing.T) {
-		probe := `{"number":"42"}`
-		r, err := http.NewRequest(
-			http.MethodPost,
-			fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Ping", server.URL),
-			strings.NewReader(probe),
-		)
-		assert.Nil(t, err, "create request")
-		r.Header.Set("Content-Type", rerpc.TypeJSON)
+	t.Run("json", func(t *testing.T) {
+		t.Run("ping", func(t *testing.T) {
+			probe := `{"number":"42"}`
+			r, err := http.NewRequest(
+				http.MethodPost,
+				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Ping", server.URL),
+				strings.NewReader(probe),
+			)
+			assert.Nil(t, err, "create request")
+			r.Header.Set("Content-Type", rerpc.TypeJSON)
 
-		response, err := server.Client().Do(r)
-		assert.Nil(t, err, "make request")
+			response, err := server.Client().Do(r)
+			assert.Nil(t, err, "make request")
 
-		testHeaders(t, response)
-		assert.Equal(t, response.StatusCode, http.StatusOK, "HTTP status code")
-		assertBodyEquals(t, response.Body, probe)
+			testHeaders(t, response)
+			assert.Equal(t, response.StatusCode, http.StatusOK, "HTTP status code")
+			assertBodyEquals(t, response.Body, probe)
+		})
+
+		t.Run("gzip", func(t *testing.T) {
+			probe := `{"number":"42"}`
+			buf := &bytes.Buffer{}
+			gzipW := gzip.NewWriter(buf)
+			io.WriteString(gzipW, probe)
+			gzipW.Close()
+
+			r, err := http.NewRequest(
+				http.MethodPost,
+				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Ping", server.URL),
+				buf,
+			)
+			assert.Nil(t, err, "create request")
+			r.Header.Set("Content-Type", rerpc.TypeJSON)
+			r.Header.Set("Content-Encoding", "gzip")
+			r.Header.Set("Accept-Encoding", "gzip")
+
+			response, err := server.Client().Do(r)
+			assert.Nil(t, err, "make request")
+			testHeaders(t, response)
+			assert.Equal(t, response.StatusCode, http.StatusOK, "HTTP status code")
+			assert.Equal(t, response.Header.Get("Content-Encoding"), "gzip", "content-encoding header")
+
+			bodyR, err := gzip.NewReader(response.Body)
+			assert.Nil(t, err, "read body as gzip")
+			assertBodyEquals(t, bodyR, probe)
+		})
+
+		t.Run("fail", func(t *testing.T) {
+			probe := fmt.Sprintf(`{"code":%d}`, rerpc.CodeResourceExhausted)
+			r, err := http.NewRequest(
+				http.MethodPost,
+				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Fail", server.URL),
+				strings.NewReader(probe),
+			)
+			assert.Nil(t, err, "create request")
+			r.Header.Set("Content-Type", rerpc.TypeJSON)
+
+			response, err := server.Client().Do(r)
+			assert.Nil(t, err, "make request")
+			testHeaders(t, response)
+			assert.Equal(t, response.StatusCode, http.StatusTooManyRequests, "HTTP status code")
+
+			expected := &twirp.Status{
+				Code:    "resource_exhausted",
+				Message: "oh no",
+			}
+			got := &twirp.Status{}
+			contents, err := io.ReadAll(response.Body)
+			assert.Nil(t, err, "read response body")
+			assert.Nil(t, json.Unmarshal(contents, got), "unmarshal JSON")
+			assert.Equal(t, got, expected, "unmarshaled Twirp status")
+		})
 	})
 
-	t.Run("gzip", func(t *testing.T) {
-		probe := `{"number":"42"}`
-		buf := &bytes.Buffer{}
-		gzipW := gzip.NewWriter(buf)
-		io.WriteString(gzipW, probe)
-		gzipW.Close()
-
-		r, err := http.NewRequest(
-			http.MethodPost,
-			fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Ping", server.URL),
-			buf,
-		)
-		assert.Nil(t, err, "create request")
-		r.Header.Set("Content-Type", rerpc.TypeJSON)
-		r.Header.Set("Content-Encoding", "gzip")
-		r.Header.Set("Accept-Encoding", "gzip")
-
-		response, err := server.Client().Do(r)
-		assert.Nil(t, err, "make request")
-		testHeaders(t, response)
-		assert.Equal(t, response.StatusCode, http.StatusOK, "HTTP status code")
-		assert.Equal(t, response.Header.Get("Content-Encoding"), "gzip", "content-encoding header")
-
-		bodyR, err := gzip.NewReader(response.Body)
-		assert.Nil(t, err, "read body as gzip")
-		assertBodyEquals(t, bodyR, probe)
-	})
-
-	t.Run("fail", func(t *testing.T) {
-		probe := fmt.Sprintf(`{"code":%d}`, rerpc.CodeResourceExhausted)
-		r, err := http.NewRequest(
-			http.MethodPost,
-			fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Fail", server.URL),
-			strings.NewReader(probe),
-		)
-		assert.Nil(t, err, "create request")
-		r.Header.Set("Content-Type", rerpc.TypeJSON)
-
-		response, err := server.Client().Do(r)
-		assert.Nil(t, err, "make request")
-		testHeaders(t, response)
-		assert.Equal(t, response.StatusCode, http.StatusTooManyRequests, "HTTP status code")
-
-		expected := &statuspb.Status{
-			Code:    int32(rerpc.CodeResourceExhausted),
-			Message: "oh no",
+	t.Run("protobuf", func(t *testing.T) {
+		newProtobufReader := func(t testing.TB, msg proto.Message) io.Reader {
+			t.Helper()
+			bs, err := proto.Marshal(msg)
+			assert.Nil(t, err, "marshal request")
+			return bytes.NewReader(bs)
 		}
-		got := &statuspb.Status{}
-		contents, err := io.ReadAll(response.Body)
-		assert.Nil(t, err, "read response body")
-		assert.Nil(t, protojson.Unmarshal(contents, got), "unmarshal JSON")
-		assert.Equal(t, got, expected, "statuspb.Status")
+		unmarshalResponse := func(t testing.TB, r io.Reader) *pingpb.PingResponse {
+			var res pingpb.PingResponse
+			bs, err := io.ReadAll(r)
+			assert.Nil(t, err, "read body")
+			assert.Nil(t, proto.Unmarshal(bs, &res), "unmarshal body")
+			return &res
+		}
+		t.Run("ping", func(t *testing.T) {
+			r, err := http.NewRequest(
+				http.MethodPost,
+				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Ping", server.URL),
+				newProtobufReader(t, &pingpb.PingRequest{Number: 42}),
+			)
+			assert.Nil(t, err, "create request")
+			r.Header.Set("Content-Type", rerpc.TypeProtoTwirp)
+
+			response, err := server.Client().Do(r)
+			assert.Nil(t, err, "make request")
+
+			testHeaders(t, response)
+			assert.Equal(t, response.StatusCode, http.StatusOK, "HTTP status code")
+			assert.Equal(t, unmarshalResponse(t, response.Body).Number, int64(42), "response")
+		})
+
+		t.Run("gzip", func(t *testing.T) {
+			probe := newProtobufReader(t, &pingpb.PingRequest{Number: 42})
+			buf := &bytes.Buffer{}
+			gzipW := gzip.NewWriter(buf)
+			io.Copy(gzipW, probe)
+			gzipW.Close()
+
+			r, err := http.NewRequest(
+				http.MethodPost,
+				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Ping", server.URL),
+				buf,
+			)
+			assert.Nil(t, err, "create request")
+			r.Header.Set("Content-Type", rerpc.TypeProtoTwirp)
+			r.Header.Set("Content-Encoding", "gzip")
+			r.Header.Set("Accept-Encoding", "gzip")
+
+			response, err := server.Client().Do(r)
+			assert.Nil(t, err, "make request")
+			testHeaders(t, response)
+			assert.Equal(t, response.StatusCode, http.StatusOK, "HTTP status code")
+			assert.Equal(t, response.Header.Get("Content-Encoding"), "gzip", "content-encoding header")
+
+			bodyR, err := gzip.NewReader(response.Body)
+			assert.Nil(t, err, "read body as gzip")
+			assert.Equal(t, unmarshalResponse(t, bodyR).Number, int64(42), "response")
+		})
+
+		t.Run("fail", func(t *testing.T) {
+			probe := newProtobufReader(t, &pingpb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)})
+			r, err := http.NewRequest(
+				http.MethodPost,
+				fmt.Sprintf("%s/rerpc.internal.ping.v0.Ping/Fail", server.URL),
+				probe,
+			)
+			assert.Nil(t, err, "create request")
+			r.Header.Set("Content-Type", rerpc.TypeProtoTwirp)
+
+			response, err := server.Client().Do(r)
+			assert.Nil(t, err, "make request")
+			testHeaders(t, response)
+			assert.Equal(t, response.Header.Get("Content-Type"), rerpc.TypeJSON, "error response content-type")
+			assert.Equal(t, response.StatusCode, http.StatusTooManyRequests, "HTTP status code")
+
+			expected := &twirp.Status{
+				Code:    "resource_exhausted",
+				Message: "oh no",
+			}
+			got := &twirp.Status{}
+			contents, err := io.ReadAll(response.Body)
+			assert.Nil(t, err, "read response body")
+			assert.Nil(t, json.Unmarshal(contents, got), "unmarshal JSON")
+			assert.Equal(t, got, expected, "unmarshaled Twirp status")
+		})
 	})
 }
 

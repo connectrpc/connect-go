@@ -140,3 +140,45 @@ func CodeOf(err error) Code {
 	}
 	return CodeUnknown
 }
+
+// Twirp has two errors that effectively subtype gRPC errors: Twirp's
+// "malformed" is a special case of CodeInvalidArgument, and Twirp's
+// "bad_route" is a special case of CodeUnimplemented. In both cases, we can
+// use the twirpError type to overwrite the usual mapping of gRPC error code to
+// Twirp error code.
+type twirpError struct {
+	code string
+	err  error
+}
+
+func asTwirpError(err error) (*twirpError, bool) {
+	var te *twirpError
+	ok := errors.As(err, &te)
+	return te, ok
+}
+
+func newMalformedError(msg string) *twirpError {
+	return &twirpError{
+		code: "malformed",
+		err:  errors.New(msg),
+	}
+}
+
+func newBadRouteError(path string) *twirpError {
+	return &twirpError{
+		code: "bad_route",
+		err:  fmt.Errorf("no handler for path %s", path),
+	}
+}
+
+func (te *twirpError) Error() string {
+	return te.err.Error()
+}
+
+func (te *twirpError) Unwrap() error {
+	return te.err
+}
+
+func (te *twirpError) TwirpCode() string {
+	return te.code
+}

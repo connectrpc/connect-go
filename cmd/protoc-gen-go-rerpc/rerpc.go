@@ -249,6 +249,9 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		g.P("})")
 		g.P()
 	}
+	comment(g, "Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.")
+	g.P(`mux.Handle("/", `, rerpcPackage.Ident("NewBadRouteHandler"), "(opts...))")
+	g.P()
 	g.P(`return "/`, sname, `/", mux`)
 	g.P("}")
 	g.P()

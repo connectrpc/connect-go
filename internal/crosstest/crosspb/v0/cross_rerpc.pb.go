@@ -143,6 +143,9 @@ func NewCrosstestHandlerReRPC(svc CrosstestServerReRPC, opts ...rerpc.HandlerOpt
 		fail.Serve(w, r, &FailRequest{})
 	})
 
+	// Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.
+	mux.Handle("/", rerpc.NewBadRouteHandler(opts...))
+
 	return "/rerpc.internal.crosstest.cross.v0.Crosstest/", mux
 }
 

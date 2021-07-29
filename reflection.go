@@ -89,8 +89,8 @@ func NewReflectionHandler(reg *Registrar) (string, http.Handler) {
 		methodFQN,
 		serviceFQN,
 		packageFQN,
-		nil,              // no unary implementation
-		ServeJSON(false), // no JSON streaming
+		nil,               // no unary implementation
+		ServeTwirp(false), // no reflection in Twirp
 	)
 	raw := &rawReflectionHandler{*reg}
 	h.rawGRPC = raw.rawGRPC
