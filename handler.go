@@ -69,6 +69,8 @@ func ServeJSON(enable bool) HandlerOption {
 // internal/pingpb/v0 package.
 type Handler struct {
 	methodFQN      string
+	serviceFQN     string
+	packageFQN     string
 	implementation UnaryHandler
 	// rawGRPC is used only for our hand-rolled reflection handler, which needs
 	// bidi streaming
@@ -81,9 +83,17 @@ type Handler struct {
 	config handlerCfg
 }
 
-// NewHandler constructs a Handler.
+// NewHandler constructs a Handler. The supplied method, service, and package
+// must be fully-qualified protobuf identifiers.
+//
+// For example, a handler might have method "acme.foo.v1.Foo.Bar", service
+// "acme.foo.v1.Foo", and package "acme.foo.v1". Remember that NewHandler is
+// usually called from generated code - most users won't need to deal with
+// protobuf identifiers directly.
 func NewHandler(
 	methodFQN string, // fully-qualified protobuf method name
+	serviceFQN string, // fully-qualified protobuf service name
+	packageFQN string, // fully-qualified protobuf package name
 	impl func(context.Context, proto.Message) (proto.Message, error),
 	opts ...HandlerOption,
 ) *Handler {
@@ -92,10 +102,12 @@ func NewHandler(
 		opt.applyToHandler(&cfg)
 	}
 	if reg := cfg.Registrar; reg != nil {
-		reg.register(methodFQN)
+		reg.register(serviceFQN)
 	}
 	return &Handler{
 		methodFQN:      methodFQN,
+		serviceFQN:     serviceFQN,
+		packageFQN:     packageFQN,
 		implementation: impl,
 		config:         cfg,
 	}
@@ -124,6 +136,8 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 
 	spec := &Specification{
 		Method:              h.methodFQN,
+		Service:             h.serviceFQN,
+		Package:             h.packageFQN,
 		ContentType:         r.Header.Get("Content-Type"),
 		RequestCompression:  CompressionIdentity,
 		ResponseCompression: CompressionIdentity,

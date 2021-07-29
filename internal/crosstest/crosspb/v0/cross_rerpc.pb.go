@@ -46,13 +46,17 @@ func NewCrosstestClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.Call
 		ping: *rerpc.NewClient(
 			doer,
 			baseURL+"/rerpc.internal.crosstest.cross.v0.Crosstest/Ping", // complete URL to call method
-			"rerpc.internal.crosstest.cross.v0.Crosstest.Ping",          // fully-qualified protobuf identifier
+			"rerpc.internal.crosstest.cross.v0.Crosstest.Ping",          // fully-qualified protobuf method
+			"rerpc.internal.crosstest.cross.v0.Crosstest",               // fully-qualified protobuf service
+			"rerpc.internal.crosstest.cross.v0",                         // fully-qualified protobuf package
 			opts...,
 		),
 		fail: *rerpc.NewClient(
 			doer,
 			baseURL+"/rerpc.internal.crosstest.cross.v0.Crosstest/Fail", // complete URL to call method
-			"rerpc.internal.crosstest.cross.v0.Crosstest.Fail",          // fully-qualified protobuf identifier
+			"rerpc.internal.crosstest.cross.v0.Crosstest.Fail",          // fully-qualified protobuf method
+			"rerpc.internal.crosstest.cross.v0.Crosstest",               // fully-qualified protobuf service
+			"rerpc.internal.crosstest.cross.v0",                         // fully-qualified protobuf package
 			opts...,
 		),
 	}
@@ -98,7 +102,9 @@ func NewCrosstestHandlerReRPC(svc CrosstestServerReRPC, opts ...rerpc.HandlerOpt
 	mux := http.NewServeMux()
 
 	ping := rerpc.NewHandler(
-		"rerpc.internal.crosstest.cross.v0.Crosstest.Ping",
+		"rerpc.internal.crosstest.cross.v0.Crosstest.Ping", // fully-qualified protobuf method
+		"rerpc.internal.crosstest.cross.v0.Crosstest",      // fully-qualified protobuf service
+		"rerpc.internal.crosstest.cross.v0",                // fully-qualified protobuf package
 		rerpc.UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*PingRequest)
 			if !ok {
@@ -117,7 +123,9 @@ func NewCrosstestHandlerReRPC(svc CrosstestServerReRPC, opts ...rerpc.HandlerOpt
 	})
 
 	fail := rerpc.NewHandler(
-		"rerpc.internal.crosstest.cross.v0.Crosstest.Fail",
+		"rerpc.internal.crosstest.cross.v0.Crosstest.Fail", // fully-qualified protobuf method
+		"rerpc.internal.crosstest.cross.v0.Crosstest",      // fully-qualified protobuf service
+		"rerpc.internal.crosstest.cross.v0",                // fully-qualified protobuf package
 		rerpc.UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*FailRequest)
 			if !ok {

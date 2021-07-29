@@ -145,7 +145,9 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		g.P(unexport(method.GoName), ": *", rerpcPackage.Ident("NewClient"), "(")
 		g.P("doer,")
 		g.P(`baseURL + "/`, path, `", // complete URL to call method`)
-		g.P(`"`, method.Desc.FullName(), `", // fully-qualified protobuf identifier`)
+		g.P(`"`, method.Desc.FullName(), `", // fully-qualified protobuf method`)
+		g.P(`"`, service.Desc.FullName(), `", // fully-qualified protobuf service`)
+		g.P(`"`, service.Desc.ParentFile().Package(), `", // fully-qualified protobuf package`)
 		g.P("opts...,")
 		g.P("),")
 	}
@@ -224,7 +226,9 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		path := fmt.Sprintf("%s/%s", sname, method.Desc.Name())
 		hname := unexport(string(method.Desc.Name()))
 		g.P(hname, " := ", rerpcPackage.Ident("NewHandler"), "(")
-		g.P(`"`, method.Desc.FullName(), `",`)
+		g.P(`"`, method.Desc.FullName(), `", // fully-qualified protobuf method`)
+		g.P(`"`, service.Desc.FullName(), `", // fully-qualified protobuf service`)
+		g.P(`"`, service.Desc.ParentFile().Package(), `", // fully-qualified protobuf package`)
 		g.P(rerpcPackage.Ident("UnaryHandler"), "(func(ctx ", contextPackage.Ident("Context"),
 			", req ", protoPackage.Ident("Message"), ") (",
 			protoPackage.Ident("Message"), ", error) {")

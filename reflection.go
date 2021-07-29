@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"sort"
-	"strings"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
@@ -54,16 +53,10 @@ func (r *Registrar) IsRegistered(service string) bool {
 	return ok
 }
 
-func (r *Registrar) register(method string) {
+func (r *Registrar) register(service string) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	i := strings.LastIndexByte(method, '.')
-	if i <= 0 {
-		// protobuf method names should always be at least service.method -
-		// if we can't find a period, the name is malformed.
-		return
-	}
-	r.services[method[:i]] = struct{}{}
+	r.services[service] = struct{}{}
+	r.mu.Unlock()
 }
 
 func (r *Registrar) applyToHandler(cfg *handlerCfg) {
@@ -87,10 +80,14 @@ func (r *Registrar) applyToHandler(cfg *handlerCfg) {
 //   https://github.com/grpc/grpc/blob/master/doc/server-reflection.md
 //   https://github.com/fullstorydev/grpcurl
 func NewReflectionHandler(reg *Registrar) (string, http.Handler) {
-	const fqn = "grpc.reflection.v1alpha.ServerReflection.ServerReflectionInfo"
-	reg.register(fqn)
+	const packageFQN = "grpc.reflection.v1alpha"
+	const serviceFQN = packageFQN + ".ServerReflection"
+	const methodFQN = serviceFQN + ".ServerReflectionInfo"
+	reg.register(serviceFQN)
 	h := NewHandler(
-		fqn,
+		methodFQN,
+		serviceFQN,
+		packageFQN,
 		nil,              // no unary implementation
 		ServeJSON(false), // no JSON streaming
 	)

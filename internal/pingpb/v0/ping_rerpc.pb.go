@@ -45,13 +45,17 @@ func NewPingClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOptio
 		ping: *rerpc.NewClient(
 			doer,
 			baseURL+"/rerpc.internal.ping.v0.Ping/Ping", // complete URL to call method
-			"rerpc.internal.ping.v0.Ping.Ping",          // fully-qualified protobuf identifier
+			"rerpc.internal.ping.v0.Ping.Ping",          // fully-qualified protobuf method
+			"rerpc.internal.ping.v0.Ping",               // fully-qualified protobuf service
+			"rerpc.internal.ping.v0",                    // fully-qualified protobuf package
 			opts...,
 		),
 		fail: *rerpc.NewClient(
 			doer,
 			baseURL+"/rerpc.internal.ping.v0.Ping/Fail", // complete URL to call method
-			"rerpc.internal.ping.v0.Ping.Fail",          // fully-qualified protobuf identifier
+			"rerpc.internal.ping.v0.Ping.Fail",          // fully-qualified protobuf method
+			"rerpc.internal.ping.v0.Ping",               // fully-qualified protobuf service
+			"rerpc.internal.ping.v0",                    // fully-qualified protobuf package
 			opts...,
 		),
 	}
@@ -97,7 +101,9 @@ func NewPingHandlerReRPC(svc PingServerReRPC, opts ...rerpc.HandlerOption) (stri
 	mux := http.NewServeMux()
 
 	ping := rerpc.NewHandler(
-		"rerpc.internal.ping.v0.Ping.Ping",
+		"rerpc.internal.ping.v0.Ping.Ping", // fully-qualified protobuf method
+		"rerpc.internal.ping.v0.Ping",      // fully-qualified protobuf service
+		"rerpc.internal.ping.v0",           // fully-qualified protobuf package
 		rerpc.UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*PingRequest)
 			if !ok {
@@ -116,7 +122,9 @@ func NewPingHandlerReRPC(svc PingServerReRPC, opts ...rerpc.HandlerOption) (stri
 	})
 
 	fail := rerpc.NewHandler(
-		"rerpc.internal.ping.v0.Ping.Fail",
+		"rerpc.internal.ping.v0.Ping.Fail", // fully-qualified protobuf method
+		"rerpc.internal.ping.v0.Ping",      // fully-qualified protobuf service
+		"rerpc.internal.ping.v0",           // fully-qualified protobuf package
 		rerpc.UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*FailRequest)
 			if !ok {
