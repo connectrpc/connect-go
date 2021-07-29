@@ -21,14 +21,10 @@ with Trailers with one that has a Status Code of DEADLINE_EXCEEDED.
 [ ] contributing
 [ ] CoC
 [ ] examples
-[ ] goroutine leak detection
 [ ] Implement grpc-web protocol (and re-familiarize myself with how it's different)
-[ ] vet & staticcheck
 [ ] dependabot
 [ ] support vtprotobuf
 
-[ ] upstream gRPC issue for unclear percent-encoding spec: which characters
-    should be escaped?
 [ ] upstream Twirp issue for putting timeout on the wire
 [ ] upstream Twirp issue for context cancellation and deadline exceeded errors
 

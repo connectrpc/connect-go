@@ -92,7 +92,7 @@ func (e *Error) Code() Code {
 	return e.code
 }
 
-// Detail returns a deep copy of the error's details.
+// Details returns a deep copy of the error's details.
 func (e *Error) Details() []*anypb.Any {
 	if len(e.details) == 0 {
 		return nil
