@@ -1,0 +1,47 @@
+List reRPC's imports: go list -f '{{ join .Imports "\n" }}'
+List all of reRPC's deps: go list -m all | grep -v rerpc
+
+Mentioned in the HTTP/2 protocol but not checked in handlers:
+* scheme: Supposed to be one of "http" or "https," no error code defined.
+  Given reRPC's focus on net/http-compatible servers, we're unlikely to
+  encounter this.
+* grpc-message-type: Not validated in grpc-go, grpc-java, or grpc-cpp. Not
+  required to unmarshal messages, and validation actually reduces the number
+  of wire-compatible changes.
+
+From ejona's epic https://github.com/grpc/grpc/pull/15460:
+By its very nature, the client and server's Deadline will be slightly different
+and their detection of its expiration will race. When clients receive a
+Cancellation on a Call with a Deadline, they should double-check whether the
+Deadline has passed. If it has passed, they should override the cancellation
+with Trailers with one that has a Status Code of DEADLINE_EXCEEDED.
+
+[ ] Restructure client code so we can have nicer signatures, like Twirp
+[ ] package GoDoc
+[ ] contributing
+[ ] CoC
+[ ] examples
+[ ] goroutine leak detection
+[ ] Implement grpc-web protocol (and re-familiarize myself with how it's different)
+[ ] vet & staticcheck
+[ ] dependabot
+[ ] support vtprotobuf
+
+[ ] upstream gRPC issue for unclear percent-encoding spec: which characters
+    should be escaped?
+[ ] upstream Twirp issue for putting timeout on the wire
+[ ] upstream Twirp issue for context cancellation and deadline exceeded errors
+
+## Resources
+
+https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#responses
+https://github.com/grpc/grpc/blob/master/doc/compression.md
+https://github.com/grpc/grpc/blob/master/doc/statuscodes.md
+https://github.com/grpc/grpc-go/blob/master/Documentation/grpc-metadata.md
+https://github.com/grpc/grpc/blob/master/doc/health-checking.md
+https://github.com/grpc/grpc/pull/15460
+
+https://github.com/twitchtv/twirp/blob/main/PROTOCOL.md
+https://github.com/twitchtv/twirp/issues/244
+
+https://developers.google.com/protocol-buffers/docs/style

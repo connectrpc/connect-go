@@ -32,7 +32,7 @@ import (
 
 	"github.com/akshayjshah/rerpc"
 	"github.com/akshayjshah/rerpc/internal/assert"
-	"github.com/akshayjshah/rerpc/internal/crosstest/crosspb/v0"
+	crosspb "github.com/akshayjshah/rerpc/internal/crosstest/v1test"
 )
 
 const errMsg = "soirée 🎉" // readable non-ASCII
@@ -62,8 +62,8 @@ func (c *combinedError) GRPCStatus() *status.Status {
 }
 
 type crossServer struct {
-	crosspb.UnimplementedCrosstestServer
-	crosspb.UnimplementedCrosstestServerReRPC
+	crosspb.UnimplementedCrossServiceServer
+	crosspb.UnimplementedCrossServiceReRPC
 }
 
 func (c crossServer) Ping(ctx context.Context, req *crosspb.PingRequest) (*crosspb.PingResponse, error) {
@@ -104,7 +104,7 @@ func assertErrorTwirp(t testing.TB, err error, msg string) twirp.Error {
 	return twerr
 }
 
-func testWithReRPCClient(t *testing.T, client crosspb.CrosstestClientReRPC) {
+func testWithReRPCClient(t *testing.T, client crosspb.CrossServiceClientReRPC) {
 	t.Run("ping", func(t *testing.T) {
 		num := rand.Int63()
 		req := &crosspb.PingRequest{Number: num}
@@ -142,7 +142,7 @@ func testWithReRPCClient(t *testing.T, client crosspb.CrosstestClientReRPC) {
 	})
 }
 
-func testWithGRPCClient(t *testing.T, client crosspb.CrosstestClient, opts ...grpc.CallOption) {
+func testWithGRPCClient(t *testing.T, client crosspb.CrossServiceClient, opts ...grpc.CallOption) {
 	t.Run("ping", func(t *testing.T) {
 		num := rand.Int63()
 		req := &crosspb.PingRequest{Number: num}
@@ -183,7 +183,7 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrosstestClient, opts ...gr
 	})
 }
 
-func testWithTwirpClient(t *testing.T, client crosspb.Crosstest) {
+func testWithTwirpClient(t *testing.T, client crosspb.CrossService) {
 	t.Run("ping", func(t *testing.T) {
 		num := rand.Int63()
 		req := &crosspb.PingRequest{Number: num}
@@ -227,7 +227,7 @@ func testWithTwirpClient(t *testing.T, client crosspb.Crosstest) {
 func TestReRPCServer(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	mux := http.NewServeMux()
-	mux.Handle(crosspb.NewCrosstestHandlerReRPC(crossServer{}, reg))
+	mux.Handle(crosspb.NewCrossServiceHandlerReRPC(crossServer{}, reg))
 	mux.Handle(rerpc.NewReflectionHandler(reg))
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
@@ -236,11 +236,11 @@ func TestReRPCServer(t *testing.T) {
 
 	t.Run("rerpc_client", func(t *testing.T) {
 		t.Run("gzip", func(t *testing.T) {
-			client := crosspb.NewCrosstestClientReRPC(server.URL, server.Client(), rerpc.Gzip(true))
+			client := crosspb.NewCrossServiceClientReRPC(server.URL, server.Client(), rerpc.Gzip(true))
 			testWithReRPCClient(t, client)
 		})
 		t.Run("identity", func(t *testing.T) {
-			client := crosspb.NewCrosstestClientReRPC(server.URL, server.Client())
+			client := crosspb.NewCrossServiceClientReRPC(server.URL, server.Client())
 			testWithReRPCClient(t, client)
 		})
 	})
@@ -253,7 +253,7 @@ func TestReRPCServer(t *testing.T) {
 		)
 		assert.Nil(t, err, "grpc dial")
 		defer gconn.Close()
-		client := crosspb.NewCrosstestClient(gconn)
+		client := crosspb.NewCrossServiceClient(gconn)
 		t.Run("identity", func(t *testing.T) {
 			testWithGRPCClient(t, client)
 		})
@@ -282,7 +282,7 @@ func TestReRPCServer(t *testing.T) {
 				context.Background(),
 				source,
 				gconn,
-				"rerpc.internal.crosstest.cross.v0.Crosstest.Ping",
+				"internal.crosstest.v1test.CrossService.Ping",
 				nil, // headers
 				eventHandler,
 				msg, // request data
@@ -298,11 +298,11 @@ func TestReRPCServer(t *testing.T) {
 			twirp.WithClientLiteralURLs(true), // Twirp clients don't follow spec by default
 		}
 		t.Run("json", func(t *testing.T) {
-			client := crosspb.NewCrosstestJSONClient(server.URL, server.Client(), opts...)
+			client := crosspb.NewCrossServiceJSONClient(server.URL, server.Client(), opts...)
 			testWithTwirpClient(t, client)
 		})
 		t.Run("protobuf", func(t *testing.T) {
-			client := crosspb.NewCrosstestProtobufClient(server.URL, server.Client(), opts...)
+			client := crosspb.NewCrossServiceProtobufClient(server.URL, server.Client(), opts...)
 			testWithTwirpClient(t, client)
 		})
 	})
@@ -310,17 +310,17 @@ func TestReRPCServer(t *testing.T) {
 
 func TestReRPCServerH2C(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.Handle(crosspb.NewCrosstestHandlerReRPC(crossServer{}))
+	mux.Handle(crosspb.NewCrossServiceHandlerReRPC(crossServer{}))
 	server := httptest.NewServer(h2c.NewHandler(mux, &http2.Server{}))
 	defer server.Close()
 
 	t.Run("rerpc_client", func(t *testing.T) {
 		t.Run("identity", func(t *testing.T) {
-			client := crosspb.NewCrosstestClientReRPC(server.URL, server.Client())
+			client := crosspb.NewCrossServiceClientReRPC(server.URL, server.Client())
 			testWithReRPCClient(t, client)
 		})
 		t.Run("gzip", func(t *testing.T) {
-			client := crosspb.NewCrosstestClientReRPC(server.URL, server.Client(), rerpc.Gzip(true))
+			client := crosspb.NewCrossServiceClientReRPC(server.URL, server.Client(), rerpc.Gzip(true))
 			testWithReRPCClient(t, client)
 		})
 	})
@@ -330,7 +330,7 @@ func TestReRPCServerH2C(t *testing.T) {
 			grpc.WithInsecure(),
 		)
 		assert.Nil(t, err, "grpc dial")
-		client := crosspb.NewCrosstestClient(gconn)
+		client := crosspb.NewCrossServiceClient(gconn)
 		t.Run("identity", func(t *testing.T) {
 			testWithGRPCClient(t, client)
 		})
@@ -344,11 +344,11 @@ func TestReRPCServerH2C(t *testing.T) {
 			twirp.WithClientLiteralURLs(true), // Twirp clients don't follow spec by default
 		}
 		t.Run("json", func(t *testing.T) {
-			client := crosspb.NewCrosstestJSONClient(server.URL, server.Client(), opts...)
+			client := crosspb.NewCrossServiceJSONClient(server.URL, server.Client(), opts...)
 			testWithTwirpClient(t, client)
 		})
 		t.Run("protobuf", func(t *testing.T) {
-			client := crosspb.NewCrosstestProtobufClient(server.URL, server.Client(), opts...)
+			client := crosspb.NewCrossServiceProtobufClient(server.URL, server.Client(), opts...)
 			testWithTwirpClient(t, client)
 		})
 	})
@@ -358,7 +358,7 @@ func TestGRPCServer(t *testing.T) {
 	lis, err := net.Listen("tcp", "localhost:0")
 	assert.Nil(t, err, "listen on ephemeral port")
 	server := grpc.NewServer()
-	crosspb.RegisterCrosstestServer(server, crossServer{})
+	crosspb.RegisterCrossServiceServer(server, crossServer{})
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -380,11 +380,11 @@ func TestGRPCServer(t *testing.T) {
 			},
 		}
 		t.Run("identity", func(t *testing.T) {
-			client := crosspb.NewCrosstestClientReRPC("http://"+lis.Addr().String(), hclient)
+			client := crosspb.NewCrossServiceClientReRPC("http://"+lis.Addr().String(), hclient)
 			testWithReRPCClient(t, client)
 		})
 		t.Run("gzip", func(t *testing.T) {
-			client := crosspb.NewCrosstestClientReRPC("http://"+lis.Addr().String(), hclient, rerpc.Gzip(true))
+			client := crosspb.NewCrossServiceClientReRPC("http://"+lis.Addr().String(), hclient, rerpc.Gzip(true))
 			testWithReRPCClient(t, client)
 		})
 	})
@@ -394,7 +394,7 @@ func TestGRPCServer(t *testing.T) {
 			grpc.WithInsecure(),
 		)
 		assert.Nil(t, err, "grpc dial")
-		client := crosspb.NewCrosstestClient(gconn)
+		client := crosspb.NewCrossServiceClient(gconn)
 		t.Run("identity", func(t *testing.T) {
 			testWithGRPCClient(t, client)
 		})

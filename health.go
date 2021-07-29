@@ -7,7 +7,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	healthpb "github.com/akshayjshah/rerpc/internal/healthpb/v1"
+	healthpb "github.com/akshayjshah/rerpc/internal/health/v1"
 )
 
 // HealthStatus describes the health of a service.

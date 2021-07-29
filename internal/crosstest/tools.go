@@ -3,6 +3,8 @@
 package tools
 
 import (
-	_ "github.com/twitchtv/twirp/protoc-gen-twirp"    // for code gen
-	_ "google.golang.org/grpc/cmd/protoc-gen-go-grpc" // for code gen
+	// Code generators.
+	_ "github.com/bufbuild/buf/cmd/buf"
+	_ "github.com/twitchtv/twirp/protoc-gen-twirp"
+	_ "google.golang.org/grpc/cmd/protoc-gen-go-grpc"
 )

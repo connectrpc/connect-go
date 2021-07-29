@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package rerpc.internal.crosstest.cross.v0;
+package internal.crosstest.v1test;
 
-option go_package = "github.com/akshayjshah/rerpc/internal/crosstest/crosspb/v0;crosspb";
+option go_package = "github.com/akshayjshah/rerpc/internal/crosstest/v1test;crosspb";
 
 import "google/protobuf/duration.proto";
 
@@ -22,7 +22,7 @@ message FailRequest {
 message FailResponse {
 }
 
-service Crosstest {
+service CrossService {
     rpc Ping(PingRequest) returns (PingResponse) {}
     rpc Fail(FailRequest) returns (FailResponse) {}
 }

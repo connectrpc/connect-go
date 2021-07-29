@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package rerpc.internal.ping.v0;
+package internal.ping.v1test;
 
-option go_package = "github.com/akshayjshah/rerpc/internal/pingpb/v0;pingpb";
+option go_package = "github.com/akshayjshah/rerpc/internal/ping/v1test;pingpb";
 
 message PingRequest {
     int64 number = 1;
@@ -19,7 +19,7 @@ message FailRequest {
 message FailResponse {
 }
 
-service Ping {
+service PingService {
     rpc Ping(PingRequest) returns (PingResponse) {}
     rpc Fail(FailRequest) returns (FailResponse) {}
 }

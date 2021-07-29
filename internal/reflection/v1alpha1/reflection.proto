@@ -6,9 +6,9 @@ syntax = "proto3";
 // The types here must remain wire-compatible with the types in
 // grpc.reflection.v1alpha:
 //   https://github.com/grpc/grpc/blob/master/src/proto/grpc/reflection/v1alpha/reflection.proto
-package rerpc.reflection.v1alpha;
+package internal.reflection.v1alpha1;
 
-option go_package = "github.com/akshayjshah/rerpc/internal/reflectionpb/v1alpha;reflectionpb";
+option go_package = "github.com/akshayjshah/rerpc/internal/reflection/v1alpha1;reflectionpb";
 
 // The message sent by the client when calling ServerReflectionInfo method.
 message ServerReflectionRequest {
