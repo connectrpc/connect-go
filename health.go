@@ -26,7 +26,8 @@ const (
 )
 
 // DefaultCheckFunc returns a health-checking function that always returns
-// HealthServing for the process and all registered services.
+// HealthServing for the process and all registered services. It's safe to call
+// concurrently. See NewHealthHandler for details.
 func DefaultCheckFunc(reg *Registrar) func(context.Context, string) (HealthStatus, error) {
 	return func(_ context.Context, service string) (HealthStatus, error) {
 		if service == "" {
@@ -44,11 +45,11 @@ func DefaultCheckFunc(reg *Registrar) func(context.Context, string) (HealthStatu
 // on which to mount it. The health-checking function will be called with a
 // fully-qualified protobuf service name (e.g., "acme.ping.v0.Ping").
 //
-// The supplied health-checking function should:
-//   * Return HealthUnknown, HealthServing, or HealthNotServing.
-//   * Return the health status of the whole process when called with an empty
-//     string.
-//   * Return a CodeNotFound error when called with an unknown service.
+// The supplied health-checking function must: (1) return HealthUnknown,
+// HealthServing, or HealthNotServing; (2) return the health status of the
+// whole process when called with an empty string; (3) return a
+// CodeNotFound error when called with an unknown service; and (4) be safe to
+// call concurrently.
 //
 // Note that the returned handler only supports the unary Check method, not the
 // streaming Watch. As suggested in gRPC's health schema, reRPC returns
