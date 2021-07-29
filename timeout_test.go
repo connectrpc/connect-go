@@ -26,6 +26,11 @@ func TestParseTimeout(t *testing.T) {
 	d, err := parseTimeout("45S")
 	assert.Nil(t, err, "45S")
 	assert.Equal(t, d, 45*time.Second, "45S")
+
+	const long = "99999999S"
+	d, err = parseTimeout(long) // 8 digits, shouldn't overflow
+	assert.Nil(t, err, long)
+	assert.Equal(t, d, 99999999*time.Second, long)
 }
 
 func TestEncodeTimeout(t *testing.T) {

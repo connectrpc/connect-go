@@ -50,7 +50,7 @@ func parseTimeout(timeout string) (time.Duration, error) {
 	if num > 99999999 { // timeout must be ASCII string of at most 8 digits
 		return 0, fmt.Errorf("gRPC protocol error: timeout %q is too long", timeout)
 	}
-	if num > maxHours {
+	if unit == time.Hour && num > maxHours {
 		// Timeout is effectively unbounded, so ignore it. The grpc-go
 		// implementation does the same thing.
 		return 0, errNoTimeout
