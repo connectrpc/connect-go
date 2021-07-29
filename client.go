@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -96,6 +97,9 @@ func (c *Client) Call(ctx context.Context, req, res proto.Message, opts ...CallO
 		Service:            c.serviceFQN,
 		Package:            c.packageFQN,
 		RequestCompression: CompressionGzip,
+	}
+	if url, err := url.Parse(c.url); err == nil {
+		spec.Path = url.Path
 	}
 	if !cfg.EnableGzipRequest {
 		spec.RequestCompression = CompressionIdentity

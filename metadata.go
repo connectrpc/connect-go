@@ -21,6 +21,7 @@ type Specification struct {
 	Service string // full protobuf name, e.g. "acme.foo.v1.Foo"
 	Package string // full protobuf name, e.g. "acme.foo.v1"
 
+	Path                string
 	ContentType         string
 	RequestCompression  string
 	ResponseCompression string

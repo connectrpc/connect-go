@@ -140,6 +140,7 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 		Method:              h.methodFQN,
 		Service:             h.serviceFQN,
 		Package:             h.packageFQN,
+		Path:                r.URL.Path,
 		ContentType:         r.Header.Get("Content-Type"),
 		RequestCompression:  CompressionIdentity,
 		ResponseCompression: CompressionIdentity,
