@@ -25,10 +25,10 @@ const (
 	HealthNotServing HealthStatus = 2 // process healthy but service not accepting requests
 )
 
-// DefaultCheckFunc returns a health-checking function that always returns
+// NewChecker returns a health-checking function that always returns
 // HealthServing for the process and all registered services. It's safe to call
 // concurrently. See NewHealthHandler for details.
-func DefaultCheckFunc(reg *Registrar) func(context.Context, string) (HealthStatus, error) {
+func NewChecker(reg *Registrar) func(context.Context, string) (HealthStatus, error) {
 	return func(_ context.Context, service string) (HealthStatus, error) {
 		if service == "" {
 			return HealthServing, nil
