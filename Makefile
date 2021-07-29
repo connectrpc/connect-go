@@ -6,7 +6,7 @@ SHELL := bash
 MAKEFLAGS += --warn-undefined-variables
 MAKEFLAGS += --no-builtin-rules
 
-HANDWRITTEN=$(shell find . -type f -name '*.go' | grep -v -e '\.pb\.go$$' -e '\.twirp\.go$$' -e '_string.go')
+HANDWRITTEN=$(shell find . -type f -name '*.go' | grep -v -e '\.pb\.go$$' -e '\.twirp\.go$$' -e '_string.go$$')
 PROTOBUFS=$(shell find . -type f -name '*.proto')
 
 .PHONY: help
