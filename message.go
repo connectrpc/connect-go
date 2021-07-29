@@ -50,6 +50,10 @@ func unmarshalJSON(r io.Reader, msg proto.Message) error {
 	if err != nil {
 		return fmt.Errorf("can't read data: %w", err)
 	}
+	if len(bs) == 0 {
+		// zero value request
+		return nil
+	}
 	if err := jsonpbUnmarshaler.Unmarshal(bs, msg); err != nil {
 		return fmt.Errorf("can't unmarshal JSON data into type %T: %w", msg, err)
 	}
@@ -60,6 +64,10 @@ func unmarshalTwirpProto(r io.Reader, msg proto.Message) error {
 	bs, err := io.ReadAll(r)
 	if err != nil {
 		return fmt.Errorf("can't read data: %w", err)
+	}
+	if len(bs) == 0 {
+		// zero value
+		return nil
 	}
 	if err := proto.Unmarshal(bs, msg); err != nil {
 		return fmt.Errorf("can't unmarshal protobuf data into type %T: %w", msg, err)
