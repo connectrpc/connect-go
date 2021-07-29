@@ -25,7 +25,7 @@ func TestCallMetadata(t *testing.T) {
 	assert.Equal(t, md.Spec.ContentType, TypeJSON, "content type")
 	md.Spec.ContentType = TypeDefaultGRPC // only mutates our copy
 	assert.Equal(t, spec.ContentType, TypeJSON, "specification should be value")
-	md.Request.Set("Foo-Bar", "baz")
+	md.Request().Set("Foo-Bar", "baz")
 	assert.Equal(t, req, http.Header{"Foo-Bar": []string{"baz"}}, "request header after write")
 }
 
@@ -46,6 +46,6 @@ func TestHandlerMetadata(t *testing.T) {
 	assert.Equal(t, md.Spec.ContentType, TypeJSON, "content type")
 	md.Spec.ContentType = TypeDefaultGRPC // only mutates our copy
 	assert.Equal(t, spec.ContentType, TypeJSON, "specification should be value")
-	md.Response.Set("Foo-Bar", "baz")
+	md.Response().Set("Foo-Bar", "baz")
 	assert.Equal(t, res, http.Header{"Foo-Bar": []string{"baz"}}, "response header after write")
 }

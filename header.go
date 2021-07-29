@@ -148,14 +148,14 @@ type ImmutableHeader struct {
 }
 
 // NewImmutableHeader constructs an ImmutableHeader.
-func NewImmutableHeader(raw http.Header) *ImmutableHeader {
-	return &ImmutableHeader{raw}
+func NewImmutableHeader(raw http.Header) ImmutableHeader {
+	return ImmutableHeader{raw}
 }
 
 // Get returns the first value associated with the given key. Like the standard
 // library's http.Header, keys are case-insensitive and canonicalized with
 // textproto.CanonicalMIMEHeaderKey.
-func (h *ImmutableHeader) Get(key string) string {
+func (h ImmutableHeader) Get(key string) string {
 	return h.raw.Get(key)
 }
 
@@ -168,7 +168,7 @@ func (h *ImmutableHeader) Get(key string) string {
 //
 // For details on gRPC's treatment of binary headers, see
 // https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md.
-func (h *ImmutableHeader) GetBinary(key string) ([]byte, error) {
+func (h ImmutableHeader) GetBinary(key string) ([]byte, error) {
 	return decodeBinaryHeader(h.raw.Get(key + "-Bin"))
 }
 
@@ -178,7 +178,7 @@ func (h *ImmutableHeader) GetBinary(key string) ([]byte, error) {
 //
 // Unlike the standard library's http.Header.Clone, the returned slice is a
 // copy.
-func (h *ImmutableHeader) Values(key string) []string {
+func (h ImmutableHeader) Values(key string) []string {
 	mutable := h.raw.Values(key)
 	// http.Header does *not* return a copy, but we need to prevent mutation.
 	return append(make([]string, 0, len(mutable)), mutable...)
@@ -186,7 +186,7 @@ func (h *ImmutableHeader) Values(key string) []string {
 
 // Clone returns a copy of the underlying HTTP headers, including all reserved
 // keys.
-func (h *ImmutableHeader) Clone() http.Header {
+func (h ImmutableHeader) Clone() http.Header {
 	return h.raw.Clone()
 }
 
@@ -198,9 +198,9 @@ type MutableHeader struct {
 }
 
 // NewMutableHeader constructs a MutableHeader.
-func NewMutableHeader(raw http.Header) *MutableHeader {
-	return &MutableHeader{
-		ImmutableHeader: *NewImmutableHeader(raw),
+func NewMutableHeader(raw http.Header) MutableHeader {
+	return MutableHeader{
+		ImmutableHeader: NewImmutableHeader(raw),
 		raw:             raw,
 	}
 }
@@ -211,7 +211,7 @@ func NewMutableHeader(raw http.Header) *MutableHeader {
 //
 // Attempting to set a reserved header (as defined by IsReservedHeader) returns
 // an error. See IsReservedHeader for backward compatibility guarantees.
-func (h *MutableHeader) Set(key, value string) error {
+func (h MutableHeader) Set(key, value string) error {
 	if err := IsReservedHeader(key); err != nil {
 		return err
 	}
@@ -228,7 +228,7 @@ func (h *MutableHeader) Set(key, value string) error {
 //
 // For details on gRPC's treatment of binary headers, see
 // https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md.
-func (h *MutableHeader) SetBinary(key string, value []byte) error {
+func (h MutableHeader) SetBinary(key string, value []byte) error {
 	key = key + "-Bin"
 	if err := IsReservedHeader(key); err != nil {
 		return err
@@ -244,7 +244,7 @@ func (h *MutableHeader) SetBinary(key string, value []byte) error {
 // Attempting to add to a reserved header (as defined by IsReservedHeader)
 // returns an error. See IsReservedHeader for backward compatibility
 // guarantees.
-func (h *MutableHeader) Add(key, value string) error {
+func (h MutableHeader) Add(key, value string) error {
 	if err := IsReservedHeader(key); err != nil {
 		return err
 	}
@@ -258,7 +258,7 @@ func (h *MutableHeader) Add(key, value string) error {
 //
 // Attempting delete a reserved header (as defined by IsReservedHeader) returns
 // an error. See IsReservedHeader for backward compatibility guarantees.
-func (h *MutableHeader) Del(key string) error {
+func (h MutableHeader) Del(key string) error {
 	if err := IsReservedHeader(key); err != nil {
 		return err
 	}
