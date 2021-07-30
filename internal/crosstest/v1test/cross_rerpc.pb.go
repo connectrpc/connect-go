@@ -49,6 +49,7 @@ func NewCrossServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.C
 			"internal.crosstest.v1test.CrossService.Ping",          // fully-qualified protobuf method
 			"internal.crosstest.v1test.CrossService",               // fully-qualified protobuf service
 			"internal.crosstest.v1test",                            // fully-qualified protobuf package
+			func() proto.Message { return &PingResponse{} },        // response constructor
 			opts...,
 		),
 		fail: *rerpc.NewClient(
@@ -57,6 +58,7 @@ func NewCrossServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.C
 			"internal.crosstest.v1test.CrossService.Fail",          // fully-qualified protobuf method
 			"internal.crosstest.v1test.CrossService",               // fully-qualified protobuf service
 			"internal.crosstest.v1test",                            // fully-qualified protobuf package
+			func() proto.Message { return &FailResponse{} },        // response constructor
 			opts...,
 		),
 	}
@@ -65,21 +67,21 @@ func NewCrossServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.C
 // Ping calls internal.crosstest.v1test.CrossService.Ping. Call options passed
 // here apply only to this call.
 func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error) {
-	res := &PingResponse{}
-	if err := c.ping.Call(ctx, req, res, opts...); err != nil {
+	res, err := c.ping.Call(ctx, req, opts...)
+	if err != nil {
 		return nil, err
 	}
-	return res, nil
+	return res.(*PingResponse), nil
 }
 
 // Fail calls internal.crosstest.v1test.CrossService.Fail. Call options passed
 // here apply only to this call.
 func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error) {
-	res := &FailResponse{}
-	if err := c.fail.Call(ctx, req, res, opts...); err != nil {
+	res, err := c.fail.Call(ctx, req, opts...)
+	if err != nil {
 		return nil, err
 	}
-	return res, nil
+	return res.(*FailResponse), nil
 }
 
 // CrossServiceReRPC is a server for the internal.crosstest.v1test.CrossService
@@ -105,7 +107,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		"internal.crosstest.v1test.CrossService.Ping", // fully-qualified protobuf method
 		"internal.crosstest.v1test.CrossService",      // fully-qualified protobuf service
 		"internal.crosstest.v1test",                   // fully-qualified protobuf package
-		rerpc.UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*PingRequest)
 			if !ok {
 				return nil, rerpc.Errorf(
@@ -126,7 +128,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		"internal.crosstest.v1test.CrossService.Fail", // fully-qualified protobuf method
 		"internal.crosstest.v1test.CrossService",      // fully-qualified protobuf service
 		"internal.crosstest.v1test",                   // fully-qualified protobuf package
-		rerpc.UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*FailRequest)
 			if !ok {
 				return nil, rerpc.Errorf(

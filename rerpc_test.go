@@ -301,38 +301,59 @@ func TestServerProtoGRPC(t *testing.T) {
 	}
 	testHealth := func(t *testing.T, url string, doer rerpc.Doer, opts ...rerpc.CallOption) {
 		t.Run("health", func(t *testing.T) {
-			checkURL := url + "/grpc.health.v1.Health/Check"
-			watchURL := url + "/grpc.health.v1.Health/Watch"
-			healthPFQN := "grpc.health.v1"
-			healthFQN := healthPFQN + ".Health"
-			checkFQN := healthFQN + ".Check"
-			watchFQN := healthFQN + ".Watch"
-			pingFQN := "internal.ping.v1test.PingService"
-			bg := context.Background()
+			const pingFQN = "internal.ping.v1test.PingService"
 			const unknown = "foobar"
 			assert.True(t, reg.IsRegistered(pingFQN), "ping service registered")
 			assert.False(t, reg.IsRegistered(unknown), "unknown service registered")
+
+			healthPFQN := "grpc.health.v1"
+			healthFQN := healthPFQN + ".Health"
+			callCheck := func(req *healthpb.HealthCheckRequest, opts ...rerpc.CallOption) (*healthpb.HealthCheckResponse, error) {
+				client := rerpc.NewClient(
+					doer,
+					url+"/grpc.health.v1.Health/Check",
+					healthFQN+".Check",
+					healthFQN,
+					healthPFQN,
+					func() proto.Message { return &healthpb.HealthCheckResponse{} },
+				)
+				res, err := client.Call(context.Background(), req, opts...)
+				if err != nil {
+					return nil, err
+				}
+				return res.(*healthpb.HealthCheckResponse), nil
+			}
+			callWatch := func(req *healthpb.HealthCheckRequest, opts ...rerpc.CallOption) (*healthpb.HealthCheckResponse, error) {
+				client := rerpc.NewClient(
+					doer,
+					url+"/grpc.health.v1.Health/Watch",
+					healthFQN+".Watch",
+					healthFQN,
+					healthPFQN,
+					func() proto.Message { return &healthpb.HealthCheckResponse{} },
+				)
+				res, err := client.Call(context.Background(), req, opts...)
+				if err != nil {
+					return nil, err
+				}
+				return res.(*healthpb.HealthCheckResponse), nil
+			}
+
 			t.Run("process", func(t *testing.T) {
 				req := &healthpb.HealthCheckRequest{}
-				var res healthpb.HealthCheckResponse
-				err := rerpc.NewClient(doer, checkURL, checkFQN, healthFQN, healthPFQN).
-					Call(bg, req, &res, opts...)
+				res, err := callCheck(req, opts...)
 				assert.Nil(t, err, "rpc error")
 				assert.Equal(t, rerpc.HealthStatus(res.Status), rerpc.HealthServing, "status")
 			})
 			t.Run("known", func(t *testing.T) {
 				req := &healthpb.HealthCheckRequest{Service: pingFQN}
-				var res healthpb.HealthCheckResponse
-				err := rerpc.NewClient(doer, checkURL, checkFQN, healthFQN, healthPFQN).
-					Call(bg, req, &res, opts...)
+				res, err := callCheck(req, opts...)
 				assert.Nil(t, err, "rpc error")
 				assert.Equal(t, rerpc.HealthStatus(res.Status), rerpc.HealthServing, "status")
 			})
 			t.Run("unknown", func(t *testing.T) {
 				req := &healthpb.HealthCheckRequest{Service: unknown}
-				var res healthpb.HealthCheckResponse
-				err := rerpc.NewClient(doer, checkURL, checkFQN, healthFQN, healthPFQN).
-					Call(bg, req, &res, opts...)
+				_, err := callCheck(req, opts...)
 				assert.NotNil(t, err, "rpc error")
 				rerr, ok := rerpc.AsError(err)
 				assert.True(t, ok, "convert to rerpc error")
@@ -340,9 +361,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			})
 			t.Run("watch", func(t *testing.T) {
 				req := &healthpb.HealthCheckRequest{Service: pingFQN}
-				var res healthpb.HealthCheckResponse
-				err := rerpc.NewClient(doer, watchURL, watchFQN, healthFQN, healthPFQN).
-					Call(bg, req, &res, opts...)
+				_, err := callWatch(req, opts...)
 				assert.NotNil(t, err, "rpc error")
 				rerr, ok := rerpc.AsError(err)
 				assert.True(t, ok, "convert to rerpc error")
@@ -351,17 +370,31 @@ func TestServerProtoGRPC(t *testing.T) {
 		})
 	}
 	testReflection := func(t *testing.T, url string, doer rerpc.Doer, opts ...rerpc.CallOption) {
-		bg := context.Background()
-		url = url + "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo"
-		reflectPFQN := "grpc.reflection.v1alpha"
-		reflectSFQN := reflectPFQN + ".ServerReflection"
-		reflectFQN := reflectSFQN + ".ServerReflectionInfo"
+		const reflectPFQN = "grpc.reflection.v1alpha"
+		const reflectSFQN = reflectPFQN + ".ServerReflection"
+		const reflectFQN = reflectSFQN + ".ServerReflectionInfo"
 		pingRequestFQN := string((&pingpb.PingRequest{}).ProtoReflect().Descriptor().FullName())
 		assert.Equal(t, reg.Services(), []string{
 			"grpc.health.v1.Health",
 			"grpc.reflection.v1alpha.ServerReflection",
 			"internal.ping.v1test.PingService",
 		}, "services registered in memory")
+
+		callReflect := func(req *reflectionpb.ServerReflectionRequest, opts ...rerpc.CallOption) (*reflectionpb.ServerReflectionResponse, error) {
+			client := rerpc.NewClient(
+				doer,
+				url+"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
+				reflectFQN,
+				reflectSFQN,
+				reflectPFQN,
+				func() proto.Message { return &reflectionpb.ServerReflectionResponse{} },
+			)
+			res, err := client.Call(context.Background(), req, opts...)
+			if err != nil {
+				return nil, err
+			}
+			return res.(*reflectionpb.ServerReflectionResponse), nil
+		}
 		t.Run("list_services", func(t *testing.T) {
 			req := &reflectionpb.ServerReflectionRequest{
 				Host: "some-host",
@@ -369,12 +402,8 @@ func TestServerProtoGRPC(t *testing.T) {
 					ListServices: "ignored per proto documentation",
 				},
 			}
-			var res reflectionpb.ServerReflectionResponse
-			assert.Nil(
-				t,
-				rerpc.NewClient(doer, url, reflectFQN, reflectSFQN, reflectPFQN).Call(bg, req, &res, opts...),
-				"reflection RPC",
-			)
+			res, err := callReflect(req, opts...)
+			assert.Nil(t, err, "reflection RPC error")
 			expect := &reflectionpb.ServerReflectionResponse{
 				ValidHost:       req.Host,
 				OriginalRequest: req,
@@ -388,7 +417,7 @@ func TestServerProtoGRPC(t *testing.T) {
 					},
 				},
 			}
-			assert.Equal(t, &res, expect, "response")
+			assert.Equal(t, res, expect, "response")
 		})
 		t.Run("file_by_filename", func(t *testing.T) {
 			req := &reflectionpb.ServerReflectionRequest{
@@ -397,12 +426,8 @@ func TestServerProtoGRPC(t *testing.T) {
 					FileByFilename: "internal/ping/v1test/ping.proto",
 				},
 			}
-			var res reflectionpb.ServerReflectionResponse
-			assert.Nil(
-				t,
-				rerpc.NewClient(doer, url, reflectFQN, reflectSFQN, reflectPFQN).Call(bg, req, &res, opts...),
-				"reflection RPC",
-			)
+			res, err := callReflect(req, opts...)
+			assert.Nil(t, err, "reflection RPC error")
 			assert.Nil(t, res.GetErrorResponse(), "error in response")
 			fds := res.GetFileDescriptorResponse()
 			assert.NotNil(t, fds, "file descriptor response")
@@ -420,12 +445,8 @@ func TestServerProtoGRPC(t *testing.T) {
 					FileContainingSymbol: pingRequestFQN,
 				},
 			}
-			var res reflectionpb.ServerReflectionResponse
-			assert.Nil(
-				t,
-				rerpc.NewClient(doer, url, reflectFQN, reflectSFQN, reflectPFQN).Call(bg, req, &res, opts...),
-				"reflection RPC",
-			)
+			res, err := callReflect(req, opts...)
+			assert.Nil(t, err, "reflection RPC error")
 			assert.Nil(t, res.GetErrorResponse(), "error in response")
 			fds := res.GetFileDescriptorResponse()
 			assert.NotNil(t, fds, "file descriptor response")
@@ -446,16 +467,12 @@ func TestServerProtoGRPC(t *testing.T) {
 					},
 				},
 			}
-			var res reflectionpb.ServerReflectionResponse
-			assert.Nil(
-				t,
-				rerpc.NewClient(doer, url, reflectFQN, reflectSFQN, reflectPFQN).Call(bg, req, &res, opts...),
-				"reflection RPC",
-			)
-			err := res.GetErrorResponse()
-			assert.NotNil(t, err, "error in response proto")
-			assert.Equal(t, err.ErrorCode, int32(rerpc.CodeNotFound), "error code")
-			assert.NotZero(t, err.ErrorMessage, "error message")
+			res, err := callReflect(req, opts...)
+			assert.Nil(t, err, "reflection RPC error")
+			msgerr := res.GetErrorResponse()
+			assert.NotNil(t, msgerr, "error in response proto")
+			assert.Equal(t, msgerr.ErrorCode, int32(rerpc.CodeNotFound), "error code")
+			assert.NotZero(t, msgerr.ErrorMessage, "error message")
 		})
 		t.Run("all_extension_numbers_of_type", func(t *testing.T) {
 			req := &reflectionpb.ServerReflectionRequest{
@@ -464,12 +481,8 @@ func TestServerProtoGRPC(t *testing.T) {
 					AllExtensionNumbersOfType: pingRequestFQN,
 				},
 			}
-			var res reflectionpb.ServerReflectionResponse
-			assert.Nil(
-				t,
-				rerpc.NewClient(doer, url, reflectFQN, reflectSFQN, reflectPFQN).Call(bg, req, &res, opts...),
-				"reflection RPC",
-			)
+			res, err := callReflect(req, opts...)
+			assert.Nil(t, err, "reflection RPC error")
 			expect := &reflectionpb.ServerReflectionResponse{
 				ValidHost:       req.Host,
 				OriginalRequest: req,
@@ -479,7 +492,7 @@ func TestServerProtoGRPC(t *testing.T) {
 					},
 				},
 			}
-			assert.Equal(t, &res, expect, "response")
+			assert.Equal(t, res, expect, "response")
 		})
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server) {
@@ -558,35 +571,40 @@ type metadataIntegrationInterceptor struct {
 	key, value string
 }
 
-func (i *metadataIntegrationInterceptor) WrapCall(next rerpc.UnaryCall) rerpc.UnaryCall {
-	return rerpc.UnaryCall(func(ctx context.Context, req, res proto.Message) error {
-		md, ok := rerpc.CallMeta(ctx)
-		assert.True(i.tb, ok, "get call metadata")
-		// Headers that interceptors can't modify should have been set already.
-		assert.Equal(i.tb, md.Request().Get("User-Agent"), rerpc.UserAgent(), "request user agent")
-		// Server will verify that it received this header.
-		assert.Nil(i.tb, md.Request().Set(i.key, i.value), "set custom request header")
+func (i *metadataIntegrationInterceptor) Wrap(next rerpc.Func) rerpc.Func {
+	return rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		callMD, isCall := rerpc.CallMeta(ctx)
+		handlerMD, isHandler := rerpc.HandlerMeta(ctx)
+		assert.False(
+			i.tb,
+			isCall == isHandler,
+			"must be call xor handler: got handler %v, call %v",
+			assert.Fmt(isHandler, isCall),
+		)
 
-		err := next(ctx, req, res)
-
-		// Server should have sent this response header.
-		assert.Equal(i.tb, md.Response().Get(i.key), i.value, "custom header %q from server", assert.Fmt(i.key))
-		return err
-	})
-}
-
-func (i *metadataIntegrationInterceptor) WrapHandler(next rerpc.UnaryHandler) rerpc.UnaryHandler {
-	return rerpc.UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
-		md, ok := rerpc.HandlerMeta(ctx)
-		assert.True(i.tb, ok, "get handler metadata")
-		// Client should have sent both of these headers.
-		assert.Equal(i.tb, md.Request().Get("User-Agent"), rerpc.UserAgent(), "user agent sent by client")
-		assert.Equal(i.tb, md.Request().Get(i.key), i.value, "custom header %q from client", assert.Fmt(i.key))
+		if isCall {
+			// Headers that interceptors can't modify should have been set already.
+			assert.Equal(i.tb, callMD.Request().Get("User-Agent"), rerpc.UserAgent(), "request user agent")
+			// Server will verify that it received this header.
+			assert.Nil(i.tb, callMD.Request().Set(i.key, i.value), "set custom request header")
+		}
+		if isHandler {
+			// Client should have sent both of these headers.
+			assert.Equal(i.tb, handlerMD.Request().Get("User-Agent"), rerpc.UserAgent(), "user agent sent by client")
+			assert.Equal(i.tb, handlerMD.Request().Get(i.key), i.value, "custom header %q from client", assert.Fmt(i.key))
+		}
 
 		res, err := next(ctx, req)
 
-		// Client will verify that it receives this header.
-		assert.Nil(i.tb, md.Response().Set(i.key, i.value), "set custom response header")
+		if isHandler {
+			// Client will verify that it receives this header.
+			assert.Nil(i.tb, handlerMD.Response().Set(i.key, i.value), "set custom response header")
+		}
+		if isCall {
+			// Server should have sent this response header.
+			assert.Equal(i.tb, callMD.Response().Get(i.key), i.value, "custom header %q from server", assert.Fmt(i.key))
+		}
+
 		return res, err
 	})
 }

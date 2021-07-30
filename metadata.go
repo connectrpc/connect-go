@@ -28,7 +28,7 @@ type Specification struct {
 }
 
 // CallMetadata provides a Specification and access to request and response
-// headers for an in-progress client call. It's useful in CallInterceptors.
+// headers for an in-progress client call. It's useful in Interceptors.
 type CallMetadata struct {
 	Spec Specification
 	req  *MutableHeader
@@ -43,9 +43,8 @@ func (m CallMetadata) Request() MutableHeader {
 	return *m.req
 }
 
-// Response returns a read-only view of the response headers. In
-// CallInterceptors, the response isn't populated until the request is sent to
-// the server.
+// Response returns a read-only view of the response headers. In Interceptors,
+// the response isn't populated until the request is sent to the server.
 func (m CallMetadata) Response() ImmutableHeader {
 	if m.res == nil {
 		return NewImmutableHeader(nil) // nil maps are safe to read from
@@ -54,7 +53,7 @@ func (m CallMetadata) Response() ImmutableHeader {
 }
 
 // NewCallContext constructs a CallMetadata and attaches it to the supplied
-// context. It's useful in tests that call CallMeta.
+// context. It's useful in tests that rely on CallMeta.
 func NewCallContext(ctx context.Context, spec Specification, req, res http.Header) context.Context {
 	mutable := NewMutableHeader(req)
 	immutable := NewImmutableHeader(res)
@@ -67,7 +66,10 @@ func NewCallContext(ctx context.Context, spec Specification, req, res http.Heade
 }
 
 // CallMeta retrieves CallMetadata from the supplied context. It only succeeds
-// in CallInterceptors - in other settings, the returned bool will be false.
+// in client calls - in other settings, the returned bool will be false.
+//
+// If you're writing an Interceptor that uses different logic for servers and
+// clients, you can use CallMeta to check which logic to apply.
 //
 // To test interceptors that use CallMeta, pass them a context constructed by
 // NewCallContext.
@@ -81,8 +83,8 @@ func CallMeta(ctx context.Context) (CallMetadata, bool) {
 }
 
 // HandlerMetadata provides a Specification and access to request and response
-// headers for an in-progress handler invocation. It's useful in
-// HandlerInterceptors and protobuf service implementations.
+// headers for an in-progress handler invocation. It's useful in Interceptors
+// and protobuf service implementations.
 type HandlerMetadata struct {
 	Spec Specification
 	req  *ImmutableHeader
@@ -119,8 +121,11 @@ func NewHandlerContext(ctx context.Context, spec Specification, req, res http.He
 }
 
 // HandlerMeta retrieves HandlerMetadata from the supplied context. It only
-// succeeds in HandlerInterceptors and protobuf service implementations - in
-// other settings, the returned bool will be false.
+// succeeds in handler invocations (including protobuf service implementations)
+// - in other settings, the returned bool will be false.
+//
+// If you're writing an Interceptor that uses different logic for servers and
+// clients, you can use HandlerMeta to check which logic to apply.
 //
 // To test interceptors and service implementations that use HandlerMeta, pass
 // them a context constructed by NewHandlerContext.
