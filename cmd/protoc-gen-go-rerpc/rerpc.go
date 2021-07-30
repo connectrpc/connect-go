@@ -148,6 +148,7 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		g.P(`"`, method.Desc.FullName(), `", // fully-qualified protobuf method`)
 		g.P(`"`, service.Desc.FullName(), `", // fully-qualified protobuf service`)
 		g.P(`"`, service.Desc.ParentFile().Package(), `", // fully-qualified protobuf package`)
+		g.P("func() proto.Message { return &", method.Output.GoIdent, "{} }, // response constructor")
 		g.P("opts...,")
 		g.P("),")
 	}
@@ -169,11 +170,11 @@ func clientMethod(g *protogen.GeneratedFile, method *protogen.Method) {
 		deprecated(g)
 	}
 	g.P("func (c *", unexport(method.Parent.GoName), "ClientReRPC) ", clientSignature(g, method), "{")
-	g.P("res := &", method.Output.GoIdent, "{}")
-	g.P("if err := c.", unexport(method.GoName), ".Call(ctx, req, res, opts...); err != nil {")
+	g.P("res, err := c.", unexport(method.GoName), ".Call(ctx, req, opts...)")
+	g.P("if err != nil {")
 	g.P("return nil, err")
 	g.P("}")
-	g.P("return res, nil")
+	g.P("return res.(*", method.Output.GoIdent, "), nil")
 	g.P("}")
 	g.P()
 }
@@ -229,7 +230,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		g.P(`"`, method.Desc.FullName(), `", // fully-qualified protobuf method`)
 		g.P(`"`, service.Desc.FullName(), `", // fully-qualified protobuf service`)
 		g.P(`"`, service.Desc.ParentFile().Package(), `", // fully-qualified protobuf package`)
-		g.P(rerpcPackage.Ident("UnaryHandler"), "(func(ctx ", contextPackage.Ident("Context"),
+		g.P(rerpcPackage.Ident("Func"), "(func(ctx ", contextPackage.Ident("Context"),
 			", req ", protoPackage.Ident("Message"), ") (",
 			protoPackage.Ident("Message"), ", error) {")
 		g.P("typed, ok := req.(*", method.Input.GoIdent, ")")

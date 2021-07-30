@@ -35,7 +35,7 @@ type handlerCfg struct {
 	DisableTwirp        bool
 	MaxRequestBytes     int
 	Registrar           *Registrar
-	Interceptor         HandlerInterceptor
+	Interceptor         Interceptor
 	Hooks               *Hooks
 }
 
@@ -75,7 +75,7 @@ type Handler struct {
 	methodFQN      string
 	serviceFQN     string
 	packageFQN     string
-	implementation UnaryHandler
+	implementation Func
 	// rawGRPC is used only for our hand-rolled reflection handler, which needs
 	// bidi streaming
 	rawGRPC func(
@@ -246,9 +246,9 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 	}
 
 	ctx := NewHandlerContext(r.Context(), *spec, r.Header, w.Header())
-	var implementation UnaryHandler
+	var implementation Func
 	if failed != nil {
-		implementation = UnaryHandler(func(context.Context, proto.Message) (proto.Message, error) {
+		implementation = Func(func(context.Context, proto.Message) (proto.Message, error) {
 			return nil, failed
 		})
 	} else if spec.ContentType == TypeJSON || spec.ContentType == TypeProtoTwirp {
@@ -260,8 +260,8 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 	h.writeResult(r.Context(), w, spec, res, err)
 }
 
-func (h *Handler) implementationTwirp(w http.ResponseWriter, r *http.Request, spec *Specification) UnaryHandler {
-	return UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+func (h *Handler) implementationTwirp(w http.ResponseWriter, r *http.Request, spec *Specification) Func {
+	return Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 		var body io.Reader = r.Body
 		if spec.RequestCompression == CompressionGzip {
 			gr, err := gzip.NewReader(body)
@@ -290,8 +290,8 @@ func (h *Handler) implementationTwirp(w http.ResponseWriter, r *http.Request, sp
 	})
 }
 
-func (h *Handler) implementationGRPC(w http.ResponseWriter, r *http.Request, spec *Specification) UnaryHandler {
-	return UnaryHandler(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+func (h *Handler) implementationGRPC(w http.ResponseWriter, r *http.Request, spec *Specification) Func {
+	return Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 		if raw := h.rawGRPC; raw != nil {
 			raw(ctx, w, r, spec.RequestCompression, spec.ResponseCompression, h.config.Hooks)
 			return nil, nil
@@ -352,11 +352,11 @@ func (h *Handler) writeResultGRPC(ctx context.Context, w http.ResponseWriter, sp
 	writeErrorGRPC(ctx, w, nil, h.config.Hooks)
 }
 
-func (h *Handler) wrap(uh UnaryHandler) UnaryHandler {
+func (h *Handler) wrap(next Func) Func {
 	if h.config.Interceptor != nil {
-		return h.config.Interceptor.WrapHandler(uh)
+		return h.config.Interceptor.Wrap(next)
 	}
-	return uh
+	return next
 }
 
 func splitOnCommasAndSpaces(c rune) bool {
