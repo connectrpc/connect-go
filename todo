@@ -19,6 +19,7 @@ with Trailers with one that has a Status Code of DEADLINE_EXCEEDED.
 
 [ ] use http.MaxBytesReader instead of io.LimitReader
 [ ] wiki
+[ ] CI with Github Actions
 
 [ ] upstream Twirp issue for putting timeout on the wire
 [ ] upstream Twirp issue for context cancellation and deadline exceeded errors
