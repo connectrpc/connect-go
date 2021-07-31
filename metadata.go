@@ -17,8 +17,8 @@ const (
 // Note that the Method, Service, and Package are fully-qualified protobuf
 // names, not Go import paths or identifiers.
 type Specification struct {
-	Method  string // full protobuf name, e.g. "acme.foo.v1.Foo.Bar"
-	Service string // full protobuf name, e.g. "acme.foo.v1.Foo"
+	Method  string // full protobuf name, e.g. "acme.foo.v1.FooService.Bar"
+	Service string // full protobuf name, e.g. "acme.foo.v1.FooService"
 	Package string // full protobuf name, e.g. "acme.foo.v1"
 
 	Path                string
@@ -66,9 +66,8 @@ func NewCallContext(ctx context.Context, spec Specification, req, res http.Heade
 }
 
 // CallMeta retrieves CallMetadata from the supplied context. It only succeeds
-// in client calls - in other settings, the returned bool will be false.
-//
-// If you're writing an Interceptor that uses different logic for servers and
+// in client calls - in other settings, the returned bool will be false. If
+// you're writing an Interceptor that uses different logic for servers and
 // clients, you can use CallMeta to check which logic to apply.
 //
 // To test interceptors that use CallMeta, pass them a context constructed by
@@ -122,10 +121,9 @@ func NewHandlerContext(ctx context.Context, spec Specification, req, res http.He
 
 // HandlerMeta retrieves HandlerMetadata from the supplied context. It only
 // succeeds in handler invocations (including protobuf service implementations)
-// - in other settings, the returned bool will be false.
-//
-// If you're writing an Interceptor that uses different logic for servers and
-// clients, you can use HandlerMeta to check which logic to apply.
+// - in other settings, the returned bool will be false. If you're writing an
+// Interceptor that uses different logic for servers and clients, you can use
+// HandlerMeta to check which logic to apply.
 //
 // To test interceptors and service implementations that use HandlerMeta, pass
 // them a context constructed by NewHandlerContext.

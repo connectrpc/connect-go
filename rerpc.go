@@ -12,9 +12,9 @@ const Version = "0.0.1"
 // this limit, set MaxHeaderBytes on your http.Server.
 const MaxHeaderBytes = 1024 * 8
 
-// ReRPC's supported HTTP content types. The gRPC variants follow gRPC's
-// HTTP/2 protocol, while the Twirp and JSON variants follow Twirp's protocol.
-// See reRPC's PROTOCOL.md for details.
+// ReRPC's supported HTTP Content-Types. Servers decide whether to use the gRPC
+// or Twirp protocol based on the request's Content-Type. See the wiki for more
+// information: https://github.com/akshayjshah/rerpc/wiki.
 const (
 	TypeDefaultGRPC = "application/grpc"
 	TypeProtoGRPC   = "application/grpc+proto"
@@ -23,15 +23,13 @@ const (
 )
 
 // ReRPC's supported compression methods.
-//
-// Snappy isn't supported because (a) the first-party gRPC libraries don't
-// support it, and (b) github.com/golang/snappy doesn't have a stable release.
 const (
 	CompressionIdentity = "identity"
 	CompressionGzip     = "gzip"
 )
 
-// For compile-time handshake with generated code.
+// These constants are used in compile-time handshakes with reRPC's generated
+// code.
 const (
 	SupportsCodeGenV0 = iota
 )
@@ -40,6 +38,7 @@ var userAgent = fmt.Sprintf("grpc-go-rerpc/%s (%s)", Version, runtime.Version())
 
 // UserAgent describes reRPC to servers, following the convention outlined in
 // https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents.
+// The output will resemble "grpc-go-rerpc/1.2.3 (go1.16.6)".
 func UserAgent() string {
 	return userAgent
 }

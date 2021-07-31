@@ -8,6 +8,7 @@ Mentioned in the HTTP/2 protocol but not checked in handlers:
 * grpc-message-type: Not validated in grpc-go, grpc-java, or grpc-cpp. Not
   required to unmarshal messages, and validation actually reduces the number
   of wire-compatible changes.
+* streaming health checks
 
 From ejona's epic https://github.com/grpc/grpc/pull/15460:
 By its very nature, the client and server's Deadline will be slightly different
@@ -16,9 +17,8 @@ Cancellation on a Call with a Deadline, they should double-check whether the
 Deadline has passed. If it has passed, they should override the cancellation
 with Trailers with one that has a Status Code of DEADLINE_EXCEEDED.
 
-[ ] Restructure client code so we can have nicer signatures, like Twirp
-[ ] examples
-[ ] dependabot
+[ ] use http.MaxBytesReader instead of io.LimitReader
+[ ] wiki
 
 [ ] upstream Twirp issue for putting timeout on the wire
 [ ] upstream Twirp issue for context cancellation and deadline exceeded errors
@@ -36,3 +36,4 @@ https://github.com/twitchtv/twirp/blob/main/PROTOCOL.md
 https://github.com/twitchtv/twirp/issues/244
 
 https://developers.google.com/protocol-buffers/docs/style
+https://buf.build

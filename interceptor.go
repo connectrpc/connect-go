@@ -8,21 +8,44 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Func is the generic signature of an RPC, from both the server and the client
-// perspective. Interceptors wrap Funcs.
+// Func is the generic signature of an RPC, from both the server and the
+// client's perspective. Interceptors wrap Funcs.
 type Func func(context.Context, proto.Message) (proto.Message, error)
 
 // An Interceptor adds logic to a generated handler or client, like the
 // decorators or middleware you may have seen in other libraries. Interceptors
 // may replace the context, mutate the request, mutate the response, handle the
-// returned error, retry, or recover from panics.
+// returned error, retry, recover from panics, emit logs and metrics, or do
+// nearly anything else.
 //
 // The returned Func must be safe to call concurrently. If chained carelessly,
 // the interceptor's logic may run more than once - where possible,
 // interceptors should be idempotent.
+//
+// See Chain for an example of interceptor use.
 type Interceptor interface {
 	Wrap(Func) Func
 }
+
+// ShortCircuit builds an interceptor that doesn't call the wrapped Func.
+// Instead, it returns the supplied Error immediately.
+//
+// This is primarily useful when testing error handling. It's also used
+// throughout reRPC's examples to avoid making network requests.
+func ShortCircuit(err error) Interceptor {
+	return InterceptorFunc(func(next Func) Func {
+		return Func(func(_ context.Context, _ proto.Message) (proto.Message, error) {
+			return nil, err
+		})
+	})
+}
+
+// An InterceptorFunc is a simple Interceptor implementation. See CallMetadata
+// for an example.
+type InterceptorFunc func(Func) Func
+
+// Wrap implements Interceptor.
+func (f InterceptorFunc) Wrap(next Func) Func { return f(next) }
 
 // A Chain composes multiple interceptors into one. A Chain is an Interceptor,
 // a CallOption, and a HandlerOption. Note that when used as a CallOption or a
@@ -113,10 +136,8 @@ var _ Interceptor = (*recovery)(nil)
 
 // Recover wraps clients and handlers to recover from panics. It uses the
 // supplied function to log the recovered value. The log function must be
-// non-nil and safe to call concurrently.
-//
-// Keep in mind that this will not prevent all crashes! Panics initiated in
-// other goroutines will still crash the process.
+// non-nil and safe to call concurrently. Keep in mind that panics initiated in
+// other goroutines will still crash the process!
 //
 // When composed with other Interceptors in a Chain, Recover should be the
 // outermost Interceptor.
