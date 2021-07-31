@@ -65,7 +65,8 @@ $ curl --request POST \
 {"code":"unimplemented","msg":"internal.ping.v1test.PingService.Ping isn't implemented"}
 ```
 
-You can find more production-ready examples in the [documentation][docs].
+You can find production-ready examples of [servers][prod-server] and
+[clients][prod-client] in the API documentation.
 
 ## Status
 
@@ -104,6 +105,8 @@ used by my current or former employers.
 [grpcurl]: https://github.com/fullstorydev/grpcurl
 [license]: https://github.com/akshayjshah/rerpc/blob/main/LICENSE.txt
 [maintainers-issue]: https://github.com/akshayjshah/rerpc/issues/2
+[prod-client]: https://pkg.go.dev/github.com/akshayjshah/rerpc#example-Client
+[prod-server]: https://pkg.go.dev/github.com/akshayjshah/rerpc#example-package
 [proto3]: https://cloud.google.com/apis/design/proto3
 [protobuf]: https://developers.google.com/protocol-buffers
 [streaming-issue]: https://github.com/akshayjshah/rerpc/issues/1
