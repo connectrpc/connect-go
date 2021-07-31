@@ -18,7 +18,7 @@ func ExampleClient() {
 	//
 	// Of course, you can skip this configuration and use http.DefaultClient for
 	// quick proof-of-concept code.
-	hc := &http.Client{
+	doer := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
 			Proxy: nil,
@@ -41,7 +41,7 @@ func ExampleClient() {
 	// Leave it out in real code!
 	short := rerpc.ShortCircuit(rerpc.Errorf(rerpc.CodeUnimplemented, "no networking in examples"))
 
-	client := pingpb.NewPingServiceClientReRPC("http://invalid-test-url", hc, rerpc.NewChain(short))
+	client := pingpb.NewPingServiceClientReRPC("http://invalid-test-url", doer, rerpc.NewChain(short))
 	res, err := client.Ping(context.Background(), &pingpb.PingRequest{})
 	fmt.Println("Response:", res)
 	fmt.Println("Error:", err)
