@@ -8,17 +8,26 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-// Error wraps Go's built-in error interface to support for gRPC error codes
-// and error details. The output of the wrapped error's Error() method is
-// sent to the client as the gRPC error message; when building public APIs,
-// take care not to leak sensitive information.
+// An Error captures three pieces of information: a Code, a human-readable
+// message, and an optional collection of arbitrary protobuf messages called
+// "details" (more on those below). Servers send the code, message, and details
+// over the wire to clients. reRPC's Error wraps a standard Go error, using the
+// underlying error's Error() string as the message. Take care not to leak
+// sensitive information from public APIs!
+//
+// Protobuf service implementations and Interceptors should return Errors
+// (using the Wrap or Errorf functions) rather than plain Go errors. If service
+// implementations or Interceptors instead return a plain Go error, reRPC will
+// use AsError to find an Error to send over the wire. If no Error can be
+// found, reRPC will use CodeUnknown and the returned error's message.
 //
 // Error codes and messages are explained in the gRPC documentation linked
 // below. Unfortunately, error details were introduced before gRPC adopted a
 // formal proposal process, so they're not clearly documented anywhere and
-// differ slightly between implementations. Roughly, they're an optional
+// may differ slightly between implementations. Roughly, they're an optional
 // mechanism for servers, middleware, and proxies to send strongly-typed errors
-// to clients.
+// and localized messages to clients. Error details aren't exposed over the
+// Twirp protocol.
 //
 // Related documents:
 //   gRPC HTTP/2 specification: https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md
@@ -29,8 +38,9 @@ type Error struct {
 	details []*anypb.Any
 }
 
-// Wrap annotates any error with a gRPC status code and error details. If the
-// code is CodeOK, the returned error is nil.
+// Wrap annotates any error with a status code and error details. If the code
+// is CodeOK, the returned error is nil. Otherwise, the returned error will be
+// an *Error.
 func Wrap(c Code, err error, details ...proto.Message) error {
 	if e := wrap(c, err); e != nil {
 		e.SetDetails(details...)
@@ -53,6 +63,7 @@ func wrap(c Code, err error) *Error {
 
 // Errorf calls fmt.Errorf with the supplied template and arguments, then wraps
 // the resulting error. If the code is CodeOK, the returned error is nil.
+// Otherwise, the returned error will be an *Error.
 func Errorf(c Code, template string, args ...interface{}) error {
 	if e := errorf(c, template, args...); e != nil {
 		return e
@@ -66,7 +77,7 @@ func errorf(c Code, template string, args ...interface{}) *Error {
 	return wrap(c, fmt.Errorf(template, args...))
 }
 
-// AsError uses errors.As to unwrap any error and look for a reRPC Error.
+// AsError uses errors.As to unwrap any error and look for a reRPC *Error.
 func AsError(err error) (*Error, bool) {
 	var re *Error
 	ok := errors.As(err, &re)
@@ -87,8 +98,11 @@ func (e *Error) Unwrap() error {
 	return e.err
 }
 
-// Code returns the error's gRPC code.
+// Code returns the error's status code.
 func (e *Error) Code() Code {
+	if e == nil {
+		return CodeOK
+	}
 	return e.code
 }
 
@@ -129,8 +143,8 @@ func (e *Error) SetDetails(details ...proto.Message) error {
 	return nil
 }
 
-// CodeOf returns the error's code if it's a *rerpc.Error, CodeOK if the error
-// is nil, or CodeUnknown otherwise.
+// CodeOf returns the error's status code if it is or wraps a *rerpc.Error,
+// CodeOK if the error is nil, and CodeUnknown otherwise.
 func CodeOf(err error) Code {
 	if err == nil {
 		return CodeOK

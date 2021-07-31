@@ -115,7 +115,8 @@ const (
 	maxCode Code = CodeUnauthenticated
 )
 
-// MarshalText implements encoding.TextMarshaler.
+// MarshalText implements encoding.TextMarshaler. Codes are marshaled in their
+// numeric representations.
 func (c Code) MarshalText() ([]byte, error) {
 	if c < minCode || c > maxCode {
 		return nil, fmt.Errorf("invalid code %v", c)
@@ -123,7 +124,10 @@ func (c Code) MarshalText() ([]byte, error) {
 	return []byte(strconv.Itoa(int(c))), nil
 }
 
-// UnmarshalText implements encoding.TextUnmarshaler.
+// UnmarshalText implements encoding.TextUnmarshaler. It accepts both numeric
+// representations (as produced by MarshalText) and the all-caps strings from
+// the gRPC specification. Note that the specification uses the British
+// "CANCELLED" for CodeCanceled.
 func (c *Code) UnmarshalText(b []byte) error {
 	if n, ok := strToCode[string(b)]; ok {
 		*c = n

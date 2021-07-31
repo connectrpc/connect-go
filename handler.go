@@ -92,17 +92,11 @@ type Handler struct {
 // NewHandler constructs a Handler. The supplied method, service, and package
 // must be fully-qualified protobuf identifiers.
 //
-// For example, a handler might have method "acme.foo.v1.Foo.Bar", service
-// "acme.foo.v1.Foo", and package "acme.foo.v1". Remember that NewHandler is
-// usually called from generated code - most users won't need to deal with
-// protobuf identifiers directly.
-func NewHandler(
-	methodFQN string, // fully-qualified protobuf method name
-	serviceFQN string, // fully-qualified protobuf service name
-	packageFQN string, // fully-qualified protobuf package name
-	impl func(context.Context, proto.Message) (proto.Message, error),
-	opts ...HandlerOption,
-) *Handler {
+// For example, a handler might have method "acme.foo.v1.FooService.Bar",
+// service "acme.foo.v1.FooService", and package "acme.foo.v1". Remember that
+// NewHandler is usually called from generated code - most users won't need to
+// deal with protobuf identifiers directly.
+func NewHandler(methodFQN, serviceFQN, packageFQN string, impl Func, opts ...HandlerOption) *Handler {
 	var cfg handlerCfg
 	for _, opt := range opts {
 		opt.applyToHandler(&cfg)
@@ -120,12 +114,12 @@ func NewHandler(
 }
 
 // Serve executes the handler, much like the standard library's http.Handler.
-// Unlike http.Handler, it requires a pointer to the protoc-generated request
-// struct. See the internal/pingpb/v0 package for an example of how this code
-// is used in reRPC's generated code.
+// Unlike http.Handler, it requires a pointer to the generated request struct.
+// See the internal/ping/v1test package for an example of how this code is used
+// in reRPC's generated code.
 //
 // As long as the caller allocates a new request struct for each call, this
-// method is safe to use concurrently.
+// method is safe to call concurrently.
 func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Message) {
 	// To ensure that we can re-use connections, always consume and close the
 	// request body.

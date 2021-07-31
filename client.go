@@ -32,7 +32,7 @@ type callCfg struct {
 // A CallOption configures a reRPC client or a single call.
 //
 // In addition to any options grouped in the documentation below, remember that
-// Chains and Options are also a valid CallOptions.
+// Chains and Options are also valid CallOptions.
 type CallOption interface {
 	applyToCall(*callCfg)
 }
@@ -42,7 +42,7 @@ type CallOption interface {
 // reRPC protoc plugin; most users won't ever need to deal with it directly.
 //
 // To see an example of how Client is used in the generated code, see the
-// internal/pingpb/v0 package.
+// internal/ping/v1test package.
 type Client struct {
 	doer        Doer
 	url         string
@@ -56,18 +56,19 @@ type Client struct {
 // NewClient creates a Client. The supplied URL must be the full,
 // method-specific URL, without trailing slashes. The supplied method, service,
 // and package must be fully-qualified protobuf identifiers, and the
-// newResponse constructor must be safe to call concurrently.
+// newResponse constructor must be safe to call concurrently. Any options
+// passed here apply to all calls made with this client.
 //
-// For example, the URL https://api.acme.com/acme.foo.v1.Foo/Bar corresponds to
-// method "acme.foo.v1.Foo.Bar", service "acme.foo.v1.Foo", and package
-// "acme.foo.v1". In that case, the newResponse constructor would be:
+// For example, the URL https://api.acme.com/acme.foo.v1.FooService/Bar
+// corresponds to method "acme.foo.v1.FooService.Bar", service
+// "acme.foo.v1.FooService", and package "acme.foo.v1". In that case, the
+// newResponse constructor would be:
 //   func() proto.Message {
 //     return &foopb.BarResponse{}
 //   }
 //
-// Remember that NewClient is usually called from generated code
-// - most users won't need to deal with long URLs or protobuf identifiers
-// directly.
+// Remember that NewClient is usually called from generated code - most users
+// won't need to deal with long URLs or protobuf identifiers directly.
 func NewClient(doer Doer, url, methodFQN, serviceFQN, packageFQN string, newResponse func() proto.Message, opts ...CallOption) *Client {
 	return &Client{
 		doer:        doer,
@@ -80,7 +81,8 @@ func NewClient(doer Doer, url, methodFQN, serviceFQN, packageFQN string, newResp
 	}
 }
 
-// Call the remote procedure.
+// Call the remote procedure. Any options passed apply only to the current
+// call.
 func (c *Client) Call(ctx context.Context, req proto.Message, opts ...CallOption) (proto.Message, error) {
 	var cfg callCfg
 	for _, opt := range c.opts {

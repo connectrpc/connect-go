@@ -18,14 +18,14 @@ import (
 // application in unexpected and difficult-to-debug ways.
 //
 // The signature of IsReservedHeader obeys semantic versioning, but the list of
-// reserved headers may expand in minor releases to keep up with evolutions of
-// the gRPC and Twirp protocols. To minimize the chance of breakage,
+// reserved headers may expand in minor releases to keep up with the evolution
+// of the gRPC and Twirp protocols. To minimize the chance of breakage,
 // applications should namespace their headers with a consistent prefix (e.g.,
 // "Google-Cloud-").
 //
-// Current, the following keys are reserved: Accept, Accept-Encoding,
-// Accept-Post, Allow, Content-Encoding, Content-Type, and Te. Keys prefixed
-// with "Grpc-", "Rerpc-", and "Twirp-" are also reserved.
+// Currently, the following keys are reserved: Accept, Accept-Encoding,
+// Accept-Post, Allow, Content-Encoding, Content-Type, Te, and Trailer. Keys
+// prefixed with "Grpc-", "Rerpc-", and "Twirp-" are also reserved.
 func IsReservedHeader(key string) error {
 	canonical := textproto.CanonicalMIMEHeaderKey(key)
 	switch canonical {
@@ -153,10 +153,8 @@ func (h ImmutableHeader) Get(key string) string {
 
 // GetBinary is similar to Get, but for binary values encoded according to the
 // gRPC specification. Briefly, binary headers have keys ending in "-Bin" and
-// base64-encoded values.
-//
-// Like grpc-go, GetBinary automatically appends the "-Bin" suffix to the
-// supplied key and base64-decodes the value.
+// base64-encoded values. GetBinary automatically appends the "-Bin" suffix to
+// the supplied key and base64-decodes the value.
 //
 // For details on gRPC's treatment of binary headers, see
 // https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md.
@@ -213,10 +211,8 @@ func (h MutableHeader) Set(key, value string) error {
 
 // SetBinary is similar to Set, but for binary values encoded according to the
 // gRPC specification. Briefly, binary headers have keys ending in "-Bin" and
-// base64-encoded values.
-//
-// Like grpc-go, SetBinary automatically appends the "-Bin" suffix to the
-// supplied key and base64-encodes the value.
+// base64-encoded values. Like grpc-go, SetBinary automatically appends the
+// "-Bin" suffix to the supplied key and base64-encodes the value.
 //
 // For details on gRPC's treatment of binary headers, see
 // https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md.

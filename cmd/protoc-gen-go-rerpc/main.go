@@ -1,7 +1,6 @@
 // protoc-gen-go-rerpc is a plugin for the protocol buffer compiler that
 // generates Go code. To use it, build this program and make it available on
-// your PATH as:
-//   protoc-gen-go-rerpc
+// your PATH as protoc-gen-go-rerpc.
 //
 // The 'go-rerpc' suffix becomes part of the arguments for the protocol buffer
 // compiler, so you'll invoke it like this:

@@ -18,9 +18,7 @@ import (
 )
 
 // A Registrar collects information to support gRPC server reflection
-// when building handlers.
-//
-// A registrar is a valid HandlerOption.
+// when building handlers. Registrars are valid HandlerOptions.
 type Registrar struct {
 	mu       sync.RWMutex
 	services map[string]struct{}
@@ -33,6 +31,7 @@ func NewRegistrar() *Registrar {
 
 // Services returns the fully-qualified names of the registered protobuf
 // services. The returned slice is a copy, so it's safe for callers to modify.
+// This method is safe to call concurrently.
 func (r *Registrar) Services() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -46,7 +45,7 @@ func (r *Registrar) Services() []string {
 }
 
 // IsRegistered checks whether a fully-qualified protobuf service name is
-// registered.
+// registered. It's safe to call concurrently.
 func (r *Registrar) IsRegistered(service string) bool {
 	r.mu.RLock()
 	_, ok := r.services[service]
@@ -54,6 +53,8 @@ func (r *Registrar) IsRegistered(service string) bool {
 	return ok
 }
 
+// Registers a fully-qualified protobuf service name. Safe to call
+// concurrently.
 func (r *Registrar) register(service string) {
 	if service == "" {
 		// Typically BadRouteHandler.
@@ -74,13 +75,11 @@ func (r *Registrar) applyToHandler(cfg *handlerCfg) {
 //
 // Note that because the reflection API requires bidirectional streaming, the
 // returned handler only supports gRPC over HTTP/2 (i.e., it doesn't support
-// JSON or HTTP/1.x).
+// Twirp). Keep in mind that the reflection service exposes every protobuf
+// package compiled into your binary - think twice before exposing it outside
+// your organization.
 //
-// While the reflection API makes tools like grpcurl convenient, keep in mind
-// that it exposes every protobuf package compiled into your binary. Think
-// twice before exposing it outside your organization.
-//
-// For more information, see
+// For more information, see:
 //   https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md
 //   https://github.com/grpc/grpc/blob/master/doc/server-reflection.md
 //   https://github.com/fullstorydev/grpcurl

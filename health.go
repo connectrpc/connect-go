@@ -16,7 +16,7 @@ import (
 // reRPC doesn't support watching health, SERVICE_UNKNOWN isn't exposed here.
 //
 // For details, see the protobuf schema:
-//   https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto
+// https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto.
 type HealthStatus int32
 
 const (
@@ -27,7 +27,9 @@ const (
 
 // NewChecker returns a health-checking function that always returns
 // HealthServing for the process and all registered services. It's safe to call
-// concurrently. See NewHealthHandler for details.
+// concurrently.
+//
+// The returned function can be passed to NewHealthHandler.
 func NewChecker(reg *Registrar) func(context.Context, string) (HealthStatus, error) {
 	return func(_ context.Context, service string) (HealthStatus, error) {
 		if service == "" {
@@ -43,13 +45,14 @@ func NewChecker(reg *Registrar) func(context.Context, string) (HealthStatus, err
 // NewHealthHandler wraps the supplied function to build an HTTP handler for
 // gRPC's health-checking API. It returns the HTTP handler and the correct path
 // on which to mount it. The health-checking function will be called with a
-// fully-qualified protobuf service name (e.g., "acme.ping.v0.Ping").
+// fully-qualified protobuf service name (e.g., "acme.ping.v1.PingService").
 //
 // The supplied health-checking function must: (1) return HealthUnknown,
 // HealthServing, or HealthNotServing; (2) return the health status of the
 // whole process when called with an empty string; (3) return a
 // CodeNotFound error when called with an unknown service; and (4) be safe to
-// call concurrently.
+// call concurrently. The function returned by NewChecker satisfies all these
+// requirements.
 //
 // Note that the returned handler only supports the unary Check method, not the
 // streaming Watch. As suggested in gRPC's health schema, reRPC returns
