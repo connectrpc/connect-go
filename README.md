@@ -39,11 +39,11 @@ import (
   "golang.org/x/net/http2"
   "golang.org/x/net/http2/h2c"
 
-  pingpb "github.com/akshayjshah/rerpc/internal/pingpb/v0" // generated
+  pingpb "github.com/akshayjshah/rerpc/internal/ping/v1test" // generated
 )
 
 type PingServer struct {
-  pingpb.UnimplementedPingServerReRPC // returns errors from all methods
+  pingpb.UnimplementedPingServiceReRPC // returns errors from all methods
 }
 
 func main() {
@@ -55,14 +55,15 @@ func main() {
 }
 ```
 
-With that server running, you can make requests with any gRPC client or cURL:
+With that server running, you can make requests with a gRPC client or with
+cURL:
 
 ```bash
 $ curl --request POST \
   --header "Content-Type: application/json" \
-  http://localhost:8081/rerpc.internal.ping.v0.Ping/Ping
+  http://localhost:8081/internal.ping.v1test.PingService/Ping
 
-{"code":"unimplemented","msg":"rerpc.internal.ping.v0.Ping.Ping isn't implemented"}
+{"code":"unimplemented","msg":"internal.ping.v1test.PingService.Ping isn't implemented"}
 ```
 
 You can find more production-ready examples in the [documentation][docs].
@@ -82,16 +83,16 @@ reRPC supports:
 
 Within those parameters, reRPC follows semantic versioning.
 
-That said, please remember that reRPC is one person's labor of love. It'll
-probably take me a few days to respond to issues and pull requests. If you're
-using reRPC in production, I'd love your [help maintaining this
-project][maintainers-issue].
+That said, please remember that reRPC is one person's labor of love.
+(Well...love and frustration. Mostly love.) It'll probably take me a few days
+to respond to issues and pull requests. If you're using reRPC in production,
+I'd love your [help maintaining this project][maintainers-issue].
 
 ## Legal
 
-Offered under the [MIT license][license]. This is a personal project, developed
+Offered under the [MIT license][license]. This is a personal project developed
 in my spare time - it's not endorsed by, supported by, or (as far as I know)
-used by my employer.
+used by my current or former employers.
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
 [docs]: https://github.com/akshayjshah/rerpc/wiki
