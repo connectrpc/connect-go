@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package internal.ping.v1test;
 
-option go_package = "github.com/akshayjshah/rerpc/internal/ping/v1test;pingpb";
+option go_package = "github.com/rerpc/rerpc/internal/ping/v1test;pingpb";
 
 message PingRequest {
     int64 number = 1;

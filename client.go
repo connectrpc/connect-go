@@ -13,7 +13,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	statuspb "github.com/akshayjshah/rerpc/internal/status/v1"
+	statuspb "github.com/rerpc/rerpc/internal/status/v1"
 )
 
 // Doer is the transport-level interface reRPC expects HTTP clients to

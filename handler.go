@@ -13,8 +13,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	statuspb "github.com/akshayjshah/rerpc/internal/status/v1"
-	"github.com/akshayjshah/rerpc/internal/twirp"
+	statuspb "github.com/rerpc/rerpc/internal/status/v1"
+	"github.com/rerpc/rerpc/internal/twirp"
 )
 
 var (

@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/akshayjshah/rerpc"
-	pingpb "github.com/akshayjshah/rerpc/internal/ping/v1test"
+	"github.com/rerpc/rerpc"
+	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
 )
 
 func ExampleClient() {

@@ -1,4 +1,4 @@
-module github.com/akshayjshah/rerpc
+module github.com/rerpc/rerpc
 
 go 1.16
 

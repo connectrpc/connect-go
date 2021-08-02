@@ -7,12 +7,12 @@ import (
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/types/descriptorpb"
 
-	"github.com/akshayjshah/rerpc"
+	"github.com/rerpc/rerpc"
 )
 
 const (
 	contextPackage = protogen.GoImportPath("context")
-	rerpcPackage   = protogen.GoImportPath("github.com/akshayjshah/rerpc")
+	rerpcPackage   = protogen.GoImportPath("github.com/rerpc/rerpc")
 	httpPackage    = protogen.GoImportPath("net/http")
 	protoPackage   = protogen.GoImportPath("google.golang.org/protobuf/proto")
 	stringsPackage = protogen.GoImportPath("strings")

@@ -3,6 +3,5 @@
 //
 // This documentation is intended to explain each type and function in
 // isolation. For walkthroughs, comparisons to grpc-go and Twirp, and other
-// narrative docs, see the project wiki:
-// https://github.com/akshayjshah/rerpc/wiki.
+// narrative docs, see https://rerpc.github.io.
 package rerpc

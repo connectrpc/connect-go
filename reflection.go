@@ -14,7 +14,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
-	rpb "github.com/akshayjshah/rerpc/internal/reflection/v1alpha1"
+	rpb "github.com/rerpc/rerpc/internal/reflection/v1alpha1"
 )
 
 // A Registrar collects information to support gRPC server reflection

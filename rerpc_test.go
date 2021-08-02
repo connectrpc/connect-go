@@ -16,12 +16,12 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/akshayjshah/rerpc"
-	"github.com/akshayjshah/rerpc/internal/assert"
-	healthpb "github.com/akshayjshah/rerpc/internal/health/v1"
-	pingpb "github.com/akshayjshah/rerpc/internal/ping/v1test"
-	reflectionpb "github.com/akshayjshah/rerpc/internal/reflection/v1alpha1"
-	"github.com/akshayjshah/rerpc/internal/twirp"
+	"github.com/rerpc/rerpc"
+	"github.com/rerpc/rerpc/internal/assert"
+	healthpb "github.com/rerpc/rerpc/internal/health/v1"
+	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
+	reflectionpb "github.com/rerpc/rerpc/internal/reflection/v1alpha1"
+	"github.com/rerpc/rerpc/internal/twirp"
 )
 
 const errMsg = "oh no"

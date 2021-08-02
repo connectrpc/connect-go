@@ -9,7 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/akshayjshah/rerpc/internal/assert"
+	"github.com/rerpc/rerpc/internal/assert"
 )
 
 func TestBinaryEncodingQuick(t *testing.T) {
