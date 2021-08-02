@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/akshayjshah/rerpc/internal/assert"
+	"github.com/rerpc/rerpc/internal/assert"
 )
 
 func TestCallMetadata(t *testing.T) {

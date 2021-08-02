@@ -6,7 +6,7 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/akshayjshah/rerpc/internal/assert"
+	"github.com/rerpc/rerpc/internal/assert"
 )
 
 func TestParseTimeout(t *testing.T) {

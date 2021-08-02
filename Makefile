@@ -29,7 +29,7 @@ lint: lintpb bin/goimports ## Lint Go and protobuf
 	@echo "Checking with gofmt..."
 	@test -z "$$(gofmt -s -l . | tee /dev/stderr)"
 	@echo "Checking with goimports..."
-	@test -z "$$(./bin/goimports -local github.com/akshayjshah/rerpc -l $(HANDWRITTEN) | tee /dev/stderr)"
+	@test -z "$$(./bin/goimports -local github.com/rerpc/rerpc -l $(HANDWRITTEN) | tee /dev/stderr)"
 	@echo "Checking with go vet..."
 	@go vet ./...
 	@echo "Checking with staticcheck..."
@@ -38,7 +38,7 @@ lint: lintpb bin/goimports ## Lint Go and protobuf
 .PHONY: lintfix
 lintfix: ## Automatically fix some lint errors
 	@gofmt -s -w .
-	@./bin/goimports -local github.com/akshayjshah/rerpc -w $(HANDWRITTEN)
+	@./bin/goimports -local github.com/rerpc/rerpc -w $(HANDWRITTEN)
 
 .PHONY: lintpb
 lintpb: bin/buf $(PROTOBUFS)

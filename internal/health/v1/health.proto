@@ -8,7 +8,7 @@ syntax = "proto3";
 //   https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto
 package internal.health.v1;
 
-option go_package = "github.com/akshayjshah/rerpc/internal/healthpb/v1;healthpb";
+option go_package = "github.com/rerpc/rerpc/internal/healthpb/v1;healthpb";
 
 message HealthCheckRequest {
   string service = 1;

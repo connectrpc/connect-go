@@ -38,7 +38,7 @@ import (
   "golang.org/x/net/http2"
   "golang.org/x/net/http2/h2c"
 
-  pingpb "github.com/akshayjshah/rerpc/internal/ping/v1test" // generated
+  pingpb "github.com/rerpc/rerpc/internal/ping/v1test" // generated
 )
 
 type PingServer struct {
@@ -95,20 +95,20 @@ in my spare time - it's not endorsed by, supported by, or (as far as I know)
 used by my current or former employers.
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
-[docs]: https://github.com/akshayjshah/rerpc/wiki
+[docs]: https://rerpc.github.io
 [envoy]: https://www.envoyproxy.io/
-[godoc]: https://pkg.go.dev/github.com/akshayjshah/rerpc
+[godoc]: https://pkg.go.dev/github.com/rerpc/rerpc
 [go-support-policy]: https://golang.org/doc/devel/release#policy
 [grpc-gateway]: https://grpc-ecosystem.github.io/grpc-gateway/
 [grpc]: https://grpc.io/
 [grpc-implementations]: https://grpc.io/docs/languages/
 [grpcurl]: https://github.com/fullstorydev/grpcurl
-[license]: https://github.com/akshayjshah/rerpc/blob/main/LICENSE.txt
-[maintainers-issue]: https://github.com/akshayjshah/rerpc/issues/2
-[prod-client]: https://pkg.go.dev/github.com/akshayjshah/rerpc#example-Client
-[prod-server]: https://pkg.go.dev/github.com/akshayjshah/rerpc#example-package
+[license]: https://github.com/rerpc/rerpc/blob/main/LICENSE.txt
+[maintainers-issue]: https://github.com/rerpc/rerpc/issues/2
+[prod-client]: https://pkg.go.dev/github.com/rerpc/rerpc#example-Client
+[prod-server]: https://pkg.go.dev/github.com/rerpc/rerpc#example-package
 [proto3]: https://cloud.google.com/apis/design/proto3
 [protobuf]: https://developers.google.com/protocol-buffers
-[streaming-issue]: https://github.com/akshayjshah/rerpc/issues/1
+[streaming-issue]: https://github.com/rerpc/rerpc/issues/1
 [twirp]: https://twitchtv.github.io/twirp/
 [twirp-implementations]: https://github.com/twitchtv/twirp#implementations-in-other-languages

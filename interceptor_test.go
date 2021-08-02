@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/akshayjshah/rerpc/internal/assert"
+	"github.com/rerpc/rerpc/internal/assert"
 )
 
 func assertingFunc(f func(context.Context)) Func {

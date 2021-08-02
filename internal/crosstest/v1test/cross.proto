@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package internal.crosstest.v1test;
 
-option go_package = "github.com/akshayjshah/rerpc/internal/crosstest/v1test;crosspb";
+option go_package = "github.com/rerpc/rerpc/internal/crosstest/v1test;crosspb";
 
 import "google/protobuf/duration.proto";
 

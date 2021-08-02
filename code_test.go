@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akshayjshah/rerpc/internal/assert"
+	"github.com/rerpc/rerpc/internal/assert"
 )
 
 func TestCodeMarshaling(t *testing.T) {

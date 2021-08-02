@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/akshayjshah/rerpc/internal/assert"
+	"github.com/rerpc/rerpc/internal/assert"
 )
 
 func TestHooks(t *testing.T) {

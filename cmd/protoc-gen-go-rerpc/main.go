@@ -21,7 +21,7 @@ import (
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/types/pluginpb"
 
-	"github.com/akshayjshah/rerpc"
+	"github.com/rerpc/rerpc"
 )
 
 func main() {

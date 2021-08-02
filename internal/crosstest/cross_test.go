@@ -30,9 +30,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/akshayjshah/rerpc"
-	"github.com/akshayjshah/rerpc/internal/assert"
-	crosspb "github.com/akshayjshah/rerpc/internal/crosstest/v1test"
+	"github.com/rerpc/rerpc"
+	"github.com/rerpc/rerpc/internal/assert"
+	crosspb "github.com/rerpc/rerpc/internal/crosstest/v1test"
 )
 
 const errMsg = "soirée 🎉" // readable non-ASCII

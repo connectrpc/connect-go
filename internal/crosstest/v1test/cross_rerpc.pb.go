@@ -8,7 +8,7 @@ package crosspb
 
 import (
 	context "context"
-	rerpc "github.com/akshayjshah/rerpc"
+	rerpc "github.com/rerpc/rerpc"
 	proto "google.golang.org/protobuf/proto"
 	http "net/http"
 	strings "strings"
