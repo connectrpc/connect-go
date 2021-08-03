@@ -19,8 +19,7 @@ debugging with cURL.
 
 Sadly, nothing's free. To keep the implementation simple and expose the same
 features over multiple protocols, reRPC only supports unary (request-response)
-RPCs. There's an [open issue][streaming-issue] for discussion of streaming
-support.
+RPCs.
 
 For more on reRPC, including a walkthrough and comparison to alternatives, see
 the [docs][].
@@ -82,11 +81,6 @@ reRPC supports:
 * [APIv2][] of protocol buffers in Go (`google.golang.org/protobuf`).
 
 Within those parameters, reRPC follows semantic versioning.
-
-That said, please remember that reRPC is one person's labor of love.
-(Well...love and frustration. Mostly love.) It'll probably take me a few days
-to respond to issues and pull requests. If you're using reRPC in production,
-I'd love your [help maintaining this project][maintainers-issue].
 
 ## Legal
 
