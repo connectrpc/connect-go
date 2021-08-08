@@ -6,10 +6,12 @@ option go_package = "github.com/rerpc/rerpc/internal/ping/v1test;pingpb";
 
 message PingRequest {
     int64 number = 1;
+    string msg = 2;
 }
 
 message PingResponse {
     int64 number = 1;
+    string msg = 2;
 }
 
 message FailRequest {
