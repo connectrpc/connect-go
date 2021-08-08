@@ -17,7 +17,7 @@ type ExamplePingServer struct {
 
 // Ping implements pingpb.PingServiceReRPC.
 func (*ExamplePingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingpb.PingResponse, error) {
-	return &pingpb.PingResponse{Number: req.Number}, nil
+	return &pingpb.PingResponse{Number: req.Number, Msg: req.Msg}, nil
 }
 
 func Example() {

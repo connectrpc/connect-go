@@ -31,7 +31,7 @@ type pingServer struct {
 }
 
 func (p pingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingpb.PingResponse, error) {
-	return &pingpb.PingResponse{Number: req.Number}, nil
+	return &pingpb.PingResponse{Number: req.Number, Msg: req.Msg}, nil
 }
 
 func (p pingServer) Fail(ctx context.Context, req *pingpb.FailRequest) (*pingpb.FailResponse, error) {
