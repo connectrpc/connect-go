@@ -133,14 +133,16 @@ func (c *Code) UnmarshalText(b []byte) error {
 		*c = n
 		return nil
 	}
-	if n, err := strconv.Atoi(string(b)); err == nil {
-		if n < int(minCode) || n > int(maxCode) {
-			return fmt.Errorf("invalid code %v", n)
-		}
-		*c = Code(n)
-		return nil
+	n, err := strconv.ParseUint(string(b), 10 /* base */, 32 /* bitsize */)
+	if err != nil {
+		return fmt.Errorf("invalid code %q", string(b))
 	}
-	return fmt.Errorf("invalid code %q", string(b))
+	code := Code(n)
+	if code < minCode || code > maxCode {
+		return fmt.Errorf("invalid code %v", n)
+	}
+	*c = code
+	return nil
 }
 
 func (c Code) http() int {
