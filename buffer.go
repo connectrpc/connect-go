@@ -16,7 +16,7 @@ func getBuffer() *bytes.Buffer {
 }
 
 func putBuffer(buf *bytes.Buffer) {
-	const max = 4 * 1024 // if >4 KiB, don't hold onto it
+	const max = 1024 * 1024 // if >1 MiB, don't hold onto it
 	if buf.Cap() > max {
 		return
 	}
