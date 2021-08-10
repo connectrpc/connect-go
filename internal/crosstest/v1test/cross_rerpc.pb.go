@@ -100,13 +100,14 @@ type CrossServiceReRPC interface {
 
 // NewCrossServiceHandlerReRPC wraps the service implementation in an HTTP
 // handler. It returns the handler and the path on which to mount it.
-func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOption) (string, http.Handler) {
+func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOption) (string, *http.ServeMux) {
 	mux := http.NewServeMux()
 
 	ping := rerpc.NewHandler(
-		"internal.crosstest.v1test.CrossService.Ping", // fully-qualified protobuf method
-		"internal.crosstest.v1test.CrossService",      // fully-qualified protobuf service
-		"internal.crosstest.v1test",                   // fully-qualified protobuf package
+		"internal.crosstest.v1test.CrossService.Ping",  // fully-qualified protobuf method
+		"internal.crosstest.v1test.CrossService",       // fully-qualified protobuf service
+		"internal.crosstest.v1test",                    // fully-qualified protobuf package
+		func() proto.Message { return &PingRequest{} }, // request msg constructor
 		rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*PingRequest)
 			if !ok {
@@ -120,14 +121,13 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		}),
 		opts...,
 	)
-	mux.HandleFunc("/internal.crosstest.v1test.CrossService/Ping", func(w http.ResponseWriter, r *http.Request) {
-		ping.Serve(w, r, &PingRequest{})
-	})
+	mux.Handle("/internal.crosstest.v1test.CrossService/Ping", ping)
 
 	fail := rerpc.NewHandler(
-		"internal.crosstest.v1test.CrossService.Fail", // fully-qualified protobuf method
-		"internal.crosstest.v1test.CrossService",      // fully-qualified protobuf service
-		"internal.crosstest.v1test",                   // fully-qualified protobuf package
+		"internal.crosstest.v1test.CrossService.Fail",  // fully-qualified protobuf method
+		"internal.crosstest.v1test.CrossService",       // fully-qualified protobuf service
+		"internal.crosstest.v1test",                    // fully-qualified protobuf package
+		func() proto.Message { return &FailRequest{} }, // request msg constructor
 		rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*FailRequest)
 			if !ok {
@@ -141,9 +141,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		}),
 		opts...,
 	)
-	mux.HandleFunc("/internal.crosstest.v1test.CrossService/Fail", func(w http.ResponseWriter, r *http.Request) {
-		fail.Serve(w, r, &FailRequest{})
-	})
+	mux.Handle("/internal.crosstest.v1test.CrossService/Fail", fail)
 
 	// Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.
 	mux.Handle("/", rerpc.NewBadRouteHandler(opts...))

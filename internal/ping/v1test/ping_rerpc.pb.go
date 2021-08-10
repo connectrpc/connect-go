@@ -8,10 +8,11 @@ package pingpb
 
 import (
 	context "context"
-	rerpc "github.com/rerpc/rerpc"
-	proto "google.golang.org/protobuf/proto"
 	http "net/http"
 	strings "strings"
+
+	rerpc "github.com/rerpc/rerpc"
+	proto "google.golang.org/protobuf/proto"
 )
 
 // This is a compile-time assertion to ensure that this generated file and the
@@ -100,13 +101,14 @@ type PingServiceReRPC interface {
 
 // NewPingServiceHandlerReRPC wraps the service implementation in an HTTP
 // handler. It returns the handler and the path on which to mount it.
-func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOption) (string, http.Handler) {
+func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOption) (string, *http.ServeMux) {
 	mux := http.NewServeMux()
 
 	ping := rerpc.NewHandler(
-		"internal.ping.v1test.PingService.Ping", // fully-qualified protobuf method
-		"internal.ping.v1test.PingService",      // fully-qualified protobuf service
-		"internal.ping.v1test",                  // fully-qualified protobuf package
+		"internal.ping.v1test.PingService.Ping",        // fully-qualified protobuf method
+		"internal.ping.v1test.PingService",             // fully-qualified protobuf service
+		"internal.ping.v1test",                         // fully-qualified protobuf package
+		func() proto.Message { return &PingRequest{} }, // request msg constructor
 		rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*PingRequest)
 			if !ok {
@@ -120,14 +122,13 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 		}),
 		opts...,
 	)
-	mux.HandleFunc("/internal.ping.v1test.PingService/Ping", func(w http.ResponseWriter, r *http.Request) {
-		ping.Serve(w, r, &PingRequest{})
-	})
+	mux.Handle("/internal.ping.v1test.PingService/Ping", ping)
 
 	fail := rerpc.NewHandler(
-		"internal.ping.v1test.PingService.Fail", // fully-qualified protobuf method
-		"internal.ping.v1test.PingService",      // fully-qualified protobuf service
-		"internal.ping.v1test",                  // fully-qualified protobuf package
+		"internal.ping.v1test.PingService.Fail",        // fully-qualified protobuf method
+		"internal.ping.v1test.PingService",             // fully-qualified protobuf service
+		"internal.ping.v1test",                         // fully-qualified protobuf package
+		func() proto.Message { return &FailRequest{} }, // request msg constructor
 		rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*FailRequest)
 			if !ok {
@@ -141,9 +142,7 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 		}),
 		opts...,
 	)
-	mux.HandleFunc("/internal.ping.v1test.PingService/Fail", func(w http.ResponseWriter, r *http.Request) {
-		fail.Serve(w, r, &FailRequest{})
-	})
+	mux.Handle("/internal.ping.v1test.PingService/Fail", fail)
 
 	// Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.
 	mux.Handle("/", rerpc.NewBadRouteHandler(opts...))

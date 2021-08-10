@@ -83,24 +83,27 @@ func (r *Registrar) applyToHandler(cfg *handlerCfg) {
 //   https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md
 //   https://github.com/grpc/grpc/blob/master/doc/server-reflection.md
 //   https://github.com/fullstorydev/grpcurl
-func NewReflectionHandler(reg *Registrar) (string, http.Handler) {
+func NewReflectionHandler(reg *Registrar) (string, *http.ServeMux) {
 	const packageFQN = "grpc.reflection.v1alpha"
 	const serviceFQN = packageFQN + ".ServerReflection"
-	const methodFQN = serviceFQN + ".ServerReflectionInfo"
+	const method = "ServerReflectionInfo"
+	const methodFQN = serviceFQN + "." + method
+	const servicePath = "/" + serviceFQN + "/"
+	const methodPath = servicePath + method
 	reg.register(serviceFQN)
 	h := NewHandler(
-		methodFQN,
-		serviceFQN,
-		packageFQN,
+		methodFQN, serviceFQN, packageFQN,
+		func() proto.Message { return nil },
 		nil,               // no unary implementation
 		ServeTwirp(false), // no reflection in Twirp
 	)
 	raw := &rawReflectionHandler{reg}
 	h.rawGRPC = raw.rawGRPC
-	httpHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.Serve(w, r, nil)
-	})
-	return "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo", httpHandler
+
+	mux := http.NewServeMux()
+	mux.Handle(methodPath, h)
+	mux.Handle("/", NewBadRouteHandler())
+	return servicePath, mux
 }
 
 type rawReflectionHandler struct {
