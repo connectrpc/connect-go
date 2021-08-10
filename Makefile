@@ -42,7 +42,9 @@ lintfix: ## Automatically fix some lint errors
 
 .PHONY: lintpb
 lintpb: bin/buf $(PROTOBUFS)
+	@echo "Checking with buf lint..."
 	@./bin/buf lint
+	@echo "Checking with buf breaking..."
 	@./bin/buf breaking --against image_v1.bin
 
 .PHONY: cover
