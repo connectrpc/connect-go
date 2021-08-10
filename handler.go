@@ -3,18 +3,10 @@ package rerpc
 import (
 	"compress/gzip"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
-	"strconv"
 	"strings"
-
-	"google.golang.org/protobuf/proto"
-
-	statuspb "github.com/rerpc/rerpc/internal/status/v1"
-	"github.com/rerpc/rerpc/internal/twirp"
 )
 
 var (
@@ -33,10 +25,13 @@ var (
 type handlerCfg struct {
 	DisableGzipResponse bool
 	DisableTwirp        bool
-	MaxRequestBytes     int
+	MaxRequestBytes     int64
 	Registrar           *Registrar
 	Interceptor         Interceptor
 	Hooks               *Hooks
+	Package             string
+	Service             string
+	Method              string
 }
 
 // A HandlerOption configures a Handler.
@@ -72,57 +67,36 @@ func ServeTwirp(enable bool) HandlerOption {
 // To see an example of how Handler is used in the generated code, see the
 // internal/pingpb/v0 package.
 type Handler struct {
-	methodFQN  string
-	serviceFQN string
-	packageFQN string
-	newRequest func() proto.Message
-	config     handlerCfg
-
-	// Handlers must either unary or stream, but not both.
-	unary  Func
-	stream func(
-		context.Context,
-		http.ResponseWriter,
-		*http.Request,
-		string, // request compression
-		string, // response compression
-		*Hooks,
-	)
+	config         handlerCfg
+	implementation HandlerStreamFunc
 }
 
-// NewHandler constructs a Handler. The supplied method, service, and package
-// must be fully-qualified protobuf identifiers, and the newRequest constructor
-// must be safe to call concurrently.
-//
-// For example, a handler might have method "acme.foo.v1.FooService.Bar",
-// service "acme.foo.v1.FooService", and package "acme.foo.v1". In that case,
-// the newRequest constructor would be:
-//   func() proto.Message {
-//     return &foopb.BarRequest{}
-//   }
+// NewHandler constructs a Handler. The supplied package, service, and method
+// names must be protobuf identifiers. For example, a handler for the URL
+// "/acme.foo.v1.FooService/Bar" would have package "acme.foo.v1", service
+// "FooService", and method "Bar".
 //
 // Remember that NewHandler is usually called from generated code - most users
 // won't need to deal with protobuf identifiers directly.
 func NewHandler(
-	methodFQN, serviceFQN, packageFQN string,
-	newRequest func() proto.Message,
-	impl Func,
+	pkg, service, method string,
+	impl HandlerStreamFunc,
 	opts ...HandlerOption,
 ) *Handler {
-	var cfg handlerCfg
+	cfg := handlerCfg{
+		Package: pkg,
+		Service: service,
+		Method:  method,
+	}
 	for _, opt := range opts {
 		opt.applyToHandler(&cfg)
 	}
 	if reg := cfg.Registrar; reg != nil {
-		reg.register(serviceFQN)
+		reg.register(cfg.Package, cfg.Service)
 	}
 	return &Handler{
-		methodFQN:  methodFQN,
-		serviceFQN: serviceFQN,
-		packageFQN: packageFQN,
-		newRequest: newRequest,
-		unary:      impl,
-		config:     cfg,
+		config:         cfg,
+		implementation: impl,
 	}
 }
 
@@ -131,8 +105,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// To ensure that we can re-use connections, always consume and close the
 	// request body.
 	defer r.Body.Close()
-	defer io.Copy(ioutil.Discard, r.Body)
+	defer io.Copy(io.Discard, r.Body)
 
+	// TODO: verify HTTP/2 for bidirectional streaming
+	if false && r.ProtoMajor < 2 {
+		w.WriteHeader(http.StatusHTTPVersionNotSupported)
+		io.WriteString(w, "bidirectional streaming requires HTTP/2")
+		return
+	}
 	if r.Method != http.MethodPost {
 		// grpc-go returns a 500 here, but interoperability with non-gRPC HTTP
 		// clients is better if we return a 405.
@@ -142,13 +122,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	spec := &Specification{
-		Method:              h.methodFQN,
-		Service:             h.serviceFQN,
-		Package:             h.packageFQN,
+		Package:             h.config.Package,
+		Service:             h.config.Service,
+		Method:              h.config.Method,
 		Path:                r.URL.Path,
 		ContentType:         r.Header.Get("Content-Type"),
 		RequestCompression:  CompressionIdentity,
 		ResponseCompression: CompressionIdentity,
+		ReadMaxBytes:        h.config.MaxRequestBytes,
 	}
 	if (spec.ContentType == TypeJSON || spec.ContentType == TypeProtoTwirp) && h.config.DisableTwirp {
 		w.Header().Set("Accept-Post", acceptPostValueWithoutJSON)
@@ -164,8 +145,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// We need to parse metadata before entering the interceptor stack, but we'd
-	// like any errors we encounter to be visible to interceptors for
-	// observability. We'll collect any such errors here and use them to
+	// like to report errors to the client in a format they understand (if
+	// possible). We'll collect any such errors here and use them to
 	// short-circuit early later on.
 	//
 	// NB, future refactorings will need to take care to avoid typed nils here.
@@ -234,8 +215,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// We may write to the body in the implementation (e.g., reflection handler), so we should
-	// set headers here.
+	// We should write any remaining headers here, since: (a) the implementation
+	// may write to the body, thereby sending the headers, and (b) interceptors
+	// should be able to see this data.
 	w.Header().Set("Content-Type", spec.ContentType)
 	if spec.ContentType != TypeJSON && spec.ContentType != TypeProtoTwirp {
 		w.Header().Set("Grpc-Accept-Encoding", acceptEncodingValue)
@@ -246,190 +228,62 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Trailer", "Grpc-Status-Details-Bin")
 	}
 
-	ctx := NewHandlerContext(r.Context(), *spec, r.Header, w.Header())
-	var unary Func
-	if failed != nil {
-		unary = Func(func(context.Context, proto.Message) (proto.Message, error) {
-			return nil, failed
-		})
-	} else if spec.ContentType == TypeJSON || spec.ContentType == TypeProtoTwirp {
-		unary = h.implementationTwirp(w, r, spec)
-	} else {
-		unary = h.implementationGRPC(w, r, spec)
-	}
-	res, err := h.wrap(unary)(ctx, h.newRequest())
-	h.writeResult(r.Context(), w, spec, res, err)
-}
-
-func (h *Handler) implementationTwirp(w http.ResponseWriter, r *http.Request, spec *Specification) Func {
-	return Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
-		var body io.Reader = r.Body
-		if spec.RequestCompression == CompressionGzip {
-			gr, err := gzip.NewReader(body)
-			if err != nil {
-				return nil, errorf(CodeInvalidArgument, "can't read gzipped body")
-			}
-			defer gr.Close()
-			body = gr
-		}
-		if max := h.config.MaxRequestBytes; max > 0 {
-			body = &io.LimitedReader{
-				R: body,
-				N: int64(max),
-			}
-		}
-		if spec.ContentType == TypeJSON {
-			if err := unmarshalJSON(body, req); err != nil {
-				return nil, wrap(CodeInvalidArgument, newMalformedError("can't unmarshal JSON body"))
-			}
-		} else {
-			if err := unmarshalTwirpProto(body, req); err != nil {
-				return nil, wrap(CodeInvalidArgument, newMalformedError("can't unmarshal Twirp protobuf body"))
-			}
-		}
-		return h.unary(ctx, req)
-	})
-}
-
-func (h *Handler) implementationGRPC(w http.ResponseWriter, r *http.Request, spec *Specification) Func {
-	return Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
-		if s := h.stream; s != nil {
-			s(ctx, w, r, spec.RequestCompression, spec.ResponseCompression, h.config.Hooks)
-			return nil, nil
-		}
-		if err := unmarshalLPM(r.Body, req, spec.RequestCompression, h.config.MaxRequestBytes); err != nil {
-			return nil, errorf(CodeInvalidArgument, "can't unmarshal protobuf body")
-		}
-		return h.unary(ctx, req)
-	})
-}
-
-func (h *Handler) writeResult(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) {
+	// Unlike gRPC, Twirp manages compression using the standard HTTP mechanisms.
+	// Since they apply to the whole stream, it's easiest to handle it here.
+	var requestBody io.Reader = r.Body
 	if spec.ContentType == TypeJSON || spec.ContentType == TypeProtoTwirp {
-		h.writeResultTwirp(ctx, w, spec, res, err)
-		return
+		if spec.RequestCompression == CompressionGzip {
+			gr, err := gzip.NewReader(requestBody)
+			if err != nil && failed == nil {
+				failed = errorf(CodeInvalidArgument, "can't read gzipped body: %w", err)
+			} else if err == nil {
+				defer gr.Close()
+				requestBody = gr
+			}
+		}
+		// Checking Content-Encoding ensures that some other user-supplied
+		// middleware isn't already compressing the response.
+		if spec.ResponseCompression == CompressionGzip && w.Header().Get("Content-Encoding") == "" {
+			w.Header().Set("Content-Encoding", "gzip")
+			gw := getGzipWriter(w)
+			defer putGzipWriter(gw)
+			w = &gzipResponseWriter{ResponseWriter: w, gw: gw}
+		}
 	}
-	h.writeResultGRPC(ctx, w, spec, res, err)
+
+	stream := newServerStream(
+		w,
+		&readCloser{Reader: requestBody, Closer: r.Body},
+		spec.ContentType,
+		h.config.MaxRequestBytes,
+		spec.ResponseCompression == CompressionGzip,
+	)
+	ctx := NewHandlerContext(r.Context(), *spec, r.Header, w.Header())
+	// TODO: refactor interceptors and apply them here
+	if failed != nil {
+		_ = stream.CloseReceive()
+		_ = stream.CloseSend(failed)
+	}
+	h.implementation(ctx, stream)
 }
 
-func (h *Handler) writeResultTwirp(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) {
-	// Even if the client requested gzip compression, check Content-Encoding to
-	// make sure some other HTTP middleware hasn't already swapped out the
-	// ResponseWriter.
-	if spec.ResponseCompression == CompressionGzip && w.Header().Get("Content-Encoding") == "" {
-		w.Header().Set("Content-Encoding", "gzip")
-		gw := getGzipWriter(w)
-		defer putGzipWriter(gw)
-		w = &gzipResponseWriter{ResponseWriter: w, gw: gw}
-	}
-	if err != nil {
-		// Twirp always writes errors as JSON.
-		writeErrorJSON(ctx, w, err, h.config.Hooks)
-		return
-	}
-	if spec.ContentType == TypeJSON {
-		marshalJSON(ctx, w, res, h.config.Hooks)
-	} else {
-		marshalTwirpProto(ctx, w, res, h.config.Hooks)
-	}
+// Path returns the URL pattern to use when registering this handler. It's used
+// by the generated code.
+func (h *Handler) Path() string {
+	return fmt.Sprintf("/%s.%s/%s", h.config.Package, h.config.Service, h.config.Method)
 }
 
-func (h *Handler) writeResultGRPC(ctx context.Context, w http.ResponseWriter, spec *Specification, res proto.Message, err error) {
-	if err != nil {
-		writeErrorGRPC(ctx, w, err, h.config.Hooks)
-		return
-	}
-	if err := marshalLPM(ctx, w, res, spec.ResponseCompression, 0 /* maxBytes */, h.config.Hooks); err != nil {
-		// It's safe to write gRPC errors even after we've started writing the
-		// body.
-		writeErrorGRPC(ctx, w, errorf(CodeUnknown, "can't marshal protobuf response"), h.config.Hooks)
-		return
-	}
-	writeErrorGRPC(ctx, w, nil, h.config.Hooks)
-}
-
-func (h *Handler) wrap(next Func) Func {
-	if h.config.Interceptor != nil {
-		return h.config.Interceptor.Wrap(next)
-	}
-	return next
+// ServicePath returns the URL pattern for the protobuf service. It's used by
+// the generated code.
+func (h *Handler) ServicePath() string {
+	return fmt.Sprintf("/%s.%s/", h.config.Package, h.config.Service)
 }
 
 func splitOnCommasAndSpaces(c rune) bool {
 	return c == ',' || c == ' '
 }
 
-func writeErrorJSON(ctx context.Context, w http.ResponseWriter, err error, hooks *Hooks) {
-	// Even if the caller sends TypeProtoTwirp, we respond with TypeJSON on errors.
-	w.Header().Set("Content-Type", TypeJSON)
-	s := newTwirpStatus(err)
-	bs, merr := json.Marshal(s)
-	if merr != nil {
-		hooks.onMarshalError(ctx, merr)
-		w.WriteHeader(http.StatusInternalServerError)
-		// codes don't need to be escaped in JSON, so this is okay
-		const tmpl = `{"code": "%s", "msg": "error marshaling error with code %s"}`
-		if _, nerr := fmt.Fprintf(w, tmpl, CodeInternal.twirp(), s.Code); nerr != nil {
-			hooks.onNetworkError(ctx, nerr)
-		}
-		return
-	}
-	w.WriteHeader(CodeOf(err).http())
-	_, err = w.Write(bs)
-	if err != nil {
-		hooks.onNetworkError(ctx, err)
-	}
-}
-
-func writeErrorGRPC(ctx context.Context, w http.ResponseWriter, err error, hooks *Hooks) {
-	if err == nil {
-		w.Header().Set("Grpc-Status", strconv.Itoa(int(CodeOK)))
-		w.Header().Set("Grpc-Message", "")
-		w.Header().Set("Grpc-Status-Details-Bin", "")
-		return
-	}
-	// gRPC errors are successes at the HTTP level and net/http automatically
-	// sends a 200 if we don't set a status code. Leaving the HTTP status
-	// implicit lets us use this function when we hit an error partway through
-	// writing the body.
-	s := statusFromError(err)
-	code := strconv.Itoa(int(s.Code))
-	// If we ever need to send more trailers, make sure to declare them in the headers
-	// above.
-	if bin, err := proto.Marshal(s); err != nil {
-		w.Header().Set("Grpc-Status", strconv.Itoa(int(CodeInternal)))
-		w.Header().Set("Grpc-Message", percentEncode("error marshaling protobuf status with code "+code))
-		hooks.onMarshalError(ctx, err)
-	} else {
-		w.Header().Set("Grpc-Status", code)
-		w.Header().Set("Grpc-Message", percentEncode(s.Message))
-		w.Header().Set("Grpc-Status-Details-Bin", encodeBinaryHeader(bin))
-	}
-}
-
-func statusFromError(err error) *statuspb.Status {
-	s := &statuspb.Status{
-		Code:    int32(CodeUnknown),
-		Message: err.Error(),
-	}
-	if re, ok := AsError(err); ok {
-		s.Code = int32(re.Code())
-		s.Details = re.Details()
-		if e := re.Unwrap(); e != nil {
-			s.Message = e.Error() // don't repeat code
-		}
-	}
-	return s
-}
-
-func newTwirpStatus(err error) *twirp.Status {
-	gs := statusFromError(err)
-	s := &twirp.Status{
-		Code:    Code(gs.Code).twirp(),
-		Message: gs.Message,
-	}
-	if te, ok := asTwirpError(err); ok {
-		s.Code = te.TwirpCode()
-	}
-	return s
+type readCloser struct {
+	io.Reader
+	io.Closer
 }

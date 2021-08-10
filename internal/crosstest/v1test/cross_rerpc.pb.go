@@ -30,8 +30,9 @@ type CrossServiceClientReRPC interface {
 }
 
 type crossServiceClientReRPC struct {
-	ping rerpc.Client
-	fail rerpc.Client
+	ping    rerpc.Client
+	fail    rerpc.Client
+	options []rerpc.CallOption
 }
 
 // NewCrossServiceClientReRPC constructs a client for the
@@ -39,49 +40,102 @@ type crossServiceClientReRPC struct {
 // apply to all calls made with this client.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
-// https://api.acme.com or https://acme.com/api/grpc).
+// https://api.acme.com or https://acme.com/grpc).
 func NewCrossServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) CrossServiceClientReRPC {
 	baseURL = strings.TrimRight(baseURL, "/")
 	return &crossServiceClientReRPC{
 		ping: *rerpc.NewClient(
 			doer,
-			baseURL+"/internal.crosstest.v1test.CrossService/Ping", // complete URL to call method
-			"internal.crosstest.v1test.CrossService.Ping",          // fully-qualified protobuf method
-			"internal.crosstest.v1test.CrossService",               // fully-qualified protobuf service
-			"internal.crosstest.v1test",                            // fully-qualified protobuf package
-			func() proto.Message { return &PingResponse{} },        // response constructor
+			baseURL,
+			"internal.crosstest.v1test", // protobuf package
+			"CrossService",              // protobuf service
+			"Ping",                      // protobuf method
 			opts...,
 		),
 		fail: *rerpc.NewClient(
 			doer,
-			baseURL+"/internal.crosstest.v1test.CrossService/Fail", // complete URL to call method
-			"internal.crosstest.v1test.CrossService.Fail",          // fully-qualified protobuf method
-			"internal.crosstest.v1test.CrossService",               // fully-qualified protobuf service
-			"internal.crosstest.v1test",                            // fully-qualified protobuf package
-			func() proto.Message { return &FailResponse{} },        // response constructor
+			baseURL,
+			"internal.crosstest.v1test", // protobuf package
+			"CrossService",              // protobuf service
+			"Fail",                      // protobuf method
 			opts...,
 		),
+		options: opts,
 	}
 }
 
 // Ping calls internal.crosstest.v1test.CrossService.Ping. Call options passed
 // here apply only to this call.
 func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error) {
-	res, err := c.ping.Call(ctx, req, opts...)
+	wrapped := rerpc.Func(func(ctx context.Context, msg proto.Message) (proto.Message, error) {
+		stream := c.ping.Call(ctx, opts...)
+		if err := stream.Send(req); err != nil {
+			_ = stream.CloseSend(err)
+			_ = stream.CloseReceive()
+			return nil, err
+		}
+		if err := stream.CloseSend(nil); err != nil {
+			_ = stream.CloseReceive()
+			return nil, err
+		}
+		var res PingResponse
+		if err := stream.Receive(&res); err != nil {
+			_ = stream.CloseReceive()
+			return nil, err
+		}
+		return &res, stream.CloseReceive()
+	})
+	mergedOpts := append([]rerpc.CallOption{}, c.options...)
+	mergedOpts = append(mergedOpts, opts...)
+	if ic := rerpc.ConfiguredCallInterceptor(mergedOpts...); ic != nil {
+		wrapped = ic.Wrap(wrapped)
+	}
+	res, err := wrapped(c.ping.Context(ctx, opts...), req)
 	if err != nil {
 		return nil, err
 	}
-	return res.(*PingResponse), nil
+	typed, ok := res.(*PingResponse)
+	if !ok {
+		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.crosstest.v1test.PingResponse, got %v", res.ProtoReflect().Descriptor().FullName())
+	}
+	return typed, nil
 }
 
 // Fail calls internal.crosstest.v1test.CrossService.Fail. Call options passed
 // here apply only to this call.
 func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error) {
-	res, err := c.fail.Call(ctx, req, opts...)
+	wrapped := rerpc.Func(func(ctx context.Context, msg proto.Message) (proto.Message, error) {
+		stream := c.fail.Call(ctx, opts...)
+		if err := stream.Send(req); err != nil {
+			_ = stream.CloseSend(err)
+			_ = stream.CloseReceive()
+			return nil, err
+		}
+		if err := stream.CloseSend(nil); err != nil {
+			_ = stream.CloseReceive()
+			return nil, err
+		}
+		var res FailResponse
+		if err := stream.Receive(&res); err != nil {
+			_ = stream.CloseReceive()
+			return nil, err
+		}
+		return &res, stream.CloseReceive()
+	})
+	mergedOpts := append([]rerpc.CallOption{}, c.options...)
+	mergedOpts = append(mergedOpts, opts...)
+	if ic := rerpc.ConfiguredCallInterceptor(mergedOpts...); ic != nil {
+		wrapped = ic.Wrap(wrapped)
+	}
+	res, err := wrapped(c.fail.Context(ctx, opts...), req)
 	if err != nil {
 		return nil, err
 	}
-	return res.(*FailResponse), nil
+	typed, ok := res.(*FailResponse)
+	if !ok {
+		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.crosstest.v1test.FailResponse, got %v", res.ProtoReflect().Descriptor().FullName())
+	}
+	return typed, nil
 }
 
 // CrossServiceReRPC is a server for the internal.crosstest.v1test.CrossService
@@ -102,51 +156,84 @@ type CrossServiceReRPC interface {
 // handler. It returns the handler and the path on which to mount it.
 func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOption) (string, *http.ServeMux) {
 	mux := http.NewServeMux()
+	ic := rerpc.ConfiguredHandlerInterceptor(opts...)
 
+	pingFunc := rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		typed, ok := req.(*PingRequest)
+		if !ok {
+			return nil, rerpc.Errorf(
+				rerpc.CodeInternal,
+				"can't call internal.crosstest.v1test.CrossService.Ping with a %v",
+				req.ProtoReflect().Descriptor().FullName(),
+			)
+		}
+		return svc.Ping(ctx, typed)
+	})
+	if ic != nil {
+		pingFunc = ic.Wrap(pingFunc)
+	}
 	ping := rerpc.NewHandler(
-		"internal.crosstest.v1test.CrossService.Ping",  // fully-qualified protobuf method
-		"internal.crosstest.v1test.CrossService",       // fully-qualified protobuf service
-		"internal.crosstest.v1test",                    // fully-qualified protobuf package
-		func() proto.Message { return &PingRequest{} }, // request msg constructor
-		rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
-			typed, ok := req.(*PingRequest)
-			if !ok {
-				return nil, rerpc.Errorf(
-					rerpc.CodeInternal,
-					"error in generated code: expected req to be a *PingRequest, got a %T",
-					req,
-				)
+		"internal.crosstest.v1test", // protobuf package
+		"CrossService",              // protobuf service
+		"Ping",                      // protobuf method
+		rerpc.HandlerStreamFunc(func(ctx context.Context, stream rerpc.Stream) {
+			defer stream.CloseReceive()
+			var req PingRequest
+			if err := stream.Receive(&req); err != nil {
+				_ = stream.CloseSend(err)
+				return
 			}
-			return svc.Ping(ctx, typed)
+			res, err := pingFunc(ctx, &req)
+			if err != nil {
+				_ = stream.CloseSend(err)
+				return
+			}
+			_ = stream.CloseSend(stream.Send(res))
 		}),
 		opts...,
 	)
-	mux.Handle("/internal.crosstest.v1test.CrossService/Ping", ping)
+	mux.Handle(ping.Path(), ping)
 
+	failFunc := rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		typed, ok := req.(*FailRequest)
+		if !ok {
+			return nil, rerpc.Errorf(
+				rerpc.CodeInternal,
+				"can't call internal.crosstest.v1test.CrossService.Fail with a %v",
+				req.ProtoReflect().Descriptor().FullName(),
+			)
+		}
+		return svc.Fail(ctx, typed)
+	})
+	if ic != nil {
+		failFunc = ic.Wrap(failFunc)
+	}
 	fail := rerpc.NewHandler(
-		"internal.crosstest.v1test.CrossService.Fail",  // fully-qualified protobuf method
-		"internal.crosstest.v1test.CrossService",       // fully-qualified protobuf service
-		"internal.crosstest.v1test",                    // fully-qualified protobuf package
-		func() proto.Message { return &FailRequest{} }, // request msg constructor
-		rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
-			typed, ok := req.(*FailRequest)
-			if !ok {
-				return nil, rerpc.Errorf(
-					rerpc.CodeInternal,
-					"error in generated code: expected req to be a *FailRequest, got a %T",
-					req,
-				)
+		"internal.crosstest.v1test", // protobuf package
+		"CrossService",              // protobuf service
+		"Fail",                      // protobuf method
+		rerpc.HandlerStreamFunc(func(ctx context.Context, stream rerpc.Stream) {
+			defer stream.CloseReceive()
+			var req FailRequest
+			if err := stream.Receive(&req); err != nil {
+				_ = stream.CloseSend(err)
+				return
 			}
-			return svc.Fail(ctx, typed)
+			res, err := failFunc(ctx, &req)
+			if err != nil {
+				_ = stream.CloseSend(err)
+				return
+			}
+			_ = stream.CloseSend(stream.Send(res))
 		}),
 		opts...,
 	)
-	mux.Handle("/internal.crosstest.v1test.CrossService/Fail", fail)
+	mux.Handle(fail.Path(), fail)
 
 	// Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.
 	mux.Handle("/", rerpc.NewBadRouteHandler(opts...))
 
-	return "/internal.crosstest.v1test.CrossService/", mux
+	return fail.ServicePath(), mux
 }
 
 var _ CrossServiceReRPC = (*UnimplementedCrossServiceReRPC)(nil) // verify interface implementation

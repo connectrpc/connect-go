@@ -138,7 +138,7 @@ func testWithReRPCClient(t *testing.T, client crosspb.CrossServiceClientReRPC) {
 		_, err := client.Ping(ctx, req)
 		rerr := assertErrorReRPC(t, err, "deadline exceeded error")
 		assert.Equal(t, rerr.Code(), rerpc.CodeDeadlineExceeded, "error code")
-		assert.Equal(t, rerr.Error(), "DeadlineExceeded: context deadline exceeded", "error message")
+		assert.ErrorIs(t, rerr, context.DeadlineExceeded, "error unwraps to context.DeadlineExceeded")
 	})
 }
 

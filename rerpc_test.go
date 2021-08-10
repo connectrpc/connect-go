@@ -305,54 +305,41 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.True(t, reg.IsRegistered(pingFQN), "ping service registered")
 			assert.False(t, reg.IsRegistered(unknown), "unknown service registered")
 
-			healthPFQN := "grpc.health.v1"
-			healthFQN := healthPFQN + ".Health"
-			callCheck := func(req *healthpb.HealthCheckRequest, opts ...rerpc.CallOption) (*healthpb.HealthCheckResponse, error) {
-				client := rerpc.NewClient(
-					doer,
-					url+"/grpc.health.v1.Health/Check",
-					healthFQN+".Check",
-					healthFQN,
-					healthPFQN,
-					func() proto.Message { return &healthpb.HealthCheckResponse{} },
-				)
-				res, err := client.Call(context.Background(), req, opts...)
-				if err != nil {
+			callHealth := func(method string, req *healthpb.HealthCheckRequest, opts ...rerpc.CallOption) (*healthpb.HealthCheckResponse, error) {
+				client := rerpc.NewClient(doer, url, "grpc.health.v1", "Health", method)
+				stream := client.Call(context.Background(), opts...)
+				if err := stream.Send(req); err != nil {
+					_ = stream.CloseSend(err)
+					_ = stream.CloseReceive()
 					return nil, err
 				}
-				return res.(*healthpb.HealthCheckResponse), nil
-			}
-			callWatch := func(req *healthpb.HealthCheckRequest, opts ...rerpc.CallOption) (*healthpb.HealthCheckResponse, error) {
-				client := rerpc.NewClient(
-					doer,
-					url+"/grpc.health.v1.Health/Watch",
-					healthFQN+".Watch",
-					healthFQN,
-					healthPFQN,
-					func() proto.Message { return &healthpb.HealthCheckResponse{} },
-				)
-				res, err := client.Call(context.Background(), req, opts...)
-				if err != nil {
+				if err := stream.CloseSend(nil); err != nil {
+					_ = stream.CloseReceive()
 					return nil, err
 				}
-				return res.(*healthpb.HealthCheckResponse), nil
+				var res healthpb.HealthCheckResponse
+				if err := stream.Receive(&res); err != nil {
+					_ = stream.CloseReceive()
+					return nil, err
+				}
+				return &res, stream.CloseReceive()
 			}
 
 			t.Run("process", func(t *testing.T) {
 				req := &healthpb.HealthCheckRequest{}
-				res, err := callCheck(req, opts...)
+				res, err := callHealth("Check", req, opts...)
 				assert.Nil(t, err, "rpc error")
 				assert.Equal(t, rerpc.HealthStatus(res.Status), rerpc.HealthServing, "status")
 			})
 			t.Run("known", func(t *testing.T) {
 				req := &healthpb.HealthCheckRequest{Service: pingFQN}
-				res, err := callCheck(req, opts...)
+				res, err := callHealth("Check", req, opts...)
 				assert.Nil(t, err, "rpc error")
 				assert.Equal(t, rerpc.HealthStatus(res.Status), rerpc.HealthServing, "status")
 			})
 			t.Run("unknown", func(t *testing.T) {
 				req := &healthpb.HealthCheckRequest{Service: unknown}
-				_, err := callCheck(req, opts...)
+				_, err := callHealth("Check", req, opts...)
 				assert.NotNil(t, err, "rpc error")
 				rerr, ok := rerpc.AsError(err)
 				assert.True(t, ok, "convert to rerpc error")
@@ -360,7 +347,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			})
 			t.Run("watch", func(t *testing.T) {
 				req := &healthpb.HealthCheckRequest{Service: pingFQN}
-				_, err := callWatch(req, opts...)
+				_, err := callHealth("Watch", req, opts...)
 				assert.NotNil(t, err, "rpc error")
 				rerr, ok := rerpc.AsError(err)
 				assert.True(t, ok, "convert to rerpc error")
@@ -369,9 +356,6 @@ func TestServerProtoGRPC(t *testing.T) {
 		})
 	}
 	testReflection := func(t *testing.T, url string, doer rerpc.Doer, opts ...rerpc.CallOption) {
-		const reflectPFQN = "grpc.reflection.v1alpha"
-		const reflectSFQN = reflectPFQN + ".ServerReflection"
-		const reflectFQN = reflectSFQN + ".ServerReflectionInfo"
 		pingRequestFQN := string((&pingpb.PingRequest{}).ProtoReflect().Descriptor().FullName())
 		assert.Equal(t, reg.Services(), []string{
 			"grpc.health.v1.Health",
@@ -380,19 +364,23 @@ func TestServerProtoGRPC(t *testing.T) {
 		}, "services registered in memory")
 
 		callReflect := func(req *reflectionpb.ServerReflectionRequest, opts ...rerpc.CallOption) (*reflectionpb.ServerReflectionResponse, error) {
-			client := rerpc.NewClient(
-				doer,
-				url+"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
-				reflectFQN,
-				reflectSFQN,
-				reflectPFQN,
-				func() proto.Message { return &reflectionpb.ServerReflectionResponse{} },
-			)
-			res, err := client.Call(context.Background(), req, opts...)
-			if err != nil {
+			client := rerpc.NewClient(doer, url, "grpc.reflection.v1alpha", "ServerReflection", "ServerReflectionInfo")
+			stream := client.Call(context.Background(), opts...)
+			if err := stream.Send(req); err != nil {
+				_ = stream.CloseSend(err)
+				_ = stream.CloseReceive()
 				return nil, err
 			}
-			return res.(*reflectionpb.ServerReflectionResponse), nil
+			if err := stream.CloseSend(nil); err != nil {
+				_ = stream.CloseReceive()
+				return nil, err
+			}
+			var res reflectionpb.ServerReflectionResponse
+			if err := stream.Receive(&res); err != nil {
+				_ = stream.CloseReceive()
+				return nil, err
+			}
+			return &res, stream.CloseReceive()
 		}
 		t.Run("list_services", func(t *testing.T) {
 			req := &reflectionpb.ServerReflectionRequest{

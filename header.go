@@ -124,7 +124,6 @@ func percentDecodeSlow(encoded string, offset int) string {
 		}
 		parsed, err := strconv.ParseUint(encoded[i+1:i+3], 16 /* hex */, 8 /* bitsize */)
 		if err != nil {
-			fmt.Println(err)
 			out.WriteRune(utf8.RuneError)
 		} else {
 			out.WriteByte(byte(parsed))

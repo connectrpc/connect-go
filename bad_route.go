@@ -12,16 +12,24 @@ import (
 // Twirp specification, mount this handler at the root of your API (so that it
 // handles any requests for invalid protobuf methods).
 func NewBadRouteHandler(opts ...HandlerOption) *Handler {
+	wrapped := Func(badRouteUnaryImpl)
+	if ic := ConfiguredHandlerInterceptor(opts...); ic != nil {
+		wrapped = ic.Wrap(wrapped)
+	}
 	return NewHandler(
-		"", "", "", // protobuf method, service, package names
-		func() proto.Message { return &emptypb.Empty{} }, // unused req msg
-		func(ctx context.Context, _ proto.Message) (proto.Message, error) {
-			path := "???"
-			if md, ok := HandlerMeta(ctx); ok {
-				path = md.Spec.Path
-			}
-			return nil, Wrap(CodeNotFound, newBadRouteError(path))
+		"", "", "", // protobuf package, service, method names
+		func(ctx context.Context, stream Stream) {
+			defer stream.CloseReceive()
+			_, err := wrapped(ctx, &emptypb.Empty{})
+			_ = stream.CloseSend(err)
 		},
-		opts...,
 	)
+}
+
+func badRouteUnaryImpl(ctx context.Context, _ proto.Message) (proto.Message, error) {
+	path := "???"
+	if md, ok := HandlerMeta(ctx); ok {
+		path = md.Spec.Path
+	}
+	return nil, Wrap(CodeNotFound, newBadRouteError(path))
 }

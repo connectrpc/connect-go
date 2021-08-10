@@ -18,6 +18,11 @@ const (
 	stringsPackage = protogen.GoImportPath("strings")
 )
 
+var (
+	contextContext = contextPackage.Ident("Context")
+	protoMessage   = protoPackage.Ident("Message")
+)
+
 func deprecated(g *protogen.GeneratedFile) {
 	comment(g, "// Deprecated: do not use.")
 }
@@ -111,7 +116,7 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method) string 
 	if method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated() {
 		deprecated(g)
 	}
-	return method.GoName + "(ctx " + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
+	return method.GoName + "(ctx " + g.QualifiedGoIdent(contextContext) +
 		", req *" + g.QualifiedGoIdent(method.Input.GoIdent) +
 		", opts ..." + g.QualifiedGoIdent(rerpcPackage.Ident("CallOption")) + ") " +
 		"(*" + g.QualifiedGoIdent(method.Output.GoIdent) + ", error)"
@@ -123,6 +128,7 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	for _, method := range unaryMethods(service) {
 		g.P(unexport(method.GoName), " ", rerpcPackage.Ident("Client"))
 	}
+	g.P("options []", rerpcPackage.Ident("CallOption"))
 	g.P("}")
 	g.P()
 
@@ -131,7 +137,7 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		" service. Call options passed here apply to all calls made with this client.")
 	g.P("//")
 	comment(g, "The URL supplied here should be the base URL for the gRPC server ",
-		"(e.g., https://api.acme.com or https://acme.com/api/grpc).")
+		"(e.g., https://api.acme.com or https://acme.com/grpc).")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
@@ -141,17 +147,16 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
 	g.P("return &", unexport(name), "{")
 	for _, method := range unaryMethods(service) {
-		path := fmt.Sprintf("%s/%s", service.Desc.FullName(), method.Desc.Name())
 		g.P(unexport(method.GoName), ": *", rerpcPackage.Ident("NewClient"), "(")
 		g.P("doer,")
-		g.P(`baseURL + "/`, path, `", // complete URL to call method`)
-		g.P(`"`, method.Desc.FullName(), `", // fully-qualified protobuf method`)
-		g.P(`"`, service.Desc.FullName(), `", // fully-qualified protobuf service`)
-		g.P(`"`, service.Desc.ParentFile().Package(), `", // fully-qualified protobuf package`)
-		g.P("func() proto.Message { return &", method.Output.GoIdent, "{} }, // response constructor")
+		g.P("baseURL,")
+		g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
+		g.P(`"`, service.Desc.Name(), `", // protobuf service`)
+		g.P(`"`, method.Desc.Name(), `", // protobuf method`)
 		g.P("opts...,")
 		g.P("),")
 	}
+	g.P("options: opts,")
 	g.P("}")
 	g.P("}")
 	g.P()
@@ -170,11 +175,38 @@ func clientMethod(g *protogen.GeneratedFile, method *protogen.Method) {
 		deprecated(g)
 	}
 	g.P("func (c *", unexport(method.Parent.GoName), "ClientReRPC) ", clientSignature(g, method), "{")
-	g.P("res, err := c.", unexport(method.GoName), ".Call(ctx, req, opts...)")
+	g.P("wrapped := ", rerpcPackage.Ident("Func"), "(func(ctx ", contextContext, ", msg ", protoMessage, ") (", protoMessage, ", error) {")
+	g.P("stream := c.", unexport(method.GoName), ".Call(ctx, opts...)")
+	g.P("if err := stream.Send(req); err != nil {")
+	g.P("_ = stream.CloseSend(err)")
+	g.P("_ = stream.CloseReceive()")
+	g.P("return nil, err")
+	g.P("}")
+	g.P("if err := stream.CloseSend(nil); err != nil {")
+	g.P("_ = stream.CloseReceive()")
+	g.P("return nil, err")
+	g.P("}")
+	g.P("var res ", method.Output.GoIdent)
+	g.P("if err := stream.Receive(&res); err != nil {")
+	g.P("_ = stream.CloseReceive()")
+	g.P("return nil, err")
+	g.P("}")
+	g.P("return &res, stream.CloseReceive()")
+	g.P("})")
+	g.P("mergedOpts := append([]", rerpcPackage.Ident("CallOption"), "{}, c.options...)")
+	g.P("mergedOpts = append(mergedOpts, opts...)")
+	g.P("if ic := ", rerpcPackage.Ident("ConfiguredCallInterceptor"), "(mergedOpts...); ic != nil {")
+	g.P("wrapped = ic.Wrap(wrapped)")
+	g.P("}")
+	g.P("res, err := wrapped(c.", unexport(method.GoName), ".Context(ctx, opts...), req)")
 	g.P("if err != nil {")
 	g.P("return nil, err")
 	g.P("}")
-	g.P("return res.(*", method.Output.GoIdent, "), nil")
+	g.P("typed, ok := res.(*", method.Output.GoIdent, ")")
+	g.P("if !ok {")
+	g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(", rerpcPackage.Ident("CodeInternal"), `, "expected response to be `, method.Output.Desc.FullName(), `, got %v", res.ProtoReflect().Descriptor().FullName())`)
+	g.P("}")
+	g.P("return typed, nil")
 	g.P("}")
 	g.P()
 }
@@ -206,13 +238,12 @@ func serverSignature(g *protogen.GeneratedFile, method *protogen.Method) string 
 	if method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated() {
 		deprecated(g)
 	}
-	return method.GoName + "(" + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
+	return method.GoName + "(" + g.QualifiedGoIdent(contextContext) +
 		", *" + g.QualifiedGoIdent(method.Input.GoIdent) + ") " +
 		"(*" + g.QualifiedGoIdent(method.Output.GoIdent) + ", error)"
 }
 
 func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, name string) {
-	sname := service.Desc.FullName()
 	comment(g, "New", service.GoName, "HandlerReRPC wraps the service implementation",
 		" in an HTTP handler. It returns the handler and the path on which to mount it.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
@@ -222,37 +253,54 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 	g.P("func New", service.GoName, "HandlerReRPC(svc ", name, ", opts ...", rerpcPackage.Ident("HandlerOption"),
 		") (string, *", httpPackage.Ident("ServeMux"), ") {")
 	g.P("mux := ", httpPackage.Ident("NewServeMux"), "()")
+	g.P("ic := ", rerpcPackage.Ident("ConfiguredHandlerInterceptor"), "(opts...)")
 	g.P()
+	lastHandlerName := ""
 	for _, method := range unaryMethods(service) {
-		path := fmt.Sprintf("%s/%s", sname, method.Desc.Name())
 		hname := unexport(string(method.Desc.Name()))
-		g.P(hname, " := ", rerpcPackage.Ident("NewHandler"), "(")
-		g.P(`"`, method.Desc.FullName(), `", // fully-qualified protobuf method`)
-		g.P(`"`, service.Desc.FullName(), `", // fully-qualified protobuf service`)
-		g.P(`"`, service.Desc.ParentFile().Package(), `", // fully-qualified protobuf package`)
-		g.P("func() ", protoPackage.Ident("Message"), " { return &", method.Input.GoIdent, "{} }, // request msg constructor")
-		g.P(rerpcPackage.Ident("Func"), "(func(ctx ", contextPackage.Ident("Context"),
-			", req ", protoPackage.Ident("Message"), ") (",
-			protoPackage.Ident("Message"), ", error) {")
+		wrapped := hname + "Func"
+		lastHandlerName = hname
+		g.P(wrapped, " := ", rerpcPackage.Ident("Func"), "(func(ctx ", contextContext, ", req ", protoMessage, ") (", protoMessage, ", error) {")
 		g.P("typed, ok := req.(*", method.Input.GoIdent, ")")
 		g.P("if !ok {")
 		g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(")
 		g.P(rerpcPackage.Ident("CodeInternal"), ",")
-		g.P(`"error in generated code: expected req to be a *`, method.Input.GoIdent, `, got a %T",`)
-		g.P("req,")
+		g.P(`"can't call `, method.Desc.FullName(), ` with a %v",`)
+		g.P("req.ProtoReflect().Descriptor().FullName(),")
 		g.P(")")
 		g.P("}")
 		g.P("return svc.", method.GoName, "(ctx, typed)")
+		g.P("})")
+		g.P("if ic != nil {")
+		g.P(wrapped, " = ic.Wrap(", wrapped, ")")
+		g.P("}")
+		g.P(hname, " := ", rerpcPackage.Ident("NewHandler"), "(")
+		g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
+		g.P(`"`, service.Desc.Name(), `", // protobuf service`)
+		g.P(`"`, method.Desc.Name(), `", // protobuf method`)
+		g.P(rerpcPackage.Ident("HandlerStreamFunc"), "(func(ctx ", contextContext, ", stream ", rerpcPackage.Ident("Stream"), ") {")
+		g.P("defer stream.CloseReceive()")
+		g.P("var req ", method.Input.GoIdent)
+		g.P("if err := stream.Receive(&req); err != nil {")
+		g.P(" _ = stream.CloseSend(err)")
+		g.P("return")
+		g.P("}")
+		g.P("res, err := ", wrapped, "(ctx, &req)")
+		g.P("if err != nil {")
+		g.P("_ = stream.CloseSend(err)")
+		g.P("return")
+		g.P("}")
+		g.P("_ = stream.CloseSend(stream.Send(res))")
 		g.P("}),")
 		g.P("opts...,")
 		g.P(")")
-		g.P(`mux.Handle("/`, path, `", `, hname, ")")
+		g.P("mux.Handle(", hname, ".Path(), ", hname, ")")
 		g.P()
 	}
 	comment(g, "Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.")
 	g.P(`mux.Handle("/", `, rerpcPackage.Ident("NewBadRouteHandler"), "(opts...))")
 	g.P()
-	g.P(`return "/`, sname, `/", mux`)
+	g.P("return ", lastHandlerName, ".ServicePath(), mux")
 	g.P("}")
 	g.P()
 }

@@ -29,7 +29,7 @@ func ExampleCallMetadata() {
 	client.Ping(context.Background(), &pingpb.PingRequest{})
 
 	// Output:
-	// calling internal.ping.v1test.PingService.Ping
+	// calling Ping
 }
 
 func ExampleChain() {

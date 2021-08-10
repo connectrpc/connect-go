@@ -60,53 +60,69 @@ func NewChecker(reg *Registrar) func(context.Context, string) (HealthStatus, err
 //   https://github.com/grpc/grpc/blob/master/doc/health-checking.md
 //   https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto
 func NewHealthHandler(
-	check func(context.Context, string) (HealthStatus, error),
+	checker func(context.Context, string) (HealthStatus, error),
 	opts ...HandlerOption,
 ) (string, *http.ServeMux) {
-	const packageFQN = "grpc.health.v1"
-	const serviceFQN = packageFQN + ".Health"
-	const checkFQN = serviceFQN + ".Check"
-	const watchFQN = serviceFQN + ".Watch"
-	const servicePath = "/" + serviceFQN + "/"
-	const checkPath = servicePath + "Check"
-	const watchPath = servicePath + "Watch"
-
 	mux := http.NewServeMux()
-	checkHandler := NewHandler(
-		checkFQN, serviceFQN, packageFQN,
-		func() proto.Message { return &healthpb.HealthCheckRequest{} },
-		func(ctx context.Context, req proto.Message) (proto.Message, error) {
-			typed, ok := req.(*healthpb.HealthCheckRequest)
-			if !ok {
-				return nil, errorf(
-					CodeInternal,
-					"can't call %s/Check with a %v",
-					serviceFQN,
-					req.ProtoReflect().Descriptor().FullName(),
-				)
+
+	checkImplementation := Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		typed, ok := req.(*healthpb.HealthCheckRequest)
+		if !ok {
+			return nil, errorf(
+				CodeInternal,
+				"can't call grpc.health.v1.Health.Check with a %v",
+				req.ProtoReflect().Descriptor().FullName(),
+			)
+		}
+		status, err := checker(ctx, typed.Service)
+		if err != nil {
+			return nil, err
+		}
+		return &healthpb.HealthCheckResponse{
+			Status: healthpb.HealthCheckResponse_ServingStatus(status),
+		}, nil
+	})
+
+	watchImplementation := HandlerStreamFunc(func(_ context.Context, stream Stream) {
+		defer stream.CloseReceive()
+		_ = stream.CloseSend(errorf(
+			CodeUnimplemented,
+			"reRPC doesn't support watching health state",
+		))
+	})
+
+	if ic := ConfiguredHandlerInterceptor(opts...); ic != nil {
+		checkImplementation = ic.Wrap(checkImplementation)
+		// TODO: apply stream interceptor
+	}
+
+	check := NewHandler(
+		"grpc.health.v1", "Health", "Check",
+		HandlerStreamFunc(func(ctx context.Context, stream Stream) {
+			defer stream.CloseReceive()
+			var req healthpb.HealthCheckRequest
+			if err := stream.Receive(&req); err != nil {
+				_ = stream.CloseSend(err)
+				return
 			}
-			status, err := check(ctx, typed.Service)
+			res, err := checkImplementation(ctx, &req)
 			if err != nil {
-				return nil, err
+				_ = stream.CloseSend(err)
+				return
 			}
-			return &healthpb.HealthCheckResponse{
-				Status: healthpb.HealthCheckResponse_ServingStatus(status),
-			}, nil
-		},
+			_ = stream.CloseSend(stream.Send(res))
+		}),
 		opts...,
 	)
-	mux.Handle(checkPath, checkHandler)
+	mux.Handle(check.Path(), check)
 
 	watch := NewHandler(
-		watchFQN, serviceFQN, packageFQN,
-		func() proto.Message { return &healthpb.HealthCheckRequest{} },
-		func(ctx context.Context, req proto.Message) (proto.Message, error) {
-			return nil, errorf(CodeUnimplemented, "reRPC doesn't support watching health state")
-		},
+		"grpc.health.v1", "Health", "Watch",
+		watchImplementation,
 		opts...,
 	)
-	mux.Handle(watchPath, watch)
-	mux.Handle("/", NewBadRouteHandler(opts...))
+	mux.Handle(watch.Path(), watch)
 
-	return servicePath, mux
+	mux.Handle("/", NewBadRouteHandler(opts...))
+	return watch.ServicePath(), mux
 }

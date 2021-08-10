@@ -27,6 +27,26 @@ type Interceptor interface {
 	Wrap(Func) Func
 }
 
+// ConfiguredCallInterceptor returns the Interceptor configured by a collection
+// of call options (if any). It's used in generated code.
+func ConfiguredCallInterceptor(opts ...CallOption) Interceptor {
+	var cfg callCfg
+	for _, o := range opts {
+		o.applyToCall(&cfg)
+	}
+	return cfg.Interceptor
+}
+
+// ConfiguredHandlerInterceptor returns the Interceptor configured by a collection
+// of handler options (if any). It's used in generated code.
+func ConfiguredHandlerInterceptor(opts ...HandlerOption) Interceptor {
+	var cfg handlerCfg
+	for _, o := range opts {
+		o.applyToHandler(&cfg)
+	}
+	return cfg.Interceptor
+}
+
 // ShortCircuit builds an interceptor that doesn't call the wrapped Func.
 // Instead, it returns the supplied Error immediately.
 //

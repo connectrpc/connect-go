@@ -24,6 +24,8 @@ type Registrar struct {
 	services map[string]struct{}
 }
 
+var _ HandlerOption = (*Registrar)(nil)
+
 // NewRegistrar constructs an empty Registrar.
 func NewRegistrar() *Registrar {
 	return &Registrar{services: make(map[string]struct{})}
@@ -53,15 +55,16 @@ func (r *Registrar) IsRegistered(service string) bool {
 	return ok
 }
 
-// Registers a fully-qualified protobuf service name. Safe to call
+// Registers a protobuf package and service combination. Safe to call
 // concurrently.
-func (r *Registrar) register(service string) {
-	if service == "" {
+func (r *Registrar) register(pkg, service string) {
+	if pkg == "" || service == "" {
 		// Typically BadRouteHandler.
 		return
 	}
+	fqn := pkg + "." + service
 	r.mu.Lock()
-	r.services[service] = struct{}{}
+	r.services[fqn] = struct{}{}
 	r.mu.Unlock()
 }
 
@@ -83,67 +86,67 @@ func (r *Registrar) applyToHandler(cfg *handlerCfg) {
 //   https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md
 //   https://github.com/grpc/grpc/blob/master/doc/server-reflection.md
 //   https://github.com/fullstorydev/grpcurl
-func NewReflectionHandler(reg *Registrar) (string, *http.ServeMux) {
-	const packageFQN = "grpc.reflection.v1alpha"
-	const serviceFQN = packageFQN + ".ServerReflection"
+func NewReflectionHandler(reg *Registrar, opts ...HandlerOption) (string, *http.ServeMux) {
+	const pkg = "grpc.reflection.v1alpha"
+	const service = "ServerReflection"
 	const method = "ServerReflectionInfo"
-	const methodFQN = serviceFQN + "." + method
-	const servicePath = "/" + serviceFQN + "/"
-	const methodPath = servicePath + method
-	reg.register(serviceFQN)
+	opts = append(opts, reg, ServeTwirp(false)) // no reflection in Twirp
+	svc := &reflectionServer{reg}
+	wrapped := HandlerStreamFunc(svc.Serve)
+	if i := ConfiguredHandlerInterceptor(opts...); i != nil {
+		fmt.Println("TODO: apply interceptors")
+	}
 	h := NewHandler(
-		methodFQN, serviceFQN, packageFQN,
-		func() proto.Message { return nil },
-		nil,               // no unary implementation
-		ServeTwirp(false), // no reflection in Twirp
+		pkg, service, method,
+		wrapped,
+		opts...,
 	)
-	raw := &rawReflectionHandler{reg}
-	h.stream = raw.rawGRPC
-
 	mux := http.NewServeMux()
-	mux.Handle(methodPath, h)
+	mux.Handle(h.Path(), h)
 	mux.Handle("/", NewBadRouteHandler())
-	return servicePath, mux
+	return h.ServicePath(), mux
 }
 
-type rawReflectionHandler struct {
+type reflectionServer struct {
 	reg *Registrar
 }
 
-func (rh *rawReflectionHandler) rawGRPC(ctx context.Context, w http.ResponseWriter, r *http.Request, requestCompression, responseCompression string, hooks *Hooks) {
-	if r.ProtoMajor < 2 {
-		w.WriteHeader(http.StatusHTTPVersionNotSupported)
-		io.WriteString(w, "bidirectional streaming requires HTTP/2")
-		return
-	}
+func (rs *reflectionServer) Serve(ctx context.Context, stream Stream) {
+	defer stream.CloseReceive()
 	for {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				_ = stream.CloseSend(wrap(CodeDeadlineExceeded, err))
+			} else if errors.Is(err, context.Canceled) {
+				_ = stream.CloseSend(wrap(CodeCanceled, err))
+			} else {
+				_ = stream.CloseSend(wrap(CodeUnknown, err))
+			}
+			return
+		}
 		var req rpb.ServerReflectionRequest
-		if err := unmarshalLPM(r.Body, &req, requestCompression, 0); err != nil && errors.Is(err, io.EOF) {
-			writeErrorGRPC(ctx, w, nil, hooks)
+		if err := stream.Receive(&req); err != nil && errors.Is(err, io.EOF) {
+			_ = stream.CloseSend(nil)
 			return
 		} else if err != nil {
-			writeErrorGRPC(ctx, w, errorf(CodeUnknown, "can't unmarshal protobuf"), hooks)
+			_ = stream.CloseSend(err)
 			return
 		}
 
-		res, serr := rh.serve(&req)
-		if serr != nil {
-			writeErrorGRPC(ctx, w, serr, hooks)
+		res, err := rs.serve(&req)
+		if err != nil {
+			_ = stream.CloseSend(err)
 			return
 		}
 
-		if err := marshalLPM(ctx, w, res, responseCompression, 0, hooks); err != nil {
-			writeErrorGRPC(ctx, w, errorf(CodeUnknown, "can't marshal protobuf"), hooks)
+		if err := stream.Send(res); err != nil {
+			_ = stream.CloseSend(err)
 			return
-		}
-
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
 		}
 	}
 }
 
-func (rh *rawReflectionHandler) serve(req *rpb.ServerReflectionRequest) (*rpb.ServerReflectionResponse, *Error) {
+func (rs *reflectionServer) serve(req *rpb.ServerReflectionRequest) (*rpb.ServerReflectionResponse, *Error) {
 	// The grpc-go implementation of server reflection uses the APIs from
 	// github.com/google/protobuf, which makes the logic fairly complex. The new
 	// google.golang.org/protobuf/reflect/protoregistry exposes a higher-level
@@ -219,7 +222,7 @@ func (rh *rawReflectionHandler) serve(req *rpb.ServerReflectionRequest) (*rpb.Se
 			}
 		}
 	case *rpb.ServerReflectionRequest_ListServices:
-		services := rh.reg.Services()
+		services := rs.reg.Services()
 		serviceResponses := make([]*rpb.ServiceResponse, len(services))
 		for i, n := range services {
 			serviceResponses[i] = &rpb.ServiceResponse{
