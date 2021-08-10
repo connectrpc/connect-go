@@ -72,14 +72,15 @@ func ServeTwirp(enable bool) HandlerOption {
 // To see an example of how Handler is used in the generated code, see the
 // internal/pingpb/v0 package.
 type Handler struct {
-	methodFQN      string
-	serviceFQN     string
-	packageFQN     string
-	newRequest     func() proto.Message
-	implementation Func
-	// rawGRPC is used only for our hand-rolled reflection handler, which needs
-	// bidi streaming
-	rawGRPC func(
+	methodFQN  string
+	serviceFQN string
+	packageFQN string
+	newRequest func() proto.Message
+	config     handlerCfg
+
+	// Handlers must either unary or stream, but not both.
+	unary  Func
+	stream func(
 		context.Context,
 		http.ResponseWriter,
 		*http.Request,
@@ -87,7 +88,6 @@ type Handler struct {
 		string, // response compression
 		*Hooks,
 	)
-	config handlerCfg
 }
 
 // NewHandler constructs a Handler. The supplied method, service, and package
@@ -117,12 +117,12 @@ func NewHandler(
 		reg.register(serviceFQN)
 	}
 	return &Handler{
-		methodFQN:      methodFQN,
-		serviceFQN:     serviceFQN,
-		packageFQN:     packageFQN,
-		newRequest:     newRequest,
-		implementation: impl,
-		config:         cfg,
+		methodFQN:  methodFQN,
+		serviceFQN: serviceFQN,
+		packageFQN: packageFQN,
+		newRequest: newRequest,
+		unary:      impl,
+		config:     cfg,
 	}
 }
 
@@ -247,17 +247,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := NewHandlerContext(r.Context(), *spec, r.Header, w.Header())
-	var implementation Func
+	var unary Func
 	if failed != nil {
-		implementation = Func(func(context.Context, proto.Message) (proto.Message, error) {
+		unary = Func(func(context.Context, proto.Message) (proto.Message, error) {
 			return nil, failed
 		})
 	} else if spec.ContentType == TypeJSON || spec.ContentType == TypeProtoTwirp {
-		implementation = h.implementationTwirp(w, r, spec)
+		unary = h.implementationTwirp(w, r, spec)
 	} else {
-		implementation = h.implementationGRPC(w, r, spec)
+		unary = h.implementationGRPC(w, r, spec)
 	}
-	res, err := h.wrap(implementation)(ctx, h.newRequest())
+	res, err := h.wrap(unary)(ctx, h.newRequest())
 	h.writeResult(r.Context(), w, spec, res, err)
 }
 
@@ -287,20 +287,20 @@ func (h *Handler) implementationTwirp(w http.ResponseWriter, r *http.Request, sp
 				return nil, wrap(CodeInvalidArgument, newMalformedError("can't unmarshal Twirp protobuf body"))
 			}
 		}
-		return h.implementation(ctx, req)
+		return h.unary(ctx, req)
 	})
 }
 
 func (h *Handler) implementationGRPC(w http.ResponseWriter, r *http.Request, spec *Specification) Func {
 	return Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
-		if raw := h.rawGRPC; raw != nil {
-			raw(ctx, w, r, spec.RequestCompression, spec.ResponseCompression, h.config.Hooks)
+		if s := h.stream; s != nil {
+			s(ctx, w, r, spec.RequestCompression, spec.ResponseCompression, h.config.Hooks)
 			return nil, nil
 		}
 		if err := unmarshalLPM(r.Body, req, spec.RequestCompression, h.config.MaxRequestBytes); err != nil {
 			return nil, errorf(CodeInvalidArgument, "can't unmarshal protobuf body")
 		}
-		return h.implementation(ctx, req)
+		return h.unary(ctx, req)
 	})
 }
 

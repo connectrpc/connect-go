@@ -98,7 +98,7 @@ func NewReflectionHandler(reg *Registrar) (string, *http.ServeMux) {
 		ServeTwirp(false), // no reflection in Twirp
 	)
 	raw := &rawReflectionHandler{reg}
-	h.rawGRPC = raw.rawGRPC
+	h.stream = raw.rawGRPC
 
 	mux := http.NewServeMux()
 	mux.Handle(methodPath, h)
