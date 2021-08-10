@@ -225,7 +225,7 @@ func extractError(h http.Header) *Error {
 		return nil
 	}
 
-	code, err := strconv.Atoi(codeHeader)
+	code, err := strconv.ParseUint(codeHeader, 10 /* base */, 32 /* bitsize */)
 	if err != nil {
 		return errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
 	}
