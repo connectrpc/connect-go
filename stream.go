@@ -28,22 +28,15 @@ type Stream interface {
 	CloseReceive() error
 }
 
-type exchange struct {
-	msg  proto.Message
-	errs chan error
-}
-
 type clientStream struct {
 	ctx          context.Context
 	doer         Doer
 	url          string
 	maxReadBytes int64
 
-	// send goroutine
-	sendCh     chan *exchange
-	sendClosed chan struct{}
-	writer     *io.PipeWriter
-	marshaler  marshaler
+	// send
+	writer    *io.PipeWriter
+	marshaler marshaler
 
 	// receive goroutine
 	reader        *io.PipeReader
@@ -68,14 +61,11 @@ func newClientStream(
 		doer:          doer,
 		url:           url,
 		maxReadBytes:  maxReadBytes,
-		sendCh:        make(chan *exchange),
-		sendClosed:    make(chan struct{}),
 		writer:        pw,
 		marshaler:     marshaler{w: pw, ctype: TypeDefaultGRPC, gzipGRPC: gzipRequest},
 		reader:        pr,
 		responseReady: make(chan struct{}),
 	}
-	go stream.startSendLoop()
 	requestPrepared := make(chan struct{})
 	go stream.makeRequest(requestPrepared)
 	<-requestPrepared
@@ -83,31 +73,23 @@ func newClientStream(
 }
 
 func (cs *clientStream) Send(msg proto.Message) error {
-	errs := make(chan error)
-	cs.sendCh <- &exchange{msg, errs}
-	return <-errs
-}
-
-func (cs *clientStream) CloseSend(_ error) error {
-	close(cs.sendCh)
-	<-cs.sendClosed
-	if err := cs.writer.Close(); err != nil {
-		return wrap(CodeUnknown, err)
+	if err := cs.marshaler.Marshal(msg); err != nil {
+		// If the server has already sent us an error (or the request has failed
+		// in some other way), we'll get that error here.
+		return err
 	}
+	// don't return typed nils
 	return nil
 }
 
-func (cs *clientStream) startSendLoop() {
-	defer close(cs.sendClosed)
-	for xc := range cs.sendCh {
-		if err := cs.marshaler.Marshal(xc.msg); err != nil {
-			// If the server has already sent us an error (or the request has failed
-			// in some other way), we'll get that error here.
-			xc.errs <- err
-		} else {
-			xc.errs <- nil
+func (cs *clientStream) CloseSend(_ error) error {
+	if err := cs.writer.Close(); err != nil {
+		if rerr, ok := AsError(err); ok {
+			return rerr
 		}
+		return wrap(CodeUnknown, err)
 	}
+	return nil
 }
 
 func (cs *clientStream) Receive(msg proto.Message) error {
@@ -168,7 +150,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 
 	req, err := http.NewRequestWithContext(cs.ctx, http.MethodPost, cs.url, cs.reader)
 	if err != nil {
-		cs.setResponseError(wrap(CodeUnknown, err))
+		cs.setResponseError(errorf(CodeUnknown, "construct *http.Request: %w", err))
 		close(prepared)
 		return
 	}
@@ -277,12 +259,16 @@ func (ss *serverStream) Receive(msg proto.Message) error {
 	if err := ss.unmarshaler.Unmarshal(msg); err != nil {
 		return err // already coded
 	}
+	// don't return typed nils
 	return nil
 }
 
 func (ss *serverStream) CloseReceive() error {
 	io.Copy(io.Discard, ss.reader)
 	if err := ss.reader.Close(); err != nil {
+		if rerr, ok := AsError(err); ok {
+			return rerr
+		}
 		return wrap(CodeUnknown, err)
 	}
 	return nil
@@ -293,6 +279,7 @@ func (ss *serverStream) Send(msg proto.Message) error {
 	if err := ss.marshaler.Marshal(msg); err != nil {
 		return err
 	}
+	// don't return typed nils
 	return nil
 }
 
@@ -317,16 +304,16 @@ func (ss *serverStream) sendErrorGRPC(err error) error {
 	}
 	s := statusFromError(err)
 	code := strconv.Itoa(int(s.Code))
-	if bin, err := proto.Marshal(s); err != nil {
+	bin, err := proto.Marshal(s)
+	if err != nil {
 		ss.writer.Header().Set("Grpc-Status", strconv.Itoa(int(CodeInternal)))
 		ss.writer.Header().Set("Grpc-Message", percentEncode("error marshaling protobuf status with code "+code))
 		return errorf(CodeInternal, "couldn't marshal protobuf status: %w", err)
-	} else {
-		ss.writer.Header().Set("Grpc-Status", code)
-		ss.writer.Header().Set("Grpc-Message", percentEncode(s.Message))
-		ss.writer.Header().Set("Grpc-Status-Details-Bin", encodeBinaryHeader(bin))
-		return nil
 	}
+	ss.writer.Header().Set("Grpc-Status", code)
+	ss.writer.Header().Set("Grpc-Message", percentEncode(s.Message))
+	ss.writer.Header().Set("Grpc-Status-Details-Bin", encodeBinaryHeader(bin))
+	return nil
 }
 
 func (ss *serverStream) sendErrorTwirp(err error) error {
