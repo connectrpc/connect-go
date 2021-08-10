@@ -318,14 +318,9 @@ func (h *Handler) writeResultTwirp(ctx context.Context, w http.ResponseWriter, s
 	// ResponseWriter.
 	if spec.ResponseCompression == CompressionGzip && w.Header().Get("Content-Encoding") == "" {
 		w.Header().Set("Content-Encoding", "gzip")
-		gw := gzWriterPool.Get().(*gzip.Writer)
-		gw.Reset(w)
+		gw := getGzipWriter(w)
+		defer putGzipWriter(gw)
 		w = &gzipResponseWriter{ResponseWriter: w, gw: gw}
-		defer func() {
-			gw.Close()           // close if we haven't already
-			gw.Reset(io.Discard) // don't keep references
-			gzWriterPool.Put(gw)
-		}()
 	}
 	if err != nil {
 		// Twirp always writes errors as JSON.

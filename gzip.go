@@ -13,6 +13,18 @@ var gzWriterPool = sync.Pool{
 	},
 }
 
+func getGzipWriter(w io.Writer) *gzip.Writer {
+	gw := gzWriterPool.Get().(*gzip.Writer)
+	gw.Reset(w)
+	return gw
+}
+
+func putGzipWriter(gw *gzip.Writer) {
+	gw.Close()           // close if we haven't already
+	gw.Reset(io.Discard) // don't keep references
+	gzWriterPool.Put(gw)
+}
+
 // Verify we're implementing these interfaces at compile time.
 var (
 	_ http.ResponseWriter = &gzipResponseWriter{}
