@@ -103,9 +103,6 @@ func (cs *clientStream) startSendLoop() {
 		if err := cs.marshaler.Marshal(xc.msg); err != nil {
 			// If the server has already sent us an error (or the request has failed
 			// in some other way), we'll get that error here.
-			if _, ok := AsError(err); !ok {
-				err = wrap(CodeUnknown, err)
-			}
 			xc.errs <- err
 		} else {
 			xc.errs <- nil
@@ -127,8 +124,8 @@ func (cs *clientStream) Receive(msg proto.Message) error {
 			cs.setResponseError(serverErr)
 			return serverErr
 		}
-		cs.setResponseError(wrap(CodeUnknown, err))
-		return cs.responseErr
+		cs.setResponseError(err)
+		return err
 	}
 	return nil
 }
@@ -278,7 +275,7 @@ func newServerStream(
 
 func (ss *serverStream) Receive(msg proto.Message) error {
 	if err := ss.unmarshaler.Unmarshal(msg); err != nil {
-		return wrap(CodeInvalidArgument, err)
+		return err // already coded
 	}
 	return nil
 }
@@ -294,8 +291,7 @@ func (ss *serverStream) CloseReceive() error {
 func (ss *serverStream) Send(msg proto.Message) error {
 	defer ss.flush()
 	if err := ss.marshaler.Marshal(msg); err != nil {
-		// we shouldn't ever fail to marshal a proto message
-		return wrap(CodeInternal, err)
+		return err
 	}
 	return nil
 }
