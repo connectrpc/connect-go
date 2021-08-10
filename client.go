@@ -32,7 +32,7 @@ type callCfg struct {
 // A CallOption configures a reRPC client or a single call.
 //
 // In addition to any options grouped in the documentation below, remember that
-// Options are also valid CallOptions.
+// Hooks and Options are also valid CallOptions.
 type CallOption interface {
 	applyToCall(*callCfg)
 }
