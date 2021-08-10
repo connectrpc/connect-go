@@ -41,7 +41,7 @@ func ExampleClient() {
 	// Leave it out in real code!
 	short := rerpc.ShortCircuit(rerpc.Errorf(rerpc.CodeUnimplemented, "no networking in examples"))
 
-	client := pingpb.NewPingServiceClientReRPC("http://invalid-test-url", doer, rerpc.NewChain(short))
+	client := pingpb.NewPingServiceClientReRPC("http://invalid-test-url", doer, rerpc.Intercept(short))
 	res, err := client.Ping(context.Background(), &pingpb.PingRequest{})
 	fmt.Println("Response:", res)
 	fmt.Println("Error:", err)

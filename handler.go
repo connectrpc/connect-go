@@ -42,7 +42,7 @@ type handlerCfg struct {
 // A HandlerOption configures a Handler.
 //
 // In addition to any options grouped in the documentation below, remember that
-// Registrars, Chains, and Options are also valid HandlerOptions.
+// Registrars and Options are also valid HandlerOptions.
 type HandlerOption interface {
 	applyToHandler(*handlerCfg)
 }
