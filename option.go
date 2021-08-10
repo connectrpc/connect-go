@@ -11,6 +11,8 @@ type readMaxBytes struct {
 	Max int
 }
 
+var _ Option = (*readMaxBytes)(nil)
+
 // ReadMaxBytes limits the performance impact of pathologically large messages
 // sent by the other party. For handlers, ReadMaxBytes sets the maximum
 // allowable request size. For clients, ReadMaxBytes sets the maximum allowable
@@ -33,6 +35,8 @@ func (o *readMaxBytes) applyToHandler(cfg *handlerCfg) {
 type gzipOption struct {
 	Enable bool
 }
+
+var _ Option = (*gzipOption)(nil)
 
 // Gzip configures client and server compression strategies.
 //
@@ -57,4 +61,25 @@ func (o *gzipOption) applyToCall(cfg *callCfg) {
 
 func (o *gzipOption) applyToHandler(cfg *handlerCfg) {
 	cfg.DisableGzipResponse = !o.Enable
+}
+
+type interceptOption struct {
+	interceptor Interceptor
+}
+
+var _ Option = (*interceptOption)(nil)
+
+// Intercept configures a client or handler to use the supplied Interceptor.
+// Note that this Option replaces any previously-configured Interceptor - to
+// compose Interceptors, use a Chain.
+func Intercept(interceptor Interceptor) Option {
+	return &interceptOption{interceptor}
+}
+
+func (o *interceptOption) applyToCall(cfg *callCfg) {
+	cfg.Interceptor = o.interceptor
+}
+
+func (o *interceptOption) applyToHandler(cfg *handlerCfg) {
+	cfg.Interceptor = o.interceptor
 }

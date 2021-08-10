@@ -47,18 +47,12 @@ type InterceptorFunc func(Func) Func
 // Wrap implements Interceptor.
 func (f InterceptorFunc) Wrap(next Func) Func { return f(next) }
 
-// A Chain composes multiple interceptors into one. A Chain is an Interceptor,
-// a CallOption, and a HandlerOption. Note that when used as a CallOption or a
-// HandlerOption, a Chain replaces any previously-configured interceptors.
+// A Chain composes multiple interceptors into one.
 type Chain struct {
 	interceptors []Interceptor
 }
 
-var (
-	_ Interceptor   = (*Chain)(nil)
-	_ CallOption    = (*Chain)(nil)
-	_ HandlerOption = (*Chain)(nil)
-)
+var _ Interceptor = (*Chain)(nil)
 
 // NewChain composes multiple interceptors into one. The first interceptor
 // provided is the outermost layer of the onion: it acts first on the context
@@ -77,14 +71,6 @@ func (c *Chain) Wrap(next Func) Func {
 		}
 	}
 	return next
-}
-
-func (c *Chain) applyToCall(cfg *callCfg) {
-	cfg.Interceptor = c
-}
-
-func (c *Chain) applyToHandler(cfg *handlerCfg) {
-	cfg.Interceptor = c
 }
 
 type timeoutClamp struct {

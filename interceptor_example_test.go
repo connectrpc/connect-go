@@ -24,7 +24,7 @@ func ExampleCallMetadata() {
 	client := pingpb.NewPingServiceClientReRPC(
 		"https://invalid-test-url",
 		http.DefaultClient,
-		rerpc.NewChain(logger, short),
+		rerpc.Intercept(rerpc.NewChain(logger, short)),
 	)
 	client.Ping(context.Background(), &pingpb.PingRequest{})
 
@@ -53,7 +53,7 @@ func ExampleChain() {
 	client := pingpb.NewPingServiceClientReRPC(
 		"https://invalid-test-url",
 		http.DefaultClient,
-		rerpc.NewChain(outer, inner, short),
+		rerpc.Intercept(rerpc.NewChain(outer, inner, short)),
 	)
 	client.Ping(context.Background(), &pingpb.PingRequest{})
 
