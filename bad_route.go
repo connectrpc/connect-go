@@ -2,7 +2,6 @@ package rerpc
 
 import (
 	"context"
-	"net/http"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -12,9 +11,10 @@ import (
 // standard library's http.StatusNotFound. To be fully compatible with the
 // Twirp specification, mount this handler at the root of your API (so that it
 // handles any requests for invalid protobuf methods).
-func NewBadRouteHandler(opts ...HandlerOption) http.Handler {
-	h := NewHandler(
+func NewBadRouteHandler(opts ...HandlerOption) *Handler {
+	return NewHandler(
 		"", "", "", // protobuf method, service, package names
+		func() proto.Message { return &emptypb.Empty{} }, // unused req msg
 		func(ctx context.Context, _ proto.Message) (proto.Message, error) {
 			path := "???"
 			if md, ok := HandlerMeta(ctx); ok {
@@ -24,7 +24,4 @@ func NewBadRouteHandler(opts ...HandlerOption) http.Handler {
 		},
 		opts...,
 	)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.Serve(w, r, &emptypb.Empty{})
-	})
 }

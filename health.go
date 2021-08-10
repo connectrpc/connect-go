@@ -2,7 +2,6 @@ package rerpc
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"google.golang.org/protobuf/proto"
@@ -63,17 +62,19 @@ func NewChecker(reg *Registrar) func(context.Context, string) (HealthStatus, err
 func NewHealthHandler(
 	check func(context.Context, string) (HealthStatus, error),
 	opts ...HandlerOption,
-) (string, http.Handler) {
+) (string, *http.ServeMux) {
 	const packageFQN = "grpc.health.v1"
 	const serviceFQN = packageFQN + ".Health"
 	const checkFQN = serviceFQN + ".Check"
 	const watchFQN = serviceFQN + ".Watch"
+	const servicePath = "/" + serviceFQN + "/"
+	const checkPath = servicePath + "Check"
+	const watchPath = servicePath + "Watch"
 
 	mux := http.NewServeMux()
 	checkHandler := NewHandler(
-		checkFQN,
-		serviceFQN,
-		packageFQN,
+		checkFQN, serviceFQN, packageFQN,
+		func() proto.Message { return &healthpb.HealthCheckRequest{} },
 		func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			typed, ok := req.(*healthpb.HealthCheckRequest)
 			if !ok {
@@ -94,22 +95,18 @@ func NewHealthHandler(
 		},
 		opts...,
 	)
-	mux.HandleFunc(fmt.Sprintf("/%s/Check", serviceFQN), func(w http.ResponseWriter, r *http.Request) {
-		checkHandler.Serve(w, r, &healthpb.HealthCheckRequest{})
-	})
+	mux.Handle(checkPath, checkHandler)
 
 	watch := NewHandler(
-		watchFQN,
-		serviceFQN,
-		packageFQN,
+		watchFQN, serviceFQN, packageFQN,
+		func() proto.Message { return &healthpb.HealthCheckRequest{} },
 		func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			return nil, errorf(CodeUnimplemented, "reRPC doesn't support watching health state")
 		},
 		opts...,
 	)
-	mux.HandleFunc(fmt.Sprintf("/%s/Watch", serviceFQN), func(w http.ResponseWriter, r *http.Request) {
-		watch.Serve(w, r, &healthpb.HealthCheckRequest{})
-	})
+	mux.Handle(watchPath, watch)
+	mux.Handle("/", NewBadRouteHandler(opts...))
 
-	return fmt.Sprintf("/%s/", serviceFQN), mux
+	return servicePath, mux
 }

@@ -75,6 +75,7 @@ type Handler struct {
 	methodFQN      string
 	serviceFQN     string
 	packageFQN     string
+	newRequest     func() proto.Message
 	implementation Func
 	// rawGRPC is used only for our hand-rolled reflection handler, which needs
 	// bidi streaming
@@ -90,13 +91,24 @@ type Handler struct {
 }
 
 // NewHandler constructs a Handler. The supplied method, service, and package
-// must be fully-qualified protobuf identifiers.
+// must be fully-qualified protobuf identifiers, and the newRequest constructor
+// must be safe to call concurrently.
 //
 // For example, a handler might have method "acme.foo.v1.FooService.Bar",
-// service "acme.foo.v1.FooService", and package "acme.foo.v1". Remember that
-// NewHandler is usually called from generated code - most users won't need to
-// deal with protobuf identifiers directly.
-func NewHandler(methodFQN, serviceFQN, packageFQN string, impl Func, opts ...HandlerOption) *Handler {
+// service "acme.foo.v1.FooService", and package "acme.foo.v1". In that case,
+// the newRequest constructor would be:
+//   func() proto.Message {
+//     return &foopb.BarRequest{}
+//   }
+//
+// Remember that NewHandler is usually called from generated code - most users
+// won't need to deal with protobuf identifiers directly.
+func NewHandler(
+	methodFQN, serviceFQN, packageFQN string,
+	newRequest func() proto.Message,
+	impl Func,
+	opts ...HandlerOption,
+) *Handler {
 	var cfg handlerCfg
 	for _, opt := range opts {
 		opt.applyToHandler(&cfg)
@@ -108,19 +120,14 @@ func NewHandler(methodFQN, serviceFQN, packageFQN string, impl Func, opts ...Han
 		methodFQN:      methodFQN,
 		serviceFQN:     serviceFQN,
 		packageFQN:     packageFQN,
+		newRequest:     newRequest,
 		implementation: impl,
 		config:         cfg,
 	}
 }
 
-// Serve executes the handler, much like the standard library's http.Handler.
-// Unlike http.Handler, it requires a pointer to the generated request struct.
-// See the internal/ping/v1test package for an example of how this code is used
-// in reRPC's generated code.
-//
-// As long as the caller allocates a new request struct for each call, this
-// method is safe to call concurrently.
-func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Message) {
+// ServeHTTP implements http.Handler.
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// To ensure that we can re-use connections, always consume and close the
 	// request body.
 	defer r.Body.Close()
@@ -250,7 +257,7 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, req proto.Messag
 	} else {
 		implementation = h.implementationGRPC(w, r, spec)
 	}
-	res, err := h.wrap(implementation)(ctx, req)
+	res, err := h.wrap(implementation)(ctx, h.newRequest())
 	h.writeResult(r.Context(), w, spec, res, err)
 }
 

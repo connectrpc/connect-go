@@ -220,7 +220,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		deprecated(g)
 	}
 	g.P("func New", service.GoName, "HandlerReRPC(svc ", name, ", opts ...", rerpcPackage.Ident("HandlerOption"),
-		") (string, ", httpPackage.Ident("Handler"), ") {")
+		") (string, *", httpPackage.Ident("ServeMux"), ") {")
 	g.P("mux := ", httpPackage.Ident("NewServeMux"), "()")
 	g.P()
 	for _, method := range unaryMethods(service) {
@@ -230,6 +230,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		g.P(`"`, method.Desc.FullName(), `", // fully-qualified protobuf method`)
 		g.P(`"`, service.Desc.FullName(), `", // fully-qualified protobuf service`)
 		g.P(`"`, service.Desc.ParentFile().Package(), `", // fully-qualified protobuf package`)
+		g.P("func() ", protoPackage.Ident("Message"), " { return &", method.Input.GoIdent, "{} }, // request msg constructor")
 		g.P(rerpcPackage.Ident("Func"), "(func(ctx ", contextPackage.Ident("Context"),
 			", req ", protoPackage.Ident("Message"), ") (",
 			protoPackage.Ident("Message"), ", error) {")
@@ -245,9 +246,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		g.P("}),")
 		g.P("opts...,")
 		g.P(")")
-		g.P(`mux.HandleFunc("/`, path, `", func(w `, httpPackage.Ident("ResponseWriter"), ", r *", httpPackage.Ident("Request"), ") {")
-		g.P(hname, ".Serve(w, r, &", method.Input.GoIdent, "{})")
-		g.P("})")
+		g.P(`mux.Handle("/`, path, `", `, hname, ")")
 		g.P()
 	}
 	comment(g, "Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.")
