@@ -8,11 +8,10 @@ package pingpb
 
 import (
 	context "context"
-	http "net/http"
-	strings "strings"
-
 	rerpc "github.com/rerpc/rerpc"
 	proto "google.golang.org/protobuf/proto"
+	http "net/http"
+	strings "strings"
 )
 
 // This is a compile-time assertion to ensure that this generated file and the
@@ -31,8 +30,9 @@ type PingServiceClientReRPC interface {
 }
 
 type pingServiceClientReRPC struct {
-	ping rerpc.Client
-	fail rerpc.Client
+	ping    rerpc.Client
+	fail    rerpc.Client
+	options []rerpc.CallOption
 }
 
 // NewPingServiceClientReRPC constructs a client for the
@@ -40,49 +40,102 @@ type pingServiceClientReRPC struct {
 // all calls made with this client.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
-// https://api.acme.com or https://acme.com/api/grpc).
+// https://api.acme.com or https://acme.com/grpc).
 func NewPingServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) PingServiceClientReRPC {
 	baseURL = strings.TrimRight(baseURL, "/")
 	return &pingServiceClientReRPC{
 		ping: *rerpc.NewClient(
 			doer,
-			baseURL+"/internal.ping.v1test.PingService/Ping", // complete URL to call method
-			"internal.ping.v1test.PingService.Ping",          // fully-qualified protobuf method
-			"internal.ping.v1test.PingService",               // fully-qualified protobuf service
-			"internal.ping.v1test",                           // fully-qualified protobuf package
-			func() proto.Message { return &PingResponse{} },  // response constructor
+			baseURL,
+			"internal.ping.v1test", // protobuf package
+			"PingService",          // protobuf service
+			"Ping",                 // protobuf method
 			opts...,
 		),
 		fail: *rerpc.NewClient(
 			doer,
-			baseURL+"/internal.ping.v1test.PingService/Fail", // complete URL to call method
-			"internal.ping.v1test.PingService.Fail",          // fully-qualified protobuf method
-			"internal.ping.v1test.PingService",               // fully-qualified protobuf service
-			"internal.ping.v1test",                           // fully-qualified protobuf package
-			func() proto.Message { return &FailResponse{} },  // response constructor
+			baseURL,
+			"internal.ping.v1test", // protobuf package
+			"PingService",          // protobuf service
+			"Fail",                 // protobuf method
 			opts...,
 		),
+		options: opts,
 	}
 }
 
 // Ping calls internal.ping.v1test.PingService.Ping. Call options passed here
 // apply only to this call.
 func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error) {
-	res, err := c.ping.Call(ctx, req, opts...)
+	wrapped := rerpc.Func(func(ctx context.Context, msg proto.Message) (proto.Message, error) {
+		stream := c.ping.Call(ctx, opts...)
+		if err := stream.Send(req); err != nil {
+			_ = stream.CloseSend(err)
+			_ = stream.CloseReceive()
+			return nil, err
+		}
+		if err := stream.CloseSend(nil); err != nil {
+			_ = stream.CloseReceive()
+			return nil, err
+		}
+		var res PingResponse
+		if err := stream.Receive(&res); err != nil {
+			_ = stream.CloseReceive()
+			return nil, err
+		}
+		return &res, stream.CloseReceive()
+	})
+	mergedOpts := append([]rerpc.CallOption{}, c.options...)
+	mergedOpts = append(mergedOpts, opts...)
+	if ic := rerpc.ConfiguredCallInterceptor(mergedOpts...); ic != nil {
+		wrapped = ic.Wrap(wrapped)
+	}
+	res, err := wrapped(c.ping.Context(ctx, opts...), req)
 	if err != nil {
 		return nil, err
 	}
-	return res.(*PingResponse), nil
+	typed, ok := res.(*PingResponse)
+	if !ok {
+		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.ping.v1test.PingResponse, got %v", res.ProtoReflect().Descriptor().FullName())
+	}
+	return typed, nil
 }
 
 // Fail calls internal.ping.v1test.PingService.Fail. Call options passed here
 // apply only to this call.
 func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error) {
-	res, err := c.fail.Call(ctx, req, opts...)
+	wrapped := rerpc.Func(func(ctx context.Context, msg proto.Message) (proto.Message, error) {
+		stream := c.fail.Call(ctx, opts...)
+		if err := stream.Send(req); err != nil {
+			_ = stream.CloseSend(err)
+			_ = stream.CloseReceive()
+			return nil, err
+		}
+		if err := stream.CloseSend(nil); err != nil {
+			_ = stream.CloseReceive()
+			return nil, err
+		}
+		var res FailResponse
+		if err := stream.Receive(&res); err != nil {
+			_ = stream.CloseReceive()
+			return nil, err
+		}
+		return &res, stream.CloseReceive()
+	})
+	mergedOpts := append([]rerpc.CallOption{}, c.options...)
+	mergedOpts = append(mergedOpts, opts...)
+	if ic := rerpc.ConfiguredCallInterceptor(mergedOpts...); ic != nil {
+		wrapped = ic.Wrap(wrapped)
+	}
+	res, err := wrapped(c.fail.Context(ctx, opts...), req)
 	if err != nil {
 		return nil, err
 	}
-	return res.(*FailResponse), nil
+	typed, ok := res.(*FailResponse)
+	if !ok {
+		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.ping.v1test.FailResponse, got %v", res.ProtoReflect().Descriptor().FullName())
+	}
+	return typed, nil
 }
 
 // PingServiceReRPC is a server for the internal.ping.v1test.PingService
@@ -103,51 +156,84 @@ type PingServiceReRPC interface {
 // handler. It returns the handler and the path on which to mount it.
 func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOption) (string, *http.ServeMux) {
 	mux := http.NewServeMux()
+	ic := rerpc.ConfiguredHandlerInterceptor(opts...)
 
+	pingFunc := rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		typed, ok := req.(*PingRequest)
+		if !ok {
+			return nil, rerpc.Errorf(
+				rerpc.CodeInternal,
+				"can't call internal.ping.v1test.PingService.Ping with a %v",
+				req.ProtoReflect().Descriptor().FullName(),
+			)
+		}
+		return svc.Ping(ctx, typed)
+	})
+	if ic != nil {
+		pingFunc = ic.Wrap(pingFunc)
+	}
 	ping := rerpc.NewHandler(
-		"internal.ping.v1test.PingService.Ping",        // fully-qualified protobuf method
-		"internal.ping.v1test.PingService",             // fully-qualified protobuf service
-		"internal.ping.v1test",                         // fully-qualified protobuf package
-		func() proto.Message { return &PingRequest{} }, // request msg constructor
-		rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
-			typed, ok := req.(*PingRequest)
-			if !ok {
-				return nil, rerpc.Errorf(
-					rerpc.CodeInternal,
-					"error in generated code: expected req to be a *PingRequest, got a %T",
-					req,
-				)
+		"internal.ping.v1test", // protobuf package
+		"PingService",          // protobuf service
+		"Ping",                 // protobuf method
+		rerpc.HandlerStreamFunc(func(ctx context.Context, stream rerpc.Stream) {
+			defer stream.CloseReceive()
+			var req PingRequest
+			if err := stream.Receive(&req); err != nil {
+				_ = stream.CloseSend(err)
+				return
 			}
-			return svc.Ping(ctx, typed)
+			res, err := pingFunc(ctx, &req)
+			if err != nil {
+				_ = stream.CloseSend(err)
+				return
+			}
+			_ = stream.CloseSend(stream.Send(res))
 		}),
 		opts...,
 	)
-	mux.Handle("/internal.ping.v1test.PingService/Ping", ping)
+	mux.Handle(ping.Path(), ping)
 
+	failFunc := rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		typed, ok := req.(*FailRequest)
+		if !ok {
+			return nil, rerpc.Errorf(
+				rerpc.CodeInternal,
+				"can't call internal.ping.v1test.PingService.Fail with a %v",
+				req.ProtoReflect().Descriptor().FullName(),
+			)
+		}
+		return svc.Fail(ctx, typed)
+	})
+	if ic != nil {
+		failFunc = ic.Wrap(failFunc)
+	}
 	fail := rerpc.NewHandler(
-		"internal.ping.v1test.PingService.Fail",        // fully-qualified protobuf method
-		"internal.ping.v1test.PingService",             // fully-qualified protobuf service
-		"internal.ping.v1test",                         // fully-qualified protobuf package
-		func() proto.Message { return &FailRequest{} }, // request msg constructor
-		rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
-			typed, ok := req.(*FailRequest)
-			if !ok {
-				return nil, rerpc.Errorf(
-					rerpc.CodeInternal,
-					"error in generated code: expected req to be a *FailRequest, got a %T",
-					req,
-				)
+		"internal.ping.v1test", // protobuf package
+		"PingService",          // protobuf service
+		"Fail",                 // protobuf method
+		rerpc.HandlerStreamFunc(func(ctx context.Context, stream rerpc.Stream) {
+			defer stream.CloseReceive()
+			var req FailRequest
+			if err := stream.Receive(&req); err != nil {
+				_ = stream.CloseSend(err)
+				return
 			}
-			return svc.Fail(ctx, typed)
+			res, err := failFunc(ctx, &req)
+			if err != nil {
+				_ = stream.CloseSend(err)
+				return
+			}
+			_ = stream.CloseSend(stream.Send(res))
 		}),
 		opts...,
 	)
-	mux.Handle("/internal.ping.v1test.PingService/Fail", fail)
+	mux.Handle(fail.Path(), fail)
 
 	// Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.
 	mux.Handle("/", rerpc.NewBadRouteHandler(opts...))
 
-	return "/internal.ping.v1test.PingService/", mux
+	return fail.ServicePath(), mux
 }
 
 var _ PingServiceReRPC = (*UnimplementedPingServiceReRPC)(nil) // verify interface implementation

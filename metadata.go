@@ -17,14 +17,15 @@ const (
 // Note that the Method, Service, and Package are fully-qualified protobuf
 // names, not Go import paths or identifiers.
 type Specification struct {
-	Method  string // full protobuf name, e.g. "acme.foo.v1.FooService.Bar"
-	Service string // full protobuf name, e.g. "acme.foo.v1.FooService"
-	Package string // full protobuf name, e.g. "acme.foo.v1"
+	Package string // protobuf name, e.g. "acme.foo.v1"
+	Service string // protobuf name, e.g. "FooService"
+	Method  string // protobuf name, e.g. "Bar"
 
 	Path                string
 	ContentType         string
 	RequestCompression  string
 	ResponseCompression string
+	ReadMaxBytes        int64
 }
 
 // CallMetadata provides a Specification and access to request and response

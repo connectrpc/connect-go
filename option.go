@@ -8,10 +8,8 @@ type Option interface {
 }
 
 type readMaxBytes struct {
-	Max int
+	Max int64
 }
-
-var _ Option = (*readMaxBytes)(nil)
 
 // ReadMaxBytes limits the performance impact of pathologically large messages
 // sent by the other party. For handlers, ReadMaxBytes sets the maximum
@@ -20,7 +18,7 @@ var _ Option = (*readMaxBytes)(nil)
 //
 // Setting ReadMaxBytes to zero allows any request size. Both clients and
 // handlers default to allowing any request size.
-func ReadMaxBytes(n int) Option {
+func ReadMaxBytes(n int64) Option {
 	return &readMaxBytes{n}
 }
 
@@ -35,8 +33,6 @@ func (o *readMaxBytes) applyToHandler(cfg *handlerCfg) {
 type gzipOption struct {
 	Enable bool
 }
-
-var _ Option = (*gzipOption)(nil)
 
 // Gzip configures client and server compression strategies.
 //
@@ -66,8 +62,6 @@ func (o *gzipOption) applyToHandler(cfg *handlerCfg) {
 type interceptOption struct {
 	interceptor Interceptor
 }
-
-var _ Option = (*interceptOption)(nil)
 
 // Intercept configures a client or handler to use the supplied Interceptor.
 // Note that this Option replaces any previously-configured Interceptor - to
