@@ -105,7 +105,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// To ensure that we can re-use connections, always consume and close the
 	// request body.
 	defer r.Body.Close()
-	defer io.Copy(io.Discard, r.Body)
+	defer discard(r.Body)
 
 	// TODO: verify HTTP/2 for bidirectional streaming
 	if false && r.ProtoMajor < 2 {

@@ -101,7 +101,7 @@ func (cs *clientStream) Receive(msg proto.Message) error {
 	if err != nil {
 		// If we can't read this LPM, see if the server sent an explicit error in
 		// trailers. First, we need to read the body to EOF.
-		io.Copy(io.Discard, cs.response.Body)
+		discard(cs.response.Body)
 		if serverErr := extractError(cs.response.Trailer); serverErr != nil {
 			cs.setResponseError(serverErr)
 			return serverErr
@@ -117,7 +117,7 @@ func (cs *clientStream) CloseReceive() error {
 	if cs.response == nil {
 		return nil
 	}
-	io.Copy(io.Discard, cs.response.Body)
+	discard(cs.response.Body)
 	if err := cs.response.Body.Close(); err != nil {
 		return wrap(CodeUnknown, err)
 	}
@@ -264,7 +264,7 @@ func (ss *serverStream) Receive(msg proto.Message) error {
 }
 
 func (ss *serverStream) CloseReceive() error {
-	io.Copy(io.Discard, ss.reader)
+	discard(ss.reader)
 	if err := ss.reader.Close(); err != nil {
 		if rerr, ok := AsError(err); ok {
 			return rerr
@@ -399,4 +399,15 @@ func extractError(h http.Header) *Error {
 	}
 
 	return ret
+}
+
+func discard(r io.Reader) {
+	if lr, ok := r.(*io.LimitedReader); ok {
+		io.Copy(io.Discard, lr)
+		return
+	}
+	// We don't want to get stuck throwing data away forever, so limit how much
+	// we're willing to do here: at most, we'll copy 4 MiB.
+	lr := &io.LimitedReader{R: r, N: 1024 * 1024 * 4}
+	io.Copy(io.Discard, lr)
 }
