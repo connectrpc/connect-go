@@ -24,6 +24,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 1
+          lfs: true
       - name: Test
         run: make test
       - name: Lint
