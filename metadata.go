@@ -136,3 +136,9 @@ func HandlerMeta(ctx context.Context) (HandlerMetadata, bool) {
 	md, ok := iface.(HandlerMetadata)
 	return md, ok
 }
+
+// WithoutMeta strips any CallMetadata and HandlerMetadata from the context.
+func WithoutMeta(ctx context.Context) context.Context {
+	noCall := context.WithValue(ctx, callMetaKey, nil)
+	return context.WithValue(noCall, handlerMetaKey, nil)
+}

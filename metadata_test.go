@@ -27,6 +27,9 @@ func TestCallMetadata(t *testing.T) {
 	assert.Equal(t, spec.ContentType, TypeJSON, "specification should be value")
 	md.Request().Set("Foo-Bar", "baz")
 	assert.Equal(t, req, http.Header{"Foo-Bar": []string{"baz"}}, "request header after write")
+
+	_, ok = CallMeta(WithoutMeta(ctx))
+	assert.False(t, ok, "get call metadata after stripping")
 }
 
 func TestHandlerMetadata(t *testing.T) {
@@ -48,4 +51,7 @@ func TestHandlerMetadata(t *testing.T) {
 	assert.Equal(t, spec.ContentType, TypeJSON, "specification should be value")
 	md.Response().Set("Foo-Bar", "baz")
 	assert.Equal(t, res, http.Header{"Foo-Bar": []string{"baz"}}, "response header after write")
+
+	_, ok = HandlerMeta(WithoutMeta(ctx))
+	assert.False(t, ok, "get handler metadata after stripping")
 }
