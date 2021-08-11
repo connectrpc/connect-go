@@ -25,7 +25,7 @@ test: gen $(HANDWRITTEN) ## Run unit tests
 	@cd internal/crosstest && go test -vet=off -race ./...
 
 .PHONY: lint
-lint: lintpb bin/goimports ## Lint Go and protobuf
+lint: lintpb bin/goimports bin/staticcheck ## Lint Go and protobuf
 	@echo "Checking with gofmt..."
 	@test -z "$$(gofmt -s -l . | tee /dev/stderr)"
 	@echo "Checking with goimports..."
