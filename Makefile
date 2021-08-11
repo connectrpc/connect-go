@@ -57,7 +57,7 @@ cover.out: gen $(HANDWRITTEN)
 .PHONY: gen
 gen: .faux.pb ## Regenerate code
 
-.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go-grpc bin/protoc-gen-twirp bin/protoc-gen-go-rerpc buf.gen.yaml
+.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go bin/protoc-gen-go-grpc bin/protoc-gen-twirp bin/protoc-gen-go-rerpc buf.gen.yaml
 	./bin/buf generate
 	rm internal/ping/v1test/ping{.twirp,_grpc.pb}.go
 	touch $(@)
@@ -66,6 +66,9 @@ gen: .faux.pb ## Regenerate code
 # regenerating it.
 image_v1.bin: bin/buf
 	./bin/buf build -o $(@)
+
+bin/protoc-gen-go: internal/crosstest/go.mod
+	cd internal/crosstest && GOBIN=$(PWD)/bin go install google.golang.org/protobuf/cmd/protoc-gen-go
 
 bin/protoc-gen-go-grpc: internal/crosstest/go.mod
 	cd internal/crosstest && GOBIN=$(PWD)/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc
