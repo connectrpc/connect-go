@@ -32,16 +32,8 @@ func (i *loggingInterceptor) Wrap(next Func) Func {
 	})
 }
 
-func (i *loggingInterceptor) WrapHandlerStream(next HandlerStreamFunc) HandlerStreamFunc {
-	return HandlerStreamFunc(func(ctx context.Context, stream Stream) {
-		io.WriteString(i.w, i.before)
-		defer func() { io.WriteString(i.w, i.after) }()
-		next(ctx, stream)
-	})
-}
-
-func (i *loggingInterceptor) WrapCallStream(next CallStreamFunc) CallStreamFunc {
-	return CallStreamFunc(func(ctx context.Context) Stream {
+func (i *loggingInterceptor) WrapStream(next StreamFunc) StreamFunc {
+	return StreamFunc(func(ctx context.Context) Stream {
 		io.WriteString(i.w, i.before)
 		defer func() { io.WriteString(i.w, i.after) }()
 		return next(ctx)
@@ -71,26 +63,16 @@ func TestChain(t *testing.T) {
 		assert.Equal(t, out.String(), onion, "execution onion")
 		assert.True(t, called, "original Func called")
 	})
-	t.Run("handler_stream", func(t *testing.T) {
+	t.Run("stream", func(t *testing.T) {
 		out.Reset()
 		var called bool
-		next := HandlerStreamFunc(func(_ context.Context, _ Stream) {
-			called = true
-		})
-		chain.WrapHandlerStream(next)(context.Background(), &panicStream{})
-		assert.Equal(t, out.String(), onion, "execution onion")
-		assert.True(t, called, "original HandlerStreamFunc called")
-	})
-	t.Run("call_stream", func(t *testing.T) {
-		out.Reset()
-		var called bool
-		next := CallStreamFunc(func(_ context.Context) Stream {
+		next := StreamFunc(func(_ context.Context) Stream {
 			called = true
 			return &panicStream{}
 		})
-		stream := chain.WrapCallStream(next)(context.Background())
+		stream := chain.WrapStream(next)(context.Background())
 		assert.NotNil(t, stream, "returned stream")
 		assert.Equal(t, out.String(), onion, "execution onion")
-		assert.True(t, called, "original CallStreamFunc called")
+		assert.True(t, called, "original StreamFunc called")
 	})
 }

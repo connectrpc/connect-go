@@ -68,7 +68,7 @@ func ServeTwirp(enable bool) HandlerOption {
 type Handler struct {
 	stype          StreamType
 	config         handlerCfg
-	implementation HandlerStreamFunc
+	implementation func(context.Context, StreamFunc)
 }
 
 // NewHandler constructs a Handler. The supplied package, service, and method
@@ -81,7 +81,7 @@ type Handler struct {
 func NewHandler(
 	stype StreamType,
 	pkg, service, method string,
-	impl HandlerStreamFunc,
+	implementation func(context.Context, StreamFunc),
 	opts ...HandlerOption,
 ) *Handler {
 	cfg := handlerCfg{
@@ -98,7 +98,7 @@ func NewHandler(
 	return &Handler{
 		stype:          stype,
 		config:         cfg,
-		implementation: impl,
+		implementation: implementation,
 	}
 }
 
@@ -255,19 +255,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	stream := newServerStream(
-		w,
-		&readCloser{Reader: requestBody, Closer: r.Body},
-		spec.ContentType,
-		h.config.MaxRequestBytes,
-		spec.ResponseCompression == CompressionGzip,
-	)
 	ctx := NewHandlerContext(r.Context(), *spec, r.Header, w.Header())
+	sf := StreamFunc(func(ctx context.Context) Stream {
+		return newServerStream(
+			ctx,
+			w,
+			&readCloser{Reader: requestBody, Closer: r.Body},
+			spec.ContentType,
+			h.config.MaxRequestBytes,
+			spec.ResponseCompression == CompressionGzip,
+		)
+	})
 	if failed != nil {
+		stream := sf(ctx)
 		_ = stream.CloseReceive()
 		_ = stream.CloseSend(failed)
+		return
 	}
-	h.implementation(ctx, stream)
+	h.implementation(ctx, sf)
 }
 
 // Path returns the URL pattern to use when registering this handler. It's used

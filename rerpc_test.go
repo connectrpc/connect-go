@@ -567,11 +567,7 @@ func (i *metadataIntegrationInterceptor) Wrap(next rerpc.Func) rerpc.Func {
 	})
 }
 
-func (i *metadataIntegrationInterceptor) WrapHandlerStream(next rerpc.HandlerStreamFunc) rerpc.HandlerStreamFunc {
-	return next
-}
-
-func (i *metadataIntegrationInterceptor) WrapCallStream(next rerpc.CallStreamFunc) rerpc.CallStreamFunc {
+func (i *metadataIntegrationInterceptor) WrapStream(next rerpc.StreamFunc) rerpc.StreamFunc {
 	return next
 }
 

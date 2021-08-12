@@ -19,6 +19,7 @@ import (
 // Stream is a bidirectional stream of protobuf messages. Streams aren't
 // guaranteed to be safe for concurrent use.
 type Stream interface {
+	Context() context.Context
 	Send(proto.Message) error
 	CloseSend(error) error
 	Receive(proto.Message) error
@@ -67,6 +68,10 @@ func newClientStream(
 	go stream.makeRequest(requestPrepared)
 	<-requestPrepared
 	return &stream
+}
+
+func (cs *clientStream) Context() context.Context {
+	return cs.ctx
 }
 
 func (cs *clientStream) Send(msg proto.Message) error {
@@ -227,6 +232,7 @@ func (cs *clientStream) setResponseError(err error) {
 }
 
 type serverStream struct {
+	ctx         context.Context
 	unmarshaler unmarshaler
 	marshaler   marshaler
 	writer      http.ResponseWriter
@@ -237,6 +243,7 @@ type serverStream struct {
 var _ Stream = (*serverStream)(nil)
 
 func newServerStream(
+	ctx context.Context,
 	w http.ResponseWriter,
 	r io.ReadCloser,
 	ctype string,
@@ -244,12 +251,17 @@ func newServerStream(
 	gzipResponse bool,
 ) *serverStream {
 	return &serverStream{
+		ctx:         ctx,
 		unmarshaler: unmarshaler{r: r, ctype: ctype, max: maxReadBytes},
 		marshaler:   marshaler{w: w, ctype: ctype, gzipGRPC: gzipResponse},
 		writer:      w,
 		reader:      r,
 		ctype:       ctype,
 	}
+}
+
+func (ss *serverStream) Context() context.Context {
+	return ss.ctx
 }
 
 func (ss *serverStream) Receive(msg proto.Message) error {

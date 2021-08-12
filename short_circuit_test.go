@@ -20,15 +20,9 @@ func (sc *shortCircuit) Wrap(next rerpc.Func) rerpc.Func {
 	})
 }
 
-func (sc *shortCircuit) WrapHandlerStream(next rerpc.HandlerStreamFunc) rerpc.HandlerStreamFunc {
-	return rerpc.HandlerStreamFunc(func(ctx context.Context, _ rerpc.Stream) {
-		next(ctx, &errStream{sc.err})
-	})
-}
-
-func (sc *shortCircuit) WrapCallStream(next rerpc.CallStreamFunc) rerpc.CallStreamFunc {
-	return rerpc.CallStreamFunc(func(_ context.Context) rerpc.Stream {
-		return &errStream{sc.err}
+func (sc *shortCircuit) WrapStream(next rerpc.StreamFunc) rerpc.StreamFunc {
+	return rerpc.StreamFunc(func(ctx context.Context) rerpc.Stream {
+		return &errStream{ctx, sc.err}
 	})
 }
 
@@ -43,11 +37,13 @@ func ShortCircuit(err error) rerpc.Interceptor {
 }
 
 type errStream struct {
+	ctx context.Context
 	err error
 }
 
 var _ rerpc.Stream = (*errStream)(nil)
 
+func (s *errStream) Context() context.Context      { return s.ctx }
 func (s *errStream) Receive(_ proto.Message) error { return s.err }
 func (s *errStream) CloseReceive() error           { return s.err }
 func (s *errStream) Send(_ proto.Message) error    { return s.err }
