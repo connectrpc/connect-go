@@ -39,7 +39,7 @@ func ExampleClient() {
 
 	// This interceptor stops the client from making HTTP requests in examples.
 	// Leave it out in real code!
-	short := rerpc.ShortCircuit(rerpc.Errorf(rerpc.CodeUnimplemented, "no networking in examples"))
+	short := ShortCircuit(rerpc.Errorf(rerpc.CodeUnimplemented, "no networking in examples"))
 
 	client := pingpb.NewPingServiceClientReRPC("http://invalid-test-url", doer, rerpc.Intercept(short))
 	res, err := client.Ping(context.Background(), &pingpb.PingRequest{})

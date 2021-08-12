@@ -55,51 +55,6 @@ func ConfiguredHandlerInterceptor(opts ...HandlerOption) Interceptor {
 	return cfg.Interceptor
 }
 
-type errStream struct {
-	err error
-}
-
-var _ Stream = (*errStream)(nil)
-
-func (s *errStream) Receive(_ proto.Message) error { return s.err }
-func (s *errStream) CloseReceive() error           { return s.err }
-func (s *errStream) Send(_ proto.Message) error    { return s.err }
-func (s *errStream) CloseSend(_ error) error       { return s.err }
-
-type shortCircuit struct {
-	err error
-}
-
-var _ Interceptor = (*shortCircuit)(nil)
-
-func (sc *shortCircuit) Wrap(next Func) Func {
-	return Func(func(_ context.Context, _ proto.Message) (proto.Message, error) {
-		return nil, sc.err
-	})
-}
-
-func (sc *shortCircuit) WrapHandlerStream(next HandlerStreamFunc) HandlerStreamFunc {
-	return HandlerStreamFunc(func(ctx context.Context, _ Stream) {
-		next(ctx, &errStream{sc.err})
-	})
-}
-
-func (sc *shortCircuit) WrapCallStream(next CallStreamFunc) CallStreamFunc {
-	return CallStreamFunc(func(_ context.Context) Stream {
-		return &errStream{sc.err}
-	})
-}
-
-// ShortCircuit builds an interceptor that doesn't call the wrapped RPC at all.
-// Instead, it returns the supplied Error immediately. ShortCircuit works for
-// unary and streaming RPCs.
-//
-// This is primarily useful when testing error handling. It's also used
-// throughout reRPC's examples to avoid making network requests.
-func ShortCircuit(err error) Interceptor {
-	return &shortCircuit{err}
-}
-
 // A UnaryInterceptorFunc is a simple Interceptor implementation that only
 // wraps unary RPCs. See CallMetadata for an example.
 type UnaryInterceptorFunc func(Func) Func
@@ -163,48 +118,4 @@ func (c *Chain) WrapCallStream(next CallStreamFunc) CallStreamFunc {
 		}
 	}
 	return next
-}
-
-type recovery struct {
-	Log func(context.Context, interface{})
-}
-
-var _ Interceptor = (*recovery)(nil)
-
-// Recover wraps clients and handlers to recover from panics. It uses the
-// supplied function to log the recovered value. The log function must be
-// non-nil and safe to call concurrently. Keep in mind that panics initiated in
-// other goroutines will still crash the process!
-//
-// When composed with other Interceptors in a Chain, Recover should be the
-// outermost Interceptor.
-func Recover(log func(context.Context, interface{})) Interceptor {
-	return &recovery{log}
-}
-
-func (r *recovery) Wrap(next Func) Func {
-	return Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
-		defer r.recoverAndLog(ctx)
-		return next(ctx, req)
-	})
-}
-
-func (r *recovery) WrapHandlerStream(next HandlerStreamFunc) HandlerStreamFunc {
-	return HandlerStreamFunc(func(ctx context.Context, stream Stream) {
-		defer r.recoverAndLog(ctx)
-		next(ctx, stream)
-	})
-}
-
-func (r *recovery) WrapCallStream(next CallStreamFunc) CallStreamFunc {
-	return CallStreamFunc(func(ctx context.Context) Stream {
-		defer r.recoverAndLog(ctx)
-		return next(ctx)
-	})
-}
-
-func (r *recovery) recoverAndLog(ctx context.Context) {
-	if val := recover(); val != nil {
-		r.Log(ctx, val)
-	}
 }

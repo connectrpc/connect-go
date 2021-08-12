@@ -3,7 +3,6 @@ package rerpc
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"testing"
 
@@ -49,6 +48,10 @@ func (i *loggingInterceptor) WrapCallStream(next CallStreamFunc) CallStreamFunc 
 	})
 }
 
+type panicStream struct {
+	Stream
+}
+
 func TestChain(t *testing.T) {
 	out := &bytes.Buffer{}
 	chain := NewChain(
@@ -74,7 +77,7 @@ func TestChain(t *testing.T) {
 		next := HandlerStreamFunc(func(_ context.Context, _ Stream) {
 			called = true
 		})
-		chain.WrapHandlerStream(next)(context.Background(), &errStream{errors.New("hi")})
+		chain.WrapHandlerStream(next)(context.Background(), &panicStream{})
 		assert.Equal(t, out.String(), onion, "execution onion")
 		assert.True(t, called, "original HandlerStreamFunc called")
 	})
@@ -83,30 +86,11 @@ func TestChain(t *testing.T) {
 		var called bool
 		next := CallStreamFunc(func(_ context.Context) Stream {
 			called = true
-			return &errStream{errors.New("hi")}
+			return &panicStream{}
 		})
 		stream := chain.WrapCallStream(next)(context.Background())
 		assert.NotNil(t, stream, "returned stream")
 		assert.Equal(t, out.String(), onion, "execution onion")
 		assert.True(t, called, "original CallStreamFunc called")
 	})
-}
-
-func TestRecover(t *testing.T) {
-	const msg = "panic at the disco"
-	var called bool
-	log := func(_ context.Context, val interface{}) {
-		called = true
-		assert.Equal(t, val, msg, "panic value")
-	}
-	r := Recover(log)
-
-	called = false
-	f := r.Wrap(assertingFunc(func(_ context.Context) {
-		panic(msg)
-	}))
-	res, err := f(context.Background(), &emptypb.Empty{})
-	assert.True(t, called, "logged panic")
-	assert.Nil(t, err, "error")
-	assert.Nil(t, res, "result")
 }
