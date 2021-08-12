@@ -8,6 +8,7 @@ package crosspb
 
 import (
 	context "context"
+	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
 	proto "google.golang.org/protobuf/proto"
 	http "net/http"
@@ -191,8 +192,20 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"Ping",                      // protobuf method
-		rerpc.HandlerStreamFunc(func(ctx context.Context, stream rerpc.Stream) {
+		func(ctx context.Context, sf rerpc.StreamFunc) {
+			stream := sf(ctx)
 			defer stream.CloseReceive()
+			if err := ctx.Err(); err != nil {
+				if errors.Is(err, context.Canceled) {
+					_ = stream.CloseSend(rerpc.Wrap(rerpc.CodeCanceled, err))
+					return
+				}
+				if errors.Is(err, context.DeadlineExceeded) {
+					_ = stream.CloseSend(rerpc.Wrap(rerpc.CodeDeadlineExceeded, err))
+					return
+				}
+				_ = stream.CloseSend(err) // unreachable per context docs
+			}
 			var req PingRequest
 			if err := stream.Receive(&req); err != nil {
 				_ = stream.CloseSend(err)
@@ -204,7 +217,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 				return
 			}
 			_ = stream.CloseSend(stream.Send(res))
-		}),
+		},
 		opts...,
 	)
 	mux.Handle(ping.Path(), ping)
@@ -228,8 +241,20 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"Fail",                      // protobuf method
-		rerpc.HandlerStreamFunc(func(ctx context.Context, stream rerpc.Stream) {
+		func(ctx context.Context, sf rerpc.StreamFunc) {
+			stream := sf(ctx)
 			defer stream.CloseReceive()
+			if err := ctx.Err(); err != nil {
+				if errors.Is(err, context.Canceled) {
+					_ = stream.CloseSend(rerpc.Wrap(rerpc.CodeCanceled, err))
+					return
+				}
+				if errors.Is(err, context.DeadlineExceeded) {
+					_ = stream.CloseSend(rerpc.Wrap(rerpc.CodeDeadlineExceeded, err))
+					return
+				}
+				_ = stream.CloseSend(err) // unreachable per context docs
+			}
 			var req FailRequest
 			if err := stream.Receive(&req); err != nil {
 				_ = stream.CloseSend(err)
@@ -241,7 +266,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 				return
 			}
 			_ = stream.CloseSend(stream.Send(res))
-		}),
+		},
 		opts...,
 	)
 	mux.Handle(fail.Path(), fail)

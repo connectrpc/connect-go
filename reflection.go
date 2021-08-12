@@ -91,15 +91,14 @@ func NewReflectionHandler(reg *Registrar, opts ...HandlerOption) (string, *http.
 	const service = "ServerReflection"
 	const method = "ServerReflectionInfo"
 	opts = append(opts, reg, ServeTwirp(false)) // no reflection in Twirp
-	svc := &reflectionServer{reg}
-	wrapped := HandlerStreamFunc(svc.Serve)
-	if i := ConfiguredHandlerInterceptor(opts...); i != nil {
-		i.WrapHandlerStream(wrapped)
+	svc := &reflectionServer{
+		reg: reg,
+		ic:  ConfiguredHandlerInterceptor(opts...),
 	}
 	h := NewHandler(
 		StreamTypeBidirectional,
 		pkg, service, method,
-		wrapped,
+		svc.Serve,
 		opts...,
 	)
 	mux := http.NewServeMux()
@@ -110,9 +109,14 @@ func NewReflectionHandler(reg *Registrar, opts ...HandlerOption) (string, *http.
 
 type reflectionServer struct {
 	reg *Registrar
+	ic  Interceptor
 }
 
-func (rs *reflectionServer) Serve(ctx context.Context, stream Stream) {
+func (rs *reflectionServer) Serve(ctx context.Context, sf StreamFunc) {
+	if rs.ic != nil {
+		sf = rs.ic.WrapStream(sf)
+	}
+	stream := sf(ctx)
 	defer stream.CloseReceive()
 	for {
 		if err := ctx.Err(); err != nil {

@@ -64,6 +64,7 @@ func NewHealthHandler(
 	opts ...HandlerOption,
 ) (string, *http.ServeMux) {
 	mux := http.NewServeMux()
+	interceptor := ConfiguredHandlerInterceptor(opts...)
 
 	checkImplementation := Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 		typed, ok := req.(*healthpb.HealthCheckRequest)
@@ -83,23 +84,27 @@ func NewHealthHandler(
 		}, nil
 	})
 
-	watchImplementation := HandlerStreamFunc(func(_ context.Context, stream Stream) {
-		defer stream.CloseReceive()
+	if interceptor != nil {
+		checkImplementation = interceptor.Wrap(checkImplementation)
+	}
+
+	watchImplementation := func(ctx context.Context, sf StreamFunc) {
+		if interceptor != nil {
+			sf = interceptor.WrapStream(sf)
+		}
+		stream := sf(ctx)
+		_ = stream.CloseReceive()
 		_ = stream.CloseSend(errorf(
 			CodeUnimplemented,
 			"reRPC doesn't support watching health state",
 		))
-	})
-
-	if ic := ConfiguredHandlerInterceptor(opts...); ic != nil {
-		checkImplementation = ic.Wrap(checkImplementation)
-		watchImplementation = ic.WrapHandlerStream(watchImplementation)
 	}
 
 	check := NewHandler(
 		StreamTypeUnary,
 		"grpc.health.v1", "Health", "Check",
-		HandlerStreamFunc(func(ctx context.Context, stream Stream) {
+		func(ctx context.Context, sf StreamFunc) {
+			stream := sf(ctx)
 			defer stream.CloseReceive()
 			var req healthpb.HealthCheckRequest
 			if err := stream.Receive(&req); err != nil {
@@ -112,7 +117,7 @@ func NewHealthHandler(
 				return
 			}
 			_ = stream.CloseSend(stream.Send(res))
-		}),
+		},
 		opts...,
 	)
 	mux.Handle(check.Path(), check)

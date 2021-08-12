@@ -6,17 +6,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Func is the generic signature of a unary RPC, from both the server and the
-// client's perspective. Interceptors wrap Funcs.
+// Func is the generic signature of a unary RPC. Interceptors wrap Funcs.
 type Func func(context.Context, proto.Message) (proto.Message, error)
 
-// HandlerStreamFunc is the generic signature of a streaming RPC from the
-// server's perspective. Interceptors wrap HandlerStreamFuncs.
-type HandlerStreamFunc func(context.Context, Stream)
-
-// CallStreamFunc is the generic signature of a streaming RPC from the client's
-// perspective. Interceptors wrap CallStreamFuncs.
-type CallStreamFunc func(context.Context) Stream
+// StreamFunc is the generic signature of a streaming RPC. Interceptors wrap
+// StreamFuncs.
+type StreamFunc func(context.Context) Stream
 
 // An Interceptor adds logic to a generated handler or client, like the
 // decorators or middleware you may have seen in other libraries. Interceptors
@@ -31,8 +26,7 @@ type CallStreamFunc func(context.Context) Stream
 // See Chain for an example of interceptor use.
 type Interceptor interface {
 	Wrap(Func) Func
-	WrapHandlerStream(HandlerStreamFunc) HandlerStreamFunc
-	WrapCallStream(CallStreamFunc) CallStreamFunc
+	WrapStream(StreamFunc) StreamFunc
 }
 
 // ConfiguredCallInterceptor returns the Interceptor configured by a collection
@@ -62,13 +56,8 @@ type UnaryInterceptorFunc func(Func) Func
 // Wrap implements Interceptor by applying the interceptor function.
 func (f UnaryInterceptorFunc) Wrap(next Func) Func { return f(next) }
 
-// WrapHandlerStream implements Interceptor with a no-op.
-func (f UnaryInterceptorFunc) WrapHandlerStream(next HandlerStreamFunc) HandlerStreamFunc {
-	return next
-}
-
-// WrapCallStream implements Interceptor with a no-op.
-func (f UnaryInterceptorFunc) WrapCallStream(next CallStreamFunc) CallStreamFunc {
+// WrapStream implements Interceptor with a no-op.
+func (f UnaryInterceptorFunc) WrapStream(next StreamFunc) StreamFunc {
 	return next
 }
 
@@ -98,23 +87,13 @@ func (c *Chain) Wrap(next Func) Func {
 	return next
 }
 
-// WrapHandlerStream implements Interceptor.
-func (c *Chain) WrapHandlerStream(next HandlerStreamFunc) HandlerStreamFunc {
-	for i := len(c.interceptors) - 1; i >= 0; i-- {
-		if interceptor := c.interceptors[i]; interceptor != nil {
-			next = interceptor.WrapHandlerStream(next)
-		}
-	}
-	return next
-}
-
-// WrapCallStream implements Interceptor.
-func (c *Chain) WrapCallStream(next CallStreamFunc) CallStreamFunc {
+// WrapStream implements Interceptor.
+func (c *Chain) WrapStream(next StreamFunc) StreamFunc {
 	// We need to wrap in reverse order to have the first interceptor from
 	// the slice act first.
 	for i := len(c.interceptors) - 1; i >= 0; i-- {
 		if interceptor := c.interceptors[i]; interceptor != nil {
-			next = interceptor.WrapCallStream(next)
+			next = interceptor.WrapStream(next)
 		}
 	}
 	return next

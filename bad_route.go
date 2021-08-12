@@ -19,8 +19,9 @@ func NewBadRouteHandler(opts ...HandlerOption) *Handler {
 	return NewHandler(
 		StreamTypeUnary,
 		"", "", "", // protobuf package, service, method names
-		func(ctx context.Context, stream Stream) {
-			defer stream.CloseReceive()
+		func(ctx context.Context, sf StreamFunc) {
+			stream := sf(ctx)
+			_ = stream.CloseReceive()
 			_, err := wrapped(ctx, &emptypb.Empty{})
 			_ = stream.CloseSend(err)
 		},
@@ -28,6 +29,8 @@ func NewBadRouteHandler(opts ...HandlerOption) *Handler {
 }
 
 func badRouteUnaryImpl(ctx context.Context, _ proto.Message) (proto.Message, error) {
+	// There's no point checking the context and sending CodeCanceled or
+	// CodeDeadlineExceeded here - it's just as fast to send the bad route error.
 	path := "???"
 	if md, ok := HandlerMeta(ctx); ok {
 		path = md.Spec.Path

@@ -39,7 +39,11 @@ func Example() {
 	// Timeouts, connection handling, TLS configuration, and other low-level
 	// transport details are handled by net/http. Everything you already know (or
 	// anything you learn) about hardening net/http Servers applies to reRPC
-	// too.
+	// too. Keep in mind that any timeouts you set will also apply to streaming
+	// RPCs!
+	//
+	// If you're not familiar with the many timeouts exposed by net/http, start with
+	// https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts/.
 	srv := &http.Server{
 		Addr:           ":http",
 		ReadTimeout:    2500 * time.Millisecond,
