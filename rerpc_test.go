@@ -293,8 +293,14 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.False(t, reg.IsRegistered(unknown), "unknown service registered")
 
 			callHealth := func(method string, req *healthpb.HealthCheckRequest, opts ...rerpc.CallOption) (*healthpb.HealthCheckResponse, error) {
-				client := rerpc.NewClient(doer, url, "grpc.health.v1", "Health", method)
-				stream := client.Call(context.Background(), opts...)
+				ctx, call := rerpc.NewCall(
+					context.Background(),
+					doer,
+					url,
+					"grpc.health.v1", "Health", method,
+					opts...,
+				)
+				stream := call(ctx)
 				if err := stream.Send(req); err != nil {
 					_ = stream.CloseSend(err)
 					_ = stream.CloseReceive()
@@ -351,8 +357,14 @@ func TestServerProtoGRPC(t *testing.T) {
 		}, "services registered in memory")
 
 		callReflect := func(req *reflectionpb.ServerReflectionRequest, opts ...rerpc.CallOption) (*reflectionpb.ServerReflectionResponse, error) {
-			client := rerpc.NewClient(doer, url, "grpc.reflection.v1alpha", "ServerReflection", "ServerReflectionInfo")
-			stream := client.Call(context.Background(), opts...)
+			ctx, call := rerpc.NewCall(
+				context.Background(),
+				doer,
+				url,
+				"grpc.reflection.v1alpha", "ServerReflection", "ServerReflectionInfo",
+				opts...,
+			)
+			stream := call(ctx)
 			if err := stream.Send(req); err != nil {
 				_ = stream.CloseSend(err)
 				_ = stream.CloseReceive()

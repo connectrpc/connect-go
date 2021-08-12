@@ -30,8 +30,8 @@ type CrossServiceClientReRPC interface {
 }
 
 type crossServiceClientReRPC struct {
-	ping    rerpc.Client
-	fail    rerpc.Client
+	doer    rerpc.Doer
+	baseURL string
 	options []rerpc.CallOption
 }
 
@@ -42,33 +42,39 @@ type crossServiceClientReRPC struct {
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
 // https://api.acme.com or https://acme.com/grpc).
 func NewCrossServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) CrossServiceClientReRPC {
-	baseURL = strings.TrimRight(baseURL, "/")
 	return &crossServiceClientReRPC{
-		ping: *rerpc.NewClient(
-			doer,
-			baseURL,
-			"internal.crosstest.v1test", // protobuf package
-			"CrossService",              // protobuf service
-			"Ping",                      // protobuf method
-			opts...,
-		),
-		fail: *rerpc.NewClient(
-			doer,
-			baseURL,
-			"internal.crosstest.v1test", // protobuf package
-			"CrossService",              // protobuf service
-			"Fail",                      // protobuf method
-			opts...,
-		),
+		baseURL: strings.TrimRight(baseURL, "/"),
+		doer:    doer,
 		options: opts,
 	}
+}
+
+func (c *crossServiceClientReRPC) mergeOptions(opts []rerpc.CallOption) []rerpc.CallOption {
+	merged := make([]rerpc.CallOption, 0, len(c.options)+len(opts))
+	for _, o := range c.options {
+		merged = append(merged, o)
+	}
+	for _, o := range opts {
+		merged = append(merged, o)
+	}
+	return merged
 }
 
 // Ping calls internal.crosstest.v1test.CrossService.Ping. Call options passed
 // here apply only to this call.
 func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error) {
+	merged := c.mergeOptions(opts)
+	ctx, call := rerpc.NewCall(
+		ctx,
+		c.doer,
+		c.baseURL,
+		"internal.crosstest.v1test", // protobuf package
+		"CrossService",              // protobuf service
+		"Ping",                      // protobuf method
+		merged...,
+	)
 	wrapped := rerpc.Func(func(ctx context.Context, msg proto.Message) (proto.Message, error) {
-		stream := c.ping.Call(ctx, opts...)
+		stream := call(ctx)
 		if err := stream.Send(req); err != nil {
 			_ = stream.CloseSend(err)
 			_ = stream.CloseReceive()
@@ -85,12 +91,10 @@ func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, op
 		}
 		return &res, stream.CloseReceive()
 	})
-	mergedOpts := append([]rerpc.CallOption{}, c.options...)
-	mergedOpts = append(mergedOpts, opts...)
-	if ic := rerpc.ConfiguredCallInterceptor(mergedOpts...); ic != nil {
+	if ic := rerpc.ConfiguredCallInterceptor(merged...); ic != nil {
 		wrapped = ic.Wrap(wrapped)
 	}
-	res, err := wrapped(c.ping.Context(ctx, opts...), req)
+	res, err := wrapped(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -104,8 +108,18 @@ func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, op
 // Fail calls internal.crosstest.v1test.CrossService.Fail. Call options passed
 // here apply only to this call.
 func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error) {
+	merged := c.mergeOptions(opts)
+	ctx, call := rerpc.NewCall(
+		ctx,
+		c.doer,
+		c.baseURL,
+		"internal.crosstest.v1test", // protobuf package
+		"CrossService",              // protobuf service
+		"Fail",                      // protobuf method
+		merged...,
+	)
 	wrapped := rerpc.Func(func(ctx context.Context, msg proto.Message) (proto.Message, error) {
-		stream := c.fail.Call(ctx, opts...)
+		stream := call(ctx)
 		if err := stream.Send(req); err != nil {
 			_ = stream.CloseSend(err)
 			_ = stream.CloseReceive()
@@ -122,12 +136,10 @@ func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, op
 		}
 		return &res, stream.CloseReceive()
 	})
-	mergedOpts := append([]rerpc.CallOption{}, c.options...)
-	mergedOpts = append(mergedOpts, opts...)
-	if ic := rerpc.ConfiguredCallInterceptor(mergedOpts...); ic != nil {
+	if ic := rerpc.ConfiguredCallInterceptor(merged...); ic != nil {
 		wrapped = ic.Wrap(wrapped)
 	}
-	res, err := wrapped(c.fail.Context(ctx, opts...), req)
+	res, err := wrapped(ctx, req)
 	if err != nil {
 		return nil, err
 	}
