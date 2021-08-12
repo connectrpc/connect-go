@@ -16,9 +16,6 @@ import (
 	"github.com/rerpc/rerpc/internal/twirp"
 )
 
-type HandlerStreamFunc func(context.Context, Stream)
-type CallStreamFunc func(context.Context) Stream
-
 // Stream is a bidirectional stream of protobuf messages. Streams aren't
 // guaranteed to be safe for concurrent use.
 type Stream interface {

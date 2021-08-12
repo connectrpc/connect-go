@@ -3,6 +3,7 @@ package rerpc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -33,6 +34,22 @@ func (i *loggingInterceptor) Wrap(next Func) Func {
 	})
 }
 
+func (i *loggingInterceptor) WrapHandlerStream(next HandlerStreamFunc) HandlerStreamFunc {
+	return HandlerStreamFunc(func(ctx context.Context, stream Stream) {
+		io.WriteString(i.w, i.before)
+		defer func() { io.WriteString(i.w, i.after) }()
+		next(ctx, stream)
+	})
+}
+
+func (i *loggingInterceptor) WrapCallStream(next CallStreamFunc) CallStreamFunc {
+	return CallStreamFunc(func(ctx context.Context) Stream {
+		io.WriteString(i.w, i.before)
+		defer func() { io.WriteString(i.w, i.after) }()
+		return next(ctx)
+	})
+}
+
 func TestChain(t *testing.T) {
 	out := &bytes.Buffer{}
 	chain := NewChain(
@@ -40,15 +57,40 @@ func TestChain(t *testing.T) {
 		&loggingInterceptor{out, "b2.", "a2."},
 	)
 	const onion = "b1.b2.a2.a1" // expected execution order
-	var called bool
-	next := assertingFunc(func(_ context.Context) {
-		called = true
+	t.Run("unary", func(t *testing.T) {
+		out.Reset()
+		var called bool
+		next := assertingFunc(func(_ context.Context) {
+			called = true
+		})
+		res, err := chain.Wrap(next)(context.Background(), &emptypb.Empty{})
+		assert.Nil(t, err, "returned error")
+		assert.NotNil(t, res, "returned result")
+		assert.Equal(t, out.String(), onion, "execution onion")
+		assert.True(t, called, "original Func called")
 	})
-	res, err := chain.Wrap(next)(context.Background(), &emptypb.Empty{})
-	assert.Nil(t, err, "returned error")
-	assert.NotNil(t, res, "returned result")
-	assert.Equal(t, out.String(), onion, "execution onion")
-	assert.True(t, called, "original Func called")
+	t.Run("handler_stream", func(t *testing.T) {
+		out.Reset()
+		var called bool
+		next := HandlerStreamFunc(func(_ context.Context, _ Stream) {
+			called = true
+		})
+		chain.WrapHandlerStream(next)(context.Background(), &errStream{errors.New("hi")})
+		assert.Equal(t, out.String(), onion, "execution onion")
+		assert.True(t, called, "original HandlerStreamFunc called")
+	})
+	t.Run("call_stream", func(t *testing.T) {
+		out.Reset()
+		var called bool
+		next := CallStreamFunc(func(_ context.Context) Stream {
+			called = true
+			return &errStream{errors.New("hi")}
+		})
+		stream := chain.WrapCallStream(next)(context.Background())
+		assert.NotNil(t, stream, "returned stream")
+		assert.Equal(t, out.String(), onion, "execution onion")
+		assert.True(t, called, "original CallStreamFunc called")
+	})
 }
 
 func TestClampTimeout(t *testing.T) {

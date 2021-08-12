@@ -93,7 +93,7 @@ func NewHealthHandler(
 
 	if ic := ConfiguredHandlerInterceptor(opts...); ic != nil {
 		checkImplementation = ic.Wrap(checkImplementation)
-		// TODO: apply stream interceptor
+		watchImplementation = ic.WrapHandlerStream(watchImplementation)
 	}
 
 	check := NewHandler(

@@ -8,9 +8,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Func is the generic signature of an RPC, from both the server and the
+// Func is the generic signature of a unary RPC, from both the server and the
 // client's perspective. Interceptors wrap Funcs.
 type Func func(context.Context, proto.Message) (proto.Message, error)
+
+// HandlerStreamFunc is the generic signature of a streaming RPC from the
+// server's perspective. Interceptors wrap HandlerStreamFuncs.
+type HandlerStreamFunc func(context.Context, Stream)
+
+// CallStreamFunc is the generic signature of a streaming RPC from the client's
+// perspective. Interceptors wrap CallStreamFuncs.
+type CallStreamFunc func(context.Context) Stream
 
 // An Interceptor adds logic to a generated handler or client, like the
 // decorators or middleware you may have seen in other libraries. Interceptors
@@ -18,13 +26,15 @@ type Func func(context.Context, proto.Message) (proto.Message, error)
 // returned error, retry, recover from panics, emit logs and metrics, or do
 // nearly anything else.
 //
-// The returned Func must be safe to call concurrently. If chained carelessly,
-// the interceptor's logic may run more than once - where possible,
+// The returned functions must be safe to call concurrently. If chained
+// carelessly, the interceptor's logic may run more than once - where possible,
 // interceptors should be idempotent.
 //
 // See Chain for an example of interceptor use.
 type Interceptor interface {
 	Wrap(Func) Func
+	WrapHandlerStream(HandlerStreamFunc) HandlerStreamFunc
+	WrapCallStream(CallStreamFunc) CallStreamFunc
 }
 
 // ConfiguredCallInterceptor returns the Interceptor configured by a collection
@@ -47,25 +57,67 @@ func ConfiguredHandlerInterceptor(opts ...HandlerOption) Interceptor {
 	return cfg.Interceptor
 }
 
-// ShortCircuit builds an interceptor that doesn't call the wrapped Func.
-// Instead, it returns the supplied Error immediately.
+type errStream struct {
+	err error
+}
+
+var _ Stream = (*errStream)(nil)
+
+func (s *errStream) Receive(_ proto.Message) error { return s.err }
+func (s *errStream) CloseReceive() error           { return s.err }
+func (s *errStream) Send(_ proto.Message) error    { return s.err }
+func (s *errStream) CloseSend(_ error) error       { return s.err }
+
+type shortCircuit struct {
+	err error
+}
+
+var _ Interceptor = (*shortCircuit)(nil)
+
+func (sc *shortCircuit) Wrap(next Func) Func {
+	return Func(func(_ context.Context, _ proto.Message) (proto.Message, error) {
+		return nil, sc.err
+	})
+}
+
+func (sc *shortCircuit) WrapHandlerStream(next HandlerStreamFunc) HandlerStreamFunc {
+	return HandlerStreamFunc(func(ctx context.Context, _ Stream) {
+		next(ctx, &errStream{sc.err})
+	})
+}
+
+func (sc *shortCircuit) WrapCallStream(next CallStreamFunc) CallStreamFunc {
+	return CallStreamFunc(func(_ context.Context) Stream {
+		return &errStream{sc.err}
+	})
+}
+
+// ShortCircuit builds an interceptor that doesn't call the wrapped RPC at all.
+// Instead, it returns the supplied Error immediately. ShortCircuit works for
+// unary and streaming RPCs.
 //
 // This is primarily useful when testing error handling. It's also used
 // throughout reRPC's examples to avoid making network requests.
 func ShortCircuit(err error) Interceptor {
-	return InterceptorFunc(func(next Func) Func {
-		return Func(func(_ context.Context, _ proto.Message) (proto.Message, error) {
-			return nil, err
-		})
-	})
+	return &shortCircuit{err}
 }
 
-// An InterceptorFunc is a simple Interceptor implementation. See CallMetadata
-// for an example.
-type InterceptorFunc func(Func) Func
+// A UnaryInterceptorFunc is a simple Interceptor implementation that only
+// wraps unary RPCs. See CallMetadata for an example.
+type UnaryInterceptorFunc func(Func) Func
 
-// Wrap implements Interceptor.
-func (f InterceptorFunc) Wrap(next Func) Func { return f(next) }
+// Wrap implements Interceptor by applying the interceptor function.
+func (f UnaryInterceptorFunc) Wrap(next Func) Func { return f(next) }
+
+// WrapHandlerStream implements Interceptor with a no-op.
+func (f UnaryInterceptorFunc) WrapHandlerStream(next HandlerStreamFunc) HandlerStreamFunc {
+	return next
+}
+
+// WrapCallStream implements Interceptor with a no-op.
+func (f UnaryInterceptorFunc) WrapCallStream(next CallStreamFunc) CallStreamFunc {
+	return next
+}
 
 // A Chain composes multiple interceptors into one.
 type Chain struct {
@@ -93,14 +145,36 @@ func (c *Chain) Wrap(next Func) Func {
 	return next
 }
 
+// WrapHandlerStream implements Interceptor.
+func (c *Chain) WrapHandlerStream(next HandlerStreamFunc) HandlerStreamFunc {
+	for i := len(c.interceptors) - 1; i >= 0; i-- {
+		if interceptor := c.interceptors[i]; interceptor != nil {
+			next = interceptor.WrapHandlerStream(next)
+		}
+	}
+	return next
+}
+
+// WrapCallStream implements Interceptor.
+func (c *Chain) WrapCallStream(next CallStreamFunc) CallStreamFunc {
+	// We need to wrap in reverse order to have the first interceptor from
+	// the slice act first.
+	for i := len(c.interceptors) - 1; i >= 0; i-- {
+		if interceptor := c.interceptors[i]; interceptor != nil {
+			next = interceptor.WrapCallStream(next)
+		}
+	}
+	return next
+}
+
 type timeoutClamp struct {
 	min, max time.Duration
 }
 
 var _ Interceptor = (*timeoutClamp)(nil)
 
-// ClampTimeout sets the minimum and maximum allowable timeouts for clients and
-// handlers.
+// ClampTimeout sets the minimum and maximum allowable timeouts for unary RPCs.
+// It has no effect on streaming RPCs.
 //
 // For both clients and handlers, calls with less than the minimum timeout
 // return CodeDeadlineExceeded. In that case, clients don't send any data to
@@ -134,6 +208,10 @@ func (c *timeoutClamp) Wrap(next Func) Func {
 	})
 }
 
+func (*timeoutClamp) WrapHandlerStream(next HandlerStreamFunc) HandlerStreamFunc { return next }
+
+func (*timeoutClamp) WrapCallStream(next CallStreamFunc) CallStreamFunc { return next }
+
 type recovery struct {
 	Log func(context.Context, interface{})
 }
@@ -155,6 +233,20 @@ func (r *recovery) Wrap(next Func) Func {
 	return Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 		defer r.recoverAndLog(ctx)
 		return next(ctx, req)
+	})
+}
+
+func (r *recovery) WrapHandlerStream(next HandlerStreamFunc) HandlerStreamFunc {
+	return HandlerStreamFunc(func(ctx context.Context, stream Stream) {
+		defer r.recoverAndLog(ctx)
+		next(ctx, stream)
+	})
+}
+
+func (r *recovery) WrapCallStream(next CallStreamFunc) CallStreamFunc {
+	return CallStreamFunc(func(ctx context.Context) Stream {
+		defer r.recoverAndLog(ctx)
+		return next(ctx)
 	})
 }
 
