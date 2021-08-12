@@ -12,7 +12,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -40,10 +39,7 @@ func (p pingServer) Fail(ctx context.Context, req *pingpb.FailRequest) (*pingpb.
 
 func TestHandlerTwirp(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.Handle(pingpb.NewPingServiceHandlerReRPC(
-		pingServer{},
-		rerpc.Intercept(rerpc.ClampTimeout(0, time.Minute)),
-	))
+	mux.Handle(pingpb.NewPingServiceHandlerReRPC(pingServer{}))
 
 	server := httptest.NewServer(mux)
 	defer server.Close()
@@ -262,17 +258,8 @@ func TestServerProtoGRPC(t *testing.T) {
 	const errMsg = "oh no"
 	reg := rerpc.NewRegistrar()
 	mux := http.NewServeMux()
-	clamp := rerpc.ClampTimeout(0, time.Minute)
-	mux.Handle(pingpb.NewPingServiceHandlerReRPC(
-		pingServer{},
-		reg,
-		rerpc.Intercept(clamp),
-	))
-	mux.Handle(rerpc.NewHealthHandler(
-		rerpc.NewChecker(reg),
-		reg,
-		rerpc.Intercept(clamp),
-	))
+	mux.Handle(pingpb.NewPingServiceHandlerReRPC(pingServer{}, reg))
+	mux.Handle(rerpc.NewHealthHandler(rerpc.NewChecker(reg), reg))
 	mux.Handle(rerpc.NewReflectionHandler(reg))
 
 	testPing := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
@@ -484,7 +471,7 @@ func TestServerProtoGRPC(t *testing.T) {
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server) {
 		t.Run("identity", func(t *testing.T) {
-			client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client(), rerpc.Intercept(clamp))
+			client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client())
 			testPing(t, client)
 			testErrors(t, client)
 			testHealth(t, server.URL, server.Client())
@@ -494,7 +481,6 @@ func TestServerProtoGRPC(t *testing.T) {
 				server.URL,
 				server.Client(),
 				rerpc.Gzip(true),
-				rerpc.Intercept(clamp),
 			)
 			testPing(t, client)
 			testErrors(t, client)
@@ -514,46 +500,6 @@ func TestServerProtoGRPC(t *testing.T) {
 		defer server.Close()
 		testMatrix(t, server)
 		testReflection(t, server.URL, server.Client())
-	})
-}
-
-func TestClampTimeoutIntegration(t *testing.T) {
-	const min = 10 * time.Second
-	clamp := rerpc.ClampTimeout(min, time.Minute)
-
-	assertDeadline := func(t testing.TB, client pingpb.PingServiceClientReRPC) {
-		ctx, cancel := context.WithTimeout(context.Background(), min-1)
-		defer cancel()
-		_, err := client.Ping(ctx, &pingpb.PingRequest{})
-		assert.NotNil(t, err, "ping error")
-		assert.Equal(t, rerpc.CodeOf(err), rerpc.CodeDeadlineExceeded, "error code")
-	}
-
-	t.Run("server", func(t *testing.T) {
-		// Clamped server, unclamped client.
-		mux := http.NewServeMux()
-		mux.Handle(pingpb.NewPingServiceHandlerReRPC(
-			pingServer{},
-			rerpc.Intercept(clamp),
-		))
-		server := httptest.NewServer(mux)
-		defer server.Close()
-		client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client())
-		assertDeadline(t, client)
-	})
-
-	t.Run("client", func(t *testing.T) {
-		// Unclamped server, clamped client.
-		mux := http.NewServeMux()
-		mux.Handle(pingpb.NewPingServiceHandlerReRPC(pingServer{}))
-		server := httptest.NewServer(mux)
-		defer server.Close()
-		client := pingpb.NewPingServiceClientReRPC(
-			server.URL,
-			server.Client(),
-			rerpc.Intercept(clamp),
-		)
-		assertDeadline(t, client)
 	})
 }
 
