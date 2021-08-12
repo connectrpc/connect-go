@@ -84,7 +84,6 @@ func (c *Client) Call(ctx context.Context, opts ...CallOption) Stream {
 	next := CallStreamFunc(func(ctx context.Context) Stream {
 		return newClientStream(ctx, c.doer, methodURL, spec.ReadMaxBytes, spec.RequestCompression == CompressionGzip)
 	})
-	// TODO: apply interceptors
 	return next(ctx)
 }
 

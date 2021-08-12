@@ -600,6 +600,14 @@ func (i *metadataIntegrationInterceptor) Wrap(next rerpc.Func) rerpc.Func {
 	})
 }
 
+func (i *metadataIntegrationInterceptor) WrapHandlerStream(next rerpc.HandlerStreamFunc) rerpc.HandlerStreamFunc {
+	return next
+}
+
+func (i *metadataIntegrationInterceptor) WrapCallStream(next rerpc.CallStreamFunc) rerpc.CallStreamFunc {
+	return next
+}
+
 func TestCallMetadataIntegration(t *testing.T) {
 	intercept := rerpc.Intercept(&metadataIntegrationInterceptor{tb: t, key: "Foo-Bar", value: "baz"})
 	mux := http.NewServeMux()

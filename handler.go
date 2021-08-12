@@ -259,7 +259,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		spec.ResponseCompression == CompressionGzip,
 	)
 	ctx := NewHandlerContext(r.Context(), *spec, r.Header, w.Header())
-	// TODO: refactor interceptors and apply them here
 	if failed != nil {
 		_ = stream.CloseReceive()
 		_ = stream.CloseSend(failed)

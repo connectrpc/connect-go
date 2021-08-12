@@ -12,7 +12,7 @@ import (
 )
 
 func ExampleCallMetadata() {
-	logger := rerpc.InterceptorFunc(func(next rerpc.Func) rerpc.Func {
+	logger := rerpc.UnaryInterceptorFunc(func(next rerpc.Func) rerpc.Func {
 		return rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			if md, ok := rerpc.CallMeta(ctx); ok {
 				fmt.Println("calling", md.Spec.Method)
@@ -33,7 +33,7 @@ func ExampleCallMetadata() {
 }
 
 func ExampleChain() {
-	outer := rerpc.InterceptorFunc(func(next rerpc.Func) rerpc.Func {
+	outer := rerpc.UnaryInterceptorFunc(func(next rerpc.Func) rerpc.Func {
 		return rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			fmt.Println("outer interceptor: before call")
 			res, err := next(ctx, req)
@@ -41,7 +41,7 @@ func ExampleChain() {
 			return res, err
 		})
 	})
-	inner := rerpc.InterceptorFunc(func(next rerpc.Func) rerpc.Func {
+	inner := rerpc.UnaryInterceptorFunc(func(next rerpc.Func) rerpc.Func {
 		return rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 			fmt.Println("inner interceptor: before call")
 			res, err := next(ctx, req)

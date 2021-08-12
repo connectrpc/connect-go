@@ -94,7 +94,7 @@ func NewReflectionHandler(reg *Registrar, opts ...HandlerOption) (string, *http.
 	svc := &reflectionServer{reg}
 	wrapped := HandlerStreamFunc(svc.Serve)
 	if i := ConfiguredHandlerInterceptor(opts...); i != nil {
-		fmt.Println("TODO: apply interceptors")
+		i.WrapHandlerStream(wrapped)
 	}
 	h := NewHandler(
 		pkg, service, method,
