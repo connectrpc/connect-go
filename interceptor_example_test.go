@@ -20,7 +20,9 @@ func ExampleCallMetadata() {
 			return next(ctx, req)
 		})
 	})
-	short := rerpc.ShortCircuit(rerpc.Errorf(rerpc.CodeUnimplemented, "no networking in examples"))
+	// This interceptor prevents the client from making network requests in
+	// examples. Leave it out in real code!
+	short := ShortCircuit(rerpc.Errorf(rerpc.CodeUnimplemented, "no networking in examples"))
 	client := pingpb.NewPingServiceClientReRPC(
 		"https://invalid-test-url",
 		http.DefaultClient,
@@ -49,7 +51,9 @@ func ExampleChain() {
 			return res, err
 		})
 	})
-	short := rerpc.ShortCircuit(rerpc.Errorf(rerpc.CodeUnimplemented, "no networking in examples"))
+	// This interceptor prevents the client from making network requests in
+	// examples. Leave it out in real code!
+	short := ShortCircuit(rerpc.Errorf(rerpc.CodeUnimplemented, "no networking in examples"))
 	client := pingpb.NewPingServiceClientReRPC(
 		"https://invalid-test-url",
 		http.DefaultClient,
