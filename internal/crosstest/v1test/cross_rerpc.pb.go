@@ -213,6 +213,14 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 			}
 			res, err := pingFunc(ctx, &req)
 			if err != nil {
+				if _, ok := rerpc.AsError(err); !ok {
+					if errors.Is(err, context.Canceled) {
+						err = rerpc.Wrap(rerpc.CodeCanceled, err)
+					}
+					if errors.Is(err, context.DeadlineExceeded) {
+						err = rerpc.Wrap(rerpc.CodeDeadlineExceeded, err)
+					}
+				}
 				_ = stream.CloseSend(err)
 				return
 			}
@@ -262,6 +270,14 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 			}
 			res, err := failFunc(ctx, &req)
 			if err != nil {
+				if _, ok := rerpc.AsError(err); !ok {
+					if errors.Is(err, context.Canceled) {
+						err = rerpc.Wrap(rerpc.CodeCanceled, err)
+					}
+					if errors.Is(err, context.DeadlineExceeded) {
+						err = rerpc.Wrap(rerpc.CodeDeadlineExceeded, err)
+					}
+				}
 				_ = stream.CloseSend(err)
 				return
 			}

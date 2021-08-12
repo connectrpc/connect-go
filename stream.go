@@ -16,12 +16,23 @@ import (
 	"github.com/rerpc/rerpc/internal/twirp"
 )
 
-// Stream is a bidirectional stream of protobuf messages. Streams aren't
-// guaranteed to be safe for concurrent use.
+// Stream is a bidirectional stream of protobuf messages.
+//
+// Stream implementations must support a limited form of concurrency: one
+// goroutine may call Send and CloseSend, and another may call Receive and
+// CloseReceive. Either goroutine may call Context.
 type Stream interface {
+	// Implementations must ensure that Context is safe to call concurrently. It
+	// must not race with any other methods.
 	Context() context.Context
+
+	// Implementations must ensure that Send and CloseSend don't race with
+	// Context, Receive, or CloseReceive. They may race with each other.
 	Send(proto.Message) error
 	CloseSend(error) error
+
+	// Implementations must ensure that Receive and CloseReceive don't race with
+	// Context, Send, or CloseSend. They may race with each other.
 	Receive(proto.Message) error
 	CloseReceive() error
 }

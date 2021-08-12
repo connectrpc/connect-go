@@ -278,12 +278,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Path returns the URL pattern to use when registering this handler. It's used
 // by the generated code.
 func (h *Handler) Path() string {
+	if h.config.Package == "" && h.config.Service == "" && h.config.Method == "" {
+		return "/"
+	}
 	return fmt.Sprintf("/%s.%s/%s", h.config.Package, h.config.Service, h.config.Method)
 }
 
 // ServicePath returns the URL pattern for the protobuf service. It's used by
 // the generated code.
 func (h *Handler) ServicePath() string {
+	if h.config.Package == "" && h.config.Service == "" && h.config.Method == "" {
+		return "/"
+	}
 	return fmt.Sprintf("/%s.%s/", h.config.Package, h.config.Service)
 }
 
