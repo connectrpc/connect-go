@@ -20,13 +20,12 @@ type callCfg struct {
 	EnableGzipRequest bool
 	MaxResponseBytes  int64
 	Interceptor       Interceptor
-	Hooks             *Hooks
 }
 
 // A CallOption configures a reRPC client or a single call.
 //
 // In addition to any options grouped in the documentation below, remember that
-// Hooks and Options are also valid CallOptions.
+// Options are also valid CallOptions.
 type CallOption interface {
 	applyToCall(*callCfg)
 }

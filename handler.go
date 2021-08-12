@@ -28,7 +28,6 @@ type handlerCfg struct {
 	MaxRequestBytes     int64
 	Registrar           *Registrar
 	Interceptor         Interceptor
-	Hooks               *Hooks
 	Package             string
 	Service             string
 	Method              string
@@ -37,7 +36,7 @@ type handlerCfg struct {
 // A HandlerOption configures a Handler.
 //
 // In addition to any options grouped in the documentation below, remember that
-// Registrars, Hooks, and Options are also valid HandlerOptions.
+// Registrars and Options are also valid HandlerOptions.
 type HandlerOption interface {
 	applyToHandler(*handlerCfg)
 }
