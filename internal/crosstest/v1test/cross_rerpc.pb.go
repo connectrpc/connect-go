@@ -67,6 +67,7 @@ func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, op
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
+		rerpc.StreamTypeUnary,
 		c.baseURL,
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
@@ -112,6 +113,7 @@ func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, op
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
+		rerpc.StreamTypeUnary,
 		c.baseURL,
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
@@ -185,6 +187,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		pingFunc = ic.Wrap(pingFunc)
 	}
 	ping := rerpc.NewHandler(
+		rerpc.StreamTypeUnary,
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"Ping",                      // protobuf method
@@ -221,6 +224,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		failFunc = ic.Wrap(failFunc)
 	}
 	fail := rerpc.NewHandler(
+		rerpc.StreamTypeUnary,
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"Fail",                      // protobuf method

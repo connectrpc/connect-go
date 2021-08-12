@@ -17,6 +17,7 @@ func NewBadRouteHandler(opts ...HandlerOption) *Handler {
 		wrapped = ic.Wrap(wrapped)
 	}
 	return NewHandler(
+		StreamTypeUnary,
 		"", "", "", // protobuf package, service, method names
 		func(ctx context.Context, stream Stream) {
 			defer stream.CloseReceive()

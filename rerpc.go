@@ -28,6 +28,17 @@ const (
 	CompressionGzip     = "gzip"
 )
 
+// StreamType describes whether the client, server, neither, or both is
+// streaming.
+type StreamType uint8
+
+const (
+	StreamTypeClient        StreamType = 0b01
+	StreamTypeServer                   = 0b10
+	StreamTypeUnary                    = StreamTypeClient & StreamTypeServer
+	StreamTypeBidirectional            = StreamTypeClient | StreamTypeServer
+)
+
 // These constants are used in compile-time handshakes with reRPC's generated
 // code.
 const (

@@ -97,6 +97,7 @@ func NewReflectionHandler(reg *Registrar, opts ...HandlerOption) (string, *http.
 		i.WrapHandlerStream(wrapped)
 	}
 	h := NewHandler(
+		StreamTypeBidirectional,
 		pkg, service, method,
 		wrapped,
 		opts...,

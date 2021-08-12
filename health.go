@@ -97,6 +97,7 @@ func NewHealthHandler(
 	}
 
 	check := NewHandler(
+		StreamTypeUnary,
 		"grpc.health.v1", "Health", "Check",
 		HandlerStreamFunc(func(ctx context.Context, stream Stream) {
 			defer stream.CloseReceive()
@@ -117,6 +118,7 @@ func NewHealthHandler(
 	mux.Handle(check.Path(), check)
 
 	watch := NewHandler(
+		StreamTypeBidirectional,
 		"grpc.health.v1", "Health", "Watch",
 		watchImplementation,
 		opts...,

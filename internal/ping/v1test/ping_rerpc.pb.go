@@ -67,6 +67,7 @@ func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opt
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
+		rerpc.StreamTypeUnary,
 		c.baseURL,
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
@@ -112,6 +113,7 @@ func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opt
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
+		rerpc.StreamTypeUnary,
 		c.baseURL,
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
@@ -185,6 +187,7 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 		pingFunc = ic.Wrap(pingFunc)
 	}
 	ping := rerpc.NewHandler(
+		rerpc.StreamTypeUnary,
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"Ping",                 // protobuf method
@@ -221,6 +224,7 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 		failFunc = ic.Wrap(failFunc)
 	}
 	fail := rerpc.NewHandler(
+		rerpc.StreamTypeUnary,
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"Fail",                 // protobuf method
