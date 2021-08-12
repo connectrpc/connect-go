@@ -188,7 +188,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 		if c, ok := httpToGRPC[res.StatusCode]; ok {
 			code = c
 		}
-		cs.setResponseError(errorf(code, "HTTP status %v", res.StatusCode))
+		cs.setResponseError(errorf(code, "HTTP status %v", res.Status))
 		return
 	}
 	compression := res.Header.Get("Grpc-Encoding")

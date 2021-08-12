@@ -296,6 +296,7 @@ func TestServerProtoGRPC(t *testing.T) {
 				ctx, call := rerpc.NewCall(
 					context.Background(),
 					doer,
+					rerpc.StreamTypeUnary,
 					url,
 					"grpc.health.v1", "Health", method,
 					opts...,
@@ -344,7 +345,14 @@ func TestServerProtoGRPC(t *testing.T) {
 				assert.NotNil(t, err, "rpc error")
 				rerr, ok := rerpc.AsError(err)
 				assert.True(t, ok, "convert to rerpc error")
-				assert.Equal(t, rerr.Code(), rerpc.CodeUnimplemented, "error code")
+				switch rerr.Code() {
+				case rerpc.CodeUnimplemented:
+					// Expected if we're using HTTP/2.
+				case rerpc.CodeUnknown:
+					assert.Equal(t, rerr.Error(), "Unknown: HTTP status 505 HTTP Version Not Supported", "error message for CodeUnknown")
+				default:
+					t.Fatalf("expected CodeUnknown or CodeUnimplemented, got %v", rerr)
+				}
 			})
 		})
 	}
@@ -360,6 +368,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			ctx, call := rerpc.NewCall(
 				context.Background(),
 				doer,
+				rerpc.StreamTypeUnary,
 				url,
 				"grpc.reflection.v1alpha", "ServerReflection", "ServerReflectionInfo",
 				opts...,

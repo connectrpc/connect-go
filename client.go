@@ -40,6 +40,7 @@ type CallOption interface {
 func NewCall(
 	ctx context.Context,
 	doer Doer,
+	stype StreamType,
 	baseURL, pkg, service, method string,
 	opts ...CallOption,
 ) (context.Context, CallStreamFunc) {
@@ -53,6 +54,7 @@ func NewCall(
 	}
 
 	spec := &Specification{
+		Type:               stype,
 		Package:            cfg.Package,
 		Service:            cfg.Service,
 		Method:             cfg.Method,

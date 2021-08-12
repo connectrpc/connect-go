@@ -66,6 +66,7 @@ func ServeTwirp(enable bool) HandlerOption {
 // To see an example of how Handler is used in the generated code, see the
 // internal/pingpb/v0 package.
 type Handler struct {
+	stype          StreamType
 	config         handlerCfg
 	implementation HandlerStreamFunc
 }
@@ -78,6 +79,7 @@ type Handler struct {
 // Remember that NewHandler is usually called from generated code - most users
 // won't need to deal with protobuf identifiers directly.
 func NewHandler(
+	stype StreamType,
 	pkg, service, method string,
 	impl HandlerStreamFunc,
 	opts ...HandlerOption,
@@ -94,6 +96,7 @@ func NewHandler(
 		reg.register(cfg.Package, cfg.Service)
 	}
 	return &Handler{
+		stype:          stype,
 		config:         cfg,
 		implementation: impl,
 	}
@@ -101,13 +104,13 @@ func NewHandler(
 
 // ServeHTTP implements http.Handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// To ensure that we can re-use connections, always consume and close the
-	// request body.
-	defer r.Body.Close()
-	defer discard(r.Body)
+	// We don't need to defer functions  to close the request body or read to
+	// EOF: the stream we construct later on already does that, and we only
+	// return early when dealing with misbehaving clients. In those cases, it's
+	// okay if we can't re-use the connection.
 
-	// TODO: verify HTTP/2 for bidirectional streaming
-	if false && r.ProtoMajor < 2 {
+	isBidi := (h.stype & StreamTypeBidirectional) == StreamTypeBidirectional
+	if isBidi && r.ProtoMajor < 2 {
 		w.WriteHeader(http.StatusHTTPVersionNotSupported)
 		io.WriteString(w, "bidirectional streaming requires HTTP/2")
 		return
@@ -119,28 +122,30 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-
-	spec := &Specification{
-		Package:             h.config.Package,
-		Service:             h.config.Service,
-		Method:              h.config.Method,
-		Path:                r.URL.Path,
-		ContentType:         r.Header.Get("Content-Type"),
-		RequestCompression:  CompressionIdentity,
-		ResponseCompression: CompressionIdentity,
-		ReadMaxBytes:        h.config.MaxRequestBytes,
-	}
-	if (spec.ContentType == TypeJSON || spec.ContentType == TypeProtoTwirp) && h.config.DisableTwirp {
+	ctype := r.Header.Get("Content-Type")
+	if (ctype == TypeJSON || ctype == TypeProtoTwirp) && h.config.DisableTwirp {
 		w.Header().Set("Accept-Post", acceptPostValueWithoutJSON)
 		w.WriteHeader(http.StatusUnsupportedMediaType)
 		return
 	}
-	if ct := spec.ContentType; ct != TypeDefaultGRPC && ct != TypeProtoGRPC && ct != TypeProtoTwirp && ct != TypeJSON {
+	if ctype != TypeDefaultGRPC && ctype != TypeProtoGRPC && ctype != TypeProtoTwirp && ctype != TypeJSON {
 		// grpc-go returns 500, but the spec recommends 415.
 		// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#requests
 		w.Header().Set("Accept-Post", acceptPostValueDefault)
 		w.WriteHeader(http.StatusUnsupportedMediaType)
 		return
+	}
+
+	spec := &Specification{
+		Type:                h.stype,
+		Package:             h.config.Package,
+		Service:             h.config.Service,
+		Method:              h.config.Method,
+		Path:                r.URL.Path,
+		ContentType:         ctype,
+		RequestCompression:  CompressionIdentity,
+		ResponseCompression: CompressionIdentity,
+		ReadMaxBytes:        h.config.MaxRequestBytes,
 	}
 
 	// We need to parse metadata before entering the interceptor stack, but we'd
