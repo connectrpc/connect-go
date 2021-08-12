@@ -164,6 +164,9 @@ func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opt
 type PingServiceReRPC interface {
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
 	Fail(context.Context, *FailRequest) (*FailResponse, error)
+	Sum(context.Context, *PingServiceReRPC_SumServer) error
+	CountUp(context.Context, *CountUpRequest, *PingServiceReRPC_CountUpServer) error
+	CumSum(context.Context, *PingServiceReRPC_CumSumServer) error
 	mustEmbedUnimplementedPingServiceReRPC()
 }
 
@@ -213,6 +216,14 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 			}
 			res, err := pingFunc(ctx, &req)
 			if err != nil {
+				if _, ok := rerpc.AsError(err); !ok {
+					if errors.Is(err, context.Canceled) {
+						err = rerpc.Wrap(rerpc.CodeCanceled, err)
+					}
+					if errors.Is(err, context.DeadlineExceeded) {
+						err = rerpc.Wrap(rerpc.CodeDeadlineExceeded, err)
+					}
+				}
 				_ = stream.CloseSend(err)
 				return
 			}
@@ -262,6 +273,14 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 			}
 			res, err := failFunc(ctx, &req)
 			if err != nil {
+				if _, ok := rerpc.AsError(err); !ok {
+					if errors.Is(err, context.Canceled) {
+						err = rerpc.Wrap(rerpc.CodeCanceled, err)
+					}
+					if errors.Is(err, context.DeadlineExceeded) {
+						err = rerpc.Wrap(rerpc.CodeDeadlineExceeded, err)
+					}
+				}
 				_ = stream.CloseSend(err)
 				return
 			}
@@ -271,10 +290,106 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 	)
 	mux.Handle(fail.Path(), fail)
 
+	sum := rerpc.NewHandler(
+		rerpc.StreamTypeClient,
+		"internal.ping.v1test", // protobuf package
+		"PingService",          // protobuf service
+		"Sum",                  // protobuf method
+		func(ctx context.Context, sf rerpc.StreamFunc) {
+			if ic != nil {
+				sf = ic.WrapStream(sf)
+			}
+			stream := sf(ctx)
+			typed := NewPingServiceReRPC_SumServer(stream)
+			err := svc.Sum(stream.Context(), typed)
+			_ = stream.CloseReceive()
+			if err != nil {
+				if _, ok := rerpc.AsError(err); !ok {
+					if errors.Is(err, context.Canceled) {
+						err = rerpc.Wrap(rerpc.CodeCanceled, err)
+					}
+					if errors.Is(err, context.DeadlineExceeded) {
+						err = rerpc.Wrap(rerpc.CodeDeadlineExceeded, err)
+					}
+				}
+			}
+			_ = stream.CloseSend(err)
+		},
+		opts...,
+	)
+	mux.Handle(sum.Path(), sum)
+
+	countUp := rerpc.NewHandler(
+		rerpc.StreamTypeServer,
+		"internal.ping.v1test", // protobuf package
+		"PingService",          // protobuf service
+		"CountUp",              // protobuf method
+		func(ctx context.Context, sf rerpc.StreamFunc) {
+			if ic != nil {
+				sf = ic.WrapStream(sf)
+			}
+			stream := sf(ctx)
+			typed := NewPingServiceReRPC_CountUpServer(stream)
+			var req CountUpRequest
+			if err := stream.Receive(&req); err != nil {
+				_ = stream.CloseReceive()
+				_ = stream.CloseSend(err)
+				return
+			}
+			if err := stream.CloseReceive(); err != nil {
+				_ = stream.CloseSend(err)
+				return
+			}
+			err := svc.CountUp(stream.Context(), &req, typed)
+			if err != nil {
+				if _, ok := rerpc.AsError(err); !ok {
+					if errors.Is(err, context.Canceled) {
+						err = rerpc.Wrap(rerpc.CodeCanceled, err)
+					}
+					if errors.Is(err, context.DeadlineExceeded) {
+						err = rerpc.Wrap(rerpc.CodeDeadlineExceeded, err)
+					}
+				}
+			}
+			_ = stream.CloseSend(err)
+		},
+		opts...,
+	)
+	mux.Handle(countUp.Path(), countUp)
+
+	cumSum := rerpc.NewHandler(
+		rerpc.StreamTypeBidirectional,
+		"internal.ping.v1test", // protobuf package
+		"PingService",          // protobuf service
+		"CumSum",               // protobuf method
+		func(ctx context.Context, sf rerpc.StreamFunc) {
+			if ic != nil {
+				sf = ic.WrapStream(sf)
+			}
+			stream := sf(ctx)
+			typed := NewPingServiceReRPC_CumSumServer(stream)
+			err := svc.CumSum(stream.Context(), typed)
+			_ = stream.CloseReceive()
+			if err != nil {
+				if _, ok := rerpc.AsError(err); !ok {
+					if errors.Is(err, context.Canceled) {
+						err = rerpc.Wrap(rerpc.CodeCanceled, err)
+					}
+					if errors.Is(err, context.DeadlineExceeded) {
+						err = rerpc.Wrap(rerpc.CodeDeadlineExceeded, err)
+					}
+				}
+			}
+			_ = stream.CloseSend(err)
+		},
+		opts...,
+	)
+	mux.Handle(cumSum.Path(), cumSum)
+
 	// Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.
 	mux.Handle("/", rerpc.NewBadRouteHandler(opts...))
 
-	return fail.ServicePath(), mux
+	return cumSum.ServicePath(), mux
 }
 
 var _ PingServiceReRPC = (*UnimplementedPingServiceReRPC)(nil) // verify interface implementation
@@ -292,4 +407,77 @@ func (UnimplementedPingServiceReRPC) Fail(context.Context, *FailRequest) (*FailR
 	return nil, rerpc.Errorf(rerpc.CodeUnimplemented, "internal.ping.v1test.PingService.Fail isn't implemented")
 }
 
+func (UnimplementedPingServiceReRPC) Sum(context.Context, *PingServiceReRPC_SumServer) error {
+	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.ping.v1test.PingService.Sum isn't implemented")
+}
+
+func (UnimplementedPingServiceReRPC) CountUp(context.Context, *CountUpRequest, *PingServiceReRPC_CountUpServer) error {
+	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.ping.v1test.PingService.CountUp isn't implemented")
+}
+
+func (UnimplementedPingServiceReRPC) CumSum(context.Context, *PingServiceReRPC_CumSumServer) error {
+	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.ping.v1test.PingService.CumSum isn't implemented")
+}
+
 func (UnimplementedPingServiceReRPC) mustEmbedUnimplementedPingServiceReRPC() {}
+
+// PingServiceReRPC_SumServer is the server-side stream for the
+// internal.ping.v1test.PingService.Sum procedure.
+type PingServiceReRPC_SumServer struct {
+	stream rerpc.Stream
+}
+
+func NewPingServiceReRPC_SumServer(stream rerpc.Stream) *PingServiceReRPC_SumServer {
+	return &PingServiceReRPC_SumServer{stream}
+}
+
+func (s *PingServiceReRPC_SumServer) Receive() (*SumRequest, error) {
+	var req SumRequest
+	if err := s.stream.Receive(&req); err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+func (s *PingServiceReRPC_SumServer) SendAndClose(msg *SumResponse) error {
+	if err := s.stream.CloseReceive(); err != nil {
+		return err
+	}
+	return s.stream.Send(msg)
+}
+
+// PingServiceReRPC_CountUpServer is the server-side stream for the
+// internal.ping.v1test.PingService.CountUp procedure.
+type PingServiceReRPC_CountUpServer struct {
+	stream rerpc.Stream
+}
+
+func NewPingServiceReRPC_CountUpServer(stream rerpc.Stream) *PingServiceReRPC_CountUpServer {
+	return &PingServiceReRPC_CountUpServer{stream}
+}
+
+func (s *PingServiceReRPC_CountUpServer) Send(msg *CountUpResponse) error {
+	return s.stream.Send(msg)
+}
+
+// PingServiceReRPC_CumSumServer is the server-side stream for the
+// internal.ping.v1test.PingService.CumSum procedure.
+type PingServiceReRPC_CumSumServer struct {
+	stream rerpc.Stream
+}
+
+func NewPingServiceReRPC_CumSumServer(stream rerpc.Stream) *PingServiceReRPC_CumSumServer {
+	return &PingServiceReRPC_CumSumServer{stream}
+}
+
+func (s *PingServiceReRPC_CumSumServer) Receive() (*CumSumRequest, error) {
+	var req CumSumRequest
+	if err := s.stream.Receive(&req); err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+func (s *PingServiceReRPC_CumSumServer) Send(msg *CumSumResponse) error {
+	return s.stream.Send(msg)
+}

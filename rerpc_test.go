@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -35,6 +36,58 @@ func (p pingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingpb.
 
 func (p pingServer) Fail(ctx context.Context, req *pingpb.FailRequest) (*pingpb.FailResponse, error) {
 	return nil, rerpc.Errorf(rerpc.Code(req.Code), errMsg)
+}
+
+func (p pingServer) Sum(ctx context.Context, stream *pingpb.PingServiceReRPC_SumServer) error {
+	var sum int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		msg, err := stream.Receive()
+		if err != nil && errors.Is(err, io.EOF) {
+			return stream.SendAndClose(&pingpb.SumResponse{
+				Sum: sum,
+			})
+		} else if err != nil {
+			return err
+		}
+		sum += msg.Number
+	}
+}
+
+func (p pingServer) CountUp(ctx context.Context, req *pingpb.CountUpRequest, stream *pingpb.PingServiceReRPC_CountUpServer) error {
+	if req.Number <= 0 {
+		return rerpc.Errorf(rerpc.CodeInvalidArgument, "number must be positive: got %v", req.Number)
+	}
+	for i := int64(1); i <= req.Number; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := stream.Send(&pingpb.CountUpResponse{Number: i}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p pingServer) CumSum(ctx context.Context, stream *pingpb.PingServiceReRPC_CumSumServer) error {
+	var sum int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		msg, err := stream.Receive()
+		if err != nil && errors.Is(err, io.EOF) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		sum += msg.Number
+		if err := stream.Send(&pingpb.CumSumResponse{Sum: sum}); err != nil {
+			return err
+		}
+	}
 }
 
 func TestHandlerTwirp(t *testing.T) {

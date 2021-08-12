@@ -95,9 +95,13 @@ func service(file *protogen.File, g *protogen.GeneratedFile, service *protogen.S
 
 	clientInterface(g, service, clientName)
 	clientImplementation(g, service, clientName)
+
 	serverInterface(g, service, serverName)
 	serverConstructor(g, service, serverName)
 	serverImplementation(g, service, serverName)
+
+	// client stream types
+	serverStreams(g, service, serverName)
 }
 
 func clientInterface(g *protogen.GeneratedFile, service *protogen.Service, name string) {
@@ -229,6 +233,10 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *
 	g.P()
 }
 
+func serverStreamName(sname string, method *protogen.Method) string {
+	return sname + "_" + method.GoName + "Server"
+}
+
 func serverInterface(g *protogen.GeneratedFile, service *protogen.Service, name string) {
 	comment(g, name, " is a server for the ", service.Desc.FullName(),
 		" service. To make sure that adding methods to this protobuf service doesn't break all ",
@@ -243,19 +251,29 @@ func serverInterface(g *protogen.GeneratedFile, service *protogen.Service, name 
 	}
 	g.Annotate(name, service.Location)
 	g.P("type ", name, " interface {")
-	for _, method := range unaryMethods(service) {
+	for _, method := range service.Methods {
 		g.Annotate(name+"."+method.GoName, method.Location)
-		g.P(method.Comments.Leading, serverSignature(g, method))
+		g.P(method.Comments.Leading, serverSignature(g, name, method))
 	}
 	g.P("mustEmbedUnimplemented", name, "()")
 	g.P("}")
 	g.P()
 }
 
-func serverSignature(g *protogen.GeneratedFile, method *protogen.Method) string {
+func serverSignature(g *protogen.GeneratedFile, sname string, method *protogen.Method) string {
 	if method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated() {
 		deprecated(g)
 	}
+	if method.Desc.IsStreamingServer() && !method.Desc.IsStreamingClient() {
+		// server streaming
+		return method.GoName + "(" + g.QualifiedGoIdent(contextContext) +
+			", *" + g.QualifiedGoIdent(method.Input.GoIdent) + ", *" + serverStreamName(sname, method) + ") error"
+	}
+	if method.Desc.IsStreamingClient() {
+		// client & bidi streaming
+		return method.GoName + "(" + g.QualifiedGoIdent(contextContext) + ", *" + serverStreamName(sname, method) + ") error"
+	}
+	// unary
 	return method.GoName + "(" + g.QualifiedGoIdent(contextContext) +
 		", *" + g.QualifiedGoIdent(method.Input.GoIdent) + ") " +
 		"(*" + g.QualifiedGoIdent(method.Output.GoIdent) + ", error)"
@@ -274,57 +292,117 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 	g.P("ic := ", rerpcPackage.Ident("ConfiguredHandlerInterceptor"), "(opts...)")
 	g.P()
 	lastHandlerName := ""
-	for _, method := range unaryMethods(service) {
+	for _, method := range service.Methods {
 		hname := unexport(string(method.Desc.Name()))
-		wrapped := hname + "Func"
 		lastHandlerName = hname
-		g.P(wrapped, " := ", rerpcPackage.Ident("Func"), "(func(ctx ", contextContext, ", req ", protoMessage, ") (", protoMessage, ", error) {")
-		g.P("typed, ok := req.(*", method.Input.GoIdent, ")")
-		g.P("if !ok {")
-		g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(")
-		g.P(rerpcPackage.Ident("CodeInternal"), ",")
-		g.P(`"can't call `, method.Desc.FullName(), ` with a %v",`)
-		g.P("req.ProtoReflect().Descriptor().FullName(),")
-		g.P(")")
-		g.P("}")
-		g.P("return svc.", method.GoName, "(ctx, typed)")
-		g.P("})")
-		g.P("if ic != nil {")
-		g.P(wrapped, " = ic.Wrap(", wrapped, ")")
-		g.P("}")
-		g.P(hname, " := ", rerpcPackage.Ident("NewHandler"), "(")
-		g.P(rerpcPackage.Ident("StreamTypeUnary"), ",")
-		g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
-		g.P(`"`, service.Desc.Name(), `", // protobuf service`)
-		g.P(`"`, method.Desc.Name(), `", // protobuf method`)
-		g.P("func(ctx ", contextContext, ", sf ", rerpcPackage.Ident("StreamFunc"), ") {")
-		g.P("stream := sf(ctx)")
-		g.P("defer stream.CloseReceive()")
-		g.P("if err := ctx.Err(); err != nil {")
-		g.P("if ", errorsIs, "(err, ", contextCanceled, ") {")
-		g.P("_ = stream.CloseSend(", rerpcPackage.Ident("Wrap"), "(", rerpcPackage.Ident("CodeCanceled"), ", err))")
-		g.P("return")
-		g.P("}")
-		g.P("if ", errorsIs, "(err, ", contextDeadlineExceeded, ") {")
-		g.P("_ = stream.CloseSend(", rerpcPackage.Ident("Wrap"), "(", rerpcPackage.Ident("CodeDeadlineExceeded"), ", err))")
-		g.P("return")
-		g.P("}")
-		g.P("_ = stream.CloseSend(err) // unreachable per context docs")
-		g.P("}")
-		g.P("var req ", method.Input.GoIdent)
-		g.P("if err := stream.Receive(&req); err != nil {")
-		g.P(" _ = stream.CloseSend(err)")
-		g.P("return")
-		g.P("}")
-		g.P("res, err := ", wrapped, "(ctx, &req)")
-		g.P("if err != nil {")
-		g.P("_ = stream.CloseSend(err)")
-		g.P("return")
-		g.P("}")
-		g.P("_ = stream.CloseSend(stream.Send(res))")
-		g.P("},")
-		g.P("opts...,")
-		g.P(")")
+
+		if method.Desc.IsStreamingServer() || method.Desc.IsStreamingClient() {
+			g.P(hname, " := ", rerpcPackage.Ident("NewHandler"), "(")
+			if method.Desc.IsStreamingServer() && method.Desc.IsStreamingClient() {
+				g.P(rerpcPackage.Ident("StreamTypeBidirectional"), ",")
+			} else if method.Desc.IsStreamingServer() {
+				g.P(rerpcPackage.Ident("StreamTypeServer"), ",")
+			} else {
+				g.P(rerpcPackage.Ident("StreamTypeClient"), ",")
+			}
+			g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
+			g.P(`"`, service.Desc.Name(), `", // protobuf service`)
+			g.P(`"`, method.Desc.Name(), `", // protobuf method`)
+			g.P("func(ctx ", contextContext, ", sf ", rerpcPackage.Ident("StreamFunc"), ") {")
+			g.P("if ic != nil {")
+			g.P("sf = ic.WrapStream(sf)")
+			g.P("}")
+			g.P("stream := sf(ctx)")
+			g.P("typed := New", serverStreamName(name, method), "(stream)")
+			if method.Desc.IsStreamingServer() && !method.Desc.IsStreamingClient() {
+				g.P("var req ", method.Input.GoIdent)
+				g.P("if err := stream.Receive(&req); err != nil {")
+				g.P("_ = stream.CloseReceive()")
+				g.P("_ = stream.CloseSend(err)")
+				g.P("return")
+				g.P("}")
+				g.P("if err := stream.CloseReceive(); err != nil {")
+				g.P("_ = stream.CloseSend(err)")
+				g.P("return")
+				g.P("}")
+				g.P("err := svc.", method.GoName, "(stream.Context(), &req, typed)")
+			} else {
+				g.P("err := svc.", method.GoName, "(stream.Context(), typed)")
+				g.P("_ = stream.CloseReceive()")
+			}
+			g.P("if err != nil {")
+			g.P("if _, ok := ", rerpcPackage.Ident("AsError"), "(err); !ok {")
+			g.P("if ", errorsIs, "(err, ", contextCanceled, ") {")
+			g.P("err = ", rerpcPackage.Ident("Wrap"), "(", rerpcPackage.Ident("CodeCanceled"), ", err)")
+			g.P("}")
+			g.P("if ", errorsIs, "(err, ", contextDeadlineExceeded, ") {")
+			g.P("err = ", rerpcPackage.Ident("Wrap"), "(", rerpcPackage.Ident("CodeDeadlineExceeded"), ", err)")
+			g.P("}")
+			g.P("}")
+			g.P("}")
+			g.P("_ = stream.CloseSend(err)")
+			g.P("},")
+			g.P("opts...,")
+			g.P(")")
+
+		} else {
+			wrapped := hname + "Func"
+			g.P(wrapped, " := ", rerpcPackage.Ident("Func"), "(func(ctx ", contextContext, ", req ", protoMessage, ") (", protoMessage, ", error) {")
+			g.P("typed, ok := req.(*", method.Input.GoIdent, ")")
+			g.P("if !ok {")
+			g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(")
+			g.P(rerpcPackage.Ident("CodeInternal"), ",")
+			g.P(`"can't call `, method.Desc.FullName(), ` with a %v",`)
+			g.P("req.ProtoReflect().Descriptor().FullName(),")
+			g.P(")")
+			g.P("}")
+			g.P("return svc.", method.GoName, "(ctx, typed)")
+			g.P("})")
+			g.P("if ic != nil {")
+			g.P(wrapped, " = ic.Wrap(", wrapped, ")")
+			g.P("}")
+			g.P(hname, " := ", rerpcPackage.Ident("NewHandler"), "(")
+			g.P(rerpcPackage.Ident("StreamTypeUnary"), ",")
+			g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
+			g.P(`"`, service.Desc.Name(), `", // protobuf service`)
+			g.P(`"`, method.Desc.Name(), `", // protobuf method`)
+			g.P("func(ctx ", contextContext, ", sf ", rerpcPackage.Ident("StreamFunc"), ") {")
+			g.P("stream := sf(ctx)")
+			g.P("defer stream.CloseReceive()")
+			g.P("if err := ctx.Err(); err != nil {")
+			g.P("if ", errorsIs, "(err, ", contextCanceled, ") {")
+			g.P("_ = stream.CloseSend(", rerpcPackage.Ident("Wrap"), "(", rerpcPackage.Ident("CodeCanceled"), ", err))")
+			g.P("return")
+			g.P("}")
+			g.P("if ", errorsIs, "(err, ", contextDeadlineExceeded, ") {")
+			g.P("_ = stream.CloseSend(", rerpcPackage.Ident("Wrap"), "(", rerpcPackage.Ident("CodeDeadlineExceeded"), ", err))")
+			g.P("return")
+			g.P("}")
+			g.P("_ = stream.CloseSend(err) // unreachable per context docs")
+			g.P("}")
+			g.P("var req ", method.Input.GoIdent)
+			g.P("if err := stream.Receive(&req); err != nil {")
+			g.P(" _ = stream.CloseSend(err)")
+			g.P("return")
+			g.P("}")
+			g.P("res, err := ", wrapped, "(ctx, &req)")
+			g.P("if err != nil {")
+			g.P("if _, ok := ", rerpcPackage.Ident("AsError"), "(err); !ok {")
+			g.P("if ", errorsIs, "(err, ", contextCanceled, ") {")
+			g.P("err = ", rerpcPackage.Ident("Wrap"), "(", rerpcPackage.Ident("CodeCanceled"), ", err)")
+			g.P("}")
+			g.P("if ", errorsIs, "(err, ", contextDeadlineExceeded, ") {")
+			g.P("err = ", rerpcPackage.Ident("Wrap"), "(", rerpcPackage.Ident("CodeDeadlineExceeded"), ", err)")
+			g.P("}")
+			g.P("}")
+			g.P("_ = stream.CloseSend(err)")
+			g.P("return")
+			g.P("}")
+			g.P("_ = stream.CloseSend(stream.Send(res))")
+			g.P("},")
+			g.P("opts...,")
+			g.P(")")
+		}
 		g.P("mux.Handle(", hname, ".Path(), ", hname, ")")
 		g.P()
 	}
@@ -345,14 +423,67 @@ func serverImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		" of ", name, " must embed Unimplemented", name, ". ")
 	g.P("type Unimplemented", name, " struct {}")
 	g.P()
-	for _, method := range unaryMethods(service) {
-		g.P("func (Unimplemented", name, ") ", serverSignature(g, method), "{")
-		g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(", rerpcPackage.Ident("CodeUnimplemented"), `, "`, method.Desc.FullName(), ` isn't implemented")`)
+	for _, method := range service.Methods {
+		g.P("func (Unimplemented", name, ") ", serverSignature(g, name, method), "{")
+		if method.Desc.IsStreamingServer() || method.Desc.IsStreamingClient() {
+			g.P("return ", rerpcPackage.Ident("Errorf"), "(", rerpcPackage.Ident("CodeUnimplemented"), `, "`, method.Desc.FullName(), ` isn't implemented")`)
+		} else {
+			g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(", rerpcPackage.Ident("CodeUnimplemented"), `, "`, method.Desc.FullName(), ` isn't implemented")`)
+		}
 		g.P("}")
 		g.P()
 	}
 	g.P("func (Unimplemented", name, ") mustEmbedUnimplemented", name, "() {}")
 	g.P()
+}
+
+func serverStreams(g *protogen.GeneratedFile, service *protogen.Service, sname string) {
+	for _, method := range service.Methods {
+		if !method.Desc.IsStreamingClient() && !method.Desc.IsStreamingServer() {
+			continue
+		}
+		streamName := serverStreamName(sname, method)
+		isDeprecated := method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated()
+		comment(g, streamName, " is the server-side stream for the ", method.Desc.FullName(), " procedure.")
+		if isDeprecated {
+			g.P("//")
+			deprecated(g)
+		}
+		g.P("type ", streamName, " struct {")
+		g.P("stream ", rerpcPackage.Ident("Stream"))
+		g.P("}")
+		g.P()
+		g.P("func New", streamName, "(stream ", rerpcPackage.Ident("Stream"), ") *", streamName, " {")
+		g.P("return &", streamName, "{stream}")
+		g.P("}")
+		g.P()
+
+		if method.Desc.IsStreamingClient() {
+			g.P("func (s *", streamName, ") Receive() (*", method.Input.GoIdent, ", error) {")
+			g.P("var req ", method.Input.GoIdent)
+			g.P("if err := s.stream.Receive(&req); err != nil {")
+			g.P("return nil, err")
+			g.P("}")
+			g.P("return &req, nil")
+			g.P("}")
+			g.P()
+		}
+		if method.Desc.IsStreamingServer() {
+			g.P("func (s *", streamName, ") Send(msg *", method.Output.GoIdent, ") error {")
+			g.P("return s.stream.Send(msg)")
+			g.P("}")
+			g.P()
+		}
+		if method.Desc.IsStreamingClient() && !method.Desc.IsStreamingServer() {
+			g.P("func (s *", streamName, ") SendAndClose(msg *", method.Output.GoIdent, ") error {")
+			g.P("if err := s.stream.CloseReceive(); err != nil {")
+			g.P("return err")
+			g.P("}")
+			g.P("return s.stream.Send(msg)")
+			g.P("}")
+			g.P()
+		}
+	}
 }
 
 func unexport(s string) string { return strings.ToLower(s[:1]) + s[1:] }
