@@ -2,8 +2,6 @@ package rerpc
 
 import (
 	"context"
-	"math"
-	"time"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -166,51 +164,6 @@ func (c *Chain) WrapCallStream(next CallStreamFunc) CallStreamFunc {
 	}
 	return next
 }
-
-type timeoutClamp struct {
-	min, max time.Duration
-}
-
-var _ Interceptor = (*timeoutClamp)(nil)
-
-// ClampTimeout sets the minimum and maximum allowable timeouts for unary RPCs.
-// It has no effect on streaming RPCs.
-//
-// For both clients and handlers, calls with less than the minimum timeout
-// return CodeDeadlineExceeded. In that case, clients don't send any data to
-// the server. Setting min to zero disables this behavior (though clients and
-// handlers always return CodeDeadlineExceeded if the deadline has already
-// passed).
-//
-// For both clients and handlers, setting the max timeout to a positive value
-// caps the allowed timeout. Calls with a timeout larger than the max, or calls
-// with no timeout at all, have their timeouts reduced to the maximum allowed
-// value.
-func ClampTimeout(min, max time.Duration) Interceptor {
-	return &timeoutClamp{min, max}
-}
-
-func (c *timeoutClamp) Wrap(next Func) Func {
-	return Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
-		untilDeadline := time.Duration(math.MaxInt64)
-		if deadline, ok := ctx.Deadline(); ok {
-			untilDeadline = time.Until(deadline)
-		}
-		if c.max > 0 && untilDeadline > c.max {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, c.max)
-			defer cancel()
-		}
-		if c.min > 0 && untilDeadline < c.min {
-			return nil, errorf(CodeDeadlineExceeded, "timeout is %v, configured min is %v", untilDeadline, c.min)
-		}
-		return next(ctx, req)
-	})
-}
-
-func (*timeoutClamp) WrapHandlerStream(next HandlerStreamFunc) HandlerStreamFunc { return next }
-
-func (*timeoutClamp) WrapCallStream(next CallStreamFunc) CallStreamFunc { return next }
 
 type recovery struct {
 	Log func(context.Context, interface{})
