@@ -125,9 +125,8 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method) string 
 func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, name string) {
 	// Client struct.
 	g.P("type ", unexport(name), " struct {")
-	for _, method := range unaryMethods(service) {
-		g.P(unexport(method.GoName), " ", rerpcPackage.Ident("Client"))
-	}
+	g.P("doer ", rerpcPackage.Ident("Doer"))
+	g.P("baseURL string")
 	g.P("options []", rerpcPackage.Ident("CallOption"))
 	g.P("}")
 	g.P()
@@ -142,32 +141,36 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		g.P("//")
 		deprecated(g)
 	}
+	callOption := rerpcPackage.Ident("CallOption")
 	g.P("func New", name, " (baseURL string, doer ", rerpcPackage.Ident("Doer"),
-		", opts ...", rerpcPackage.Ident("CallOption"), ") ", name, " {")
-	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
+		", opts ...", callOption, ") ", name, " {")
 	g.P("return &", unexport(name), "{")
-	for _, method := range unaryMethods(service) {
-		g.P(unexport(method.GoName), ": *", rerpcPackage.Ident("NewClient"), "(")
-		g.P("doer,")
-		g.P("baseURL,")
-		g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
-		g.P(`"`, service.Desc.Name(), `", // protobuf service`)
-		g.P(`"`, method.Desc.Name(), `", // protobuf method`)
-		g.P("opts...,")
-		g.P("),")
-	}
+	g.P("baseURL: ", stringsPackage.Ident("TrimRight"), `(baseURL, "/"),`)
+	g.P("doer: doer,")
 	g.P("options: opts,")
 	g.P("}")
 	g.P("}")
 	g.P()
 
+	g.P("func (c *", unexport(name), ") mergeOptions(opts []", callOption, ") []", callOption, " {")
+	g.P("merged := make([]", rerpcPackage.Ident("CallOption"), ", 0, len(c.options)+len(opts))")
+	g.P("for _, o := range c.options {")
+	g.P("merged = append(merged, o)")
+	g.P("}")
+	g.P("for _, o := range opts {")
+	g.P("merged = append(merged, o)")
+	g.P("}")
+	g.P("return merged")
+	g.P("}")
+	g.P()
+
 	// Client method implementations.
 	for _, method := range unaryMethods(service) {
-		clientMethod(g, method)
+		clientMethod(g, service, method)
 	}
 }
 
-func clientMethod(g *protogen.GeneratedFile, method *protogen.Method) {
+func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *protogen.Method) {
 	comment(g, method.GoName, " calls ", method.Desc.FullName(), ".",
 		" Call options passed here apply only to this call.")
 	if method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated() {
@@ -175,8 +178,19 @@ func clientMethod(g *protogen.GeneratedFile, method *protogen.Method) {
 		deprecated(g)
 	}
 	g.P("func (c *", unexport(method.Parent.GoName), "ClientReRPC) ", clientSignature(g, method), "{")
+	g.P("merged := c.mergeOptions(opts)")
+	g.P("ctx, call := ", rerpcPackage.Ident("NewCall"), "(")
+	g.P("ctx,")
+	g.P("c.doer,")
+	g.P("c.baseURL,")
+	g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
+	g.P(`"`, service.Desc.Name(), `", // protobuf service`)
+	g.P(`"`, method.Desc.Name(), `", // protobuf method`)
+	g.P("merged...,")
+	g.P(")")
+
 	g.P("wrapped := ", rerpcPackage.Ident("Func"), "(func(ctx ", contextContext, ", msg ", protoMessage, ") (", protoMessage, ", error) {")
-	g.P("stream := c.", unexport(method.GoName), ".Call(ctx, opts...)")
+	g.P("stream := call(ctx)")
 	g.P("if err := stream.Send(req); err != nil {")
 	g.P("_ = stream.CloseSend(err)")
 	g.P("_ = stream.CloseReceive()")
@@ -193,12 +207,11 @@ func clientMethod(g *protogen.GeneratedFile, method *protogen.Method) {
 	g.P("}")
 	g.P("return &res, stream.CloseReceive()")
 	g.P("})")
-	g.P("mergedOpts := append([]", rerpcPackage.Ident("CallOption"), "{}, c.options...)")
-	g.P("mergedOpts = append(mergedOpts, opts...)")
-	g.P("if ic := ", rerpcPackage.Ident("ConfiguredCallInterceptor"), "(mergedOpts...); ic != nil {")
+
+	g.P("if ic := ", rerpcPackage.Ident("ConfiguredCallInterceptor"), "(merged...); ic != nil {")
 	g.P("wrapped = ic.Wrap(wrapped)")
 	g.P("}")
-	g.P("res, err := wrapped(c.", unexport(method.GoName), ".Context(ctx, opts...), req)")
+	g.P("res, err := wrapped(ctx, req)")
 	g.P("if err != nil {")
 	g.P("return nil, err")
 	g.P("}")
