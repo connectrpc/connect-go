@@ -1,7 +1,7 @@
 reRPC
 =====
 
-[![Build](https://github.com/rerpc/rerpc/actions/workflows/test.yml/badge.svg?event=push)](https://github.com/rerpc/rerpc/actions/workflows/test.yml)[![GoDoc](https://pkg.go.dev/badge/github.com/rerpc/rerpc.svg)](https://pkg.go.dev/github.com/rerpc/rerpc)
+[![Build](https://github.com/rerpc/rerpc/actions/workflows/test.yml/badge.svg?event=push)](https://github.com/rerpc/rerpc/actions/workflows/test.yml) [![GoDoc](https://pkg.go.dev/badge/github.com/rerpc/rerpc.svg)](https://pkg.go.dev/github.com/rerpc/rerpc)
 
 reRPC is a small RPC framework built on [protocol buffers][protobuf] and
 `net/http`. It generates code from API definition files so you can focus on
