@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -38,7 +39,7 @@ func (p pingServer) Fail(ctx context.Context, req *pingpb.FailRequest) (*pingpb.
 	return nil, rerpc.Errorf(rerpc.Code(req.Code), errMsg)
 }
 
-func (p pingServer) Sum(ctx context.Context, stream *pingpb.PingServiceReRPC_SumServer) error {
+func (p pingServer) Sum(ctx context.Context, stream *pingpb.PingServiceReRPC_Sum) error {
 	var sum int64
 	for {
 		if err := ctx.Err(); err != nil {
@@ -56,7 +57,7 @@ func (p pingServer) Sum(ctx context.Context, stream *pingpb.PingServiceReRPC_Sum
 	}
 }
 
-func (p pingServer) CountUp(ctx context.Context, req *pingpb.CountUpRequest, stream *pingpb.PingServiceReRPC_CountUpServer) error {
+func (p pingServer) CountUp(ctx context.Context, req *pingpb.CountUpRequest, stream *pingpb.PingServiceReRPC_CountUp) error {
 	if req.Number <= 0 {
 		return rerpc.Errorf(rerpc.CodeInvalidArgument, "number must be positive: got %v", req.Number)
 	}
@@ -71,7 +72,7 @@ func (p pingServer) CountUp(ctx context.Context, req *pingpb.CountUpRequest, str
 	return nil
 }
 
-func (p pingServer) CumSum(ctx context.Context, stream *pingpb.PingServiceReRPC_CumSumServer) error {
+func (p pingServer) CumSum(ctx context.Context, stream *pingpb.PingServiceReRPC_CumSum) error {
 	var sum int64
 	for {
 		if err := ctx.Err(); err != nil {
@@ -325,6 +326,87 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.Equal(t, res, expect, "ping response")
 		})
 	}
+	testSum := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
+		t.Run("sum", func(t *testing.T) {
+			const upTo = 10
+			const expect = 55 // 1+10 + 2+9 + ... + 5+6 = 55
+			stream := client.Sum(context.Background())
+			for i := int64(1); i <= upTo; i++ {
+				err := stream.Send(&pingpb.SumRequest{Number: i})
+				assert.Nil(t, err, "Send %v", assert.Fmt(i))
+			}
+			res, err := stream.ReceiveAndClose()
+			assert.Nil(t, err, "ReceiveAndClose error")
+			assert.Equal(t, res, &pingpb.SumResponse{Sum: 55}, "response")
+		})
+	}
+	testCountUp := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
+		t.Run("count_up", func(t *testing.T) {
+			const n = 5
+			got := make([]int64, 0, n)
+			expect := make([]int64, 0, n)
+			for i := 1; i <= n; i++ {
+				expect = append(expect, int64(i))
+			}
+			stream, err := client.CountUp(
+				context.Background(),
+				&pingpb.CountUpRequest{Number: n},
+			)
+			for {
+				msg, err := stream.Receive()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				assert.Nil(t, err, "receive error")
+				got = append(got, msg.Number)
+			}
+			err = stream.Close()
+			assert.Nil(t, err, "close error")
+			assert.Equal(t, got, expect, "responses")
+		})
+	}
+	testCumSum := func(t *testing.T, client pingpb.PingServiceClientReRPC, expectSuccess bool) {
+		t.Run("cumsum", func(t *testing.T) {
+			send := []int64{3, 5, 1}
+			expect := []int64{3, 8, 9}
+			var got []int64
+			stream := client.CumSum(context.Background())
+			if !expectSuccess {
+				err := stream.Send(&pingpb.CumSumRequest{})
+				assert.Nil(t, err, "first send on HTTP/1.1") // succeeds, haven't gotten response back yet
+				assert.Nil(t, stream.CloseSend(), "close send error on HTTP/1.1")
+				_, err = stream.Receive()
+				assert.NotNil(t, err, "first receive on HTTP/1.1") // should be 505
+				assert.True(t, strings.Contains(err.Error(), "HTTP status 505"), "expected 505, got %v", assert.Fmt(err))
+				assert.Nil(t, stream.CloseReceive(), "close receive error on HTTP/1.1")
+				return
+			}
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				for i, n := range send {
+					err := stream.Send(&pingpb.CumSumRequest{Number: n})
+					assert.Nil(t, err, "send error #%v", assert.Fmt(i))
+				}
+				assert.Nil(t, stream.CloseSend(), "close send error")
+			}()
+			go func() {
+				defer wg.Done()
+				for {
+					msg, err := stream.Receive()
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					assert.Nil(t, err, "receive error")
+					got = append(got, msg.Sum)
+				}
+				assert.Nil(t, stream.CloseReceive(), "close receive error")
+			}()
+			wg.Wait()
+			assert.Equal(t, got, expect, "sums")
+		})
+	}
 	testErrors := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
 		t.Run("errors", func(t *testing.T) {
 			req := &pingpb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)}
@@ -543,10 +625,13 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.Equal(t, res, expect, "response")
 		})
 	}
-	testMatrix := func(t *testing.T, server *httptest.Server) {
+	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) {
 		t.Run("identity", func(t *testing.T) {
 			client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client())
 			testPing(t, client)
+			testSum(t, client)
+			testCountUp(t, client)
+			testCumSum(t, client, bidi)
 			testErrors(t, client)
 			testHealth(t, server.URL, server.Client())
 		})
@@ -557,6 +642,9 @@ func TestServerProtoGRPC(t *testing.T) {
 				rerpc.Gzip(true),
 			)
 			testPing(t, client)
+			testSum(t, client)
+			testCountUp(t, client)
+			testCumSum(t, client, bidi)
 			testErrors(t, client)
 			testHealth(t, server.URL, server.Client(), rerpc.Gzip(true))
 		})
@@ -565,14 +653,14 @@ func TestServerProtoGRPC(t *testing.T) {
 	t.Run("http1", func(t *testing.T) {
 		server := httptest.NewServer(mux)
 		defer server.Close()
-		testMatrix(t, server)
+		testMatrix(t, server, false /* bidi */)
 	})
 	t.Run("http2", func(t *testing.T) {
 		server := httptest.NewUnstartedServer(mux)
 		server.EnableHTTP2 = true
 		server.StartTLS()
 		defer server.Close()
-		testMatrix(t, server)
+		testMatrix(t, server, true /* bidi */)
 		testReflection(t, server.URL, server.Client())
 	})
 }
