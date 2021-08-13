@@ -337,7 +337,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			}
 			res, err := stream.ReceiveAndClose()
 			assert.Nil(t, err, "ReceiveAndClose error")
-			assert.Equal(t, res, &pingpb.SumResponse{Sum: 55}, "response")
+			assert.Equal(t, res, &pingpb.SumResponse{Sum: expect}, "response")
 		})
 	}
 	testCountUp := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
@@ -352,6 +352,7 @@ func TestServerProtoGRPC(t *testing.T) {
 				context.Background(),
 				&pingpb.CountUpRequest{Number: n},
 			)
+			assert.Nil(t, err, "send error")
 			for {
 				msg, err := stream.Receive()
 				if errors.Is(err, io.EOF) {
