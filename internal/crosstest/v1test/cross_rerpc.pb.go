@@ -65,6 +65,7 @@ func (c *crossServiceClientReRPC) mergeOptions(opts []rerpc.CallOption) []rerpc.
 // here apply only to this call.
 func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error) {
 	merged := c.mergeOptions(opts)
+	ic := rerpc.ConfiguredCallInterceptor(merged...)
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
@@ -93,7 +94,7 @@ func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, op
 		}
 		return &res, stream.CloseReceive()
 	})
-	if ic := rerpc.ConfiguredCallInterceptor(merged...); ic != nil {
+	if ic != nil {
 		wrapped = ic.Wrap(wrapped)
 	}
 	res, err := wrapped(ctx, req)
@@ -111,6 +112,7 @@ func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, op
 // here apply only to this call.
 func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error) {
 	merged := c.mergeOptions(opts)
+	ic := rerpc.ConfiguredCallInterceptor(merged...)
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
@@ -139,7 +141,7 @@ func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, op
 		}
 		return &res, stream.CloseReceive()
 	})
-	if ic := rerpc.ConfiguredCallInterceptor(merged...); ic != nil {
+	if ic != nil {
 		wrapped = ic.Wrap(wrapped)
 	}
 	res, err := wrapped(ctx, req)

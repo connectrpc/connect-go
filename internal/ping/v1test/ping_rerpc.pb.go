@@ -28,6 +28,9 @@ const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 type PingServiceClientReRPC interface {
 	Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error)
 	Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error)
+	Sum(ctx context.Context, opts ...rerpc.CallOption) *PingServiceClientReRPC_Sum
+	CountUp(ctx context.Context, req *CountUpRequest, opts ...rerpc.CallOption) (*PingServiceClientReRPC_CountUp, error)
+	CumSum(ctx context.Context, opts ...rerpc.CallOption) *PingServiceClientReRPC_CumSum
 }
 
 type pingServiceClientReRPC struct {
@@ -65,6 +68,7 @@ func (c *pingServiceClientReRPC) mergeOptions(opts []rerpc.CallOption) []rerpc.C
 // apply only to this call.
 func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error) {
 	merged := c.mergeOptions(opts)
+	ic := rerpc.ConfiguredCallInterceptor(merged...)
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
@@ -93,7 +97,7 @@ func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opt
 		}
 		return &res, stream.CloseReceive()
 	})
-	if ic := rerpc.ConfiguredCallInterceptor(merged...); ic != nil {
+	if ic != nil {
 		wrapped = ic.Wrap(wrapped)
 	}
 	res, err := wrapped(ctx, req)
@@ -111,6 +115,7 @@ func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opt
 // apply only to this call.
 func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error) {
 	merged := c.mergeOptions(opts)
+	ic := rerpc.ConfiguredCallInterceptor(merged...)
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
@@ -139,7 +144,7 @@ func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opt
 		}
 		return &res, stream.CloseReceive()
 	})
-	if ic := rerpc.ConfiguredCallInterceptor(merged...); ic != nil {
+	if ic != nil {
 		wrapped = ic.Wrap(wrapped)
 	}
 	res, err := wrapped(ctx, req)
@@ -153,6 +158,81 @@ func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opt
 	return typed, nil
 }
 
+// Sum calls internal.ping.v1test.PingService.Sum. Call options passed here
+// apply only to this call.
+func (c *pingServiceClientReRPC) Sum(ctx context.Context, opts ...rerpc.CallOption) *PingServiceClientReRPC_Sum {
+	merged := c.mergeOptions(opts)
+	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ctx, call := rerpc.NewCall(
+		ctx,
+		c.doer,
+		rerpc.StreamTypeClient,
+		c.baseURL,
+		"internal.ping.v1test", // protobuf package
+		"PingService",          // protobuf service
+		"Sum",                  // protobuf method
+		merged...,
+	)
+	if ic != nil {
+		call = ic.WrapStream(call)
+	}
+	stream := call(ctx)
+	return NewPingServiceClientReRPC_Sum(stream)
+}
+
+// CountUp calls internal.ping.v1test.PingService.CountUp. Call options passed
+// here apply only to this call.
+func (c *pingServiceClientReRPC) CountUp(ctx context.Context, req *CountUpRequest, opts ...rerpc.CallOption) (*PingServiceClientReRPC_CountUp, error) {
+	merged := c.mergeOptions(opts)
+	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ctx, call := rerpc.NewCall(
+		ctx,
+		c.doer,
+		rerpc.StreamTypeServer,
+		c.baseURL,
+		"internal.ping.v1test", // protobuf package
+		"PingService",          // protobuf service
+		"CountUp",              // protobuf method
+		merged...,
+	)
+	if ic != nil {
+		call = ic.WrapStream(call)
+	}
+	stream := call(ctx)
+	if err := stream.Send(req); err != nil {
+		_ = stream.CloseSend(err)
+		_ = stream.CloseReceive()
+		return nil, err
+	}
+	if err := stream.CloseSend(nil); err != nil {
+		_ = stream.CloseReceive()
+		return nil, err
+	}
+	return NewPingServiceClientReRPC_CountUp(stream), nil
+}
+
+// CumSum calls internal.ping.v1test.PingService.CumSum. Call options passed
+// here apply only to this call.
+func (c *pingServiceClientReRPC) CumSum(ctx context.Context, opts ...rerpc.CallOption) *PingServiceClientReRPC_CumSum {
+	merged := c.mergeOptions(opts)
+	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ctx, call := rerpc.NewCall(
+		ctx,
+		c.doer,
+		rerpc.StreamTypeBidirectional,
+		c.baseURL,
+		"internal.ping.v1test", // protobuf package
+		"PingService",          // protobuf service
+		"CumSum",               // protobuf method
+		merged...,
+	)
+	if ic != nil {
+		call = ic.WrapStream(call)
+	}
+	stream := call(ctx)
+	return NewPingServiceClientReRPC_CumSum(stream)
+}
+
 // PingServiceReRPC is a server for the internal.ping.v1test.PingService
 // service. To make sure that adding methods to this protobuf service doesn't
 // break all implementations of this interface, all implementations must embed
@@ -164,9 +244,9 @@ func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opt
 type PingServiceReRPC interface {
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
 	Fail(context.Context, *FailRequest) (*FailResponse, error)
-	Sum(context.Context, *PingServiceReRPC_SumServer) error
-	CountUp(context.Context, *CountUpRequest, *PingServiceReRPC_CountUpServer) error
-	CumSum(context.Context, *PingServiceReRPC_CumSumServer) error
+	Sum(context.Context, *PingServiceReRPC_Sum) error
+	CountUp(context.Context, *CountUpRequest, *PingServiceReRPC_CountUp) error
+	CumSum(context.Context, *PingServiceReRPC_CumSum) error
 	mustEmbedUnimplementedPingServiceReRPC()
 }
 
@@ -300,7 +380,7 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 				sf = ic.WrapStream(sf)
 			}
 			stream := sf(ctx)
-			typed := NewPingServiceReRPC_SumServer(stream)
+			typed := NewPingServiceReRPC_Sum(stream)
 			err := svc.Sum(stream.Context(), typed)
 			_ = stream.CloseReceive()
 			if err != nil {
@@ -329,7 +409,7 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 				sf = ic.WrapStream(sf)
 			}
 			stream := sf(ctx)
-			typed := NewPingServiceReRPC_CountUpServer(stream)
+			typed := NewPingServiceReRPC_CountUp(stream)
 			var req CountUpRequest
 			if err := stream.Receive(&req); err != nil {
 				_ = stream.CloseReceive()
@@ -367,7 +447,7 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 				sf = ic.WrapStream(sf)
 			}
 			stream := sf(ctx)
-			typed := NewPingServiceReRPC_CumSumServer(stream)
+			typed := NewPingServiceReRPC_CumSum(stream)
 			err := svc.CumSum(stream.Context(), typed)
 			_ = stream.CloseReceive()
 			if err != nil {
@@ -407,31 +487,106 @@ func (UnimplementedPingServiceReRPC) Fail(context.Context, *FailRequest) (*FailR
 	return nil, rerpc.Errorf(rerpc.CodeUnimplemented, "internal.ping.v1test.PingService.Fail isn't implemented")
 }
 
-func (UnimplementedPingServiceReRPC) Sum(context.Context, *PingServiceReRPC_SumServer) error {
+func (UnimplementedPingServiceReRPC) Sum(context.Context, *PingServiceReRPC_Sum) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.ping.v1test.PingService.Sum isn't implemented")
 }
 
-func (UnimplementedPingServiceReRPC) CountUp(context.Context, *CountUpRequest, *PingServiceReRPC_CountUpServer) error {
+func (UnimplementedPingServiceReRPC) CountUp(context.Context, *CountUpRequest, *PingServiceReRPC_CountUp) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.ping.v1test.PingService.CountUp isn't implemented")
 }
 
-func (UnimplementedPingServiceReRPC) CumSum(context.Context, *PingServiceReRPC_CumSumServer) error {
+func (UnimplementedPingServiceReRPC) CumSum(context.Context, *PingServiceReRPC_CumSum) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.ping.v1test.PingService.CumSum isn't implemented")
 }
 
 func (UnimplementedPingServiceReRPC) mustEmbedUnimplementedPingServiceReRPC() {}
 
-// PingServiceReRPC_SumServer is the server-side stream for the
+// PingServiceClientReRPC_Sum is the client-side stream for the
 // internal.ping.v1test.PingService.Sum procedure.
-type PingServiceReRPC_SumServer struct {
+type PingServiceClientReRPC_Sum struct {
 	stream rerpc.Stream
 }
 
-func NewPingServiceReRPC_SumServer(stream rerpc.Stream) *PingServiceReRPC_SumServer {
-	return &PingServiceReRPC_SumServer{stream}
+func NewPingServiceClientReRPC_Sum(stream rerpc.Stream) *PingServiceClientReRPC_Sum {
+	return &PingServiceClientReRPC_Sum{stream}
 }
 
-func (s *PingServiceReRPC_SumServer) Receive() (*SumRequest, error) {
+func (s *PingServiceClientReRPC_Sum) Send(msg *SumRequest) error {
+	return s.stream.Send(msg)
+}
+
+func (s *PingServiceClientReRPC_Sum) ReceiveAndClose() (*SumResponse, error) {
+	if err := s.stream.CloseSend(nil); err != nil {
+		return nil, err
+	}
+	var res SumResponse
+	err := s.stream.Receive(&res)
+	return &res, err
+}
+
+// PingServiceClientReRPC_CountUp is the client-side stream for the
+// internal.ping.v1test.PingService.CountUp procedure.
+type PingServiceClientReRPC_CountUp struct {
+	stream rerpc.Stream
+}
+
+func NewPingServiceClientReRPC_CountUp(stream rerpc.Stream) *PingServiceClientReRPC_CountUp {
+	return &PingServiceClientReRPC_CountUp{stream}
+}
+
+func (s *PingServiceClientReRPC_CountUp) Receive() (*CountUpResponse, error) {
+	var req CountUpResponse
+	if err := s.stream.Receive(&req); err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+func (s *PingServiceClientReRPC_CountUp) Close() error {
+	return s.stream.CloseReceive()
+}
+
+// PingServiceClientReRPC_CumSum is the client-side stream for the
+// internal.ping.v1test.PingService.CumSum procedure.
+type PingServiceClientReRPC_CumSum struct {
+	stream rerpc.Stream
+}
+
+func NewPingServiceClientReRPC_CumSum(stream rerpc.Stream) *PingServiceClientReRPC_CumSum {
+	return &PingServiceClientReRPC_CumSum{stream}
+}
+
+func (s *PingServiceClientReRPC_CumSum) Send(msg *CumSumRequest) error {
+	return s.stream.Send(msg)
+}
+
+func (s *PingServiceClientReRPC_CumSum) CloseSend() error {
+	return s.stream.CloseSend(nil)
+}
+
+func (s *PingServiceClientReRPC_CumSum) Receive() (*CumSumResponse, error) {
+	var req CumSumResponse
+	if err := s.stream.Receive(&req); err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+func (s *PingServiceClientReRPC_CumSum) CloseReceive() error {
+	return s.stream.CloseReceive()
+}
+
+// PingServiceReRPC_Sum is the server-side stream for the
+// internal.ping.v1test.PingService.Sum procedure.
+type PingServiceReRPC_Sum struct {
+	stream rerpc.Stream
+}
+
+func NewPingServiceReRPC_Sum(stream rerpc.Stream) *PingServiceReRPC_Sum {
+	return &PingServiceReRPC_Sum{stream}
+}
+
+func (s *PingServiceReRPC_Sum) Receive() (*SumRequest, error) {
 	var req SumRequest
 	if err := s.stream.Receive(&req); err != nil {
 		return nil, err
@@ -439,38 +594,38 @@ func (s *PingServiceReRPC_SumServer) Receive() (*SumRequest, error) {
 	return &req, nil
 }
 
-func (s *PingServiceReRPC_SumServer) SendAndClose(msg *SumResponse) error {
+func (s *PingServiceReRPC_Sum) SendAndClose(msg *SumResponse) error {
 	if err := s.stream.CloseReceive(); err != nil {
 		return err
 	}
 	return s.stream.Send(msg)
 }
 
-// PingServiceReRPC_CountUpServer is the server-side stream for the
+// PingServiceReRPC_CountUp is the server-side stream for the
 // internal.ping.v1test.PingService.CountUp procedure.
-type PingServiceReRPC_CountUpServer struct {
+type PingServiceReRPC_CountUp struct {
 	stream rerpc.Stream
 }
 
-func NewPingServiceReRPC_CountUpServer(stream rerpc.Stream) *PingServiceReRPC_CountUpServer {
-	return &PingServiceReRPC_CountUpServer{stream}
+func NewPingServiceReRPC_CountUp(stream rerpc.Stream) *PingServiceReRPC_CountUp {
+	return &PingServiceReRPC_CountUp{stream}
 }
 
-func (s *PingServiceReRPC_CountUpServer) Send(msg *CountUpResponse) error {
+func (s *PingServiceReRPC_CountUp) Send(msg *CountUpResponse) error {
 	return s.stream.Send(msg)
 }
 
-// PingServiceReRPC_CumSumServer is the server-side stream for the
+// PingServiceReRPC_CumSum is the server-side stream for the
 // internal.ping.v1test.PingService.CumSum procedure.
-type PingServiceReRPC_CumSumServer struct {
+type PingServiceReRPC_CumSum struct {
 	stream rerpc.Stream
 }
 
-func NewPingServiceReRPC_CumSumServer(stream rerpc.Stream) *PingServiceReRPC_CumSumServer {
-	return &PingServiceReRPC_CumSumServer{stream}
+func NewPingServiceReRPC_CumSum(stream rerpc.Stream) *PingServiceReRPC_CumSum {
+	return &PingServiceReRPC_CumSum{stream}
 }
 
-func (s *PingServiceReRPC_CumSumServer) Receive() (*CumSumRequest, error) {
+func (s *PingServiceReRPC_CumSum) Receive() (*CumSumRequest, error) {
 	var req CumSumRequest
 	if err := s.stream.Receive(&req); err != nil {
 		return nil, err
@@ -478,6 +633,6 @@ func (s *PingServiceReRPC_CumSumServer) Receive() (*CumSumRequest, error) {
 	return &req, nil
 }
 
-func (s *PingServiceReRPC_CumSumServer) Send(msg *CumSumResponse) error {
+func (s *PingServiceReRPC_CumSum) Send(msg *CumSumResponse) error {
 	return s.stream.Send(msg)
 }
