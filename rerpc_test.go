@@ -46,7 +46,7 @@ func (p pingServer) Sum(ctx context.Context, stream *pingpb.PingServiceReRPC_Sum
 			return err
 		}
 		msg, err := stream.Receive()
-		if err != nil && errors.Is(err, io.EOF) {
+		if errors.Is(err, io.EOF) {
 			return stream.SendAndClose(&pingpb.SumResponse{
 				Sum: sum,
 			})
@@ -79,7 +79,7 @@ func (p pingServer) CumSum(ctx context.Context, stream *pingpb.PingServiceReRPC_
 			return err
 		}
 		msg, err := stream.Receive()
-		if err != nil && errors.Is(err, io.EOF) {
+		if errors.Is(err, io.EOF) {
 			return nil
 		} else if err != nil {
 			return err

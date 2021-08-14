@@ -28,6 +28,9 @@ const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 type CrossServiceClientReRPC interface {
 	Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error)
 	Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error)
+	Sum(ctx context.Context, opts ...rerpc.CallOption) *CrossServiceClientReRPC_Sum
+	CountUp(ctx context.Context, req *CountUpRequest, opts ...rerpc.CallOption) (*CrossServiceClientReRPC_CountUp, error)
+	CumSum(ctx context.Context, opts ...rerpc.CallOption) *CrossServiceClientReRPC_CumSum
 }
 
 type crossServiceClientReRPC struct {
@@ -155,6 +158,81 @@ func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, op
 	return typed, nil
 }
 
+// Sum calls internal.crosstest.v1test.CrossService.Sum. Call options passed
+// here apply only to this call.
+func (c *crossServiceClientReRPC) Sum(ctx context.Context, opts ...rerpc.CallOption) *CrossServiceClientReRPC_Sum {
+	merged := c.mergeOptions(opts)
+	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ctx, call := rerpc.NewCall(
+		ctx,
+		c.doer,
+		rerpc.StreamTypeClient,
+		c.baseURL,
+		"internal.crosstest.v1test", // protobuf package
+		"CrossService",              // protobuf service
+		"Sum",                       // protobuf method
+		merged...,
+	)
+	if ic != nil {
+		call = ic.WrapStream(call)
+	}
+	stream := call(ctx)
+	return NewCrossServiceClientReRPC_Sum(stream)
+}
+
+// CountUp calls internal.crosstest.v1test.CrossService.CountUp. Call options
+// passed here apply only to this call.
+func (c *crossServiceClientReRPC) CountUp(ctx context.Context, req *CountUpRequest, opts ...rerpc.CallOption) (*CrossServiceClientReRPC_CountUp, error) {
+	merged := c.mergeOptions(opts)
+	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ctx, call := rerpc.NewCall(
+		ctx,
+		c.doer,
+		rerpc.StreamTypeServer,
+		c.baseURL,
+		"internal.crosstest.v1test", // protobuf package
+		"CrossService",              // protobuf service
+		"CountUp",                   // protobuf method
+		merged...,
+	)
+	if ic != nil {
+		call = ic.WrapStream(call)
+	}
+	stream := call(ctx)
+	if err := stream.Send(req); err != nil {
+		_ = stream.CloseSend(err)
+		_ = stream.CloseReceive()
+		return nil, err
+	}
+	if err := stream.CloseSend(nil); err != nil {
+		_ = stream.CloseReceive()
+		return nil, err
+	}
+	return NewCrossServiceClientReRPC_CountUp(stream), nil
+}
+
+// CumSum calls internal.crosstest.v1test.CrossService.CumSum. Call options
+// passed here apply only to this call.
+func (c *crossServiceClientReRPC) CumSum(ctx context.Context, opts ...rerpc.CallOption) *CrossServiceClientReRPC_CumSum {
+	merged := c.mergeOptions(opts)
+	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ctx, call := rerpc.NewCall(
+		ctx,
+		c.doer,
+		rerpc.StreamTypeBidirectional,
+		c.baseURL,
+		"internal.crosstest.v1test", // protobuf package
+		"CrossService",              // protobuf service
+		"CumSum",                    // protobuf method
+		merged...,
+	)
+	if ic != nil {
+		call = ic.WrapStream(call)
+	}
+	stream := call(ctx)
+	return NewCrossServiceClientReRPC_CumSum(stream)
+}
+
 // CrossServiceReRPC is a server for the internal.crosstest.v1test.CrossService
 // service. To make sure that adding methods to this protobuf service doesn't
 // break all implementations of this interface, all implementations must embed
@@ -166,6 +244,9 @@ func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, op
 type CrossServiceReRPC interface {
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
 	Fail(context.Context, *FailRequest) (*FailResponse, error)
+	Sum(context.Context, *CrossServiceReRPC_Sum) error
+	CountUp(context.Context, *CountUpRequest, *CrossServiceReRPC_CountUp) error
+	CumSum(context.Context, *CrossServiceReRPC_CumSum) error
 	mustEmbedUnimplementedCrossServiceReRPC()
 }
 
@@ -289,10 +370,106 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 	)
 	mux.Handle(fail.Path(), fail)
 
+	sum := rerpc.NewHandler(
+		rerpc.StreamTypeClient,
+		"internal.crosstest.v1test", // protobuf package
+		"CrossService",              // protobuf service
+		"Sum",                       // protobuf method
+		func(ctx context.Context, sf rerpc.StreamFunc) {
+			if ic != nil {
+				sf = ic.WrapStream(sf)
+			}
+			stream := sf(ctx)
+			typed := NewCrossServiceReRPC_Sum(stream)
+			err := svc.Sum(stream.Context(), typed)
+			_ = stream.CloseReceive()
+			if err != nil {
+				if _, ok := rerpc.AsError(err); !ok {
+					if errors.Is(err, context.Canceled) {
+						err = rerpc.Wrap(rerpc.CodeCanceled, err)
+					}
+					if errors.Is(err, context.DeadlineExceeded) {
+						err = rerpc.Wrap(rerpc.CodeDeadlineExceeded, err)
+					}
+				}
+			}
+			_ = stream.CloseSend(err)
+		},
+		opts...,
+	)
+	mux.Handle(sum.Path(), sum)
+
+	countUp := rerpc.NewHandler(
+		rerpc.StreamTypeServer,
+		"internal.crosstest.v1test", // protobuf package
+		"CrossService",              // protobuf service
+		"CountUp",                   // protobuf method
+		func(ctx context.Context, sf rerpc.StreamFunc) {
+			if ic != nil {
+				sf = ic.WrapStream(sf)
+			}
+			stream := sf(ctx)
+			typed := NewCrossServiceReRPC_CountUp(stream)
+			var req CountUpRequest
+			if err := stream.Receive(&req); err != nil {
+				_ = stream.CloseReceive()
+				_ = stream.CloseSend(err)
+				return
+			}
+			if err := stream.CloseReceive(); err != nil {
+				_ = stream.CloseSend(err)
+				return
+			}
+			err := svc.CountUp(stream.Context(), &req, typed)
+			if err != nil {
+				if _, ok := rerpc.AsError(err); !ok {
+					if errors.Is(err, context.Canceled) {
+						err = rerpc.Wrap(rerpc.CodeCanceled, err)
+					}
+					if errors.Is(err, context.DeadlineExceeded) {
+						err = rerpc.Wrap(rerpc.CodeDeadlineExceeded, err)
+					}
+				}
+			}
+			_ = stream.CloseSend(err)
+		},
+		opts...,
+	)
+	mux.Handle(countUp.Path(), countUp)
+
+	cumSum := rerpc.NewHandler(
+		rerpc.StreamTypeBidirectional,
+		"internal.crosstest.v1test", // protobuf package
+		"CrossService",              // protobuf service
+		"CumSum",                    // protobuf method
+		func(ctx context.Context, sf rerpc.StreamFunc) {
+			if ic != nil {
+				sf = ic.WrapStream(sf)
+			}
+			stream := sf(ctx)
+			typed := NewCrossServiceReRPC_CumSum(stream)
+			err := svc.CumSum(stream.Context(), typed)
+			_ = stream.CloseReceive()
+			if err != nil {
+				if _, ok := rerpc.AsError(err); !ok {
+					if errors.Is(err, context.Canceled) {
+						err = rerpc.Wrap(rerpc.CodeCanceled, err)
+					}
+					if errors.Is(err, context.DeadlineExceeded) {
+						err = rerpc.Wrap(rerpc.CodeDeadlineExceeded, err)
+					}
+				}
+			}
+			_ = stream.CloseSend(err)
+		},
+		opts...,
+	)
+	mux.Handle(cumSum.Path(), cumSum)
+
 	// Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.
 	mux.Handle("/", rerpc.NewBadRouteHandler(opts...))
 
-	return fail.ServicePath(), mux
+	return cumSum.ServicePath(), mux
 }
 
 var _ CrossServiceReRPC = (*UnimplementedCrossServiceReRPC)(nil) // verify interface implementation
@@ -310,4 +487,152 @@ func (UnimplementedCrossServiceReRPC) Fail(context.Context, *FailRequest) (*Fail
 	return nil, rerpc.Errorf(rerpc.CodeUnimplemented, "internal.crosstest.v1test.CrossService.Fail isn't implemented")
 }
 
+func (UnimplementedCrossServiceReRPC) Sum(context.Context, *CrossServiceReRPC_Sum) error {
+	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.crosstest.v1test.CrossService.Sum isn't implemented")
+}
+
+func (UnimplementedCrossServiceReRPC) CountUp(context.Context, *CountUpRequest, *CrossServiceReRPC_CountUp) error {
+	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.crosstest.v1test.CrossService.CountUp isn't implemented")
+}
+
+func (UnimplementedCrossServiceReRPC) CumSum(context.Context, *CrossServiceReRPC_CumSum) error {
+	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.crosstest.v1test.CrossService.CumSum isn't implemented")
+}
+
 func (UnimplementedCrossServiceReRPC) mustEmbedUnimplementedCrossServiceReRPC() {}
+
+// CrossServiceClientReRPC_Sum is the client-side stream for the
+// internal.crosstest.v1test.CrossService.Sum procedure.
+type CrossServiceClientReRPC_Sum struct {
+	stream rerpc.Stream
+}
+
+func NewCrossServiceClientReRPC_Sum(stream rerpc.Stream) *CrossServiceClientReRPC_Sum {
+	return &CrossServiceClientReRPC_Sum{stream}
+}
+
+func (s *CrossServiceClientReRPC_Sum) Send(msg *SumRequest) error {
+	return s.stream.Send(msg)
+}
+
+func (s *CrossServiceClientReRPC_Sum) ReceiveAndClose() (*SumResponse, error) {
+	if err := s.stream.CloseSend(nil); err != nil {
+		return nil, err
+	}
+	var res SumResponse
+	err := s.stream.Receive(&res)
+	return &res, err
+}
+
+// CrossServiceClientReRPC_CountUp is the client-side stream for the
+// internal.crosstest.v1test.CrossService.CountUp procedure.
+type CrossServiceClientReRPC_CountUp struct {
+	stream rerpc.Stream
+}
+
+func NewCrossServiceClientReRPC_CountUp(stream rerpc.Stream) *CrossServiceClientReRPC_CountUp {
+	return &CrossServiceClientReRPC_CountUp{stream}
+}
+
+func (s *CrossServiceClientReRPC_CountUp) Receive() (*CountUpResponse, error) {
+	var req CountUpResponse
+	if err := s.stream.Receive(&req); err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+func (s *CrossServiceClientReRPC_CountUp) Close() error {
+	return s.stream.CloseReceive()
+}
+
+// CrossServiceClientReRPC_CumSum is the client-side stream for the
+// internal.crosstest.v1test.CrossService.CumSum procedure.
+type CrossServiceClientReRPC_CumSum struct {
+	stream rerpc.Stream
+}
+
+func NewCrossServiceClientReRPC_CumSum(stream rerpc.Stream) *CrossServiceClientReRPC_CumSum {
+	return &CrossServiceClientReRPC_CumSum{stream}
+}
+
+func (s *CrossServiceClientReRPC_CumSum) Send(msg *CumSumRequest) error {
+	return s.stream.Send(msg)
+}
+
+func (s *CrossServiceClientReRPC_CumSum) CloseSend() error {
+	return s.stream.CloseSend(nil)
+}
+
+func (s *CrossServiceClientReRPC_CumSum) Receive() (*CumSumResponse, error) {
+	var req CumSumResponse
+	if err := s.stream.Receive(&req); err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+func (s *CrossServiceClientReRPC_CumSum) CloseReceive() error {
+	return s.stream.CloseReceive()
+}
+
+// CrossServiceReRPC_Sum is the server-side stream for the
+// internal.crosstest.v1test.CrossService.Sum procedure.
+type CrossServiceReRPC_Sum struct {
+	stream rerpc.Stream
+}
+
+func NewCrossServiceReRPC_Sum(stream rerpc.Stream) *CrossServiceReRPC_Sum {
+	return &CrossServiceReRPC_Sum{stream}
+}
+
+func (s *CrossServiceReRPC_Sum) Receive() (*SumRequest, error) {
+	var req SumRequest
+	if err := s.stream.Receive(&req); err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+func (s *CrossServiceReRPC_Sum) SendAndClose(msg *SumResponse) error {
+	if err := s.stream.CloseReceive(); err != nil {
+		return err
+	}
+	return s.stream.Send(msg)
+}
+
+// CrossServiceReRPC_CountUp is the server-side stream for the
+// internal.crosstest.v1test.CrossService.CountUp procedure.
+type CrossServiceReRPC_CountUp struct {
+	stream rerpc.Stream
+}
+
+func NewCrossServiceReRPC_CountUp(stream rerpc.Stream) *CrossServiceReRPC_CountUp {
+	return &CrossServiceReRPC_CountUp{stream}
+}
+
+func (s *CrossServiceReRPC_CountUp) Send(msg *CountUpResponse) error {
+	return s.stream.Send(msg)
+}
+
+// CrossServiceReRPC_CumSum is the server-side stream for the
+// internal.crosstest.v1test.CrossService.CumSum procedure.
+type CrossServiceReRPC_CumSum struct {
+	stream rerpc.Stream
+}
+
+func NewCrossServiceReRPC_CumSum(stream rerpc.Stream) *CrossServiceReRPC_CumSum {
+	return &CrossServiceReRPC_CumSum{stream}
+}
+
+func (s *CrossServiceReRPC_CumSum) Receive() (*CumSumRequest, error) {
+	var req CumSumRequest
+	if err := s.stream.Receive(&req); err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+func (s *CrossServiceReRPC_CumSum) Send(msg *CumSumResponse) error {
+	return s.stream.Send(msg)
+}

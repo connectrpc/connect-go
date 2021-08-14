@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"io"
 	"math/rand"
 	"net"
@@ -37,6 +38,18 @@ import (
 
 const errMsg = "soirée 🎉" // readable non-ASCII
 
+func newClientH2C() *http.Client {
+	// This is wildly insecure - don't do this in production!
+	return &http.Client{
+		Transport: &http2.Transport{
+			AllowHTTP: true,
+			DialTLS: func(netw, addr string, cfg *tls.Config) (net.Conn, error) {
+				return net.Dial(netw, addr)
+			},
+		},
+	}
+}
+
 type crossServerReRPC struct {
 	crosspb.UnimplementedCrossServiceReRPC
 }
@@ -55,6 +68,58 @@ func (c crossServerReRPC) Fail(ctx context.Context, req *crosspb.FailRequest) (*
 	return nil, rerpc.Errorf(rerpc.CodeResourceExhausted, errMsg)
 }
 
+func (c crossServerReRPC) Sum(ctx context.Context, stream *crosspb.CrossServiceReRPC_Sum) error {
+	var sum int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		msg, err := stream.Receive()
+		if errors.Is(err, io.EOF) {
+			return stream.SendAndClose(&crosspb.SumResponse{
+				Sum: sum,
+			})
+		} else if err != nil {
+			return err
+		}
+		sum += msg.Number
+	}
+}
+
+func (c crossServerReRPC) CountUp(ctx context.Context, req *crosspb.CountUpRequest, stream *crosspb.CrossServiceReRPC_CountUp) error {
+	if req.Number <= 0 {
+		return rerpc.Errorf(rerpc.CodeInvalidArgument, "number must be positive: got %v", req.Number)
+	}
+	for i := int64(1); i <= req.Number; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := stream.Send(&crosspb.CountUpResponse{Number: i}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c crossServerReRPC) CumSum(ctx context.Context, stream *crosspb.CrossServiceReRPC_CumSum) error {
+	var sum int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		msg, err := stream.Receive()
+		if errors.Is(err, io.EOF) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		sum += msg.Number
+		if err := stream.Send(&crosspb.CumSumResponse{Sum: sum}); err != nil {
+			return err
+		}
+	}
+}
+
 type crossServerGRPC struct {
 	crosspb.UnimplementedCrossServiceServer
 }
@@ -71,6 +136,58 @@ func (c crossServerGRPC) Ping(ctx context.Context, req *crosspb.PingRequest) (*c
 
 func (c crossServerGRPC) Fail(ctx context.Context, req *crosspb.FailRequest) (*crosspb.FailResponse, error) {
 	return nil, grpc.Errorf(codes.ResourceExhausted, errMsg)
+}
+
+func (c crossServerGRPC) Sum(stream crosspb.CrossService_SumServer) error {
+	var sum int64
+	for {
+		if err := stream.Context().Err(); err != nil {
+			return err
+		}
+		msg, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return stream.SendAndClose(&crosspb.SumResponse{
+				Sum: sum,
+			})
+		} else if err != nil {
+			return err
+		}
+		sum += msg.Number
+	}
+}
+
+func (c crossServerGRPC) CountUp(req *crosspb.CountUpRequest, stream crosspb.CrossService_CountUpServer) error {
+	if req.Number <= 0 {
+		return grpc.Errorf(codes.InvalidArgument, "number must be positive: got %v", req.Number)
+	}
+	for i := int64(1); i <= req.Number; i++ {
+		if err := stream.Context().Err(); err != nil {
+			return err
+		}
+		if err := stream.Send(&crosspb.CountUpResponse{Number: i}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c crossServerGRPC) CumSum(stream crosspb.CrossService_CumSumServer) error {
+	var sum int64
+	for {
+		if err := stream.Context().Err(); err != nil {
+			return err
+		}
+		msg, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		sum += msg.Number
+		if err := stream.Send(&crosspb.CumSumResponse{Sum: sum}); err != nil {
+			return err
+		}
+	}
 }
 
 func assertErrorGRPC(t testing.TB, err error, msg string) *status.Status {
@@ -133,6 +250,72 @@ func testWithReRPCClient(t *testing.T, client crosspb.CrossServiceClientReRPC) {
 		assert.Equal(t, rerr.Code(), rerpc.CodeDeadlineExceeded, "error code")
 		assert.ErrorIs(t, rerr, context.DeadlineExceeded, "error unwraps to context.DeadlineExceeded")
 	})
+	t.Run("sum", func(t *testing.T) {
+		const upTo = 10
+		const expect = 55 // 1+10 + 2+9 + ... + 5+6 = 55
+		stream := client.Sum(context.Background())
+		for i := int64(1); i <= upTo; i++ {
+			err := stream.Send(&crosspb.SumRequest{Number: i})
+			assert.Nil(t, err, "Send %v", assert.Fmt(i))
+		}
+		res, err := stream.ReceiveAndClose()
+		assert.Nil(t, err, "ReceiveAndClose error")
+		assert.Equal(t, res, &crosspb.SumResponse{Sum: expect}, "response")
+	})
+	t.Run("count_up", func(t *testing.T) {
+		const n = 5
+		got := make([]int64, 0, n)
+		expect := make([]int64, 0, n)
+		for i := 1; i <= n; i++ {
+			expect = append(expect, int64(i))
+		}
+		stream, err := client.CountUp(
+			context.Background(),
+			&crosspb.CountUpRequest{Number: n},
+		)
+		assert.Nil(t, err, "send error")
+		for {
+			msg, err := stream.Receive()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			assert.Nil(t, err, "receive error")
+			got = append(got, msg.Number)
+		}
+		err = stream.Close()
+		assert.Nil(t, err, "close error")
+		assert.Equal(t, got, expect, "responses")
+	})
+	t.Run("cumsum", func(t *testing.T) {
+		send := []int64{3, 5, 1}
+		expect := []int64{3, 8, 9}
+		var got []int64
+		stream := client.CumSum(context.Background())
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for i, n := range send {
+				err := stream.Send(&crosspb.CumSumRequest{Number: n})
+				assert.Nil(t, err, "send error #%v", assert.Fmt(i))
+			}
+			assert.Nil(t, stream.CloseSend(), "close send error")
+		}()
+		go func() {
+			defer wg.Done()
+			for {
+				msg, err := stream.Receive()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				assert.Nil(t, err, "receive error")
+				got = append(got, msg.Sum)
+			}
+			assert.Nil(t, stream.CloseReceive(), "close receive error")
+		}()
+		wg.Wait()
+		assert.Equal(t, got, expect, "sums")
+	})
 }
 
 func testWithGRPCClient(t *testing.T, client crosspb.CrossServiceClient, opts ...grpc.CallOption) {
@@ -173,6 +356,71 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrossServiceClient, opts ..
 		// Generally bad practice to assert error messages we don't own, but
 		// we'll want to keep rerpc's message in sync with grpc-go's.
 		assert.Equal(t, s.Message(), "context deadline exceeded", "error message")
+	})
+	t.Run("sum", func(t *testing.T) {
+		const upTo = 10
+		const expect = 55 // 1+10 + 2+9 + ... + 5+6 = 55
+		stream, err := client.Sum(context.Background())
+		assert.Nil(t, err, "call error")
+		for i := int64(1); i <= upTo; i++ {
+			err := stream.Send(&crosspb.SumRequest{Number: i})
+			assert.Nil(t, err, "Send %v", assert.Fmt(i))
+		}
+		res, err := stream.CloseAndRecv()
+		assert.Nil(t, err, "CloseAndRecv error")
+		assert.Equal(t, res, &crosspb.SumResponse{Sum: expect}, "response")
+	})
+	t.Run("count_up", func(t *testing.T) {
+		const n = 5
+		got := make([]int64, 0, n)
+		expect := make([]int64, 0, n)
+		for i := 1; i <= n; i++ {
+			expect = append(expect, int64(i))
+		}
+		stream, err := client.CountUp(
+			context.Background(),
+			&crosspb.CountUpRequest{Number: n},
+		)
+		assert.Nil(t, err, "call error")
+		for {
+			msg, err := stream.Recv()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			assert.Nil(t, err, "receive error")
+			got = append(got, msg.Number)
+		}
+		assert.Equal(t, got, expect, "responses")
+	})
+	t.Run("cumsum", func(t *testing.T) {
+		send := []int64{3, 5, 1}
+		expect := []int64{3, 8, 9}
+		var got []int64
+		stream, err := client.CumSum(context.Background())
+		assert.Nil(t, err, "call error")
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for i, n := range send {
+				err := stream.Send(&crosspb.CumSumRequest{Number: n})
+				assert.Nil(t, err, "send error #%v", assert.Fmt(i))
+			}
+			assert.Nil(t, stream.CloseSend(), "close send error")
+		}()
+		go func() {
+			defer wg.Done()
+			for {
+				msg, err := stream.Recv()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				assert.Nil(t, err, "receive error")
+				got = append(got, msg.Sum)
+			}
+		}()
+		wg.Wait()
+		assert.Equal(t, got, expect, "sums")
 	})
 }
 
@@ -308,12 +556,13 @@ func TestReRPCServerH2C(t *testing.T) {
 	defer server.Close()
 
 	t.Run("rerpc_client", func(t *testing.T) {
+		hclient := newClientH2C()
 		t.Run("identity", func(t *testing.T) {
-			client := crosspb.NewCrossServiceClientReRPC(server.URL, server.Client())
+			client := crosspb.NewCrossServiceClientReRPC(server.URL, hclient)
 			testWithReRPCClient(t, client)
 		})
 		t.Run("gzip", func(t *testing.T) {
-			client := crosspb.NewCrossServiceClientReRPC(server.URL, server.Client(), rerpc.Gzip(true))
+			client := crosspb.NewCrossServiceClientReRPC(server.URL, hclient, rerpc.Gzip(true))
 			testWithReRPCClient(t, client)
 		})
 	})
@@ -363,15 +612,7 @@ func TestGRPCServer(t *testing.T) {
 	defer server.GracefulStop()
 
 	t.Run("rerpc_client", func(t *testing.T) {
-		// This is wildly insecure - don't do this in production!
-		hclient := &http.Client{
-			Transport: &http2.Transport{
-				AllowHTTP: true,
-				DialTLS: func(netw, addr string, cfg *tls.Config) (net.Conn, error) {
-					return net.Dial(netw, addr)
-				},
-			},
-		}
+		hclient := newClientH2C()
 		t.Run("identity", func(t *testing.T) {
 			client := crosspb.NewCrossServiceClientReRPC("http://"+lis.Addr().String(), hclient)
 			testWithReRPCClient(t, client)
