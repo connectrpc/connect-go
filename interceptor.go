@@ -31,7 +31,7 @@ type Interceptor interface {
 
 // ConfiguredCallInterceptor returns the Interceptor configured by a collection
 // of call options (if any). It's used in generated code.
-func ConfiguredCallInterceptor(opts ...CallOption) Interceptor {
+func ConfiguredCallInterceptor(opts []CallOption) Interceptor {
 	var cfg callCfg
 	for _, o := range opts {
 		o.applyToCall(&cfg)
@@ -41,7 +41,7 @@ func ConfiguredCallInterceptor(opts ...CallOption) Interceptor {
 
 // ConfiguredHandlerInterceptor returns the Interceptor configured by a collection
 // of handler options (if any). It's used in generated code.
-func ConfiguredHandlerInterceptor(opts ...HandlerOption) Interceptor {
+func ConfiguredHandlerInterceptor(opts []HandlerOption) Interceptor {
 	var cfg handlerCfg
 	for _, o := range opts {
 		o.applyToHandler(&cfg)

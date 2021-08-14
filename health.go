@@ -64,7 +64,7 @@ func NewHealthHandler(
 	opts ...HandlerOption,
 ) (string, *http.ServeMux) {
 	mux := http.NewServeMux()
-	interceptor := ConfiguredHandlerInterceptor(opts...)
+	interceptor := ConfiguredHandlerInterceptor(opts)
 
 	checkImplementation := Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 		typed, ok := req.(*healthpb.HealthCheckRequest)

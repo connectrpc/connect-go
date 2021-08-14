@@ -68,7 +68,7 @@ func (c *pingServiceClientReRPC) mergeOptions(opts []rerpc.CallOption) []rerpc.C
 // apply only to this call.
 func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error) {
 	merged := c.mergeOptions(opts)
-	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
@@ -115,7 +115,7 @@ func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opt
 // apply only to this call.
 func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error) {
 	merged := c.mergeOptions(opts)
-	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
@@ -162,7 +162,7 @@ func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opt
 // apply only to this call.
 func (c *pingServiceClientReRPC) Sum(ctx context.Context, opts ...rerpc.CallOption) *PingServiceClientReRPC_Sum {
 	merged := c.mergeOptions(opts)
-	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
@@ -184,7 +184,7 @@ func (c *pingServiceClientReRPC) Sum(ctx context.Context, opts ...rerpc.CallOpti
 // here apply only to this call.
 func (c *pingServiceClientReRPC) CountUp(ctx context.Context, req *CountUpRequest, opts ...rerpc.CallOption) (*PingServiceClientReRPC_CountUp, error) {
 	merged := c.mergeOptions(opts)
-	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
@@ -215,7 +215,7 @@ func (c *pingServiceClientReRPC) CountUp(ctx context.Context, req *CountUpReques
 // here apply only to this call.
 func (c *pingServiceClientReRPC) CumSum(ctx context.Context, opts ...rerpc.CallOption) *PingServiceClientReRPC_CumSum {
 	merged := c.mergeOptions(opts)
-	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
@@ -254,7 +254,7 @@ type PingServiceReRPC interface {
 // handler. It returns the handler and the path on which to mount it.
 func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOption) (string, *http.ServeMux) {
 	mux := http.NewServeMux()
-	ic := rerpc.ConfiguredHandlerInterceptor(opts...)
+	ic := rerpc.ConfiguredHandlerInterceptor(opts)
 
 	pingFunc := rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 		typed, ok := req.(*PingRequest)
