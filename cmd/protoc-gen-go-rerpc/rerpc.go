@@ -321,7 +321,7 @@ func clientStreams(g *protogen.GeneratedFile, service *protogen.Service, name st
 				g.P()
 			} else {
 				// Client-only streaming.
-				g.P("func (s *", streamName, ") ReceiveAndClose() (*", method.Output.GoIdent, ", error) {")
+				g.P("func (s *", streamName, ") CloseAndReceive() (*", method.Output.GoIdent, ", error) {")
 				g.P("if err := s.stream.CloseSend(nil); err != nil {")
 				g.P("return nil, err")
 				g.P("}")

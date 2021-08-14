@@ -515,7 +515,7 @@ func (s *CrossServiceClientReRPC_Sum) Send(msg *SumRequest) error {
 	return s.stream.Send(msg)
 }
 
-func (s *CrossServiceClientReRPC_Sum) ReceiveAndClose() (*SumResponse, error) {
+func (s *CrossServiceClientReRPC_Sum) CloseAndReceive() (*SumResponse, error) {
 	if err := s.stream.CloseSend(nil); err != nil {
 		return nil, err
 	}

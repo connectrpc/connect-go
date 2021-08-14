@@ -335,8 +335,8 @@ func TestServerProtoGRPC(t *testing.T) {
 				err := stream.Send(&pingpb.SumRequest{Number: i})
 				assert.Nil(t, err, "Send %v", assert.Fmt(i))
 			}
-			res, err := stream.ReceiveAndClose()
-			assert.Nil(t, err, "ReceiveAndClose error")
+			res, err := stream.CloseAndReceive()
+			assert.Nil(t, err, "CloseAndReceive error")
 			assert.Equal(t, res, &pingpb.SumResponse{Sum: expect}, "response")
 		})
 	}
