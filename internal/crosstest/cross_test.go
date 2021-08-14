@@ -258,8 +258,8 @@ func testWithReRPCClient(t *testing.T, client crosspb.CrossServiceClientReRPC) {
 			err := stream.Send(&crosspb.SumRequest{Number: i})
 			assert.Nil(t, err, "Send %v", assert.Fmt(i))
 		}
-		res, err := stream.ReceiveAndClose()
-		assert.Nil(t, err, "ReceiveAndClose error")
+		res, err := stream.CloseAndReceive()
+		assert.Nil(t, err, "CloseAndReceive error")
 		assert.Equal(t, res, &crosspb.SumResponse{Sum: expect}, "response")
 	})
 	t.Run("count_up", func(t *testing.T) {
