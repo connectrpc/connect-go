@@ -28,6 +28,7 @@ type handlerCfg struct {
 	MaxRequestBytes     int64
 	Registrar           *Registrar
 	Interceptor         Interceptor
+	DisableRegistration bool
 	Package             string
 	Service             string
 	Method              string
@@ -92,7 +93,7 @@ func NewHandler(
 	for _, opt := range opts {
 		opt.applyToHandler(&cfg)
 	}
-	if reg := cfg.Registrar; reg != nil {
+	if reg := cfg.Registrar; reg != nil && !cfg.DisableRegistration {
 		reg.register(cfg.Package, cfg.Service)
 	}
 	return &Handler{

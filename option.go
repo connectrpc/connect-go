@@ -7,6 +7,34 @@ type Option interface {
 	HandlerOption
 }
 
+type overrideProtobufTypes struct {
+	pkg, svc string
+}
+
+// OverrideProtobufTypes replaces the protobuf package and service names set by
+// the generated code. This affects URLs and any Specification retrieved from a
+// call or handler context. In some situations, this helps to prevent protobuf
+// package name collisions: for example, reRPC uses this option to serve its
+// copies of the gRPC health and reflection APIs under the gRPC names and
+// paths.
+//
+// It does not change the data exposed by the reflection API. To prevent
+// inconsistencies, using this option disables reflection registration.
+func OverrideProtobufTypes(pkg, service string) Option {
+	return &overrideProtobufTypes{pkg, service}
+}
+
+func (o *overrideProtobufTypes) applyToCall(cfg *callCfg) {
+	cfg.Package = o.pkg
+	cfg.Service = o.svc
+}
+
+func (o *overrideProtobufTypes) applyToHandler(cfg *handlerCfg) {
+	cfg.Package = o.pkg
+	cfg.Service = o.svc
+	cfg.DisableRegistration = true
+}
+
 type readMaxBytes struct {
 	Max int64
 }
