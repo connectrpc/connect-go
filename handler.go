@@ -123,7 +123,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctype := r.Header.Get("Content-Type")
-	if (ctype == TypeJSON || ctype == TypeProtoTwirp) && h.config.DisableTwirp {
+	if (ctype == TypeJSON || ctype == TypeProtoTwirp) && (h.config.DisableTwirp || h.stype != StreamTypeUnary) {
 		w.Header().Set("Accept-Post", acceptPostValueWithoutJSON)
 		w.WriteHeader(http.StatusUnsupportedMediaType)
 		return
