@@ -34,6 +34,7 @@ import (
 	"github.com/rerpc/rerpc"
 	"github.com/rerpc/rerpc/internal/assert"
 	crosspb "github.com/rerpc/rerpc/internal/crosstest/v1test"
+	"github.com/rerpc/rerpc/reflection"
 )
 
 const errMsg = "soirée 🎉" // readable non-ASCII
@@ -469,7 +470,7 @@ func TestReRPCServer(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	mux := http.NewServeMux()
 	mux.Handle(crosspb.NewCrossServiceHandlerReRPC(crossServerReRPC{}, reg))
-	mux.Handle(rerpc.NewReflectionHandler(reg))
+	mux.Handle(reflection.NewHandler(reg))
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
