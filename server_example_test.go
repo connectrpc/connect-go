@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rerpc/rerpc"
+	"github.com/rerpc/rerpc/health"
 	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
 )
 
@@ -24,16 +25,16 @@ func Example() {
 	// The business logic here is trivial, but the rest of the example is meant
 	// to be somewhat realistic. This server has basic timeouts configured, and
 	// it also exposes gRPC's server reflection and health check APIs.
-	ping := &ExamplePingServer{}     // our business logic
-	reg := rerpc.NewRegistrar()      // for gRPC reflection
-	checker := rerpc.NewChecker(reg) // basic health checks
+	ping := &ExamplePingServer{}      // our business logic
+	reg := rerpc.NewRegistrar()       // for gRPC reflection
+	checker := health.NewChecker(reg) // basic health checks
 
 	// We're building plain net/http Handlers, so reRPC works with any Go HTTP
 	// middleware (e.g., net/http's StripPrefix).
 	mux := http.NewServeMux()
 	mux.Handle(pingpb.NewPingServiceHandlerReRPC(ping, reg)) // business logic
 	mux.Handle(rerpc.NewReflectionHandler(reg))              // server reflection
-	mux.Handle(rerpc.NewHealthHandler(checker, reg))         // health checks
+	mux.Handle(health.NewHandler(checker, reg))              // health checks
 	mux.Handle("/", rerpc.NewBadRouteHandler())              // Twirp-compatible 404s
 
 	// Timeouts, connection handling, TLS configuration, and other low-level
