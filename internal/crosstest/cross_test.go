@@ -37,38 +37,13 @@ import (
 
 const errMsg = "soirée 🎉" // readable non-ASCII
 
-type combinedError struct {
-	err *rerpc.Error
-}
-
-func NewCombinedError(err *rerpc.Error) error {
-	return &combinedError{err}
-}
-
-func (c *combinedError) Unwrap() error {
-	return c.err
-}
-
-func (c *combinedError) Error() string {
-	return c.err.Error()
-}
-
-func (c *combinedError) GRPCStatus() *status.Status {
-	if c.err == nil {
-		return nil
-	}
-	msg := strings.SplitN(c.err.Error(), ": ", 2)[1]
-	return status.New(codes.Code(c.err.Code()), msg)
-}
-
-type crossServer struct {
-	crosspb.UnimplementedCrossServiceServer
+type crossServerReRPC struct {
 	crosspb.UnimplementedCrossServiceReRPC
 }
 
-func (c crossServer) Ping(ctx context.Context, req *crosspb.PingRequest) (*crosspb.PingResponse, error) {
+func (c crossServerReRPC) Ping(ctx context.Context, req *crosspb.PingRequest) (*crosspb.PingResponse, error) {
 	if err := req.Sleep.CheckValid(); req.Sleep != nil && err != nil {
-		return nil, NewCombinedError(rerpc.Errorf(rerpc.CodeInvalidArgument, err.Error()).(*rerpc.Error))
+		return nil, rerpc.Wrap(rerpc.CodeInvalidArgument, err)
 	}
 	if d := req.Sleep.AsDuration(); d > 0 {
 		time.Sleep(d)
@@ -76,8 +51,26 @@ func (c crossServer) Ping(ctx context.Context, req *crosspb.PingRequest) (*cross
 	return &crosspb.PingResponse{Number: req.Number}, nil
 }
 
-func (c crossServer) Fail(ctx context.Context, req *crosspb.FailRequest) (*crosspb.FailResponse, error) {
-	return nil, NewCombinedError(rerpc.Errorf(rerpc.CodeResourceExhausted, errMsg).(*rerpc.Error))
+func (c crossServerReRPC) Fail(ctx context.Context, req *crosspb.FailRequest) (*crosspb.FailResponse, error) {
+	return nil, rerpc.Errorf(rerpc.CodeResourceExhausted, errMsg)
+}
+
+type crossServerGRPC struct {
+	crosspb.UnimplementedCrossServiceServer
+}
+
+func (c crossServerGRPC) Ping(ctx context.Context, req *crosspb.PingRequest) (*crosspb.PingResponse, error) {
+	if err := req.Sleep.CheckValid(); req.Sleep != nil && err != nil {
+		return nil, grpc.Errorf(codes.InvalidArgument, err.Error())
+	}
+	if d := req.Sleep.AsDuration(); d > 0 {
+		time.Sleep(d)
+	}
+	return &crosspb.PingResponse{Number: req.Number}, nil
+}
+
+func (c crossServerGRPC) Fail(ctx context.Context, req *crosspb.FailRequest) (*crosspb.FailResponse, error) {
+	return nil, grpc.Errorf(codes.ResourceExhausted, errMsg)
 }
 
 func assertErrorGRPC(t testing.TB, err error, msg string) *status.Status {
@@ -227,7 +220,7 @@ func testWithTwirpClient(t *testing.T, client crosspb.CrossService) {
 func TestReRPCServer(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	mux := http.NewServeMux()
-	mux.Handle(crosspb.NewCrossServiceHandlerReRPC(crossServer{}, reg))
+	mux.Handle(crosspb.NewCrossServiceHandlerReRPC(crossServerReRPC{}, reg))
 	mux.Handle(rerpc.NewReflectionHandler(reg))
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
@@ -310,7 +303,7 @@ func TestReRPCServer(t *testing.T) {
 
 func TestReRPCServerH2C(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.Handle(crosspb.NewCrossServiceHandlerReRPC(crossServer{}))
+	mux.Handle(crosspb.NewCrossServiceHandlerReRPC(crossServerReRPC{}))
 	server := httptest.NewServer(h2c.NewHandler(mux, &http2.Server{}))
 	defer server.Close()
 
@@ -358,7 +351,7 @@ func TestGRPCServer(t *testing.T) {
 	lis, err := net.Listen("tcp", "localhost:0")
 	assert.Nil(t, err, "listen on ephemeral port")
 	server := grpc.NewServer()
-	crosspb.RegisterCrossServiceServer(server, crossServer{})
+	crosspb.RegisterCrossServiceServer(server, crossServerGRPC{})
 
 	var wg sync.WaitGroup
 	wg.Add(1)
