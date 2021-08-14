@@ -8,6 +8,7 @@ import (
 	"github.com/rerpc/rerpc"
 	"github.com/rerpc/rerpc/health"
 	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
+	"github.com/rerpc/rerpc/reflection"
 )
 
 // ExamplePingServer implements some trivial business logic. The protobuf
@@ -33,7 +34,7 @@ func Example() {
 	// middleware (e.g., net/http's StripPrefix).
 	mux := http.NewServeMux()
 	mux.Handle(pingpb.NewPingServiceHandlerReRPC(ping, reg)) // business logic
-	mux.Handle(rerpc.NewReflectionHandler(reg))              // server reflection
+	mux.Handle(reflection.NewHandler(reg))                   // server reflection
 	mux.Handle(health.NewHandler(checker, reg))              // health checks
 	mux.Handle("/", rerpc.NewBadRouteHandler())              // Twirp-compatible 404s
 

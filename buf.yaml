@@ -4,6 +4,7 @@ lint:
     - DEFAULT
   ignore:
     - internal/health/v1/health.proto
+    - internal/reflection/v1alpha1/reflection.proto
 breaking:
   use:
     - WIRE_JSON

@@ -10,6 +10,13 @@ package internal.reflection.v1alpha1;
 
 option go_package = "github.com/rerpc/rerpc/internal/reflection/v1alpha1;reflectionpb";
 
+service ServerReflection {
+  // The reflection service is structured as a bidirectional stream, ensuring
+  // all related requests go to a single server.
+  rpc ServerReflectionInfo(stream ServerReflectionRequest)
+      returns (stream ServerReflectionResponse);
+}
+
 // The message sent by the client when calling ServerReflectionInfo method.
 message ServerReflectionRequest {
   string host = 1;
@@ -119,3 +126,5 @@ message ErrorResponse {
   int32 error_code = 1;
   string error_message = 2;
 }
+
+

@@ -24,6 +24,7 @@ import (
 	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
 	reflectionpb "github.com/rerpc/rerpc/internal/reflection/v1alpha1"
 	"github.com/rerpc/rerpc/internal/twirp"
+	"github.com/rerpc/rerpc/reflection"
 )
 
 const errMsg = "oh no"
@@ -315,7 +316,7 @@ func TestServerProtoGRPC(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(pingpb.NewPingServiceHandlerReRPC(pingServer{}, reg))
 	mux.Handle(health.NewHandler(health.NewChecker(reg)))
-	mux.Handle(rerpc.NewReflectionHandler(reg))
+	mux.Handle(reflection.NewHandler(reg))
 
 	testPing := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
 		t.Run("ping", func(t *testing.T) {
@@ -471,7 +472,6 @@ func TestServerProtoGRPC(t *testing.T) {
 	testReflection := func(t *testing.T, url string, doer rerpc.Doer, opts ...rerpc.CallOption) {
 		pingRequestFQN := string((&pingpb.PingRequest{}).ProtoReflect().Descriptor().FullName())
 		assert.Equal(t, reg.Services(), []string{
-			"grpc.reflection.v1alpha.ServerReflection",
 			"internal.ping.v1test.PingService",
 		}, "services registered in memory")
 
@@ -516,7 +516,6 @@ func TestServerProtoGRPC(t *testing.T) {
 				MessageResponse: &reflectionpb.ServerReflectionResponse_ListServicesResponse{
 					ListServicesResponse: &reflectionpb.ListServiceResponse{
 						Service: []*reflectionpb.ServiceResponse{
-							{Name: "grpc.reflection.v1alpha.ServerReflection"},
 							{Name: "internal.ping.v1test.PingService"},
 						},
 					},

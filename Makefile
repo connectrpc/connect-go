@@ -61,6 +61,7 @@ gen: .faux.pb ## Regenerate code
 	./bin/buf generate
 	rm internal/ping/v1test/ping{.twirp,_grpc.pb}.go
 	rm internal/health/v1/health{.twirp,_grpc.pb}.go
+	rm internal/reflection/v1alpha1/reflection{.twirp,_grpc.pb}.go
 	touch $(@)
 
 # Don't make this depend on $(PROTOBUFS), since we don't want to keep
