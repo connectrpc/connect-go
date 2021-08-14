@@ -87,6 +87,14 @@ func (cs *clientStream) Context() context.Context {
 
 func (cs *clientStream) Send(msg proto.Message) error {
 	if err := cs.marshaler.Marshal(msg); err != nil {
+		if errors.Is(err, io.ErrClosedPipe) {
+			// The HTTP stack closed the request body, so we should expect a
+			// response. Wait to get a more informative error message.
+			<-cs.responseReady
+			if cs.responseErr != nil {
+				return cs.responseErr
+			}
+		}
 		// If the server has already sent us an error (or the request has failed
 		// in some other way), we'll get that error here.
 		return err

@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/rerpc/rerpc"
+	"github.com/rerpc/rerpc/health"
 	"github.com/rerpc/rerpc/internal/assert"
 	healthpb "github.com/rerpc/rerpc/internal/health/v1"
 	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
@@ -313,7 +314,7 @@ func TestServerProtoGRPC(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	mux := http.NewServeMux()
 	mux.Handle(pingpb.NewPingServiceHandlerReRPC(pingServer{}, reg))
-	mux.Handle(rerpc.NewHealthHandler(rerpc.NewChecker(reg), reg))
+	mux.Handle(health.NewHandler(health.NewChecker(reg)))
 	mux.Handle(rerpc.NewReflectionHandler(reg))
 
 	testPing := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
@@ -427,58 +428,33 @@ func TestServerProtoGRPC(t *testing.T) {
 			const unknown = "foobar"
 			assert.True(t, reg.IsRegistered(pingFQN), "ping service registered")
 			assert.False(t, reg.IsRegistered(unknown), "unknown service registered")
-
-			callHealth := func(method string, req *healthpb.HealthCheckRequest, opts ...rerpc.CallOption) (*healthpb.HealthCheckResponse, error) {
-				ctx, call := rerpc.NewCall(
-					context.Background(),
-					doer,
-					rerpc.StreamTypeUnary,
-					url,
-					"grpc.health.v1", "Health", method,
-					opts...,
-				)
-				stream := call(ctx)
-				if err := stream.Send(req); err != nil {
-					_ = stream.CloseSend(err)
-					_ = stream.CloseReceive()
-					return nil, err
-				}
-				if err := stream.CloseSend(nil); err != nil {
-					_ = stream.CloseReceive()
-					return nil, err
-				}
-				var res healthpb.HealthCheckResponse
-				if err := stream.Receive(&res); err != nil {
-					_ = stream.CloseReceive()
-					return nil, err
-				}
-				return &res, stream.CloseReceive()
-			}
+			client := health.NewClient(url, doer, opts...)
 
 			t.Run("process", func(t *testing.T) {
-				req := &healthpb.HealthCheckRequest{}
-				res, err := callHealth("Check", req, opts...)
+				res, err := client.Check(context.Background(), &health.CheckRequest{})
 				assert.Nil(t, err, "rpc error")
-				assert.Equal(t, rerpc.HealthStatus(res.Status), rerpc.HealthServing, "status")
+				assert.Equal(t, res.Status, health.StatusServing, "status")
 			})
 			t.Run("known", func(t *testing.T) {
-				req := &healthpb.HealthCheckRequest{Service: pingFQN}
-				res, err := callHealth("Check", req, opts...)
+				res, err := client.Check(context.Background(), &health.CheckRequest{Service: pingFQN})
 				assert.Nil(t, err, "rpc error")
-				assert.Equal(t, rerpc.HealthStatus(res.Status), rerpc.HealthServing, "status")
+				assert.Equal(t, health.Status(res.Status), health.StatusServing, "status")
 			})
 			t.Run("unknown", func(t *testing.T) {
-				req := &healthpb.HealthCheckRequest{Service: unknown}
-				_, err := callHealth("Check", req, opts...)
+				_, err := client.Check(context.Background(), &health.CheckRequest{Service: unknown})
 				assert.NotNil(t, err, "rpc error")
 				rerr, ok := rerpc.AsError(err)
 				assert.True(t, ok, "convert to rerpc error")
 				assert.Equal(t, rerr.Code(), rerpc.CodeNotFound, "error code")
 			})
 			t.Run("watch", func(t *testing.T) {
-				req := &healthpb.HealthCheckRequest{Service: pingFQN}
-				_, err := callHealth("Watch", req, opts...)
-				assert.NotNil(t, err, "rpc error")
+				options := append(opts, rerpc.OverrideProtobufTypes("grpc.health.v1", "Health"))
+				client := healthpb.NewHealthClientReRPC(url, doer, options...)
+				stream, err := client.Watch(context.Background(), &healthpb.HealthCheckRequest{Service: pingFQN})
+				assert.Nil(t, err, "rpc error")
+				defer stream.Close()
+				_, err = stream.Receive()
+				assert.NotNil(t, err, "receive err")
 				rerr, ok := rerpc.AsError(err)
 				assert.True(t, ok, "convert to rerpc error")
 				switch rerr.Code() {
@@ -495,7 +471,6 @@ func TestServerProtoGRPC(t *testing.T) {
 	testReflection := func(t *testing.T, url string, doer rerpc.Doer, opts ...rerpc.CallOption) {
 		pingRequestFQN := string((&pingpb.PingRequest{}).ProtoReflect().Descriptor().FullName())
 		assert.Equal(t, reg.Services(), []string{
-			"grpc.health.v1.Health",
 			"grpc.reflection.v1alpha.ServerReflection",
 			"internal.ping.v1test.PingService",
 		}, "services registered in memory")
@@ -541,7 +516,6 @@ func TestServerProtoGRPC(t *testing.T) {
 				MessageResponse: &reflectionpb.ServerReflectionResponse_ListServicesResponse{
 					ListServicesResponse: &reflectionpb.ListServiceResponse{
 						Service: []*reflectionpb.ServiceResponse{
-							{Name: "grpc.health.v1.Health"},
 							{Name: "grpc.reflection.v1alpha.ServerReflection"},
 							{Name: "internal.ping.v1test.PingService"},
 						},
