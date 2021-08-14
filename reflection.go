@@ -93,7 +93,7 @@ func NewReflectionHandler(reg *Registrar, opts ...HandlerOption) (string, *http.
 	opts = append(opts, reg, ServeTwirp(false)) // no reflection in Twirp
 	svc := &reflectionServer{
 		reg: reg,
-		ic:  ConfiguredHandlerInterceptor(opts...),
+		ic:  ConfiguredHandlerInterceptor(opts),
 	}
 	h := NewHandler(
 		StreamTypeBidirectional,

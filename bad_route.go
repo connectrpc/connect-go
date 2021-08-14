@@ -13,7 +13,7 @@ import (
 // handles any requests for invalid protobuf methods).
 func NewBadRouteHandler(opts ...HandlerOption) *Handler {
 	wrapped := Func(badRouteUnaryImpl)
-	if ic := ConfiguredHandlerInterceptor(opts...); ic != nil {
+	if ic := ConfiguredHandlerInterceptor(opts); ic != nil {
 		wrapped = ic.Wrap(wrapped)
 	}
 	return NewHandler(

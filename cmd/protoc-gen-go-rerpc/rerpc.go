@@ -207,7 +207,7 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, cname st
 	}
 	g.P("func (c *", unexport(method.Parent.GoName), "ClientReRPC) ", clientSignature(g, cname, method), " {")
 	g.P("merged := c.mergeOptions(opts)")
-	g.P("ic := ", rerpcPackage.Ident("ConfiguredCallInterceptor"), "(merged...)")
+	g.P("ic := ", rerpcPackage.Ident("ConfiguredCallInterceptor"), "(merged)")
 	g.P("ctx, call := ", rerpcPackage.Ident("NewCall"), "(")
 	g.P("ctx,")
 	g.P("c.doer,")
@@ -409,7 +409,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 	g.P("func New", service.GoName, "HandlerReRPC(svc ", name, ", opts ...", rerpcPackage.Ident("HandlerOption"),
 		") (string, *", httpPackage.Ident("ServeMux"), ") {")
 	g.P("mux := ", httpPackage.Ident("NewServeMux"), "()")
-	g.P("ic := ", rerpcPackage.Ident("ConfiguredHandlerInterceptor"), "(opts...)")
+	g.P("ic := ", rerpcPackage.Ident("ConfiguredHandlerInterceptor"), "(opts)")
 	g.P()
 	lastHandlerName := ""
 	for _, method := range service.Methods {

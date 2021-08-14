@@ -68,7 +68,7 @@ func (c *crossServiceClientReRPC) mergeOptions(opts []rerpc.CallOption) []rerpc.
 // here apply only to this call.
 func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error) {
 	merged := c.mergeOptions(opts)
-	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
@@ -115,7 +115,7 @@ func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, op
 // here apply only to this call.
 func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error) {
 	merged := c.mergeOptions(opts)
-	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
@@ -162,7 +162,7 @@ func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, op
 // here apply only to this call.
 func (c *crossServiceClientReRPC) Sum(ctx context.Context, opts ...rerpc.CallOption) *CrossServiceClientReRPC_Sum {
 	merged := c.mergeOptions(opts)
-	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
@@ -184,7 +184,7 @@ func (c *crossServiceClientReRPC) Sum(ctx context.Context, opts ...rerpc.CallOpt
 // passed here apply only to this call.
 func (c *crossServiceClientReRPC) CountUp(ctx context.Context, req *CountUpRequest, opts ...rerpc.CallOption) (*CrossServiceClientReRPC_CountUp, error) {
 	merged := c.mergeOptions(opts)
-	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
@@ -215,7 +215,7 @@ func (c *crossServiceClientReRPC) CountUp(ctx context.Context, req *CountUpReque
 // passed here apply only to this call.
 func (c *crossServiceClientReRPC) CumSum(ctx context.Context, opts ...rerpc.CallOption) *CrossServiceClientReRPC_CumSum {
 	merged := c.mergeOptions(opts)
-	ic := rerpc.ConfiguredCallInterceptor(merged...)
+	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
 		c.doer,
@@ -254,7 +254,7 @@ type CrossServiceReRPC interface {
 // handler. It returns the handler and the path on which to mount it.
 func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOption) (string, *http.ServeMux) {
 	mux := http.NewServeMux()
-	ic := rerpc.ConfiguredHandlerInterceptor(opts...)
+	ic := rerpc.ConfiguredHandlerInterceptor(opts)
 
 	pingFunc := rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 		typed, ok := req.(*PingRequest)
