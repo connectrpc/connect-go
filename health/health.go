@@ -92,10 +92,7 @@ func NewHandler(
 ) (string, *http.ServeMux) {
 	return healthpb.NewHealthHandlerReRPC(
 		&server{check: checker},
-		append(opts, rerpc.OverrideProtobufTypes(
-			"grpc.health.v1", // package
-			"Health",         // service
-		))...,
+		append(opts, rerpc.OverrideProtobufPackage("grpc.health.v1"))...,
 	)
 }
 
@@ -120,10 +117,7 @@ func NewClient(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) *Clien
 	return &Client{healthpb.NewHealthClientReRPC(
 		baseURL,
 		doer,
-		append(opts, rerpc.OverrideProtobufTypes(
-			"grpc.health.v1", // package
-			"Health",         // service
-		))...,
+		append(opts, rerpc.OverrideProtobufPackage("grpc.health.v1"))...,
 	)}
 }
 
