@@ -13,13 +13,14 @@ type overrideProtobufTypes struct {
 
 // OverrideProtobufTypes replaces the protobuf package and service names set by
 // the generated code. This affects URLs and any Specification retrieved from a
-// call or handler context. In some situations, this helps to prevent protobuf
-// package name collisions: for example, reRPC uses this option to serve its
-// copies of the gRPC health and reflection APIs under the gRPC names and
-// paths.
+// call or handler context. This is usually a bad idea, but it's occasionally
+// necessary to prevent protobuf package collisions. (For example, reRPC uses
+// this option to serve the health and reflection APIs without generating
+// runtime conflicts with grpc-go.)
 //
 // It does not change the data exposed by the reflection API. To prevent
-// inconsistencies, using this option disables reflection registration.
+// inconsistencies, using this option disables reflection for the service
+// (though other services can still be introspected).
 func OverrideProtobufTypes(pkg, service string) Option {
 	return &overrideProtobufTypes{pkg, service}
 }
@@ -40,11 +41,13 @@ type readMaxBytes struct {
 }
 
 // ReadMaxBytes limits the performance impact of pathologically large messages
-// sent by the other party. For handlers, ReadMaxBytes sets the maximum
-// allowable request size. For clients, ReadMaxBytes sets the maximum allowable
-// response size. Limits are applied before decompression.
+// sent by the other party. For handlers, ReadMaxBytes limits the size of
+// message that the client can send. For clients, ReadMaxBytes limits the size
+// of message that the server can respond with. Limits are applied before
+// decompression and apply to each protobuf message, not to the stream as a
+// whole.
 //
-// Setting ReadMaxBytes to zero allows any request size. Both clients and
+// Setting ReadMaxBytes to zero allows any message size. Both clients and
 // handlers default to allowing any request size.
 func ReadMaxBytes(n int64) Option {
 	return &readMaxBytes{n}

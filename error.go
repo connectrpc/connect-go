@@ -29,9 +29,9 @@ import (
 // and localized messages to clients. Error details aren't exposed over the
 // Twirp protocol.
 //
-// Related documents:
-//   gRPC HTTP/2 specification: https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md
-//   gRPC status codes: https://github.com/grpc/grpc/blob/master/doc/statuscodes.md
+// See https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md and
+// https://github.com/grpc/grpc/blob/master/doc/statuscodes.md for further
+// details.
 type Error struct {
 	code    Code
 	err     error

@@ -19,9 +19,9 @@ type StreamFunc func(context.Context) Stream
 // returned error, retry, recover from panics, emit logs and metrics, or do
 // nearly anything else.
 //
-// The returned functions must be safe to call concurrently. If chained
-// carelessly, the interceptor's logic may run more than once - where possible,
-// interceptors should be idempotent.
+// The functions returned by Wrap and WrapStream must be safe to call
+// concurrently. If chained carelessly, the interceptor's logic may run more
+// than once - where possible, interceptors should be idempotent.
 //
 // See Chain for an example of interceptor use.
 type Interceptor interface {
@@ -50,7 +50,8 @@ func ConfiguredHandlerInterceptor(opts []HandlerOption) Interceptor {
 }
 
 // A UnaryInterceptorFunc is a simple Interceptor implementation that only
-// wraps unary RPCs. See CallMetadata for an example.
+// wraps unary RPCs. It has no effect on client, server, or bidirectional
+// streaming RPCs. See CallMetadata for an example.
 type UnaryInterceptorFunc func(Func) Func
 
 // Wrap implements Interceptor by applying the interceptor function.
