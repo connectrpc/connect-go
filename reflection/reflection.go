@@ -44,8 +44,7 @@ type Registrar interface {
 // https://github.com/fullstorydev/grpcurl.
 func NewHandler(reg Registrar, opts ...rerpc.HandlerOption) (string, *http.ServeMux) {
 	const pkg = "grpc.reflection.v1alpha"
-	const service = "ServerReflection"
-	opts = append(opts, rerpc.OverrideProtobufTypes(pkg, service))
+	opts = append(opts, rerpc.OverrideProtobufPackage(pkg))
 	return rpb.NewServerReflectionHandlerReRPC(&server{reg: reg}, opts...)
 }
 

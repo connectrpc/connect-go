@@ -7,32 +7,31 @@ type Option interface {
 	HandlerOption
 }
 
-type overrideProtobufTypes struct {
-	pkg, svc string
+type overridePkg struct {
+	pkg string
 }
 
-// OverrideProtobufTypes replaces the protobuf package and service names set by
-// the generated code. This affects URLs and any Specification retrieved from a
-// call or handler context. This is usually a bad idea, but it's occasionally
-// necessary to prevent protobuf package collisions. (For example, reRPC uses
-// this option to serve the health and reflection APIs without generating
-// runtime conflicts with grpc-go.)
+// OverrideProtobufPackage replaces the protobuf package name set by the
+// generated code. This affects URLs and any Specification retrieved from a
+// call or handler context. Using this option is usually a bad idea, but it's
+// occasionally necessary to prevent protobuf package collisions. (For example,
+// reRPC uses this option to serve the health and reflection APIs without
+// generating runtime conflicts with grpc-go.)
 //
-// It does not change the data exposed by the reflection API. To prevent
-// inconsistencies, using this option disables reflection for the service
-// (though other services can still be introspected).
-func OverrideProtobufTypes(pkg, service string) Option {
-	return &overrideProtobufTypes{pkg, service}
+// OverrideProtobufPackage does not change the data exposed by the reflection
+// API. To prevent inconsistencies between the reflection data and the actual
+// service URL, using this option disables reflection for the overridden
+// service (though other services can still be introspected).
+func OverrideProtobufPackage(pkg string) Option {
+	return &overridePkg{pkg}
 }
 
-func (o *overrideProtobufTypes) applyToCall(cfg *callCfg) {
+func (o *overridePkg) applyToCall(cfg *callCfg) {
 	cfg.Package = o.pkg
-	cfg.Service = o.svc
 }
 
-func (o *overrideProtobufTypes) applyToHandler(cfg *handlerCfg) {
+func (o *overridePkg) applyToHandler(cfg *handlerCfg) {
 	cfg.Package = o.pkg
-	cfg.Service = o.svc
 	cfg.DisableRegistration = true
 }
 

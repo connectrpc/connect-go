@@ -449,7 +449,7 @@ func TestServerProtoGRPC(t *testing.T) {
 				assert.Equal(t, rerr.Code(), rerpc.CodeNotFound, "error code")
 			})
 			t.Run("watch", func(t *testing.T) {
-				options := append(opts, rerpc.OverrideProtobufTypes("grpc.health.v1", "Health"))
+				options := append(opts, rerpc.OverrideProtobufPackage("grpc.health.v1"))
 				client := healthpb.NewHealthClientReRPC(url, doer, options...)
 				stream, err := client.Watch(context.Background(), &healthpb.HealthCheckRequest{Service: pingFQN})
 				assert.Nil(t, err, "rpc error")
