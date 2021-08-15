@@ -60,6 +60,20 @@ func TestIsReservedHeader(t *testing.T) {
 		key      string
 		reserved bool
 	}{
+		// Invalid characters
+		{"", true},
+		{"Foo\uF000", true},
+		{"Foo$", true},
+		{"Foo!", true},
+
+		// HTTP2 proto-headers
+		{":method", true},
+		{":scheme", true},
+		{":authority", true},
+		{":path", true},
+		{":foo", true},
+
+		// Reserved
 		{"Accept", true},
 		{"Accept-Encoding", true},
 		{"Accept-Post", true},
@@ -71,14 +85,32 @@ func TestIsReservedHeader(t *testing.T) {
 		{"Rerpc-Foo", true},
 		{"Twirp-Foo", true},
 
+		// Available
 		{"Content-Length", false},
 		{"Transfer-Encoding", false},
 		{"Grpcfoo", false},
 		{"Rerpcfoo", false},
 		{"Twirpfoo", false},
 		{"Google-Cloud-Trace-Id", false},
+		{"Foo_bar", false},
+		{"Foo.bar", false},
 	}
+
+	testHeaderKey := func(t testing.TB, name string, reserved bool) {
+		t.Helper()
+		err := IsReservedHeader(name)
+		if reserved {
+			assert.NotNil(t, err, "expected key %q to be reserved", assert.Fmt(name))
+		} else {
+			assert.Nil(t, err, "expected key %q to be available for application use", assert.Fmt(name))
+		}
+	}
+
 	for _, tt := range tests {
+		if len(tt.key) == 0 {
+			testHeaderKey(t, tt.key, tt.reserved)
+			continue
+		}
 		// Should be case-insensitive
 		bs := []byte(tt.key)
 		for i := 0; i < 10; i++ {
@@ -92,12 +124,7 @@ func TestIsReservedHeader(t *testing.T) {
 				}
 			}
 			k := string(bs)
-			err := IsReservedHeader(k)
-			if tt.reserved {
-				assert.NotNil(t, err, "expected key %q to be reserved", assert.Fmt(k))
-			} else {
-				assert.Nil(t, err, "expected key %q to be available for application use", assert.Fmt(k))
-			}
+			testHeaderKey(t, k, tt.reserved)
 		}
 	}
 }

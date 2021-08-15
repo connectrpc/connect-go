@@ -2,6 +2,7 @@ package rerpc
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/textproto"
@@ -24,9 +25,28 @@ import (
 // "Google-Cloud-").
 //
 // Currently, the following keys are reserved: Accept, Accept-Encoding,
-// Accept-Post, Allow, Content-Encoding, Content-Type, Te, and Trailer. Keys
-// prefixed with "Grpc-", "Rerpc-", and "Twirp-" are also reserved.
+// Accept-Post, Allow, Content-Encoding, Content-Type, Te, and Trailer. Empty
+// keys, or keys prefixed with ":", "Grpc-", "Rerpc-", and "Twirp-" are also
+// reserved.
+//
+// Unreserved keys can only contain the following ASCII characters:
+// a-z, A-Z, 0-9, "-" (hyphen-minus), "_" (underscore), and "." (period).
 func IsReservedHeader(key string) error {
+	if key == "" {
+		return errors.New("empty header key")
+	}
+	if key[0] == ':' {
+		return fmt.Errorf("%q is a reserved HTTP2 proto-header", key)
+	}
+	for _, c := range key {
+		if !(('a' <= c && c <= 'z') ||
+			('A' <= c && c <= 'Z') ||
+			('0' <= c && c <= '9') ||
+			c == '-' || c == '_' || c == '.') {
+
+			return fmt.Errorf("%q contains non-ASCII or reserved characters", key)
+		}
+	}
 	canonical := textproto.CanonicalMIMEHeaderKey(key)
 	switch canonical {
 	case "Accept", "Accept-Encoding", "Accept-Post",
