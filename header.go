@@ -165,7 +165,7 @@ func (h ImmutableHeader) GetBinary(key string) ([]byte, error) {
 // library's http.Header, keys are case-insensitive and canonicalized with
 // textproto.CanonicalMIMEHeaderKey.
 //
-// Unlike the standard library's http.Header.Clone, the returned slice is a
+// Unlike the standard library's http.Header.Values, the returned slice is a
 // copy.
 func (h ImmutableHeader) Values(key string) []string {
 	mutable := h.raw.Values(key)

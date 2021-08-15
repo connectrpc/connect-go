@@ -1,3 +1,6 @@
+// Package reflection offers support for gRPC's server reflection API. If you
+// add reflection support to your gRPC server, many developer tools (including
+// cURL replacements like grpcurl) become much more convenient.
 package reflection
 
 import (

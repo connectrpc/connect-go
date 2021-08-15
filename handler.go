@@ -65,7 +65,7 @@ func ServeTwirp(enable bool) HandlerOption {
 // deal with it directly.
 //
 // To see an example of how Handler is used in the generated code, see the
-// internal/pingpb/v0 package.
+// internal/ping/v1test package.
 type Handler struct {
 	stype          StreamType
 	config         handlerCfg
@@ -286,7 +286,9 @@ func (h *Handler) Path() string {
 }
 
 // ServicePath returns the URL pattern for the protobuf service. It's used by
-// the generated code.
+// the generated code. For example, if Path returned
+// "/acme.foo.v1.FooService/Bar" then ServicePath would return
+// "/acme.foo.v1.FooService/".
 func (h *Handler) ServicePath() string {
 	if h.config.Package == "" && h.config.Service == "" && h.config.Method == "" {
 		return "/"

@@ -14,8 +14,8 @@ const (
 
 // Specification is a description of a client call or a handler invocation.
 //
-// Note that the Method, Service, and Package are fully-qualified protobuf
-// names, not Go import paths or identifiers.
+// Note that the Method, Service, and Package are protobuf names, not Go import
+// paths or identifiers.
 type Specification struct {
 	Type    StreamType
 	Package string // protobuf name, e.g. "acme.foo.v1"
