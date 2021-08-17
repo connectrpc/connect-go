@@ -116,6 +116,16 @@ func TestHandlerTwirp(t *testing.T) {
 		assert.Equal(t, string(contents), expected, "body contents")
 	}
 
+	assertError := func(t testing.TB, response *http.Response, expected *twirp.Status) {
+		t.Helper()
+		assert.Equal(t, response.Header.Get("Content-Type"), rerpc.TypeJSON, "error response content-type")
+		got := &twirp.Status{}
+		contents, err := io.ReadAll(response.Body)
+		assert.Nil(t, err, "read response body")
+		assert.Nil(t, json.Unmarshal(contents, got), "unmarshal JSON")
+		assert.Equal(t, got, expected, "unmarshaled Twirp status")
+	}
+
 	t.Run("json", func(t *testing.T) {
 		t.Run("zero", func(t *testing.T) {
 			r, err := http.NewRequest(
@@ -198,11 +208,7 @@ func TestHandlerTwirp(t *testing.T) {
 				Code:    "resource_exhausted",
 				Message: "oh no",
 			}
-			got := &twirp.Status{}
-			contents, err := io.ReadAll(response.Body)
-			assert.Nil(t, err, "read response body")
-			assert.Nil(t, json.Unmarshal(contents, got), "unmarshal JSON")
-			assert.Equal(t, got, expected, "unmarshaled Twirp status")
+			assertError(t, response, expected)
 		})
 
 		t.Run("bad_route", func(t *testing.T) {
@@ -223,11 +229,7 @@ func TestHandlerTwirp(t *testing.T) {
 				Code:    "bad_route",
 				Message: "no handler for path /internal.ping.v1test.PingService/Foo",
 			}
-			got := &twirp.Status{}
-			contents, err := io.ReadAll(response.Body)
-			assert.Nil(t, err, "read response body")
-			assert.Nil(t, json.Unmarshal(contents, got), "unmarshal JSON")
-			assert.Equal(t, got, expected, "unmarshaled Twirp status")
+			assertError(t, response, expected)
 		})
 	})
 
@@ -319,18 +321,13 @@ func TestHandlerTwirp(t *testing.T) {
 			response, err := server.Client().Do(r)
 			assert.Nil(t, err, "make request")
 			testHeaders(t, response)
-			assert.Equal(t, response.Header.Get("Content-Type"), rerpc.TypeJSON, "error response content-type")
 			assert.Equal(t, response.StatusCode, http.StatusTooManyRequests, "HTTP status code")
 
 			expected := &twirp.Status{
 				Code:    "resource_exhausted",
 				Message: "oh no",
 			}
-			got := &twirp.Status{}
-			contents, err := io.ReadAll(response.Body)
-			assert.Nil(t, err, "read response body")
-			assert.Nil(t, json.Unmarshal(contents, got), "unmarshal JSON")
-			assert.Equal(t, got, expected, "unmarshaled Twirp status")
+			assertError(t, response, expected)
 		})
 
 		t.Run("bad_route", func(t *testing.T) {
@@ -352,11 +349,7 @@ func TestHandlerTwirp(t *testing.T) {
 				Code:    "bad_route",
 				Message: "no handler for path /internal.ping.v1test.PingService/Foo",
 			}
-			got := &twirp.Status{}
-			contents, err := io.ReadAll(response.Body)
-			assert.Nil(t, err, "read response body")
-			assert.Nil(t, json.Unmarshal(contents, got), "unmarshal JSON")
-			assert.Equal(t, got, expected, "unmarshaled Twirp status")
+			assertError(t, response, expected)
 		})
 	})
 }
