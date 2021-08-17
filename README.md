@@ -51,6 +51,7 @@ func main() {
   ping := &PingServer{}
   mux := http.NewServeMux()
   mux.Handle(pingpb.NewPingHandlerReRPC(ping))
+  mux.Handle("/", rerpc.NewBadRouteHandler())
   handler := h2c.NewHandler(mux, &http2.Server{})
   http.ListenAndServe(":8081", handler)
 }
