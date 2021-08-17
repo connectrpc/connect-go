@@ -36,7 +36,7 @@ func IsReservedHeader(key string) error {
 		return errors.New("empty header key")
 	}
 	if key[0] == ':' {
-		return fmt.Errorf("%q is a reserved HTTP2 proto-header", key)
+		return fmt.Errorf("%q is a reserved HTTP2 pseudo-header", key)
 	}
 	for _, c := range key {
 		if !(('a' <= c && c <= 'z') ||
