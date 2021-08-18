@@ -1,7 +1,6 @@
 package rerpc
 
 import (
-	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -238,10 +237,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var requestBody io.Reader = r.Body
 	if spec.ContentType == TypeJSON || spec.ContentType == TypeProtoTwirp {
 		if spec.RequestCompression == CompressionGzip {
-			gr, err := gzip.NewReader(requestBody)
+			gr, err := getGzipReader(requestBody)
 			if err != nil && failed == nil {
 				failed = errorf(CodeInvalidArgument, "can't read gzipped body: %w", err)
 			} else if err == nil {
+				defer putGzipReader(gr)
 				defer gr.Close()
 				requestBody = gr
 			}

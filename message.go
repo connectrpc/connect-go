@@ -2,7 +2,6 @@ package rerpc
 
 import (
 	"bytes"
-	"compress/gzip"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -233,10 +232,11 @@ func (u *unmarshaler) unmarshalGRPC(msg proto.Message) *Error {
 	}
 
 	if compressed {
-		gr, err := gzip.NewReader(bytes.NewReader(raw))
+		gr, err := getGzipReader(bytes.NewReader(raw))
 		if err != nil {
 			return errorf(CodeInvalidArgument, "can't decompress gzipped data: %w", err)
 		}
+		defer putGzipReader(gr)
 		defer gr.Close()
 		decompressed := getBuffer()
 		defer putBuffer(decompressed)
