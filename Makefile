@@ -5,6 +5,7 @@ SHELL := bash
 .DEFAULT_GOAL := help
 MAKEFLAGS += --warn-undefined-variables
 MAKEFLAGS += --no-builtin-rules
+BENCHFLAGS ?= -cpuprofile=cpu.pprof -memprofile=mem.pprof -benchmem
 
 HANDWRITTEN=$(shell find . -type f -name '*.go' | grep -v -e '\.pb\.go$$' -e '\.twirp\.go$$' -e '_string.go$$')
 PROTOBUFS=$(shell find . -type f -name '*.proto')
@@ -23,6 +24,11 @@ clean: ## Delete build output
 test: gen $(HANDWRITTEN) ## Run unit tests
 	@go test -vet=off -race -cover ./...
 	@cd internal/crosstest && go test -vet=off -race ./...
+
+.PHONY: bench
+BENCH ?= .
+bench: gen $(HANDWRITTEN) ## Run benchmarks
+	@cd internal/crosstest && go test -vet=off -bench=$(BENCH) $(BENCHFLAGS) -run="^$$" .
 
 .PHONY: lint
 lint: lintpb bin/goimports bin/staticcheck ## Lint Go and protobuf
