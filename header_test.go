@@ -55,60 +55,60 @@ func TestPercentEncoding(t *testing.T) {
 	roundtrip("fiancée")
 }
 
-func TestIsReservedHeader(t *testing.T) {
+func TestIsValidHeaderKey(t *testing.T) {
 	tests := []struct {
-		key      string
-		reserved bool
+		key   string
+		valid bool
 	}{
 		// Invalid characters
-		{"", true},
-		{"Foo\uF000", true},
-		{"Foo$", true},
-		{"Foo!", true},
+		{"", false},
+		{"Foo\uF000", false},
+		{"Foo$", false},
+		{"Foo!", false},
 
 		// HTTP2 proto-headers
-		{":method", true},
-		{":scheme", true},
-		{":authority", true},
-		{":path", true},
-		{":foo", true},
+		{":method", false},
+		{":scheme", false},
+		{":authority", false},
+		{":path", false},
+		{":foo", false},
 
 		// Reserved
-		{"Accept", true},
-		{"Accept-Encoding", true},
-		{"Accept-Post", true},
-		{"Allow", true},
-		{"Content-Encoding", true},
-		{"Content-Type", true},
-		{"Te", true},
-		{"Grpc-Foo", true},
-		{"Rerpc-Foo", true},
-		{"Twirp-Foo", true},
+		{"Accept", false},
+		{"Accept-Encoding", false},
+		{"Accept-Post", false},
+		{"Allow", false},
+		{"Content-Encoding", false},
+		{"Content-Type", false},
+		{"Te", false},
+		{"Grpc-Foo", false},
+		{"Rerpc-Foo", false},
+		{"Twirp-Foo", false},
 
 		// Available
-		{"Content-Length", false},
-		{"Transfer-Encoding", false},
-		{"Grpcfoo", false},
-		{"Rerpcfoo", false},
-		{"Twirpfoo", false},
-		{"Google-Cloud-Trace-Id", false},
-		{"Foo_bar", false},
-		{"Foo.bar", false},
+		{"Content-Length", true},
+		{"Transfer-Encoding", true},
+		{"Grpcfoo", true},
+		{"Rerpcfoo", true},
+		{"Twirpfoo", true},
+		{"Google-Cloud-Trace-Id", true},
+		{"Foo_bar", true},
+		{"Foo.bar", true},
 	}
 
-	testHeaderKey := func(t testing.TB, name string, reserved bool) {
+	testHeaderKey := func(t testing.TB, name string, valid bool) {
 		t.Helper()
-		err := IsReservedHeader(name)
-		if reserved {
-			assert.NotNil(t, err, "expected key %q to be reserved", assert.Fmt(name))
-		} else {
+		err := IsValidHeaderKey(name)
+		if valid {
 			assert.Nil(t, err, "expected key %q to be available for application use", assert.Fmt(name))
+		} else {
+			assert.NotNil(t, err, "expected key %q to be reserved", assert.Fmt(name))
 		}
 	}
 
 	for _, tt := range tests {
 		if len(tt.key) == 0 {
-			testHeaderKey(t, tt.key, tt.reserved)
+			testHeaderKey(t, tt.key, tt.valid)
 			continue
 		}
 		// Should be case-insensitive
@@ -124,7 +124,7 @@ func TestIsReservedHeader(t *testing.T) {
 				}
 			}
 			k := string(bs)
-			testHeaderKey(t, k, tt.reserved)
+			testHeaderKey(t, k, tt.valid)
 		}
 	}
 }
