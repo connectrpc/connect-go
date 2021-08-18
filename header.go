@@ -29,7 +29,7 @@ import (
 // keys, or keys prefixed with ":", "Grpc-", "Rerpc-", and "Twirp-" are also
 // reserved.
 //
-// Unreserved keys can only contain the following ASCII characters:
+// Unreserved keys may only contain the following ASCII characters:
 // a-z, A-Z, 0-9, "-" (hyphen-minus), "_" (underscore), and "." (period).
 func IsValidHeaderKey(key string) error {
 	if key == "" {
@@ -65,6 +65,19 @@ func IsValidHeaderKey(key string) error {
 	default:
 		return nil
 	}
+}
+
+// IsValidHeaderValue checks whether the supplied string is a valid header
+// value. The gRPC wire protocol is more restrictive than plain HTTP, so only
+// space and printable ASCII is allowed.
+func IsValidHeaderValue(v string) error {
+	for i := range v {
+		c := v[i]
+		if c < 0x20 || c > 0x7E { // hex makes matching the spec easier
+			return fmt.Errorf("%q isn't a valid header value: index %d is neither space nor printable ASCII", v, i)
+		}
+	}
+	return nil
 }
 
 func encodeBinaryHeader(data []byte) string {
@@ -218,10 +231,14 @@ func NewMutableHeader(raw http.Header) MutableHeader {
 // values. Like the standard library's http.Header, keys are case-insensitive
 // and canonicalized with textproto.CanonicalMIMEHeaderKey.
 //
-// Attempting to set a reserved header (as defined by IsValidHeaderKey) returns
-// an error. See IsValidHeaderKey for backward compatibility guarantees.
+// Attempting to set an invalid key (as defined by IsValidHeaderKey) or value
+// (as defined by IsValidHeaderValue) returns an error. See IsValidHeaderKey
+// for backward compatibility guarantees.
 func (h MutableHeader) Set(key, value string) error {
 	if err := IsValidHeaderKey(key); err != nil {
+		return err
+	}
+	if err := IsValidHeaderValue(value); err != nil {
 		return err
 	}
 	h.raw.Set(key, value)
@@ -248,11 +265,14 @@ func (h MutableHeader) SetBinary(key string, value []byte) error {
 // associated with the key. Like the standard library's http.Header, keys are
 // case-insensitive and canonicalized with textproto.CanonicalMIMEHeaderKey.
 //
-// Attempting to add to a reserved header (as defined by IsValidHeaderKey)
-// returns an error. See IsValidHeaderKey for backward compatibility
-// guarantees.
+// Attempting to add to an invalid key (as defined by IsValidHeaderKey) or
+// supplying an invalid value (as defined by IsValidHeaderValue) returns an
+// error. See IsValidHeaderKey for backward compatibility guarantees.
 func (h MutableHeader) Add(key, value string) error {
 	if err := IsValidHeaderKey(key); err != nil {
+		return err
+	}
+	if err := IsValidHeaderValue(value); err != nil {
 		return err
 	}
 	h.raw.Add(key, value)
@@ -263,8 +283,8 @@ func (h MutableHeader) Add(key, value string) error {
 // http.Header, keys are case-insensitive and canonicalized with
 // textproto.CanonicalMIMEHeaderKey.
 //
-// Attempting delete a reserved header (as defined by IsValidHeaderKey) returns
-// an error. See IsValidHeaderKey for backward compatibility guarantees.
+// Attempting delete an invalid key (as defined by IsValidHeaderKey) returns an
+// error. See IsValidHeaderKey for backward compatibility guarantees.
 func (h MutableHeader) Del(key string) error {
 	if err := IsValidHeaderKey(key); err != nil {
 		return err

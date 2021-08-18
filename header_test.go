@@ -129,6 +129,31 @@ func TestIsValidHeaderKey(t *testing.T) {
 	}
 }
 
+func TestIsValidHeaderValue(t *testing.T) {
+	tests := []struct {
+		s     string
+		valid bool
+	}{
+		{"", true},
+		{":authority", true},
+		{"Authority", true},
+		{"AutHoR-it!@$`", true},
+		{"Grpc-Timeout", true},
+		{"foo", true},
+		{"foo\x00", false}, // ASCII null
+		{"foo\x7F", false}, // ASCII delete
+	}
+
+	for _, tt := range tests {
+		err := IsValidHeaderValue(tt.s)
+		if tt.valid {
+			assert.Nil(t, err, "expected %q to be valid", assert.Fmt(tt.s))
+		} else {
+			assert.NotNil(t, err, "expected %q to be invalid", assert.Fmt(tt.s))
+		}
+	}
+}
+
 func TestHeaderWrappers(t *testing.T) {
 	res, resV := "Content-Encoding", "gzip"
 	unres, unresV := "Foo-Id", "barbaz"
@@ -154,8 +179,10 @@ func TestHeaderWrappers(t *testing.T) {
 
 	const k, v1, v2 = "Foo-Timeout", "one", "two"
 	assert.Nil(t, h.Set(k, v1), "set unreserved key")
+	assert.NotNil(t, h.Set(k, v1+"\x00"), "set unreserved key to invalid value")
 	assert.Equal(t, h.Get(k), v1, "get mutated unreserved key")
 	assert.Nil(t, h.Add(k, v2), "add unreserved key")
+	assert.NotNil(t, h.Add(k, v2+"\x00"), "add unreserved key and invalid value")
 	assert.Equal(t, h.Values(k), []string{v1, v2}, "values mutated unreserved key")
 	assert.Nil(t, h.Del(k), "delete unreserved key")
 	assert.Zero(t, h.Get(k), "get deleted key")
