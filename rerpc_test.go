@@ -116,6 +116,16 @@ func TestHandlerTwirp(t *testing.T) {
 		assert.Equal(t, string(contents), expected, "body contents")
 	}
 
+	assertError := func(t testing.TB, response *http.Response, expected *twirp.Status) {
+		t.Helper()
+		assert.Equal(t, response.Header.Get("Content-Type"), rerpc.TypeJSON, "error response content-type")
+		got := &twirp.Status{}
+		contents, err := io.ReadAll(response.Body)
+		assert.Nil(t, err, "read response body")
+		assert.Nil(t, json.Unmarshal(contents, got), "unmarshal JSON")
+		assert.Equal(t, got, expected, "unmarshaled Twirp status")
+	}
+
 	t.Run("json", func(t *testing.T) {
 		t.Run("zero", func(t *testing.T) {
 			r, err := http.NewRequest(
@@ -198,11 +208,28 @@ func TestHandlerTwirp(t *testing.T) {
 				Code:    "resource_exhausted",
 				Message: "oh no",
 			}
-			got := &twirp.Status{}
-			contents, err := io.ReadAll(response.Body)
-			assert.Nil(t, err, "read response body")
-			assert.Nil(t, json.Unmarshal(contents, got), "unmarshal JSON")
-			assert.Equal(t, got, expected, "unmarshaled Twirp status")
+			assertError(t, response, expected)
+		})
+
+		t.Run("bad_route", func(t *testing.T) {
+			r, err := http.NewRequest(
+				http.MethodPost,
+				fmt.Sprintf("%s/internal.ping.v1test.PingService/Foo", server.URL),
+				bytes.NewReader(nil),
+			)
+			assert.Nil(t, err, "create request")
+			r.Header.Set("Content-Type", rerpc.TypeJSON)
+
+			response, err := server.Client().Do(r)
+			assert.Nil(t, err, "make request")
+			testHeaders(t, response)
+			assert.Equal(t, response.StatusCode, http.StatusNotFound, "HTTP status code")
+
+			expected := &twirp.Status{
+				Code:    "bad_route",
+				Message: "no handler for path /internal.ping.v1test.PingService/Foo",
+			}
+			assertError(t, response, expected)
 		})
 	})
 
@@ -294,18 +321,35 @@ func TestHandlerTwirp(t *testing.T) {
 			response, err := server.Client().Do(r)
 			assert.Nil(t, err, "make request")
 			testHeaders(t, response)
-			assert.Equal(t, response.Header.Get("Content-Type"), rerpc.TypeJSON, "error response content-type")
 			assert.Equal(t, response.StatusCode, http.StatusTooManyRequests, "HTTP status code")
 
 			expected := &twirp.Status{
 				Code:    "resource_exhausted",
 				Message: "oh no",
 			}
-			got := &twirp.Status{}
-			contents, err := io.ReadAll(response.Body)
-			assert.Nil(t, err, "read response body")
-			assert.Nil(t, json.Unmarshal(contents, got), "unmarshal JSON")
-			assert.Equal(t, got, expected, "unmarshaled Twirp status")
+			assertError(t, response, expected)
+		})
+
+		t.Run("bad_route", func(t *testing.T) {
+			r, err := http.NewRequest(
+				http.MethodPost,
+				fmt.Sprintf("%s/internal.ping.v1test.PingService/Foo", server.URL),
+				bytes.NewReader(nil),
+			)
+			assert.Nil(t, err, "create request")
+			r.Header.Set("Content-Type", rerpc.TypeProtoTwirp)
+
+			response, err := server.Client().Do(r)
+			assert.Nil(t, err, "make request")
+
+			testHeaders(t, response)
+			assert.Equal(t, response.StatusCode, http.StatusNotFound, "HTTP status code")
+
+			expected := &twirp.Status{
+				Code:    "bad_route",
+				Message: "no handler for path /internal.ping.v1test.PingService/Foo",
+			}
+			assertError(t, response, expected)
 		})
 	})
 }
@@ -317,6 +361,7 @@ func TestServerProtoGRPC(t *testing.T) {
 	mux.Handle(pingpb.NewPingServiceHandlerReRPC(pingServer{}, reg))
 	mux.Handle(health.NewHandler(health.NewChecker(reg)))
 	mux.Handle(reflection.NewHandler(reg))
+	mux.Handle("/test.badroute.PingService/", rerpc.NewBadRouteHandler())
 
 	testPing := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
 		t.Run("ping", func(t *testing.T) {
@@ -420,6 +465,19 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.True(t, ok, "conversion to *rerpc.Error")
 			assert.Equal(t, rerr.Code(), rerpc.CodeResourceExhausted, "error code")
 			assert.Equal(t, rerr.Error(), "ResourceExhausted: "+errMsg, "error message")
+			assert.Zero(t, rerr.Details(), "error details")
+		})
+	}
+	testBadRoute := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
+		t.Run("bad_route", func(t *testing.T) {
+			req := &pingpb.PingRequest{}
+			res, err := client.Ping(context.Background(), req, rerpc.OverrideProtobufPackage("test.badroute"))
+			assert.Nil(t, res, "fail RPC response")
+			assert.NotNil(t, err, "fail RPC error")
+			rerr, ok := rerpc.AsError(err)
+			assert.True(t, ok, "conversion to *rerpc.Error")
+			assert.Equal(t, rerr.Code(), rerpc.CodeNotFound, "error code")
+			assert.Equal(t, rerr.Error(), "NotFound: no handler for path /test.badroute.PingService/Ping", "error message")
 			assert.Zero(t, rerr.Details(), "error details")
 		})
 	}
@@ -607,6 +665,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			testCountUp(t, client)
 			testCumSum(t, client, bidi)
 			testErrors(t, client)
+			testBadRoute(t, client)
 			testHealth(t, server.URL, server.Client())
 		})
 		t.Run("gzip", func(t *testing.T) {
@@ -620,6 +679,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			testCountUp(t, client)
 			testCumSum(t, client, bidi)
 			testErrors(t, client)
+			testBadRoute(t, client)
 			testHealth(t, server.URL, server.Client(), rerpc.Gzip(true))
 		})
 	}
