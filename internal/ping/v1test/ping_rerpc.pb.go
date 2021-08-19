@@ -520,8 +520,14 @@ func (s *PingServiceClientReRPC_Sum) CloseAndReceive() (*SumResponse, error) {
 		return nil, err
 	}
 	var res SumResponse
-	err := s.stream.Receive(&res)
-	return &res, err
+	if err := s.stream.Receive(&res); err != nil {
+		_ = s.stream.CloseReceive()
+		return nil, err
+	}
+	if err := s.stream.CloseReceive(); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 // PingServiceClientReRPC_CountUp is the client-side stream for the
