@@ -69,7 +69,7 @@ func NewCall(
 		spec.Path = url.Path
 	}
 	reqHeader := make(http.Header, 5)
-	reqHeader.Set("User-Agent", UserAgent())
+	reqHeader.Set("User-Agent", userAgent)
 	reqHeader.Set("Content-Type", TypeDefaultGRPC)
 	reqHeader.Set("Grpc-Encoding", spec.RequestCompression)
 	reqHeader.Set("Grpc-Accept-Encoding", acceptEncodingValue) // always advertise identity & gzip

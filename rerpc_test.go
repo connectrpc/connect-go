@@ -715,17 +715,19 @@ func (i *metadataIntegrationInterceptor) Wrap(next rerpc.Func) rerpc.Func {
 			assert.Fmt(isHandler, isCall),
 		)
 
+		var ua string
 		if isCall {
 			// Headers that interceptors can't modify should have been set already.
-			assert.Equal(i.tb, callMD.Request().Get("User-Agent"), rerpc.UserAgent(), "request user agent")
+			ua = callMD.Request().Get("User-Agent")
 			// Server will verify that it received this header.
 			assert.Nil(i.tb, callMD.Request().Set(i.key, i.value), "set custom request header")
 		}
 		if isHandler {
 			// Client should have sent both of these headers.
-			assert.Equal(i.tb, handlerMD.Request().Get("User-Agent"), rerpc.UserAgent(), "user agent sent by client")
+			ua = handlerMD.Request().Get("User-Agent")
 			assert.Equal(i.tb, handlerMD.Request().Get(i.key), i.value, "custom header %q from client", assert.Fmt(i.key))
 		}
+		assert.True(i.tb, strings.HasPrefix(ua, "grpc-go-rerpc/"), "wrong user-agent, got %v", assert.Fmt(ua))
 
 		res, err := next(ctx, req)
 

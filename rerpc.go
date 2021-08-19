@@ -46,10 +46,3 @@ const (
 )
 
 var userAgent = fmt.Sprintf("grpc-go-rerpc/%s (%s)", Version, runtime.Version())
-
-// UserAgent describes reRPC to servers, following the convention outlined in
-// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents.
-// The output will resemble "grpc-go-rerpc/1.2.3 (go1.16.6)".
-func UserAgent() string {
-	return userAgent
-}
