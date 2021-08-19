@@ -70,7 +70,7 @@ func (m *marshaler) marshalGRPC(msg proto.Message) *Error {
 	if err != nil {
 		return errorf(CodeInternal, "couldn't marshal protobuf message: %w", err)
 	}
-	if !m.gzipGRPC {
+	if !m.gzipGRPC || !isWorthCompressing(raw) {
 		if err := m.writeGRPCPrefix(false, len(raw)); err != nil {
 			return err // already enriched
 		}

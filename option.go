@@ -66,20 +66,23 @@ type gzipOption struct {
 
 // Gzip configures client and server compression strategies.
 //
-// For handlers, enabling gzip sends compressed responses to clients that
-// support them. Handlers default to using gzip where possible.
+// For handlers, enabling gzip compresses responses where it's likely to
+// improve overall performance. By default, handlers use gzip if the client
+// supports it, the uncompressed response message is >1 KiB, and the message is
+// likely to compress well. Disabling gzip support instructs handlers to always
+// send uncompressed responses.
 //
-// For clients, enabling gzip compresses requests. ReRPC clients always ask for
-// compressed responses (even if the request is uncompressed), but most gRPC
-// servers only support symmetric compression: they'll only gzip the response
-// if the client sends a gzipped request. Since not all servers support gzip
-// compression, clients default to sending uncompressed requests.
+// For clients, enabling gzip compresses requests where it's likely to improve
+// performance (using the same criteria as handlers). gRPC's compression
+// negotiation is complex, but most first-party gRPC servers won't compress
+// responses unless the client enables this option. Since not all servers
+// support gzip compression, clients default to sending uncompressed requests.
 func Gzip(enable bool) Option {
 	return &gzipOption{enable}
 }
 
 func (o *gzipOption) applyToCall(cfg *callCfg) {
-	// NB, the default is required by
+	// NB, defaulting to identity is required by
 	// https://github.com/grpc/grpc/blob/master/doc/compression.md - see test
 	// case 6.
 	cfg.EnableGzipRequest = o.Enable

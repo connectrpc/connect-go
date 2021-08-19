@@ -2,11 +2,13 @@ package rerpc
 
 import (
 	"bytes"
-	"compress/gzip"
 	_ "embed"
 	"io"
 	"net/http"
 	"sync"
+
+	"github.com/klauspost/compress"
+	"github.com/klauspost/compress/gzip"
 )
 
 //go:embed empty.gz
@@ -48,6 +50,13 @@ func putGzipReader(gr *gzip.Reader) {
 	gr.Close()                                // close if we haven't already
 	gr.Reset(bytes.NewReader(emptyGzipBytes)) // don't keep references
 	gzReaderPool.Put(gr)
+}
+
+// isWorthCompressing checks whether compression is worthwhile. Very short
+// messages and messages unlikely to be compress significantly aren't worth
+// burning CPU on.
+func isWorthCompressing(raw []byte) bool {
+	return len(raw) > 1024 && compress.Estimate(raw) > 0.1
 }
 
 // Verify we're implementing these interfaces at compile time.
