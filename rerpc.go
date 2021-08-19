@@ -33,9 +33,9 @@ const (
 type StreamType uint8
 
 const (
-	StreamTypeClient        StreamType = 0b01
+	StreamTypeUnary         StreamType = 0b00
+	StreamTypeClient                   = 0b01
 	StreamTypeServer                   = 0b10
-	StreamTypeUnary                    = StreamTypeClient & StreamTypeServer
 	StreamTypeBidirectional            = StreamTypeClient | StreamTypeServer
 )
 
