@@ -53,6 +53,7 @@ func Example() {
 	// https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts/.
 	srv := &http.Server{
 		Addr:           ":http",
+		Handler:        mux,
 		ReadTimeout:    2500 * time.Millisecond,
 		WriteTimeout:   5 * time.Second,
 		MaxHeaderBytes: rerpc.MaxHeaderBytes,
