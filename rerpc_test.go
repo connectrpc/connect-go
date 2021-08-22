@@ -762,6 +762,7 @@ func TestCallMetadataIntegration(t *testing.T) {
 	assert.Equal(t, res, &pingpb.PingResponse{}, "call response")
 }
 
+//lint:ignore U1000 skip tests while the implementation is WIP
 type headerPingServer struct {
 	pingpb.UnimplementedPingServiceReRPC
 }
@@ -773,6 +774,7 @@ func (s headerPingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*p
 	return &pingpb.PingResponse{Number: req.Number, Msg: req.Msg}, nil
 }
 
+//lint:ignore U1000 skip tests while the implementation is WIP
 type headerPingInterceptor struct{}
 
 func (i headerPingInterceptor) Wrap(next rerpc.Func) rerpc.Func {
