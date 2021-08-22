@@ -5,7 +5,7 @@ SHELL := bash
 .DEFAULT_GOAL := help
 MAKEFLAGS += --warn-undefined-variables
 MAKEFLAGS += --no-builtin-rules
-BENCHFLAGS ?= -cpuprofile=cpu.pprof -memprofile=mem.pprof -benchmem
+BENCHFLAGS ?= -cpuprofile=cpu.pprof -memprofile=mem.pprof -benchmem -benchtime=30s
 
 HANDWRITTEN=$(shell find . -type f -name '*.go' | grep -v -e '\.pb\.go$$' -e '\.twirp\.go$$' -e '_string.go$$')
 PROTOBUFS=$(shell find . -type f -name '*.proto')

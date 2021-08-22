@@ -16,7 +16,7 @@ var (
 		[]string{TypeDefaultGRPC, TypeProtoGRPC, TypeProtoTwirp, TypeJSON},
 		",",
 	)
-	acceptPostValueWithoutJSON = strings.Join(
+	acceptPostValueWithoutTwirp = strings.Join(
 		[]string{TypeDefaultGRPC, TypeProtoGRPC},
 		",",
 	)
@@ -126,7 +126,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctype := r.Header.Get("Content-Type")
 	if (ctype == TypeJSON || ctype == TypeProtoTwirp) && (h.config.DisableTwirp || h.stype != StreamTypeUnary) {
-		w.Header().Set("Accept-Post", acceptPostValueWithoutJSON)
+		w.Header().Set("Accept-Post", acceptPostValueWithoutTwirp)
 		w.WriteHeader(http.StatusUnsupportedMediaType)
 		return
 	}
