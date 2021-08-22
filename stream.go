@@ -37,6 +37,13 @@ type Stream interface {
 	CloseReceive() error
 }
 
+// clientStream represents a bidirectional exchange of protobuf messages
+// between the client and server. The request body is the stream from client to
+// server, and the response body is the reverse.
+//
+// The way we do this with net/http is very different from the typical HTTP/1.1
+// request/response code. Since this is the most complex code in reRPC, it has
+// many more comments than usual.
 type clientStream struct {
 	ctx          context.Context
 	doer         Doer
@@ -64,6 +71,18 @@ func newClientStream(
 	maxReadBytes int64,
 	gzipRequest bool,
 ) *clientStream {
+	// In a typical HTTP/1.1 request, we'd put the body into a bytes.Buffer, hand
+	// the buffer to http.NewRequest, and fire off the request with doer.Do. That
+	// won't work here because we're establishing a stream - we don't even have
+	// all the data we'll eventually send. Instead, we use io.Pipe as the request
+	// body.
+	//
+	// net/http will own the read side of the pipe, and we'll hold onto the write
+	// side. Writes to pw will block until net/http pulls the data from pr and
+	// puts it onto the network - there's no buffer between the two. (The two
+	// sides of the pipe are meant to be used concurrently.) Once the server gets
+	// the first protobuf message that we send, it'll send back headers and start
+	// the response stream.
 	pr, pw := io.Pipe()
 	stream := clientStream{
 		ctx:           ctx,
@@ -75,6 +94,13 @@ func newClientStream(
 		reader:        pr,
 		responseReady: make(chan struct{}),
 	}
+	// stream.makeRequest hands the read side of the pipe off to net/http and
+	// waits to establish the response stream. There's a small class of errors we
+	// can catch without even sending data over the network, though, so we don't
+	// return from this constructor until we're sure that we're actually waiting
+	// on the server. This makes user-visible behavior more predictable: for
+	// example, if they've configured the server's base URL as "hwws://acme.com",
+	// they'll always get an invalid URL error on their first attempt to send.
 	requestPrepared := make(chan struct{})
 	go stream.makeRequest(requestPrepared)
 	<-requestPrepared
@@ -86,24 +112,47 @@ func (cs *clientStream) Context() context.Context {
 }
 
 func (cs *clientStream) Send(msg proto.Message) error {
+	// Calling Marshal writes data to the send stream. It's safe to do this while
+	// makeRequest is running, because we're writing to our side of the pipe
+	// (which is safe to do while net/http reads from the other side).
 	if err := cs.marshaler.Marshal(msg); err != nil {
 		if errors.Is(err, io.ErrClosedPipe) {
-			// The HTTP stack closed the request body, so we should expect a
-			// response. Wait to get a more informative error message.
+			// net/http closed the request body, so it's sure that we can't send more
+			// data. In these cases, we expect a response from the server. Wait for
+			// that response so we can give the user a more informative error than
+			// "pipe closed".
 			<-cs.responseReady
+			// FIXME: We write to responseErr in Receive, so we need a lock here.
 			if cs.responseErr != nil {
 				return cs.responseErr
 			}
 		}
-		// If the server has already sent us an error (or the request has failed
-		// in some other way), we'll get that error here.
+		// In this case, the read side of the pipe was closed with an explicit
+		// error (possibly sent by the server, possibly just io.EOF). The io.Pipe
+		// makes that error visible to us on the write side without any data races.
+		// We've already enriched the error with a status code, so we can just
+		// return it to the caller.
 		return err
 	}
-	// don't return typed nils
+	// Marshal returns an *Error. To avoid returning a typed nil, use a literal
+	// nil here.
 	return nil
 }
 
 func (cs *clientStream) CloseSend(_ error) error {
+	// The user calls CloseSend to indicate that they're done sending data. All
+	// we do here is close the write side of the pipe, so it's safe to do this
+	// while makeRequest is running. (This method takes an error to accommodate
+	// server-side streams. Clients can't send an error when they stop sending
+	// data, so we just ignore it.)
+	//
+	// Because reRPC also supports some RPC types over HTTP/1.1, we need to be
+	// careful how we expose this method to users. HTTP/1.1 doesn't support
+	// bidirectional streaming - the send stream (aka request body) must be
+	// closed before we start waiting on the response or we'll just block
+	// forever. To make sure users don't have to worry about this, the generated
+	// code for unary, client streaming, and server streaming RPCs must call
+	// CloseSend automatically rather than requiring the user to do it.
 	if err := cs.writer.Close(); err != nil {
 		if rerr, ok := AsError(err); ok {
 			return rerr
@@ -114,10 +163,15 @@ func (cs *clientStream) CloseSend(_ error) error {
 }
 
 func (cs *clientStream) Receive(msg proto.Message) error {
+	// First, we wait until we've gotten the response headers and established the
+	// server-to-client side of the stream.
 	<-cs.responseReady
+	// FIXME: lock
 	if cs.responseErr != nil {
+		// The stream is already closed or corrupted.
 		return cs.responseErr
 	}
+	// Consume one message from the response stream.
 	err := cs.unmarshaler.Unmarshal(msg)
 	if err != nil {
 		// If we can't read this LPM, see if the server sent an explicit error in
@@ -127,6 +181,10 @@ func (cs *clientStream) Receive(msg proto.Message) error {
 			cs.setResponseError(serverErr)
 			return serverErr
 		}
+		// There's no error in the trailers, so this was probably an error
+		// converting the bytes to a message, an error reading from the network, or
+		// just an EOF. We're going to return it to the user, but we also want to
+		// setResponseError so Send errors out.
 		cs.setResponseError(err)
 		return err
 	}
@@ -146,6 +204,8 @@ func (cs *clientStream) CloseReceive() error {
 }
 
 func (cs *clientStream) makeRequest(prepared chan struct{}) {
+	// This runs concurrently with Send and CloseSend. Receive and CloseReceive
+	// wait on cs.responseReady, so we can't race with them.
 	defer close(cs.responseReady)
 
 	md, ok := CallMeta(cs.ctx)
@@ -157,15 +217,10 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 
 	if deadline, ok := cs.ctx.Deadline(); ok {
 		untilDeadline := time.Until(deadline)
-		if untilDeadline <= 0 {
-			cs.setResponseError(errorf(CodeDeadlineExceeded, "no time to make RPC: timeout is %v", untilDeadline))
-			close(prepared)
-			return
-		}
 		if enc, err := encodeTimeout(untilDeadline); err == nil {
 			// Tests verify that the error in encodeTimeout is unreachable, so we
 			// should be safe without observability for the error case.
-			md.req.raw.Set("Grpc-Timeout", enc)
+			md.req.raw["Grpc-Timeout"] = []string{enc}
 		}
 	}
 
@@ -191,10 +246,15 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 		return
 	}
 
+	// At this point, we've caught all the errors we can - it's time to send data
+	// to the server. Unblock the constructor.
 	close(prepared)
+	// It's possible that the server sends back a response immediately after
+	// receiving the request headers, but in most cases we'll block here until
+	// the user calls Send. Once we send a message to the server, they send a
+	// message back and establish the receive side of the stream.
 	res, err := cs.doer.Do(req)
 	if err != nil {
-		// Error message comes from our networking stack, so it's safe to expose.
 		code := CodeUnknown
 		if errors.Is(err, context.Canceled) {
 			code = CodeCanceled
@@ -239,14 +299,18 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 		cs.setResponseError(err)
 		return
 	}
-	// Success!
+	// Success! We got a response with valid headers and no error, so there's
+	// probably a message waiting in the stream.
 	cs.response = res
 	cs.unmarshaler = unmarshaler{r: res.Body, ctype: TypeDefaultGRPC, max: cs.maxReadBytes}
 }
 
 func (cs *clientStream) setResponseError(err error) {
 	cs.responseErr = err
-	// The write end of the pipe will now return this error too.
+	// The write end of the pipe will now return this error too. It's safe to
+	// call this method more than once and/or concurrently (calls after the first
+	// are no-ops), so it's okay for us to call this even though net/http
+	// sometimes closes the reader too.
 	cs.reader.CloseWithError(err)
 }
 
@@ -261,6 +325,9 @@ type serverStream struct {
 
 var _ Stream = (*serverStream)(nil)
 
+// Thankfully, the server stream is much simpler than the client. net/http
+// gives us the request body and response writer at the same time, so we don't
+// need to worry about concurrency.
 func newServerStream(
 	ctx context.Context,
 	w http.ResponseWriter,
