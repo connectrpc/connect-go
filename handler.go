@@ -10,15 +10,17 @@ import (
 
 var (
 	// Always advertise that reRPC accepts gzip compression.
-	acceptEncodingValue    = strings.Join([]string{CompressionGzip, CompressionIdentity}, ",")
-	acceptPostValueDefault = strings.Join(
-		[]string{TypeDefaultGRPC, TypeProtoGRPC, TypeJSON},
+	acceptEncodingValue      = strings.Join([]string{CompressionGzip, CompressionIdentity}, ",")
+	acceptEncodingValueSlice = []string{acceptEncodingValue}
+	acceptPostValueDefault   = strings.Join(
+		[]string{TypeDefaultGRPC, TypeProtoGRPC, TypeProtoTwirp, TypeJSON},
 		",",
 	)
 	acceptPostValueWithoutJSON = strings.Join(
 		[]string{TypeDefaultGRPC, TypeProtoGRPC},
 		",",
 	)
+	grpcStatusTrailers = []string{"Grpc-Status", "Grpc-Message", "Grpc-Status-Details-Bin"}
 )
 
 type handlerCfg struct {
@@ -222,14 +224,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// We should write any remaining headers here, since: (a) the implementation
 	// may write to the body, thereby sending the headers, and (b) interceptors
 	// should be able to see this data.
-	w.Header().Set("Content-Type", spec.ContentType)
+	//
+	// Since we know that these header keys are already in canonical form, we can
+	// skip the normalization in Header.Set. To avoid allocating re-allocating
+	// the same slices over and over, we use pre-allocated globals for the header
+	// values.
+	w.Header()["Content-Type"] = typeToSlice(spec.ContentType)
 	if spec.ContentType != TypeJSON && spec.ContentType != TypeProtoTwirp {
-		w.Header().Set("Grpc-Accept-Encoding", acceptEncodingValue)
-		w.Header().Set("Grpc-Encoding", spec.ResponseCompression)
+		w.Header()["Grpc-Accept-Encoding"] = acceptEncodingValueSlice
+		w.Header()["Grpc-Encoding"] = compressionToSlice(spec.ResponseCompression)
 		// Every gRPC response will have these trailers.
-		w.Header().Add("Trailer", "Grpc-Status")
-		w.Header().Add("Trailer", "Grpc-Message")
-		w.Header().Add("Trailer", "Grpc-Status-Details-Bin")
+		w.Header()["Trailer"] = grpcStatusTrailers
 	}
 
 	// Unlike gRPC, Twirp manages compression using the standard HTTP mechanisms.

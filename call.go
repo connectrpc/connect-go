@@ -6,6 +6,8 @@ import (
 	"net/url"
 )
 
+var teTrailersSlice = []string{"trailers"}
+
 // Doer is the transport-level interface reRPC expects HTTP clients to
 // implement. The standard library's http.Client implements Doer.
 type Doer interface {
@@ -70,11 +72,14 @@ func NewCall(
 		spec.Path = url.Path
 	}
 	reqHeader := make(http.Header, 5)
-	reqHeader.Set("User-Agent", userAgent)
-	reqHeader.Set("Content-Type", TypeDefaultGRPC)
-	reqHeader.Set("Grpc-Encoding", spec.RequestCompression)
-	reqHeader.Set("Grpc-Accept-Encoding", acceptEncodingValue) // always advertise identity & gzip
-	reqHeader.Set("Te", "trailers")
+	// We know these header keys are in canonical form, so we can bypass all the
+	// checks in Header.Set. To avoid allocating the same slices over and over,
+	// we use pre-allocated globals for the header values.
+	reqHeader["User-Agent"] = userAgentSlice
+	reqHeader["Content-Type"] = typeDefaultGRPCSlice
+	reqHeader["Grpc-Encoding"] = compressionToSlice(spec.RequestCompression)
+	reqHeader["Grpc-Accept-Encoding"] = acceptEncodingValueSlice // always advertise identity & gzip
+	reqHeader["Te"] = teTrailersSlice
 	ctx = NewCallContext(ctx, spec, reqHeader, make(http.Header))
 	sf := StreamFunc(func(ctx context.Context) Stream {
 		return newClientStream(ctx, doer, methodURL, spec.ReadMaxBytes, cfg.EnableGzipRequest)
