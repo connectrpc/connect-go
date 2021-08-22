@@ -136,7 +136,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	spec := &Specification{
+	spec := Specification{
 		Type:                h.stype,
 		Package:             h.config.Package,
 		Service:             h.config.Service,
@@ -256,7 +256,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx := NewHandlerContext(r.Context(), *spec, r.Header, w.Header())
+	ctx := NewHandlerContext(r.Context(), spec, r.Header, w.Header())
 	sf := StreamFunc(func(ctx context.Context) Stream {
 		return newServerStream(
 			ctx,

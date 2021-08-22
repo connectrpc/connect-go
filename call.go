@@ -53,7 +53,7 @@ func NewCall(
 		opt.applyToCall(&cfg)
 	}
 
-	spec := &Specification{
+	spec := Specification{
 		Type:               stype,
 		Package:            cfg.Package,
 		Service:            cfg.Service,
@@ -74,7 +74,7 @@ func NewCall(
 	reqHeader.Set("Grpc-Encoding", spec.RequestCompression)
 	reqHeader.Set("Grpc-Accept-Encoding", acceptEncodingValue) // always advertise identity & gzip
 	reqHeader.Set("Te", "trailers")
-	ctx = NewCallContext(ctx, *spec, reqHeader, make(http.Header))
+	ctx = NewCallContext(ctx, spec, reqHeader, make(http.Header))
 	sf := StreamFunc(func(ctx context.Context) Stream {
 		return newClientStream(ctx, doer, methodURL, spec.ReadMaxBytes, cfg.EnableGzipRequest)
 	})
