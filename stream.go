@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -57,9 +58,11 @@ type clientStream struct {
 	// receive goroutine
 	reader        *io.PipeReader
 	response      *http.Response
-	responseErr   error
 	responseReady chan struct{}
 	unmarshaler   unmarshaler
+
+	responseErrMu sync.Mutex
+	responseErr   error
 }
 
 var _ Stream = (*clientStream)(nil)
@@ -122,9 +125,8 @@ func (cs *clientStream) Send(msg proto.Message) error {
 			// that response so we can give the user a more informative error than
 			// "pipe closed".
 			<-cs.responseReady
-			// FIXME: We write to responseErr in Receive, so we need a lock here.
-			if cs.responseErr != nil {
-				return cs.responseErr
+			if err := cs.getResponseError(); err != nil {
+				return err
 			}
 		}
 		// In this case, the read side of the pipe was closed with an explicit
@@ -166,10 +168,9 @@ func (cs *clientStream) Receive(msg proto.Message) error {
 	// First, we wait until we've gotten the response headers and established the
 	// server-to-client side of the stream.
 	<-cs.responseReady
-	// FIXME: lock
-	if cs.responseErr != nil {
+	if err := cs.getResponseError(); err != nil {
 		// The stream is already closed or corrupted.
-		return cs.responseErr
+		return err
 	}
 	// Consume one message from the response stream.
 	err := cs.unmarshaler.Unmarshal(msg)
@@ -306,12 +307,20 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 }
 
 func (cs *clientStream) setResponseError(err error) {
+	cs.responseErrMu.Lock()
 	cs.responseErr = err
+	cs.responseErrMu.Unlock()
 	// The write end of the pipe will now return this error too. It's safe to
 	// call this method more than once and/or concurrently (calls after the first
 	// are no-ops), so it's okay for us to call this even though net/http
 	// sometimes closes the reader too.
 	cs.reader.CloseWithError(err)
+}
+
+func (cs *clientStream) getResponseError() error {
+	cs.responseErrMu.Lock()
+	defer cs.responseErrMu.Unlock()
+	return cs.responseErr
 }
 
 type serverStream struct {
