@@ -2,7 +2,6 @@ package rerpc
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/url"
 )
@@ -64,7 +63,9 @@ func NewCall(
 	if cfg.EnableGzipRequest {
 		spec.RequestCompression = CompressionGzip
 	}
-	methodURL := fmt.Sprintf("%s/%s.%s/%s", baseURL, spec.Package, spec.Service, spec.Method)
+	// We don't want to use fmt.Sprintf on the hot path - it allocates a lot for
+	// a small gain in readability.
+	methodURL := baseURL + "/" + spec.Package + "." + spec.Service + "/" + spec.Method
 	if url, err := url.Parse(methodURL); err == nil {
 		spec.Path = url.Path
 	}
