@@ -761,3 +761,99 @@ func TestCallMetadataIntegration(t *testing.T) {
 	assert.Nil(t, err, "call error")
 	assert.Equal(t, res, &pingpb.PingResponse{}, "call response")
 }
+
+type headerPingServer struct {
+	pingpb.UnimplementedPingServiceReRPC
+}
+
+func (s headerPingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingpb.PingResponse, error) {
+	handlerMD, _ := rerpc.HandlerMeta(ctx)
+	u := strings.ToUpper(handlerMD.Request().Get("Test-Ping"))
+	handlerMD.Response().Set("Test-Ping", u)
+	return &pingpb.PingResponse{Number: req.Number, Msg: req.Msg}, nil
+}
+
+type headerPingInterceptor struct{}
+
+func (i headerPingInterceptor) Wrap(next rerpc.Func) rerpc.Func {
+	return rerpc.Func(func(ctx context.Context, msg proto.Message) (proto.Message, error) {
+		callerMD, _ := rerpc.CallMeta(ctx)
+		requestMeta := callerMD.Request()
+		v := requestMeta.Get("Test-Ping") + "bar"
+		requestMeta.Set("Test-Ping", v)
+		return next(ctx, msg)
+	})
+}
+
+func (i headerPingInterceptor) WrapStream(next rerpc.StreamFunc) rerpc.StreamFunc {
+	return next
+}
+
+func TestCallHeadersOption(t *testing.T) {
+	t.Skip("API brainstorm")
+	mux := http.NewServeMux()
+	mux.Handle(pingpb.NewPingServiceHandlerReRPC(headerPingServer{}))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	defaultHeaders := rerpc.NewMutableHeader(make(http.Header))
+	defaultHeaders.Set("Test-Default", "foo")
+	client := pingpb.NewPingServiceClientReRPC(
+		server.URL,
+		server.Client(),
+		rerpc.Intercept(headerPingInterceptor{}),
+		rerpc.RequestHeaders(defaultHeaders),
+	)
+
+	requestHeaders := rerpc.NewMutableHeader(make(http.Header))
+	requestHeaders.Set("Test-Ping", "foo")
+	requestHeadersOption := rerpc.RequestHeaders(requestHeaders)
+	requestHeaders.Set("Test-Ping", "") // option should copy
+	var responseHeaders rerpc.ImmutableHeader
+
+	_, err := client.Ping(
+		context.Background(),
+		&pingpb.PingRequest{},
+		requestHeadersOption,
+		rerpc.ResponseHeaders(&responseHeaders),
+	)
+	assert.Nil(t, err, "call error")
+	assert.Equal(t, responseHeaders.Get("Test-Ping"), "FOOBAR", "header probe")
+	assert.Zero(t, responseHeaders.Get("Test-Default"), "default header overwrite")
+}
+
+// WithHeaders returns a copy of the parent context with arbitrary headers set.
+// The context can be used to pass user headers into a client call and for
+// reading response headers from a call's response.
+//
+// RequestHeaders can be nil if one is only interested in reading the
+// response headers.
+func WithHeaders(c context.Context, requestHeaders rerpc.MutableHeader) context.Context { return c }
+func ResponseHeaders(context.Context) (rerpc.ImmutableHeader, bool) {
+	return rerpc.NewImmutableHeader(nil), true
+}
+
+func TestCallHeadersContext(t *testing.T) {
+	t.Skip("API brainstorm")
+	mux := http.NewServeMux()
+	mux.Handle(pingpb.NewPingServiceHandlerReRPC(headerPingServer{}))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := pingpb.NewPingServiceClientReRPC(
+		server.URL,
+		server.Client(),
+		rerpc.Intercept(headerPingInterceptor{}),
+	)
+
+	ctx := context.Background()
+	requestHeaders := rerpc.NewMutableHeader(make(http.Header))
+	requestHeaders.Set("Test-Ping", "foo")
+	ctx = WithHeaders(ctx, requestHeaders)
+	requestHeaders.Set("Test-Ping", "") // ctx should copy
+
+	_, err := client.Ping(ctx, &pingpb.PingRequest{})
+	assert.Nil(t, err, "call error")
+	responseHeaders, ok := ResponseHeaders(ctx)
+	assert.True(t, ok, "response headers")
+	assert.Equal(t, responseHeaders.Get("Test-Ping"), "FOOBAR", "header probe")
+	assert.Zero(t, responseHeaders.Get("Test-Default"), "default header overwrite")
+}
