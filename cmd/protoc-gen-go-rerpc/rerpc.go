@@ -406,21 +406,19 @@ func serverSignature(g *protogen.GeneratedFile, sname string, method *protogen.M
 }
 
 func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, name string) {
-	comment(g, "New", service.GoName, "HandlerReRPC wraps the service implementation",
-		" in an HTTP handler. It returns the handler and the path on which to mount it.")
+	comment(g, "New", service.GoName, "HandlerReRPC wraps each method on the service implementation",
+		" in a *rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
 	}
 	g.P("func New", service.GoName, "HandlerReRPC(svc ", name, ", opts ...", rerpcPackage.Ident("HandlerOption"),
-		") (string, *", httpPackage.Ident("ServeMux"), ") {")
-	g.P("mux := ", httpPackage.Ident("NewServeMux"), "()")
+		") []*", rerpcPackage.Ident("Handler"), " {")
+	g.P("handlers := make([]*", rerpcPackage.Ident("Handler"), ", 0, ", len(service.Methods), ")")
 	g.P("ic := ", rerpcPackage.Ident("ConfiguredHandlerInterceptor"), "(opts)")
 	g.P()
-	lastHandlerName := ""
 	for _, method := range service.Methods {
 		hname := unexport(string(method.Desc.Name()))
-		lastHandlerName = hname
 
 		if method.Desc.IsStreamingServer() || method.Desc.IsStreamingClient() {
 			g.P(hname, " := ", rerpcPackage.Ident("NewHandler"), "(")
@@ -529,13 +527,10 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 			g.P("opts...,")
 			g.P(")")
 		}
-		g.P("mux.Handle(", hname, ".Path(), ", hname, ")")
+		g.P("handlers = append(handlers, ", hname, ")")
 		g.P()
 	}
-	comment(g, "Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.")
-	g.P(`mux.Handle("/", `, rerpcPackage.Ident("NewBadRouteHandler"), "(opts...))")
-	g.P()
-	g.P("return ", lastHandlerName, ".ServicePath(), mux")
+	g.P("return handlers")
 	g.P("}")
 	g.P()
 }

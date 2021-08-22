@@ -9,14 +9,14 @@ import (
 
 // NewBadRouteHandler always returns gRPC and Twirp's equivalent of the
 // standard library's http.StatusNotFound. To be fully compatible with the
-// Twirp specification, mount this handler at the root of your API (so that it
+// Twirp specification, include this in your call to NewServeMux (so that it
 // handles any requests for invalid protobuf methods).
-func NewBadRouteHandler(opts ...HandlerOption) *Handler {
+func NewBadRouteHandler(opts ...HandlerOption) []*Handler {
 	wrapped := Func(badRouteUnaryImpl)
 	if ic := ConfiguredHandlerInterceptor(opts); ic != nil {
 		wrapped = ic.Wrap(wrapped)
 	}
-	return NewHandler(
+	h := NewHandler(
 		StreamTypeUnary,
 		"", "", "", // protobuf package, service, method names
 		func(ctx context.Context, sf StreamFunc) {
@@ -26,6 +26,7 @@ func NewBadRouteHandler(opts ...HandlerOption) *Handler {
 			_ = stream.CloseSend(err)
 		},
 	)
+	return []*Handler{h}
 }
 
 func badRouteUnaryImpl(ctx context.Context, _ proto.Message) (proto.Message, error) {

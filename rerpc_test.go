@@ -94,9 +94,10 @@ func (p pingServer) CumSum(ctx context.Context, stream *pingpb.PingServiceReRPC_
 }
 
 func TestHandlerTwirp(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.Handle(pingpb.NewPingServiceHandlerReRPC(pingServer{}))
-
+	mux := rerpc.NewServeMux(
+		pingpb.NewPingServiceHandlerReRPC(pingServer{}),
+		rerpc.NewBadRouteHandler(),
+	)
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
@@ -357,11 +358,12 @@ func TestHandlerTwirp(t *testing.T) {
 func TestServerProtoGRPC(t *testing.T) {
 	const errMsg = "oh no"
 	reg := rerpc.NewRegistrar()
-	mux := http.NewServeMux()
-	mux.Handle(pingpb.NewPingServiceHandlerReRPC(pingServer{}, reg))
-	mux.Handle(health.NewHandler(health.NewChecker(reg)))
-	mux.Handle(reflection.NewHandler(reg))
-	mux.Handle("/test.badroute.PingService/", rerpc.NewBadRouteHandler())
+	mux := rerpc.NewServeMux(
+		pingpb.NewPingServiceHandlerReRPC(pingServer{}, reg),
+		health.NewHandler(health.NewChecker(reg)),
+		reflection.NewHandler(reg),
+		rerpc.NewBadRouteHandler(),
+	)
 
 	testPing := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
 		t.Run("ping", func(t *testing.T) {
@@ -750,8 +752,9 @@ func (i *metadataIntegrationInterceptor) WrapStream(next rerpc.StreamFunc) rerpc
 
 func TestCallMetadataIntegration(t *testing.T) {
 	intercept := rerpc.Intercept(&metadataIntegrationInterceptor{tb: t, key: "Foo-Bar", value: "baz"})
-	mux := http.NewServeMux()
-	mux.Handle(pingpb.NewPingServiceHandlerReRPC(pingServer{}, intercept))
+	mux := rerpc.NewServeMux(
+		pingpb.NewPingServiceHandlerReRPC(pingServer{}, intercept),
+	)
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client(), intercept)

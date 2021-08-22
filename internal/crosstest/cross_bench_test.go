@@ -22,8 +22,7 @@ import (
 )
 
 func BenchmarkReRPC(b *testing.B) {
-	mux := http.NewServeMux()
-	mux.Handle(crosspb.NewCrossServiceHandlerReRPC(crossServerReRPC{}))
+	mux := rerpc.NewServeMux(crosspb.NewCrossServiceHandlerReRPC(crossServerReRPC{}))
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()

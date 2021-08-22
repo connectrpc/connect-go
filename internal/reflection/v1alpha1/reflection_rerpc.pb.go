@@ -10,7 +10,6 @@ import (
 	context "context"
 	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
-	http "net/http"
 	strings "strings"
 )
 
@@ -100,10 +99,11 @@ type ServerReflectionReRPC interface {
 	mustEmbedUnimplementedServerReflectionReRPC()
 }
 
-// NewServerReflectionHandlerReRPC wraps the service implementation in an HTTP
-// handler. It returns the handler and the path on which to mount it.
-func NewServerReflectionHandlerReRPC(svc ServerReflectionReRPC, opts ...rerpc.HandlerOption) (string, *http.ServeMux) {
-	mux := http.NewServeMux()
+// NewServerReflectionHandlerReRPC wraps each method on the service
+// implementation in a *rerpc.Handler. The returned slice can be passed to
+// rerpc.NewServeMux.
+func NewServerReflectionHandlerReRPC(svc ServerReflectionReRPC, opts ...rerpc.HandlerOption) []*rerpc.Handler {
+	handlers := make([]*rerpc.Handler, 0, 1)
 	ic := rerpc.ConfiguredHandlerInterceptor(opts)
 
 	serverReflectionInfo := rerpc.NewHandler(
@@ -133,12 +133,9 @@ func NewServerReflectionHandlerReRPC(svc ServerReflectionReRPC, opts ...rerpc.Ha
 		},
 		opts...,
 	)
-	mux.Handle(serverReflectionInfo.Path(), serverReflectionInfo)
+	handlers = append(handlers, serverReflectionInfo)
 
-	// Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.
-	mux.Handle("/", rerpc.NewBadRouteHandler(opts...))
-
-	return serverReflectionInfo.ServicePath(), mux
+	return handlers
 }
 
 var _ ServerReflectionReRPC = (*UnimplementedServerReflectionReRPC)(nil) // verify interface implementation

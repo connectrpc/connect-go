@@ -11,7 +11,6 @@ import (
 	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
 	proto "google.golang.org/protobuf/proto"
-	http "net/http"
 	strings "strings"
 )
 
@@ -185,10 +184,10 @@ type HealthReRPC interface {
 	mustEmbedUnimplementedHealthReRPC()
 }
 
-// NewHealthHandlerReRPC wraps the service implementation in an HTTP handler. It
-// returns the handler and the path on which to mount it.
-func NewHealthHandlerReRPC(svc HealthReRPC, opts ...rerpc.HandlerOption) (string, *http.ServeMux) {
-	mux := http.NewServeMux()
+// NewHealthHandlerReRPC wraps each method on the service implementation in a
+// *rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
+func NewHealthHandlerReRPC(svc HealthReRPC, opts ...rerpc.HandlerOption) []*rerpc.Handler {
+	handlers := make([]*rerpc.Handler, 0, 2)
 	ic := rerpc.ConfiguredHandlerInterceptor(opts)
 
 	checkFunc := rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
@@ -246,7 +245,7 @@ func NewHealthHandlerReRPC(svc HealthReRPC, opts ...rerpc.HandlerOption) (string
 		},
 		opts...,
 	)
-	mux.Handle(check.Path(), check)
+	handlers = append(handlers, check)
 
 	watch := rerpc.NewHandler(
 		rerpc.StreamTypeServer,
@@ -284,12 +283,9 @@ func NewHealthHandlerReRPC(svc HealthReRPC, opts ...rerpc.HandlerOption) (string
 		},
 		opts...,
 	)
-	mux.Handle(watch.Path(), watch)
+	handlers = append(handlers, watch)
 
-	// Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.
-	mux.Handle("/", rerpc.NewBadRouteHandler(opts...))
-
-	return watch.ServicePath(), mux
+	return handlers
 }
 
 var _ HealthReRPC = (*UnimplementedHealthReRPC)(nil) // verify interface implementation

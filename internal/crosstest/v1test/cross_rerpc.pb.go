@@ -11,7 +11,6 @@ import (
 	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
 	proto "google.golang.org/protobuf/proto"
-	http "net/http"
 	strings "strings"
 )
 
@@ -250,10 +249,10 @@ type CrossServiceReRPC interface {
 	mustEmbedUnimplementedCrossServiceReRPC()
 }
 
-// NewCrossServiceHandlerReRPC wraps the service implementation in an HTTP
-// handler. It returns the handler and the path on which to mount it.
-func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOption) (string, *http.ServeMux) {
-	mux := http.NewServeMux()
+// NewCrossServiceHandlerReRPC wraps each method on the service implementation
+// in a *rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
+func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOption) []*rerpc.Handler {
+	handlers := make([]*rerpc.Handler, 0, 5)
 	ic := rerpc.ConfiguredHandlerInterceptor(opts)
 
 	pingFunc := rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
@@ -311,7 +310,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		},
 		opts...,
 	)
-	mux.Handle(ping.Path(), ping)
+	handlers = append(handlers, ping)
 
 	failFunc := rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
 		typed, ok := req.(*FailRequest)
@@ -368,7 +367,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		},
 		opts...,
 	)
-	mux.Handle(fail.Path(), fail)
+	handlers = append(handlers, fail)
 
 	sum := rerpc.NewHandler(
 		rerpc.StreamTypeClient,
@@ -397,7 +396,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		},
 		opts...,
 	)
-	mux.Handle(sum.Path(), sum)
+	handlers = append(handlers, sum)
 
 	countUp := rerpc.NewHandler(
 		rerpc.StreamTypeServer,
@@ -435,7 +434,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		},
 		opts...,
 	)
-	mux.Handle(countUp.Path(), countUp)
+	handlers = append(handlers, countUp)
 
 	cumSum := rerpc.NewHandler(
 		rerpc.StreamTypeBidirectional,
@@ -464,12 +463,9 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		},
 		opts...,
 	)
-	mux.Handle(cumSum.Path(), cumSum)
+	handlers = append(handlers, cumSum)
 
-	// Respond to unknown protobuf methods with gRPC and Twirp's 404 equivalents.
-	mux.Handle("/", rerpc.NewBadRouteHandler(opts...))
-
-	return cumSum.ServicePath(), mux
+	return handlers
 }
 
 var _ CrossServiceReRPC = (*UnimplementedCrossServiceReRPC)(nil) // verify interface implementation
