@@ -3,7 +3,6 @@ package health
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/rerpc/rerpc"
 	healthpb "github.com/rerpc/rerpc/internal/health/v1"
@@ -89,7 +88,7 @@ func (s *server) Watch(_ context.Context, _ *healthpb.HealthCheckRequest, _ *hea
 func NewHandler(
 	checker func(context.Context, string) (Status, error),
 	opts ...rerpc.HandlerOption,
-) (string, *http.ServeMux) {
+) []*rerpc.Handler {
 	return healthpb.NewHealthHandlerReRPC(
 		&server{check: checker},
 		append(opts, rerpc.OverrideProtobufPackage("grpc.health.v1"))...,

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"sort"
 
 	"google.golang.org/protobuf/proto"
@@ -42,7 +41,7 @@ type Registrar interface {
 // https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md,
 // https://github.com/grpc/grpc/blob/master/doc/server-reflection.md, and
 // https://github.com/fullstorydev/grpcurl.
-func NewHandler(reg Registrar, opts ...rerpc.HandlerOption) (string, *http.ServeMux) {
+func NewHandler(reg Registrar, opts ...rerpc.HandlerOption) []*rerpc.Handler {
 	const pkg = "grpc.reflection.v1alpha"
 	opts = append(opts, rerpc.OverrideProtobufPackage(pkg))
 	return rpb.NewServerReflectionHandlerReRPC(&server{reg: reg}, opts...)

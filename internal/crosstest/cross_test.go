@@ -468,9 +468,10 @@ func testWithTwirpClient(t *testing.T, client crosspb.CrossService) {
 
 func TestReRPCServer(t *testing.T) {
 	reg := rerpc.NewRegistrar()
-	mux := http.NewServeMux()
-	mux.Handle(crosspb.NewCrossServiceHandlerReRPC(crossServerReRPC{}, reg))
-	mux.Handle(reflection.NewHandler(reg))
+	mux := rerpc.NewServeMux(
+		crosspb.NewCrossServiceHandlerReRPC(crossServerReRPC{}, reg),
+		reflection.NewHandler(reg),
+	)
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
@@ -551,8 +552,7 @@ func TestReRPCServer(t *testing.T) {
 }
 
 func TestReRPCServerH2C(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.Handle(crosspb.NewCrossServiceHandlerReRPC(crossServerReRPC{}))
+	mux := rerpc.NewServeMux(crosspb.NewCrossServiceHandlerReRPC(crossServerReRPC{}))
 	server := httptest.NewServer(h2c.NewHandler(mux, &http2.Server{}))
 	defer server.Close()
 

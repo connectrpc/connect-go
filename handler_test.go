@@ -20,10 +20,10 @@ import (
 
 func TestHandlerReadMaxBytes(t *testing.T) {
 	const readMaxBytes = 32
-	_, ping := pingpb.NewPingServiceHandlerReRPC(
+	ping := rerpc.NewServeMux(pingpb.NewPingServiceHandlerReRPC(
 		&ExamplePingServer{},
 		rerpc.ReadMaxBytes(readMaxBytes),
-	)
+	))
 
 	t.Run("twirp/json", func(t *testing.T) {
 		probe := `{"number":"42", "msg": "padding"}`

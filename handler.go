@@ -285,20 +285,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // by the generated code.
 func (h *Handler) Path() string {
 	if h.config.Package == "" && h.config.Service == "" && h.config.Method == "" {
+		// e.g., bad route handler
 		return "/"
 	}
 	return fmt.Sprintf("/%s.%s/%s", h.config.Package, h.config.Service, h.config.Method)
-}
-
-// ServicePath returns the URL pattern for the protobuf service. It's used by
-// the generated code. For example, if Path returned
-// "/acme.foo.v1.FooService/Bar" then ServicePath would return
-// "/acme.foo.v1.FooService/".
-func (h *Handler) ServicePath() string {
-	if h.config.Package == "" && h.config.Service == "" && h.config.Method == "" {
-		return "/"
-	}
-	return fmt.Sprintf("/%s.%s/", h.config.Package, h.config.Service)
 }
 
 func splitOnCommasAndSpaces(c rune) bool {

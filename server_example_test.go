@@ -31,17 +31,15 @@ func Example() {
 	checker := health.NewChecker(reg)        // basic health checks
 	limit := rerpc.ReadMaxBytes(1024 * 1024) // limit request size
 
-	// We're building plain net/http Handlers, so reRPC works with any Go HTTP
-	// middleware (e.g., net/http's StripPrefix).
-	mux := http.NewServeMux()
-	mux.Handle(pingpb.NewPingServiceHandlerReRPC(
-		ping, // business logic
-		reg,  // remaining args are handler options
-		limit,
-	))
-	mux.Handle(reflection.NewHandler(reg))      // server reflection
-	mux.Handle(health.NewHandler(checker, reg)) // health checks
-	mux.Handle("/", rerpc.NewBadRouteHandler()) // Twirp-compatible 404s
+	// NewServeMux returns a plain net/http *ServeMux. Since a mux is an
+	// http.Handler, reRPC works with any Go HTTP middleware (e.g., net/http's
+	// StripPrefix).
+	mux := rerpc.NewServeMux(
+		pingpb.NewPingServiceHandlerReRPC(ping, reg, limit), // business logic
+		reflection.NewHandler(reg),                          // server reflection
+		health.NewHandler(checker, reg),                     // health checks
+		rerpc.NewBadRouteHandler(),                          // Twirp-compatible 404s
+	)
 
 	// Timeouts, connection handling, TLS configuration, and other low-level
 	// transport details are handled by net/http. Everything you already know (or
