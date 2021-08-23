@@ -33,23 +33,23 @@ type Specification struct {
 // headers for an in-progress client call. It's useful in Interceptors.
 type CallMetadata struct {
 	Spec Specification
-	req  *MutableHeader
-	res  *ImmutableHeader
+	req  *Header
+	res  *Header
 }
 
-// Request returns a writable view of the request headers.
-func (m CallMetadata) Request() MutableHeader {
+// Request returns the request headers.
+func (m CallMetadata) Request() Header {
 	if m.req == nil {
-		return NewMutableHeader(make(http.Header))
+		return NewHeader(make(http.Header))
 	}
 	return *m.req
 }
 
-// Response returns a read-only view of the response headers. In Interceptors,
-// the response isn't populated until the request is sent to the server.
-func (m CallMetadata) Response() ImmutableHeader {
+// Response returns the response headers. In Interceptors, the response isn't
+// populated until the request is sent to the server.
+func (m CallMetadata) Response() Header {
 	if m.res == nil {
-		return NewImmutableHeader(nil) // nil maps are safe to read from
+		return NewHeader(make(http.Header))
 	}
 	return *m.res
 }
@@ -57,12 +57,10 @@ func (m CallMetadata) Response() ImmutableHeader {
 // NewCallContext constructs a CallMetadata and attaches it to the supplied
 // context. It's useful in tests that rely on CallMeta.
 func NewCallContext(ctx context.Context, spec Specification, req, res http.Header) context.Context {
-	mutable := NewMutableHeader(req)
-	immutable := NewImmutableHeader(res)
 	md := CallMetadata{
 		Spec: spec,
-		req:  &mutable,
-		res:  &immutable,
+		req:  &Header{raw: req},
+		res:  &Header{raw: res},
 	}
 	return context.WithValue(ctx, callMetaKey, md)
 }
@@ -88,22 +86,22 @@ func CallMeta(ctx context.Context) (CallMetadata, bool) {
 // and protobuf service implementations.
 type HandlerMetadata struct {
 	Spec Specification
-	req  *ImmutableHeader
-	res  *MutableHeader
+	req  *Header
+	res  *Header
 }
 
-// Request returns a read-only view of the request headers.
-func (hm HandlerMetadata) Request() ImmutableHeader {
+// Request returns the request headers.
+func (hm HandlerMetadata) Request() Header {
 	if hm.req == nil {
-		return NewImmutableHeader(nil) // nil maps are safe to read from
+		return NewHeader(make(http.Header))
 	}
 	return *hm.req
 }
 
-// Response returns a writable view of the response headers.
-func (hm HandlerMetadata) Response() MutableHeader {
+// Response returns the response headers.
+func (hm HandlerMetadata) Response() Header {
 	if hm.res == nil {
-		return NewMutableHeader(make(http.Header))
+		return NewHeader(make(http.Header))
 	}
 	return *hm.res
 }
@@ -111,12 +109,10 @@ func (hm HandlerMetadata) Response() MutableHeader {
 // NewHandlerContext constructs a HandlerMetadata and attaches it to the supplied
 // context. It's useful in tests that call HandlerMeta.
 func NewHandlerContext(ctx context.Context, spec Specification, req, res http.Header) context.Context {
-	immutable := NewImmutableHeader(req)
-	mutable := NewMutableHeader(res)
 	md := HandlerMetadata{
 		Spec: spec,
-		req:  &immutable,
-		res:  &mutable,
+		req:  &Header{raw: req},
+		res:  &Header{raw: res},
 	}
 	return context.WithValue(ctx, handlerMetaKey, md)
 }
