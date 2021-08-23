@@ -166,20 +166,23 @@ func percentDecodeSlow(encoded string, offset int) string {
 	return out.String()
 }
 
-// ImmutableHeader provides read-only access to HTTP headers.
-type ImmutableHeader struct {
+// Header provides access to HTTP headers. It's very similar to net/http's
+// Header, but automatically validates with IsValidHeaderKey and
+// IsValidHeaderValue.
+type Header struct {
 	raw http.Header
 }
 
-// NewImmutableHeader constructs an ImmutableHeader.
-func NewImmutableHeader(raw http.Header) ImmutableHeader {
-	return ImmutableHeader{raw}
+// NewHeader wraps an http.Header in reRPC's validation logic. Keys and values
+// added directly to the http.Header aren't validated.
+func NewHeader(raw http.Header) Header {
+	return Header{raw: raw}
 }
 
 // Get returns the first value associated with the given key. Like the standard
 // library's http.Header, keys are case-insensitive and canonicalized with
 // textproto.CanonicalMIMEHeaderKey.
-func (h ImmutableHeader) Get(key string) string {
+func (h Header) Get(key string) string {
 	return h.raw.Get(key)
 }
 
@@ -190,7 +193,7 @@ func (h ImmutableHeader) Get(key string) string {
 //
 // For details on gRPC's treatment of binary headers, see
 // https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md.
-func (h ImmutableHeader) GetBinary(key string) ([]byte, error) {
+func (h Header) GetBinary(key string) ([]byte, error) {
 	return decodeBinaryHeader(h.raw.Get(key + "-Bin"))
 }
 
@@ -200,7 +203,7 @@ func (h ImmutableHeader) GetBinary(key string) ([]byte, error) {
 //
 // Unlike the standard library's http.Header.Values, the returned slice is a
 // copy.
-func (h ImmutableHeader) Values(key string) []string {
+func (h Header) Values(key string) []string {
 	mutable := h.raw.Values(key)
 	// http.Header does *not* return a copy, but we need to prevent mutation.
 	return append(make([]string, 0, len(mutable)), mutable...)
@@ -208,23 +211,8 @@ func (h ImmutableHeader) Values(key string) []string {
 
 // Clone returns a copy of the underlying HTTP headers, including all reserved
 // keys.
-func (h ImmutableHeader) Clone() http.Header {
+func (h Header) Clone() http.Header {
 	return h.raw.Clone()
-}
-
-// MutableHeader provides read-write access to HTTP headers.
-type MutableHeader struct {
-	ImmutableHeader
-
-	raw http.Header
-}
-
-// NewMutableHeader constructs a MutableHeader.
-func NewMutableHeader(raw http.Header) MutableHeader {
-	return MutableHeader{
-		ImmutableHeader: NewImmutableHeader(raw),
-		raw:             raw,
-	}
 }
 
 // Set the value associated with the given key, overwriting any existing
@@ -234,7 +222,7 @@ func NewMutableHeader(raw http.Header) MutableHeader {
 // Attempting to set an invalid key (as defined by IsValidHeaderKey) or value
 // (as defined by IsValidHeaderValue) returns an error. See IsValidHeaderKey
 // for backward compatibility guarantees.
-func (h MutableHeader) Set(key, value string) error {
+func (h Header) Set(key, value string) error {
 	if err := IsValidHeaderKey(key); err != nil {
 		return err
 	}
@@ -252,7 +240,7 @@ func (h MutableHeader) Set(key, value string) error {
 //
 // For details on gRPC's treatment of binary headers, see
 // https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md.
-func (h MutableHeader) SetBinary(key string, value []byte) error {
+func (h Header) SetBinary(key string, value []byte) error {
 	key = key + "-Bin"
 	if err := IsValidHeaderKey(key); err != nil {
 		return err
@@ -268,7 +256,7 @@ func (h MutableHeader) SetBinary(key string, value []byte) error {
 // Attempting to add to an invalid key (as defined by IsValidHeaderKey) or
 // supplying an invalid value (as defined by IsValidHeaderValue) returns an
 // error. See IsValidHeaderKey for backward compatibility guarantees.
-func (h MutableHeader) Add(key, value string) error {
+func (h Header) Add(key, value string) error {
 	if err := IsValidHeaderKey(key); err != nil {
 		return err
 	}
@@ -285,7 +273,7 @@ func (h MutableHeader) Add(key, value string) error {
 //
 // Attempting delete an invalid key (as defined by IsValidHeaderKey) returns an
 // error. See IsValidHeaderKey for backward compatibility guarantees.
-func (h MutableHeader) Del(key string) error {
+func (h Header) Del(key string) error {
 	if err := IsValidHeaderKey(key); err != nil {
 		return err
 	}
