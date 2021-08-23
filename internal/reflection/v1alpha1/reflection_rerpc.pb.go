@@ -30,9 +30,10 @@ type ServerReflectionClientReRPC interface {
 }
 
 type serverReflectionClientReRPC struct {
-	doer    rerpc.Doer
-	baseURL string
-	options []rerpc.CallOption
+	codecProvider *rerpc.CodecProvider
+	doer          rerpc.Doer
+	baseURL       string
+	options       []rerpc.CallOption
 }
 
 // NewServerReflectionClientReRPC constructs a client for the
@@ -43,9 +44,10 @@ type serverReflectionClientReRPC struct {
 // https://api.acme.com or https://acme.com/grpc).
 func NewServerReflectionClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) ServerReflectionClientReRPC {
 	return &serverReflectionClientReRPC{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		doer:    doer,
-		options: opts,
+		baseURL:       strings.TrimRight(baseURL, "/"),
+		codecProvider: rerpc.NewCodecProvider(),
+		doer:          doer,
+		options:       opts,
 	}
 }
 
@@ -68,6 +70,7 @@ func (c *serverReflectionClientReRPC) ServerReflectionInfo(ctx context.Context, 
 	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
+		c.codecProvider,
 		c.doer,
 		rerpc.StreamTypeBidirectional,
 		c.baseURL,
@@ -103,11 +106,13 @@ type ServerReflectionReRPC interface {
 // implementation in a *rerpc.Handler. The returned slice can be passed to
 // rerpc.NewServeMux.
 func NewServerReflectionHandlerReRPC(svc ServerReflectionReRPC, opts ...rerpc.HandlerOption) []*rerpc.Handler {
+	codecProvider := rerpc.NewCodecProvider()
 	handlers := make([]*rerpc.Handler, 0, 1)
 	ic := rerpc.ConfiguredHandlerInterceptor(opts)
 
 	serverReflectionInfo := rerpc.NewHandler(
 		rerpc.StreamTypeBidirectional,
+		codecProvider,
 		"internal.reflection.v1alpha1", // protobuf package
 		"ServerReflection",             // protobuf service
 		"ServerReflectionInfo",         // protobuf method

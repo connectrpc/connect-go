@@ -151,6 +151,7 @@ func clientSignature(g *protogen.GeneratedFile, cname string, method *protogen.M
 func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, name string) {
 	// Client struct.
 	g.P("type ", unexport(name), " struct {")
+	g.P("codecProvider *", rerpcPackage.Ident("CodecProvider"))
 	g.P("doer ", rerpcPackage.Ident("Doer"))
 	g.P("baseURL string")
 	g.P("options []", rerpcPackage.Ident("CallOption"))
@@ -172,6 +173,7 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		", opts ...", callOption, ") ", name, " {")
 	g.P("return &", unexport(name), "{")
 	g.P("baseURL: ", stringsPackage.Ident("TrimRight"), `(baseURL, "/"),`)
+	g.P("codecProvider: ", rerpcPackage.Ident("NewCodecProvider"), "(),")
 	g.P("doer: doer,")
 	g.P("options: opts,")
 	g.P("}")
@@ -210,6 +212,7 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, cname st
 	g.P("ic := ", rerpcPackage.Ident("ConfiguredCallInterceptor"), "(merged)")
 	g.P("ctx, call := ", rerpcPackage.Ident("NewCall"), "(")
 	g.P("ctx,")
+	g.P("c.codecProvider,")
 	g.P("c.doer,")
 	if isStreamingClient && isStreamingServer {
 		g.P(rerpcPackage.Ident("StreamTypeBidirectional"), ",")
@@ -414,6 +417,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 	}
 	g.P("func New", service.GoName, "HandlerReRPC(svc ", name, ", opts ...", rerpcPackage.Ident("HandlerOption"),
 		") []*", rerpcPackage.Ident("Handler"), " {")
+	g.P("codecProvider := ", rerpcPackage.Ident("NewCodecProvider"), "()")
 	g.P("handlers := make([]*", rerpcPackage.Ident("Handler"), ", 0, ", len(service.Methods), ")")
 	g.P("ic := ", rerpcPackage.Ident("ConfiguredHandlerInterceptor"), "(opts)")
 	g.P()
@@ -429,6 +433,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 			} else {
 				g.P(rerpcPackage.Ident("StreamTypeClient"), ",")
 			}
+			g.P("codecProvider,")
 			g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
 			g.P(`"`, service.Desc.Name(), `", // protobuf service`)
 			g.P(`"`, method.Desc.Name(), `", // protobuf method`)
@@ -487,6 +492,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 			g.P("}")
 			g.P(hname, " := ", rerpcPackage.Ident("NewHandler"), "(")
 			g.P(rerpcPackage.Ident("StreamTypeUnary"), ",")
+			g.P("codecProvider,")
 			g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
 			g.P(`"`, service.Desc.Name(), `", // protobuf service`)
 			g.P(`"`, method.Desc.Name(), `", // protobuf method`)

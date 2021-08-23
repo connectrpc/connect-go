@@ -33,9 +33,10 @@ type CrossServiceClientReRPC interface {
 }
 
 type crossServiceClientReRPC struct {
-	doer    rerpc.Doer
-	baseURL string
-	options []rerpc.CallOption
+	codecProvider *rerpc.CodecProvider
+	doer          rerpc.Doer
+	baseURL       string
+	options       []rerpc.CallOption
 }
 
 // NewCrossServiceClientReRPC constructs a client for the
@@ -46,9 +47,10 @@ type crossServiceClientReRPC struct {
 // https://api.acme.com or https://acme.com/grpc).
 func NewCrossServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) CrossServiceClientReRPC {
 	return &crossServiceClientReRPC{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		doer:    doer,
-		options: opts,
+		baseURL:       strings.TrimRight(baseURL, "/"),
+		codecProvider: rerpc.NewCodecProvider(),
+		doer:          doer,
+		options:       opts,
 	}
 }
 
@@ -70,6 +72,7 @@ func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, op
 	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
+		c.codecProvider,
 		c.doer,
 		rerpc.StreamTypeUnary,
 		c.baseURL,
@@ -117,6 +120,7 @@ func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, op
 	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
+		c.codecProvider,
 		c.doer,
 		rerpc.StreamTypeUnary,
 		c.baseURL,
@@ -164,6 +168,7 @@ func (c *crossServiceClientReRPC) Sum(ctx context.Context, opts ...rerpc.CallOpt
 	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
+		c.codecProvider,
 		c.doer,
 		rerpc.StreamTypeClient,
 		c.baseURL,
@@ -186,6 +191,7 @@ func (c *crossServiceClientReRPC) CountUp(ctx context.Context, req *CountUpReque
 	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
+		c.codecProvider,
 		c.doer,
 		rerpc.StreamTypeServer,
 		c.baseURL,
@@ -217,6 +223,7 @@ func (c *crossServiceClientReRPC) CumSum(ctx context.Context, opts ...rerpc.Call
 	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
+		c.codecProvider,
 		c.doer,
 		rerpc.StreamTypeBidirectional,
 		c.baseURL,
@@ -252,6 +259,7 @@ type CrossServiceReRPC interface {
 // NewCrossServiceHandlerReRPC wraps each method on the service implementation
 // in a *rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
 func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOption) []*rerpc.Handler {
+	codecProvider := rerpc.NewCodecProvider()
 	handlers := make([]*rerpc.Handler, 0, 5)
 	ic := rerpc.ConfiguredHandlerInterceptor(opts)
 
@@ -271,6 +279,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 	}
 	ping := rerpc.NewHandler(
 		rerpc.StreamTypeUnary,
+		codecProvider,
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"Ping",                      // protobuf method
@@ -328,6 +337,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 	}
 	fail := rerpc.NewHandler(
 		rerpc.StreamTypeUnary,
+		codecProvider,
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"Fail",                      // protobuf method
@@ -371,6 +381,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 
 	sum := rerpc.NewHandler(
 		rerpc.StreamTypeClient,
+		codecProvider,
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"Sum",                       // protobuf method
@@ -400,6 +411,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 
 	countUp := rerpc.NewHandler(
 		rerpc.StreamTypeServer,
+		codecProvider,
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"CountUp",                   // protobuf method
@@ -438,6 +450,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 
 	cumSum := rerpc.NewHandler(
 		rerpc.StreamTypeBidirectional,
+		codecProvider,
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"CumSum",                    // protobuf method

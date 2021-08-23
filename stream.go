@@ -29,12 +29,12 @@ type Stream interface {
 
 	// Implementations must ensure that Send and CloseSend don't race with
 	// Context, Receive, or CloseReceive. They may race with each other.
-	Send(proto.Message) error
+	Send(interface{}) error
 	CloseSend(error) error
 
 	// Implementations must ensure that Receive and CloseReceive don't race with
 	// Context, Send, or CloseSend. They may race with each other.
-	Receive(proto.Message) error
+	Receive(interface{}) error
 	CloseReceive() error
 }
 
@@ -46,10 +46,11 @@ type Stream interface {
 // request/response code. Since this is the most complex code in reRPC, it has
 // many more comments than usual.
 type clientStream struct {
-	ctx          context.Context
-	doer         Doer
-	url          string
-	maxReadBytes int64
+	ctx           context.Context
+	codecProvider *CodecProvider
+	doer          Doer
+	url           string
+	maxReadBytes  int64
 
 	// send
 	writer    *io.PipeWriter
@@ -69,6 +70,7 @@ var _ Stream = (*clientStream)(nil)
 
 func newClientStream(
 	ctx context.Context,
+	codecProvider *CodecProvider,
 	doer Doer,
 	url string,
 	maxReadBytes int64,
@@ -89,11 +91,12 @@ func newClientStream(
 	pr, pw := io.Pipe()
 	stream := clientStream{
 		ctx:           ctx,
+		codecProvider: codecProvider,
 		doer:          doer,
 		url:           url,
 		maxReadBytes:  maxReadBytes,
 		writer:        pw,
-		marshaler:     marshaler{w: pw, ctype: TypeDefaultGRPC, gzipGRPC: gzipRequest},
+		marshaler:     marshaler{codecProvider: codecProvider, w: pw, ctype: TypeDefaultGRPC, gzipGRPC: gzipRequest},
 		reader:        pr,
 		responseReady: make(chan struct{}),
 	}
@@ -114,7 +117,7 @@ func (cs *clientStream) Context() context.Context {
 	return cs.ctx
 }
 
-func (cs *clientStream) Send(msg proto.Message) error {
+func (cs *clientStream) Send(msg interface{}) error {
 	// Calling Marshal writes data to the send stream. It's safe to do this while
 	// makeRequest is running, because we're writing to our side of the pipe
 	// (which is safe to do while net/http reads from the other side).
@@ -164,7 +167,7 @@ func (cs *clientStream) CloseSend(_ error) error {
 	return nil
 }
 
-func (cs *clientStream) Receive(msg proto.Message) error {
+func (cs *clientStream) Receive(msg interface{}) error {
 	// First, we wait until we've gotten the response headers and established the
 	// server-to-client side of the stream.
 	<-cs.responseReady
@@ -303,7 +306,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 	// Success! We got a response with valid headers and no error, so there's
 	// probably a message waiting in the stream.
 	cs.response = res
-	cs.unmarshaler = unmarshaler{r: res.Body, ctype: TypeDefaultGRPC, max: cs.maxReadBytes}
+	cs.unmarshaler = unmarshaler{codecProvider: cs.codecProvider, r: res.Body, ctype: TypeDefaultGRPC, max: cs.maxReadBytes}
 }
 
 func (cs *clientStream) setResponseError(err error) {
@@ -339,6 +342,7 @@ var _ Stream = (*serverStream)(nil)
 // need to worry about concurrency.
 func newServerStream(
 	ctx context.Context,
+	codecProvider *CodecProvider,
 	w http.ResponseWriter,
 	r io.ReadCloser,
 	ctype string,
@@ -347,8 +351,8 @@ func newServerStream(
 ) *serverStream {
 	return &serverStream{
 		ctx:         ctx,
-		unmarshaler: unmarshaler{r: r, ctype: ctype, max: maxReadBytes},
-		marshaler:   marshaler{w: w, ctype: ctype, gzipGRPC: gzipResponse},
+		unmarshaler: unmarshaler{codecProvider: codecProvider, r: r, ctype: ctype, max: maxReadBytes},
+		marshaler:   marshaler{codecProvider: codecProvider, w: w, ctype: ctype, gzipGRPC: gzipResponse},
 		writer:      w,
 		reader:      r,
 		ctype:       ctype,
@@ -359,7 +363,7 @@ func (ss *serverStream) Context() context.Context {
 	return ss.ctx
 }
 
-func (ss *serverStream) Receive(msg proto.Message) error {
+func (ss *serverStream) Receive(msg interface{}) error {
 	if err := ss.unmarshaler.Unmarshal(msg); err != nil {
 		return err // already coded
 	}
@@ -378,7 +382,7 @@ func (ss *serverStream) CloseReceive() error {
 	return nil
 }
 
-func (ss *serverStream) Send(msg proto.Message) error {
+func (ss *serverStream) Send(msg interface{}) error {
 	defer ss.flush()
 	if err := ss.marshaler.Marshal(msg); err != nil {
 		return err

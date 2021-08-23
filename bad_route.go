@@ -18,6 +18,7 @@ func NewBadRouteHandler(opts ...HandlerOption) []*Handler {
 	}
 	h := NewHandler(
 		StreamTypeUnary,
+		nil,        // The CodecProvider is never called for this handler.
 		"", "", "", // protobuf package, service, method names
 		func(ctx context.Context, sf StreamFunc) {
 			stream := sf(ctx)

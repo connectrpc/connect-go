@@ -46,9 +46,10 @@ type HealthClientReRPC interface {
 }
 
 type healthClientReRPC struct {
-	doer    rerpc.Doer
-	baseURL string
-	options []rerpc.CallOption
+	codecProvider *rerpc.CodecProvider
+	doer          rerpc.Doer
+	baseURL       string
+	options       []rerpc.CallOption
 }
 
 // NewHealthClientReRPC constructs a client for the internal.health.v1.Health
@@ -58,9 +59,10 @@ type healthClientReRPC struct {
 // https://api.acme.com or https://acme.com/grpc).
 func NewHealthClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) HealthClientReRPC {
 	return &healthClientReRPC{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		doer:    doer,
-		options: opts,
+		baseURL:       strings.TrimRight(baseURL, "/"),
+		codecProvider: rerpc.NewCodecProvider(),
+		doer:          doer,
+		options:       opts,
 	}
 }
 
@@ -82,6 +84,7 @@ func (c *healthClientReRPC) Check(ctx context.Context, req *HealthCheckRequest, 
 	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
+		c.codecProvider,
 		c.doer,
 		rerpc.StreamTypeUnary,
 		c.baseURL,
@@ -129,6 +132,7 @@ func (c *healthClientReRPC) Watch(ctx context.Context, req *HealthCheckRequest, 
 	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
+		c.codecProvider,
 		c.doer,
 		rerpc.StreamTypeServer,
 		c.baseURL,
@@ -187,6 +191,7 @@ type HealthReRPC interface {
 // NewHealthHandlerReRPC wraps each method on the service implementation in a
 // *rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
 func NewHealthHandlerReRPC(svc HealthReRPC, opts ...rerpc.HandlerOption) []*rerpc.Handler {
+	codecProvider := rerpc.NewCodecProvider()
 	handlers := make([]*rerpc.Handler, 0, 2)
 	ic := rerpc.ConfiguredHandlerInterceptor(opts)
 
@@ -206,6 +211,7 @@ func NewHealthHandlerReRPC(svc HealthReRPC, opts ...rerpc.HandlerOption) []*rerp
 	}
 	check := rerpc.NewHandler(
 		rerpc.StreamTypeUnary,
+		codecProvider,
 		"internal.health.v1", // protobuf package
 		"Health",             // protobuf service
 		"Check",              // protobuf method
@@ -249,6 +255,7 @@ func NewHealthHandlerReRPC(svc HealthReRPC, opts ...rerpc.HandlerOption) []*rerp
 
 	watch := rerpc.NewHandler(
 		rerpc.StreamTypeServer,
+		codecProvider,
 		"internal.health.v1", // protobuf package
 		"Health",             // protobuf service
 		"Watch",              // protobuf method

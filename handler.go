@@ -69,6 +69,7 @@ func ServeTwirp(enable bool) HandlerOption {
 // internal/ping/v1test package.
 type Handler struct {
 	stype          StreamType
+	codecProvider  *CodecProvider
 	config         handlerCfg
 	implementation func(context.Context, StreamFunc)
 }
@@ -82,6 +83,7 @@ type Handler struct {
 // won't need to deal with protobuf identifiers directly.
 func NewHandler(
 	stype StreamType,
+	codecProvider *CodecProvider,
 	pkg, service, method string,
 	implementation func(context.Context, StreamFunc),
 	opts ...HandlerOption,
@@ -99,6 +101,7 @@ func NewHandler(
 	}
 	return &Handler{
 		stype:          stype,
+		codecProvider:  codecProvider,
 		config:         cfg,
 		implementation: implementation,
 	}
@@ -265,6 +268,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sf := StreamFunc(func(ctx context.Context) Stream {
 		return newServerStream(
 			ctx,
+			h.codecProvider,
 			w,
 			&readCloser{Reader: requestBody, Closer: r.Body},
 			spec.ContentType,

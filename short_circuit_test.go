@@ -43,8 +43,8 @@ type errStream struct {
 
 var _ rerpc.Stream = (*errStream)(nil)
 
-func (s *errStream) Context() context.Context      { return s.ctx }
-func (s *errStream) Receive(_ proto.Message) error { return s.err }
-func (s *errStream) CloseReceive() error           { return s.err }
-func (s *errStream) Send(_ proto.Message) error    { return s.err }
-func (s *errStream) CloseSend(_ error) error       { return s.err }
+func (s *errStream) Context() context.Context    { return s.ctx }
+func (s *errStream) Receive(_ interface{}) error { return s.err }
+func (s *errStream) CloseReceive() error         { return s.err }
+func (s *errStream) Send(_ interface{}) error    { return s.err }
+func (s *errStream) CloseSend(_ error) error     { return s.err }

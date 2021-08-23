@@ -538,6 +538,7 @@ func TestServerProtoGRPC(t *testing.T) {
 		callReflect := func(req *reflectionpb.ServerReflectionRequest, opts ...rerpc.CallOption) (*reflectionpb.ServerReflectionResponse, error) {
 			ctx, call := rerpc.NewCall(
 				context.Background(),
+				rerpc.NewCodecProvider(),
 				doer,
 				rerpc.StreamTypeUnary,
 				url,

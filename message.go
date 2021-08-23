@@ -6,43 +6,38 @@ import (
 	"errors"
 	"fmt"
 	"io"
-
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 )
 
-var (
-	// Marshal JSON with the options required by Twirp.
-	jsonpbMarshaler   = protojson.MarshalOptions{UseProtoNames: true}
-	jsonpbUnmarshaler = protojson.UnmarshalOptions{DiscardUnknown: true}
-	sizeZeroPrefix    = make([]byte, 4)
-)
+var sizeZeroPrefix = make([]byte, 4)
 
 type marshaler struct {
-	w        io.Writer
-	ctype    string
-	gzipGRPC bool
+	codecProvider *CodecProvider
+	w             io.Writer
+	ctype         string
+	gzipGRPC      bool
 }
 
-func (m *marshaler) Marshal(msg proto.Message) *Error {
+func (m *marshaler) Marshal(msg interface{}) *Error {
+	codec, ok := m.codecProvider.CodecForContentType(m.ctype)
+	if !ok {
+		return errorf(CodeInvalidArgument, "unsupported Content-Type %q", m.ctype)
+	}
+	bytes, err := codec.Marshal(msg)
+	if err != nil {
+		return wrap(CodeInternal, err) // errors here should be impossible
+	}
 	switch m.ctype {
-	case TypeJSON:
-		return m.marshalTwirpJSON(msg)
-	case TypeProtoTwirp:
-		return m.marshalTwirpProto(msg)
+	case TypeJSON, TypeProtoTwirp:
+		return m.marshalTwirp(bytes)
 	case TypeDefaultGRPC, TypeProtoGRPC:
-		return m.marshalGRPC(msg)
+		return m.marshalGRPC(bytes)
 	default:
 		return errorf(CodeInvalidArgument, "unsupported Content-Type %q", m.ctype)
 	}
 }
 
-func (m *marshaler) marshalTwirpJSON(msg proto.Message) *Error {
-	bs, err := jsonpbMarshaler.Marshal(msg)
-	if err != nil {
-		return wrap(CodeInternal, err) // errors here should be impossible
-	}
-	if _, err = m.w.Write(bs); err != nil {
+func (m *marshaler) marshalTwirp(bytes []byte) *Error {
+	if _, err := m.w.Write(bytes); err != nil {
 		if rerr, ok := AsError(err); ok {
 			return rerr
 		}
@@ -51,30 +46,12 @@ func (m *marshaler) marshalTwirpJSON(msg proto.Message) *Error {
 	return nil
 }
 
-func (m *marshaler) marshalTwirpProto(msg proto.Message) *Error {
-	bs, err := proto.Marshal(msg)
-	if err != nil {
-		return wrap(CodeInternal, err) // errors here should be impossible
-	}
-	if _, err = m.w.Write(bs); err != nil {
-		if rerr, ok := AsError(err); ok {
-			return rerr
-		}
-		return wrap(CodeUnknown, err)
-	}
-	return nil
-}
-
-func (m *marshaler) marshalGRPC(msg proto.Message) *Error {
-	raw, err := proto.Marshal(msg)
-	if err != nil {
-		return errorf(CodeInternal, "couldn't marshal protobuf message: %w", err)
-	}
-	if !m.gzipGRPC || !isWorthCompressing(raw) {
-		if err := m.writeGRPCPrefix(false, len(raw)); err != nil {
+func (m *marshaler) marshalGRPC(bytes []byte) *Error {
+	if !m.gzipGRPC || !isWorthCompressing(bytes) {
+		if err := m.writeGRPCPrefix(false, len(bytes)); err != nil {
 			return err // already enriched
 		}
-		if _, err := m.w.Write(raw); err != nil {
+		if _, err := m.w.Write(bytes); err != nil {
 			return errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
 		}
 		return nil
@@ -84,7 +61,7 @@ func (m *marshaler) marshalGRPC(msg proto.Message) *Error {
 	gw := getGzipWriter(data)
 	defer putGzipWriter(gw)
 
-	if _, err = gw.Write(raw); err != nil { // returns uncompressed size, which isn't useful
+	if _, err := gw.Write(bytes); err != nil { // returns uncompressed size, which isn't useful
 		return errorf(CodeInternal, "couldn't gzip data: %w", err)
 	}
 	if err := gw.Close(); err != nil {
@@ -118,33 +95,38 @@ func (m *marshaler) writeGRPCPrefix(compressed bool, size int) *Error {
 }
 
 type unmarshaler struct {
-	r     io.Reader
-	ctype string
-	max   int64
+	codecProvider *CodecProvider
+	r             io.Reader
+	ctype         string
+	max           int64
 }
 
-func (u *unmarshaler) Unmarshal(msg proto.Message) *Error {
+func (u *unmarshaler) Unmarshal(msg interface{}) *Error {
+	codec, ok := u.codecProvider.CodecForContentType(u.ctype)
+	if !ok {
+		return errorf(CodeInvalidArgument, "unsupported Content-Type %q", u.ctype)
+	}
 	switch u.ctype {
 	case TypeJSON:
-		return u.unmarshalTwirpJSON(msg)
+		return u.unmarshalTwirpJSON(msg, codec)
 	case TypeProtoTwirp:
-		return u.unmarshalTwirpProto(msg)
+		return u.unmarshalTwirpProto(msg, codec)
 	case TypeDefaultGRPC, TypeProtoGRPC:
-		return u.unmarshalGRPC(msg)
+		return u.unmarshalGRPC(msg, codec)
 	default:
 		return errorf(CodeInvalidArgument, "unsupported Content-Type %q", u.ctype)
 	}
 }
 
-func (u *unmarshaler) unmarshalTwirpJSON(msg proto.Message) *Error {
-	return u.unmarshalTwirp(msg, "JSON", jsonpbUnmarshaler.Unmarshal)
+func (u *unmarshaler) unmarshalTwirpJSON(msg interface{}, codec Codec) *Error {
+	return u.unmarshalTwirp(msg, "JSON", codec)
 }
 
-func (u *unmarshaler) unmarshalTwirpProto(msg proto.Message) *Error {
-	return u.unmarshalTwirp(msg, "protobuf", proto.Unmarshal)
+func (u *unmarshaler) unmarshalTwirpProto(msg interface{}, codec Codec) *Error {
+	return u.unmarshalTwirp(msg, "protobuf", codec)
 }
 
-func (u *unmarshaler) unmarshalTwirp(msg proto.Message, variant string, do func([]byte, proto.Message) error) *Error {
+func (u *unmarshaler) unmarshalTwirp(msg interface{}, variant string, codec Codec) *Error {
 	buf := getBuffer()
 	defer putBuffer(buf)
 	r := u.r
@@ -159,21 +141,20 @@ func (u *unmarshaler) unmarshalTwirp(msg proto.Message, variant string, do func(
 	} else if n == 0 {
 		return nil // zero value
 	}
-	if err := do(buf.Bytes(), msg); err != nil {
+	if err := codec.Unmarshal(buf.Bytes(), msg); err != nil {
 		if lr, ok := r.(*io.LimitedReader); ok && lr.N <= 0 {
 			// likely more informative than unmarshaling error
 			return errorf(CodeInvalidArgument, "request too large: max bytes set to %v", u.max)
 		}
-		fqn := msg.ProtoReflect().Descriptor().FullName()
 		return wrap(
 			CodeInvalidArgument,
-			newMalformedError(fmt.Sprintf("can't unmarshal %s into %v: %v", variant, fqn, err)),
+			newMalformedError(fmt.Sprintf("can't unmarshal %s into %T: %v", variant, msg, err)),
 		)
 	}
 	return nil
 }
 
-func (u *unmarshaler) unmarshalGRPC(msg proto.Message) *Error {
+func (u *unmarshaler) unmarshalGRPC(msg interface{}, codec Codec) *Error {
 	// Each length-prefixed message starts with 5 bytes of metadata: a one-byte
 	// unsigned integer indicating whether the payload is compressed, and a
 	// four-byte unsigned integer indicating the message length.
@@ -246,9 +227,8 @@ func (u *unmarshaler) unmarshalGRPC(msg proto.Message) *Error {
 		raw = decompressed.Bytes()
 	}
 
-	if err := proto.Unmarshal(raw, msg); err != nil {
-		fqn := msg.ProtoReflect().Descriptor().FullName()
-		return errorf(CodeInvalidArgument, "can't unmarshal protobuf into %v: %w", fqn, err)
+	if err := codec.Unmarshal(raw, msg); err != nil {
+		return errorf(CodeInvalidArgument, "can't unmarshal protobuf into %T: %w", msg, err)
 	}
 
 	return nil

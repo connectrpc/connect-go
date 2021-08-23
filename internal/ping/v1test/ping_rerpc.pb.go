@@ -33,9 +33,10 @@ type PingServiceClientReRPC interface {
 }
 
 type pingServiceClientReRPC struct {
-	doer    rerpc.Doer
-	baseURL string
-	options []rerpc.CallOption
+	codecProvider *rerpc.CodecProvider
+	doer          rerpc.Doer
+	baseURL       string
+	options       []rerpc.CallOption
 }
 
 // NewPingServiceClientReRPC constructs a client for the
@@ -46,9 +47,10 @@ type pingServiceClientReRPC struct {
 // https://api.acme.com or https://acme.com/grpc).
 func NewPingServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) PingServiceClientReRPC {
 	return &pingServiceClientReRPC{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		doer:    doer,
-		options: opts,
+		baseURL:       strings.TrimRight(baseURL, "/"),
+		codecProvider: rerpc.NewCodecProvider(),
+		doer:          doer,
+		options:       opts,
 	}
 }
 
@@ -70,6 +72,7 @@ func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opt
 	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
+		c.codecProvider,
 		c.doer,
 		rerpc.StreamTypeUnary,
 		c.baseURL,
@@ -117,6 +120,7 @@ func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opt
 	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
+		c.codecProvider,
 		c.doer,
 		rerpc.StreamTypeUnary,
 		c.baseURL,
@@ -164,6 +168,7 @@ func (c *pingServiceClientReRPC) Sum(ctx context.Context, opts ...rerpc.CallOpti
 	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
+		c.codecProvider,
 		c.doer,
 		rerpc.StreamTypeClient,
 		c.baseURL,
@@ -186,6 +191,7 @@ func (c *pingServiceClientReRPC) CountUp(ctx context.Context, req *CountUpReques
 	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
+		c.codecProvider,
 		c.doer,
 		rerpc.StreamTypeServer,
 		c.baseURL,
@@ -217,6 +223,7 @@ func (c *pingServiceClientReRPC) CumSum(ctx context.Context, opts ...rerpc.CallO
 	ic := rerpc.ConfiguredCallInterceptor(merged)
 	ctx, call := rerpc.NewCall(
 		ctx,
+		c.codecProvider,
 		c.doer,
 		rerpc.StreamTypeBidirectional,
 		c.baseURL,
@@ -252,6 +259,7 @@ type PingServiceReRPC interface {
 // NewPingServiceHandlerReRPC wraps each method on the service implementation in
 // a *rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
 func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOption) []*rerpc.Handler {
+	codecProvider := rerpc.NewCodecProvider()
 	handlers := make([]*rerpc.Handler, 0, 5)
 	ic := rerpc.ConfiguredHandlerInterceptor(opts)
 
@@ -271,6 +279,7 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 	}
 	ping := rerpc.NewHandler(
 		rerpc.StreamTypeUnary,
+		codecProvider,
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"Ping",                 // protobuf method
@@ -328,6 +337,7 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 	}
 	fail := rerpc.NewHandler(
 		rerpc.StreamTypeUnary,
+		codecProvider,
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"Fail",                 // protobuf method
@@ -371,6 +381,7 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 
 	sum := rerpc.NewHandler(
 		rerpc.StreamTypeClient,
+		codecProvider,
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"Sum",                  // protobuf method
@@ -400,6 +411,7 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 
 	countUp := rerpc.NewHandler(
 		rerpc.StreamTypeServer,
+		codecProvider,
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"CountUp",              // protobuf method
@@ -438,6 +450,7 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 
 	cumSum := rerpc.NewHandler(
 		rerpc.StreamTypeBidirectional,
+		codecProvider,
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"CumSum",               // protobuf method

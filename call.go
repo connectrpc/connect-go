@@ -40,6 +40,7 @@ type CallOption interface {
 // internal/ping/v1test package.
 func NewCall(
 	ctx context.Context,
+	codecProvider *CodecProvider,
 	doer Doer,
 	stype StreamType,
 	baseURL, pkg, service, method string,
@@ -82,7 +83,7 @@ func NewCall(
 	reqHeader["Te"] = teTrailersSlice
 	ctx = NewCallContext(ctx, spec, reqHeader, make(http.Header))
 	sf := StreamFunc(func(ctx context.Context) Stream {
-		return newClientStream(ctx, doer, methodURL, spec.ReadMaxBytes, cfg.EnableGzipRequest)
+		return newClientStream(ctx, codecProvider, doer, methodURL, spec.ReadMaxBytes, cfg.EnableGzipRequest)
 	})
 	return ctx, sf
 }
