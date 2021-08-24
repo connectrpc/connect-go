@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	statuspb "github.com/rerpc/rerpc/internal/status/v1"
 	"github.com/rerpc/rerpc/internal/twirp"
@@ -464,7 +465,17 @@ func statusFromError(err error) *statuspb.Status {
 	}
 	if re, ok := AsError(err); ok {
 		s.Code = int32(re.Code())
-		s.Details = re.Details()
+		details := re.Details()
+		anyDetails := make([]*anypb.Any, 0, len(details))
+		for _, detail := range details {
+			anyDetail, ok := detail.(*anypb.Any)
+			if !ok {
+				// Currently unreachable.
+				continue
+			}
+			anyDetails = append(anyDetails, anyDetail)
+		}
+		s.Details = anyDetails
 		if e := re.Unwrap(); e != nil {
 			s.Message = e.Error() // don't repeat code
 		}
@@ -496,7 +507,11 @@ func extractError(h http.Header) *Error {
 		if err := proto.Unmarshal(detailsBinary, &status); err != nil {
 			return errorf(CodeUnknown, "server returned invalid protobuf for error details: %w", err)
 		}
-		ret.details = status.Details
+		errorDetails := make([]ErrorDetail, len(status.Details))
+		for i, detail := range status.Details {
+			errorDetails[i] = NewProtoErrorDetail(detail)
+		}
+		ret.SetDetails(errorDetails...)
 		// Prefer the protobuf-encoded data to the headers (grpc-go does this too).
 		ret.code = Code(status.Code)
 		ret.err = errors.New(status.Message)

@@ -35,13 +35,25 @@ import (
 type Error struct {
 	code    Code
 	err     error
-	details []*anypb.Any
+	details []interface{}
+}
+
+// ErrorDetail represents an error detail sent between reRPC servers.
+type ErrorDetail interface {
+	isDetail()
+}
+
+// NewProtoErrorDetail constructs an ErrorDetail from the given proto.Message.
+func NewProtoErrorDetail(detail proto.Message) ErrorDetail {
+	return &protoErrorDetail{
+		detail: detail,
+	}
 }
 
 // Wrap annotates any error with a status code and error details. If the code
 // is CodeOK, the returned error is nil. Otherwise, the returned error will be
 // an *Error.
-func Wrap(c Code, err error, details ...proto.Message) error {
+func Wrap(c Code, err error, details ...ErrorDetail) error {
 	if e := wrap(c, err); e != nil {
 		e.SetDetails(details...)
 		return e
@@ -106,35 +118,52 @@ func (e *Error) Code() Code {
 	return e.code
 }
 
-// Details returns a deep copy of the error's details.
-func (e *Error) Details() []*anypb.Any {
+// Details returns a deep copy of the error's details. For now, this is always
+// a []*anypb.Any.
+func (e *Error) Details() []interface{} {
 	if len(e.details) == 0 {
 		return nil
 	}
-	ds := make([]*anypb.Any, len(e.details))
+	details := make([]interface{}, len(e.details))
 	for i, d := range e.details {
-		ds[i] = proto.Clone(d).(*anypb.Any)
+		// At this point, we only support *anypb.Any error details, so we
+		// can depend on this assertion as-is.
+		any, ok := d.(*anypb.Any)
+		if !ok {
+			// Currently unreachable based on the rest of the Error API.
+			//
+			// We include the error in the result so that we can avoid including
+			// an unreachable error in the signature.
+			details[i] = fmt.Errorf("detail %T is not a supported type; expected %T", d, &anypb.Any{})
+			continue
+		}
+		details[i] = proto.Clone(any).(*anypb.Any)
 	}
-	return ds
+	return details
 }
 
 // AddDetail appends a message to the error's details.
-func (e *Error) AddDetail(m proto.Message) error {
-	if d, ok := m.(*anypb.Any); ok {
+func (e *Error) AddDetail(detail ErrorDetail) error {
+	msg, ok := detail.(*protoErrorDetail)
+	if !ok {
+		// Currently unreachable.
+		return fmt.Errorf("detail %T is not a supported type; expected %T", detail, &anypb.Any{})
+	}
+	if d, ok := msg.detail.(*anypb.Any); ok {
 		e.details = append(e.details, proto.Clone(d).(*anypb.Any))
 		return nil
 	}
-	detail, err := anypb.New(m)
+	any, err := anypb.New(msg.detail)
 	if err != nil {
 		return fmt.Errorf("can't add message to error details: %w", err)
 	}
-	e.details = append(e.details, detail)
+	e.details = append(e.details, any)
 	return nil
 }
 
 // SetDetails overwrites the error's details.
-func (e *Error) SetDetails(details ...proto.Message) error {
-	e.details = make([]*anypb.Any, 0, len(details))
+func (e *Error) SetDetails(details ...ErrorDetail) error {
+	e.details = make([]interface{}, 0, len(details))
 	for _, d := range details {
 		if err := e.AddDetail(d); err != nil {
 			return err
@@ -154,6 +183,14 @@ func CodeOf(err error) Code {
 	}
 	return CodeUnknown
 }
+
+// protoErrorDetail implements the ErrorDetail interface, and is
+// backed by a proto.Message.
+type protoErrorDetail struct {
+	detail proto.Message
+}
+
+func (p *protoErrorDetail) isDetail() {}
 
 // Twirp has two errors that effectively subtype gRPC errors: Twirp's
 // "malformed" is a special case of CodeInvalidArgument, and Twirp's

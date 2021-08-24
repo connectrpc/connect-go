@@ -42,12 +42,25 @@ func TestCodeOf(t *testing.T) {
 
 func TestErrorDetails(t *testing.T) {
 	second := durationpb.New(time.Second)
+	secondErrorDetail := NewProtoErrorDetail(second)
 	detail, err := anypb.New(second)
 	assert.Nil(t, err, "create anypb.Any")
 	rerr := Errorf(CodeUnknown, "details").(*Error)
 	assert.Zero(t, rerr.Details(), "fresh error")
-	assert.Nil(t, rerr.AddDetail(second), "add detail")
-	assert.Equal(t, rerr.Details(), []*anypb.Any{detail}, "retrieve details")
-	assert.Nil(t, rerr.SetDetails(second, second), "overwrite details")
-	assert.Equal(t, rerr.Details(), []*anypb.Any{detail, detail}, "retrieve details")
+	assert.Nil(t, rerr.AddDetail(secondErrorDetail), "add detail")
+	assert.Equal(t, detailsAsAny(t, rerr.Details()), []*anypb.Any{detail}, "retrieve details")
+	assert.Nil(t, rerr.SetDetails(secondErrorDetail, secondErrorDetail), "overwrite details")
+	assert.Equal(t, detailsAsAny(t, rerr.Details()), []*anypb.Any{detail, detail}, "retrieve details")
+}
+
+// detailsAsAny is used to transform the given details into a
+// []*anypb.Any so that they can be reliably asserted in tests.
+func detailsAsAny(t *testing.T, details []interface{}) []*anypb.Any {
+	result := make([]*anypb.Any, len(details))
+	for i, detail := range details {
+		var ok bool
+		result[i], ok = detail.(*anypb.Any)
+		assert.True(t, ok, "detail should be an *anypb.Any")
+	}
+	return result
 }
