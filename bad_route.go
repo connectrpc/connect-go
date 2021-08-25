@@ -33,7 +33,7 @@ func badRouteUnaryImpl(ctx context.Context, _ proto.Message) (proto.Message, err
 	// There's no point checking the context and sending CodeCanceled or
 	// CodeDeadlineExceeded here - it's just as fast to send the bad route error.
 	path := "???"
-	if md, ok := HandlerMeta(ctx); ok {
+	if md, ok := HandlerMetadata(ctx); ok {
 		path = md.Spec.Path
 	}
 	return nil, Wrap(CodeNotFound, newBadRouteError(path))

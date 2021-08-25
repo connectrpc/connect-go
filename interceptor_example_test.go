@@ -14,7 +14,7 @@ import (
 func ExampleCallMetadata() {
 	logger := rerpc.UnaryInterceptorFunc(func(next rerpc.Func) rerpc.Func {
 		return rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
-			if md, ok := rerpc.CallMeta(ctx); ok {
+			if md, ok := rerpc.CallMetadata(ctx); ok {
 				fmt.Println("calling", md.Spec.Method)
 			}
 			return next(ctx, req)

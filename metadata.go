@@ -29,35 +29,35 @@ type Specification struct {
 	ReadMaxBytes        int64
 }
 
-// CallMetadata provides a Specification and access to request and response
-// headers for an in-progress client call. It's useful in Interceptors.
-type CallMetadata struct {
+// Metadata provides a Specification and access to request and response headers
+// for an in-progress client call or handler invocation.
+type Metadata struct {
 	Spec Specification
 	req  *Header
 	res  *Header
 }
 
 // Request returns the request headers.
-func (m CallMetadata) Request() Header {
+func (m Metadata) Request() Header {
 	if m.req == nil {
 		return NewHeader(make(http.Header))
 	}
 	return *m.req
 }
 
-// Response returns the response headers. In Interceptors, the response isn't
-// populated until the request is sent to the server.
-func (m CallMetadata) Response() Header {
+// Response returns the response headers. In client-side Interceptors, the
+// response isn't populated until the request is sent to the server.
+func (m Metadata) Response() Header {
 	if m.res == nil {
 		return NewHeader(make(http.Header))
 	}
 	return *m.res
 }
 
-// NewCallContext constructs a CallMetadata and attaches it to the supplied
-// context. It's useful in tests that rely on CallMeta.
+// NewCallContext constructs a Metadata and attaches it to the supplied
+// context. It's useful in tests that rely on CallMetadata.
 func NewCallContext(ctx context.Context, spec Specification, req, res http.Header) context.Context {
-	md := CallMetadata{
+	md := Metadata{
 		Spec: spec,
 		req:  &Header{raw: req},
 		res:  &Header{raw: res},
@@ -65,51 +65,26 @@ func NewCallContext(ctx context.Context, spec Specification, req, res http.Heade
 	return context.WithValue(ctx, callMetaKey, md)
 }
 
-// CallMeta retrieves CallMetadata from the supplied context. It only succeeds
+// CallMetadata retrieves Metadata from the supplied context. It only succeeds
 // in client calls - in other settings, the returned bool will be false. If
 // you're writing an Interceptor that uses different logic for servers and
-// clients, you can use CallMeta to check which logic to apply.
+// clients, you can use CallMetadata to check which logic to apply.
 //
-// To test interceptors that use CallMeta, pass them a context constructed by
-// NewCallContext.
-func CallMeta(ctx context.Context) (CallMetadata, bool) {
+// To test interceptors that use CallMetadata, pass them a context constructed
+// by NewCallContext.
+func CallMetadata(ctx context.Context) (Metadata, bool) {
 	iface := ctx.Value(callMetaKey)
 	if iface == nil {
-		return CallMetadata{}, false
+		return Metadata{}, false
 	}
-	md, ok := iface.(CallMetadata)
+	md, ok := iface.(Metadata)
 	return md, ok
-}
-
-// HandlerMetadata provides a Specification and access to request and response
-// headers for an in-progress handler invocation. It's useful in Interceptors
-// and protobuf service implementations.
-type HandlerMetadata struct {
-	Spec Specification
-	req  *Header
-	res  *Header
-}
-
-// Request returns the request headers.
-func (hm HandlerMetadata) Request() Header {
-	if hm.req == nil {
-		return NewHeader(make(http.Header))
-	}
-	return *hm.req
-}
-
-// Response returns the response headers.
-func (hm HandlerMetadata) Response() Header {
-	if hm.res == nil {
-		return NewHeader(make(http.Header))
-	}
-	return *hm.res
 }
 
 // NewHandlerContext constructs a HandlerMetadata and attaches it to the supplied
 // context. It's useful in tests that call HandlerMeta.
 func NewHandlerContext(ctx context.Context, spec Specification, req, res http.Header) context.Context {
-	md := HandlerMetadata{
+	md := Metadata{
 		Spec: spec,
 		req:  &Header{raw: req},
 		res:  &Header{raw: res},
@@ -117,25 +92,25 @@ func NewHandlerContext(ctx context.Context, spec Specification, req, res http.He
 	return context.WithValue(ctx, handlerMetaKey, md)
 }
 
-// HandlerMeta retrieves HandlerMetadata from the supplied context. It only
+// HandlerMetadata retrieves Metadata from the supplied context. It only
 // succeeds in handler invocations (including protobuf service implementations)
 // - in other settings, the returned bool will be false. If you're writing an
 // Interceptor that uses different logic for servers and clients, you can use
-// HandlerMeta to check which logic to apply.
+// HandlerMetadata to check which logic to apply.
 //
-// To test interceptors and service implementations that use HandlerMeta, pass
+// To test interceptors and service implementations that use HandlerMetadata, pass
 // them a context constructed by NewHandlerContext.
-func HandlerMeta(ctx context.Context) (HandlerMetadata, bool) {
+func HandlerMetadata(ctx context.Context) (Metadata, bool) {
 	iface := ctx.Value(handlerMetaKey)
 	if iface == nil {
-		return HandlerMetadata{}, false
+		return Metadata{}, false
 	}
-	md, ok := iface.(HandlerMetadata)
+	md, ok := iface.(Metadata)
 	return md, ok
 }
 
-// WithoutMeta strips any CallMetadata and HandlerMetadata from the context.
-func WithoutMeta(ctx context.Context) context.Context {
+// WithoutMetadata strips any Metadata from the context.
+func WithoutMetadata(ctx context.Context) context.Context {
 	noCall := context.WithValue(ctx, callMetaKey, nil)
 	return context.WithValue(noCall, handlerMetaKey, nil)
 }
