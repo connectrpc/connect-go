@@ -2,12 +2,11 @@ package rerpc
 
 import (
 	"bytes"
+	"compress/gzip"
 	_ "embed"
 	"io"
 	"net/http"
 	"sync"
-
-	"github.com/klauspost/compress/gzip"
 )
 
 //go:embed empty.gz
