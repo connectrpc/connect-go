@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/klauspost/compress"
 	"github.com/klauspost/compress/gzip"
 )
 
@@ -56,7 +55,7 @@ func putGzipReader(gr *gzip.Reader) {
 // messages and messages unlikely to be compress significantly aren't worth
 // burning CPU on.
 func isWorthCompressing(raw []byte) bool {
-	return len(raw) > 1024 && compress.Estimate(raw) > 0.1
+	return len(raw) > 1024
 }
 
 // Verify we're implementing these interfaces at compile time.
