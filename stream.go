@@ -209,7 +209,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 	// wait on cs.responseReady, so we can't race with them.
 	defer close(cs.responseReady)
 
-	md, ok := CallMeta(cs.ctx)
+	md, ok := CallMetadata(cs.ctx)
 	if !ok {
 		cs.setResponseError(errorf(CodeInternal, "no call metadata available on context"))
 		close(prepared)
