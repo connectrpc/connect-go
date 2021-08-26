@@ -49,7 +49,7 @@ lintfix: bin/gofmt bin/goimports ## Automatically fix some lint errors
 	@./bin/goimports -local github.com/rerpc/rerpc -w $(HANDWRITTEN)
 
 .PHONY: lintpb
-lintpb: bin/buf $(PROTOBUFS)
+lintpb: bin/buf buf.yaml $(PROTOBUFS)
 	@echo "Checking with buf lint..."
 	@./bin/buf lint
 	@echo "Checking with buf breaking..."
