@@ -1,4 +1,4 @@
-package retest
+package rerpctest
 
 import (
 	"net/http"

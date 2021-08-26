@@ -1,5 +1,6 @@
-// Package retest contains testing utilities for reRPC, including a replacement for httptest.Server.
-package retest
+// Package rerpctest contains testing utilities for reRPC, including a
+// replacement for httptest.Server.
+package rerpctest
 
 import (
 	"context"
