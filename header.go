@@ -166,9 +166,11 @@ func percentDecodeSlow(encoded string, offset int) string {
 	return out.String()
 }
 
-// Header provides access to HTTP headers. It's very similar to net/http's
-// Header, but automatically validates with IsValidHeaderKey and
+// Header provides access to HTTP headers and trailers. It's very similar to
+// net/http's Header, but automatically validates with IsValidHeaderKey and
 // IsValidHeaderValue.
+//
+// The zero value of Header is safe to use.
 type Header struct {
 	raw http.Header
 }
@@ -183,6 +185,9 @@ func NewHeader(raw http.Header) Header {
 // library's http.Header, keys are case-insensitive and canonicalized with
 // textproto.CanonicalMIMEHeaderKey.
 func (h Header) Get(key string) string {
+	if h.raw == nil {
+		return ""
+	}
 	return h.raw.Get(key)
 }
 
@@ -194,6 +199,10 @@ func (h Header) Get(key string) string {
 // For details on gRPC's treatment of binary headers, see
 // https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md.
 func (h Header) GetBinary(key string) ([]byte, error) {
+	if h.raw == nil {
+		return nil, nil
+	}
+	// TODO: what if the key's not present?
 	return decodeBinaryHeader(h.raw.Get(key + "-Bin"))
 }
 
@@ -204,6 +213,9 @@ func (h Header) GetBinary(key string) ([]byte, error) {
 // Unlike the standard library's http.Header.Values, the returned slice is a
 // copy.
 func (h Header) Values(key string) []string {
+	if h.raw == nil {
+		return nil
+	}
 	mutable := h.raw.Values(key)
 	// http.Header does *not* return a copy, but we need to prevent mutation.
 	return append(make([]string, 0, len(mutable)), mutable...)
@@ -212,6 +224,9 @@ func (h Header) Values(key string) []string {
 // Clone returns a copy of the underlying HTTP headers, including all reserved
 // keys.
 func (h Header) Clone() http.Header {
+	if h.raw == nil {
+		return make(http.Header)
+	}
 	return h.raw.Clone()
 }
 
@@ -229,6 +244,9 @@ func (h Header) Set(key, value string) error {
 	if err := IsValidHeaderValue(value); err != nil {
 		return err
 	}
+	if h.raw == nil {
+		h.raw = make(http.Header)
+	}
 	h.raw.Set(key, value)
 	return nil
 }
@@ -244,6 +262,9 @@ func (h Header) SetBinary(key string, value []byte) error {
 	key = key + "-Bin"
 	if err := IsValidHeaderKey(key); err != nil {
 		return err
+	}
+	if h.raw == nil {
+		h.raw = make(http.Header)
 	}
 	h.raw.Set(key, encodeBinaryHeader(value))
 	return nil
@@ -263,6 +284,9 @@ func (h Header) Add(key, value string) error {
 	if err := IsValidHeaderValue(value); err != nil {
 		return err
 	}
+	if h.raw == nil {
+		h.raw = make(http.Header)
+	}
 	h.raw.Add(key, value)
 	return nil
 }
@@ -277,6 +301,8 @@ func (h Header) Del(key string) error {
 	if err := IsValidHeaderKey(key); err != nil {
 		return err
 	}
-	h.raw.Del(key)
+	if h.raw != nil {
+		h.raw.Del(key)
+	}
 	return nil
 }
