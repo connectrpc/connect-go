@@ -37,7 +37,7 @@ func Example() {
 	mux := rerpc.NewServeMux(
 		pingpb.NewPingServiceHandlerReRPC(ping, reg, limit), // business logic
 		reflection.NewHandler(reg),                          // server reflection
-		health.NewHandler(checker, reg),                     // health checks
+		health.NewHandler(checker),                          // health checks
 		rerpc.NewBadRouteHandler(),                          // Twirp-compatible 404s
 	)
 
