@@ -2,12 +2,13 @@ package rerpc
 
 import (
 	"context"
-
-	"google.golang.org/protobuf/proto"
 )
 
 // Func is the generic signature of a unary RPC. Interceptors wrap Funcs.
-type Func func(context.Context, proto.Message) (proto.Message, error)
+//
+// The type of the request and response struct depend on the codec being used.
+// When using protobuf, they'll always be proto.Message implementations.
+type Func func(context.Context, interface{}) (interface{}, error)
 
 // StreamFunc is the generic signature of a streaming RPC. Interceptors wrap
 // StreamFuncs.
