@@ -5,15 +5,13 @@ import (
 	"fmt"
 	"net/http"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/rerpc/rerpc"
 	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
 )
 
 func ExampleCallMetadata() {
 	logger := rerpc.UnaryInterceptorFunc(func(next rerpc.Func) rerpc.Func {
-		return rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		return rerpc.Func(func(ctx context.Context, req interface{}) (interface{}, error) {
 			if md, ok := rerpc.CallMetadata(ctx); ok {
 				fmt.Println("calling", md.Spec.Method)
 			}
@@ -36,7 +34,7 @@ func ExampleCallMetadata() {
 
 func ExampleChain() {
 	outer := rerpc.UnaryInterceptorFunc(func(next rerpc.Func) rerpc.Func {
-		return rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		return rerpc.Func(func(ctx context.Context, req interface{}) (interface{}, error) {
 			fmt.Println("outer interceptor: before call")
 			res, err := next(ctx, req)
 			fmt.Println("outer interceptor: after call")
@@ -44,7 +42,7 @@ func ExampleChain() {
 		})
 	})
 	inner := rerpc.UnaryInterceptorFunc(func(next rerpc.Func) rerpc.Func {
-		return rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+		return rerpc.Func(func(ctx context.Context, req interface{}) (interface{}, error) {
 			fmt.Println("inner interceptor: before call")
 			res, err := next(ctx, req)
 			fmt.Println("inner interceptor: after call")

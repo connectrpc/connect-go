@@ -10,7 +10,6 @@ import (
 	context "context"
 	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
-	proto "google.golang.org/protobuf/proto"
 	strings "strings"
 )
 
@@ -78,7 +77,7 @@ func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, op
 		"Ping",                      // protobuf method
 		merged...,
 	)
-	wrapped := rerpc.Func(func(ctx context.Context, msg proto.Message) (proto.Message, error) {
+	wrapped := rerpc.Func(func(ctx context.Context, msg interface{}) (interface{}, error) {
 		stream := call(ctx)
 		if err := stream.Send(req); err != nil {
 			_ = stream.CloseSend(err)
@@ -105,7 +104,7 @@ func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, op
 	}
 	typed, ok := res.(*PingResponse)
 	if !ok {
-		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.crosstest.v1test.PingResponse, got %v", res.ProtoReflect().Descriptor().FullName())
+		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.crosstest.v1test.PingResponse, got %T", res)
 	}
 	return typed, nil
 }
@@ -125,7 +124,7 @@ func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, op
 		"Fail",                      // protobuf method
 		merged...,
 	)
-	wrapped := rerpc.Func(func(ctx context.Context, msg proto.Message) (proto.Message, error) {
+	wrapped := rerpc.Func(func(ctx context.Context, msg interface{}) (interface{}, error) {
 		stream := call(ctx)
 		if err := stream.Send(req); err != nil {
 			_ = stream.CloseSend(err)
@@ -152,7 +151,7 @@ func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, op
 	}
 	typed, ok := res.(*FailResponse)
 	if !ok {
-		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.crosstest.v1test.FailResponse, got %v", res.ProtoReflect().Descriptor().FullName())
+		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.crosstest.v1test.FailResponse, got %T", res)
 	}
 	return typed, nil
 }
@@ -255,13 +254,13 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 	handlers := make([]*rerpc.Handler, 0, 5)
 	ic := rerpc.ConfiguredHandlerInterceptor(opts)
 
-	pingFunc := rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+	pingFunc := rerpc.Func(func(ctx context.Context, req interface{}) (interface{}, error) {
 		typed, ok := req.(*PingRequest)
 		if !ok {
 			return nil, rerpc.Errorf(
 				rerpc.CodeInternal,
-				"can't call internal.crosstest.v1test.CrossService.Ping with a %v",
-				req.ProtoReflect().Descriptor().FullName(),
+				"can't call internal.crosstest.v1test.CrossService.Ping with a %T",
+				req,
 			)
 		}
 		return svc.Ping(ctx, typed)
@@ -312,13 +311,13 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 	)
 	handlers = append(handlers, ping)
 
-	failFunc := rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+	failFunc := rerpc.Func(func(ctx context.Context, req interface{}) (interface{}, error) {
 		typed, ok := req.(*FailRequest)
 		if !ok {
 			return nil, rerpc.Errorf(
 				rerpc.CodeInternal,
-				"can't call internal.crosstest.v1test.CrossService.Fail with a %v",
-				req.ProtoReflect().Descriptor().FullName(),
+				"can't call internal.crosstest.v1test.CrossService.Fail with a %T",
+				req,
 			)
 		}
 		return svc.Fail(ctx, typed)

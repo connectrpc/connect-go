@@ -10,7 +10,6 @@ import (
 	context "context"
 	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
-	proto "google.golang.org/protobuf/proto"
 	strings "strings"
 )
 
@@ -78,7 +77,7 @@ func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opt
 		"Ping",                 // protobuf method
 		merged...,
 	)
-	wrapped := rerpc.Func(func(ctx context.Context, msg proto.Message) (proto.Message, error) {
+	wrapped := rerpc.Func(func(ctx context.Context, msg interface{}) (interface{}, error) {
 		stream := call(ctx)
 		if err := stream.Send(req); err != nil {
 			_ = stream.CloseSend(err)
@@ -105,7 +104,7 @@ func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opt
 	}
 	typed, ok := res.(*PingResponse)
 	if !ok {
-		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.ping.v1test.PingResponse, got %v", res.ProtoReflect().Descriptor().FullName())
+		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.ping.v1test.PingResponse, got %T", res)
 	}
 	return typed, nil
 }
@@ -125,7 +124,7 @@ func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opt
 		"Fail",                 // protobuf method
 		merged...,
 	)
-	wrapped := rerpc.Func(func(ctx context.Context, msg proto.Message) (proto.Message, error) {
+	wrapped := rerpc.Func(func(ctx context.Context, msg interface{}) (interface{}, error) {
 		stream := call(ctx)
 		if err := stream.Send(req); err != nil {
 			_ = stream.CloseSend(err)
@@ -152,7 +151,7 @@ func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opt
 	}
 	typed, ok := res.(*FailResponse)
 	if !ok {
-		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.ping.v1test.FailResponse, got %v", res.ProtoReflect().Descriptor().FullName())
+		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.ping.v1test.FailResponse, got %T", res)
 	}
 	return typed, nil
 }
@@ -255,13 +254,13 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 	handlers := make([]*rerpc.Handler, 0, 5)
 	ic := rerpc.ConfiguredHandlerInterceptor(opts)
 
-	pingFunc := rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+	pingFunc := rerpc.Func(func(ctx context.Context, req interface{}) (interface{}, error) {
 		typed, ok := req.(*PingRequest)
 		if !ok {
 			return nil, rerpc.Errorf(
 				rerpc.CodeInternal,
-				"can't call internal.ping.v1test.PingService.Ping with a %v",
-				req.ProtoReflect().Descriptor().FullName(),
+				"can't call internal.ping.v1test.PingService.Ping with a %T",
+				req,
 			)
 		}
 		return svc.Ping(ctx, typed)
@@ -312,13 +311,13 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 	)
 	handlers = append(handlers, ping)
 
-	failFunc := rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+	failFunc := rerpc.Func(func(ctx context.Context, req interface{}) (interface{}, error) {
 		typed, ok := req.(*FailRequest)
 		if !ok {
 			return nil, rerpc.Errorf(
 				rerpc.CodeInternal,
-				"can't call internal.ping.v1test.PingService.Fail with a %v",
-				req.ProtoReflect().Descriptor().FullName(),
+				"can't call internal.ping.v1test.PingService.Fail with a %T",
+				req,
 			)
 		}
 		return svc.Fail(ctx, typed)

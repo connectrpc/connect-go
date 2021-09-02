@@ -2,9 +2,6 @@ package rerpc
 
 import (
 	"context"
-
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // NewBadRouteHandler always returns gRPC and Twirp's equivalent of the
@@ -22,14 +19,14 @@ func NewBadRouteHandler(opts ...HandlerOption) []*Handler {
 		func(ctx context.Context, sf StreamFunc) {
 			stream := sf(ctx)
 			_ = stream.CloseReceive()
-			_, err := wrapped(ctx, &emptypb.Empty{})
+			_, err := wrapped(ctx, nil)
 			_ = stream.CloseSend(err)
 		},
 	)
 	return []*Handler{h}
 }
 
-func badRouteUnaryImpl(ctx context.Context, _ proto.Message) (proto.Message, error) {
+func badRouteUnaryImpl(ctx context.Context, _ interface{}) (interface{}, error) {
 	// There's no point checking the context and sending CodeCanceled or
 	// CodeDeadlineExceeded here - it's just as fast to send the bad route error.
 	path := "???"

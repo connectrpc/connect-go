@@ -10,7 +10,6 @@ import (
 	context "context"
 	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
-	proto "google.golang.org/protobuf/proto"
 	strings "strings"
 )
 
@@ -90,7 +89,7 @@ func (c *healthClientReRPC) Check(ctx context.Context, req *HealthCheckRequest, 
 		"Check",              // protobuf method
 		merged...,
 	)
-	wrapped := rerpc.Func(func(ctx context.Context, msg proto.Message) (proto.Message, error) {
+	wrapped := rerpc.Func(func(ctx context.Context, msg interface{}) (interface{}, error) {
 		stream := call(ctx)
 		if err := stream.Send(req); err != nil {
 			_ = stream.CloseSend(err)
@@ -117,7 +116,7 @@ func (c *healthClientReRPC) Check(ctx context.Context, req *HealthCheckRequest, 
 	}
 	typed, ok := res.(*HealthCheckResponse)
 	if !ok {
-		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.health.v1.HealthCheckResponse, got %v", res.ProtoReflect().Descriptor().FullName())
+		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.health.v1.HealthCheckResponse, got %T", res)
 	}
 	return typed, nil
 }
@@ -190,13 +189,13 @@ func NewHealthHandlerReRPC(svc HealthReRPC, opts ...rerpc.HandlerOption) []*rerp
 	handlers := make([]*rerpc.Handler, 0, 2)
 	ic := rerpc.ConfiguredHandlerInterceptor(opts)
 
-	checkFunc := rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+	checkFunc := rerpc.Func(func(ctx context.Context, req interface{}) (interface{}, error) {
 		typed, ok := req.(*HealthCheckRequest)
 		if !ok {
 			return nil, rerpc.Errorf(
 				rerpc.CodeInternal,
-				"can't call internal.health.v1.Health.Check with a %v",
-				req.ProtoReflect().Descriptor().FullName(),
+				"can't call internal.health.v1.Health.Check with a %T",
+				req,
 			)
 		}
 		return svc.Check(ctx, typed)

@@ -6,14 +6,13 @@ import (
 	"io"
 	"testing"
 
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/rerpc/rerpc/internal/assert"
 )
 
 func assertingFunc(f func(context.Context)) Func {
-	return Func(func(ctx context.Context, _ proto.Message) (proto.Message, error) {
+	return Func(func(ctx context.Context, _ interface{}) (interface{}, error) {
 		f(ctx)
 		return &emptypb.Empty{}, nil
 	})
@@ -25,7 +24,7 @@ type loggingInterceptor struct {
 }
 
 func (i *loggingInterceptor) Wrap(next Func) Func {
-	return Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+	return Func(func(ctx context.Context, req interface{}) (interface{}, error) {
 		io.WriteString(i.w, i.before)
 		defer func() { io.WriteString(i.w, i.after) }()
 		return next(ctx, req)
