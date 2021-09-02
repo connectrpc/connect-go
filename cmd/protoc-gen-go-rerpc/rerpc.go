@@ -23,7 +23,6 @@ var (
 	contextContext          = contextPackage.Ident("Context")
 	contextCanceled         = contextPackage.Ident("Canceled")
 	contextDeadlineExceeded = contextPackage.Ident("DeadlineExceeded")
-	protoMessage            = protoPackage.Ident("Message")
 	errorsIs                = errorsPackage.Ident("Is")
 )
 
@@ -252,7 +251,7 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, cname st
 		return
 	}
 
-	g.P("wrapped := ", rerpcPackage.Ident("Func"), "(func(ctx ", contextContext, ", msg ", protoMessage, ") (", protoMessage, ", error) {")
+	g.P("wrapped := ", rerpcPackage.Ident("Func"), "(func(ctx ", contextContext, ", msg interface{}) (interface{}, error) {")
 	g.P("stream := call(ctx)")
 	g.P("if err := stream.Send(req); err != nil {")
 	g.P("_ = stream.CloseSend(err)")
@@ -280,7 +279,7 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, cname st
 	g.P("}")
 	g.P("typed, ok := res.(*", method.Output.GoIdent, ")")
 	g.P("if !ok {")
-	g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(", rerpcPackage.Ident("CodeInternal"), `, "expected response to be `, method.Output.Desc.FullName(), `, got %v", res.ProtoReflect().Descriptor().FullName())`)
+	g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(", rerpcPackage.Ident("CodeInternal"), `, "expected response to be `, method.Output.Desc.FullName(), `, got %T", res)`)
 	g.P("}")
 	g.P("return typed, nil")
 	g.P("}")
@@ -471,13 +470,13 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 
 		} else {
 			wrapped := hname + "Func"
-			g.P(wrapped, " := ", rerpcPackage.Ident("Func"), "(func(ctx ", contextContext, ", req ", protoMessage, ") (", protoMessage, ", error) {")
+			g.P(wrapped, " := ", rerpcPackage.Ident("Func"), "(func(ctx ", contextContext, ", req interface{}) (interface{}, error) {")
 			g.P("typed, ok := req.(*", method.Input.GoIdent, ")")
 			g.P("if !ok {")
 			g.P("return nil, ", rerpcPackage.Ident("Errorf"), "(")
 			g.P(rerpcPackage.Ident("CodeInternal"), ",")
-			g.P(`"can't call `, method.Desc.FullName(), ` with a %v",`)
-			g.P("req.ProtoReflect().Descriptor().FullName(),")
+			g.P(`"can't call `, method.Desc.FullName(), ` with a %T",`)
+			g.P("req,")
 			g.P(")")
 			g.P("}")
 			g.P("return svc.", method.GoName, "(ctx, typed)")

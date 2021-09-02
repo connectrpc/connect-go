@@ -707,7 +707,7 @@ type metadataIntegrationInterceptor struct {
 }
 
 func (i *metadataIntegrationInterceptor) Wrap(next rerpc.Func) rerpc.Func {
-	return rerpc.Func(func(ctx context.Context, req proto.Message) (proto.Message, error) {
+	return rerpc.Func(func(ctx context.Context, req interface{}) (interface{}, error) {
 		callMD, isCall := rerpc.CallMetadata(ctx)
 		handlerMD, isHandler := rerpc.HandlerMetadata(ctx)
 		assert.False(

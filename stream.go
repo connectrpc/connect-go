@@ -29,12 +29,12 @@ type Stream interface {
 
 	// Implementations must ensure that Send and CloseSend don't race with
 	// Context, Receive, or CloseReceive. They may race with each other.
-	Send(proto.Message) error
+	Send(interface{}) error
 	CloseSend(error) error
 
 	// Implementations must ensure that Receive and CloseReceive don't race with
 	// Context, Send, or CloseSend. They may race with each other.
-	Receive(proto.Message) error
+	Receive(interface{}) error
 	CloseReceive() error
 }
 
@@ -114,7 +114,12 @@ func (cs *clientStream) Context() context.Context {
 	return cs.ctx
 }
 
-func (cs *clientStream) Send(msg proto.Message) error {
+func (cs *clientStream) Send(m interface{}) error {
+	// TODO: update this when codec is pluggable
+	msg, ok := m.(proto.Message)
+	if !ok {
+		return errorf(CodeInternal, "expected proto.Message, got %T", m)
+	}
 	// Calling Marshal writes data to the send stream. It's safe to do this while
 	// makeRequest is running, because we're writing to our side of the pipe
 	// (which is safe to do while net/http reads from the other side).
@@ -164,7 +169,12 @@ func (cs *clientStream) CloseSend(_ error) error {
 	return nil
 }
 
-func (cs *clientStream) Receive(msg proto.Message) error {
+func (cs *clientStream) Receive(m interface{}) error {
+	// TODO: update this when codec is pluggable
+	msg, ok := m.(proto.Message)
+	if !ok {
+		return errorf(CodeInternal, "expected proto.Message, got %T", m)
+	}
 	// First, we wait until we've gotten the response headers and established the
 	// server-to-client side of the stream.
 	<-cs.responseReady
@@ -359,7 +369,12 @@ func (ss *serverStream) Context() context.Context {
 	return ss.ctx
 }
 
-func (ss *serverStream) Receive(msg proto.Message) error {
+func (ss *serverStream) Receive(m interface{}) error {
+	// TODO: update this when codec is pluggable
+	msg, ok := m.(proto.Message)
+	if !ok {
+		return errorf(CodeInternal, "expected proto.Message, got %T", m)
+	}
 	if err := ss.unmarshaler.Unmarshal(msg); err != nil {
 		return err // already coded
 	}
@@ -378,7 +393,12 @@ func (ss *serverStream) CloseReceive() error {
 	return nil
 }
 
-func (ss *serverStream) Send(msg proto.Message) error {
+func (ss *serverStream) Send(m interface{}) error {
+	// TODO: update this when codec is pluggable
+	msg, ok := m.(proto.Message)
+	if !ok {
+		return errorf(CodeInternal, "expected proto.Message, got %T", m)
+	}
 	defer ss.flush()
 	if err := ss.marshaler.Marshal(msg); err != nil {
 		return err
