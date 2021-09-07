@@ -23,6 +23,11 @@ type callCfg struct {
 	Interceptor       Interceptor
 }
 
+type ClientOption interface {
+	CallOption
+	applyToClient()
+}
+
 // A CallOption configures a reRPC client or a single call.
 //
 // In addition to any options grouped in the documentation below, remember that
@@ -31,20 +36,21 @@ type CallOption interface {
 	applyToCall(*callCfg)
 }
 
-type requestHeadersOption struct{}
+type requestHeaderOption struct{}
 
-func (requestHeadersOption) applyToCall(*callCfg) {}
+func (requestHeaderOption) applyToCall(*callCfg) {}
+func (requestHeaderOption) applyToClient()       {}
 
-func RequestHeaders(MutableHeader) CallOption {
-	return requestHeadersOption{}
+func RequestHeader(Header) ClientOption {
+	return requestHeaderOption{}
 }
 
-type responseHeadersOption struct{}
+type responseHeaderOption struct{}
 
-func (responseHeadersOption) applyToCall(*callCfg) {}
+func (responseHeaderOption) applyToCall(*callCfg) {}
 
-func ResponseHeaders(*ImmutableHeader) CallOption {
-	return responseHeadersOption{}
+func ResponseHeader(*Header) CallOption {
+	return responseHeaderOption{}
 }
 
 // NewCall returns the context and StreamFunc required to call a remote

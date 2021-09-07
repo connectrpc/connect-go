@@ -768,94 +768,61 @@ type headerPingServer struct {
 }
 
 func (s headerPingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingpb.PingResponse, error) {
-	handlerMD, _ := rerpc.HandlerMeta(ctx)
-	u := strings.ToUpper(handlerMD.Request().Get("Test-Ping"))
-	handlerMD.Response().Set("Test-Ping", u)
+	md, _ := rerpc.HandlerMetadata(ctx)
+	u := strings.ToUpper(md.Request().Get("Test-Ping"))
+	md.Response().Set("Test-Ping", u)
 	return &pingpb.PingResponse{Number: req.Number, Msg: req.Msg}, nil
 }
 
 //lint:ignore U1000 skip tests while the implementation is WIP
-type headerPingInterceptor struct{}
+var headerPingInterceptor = rerpc.UnaryInterceptorFunc(
+	func(next rerpc.Func) rerpc.Func {
+		return func(ctx context.Context, msg interface{}) (interface{}, error) {
+			md, _ := rerpc.CallMetadata(ctx)
+			reqHeader := md.Request()
+			reqHeader.Set("Test-Ping", reqHeader.Get("Test-Ping")+"bar")
 
-func (i headerPingInterceptor) Wrap(next rerpc.Func) rerpc.Func {
-	return rerpc.Func(func(ctx context.Context, msg proto.Message) (proto.Message, error) {
-		callerMD, _ := rerpc.CallMeta(ctx)
-		requestMeta := callerMD.Request()
-		v := requestMeta.Get("Test-Ping") + "bar"
-		requestMeta.Set("Test-Ping", v)
-		return next(ctx, msg)
-	})
-}
+			res, err := next(ctx, msg)
 
-func (i headerPingInterceptor) WrapStream(next rerpc.StreamFunc) rerpc.StreamFunc {
-	return next
-}
+			resHeader := md.Response()
+			resHeader.Set("Test-Ping", resHeader.Get("Test-Ping")+"baz")
+			return res, err
+		}
+	},
+)
 
 func TestCallHeadersOption(t *testing.T) {
-	t.Skip("API brainstorm")
-	mux := http.NewServeMux()
-	mux.Handle(pingpb.NewPingServiceHandlerReRPC(headerPingServer{}))
+	t.Skip("WIP")
+	mux := rerpc.NewServeMux(
+		pingpb.NewPingServiceHandlerReRPC(headerPingServer{}),
+	)
 	server := httptest.NewServer(mux)
 	defer server.Close()
-	defaultHeaders := rerpc.NewMutableHeader(make(http.Header))
+	defaultHeaders := rerpc.NewHeader(make(http.Header))
 	defaultHeaders.Set("Test-Default", "foo")
+	var dummyHeaders rerpc.Header
 	client := pingpb.NewPingServiceClientReRPC(
 		server.URL,
 		server.Client(),
-		rerpc.Intercept(headerPingInterceptor{}),
-		rerpc.RequestHeaders(defaultHeaders),
+		rerpc.Intercept(headerPingInterceptor),
+		rerpc.RequestHeader(defaultHeaders),
+		// rerpc.ResponseHeader(&dummyHeaders), // cannot use
 	)
 
-	requestHeaders := rerpc.NewMutableHeader(make(http.Header))
+	requestHeaders := rerpc.NewHeader(make(http.Header))
 	requestHeaders.Set("Test-Ping", "foo")
-	requestHeadersOption := rerpc.RequestHeaders(requestHeaders)
+	requestHeadersOption := rerpc.RequestHeader(requestHeaders)
 	requestHeaders.Set("Test-Ping", "") // option should copy
-	var responseHeaders rerpc.ImmutableHeader
+	var responseHeaders rerpc.Header
 
 	_, err := client.Ping(
 		context.Background(),
 		&pingpb.PingRequest{},
 		requestHeadersOption,
-		rerpc.ResponseHeaders(&responseHeaders),
+		rerpc.ResponseHeader(&responseHeaders),
 	)
 	assert.Nil(t, err, "call error")
-	assert.Equal(t, responseHeaders.Get("Test-Ping"), "FOOBAR", "header probe")
+	assert.Equal(t, responseHeaders.Get("Test-Ping"), "FOOBARbaz", "header probe")
 	assert.Zero(t, responseHeaders.Get("Test-Default"), "default header overwrite")
-}
-
-// WithHeaders returns a copy of the parent context with arbitrary headers set.
-// The context can be used to pass user headers into a client call and for
-// reading response headers from a call's response.
-//
-// RequestHeaders can be nil if one is only interested in reading the
-// response headers.
-func WithHeaders(c context.Context, requestHeaders rerpc.MutableHeader) context.Context { return c }
-func ResponseHeaders(context.Context) (rerpc.ImmutableHeader, bool) {
-	return rerpc.NewImmutableHeader(nil), true
-}
-
-func TestCallHeadersContext(t *testing.T) {
-	t.Skip("API brainstorm")
-	mux := http.NewServeMux()
-	mux.Handle(pingpb.NewPingServiceHandlerReRPC(headerPingServer{}))
-	server := httptest.NewServer(mux)
-	defer server.Close()
-	client := pingpb.NewPingServiceClientReRPC(
-		server.URL,
-		server.Client(),
-		rerpc.Intercept(headerPingInterceptor{}),
-	)
-
-	ctx := context.Background()
-	requestHeaders := rerpc.NewMutableHeader(make(http.Header))
-	requestHeaders.Set("Test-Ping", "foo")
-	ctx = WithHeaders(ctx, requestHeaders)
-	requestHeaders.Set("Test-Ping", "") // ctx should copy
-
-	_, err := client.Ping(ctx, &pingpb.PingRequest{})
-	assert.Nil(t, err, "call error")
-	responseHeaders, ok := ResponseHeaders(ctx)
-	assert.True(t, ok, "response headers")
-	assert.Equal(t, responseHeaders.Get("Test-Ping"), "FOOBAR", "header probe")
-	assert.Zero(t, responseHeaders.Get("Test-Default"), "default header overwrite")
+	assert.Zero(t, dummyHeaders.Clone(), "dummy client response headers option")
 }

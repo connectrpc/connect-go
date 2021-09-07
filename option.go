@@ -3,7 +3,7 @@ package rerpc
 // Option implements both CallOption and HandlerOption, so it can be applied
 // both client-side and server-side.
 type Option interface {
-	CallOption
+	ClientOption
 	HandlerOption
 }
 
@@ -29,6 +29,7 @@ func OverrideProtobufPackage(pkg string) Option {
 func (o *overridePkg) applyToCall(cfg *callCfg) {
 	cfg.Package = o.pkg
 }
+func (o *overridePkg) applyToClient() {}
 
 func (o *overridePkg) applyToHandler(cfg *handlerCfg) {
 	cfg.Package = o.pkg
@@ -55,6 +56,7 @@ func ReadMaxBytes(n int64) Option {
 func (o *readMaxBytes) applyToCall(cfg *callCfg) {
 	cfg.MaxResponseBytes = o.Max
 }
+func (o *readMaxBytes) applyToClient() {}
 
 func (o *readMaxBytes) applyToHandler(cfg *handlerCfg) {
 	cfg.MaxRequestBytes = o.Max
@@ -87,6 +89,7 @@ func (o *gzipOption) applyToCall(cfg *callCfg) {
 	// case 6.
 	cfg.EnableGzipRequest = o.Enable
 }
+func (o *gzipOption) applyToClient() {}
 
 func (o *gzipOption) applyToHandler(cfg *handlerCfg) {
 	cfg.DisableGzipResponse = !o.Enable
@@ -106,6 +109,7 @@ func Intercept(interceptor Interceptor) Option {
 func (o *interceptOption) applyToCall(cfg *callCfg) {
 	cfg.Interceptor = o.interceptor
 }
+func (o *interceptOption) applyToClient() {}
 
 func (o *interceptOption) applyToHandler(cfg *handlerCfg) {
 	cfg.Interceptor = o.interceptor
