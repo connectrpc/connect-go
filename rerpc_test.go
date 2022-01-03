@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/rerpc/rerpc"
+	"github.com/rerpc/rerpc/handlerstream"
 	"github.com/rerpc/rerpc/health"
 	"github.com/rerpc/rerpc/internal/assert"
 	healthpb "github.com/rerpc/rerpc/internal/health/v1"
@@ -41,7 +42,10 @@ func (p pingServer) Fail(ctx context.Context, req *pingpb.FailRequest) (*pingpb.
 	return nil, rerpc.Errorf(rerpc.Code(req.Code), errMsg)
 }
 
-func (p pingServer) Sum(ctx context.Context, stream *pingpb.PingServiceReRPC_Sum) error {
+func (p pingServer) Sum(
+	ctx context.Context,
+	stream *handlerstream.Client[pingpb.SumRequest, pingpb.SumResponse],
+) error {
 	var sum int64
 	for {
 		if err := ctx.Err(); err != nil {
@@ -59,7 +63,11 @@ func (p pingServer) Sum(ctx context.Context, stream *pingpb.PingServiceReRPC_Sum
 	}
 }
 
-func (p pingServer) CountUp(ctx context.Context, req *pingpb.CountUpRequest, stream *pingpb.PingServiceReRPC_CountUp) error {
+func (p pingServer) CountUp(
+	ctx context.Context,
+	req *pingpb.CountUpRequest,
+	stream *handlerstream.Server[pingpb.CountUpResponse],
+) error {
 	if req.Number <= 0 {
 		return rerpc.Errorf(rerpc.CodeInvalidArgument, "number must be positive: got %v", req.Number)
 	}
@@ -74,7 +82,10 @@ func (p pingServer) CountUp(ctx context.Context, req *pingpb.CountUpRequest, str
 	return nil
 }
 
-func (p pingServer) CumSum(ctx context.Context, stream *pingpb.PingServiceReRPC_CumSum) error {
+func (p pingServer) CumSum(
+	ctx context.Context,
+	stream *handlerstream.Bidirectional[pingpb.CumSumRequest, pingpb.CumSumResponse],
+) error {
 	var sum int64
 	for {
 		if err := ctx.Err(); err != nil {
@@ -536,7 +547,7 @@ func TestServerProtoGRPC(t *testing.T) {
 		}, "services registered in memory")
 
 		callReflect := func(req *reflectionpb.ServerReflectionRequest, opts ...rerpc.CallOption) (*reflectionpb.ServerReflectionResponse, error) {
-			ctx, call := rerpc.NewCall(
+			ctx, call := rerpc.NewClientStream(
 				context.Background(),
 				doer,
 				rerpc.StreamTypeUnary,

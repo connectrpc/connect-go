@@ -2,6 +2,7 @@ package rerpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -73,14 +74,88 @@ type Handler struct {
 	implementation func(context.Context, StreamFunc)
 }
 
-// NewHandler constructs a Handler. The supplied package, service, and method
-// names must be protobuf identifiers. For example, a handler for the URL
-// "/acme.foo.v1.FooService/Bar" would have package "acme.foo.v1", service
+// NewUnaryHandler constructs a Handler. The supplied package, service, and
+// method names must be protobuf identifiers. For example, a handler for the
+// URL "/acme.foo.v1.FooService/Bar" would have package "acme.foo.v1", service
 // "FooService", and method "Bar".
 //
-// Remember that NewHandler is usually called from generated code - most users
-// won't need to deal with protobuf identifiers directly.
-func NewHandler(
+// Remember that NewUnaryHandler is usually called from generated code - most
+// users won't need to deal with protobuf identifiers directly.
+func NewUnaryHandler[Req, Res any](
+	pkg, service, method string,
+	implementation func(context.Context, *Req) (*Res, error),
+	opts ...HandlerOption,
+) *Handler {
+	cfg := handlerCfg{
+		Package: pkg,
+		Service: service,
+		Method:  method,
+	}
+	for _, opt := range opts {
+		opt.applyToHandler(&cfg)
+	}
+	if reg := cfg.Registrar; reg != nil && !cfg.DisableRegistration {
+		reg.register(cfg.Package, cfg.Service)
+	}
+	untyped := Func(func(ctx context.Context, req interface{}) (interface{}, error) {
+		typed, ok := req.(*Req)
+		if !ok {
+			var expected Req
+			return nil, Errorf(CodeInternal, "expected response to be *%T, got %T", expected, req)
+		}
+		return implementation(ctx, typed)
+	})
+	if ic := cfg.Interceptor; ic != nil {
+		untyped = ic.Wrap(untyped)
+	}
+	return &Handler{
+		stype:  StreamTypeUnary,
+		config: cfg,
+		implementation: func(ctx context.Context, sf StreamFunc) {
+			stream := sf(ctx)
+			defer stream.CloseReceive()
+			if err := ctx.Err(); err != nil {
+				if errors.Is(err, context.Canceled) {
+					_ = stream.CloseSend(Wrap(CodeCanceled, err))
+					return
+				}
+				if errors.Is(err, context.DeadlineExceeded) {
+					_ = stream.CloseSend(Wrap(CodeDeadlineExceeded, err))
+					return
+				}
+				_ = stream.CloseSend(err) // unreachable per context docs
+			}
+			var req Req
+			if err := stream.Receive(&req); err != nil {
+				_ = stream.CloseSend(err)
+				return
+			}
+			res, err := untyped(ctx, &req)
+			if err != nil {
+				if _, ok := AsError(err); !ok {
+					if errors.Is(err, context.Canceled) {
+						err = Wrap(CodeCanceled, err)
+					}
+					if errors.Is(err, context.DeadlineExceeded) {
+						err = Wrap(CodeDeadlineExceeded, err)
+					}
+				}
+				_ = stream.CloseSend(err)
+				return
+			}
+			_ = stream.CloseSend(stream.Send(res))
+		},
+	}
+}
+
+// NewStreamingHandler constructs a Handler. The supplied package, service, and
+// method names must be protobuf identifiers. For example, a handler for the
+// URL "/acme.foo.v1.FooService/Bar" would have package "acme.foo.v1", service
+// "FooService", and method "Bar".
+//
+// Remember that NewStreamingHandler is usually called from generated code -
+// most users won't need to deal with protobuf identifiers directly.
+func NewStreamingHandler(
 	stype StreamType,
 	pkg, service, method string,
 	implementation func(context.Context, StreamFunc),
@@ -147,7 +222,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ContentType:         ctype,
 		RequestCompression:  CompressionIdentity,
 		ResponseCompression: CompressionIdentity,
-		ReadMaxBytes:        h.config.MaxRequestBytes,
 	}
 
 	// We need to parse metadata before entering the interceptor stack, but we'd
@@ -272,6 +346,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			spec.ResponseCompression == CompressionGzip,
 		)
 	})
+	if ic := h.config.Interceptor; ic != nil && h.stype != StreamTypeUnary {
+		sf = ic.WrapStream(sf)
+	}
 	if failed != nil {
 		stream := sf(ctx)
 		_ = stream.CloseReceive()

@@ -30,26 +30,6 @@ type Interceptor interface {
 	WrapStream(StreamFunc) StreamFunc
 }
 
-// ConfiguredCallInterceptor returns the Interceptor configured by a collection
-// of call options (if any). It's used in generated code.
-func ConfiguredCallInterceptor(opts []CallOption) Interceptor {
-	var cfg callCfg
-	for _, o := range opts {
-		o.applyToCall(&cfg)
-	}
-	return cfg.Interceptor
-}
-
-// ConfiguredHandlerInterceptor returns the Interceptor configured by a collection
-// of handler options (if any). It's used in generated code.
-func ConfiguredHandlerInterceptor(opts []HandlerOption) Interceptor {
-	var cfg handlerCfg
-	for _, o := range opts {
-		o.applyToHandler(&cfg)
-	}
-	return cfg.Interceptor
-}
-
 // A UnaryInterceptorFunc is a simple Interceptor implementation that only
 // wraps unary RPCs. It has no effect on client, server, or bidirectional
 // streaming RPCs. See CallMetadata for an example.
