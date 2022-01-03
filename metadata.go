@@ -26,7 +26,6 @@ type Specification struct {
 	ContentType         string
 	RequestCompression  string
 	ResponseCompression string
-	ReadMaxBytes        int64
 }
 
 // Metadata provides a Specification and access to request and response headers
