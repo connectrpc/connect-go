@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/rerpc/rerpc"
+	"github.com/rerpc/rerpc/handlerstream"
 	healthpb "github.com/rerpc/rerpc/internal/health/v1"
 )
 
@@ -63,7 +64,11 @@ func (s *server) Check(ctx context.Context, req *healthpb.HealthCheckRequest) (*
 	}, nil
 }
 
-func (s *server) Watch(_ context.Context, _ *healthpb.HealthCheckRequest, _ *healthpb.HealthReRPC_Watch) error {
+func (s *server) Watch(
+	_ context.Context,
+	_ *healthpb.HealthCheckRequest,
+	_ *handlerstream.Server[healthpb.HealthCheckResponse],
+) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "reRPC doesn't support watching health state")
 }
 

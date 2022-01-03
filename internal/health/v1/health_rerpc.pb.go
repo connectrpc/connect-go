@@ -10,6 +10,8 @@ import (
 	context "context"
 	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
+	callstream "github.com/rerpc/rerpc/callstream"
+	handlerstream "github.com/rerpc/rerpc/handlerstream"
 	strings "strings"
 )
 
@@ -41,7 +43,7 @@ type HealthClientReRPC interface {
 	// should assume this method is not supported and should not retry the
 	// call.  If the call terminates with any other status (including OK),
 	// clients should retry the call with appropriate exponential backoff.
-	Watch(ctx context.Context, req *HealthCheckRequest, opts ...rerpc.CallOption) (*HealthClientReRPC_Watch, error)
+	Watch(ctx context.Context, req *HealthCheckRequest, opts ...rerpc.CallOption) (*callstream.Server[HealthCheckResponse], error)
 }
 
 type healthClientReRPC struct {
@@ -78,55 +80,22 @@ func (c *healthClientReRPC) mergeOptions(opts []rerpc.CallOption) []rerpc.CallOp
 // only to this call.
 func (c *healthClientReRPC) Check(ctx context.Context, req *HealthCheckRequest, opts ...rerpc.CallOption) (*HealthCheckResponse, error) {
 	merged := c.mergeOptions(opts)
-	ic := rerpc.ConfiguredCallInterceptor(merged)
-	ctx, call := rerpc.NewCall(
-		ctx,
+	call := rerpc.NewClientFunc[HealthCheckRequest, HealthCheckResponse](
 		c.doer,
-		rerpc.StreamTypeUnary,
 		c.baseURL,
 		"internal.health.v1", // protobuf package
 		"Health",             // protobuf service
 		"Check",              // protobuf method
 		merged...,
 	)
-	wrapped := rerpc.Func(func(ctx context.Context, msg interface{}) (interface{}, error) {
-		stream := call(ctx)
-		if err := stream.Send(req); err != nil {
-			_ = stream.CloseSend(err)
-			_ = stream.CloseReceive()
-			return nil, err
-		}
-		if err := stream.CloseSend(nil); err != nil {
-			_ = stream.CloseReceive()
-			return nil, err
-		}
-		var res HealthCheckResponse
-		if err := stream.Receive(&res); err != nil {
-			_ = stream.CloseReceive()
-			return nil, err
-		}
-		return &res, stream.CloseReceive()
-	})
-	if ic != nil {
-		wrapped = ic.Wrap(wrapped)
-	}
-	res, err := wrapped(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	typed, ok := res.(*HealthCheckResponse)
-	if !ok {
-		return nil, rerpc.Errorf(rerpc.CodeInternal, "expected response to be internal.health.v1.HealthCheckResponse, got %T", res)
-	}
-	return typed, nil
+	return call(ctx, req)
 }
 
 // Watch calls internal.health.v1.Health.Watch. Call options passed here apply
 // only to this call.
-func (c *healthClientReRPC) Watch(ctx context.Context, req *HealthCheckRequest, opts ...rerpc.CallOption) (*HealthClientReRPC_Watch, error) {
+func (c *healthClientReRPC) Watch(ctx context.Context, req *HealthCheckRequest, opts ...rerpc.CallOption) (*callstream.Server[HealthCheckResponse], error) {
 	merged := c.mergeOptions(opts)
-	ic := rerpc.ConfiguredCallInterceptor(merged)
-	ctx, call := rerpc.NewCall(
+	ctx, call := rerpc.NewClientStream(
 		ctx,
 		c.doer,
 		rerpc.StreamTypeServer,
@@ -136,9 +105,6 @@ func (c *healthClientReRPC) Watch(ctx context.Context, req *HealthCheckRequest, 
 		"Watch",              // protobuf method
 		merged...,
 	)
-	if ic != nil {
-		call = ic.WrapStream(call)
-	}
 	stream := call(ctx)
 	if err := stream.Send(req); err != nil {
 		_ = stream.CloseSend(err)
@@ -149,7 +115,7 @@ func (c *healthClientReRPC) Watch(ctx context.Context, req *HealthCheckRequest, 
 		_ = stream.CloseReceive()
 		return nil, err
 	}
-	return NewHealthClientReRPC_Watch(stream), nil
+	return callstream.NewServer[HealthCheckResponse](stream), nil
 }
 
 // HealthReRPC is a server for the internal.health.v1.Health service. To make
@@ -179,7 +145,7 @@ type HealthReRPC interface {
 	// should assume this method is not supported and should not retry the
 	// call.  If the call terminates with any other status (including OK),
 	// clients should retry the call with appropriate exponential backoff.
-	Watch(context.Context, *HealthCheckRequest, *HealthReRPC_Watch) error
+	Watch(context.Context, *HealthCheckRequest, *handlerstream.Server[HealthCheckResponse]) error
 	mustEmbedUnimplementedHealthReRPC()
 }
 
@@ -187,76 +153,24 @@ type HealthReRPC interface {
 // *rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
 func NewHealthHandlerReRPC(svc HealthReRPC, opts ...rerpc.HandlerOption) []*rerpc.Handler {
 	handlers := make([]*rerpc.Handler, 0, 2)
-	ic := rerpc.ConfiguredHandlerInterceptor(opts)
 
-	checkFunc := rerpc.Func(func(ctx context.Context, req interface{}) (interface{}, error) {
-		typed, ok := req.(*HealthCheckRequest)
-		if !ok {
-			return nil, rerpc.Errorf(
-				rerpc.CodeInternal,
-				"can't call internal.health.v1.Health.Check with a %T",
-				req,
-			)
-		}
-		return svc.Check(ctx, typed)
-	})
-	if ic != nil {
-		checkFunc = ic.Wrap(checkFunc)
-	}
-	check := rerpc.NewHandler(
-		rerpc.StreamTypeUnary,
+	check := rerpc.NewUnaryHandler(
 		"internal.health.v1", // protobuf package
 		"Health",             // protobuf service
 		"Check",              // protobuf method
-		func(ctx context.Context, sf rerpc.StreamFunc) {
-			stream := sf(ctx)
-			defer stream.CloseReceive()
-			if err := ctx.Err(); err != nil {
-				if errors.Is(err, context.Canceled) {
-					_ = stream.CloseSend(rerpc.Wrap(rerpc.CodeCanceled, err))
-					return
-				}
-				if errors.Is(err, context.DeadlineExceeded) {
-					_ = stream.CloseSend(rerpc.Wrap(rerpc.CodeDeadlineExceeded, err))
-					return
-				}
-				_ = stream.CloseSend(err) // unreachable per context docs
-			}
-			var req HealthCheckRequest
-			if err := stream.Receive(&req); err != nil {
-				_ = stream.CloseSend(err)
-				return
-			}
-			res, err := checkFunc(ctx, &req)
-			if err != nil {
-				if _, ok := rerpc.AsError(err); !ok {
-					if errors.Is(err, context.Canceled) {
-						err = rerpc.Wrap(rerpc.CodeCanceled, err)
-					}
-					if errors.Is(err, context.DeadlineExceeded) {
-						err = rerpc.Wrap(rerpc.CodeDeadlineExceeded, err)
-					}
-				}
-				_ = stream.CloseSend(err)
-				return
-			}
-			_ = stream.CloseSend(stream.Send(res))
-		},
+		svc.Check,
 		opts...,
 	)
 	handlers = append(handlers, check)
 
-	watch := rerpc.NewHandler(
+	watch := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeServer,
 		"internal.health.v1", // protobuf package
 		"Health",             // protobuf service
 		"Watch",              // protobuf method
 		func(ctx context.Context, sf rerpc.StreamFunc) {
-			if ic != nil {
-				sf = ic.WrapStream(sf)
-			}
 			stream := sf(ctx)
-			typed := NewHealthReRPC_Watch(stream)
+			typed := handlerstream.NewServer[HealthCheckResponse](stream)
 			var req HealthCheckRequest
 			if err := stream.Receive(&req); err != nil {
 				_ = stream.CloseReceive()
@@ -298,44 +212,8 @@ func (UnimplementedHealthReRPC) Check(context.Context, *HealthCheckRequest) (*He
 	return nil, rerpc.Errorf(rerpc.CodeUnimplemented, "internal.health.v1.Health.Check isn't implemented")
 }
 
-func (UnimplementedHealthReRPC) Watch(context.Context, *HealthCheckRequest, *HealthReRPC_Watch) error {
+func (UnimplementedHealthReRPC) Watch(context.Context, *HealthCheckRequest, *handlerstream.Server[HealthCheckResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.health.v1.Health.Watch isn't implemented")
 }
 
 func (UnimplementedHealthReRPC) mustEmbedUnimplementedHealthReRPC() {}
-
-// HealthClientReRPC_Watch is the client-side stream for the
-// internal.health.v1.Health.Watch procedure.
-type HealthClientReRPC_Watch struct {
-	stream rerpc.Stream
-}
-
-func NewHealthClientReRPC_Watch(stream rerpc.Stream) *HealthClientReRPC_Watch {
-	return &HealthClientReRPC_Watch{stream}
-}
-
-func (s *HealthClientReRPC_Watch) Receive() (*HealthCheckResponse, error) {
-	var req HealthCheckResponse
-	if err := s.stream.Receive(&req); err != nil {
-		return nil, err
-	}
-	return &req, nil
-}
-
-func (s *HealthClientReRPC_Watch) Close() error {
-	return s.stream.CloseReceive()
-}
-
-// HealthReRPC_Watch is the server-side stream for the
-// internal.health.v1.Health.Watch procedure.
-type HealthReRPC_Watch struct {
-	stream rerpc.Stream
-}
-
-func NewHealthReRPC_Watch(stream rerpc.Stream) *HealthReRPC_Watch {
-	return &HealthReRPC_Watch{stream}
-}
-
-func (s *HealthReRPC_Watch) Send(msg *HealthCheckResponse) error {
-	return s.stream.Send(msg)
-}

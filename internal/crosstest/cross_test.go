@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/rerpc/rerpc"
+	"github.com/rerpc/rerpc/handlerstream"
 	"github.com/rerpc/rerpc/internal/assert"
 	crosspb "github.com/rerpc/rerpc/internal/crosstest/v1test"
 	"github.com/rerpc/rerpc/reflection"
@@ -69,7 +70,10 @@ func (c crossServerReRPC) Fail(ctx context.Context, req *crosspb.FailRequest) (*
 	return nil, rerpc.Errorf(rerpc.CodeResourceExhausted, errMsg)
 }
 
-func (c crossServerReRPC) Sum(ctx context.Context, stream *crosspb.CrossServiceReRPC_Sum) error {
+func (c crossServerReRPC) Sum(
+	ctx context.Context,
+	stream *handlerstream.Client[crosspb.SumRequest, crosspb.SumResponse],
+) error {
 	var sum int64
 	for {
 		if err := ctx.Err(); err != nil {
@@ -87,7 +91,11 @@ func (c crossServerReRPC) Sum(ctx context.Context, stream *crosspb.CrossServiceR
 	}
 }
 
-func (c crossServerReRPC) CountUp(ctx context.Context, req *crosspb.CountUpRequest, stream *crosspb.CrossServiceReRPC_CountUp) error {
+func (c crossServerReRPC) CountUp(
+	ctx context.Context,
+	req *crosspb.CountUpRequest,
+	stream *handlerstream.Server[crosspb.CountUpResponse],
+) error {
 	if req.Number <= 0 {
 		return rerpc.Errorf(rerpc.CodeInvalidArgument, "number must be positive: got %v", req.Number)
 	}
@@ -102,7 +110,10 @@ func (c crossServerReRPC) CountUp(ctx context.Context, req *crosspb.CountUpReque
 	return nil
 }
 
-func (c crossServerReRPC) CumSum(ctx context.Context, stream *crosspb.CrossServiceReRPC_CumSum) error {
+func (c crossServerReRPC) CumSum(
+	ctx context.Context,
+	stream *handlerstream.Bidirectional[crosspb.CumSumRequest, crosspb.CumSumResponse],
+) error {
 	var sum int64
 	for {
 		if err := ctx.Err(); err != nil {

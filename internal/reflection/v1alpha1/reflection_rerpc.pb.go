@@ -10,6 +10,8 @@ import (
 	context "context"
 	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
+	callstream "github.com/rerpc/rerpc/callstream"
+	handlerstream "github.com/rerpc/rerpc/handlerstream"
 	strings "strings"
 )
 
@@ -26,7 +28,7 @@ const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 type ServerReflectionClientReRPC interface {
 	// The reflection service is structured as a bidirectional stream, ensuring
 	// all related requests go to a single server.
-	ServerReflectionInfo(ctx context.Context, opts ...rerpc.CallOption) *ServerReflectionClientReRPC_ServerReflectionInfo
+	ServerReflectionInfo(ctx context.Context, opts ...rerpc.CallOption) *callstream.Bidirectional[ServerReflectionRequest, ServerReflectionResponse]
 }
 
 type serverReflectionClientReRPC struct {
@@ -63,10 +65,9 @@ func (c *serverReflectionClientReRPC) mergeOptions(opts []rerpc.CallOption) []re
 // ServerReflectionInfo calls
 // internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo. Call
 // options passed here apply only to this call.
-func (c *serverReflectionClientReRPC) ServerReflectionInfo(ctx context.Context, opts ...rerpc.CallOption) *ServerReflectionClientReRPC_ServerReflectionInfo {
+func (c *serverReflectionClientReRPC) ServerReflectionInfo(ctx context.Context, opts ...rerpc.CallOption) *callstream.Bidirectional[ServerReflectionRequest, ServerReflectionResponse] {
 	merged := c.mergeOptions(opts)
-	ic := rerpc.ConfiguredCallInterceptor(merged)
-	ctx, call := rerpc.NewCall(
+	ctx, call := rerpc.NewClientStream(
 		ctx,
 		c.doer,
 		rerpc.StreamTypeBidirectional,
@@ -76,11 +77,8 @@ func (c *serverReflectionClientReRPC) ServerReflectionInfo(ctx context.Context, 
 		"ServerReflectionInfo",         // protobuf method
 		merged...,
 	)
-	if ic != nil {
-		call = ic.WrapStream(call)
-	}
 	stream := call(ctx)
-	return NewServerReflectionClientReRPC_ServerReflectionInfo(stream)
+	return callstream.NewBidirectional[ServerReflectionRequest, ServerReflectionResponse](stream)
 }
 
 // ServerReflectionReRPC is a server for the
@@ -95,7 +93,7 @@ func (c *serverReflectionClientReRPC) ServerReflectionInfo(ctx context.Context, 
 type ServerReflectionReRPC interface {
 	// The reflection service is structured as a bidirectional stream, ensuring
 	// all related requests go to a single server.
-	ServerReflectionInfo(context.Context, *ServerReflectionReRPC_ServerReflectionInfo) error
+	ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[ServerReflectionRequest, ServerReflectionResponse]) error
 	mustEmbedUnimplementedServerReflectionReRPC()
 }
 
@@ -104,19 +102,15 @@ type ServerReflectionReRPC interface {
 // rerpc.NewServeMux.
 func NewServerReflectionHandlerReRPC(svc ServerReflectionReRPC, opts ...rerpc.HandlerOption) []*rerpc.Handler {
 	handlers := make([]*rerpc.Handler, 0, 1)
-	ic := rerpc.ConfiguredHandlerInterceptor(opts)
 
-	serverReflectionInfo := rerpc.NewHandler(
+	serverReflectionInfo := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeBidirectional,
 		"internal.reflection.v1alpha1", // protobuf package
 		"ServerReflection",             // protobuf service
 		"ServerReflectionInfo",         // protobuf method
 		func(ctx context.Context, sf rerpc.StreamFunc) {
-			if ic != nil {
-				sf = ic.WrapStream(sf)
-			}
 			stream := sf(ctx)
-			typed := NewServerReflectionReRPC_ServerReflectionInfo(stream)
+			typed := handlerstream.NewBidirectional[ServerReflectionRequest, ServerReflectionResponse](stream)
 			err := svc.ServerReflectionInfo(stream.Context(), typed)
 			_ = stream.CloseReceive()
 			if err != nil {
@@ -145,61 +139,8 @@ var _ ServerReflectionReRPC = (*UnimplementedServerReflectionReRPC)(nil) // veri
 // ServerReflectionReRPC must embed UnimplementedServerReflectionReRPC.
 type UnimplementedServerReflectionReRPC struct{}
 
-func (UnimplementedServerReflectionReRPC) ServerReflectionInfo(context.Context, *ServerReflectionReRPC_ServerReflectionInfo) error {
+func (UnimplementedServerReflectionReRPC) ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[ServerReflectionRequest, ServerReflectionResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo isn't implemented")
 }
 
 func (UnimplementedServerReflectionReRPC) mustEmbedUnimplementedServerReflectionReRPC() {}
-
-// ServerReflectionClientReRPC_ServerReflectionInfo is the client-side stream
-// for the internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo
-// procedure.
-type ServerReflectionClientReRPC_ServerReflectionInfo struct {
-	stream rerpc.Stream
-}
-
-func NewServerReflectionClientReRPC_ServerReflectionInfo(stream rerpc.Stream) *ServerReflectionClientReRPC_ServerReflectionInfo {
-	return &ServerReflectionClientReRPC_ServerReflectionInfo{stream}
-}
-
-func (s *ServerReflectionClientReRPC_ServerReflectionInfo) Send(msg *ServerReflectionRequest) error {
-	return s.stream.Send(msg)
-}
-
-func (s *ServerReflectionClientReRPC_ServerReflectionInfo) CloseSend() error {
-	return s.stream.CloseSend(nil)
-}
-
-func (s *ServerReflectionClientReRPC_ServerReflectionInfo) Receive() (*ServerReflectionResponse, error) {
-	var req ServerReflectionResponse
-	if err := s.stream.Receive(&req); err != nil {
-		return nil, err
-	}
-	return &req, nil
-}
-
-func (s *ServerReflectionClientReRPC_ServerReflectionInfo) CloseReceive() error {
-	return s.stream.CloseReceive()
-}
-
-// ServerReflectionReRPC_ServerReflectionInfo is the server-side stream for the
-// internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo procedure.
-type ServerReflectionReRPC_ServerReflectionInfo struct {
-	stream rerpc.Stream
-}
-
-func NewServerReflectionReRPC_ServerReflectionInfo(stream rerpc.Stream) *ServerReflectionReRPC_ServerReflectionInfo {
-	return &ServerReflectionReRPC_ServerReflectionInfo{stream}
-}
-
-func (s *ServerReflectionReRPC_ServerReflectionInfo) Receive() (*ServerReflectionRequest, error) {
-	var req ServerReflectionRequest
-	if err := s.stream.Receive(&req); err != nil {
-		return nil, err
-	}
-	return &req, nil
-}
-
-func (s *ServerReflectionReRPC_ServerReflectionInfo) Send(msg *ServerReflectionResponse) error {
-	return s.stream.Send(msg)
-}

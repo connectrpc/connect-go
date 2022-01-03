@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/rerpc/rerpc"
+	"github.com/rerpc/rerpc/handlerstream"
 	rpb "github.com/rerpc/rerpc/internal/reflection/v1alpha1"
 )
 
@@ -53,7 +54,10 @@ type server struct {
 	reg Registrar
 }
 
-func (rs *server) ServerReflectionInfo(ctx context.Context, stream *rpb.ServerReflectionReRPC_ServerReflectionInfo) error {
+func (rs *server) ServerReflectionInfo(
+	ctx context.Context,
+	stream *handlerstream.Bidirectional[rpb.ServerReflectionRequest, rpb.ServerReflectionResponse],
+) error {
 	fileDescriptorsSent := &fdset{}
 	for {
 		req, err := stream.Receive()
