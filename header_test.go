@@ -161,7 +161,7 @@ func TestHeaderWrappers(t *testing.T) {
 		res:   []string{resV},
 		unres: []string{unresV},
 	}
-	h := NewHeader(raw)
+	h := Header{raw: raw}
 
 	assert.Equal(t, h.Get(res), resV, "get reserved header")
 	assert.Equal(t, h.Get(unres), unresV, "get unreserved header")
