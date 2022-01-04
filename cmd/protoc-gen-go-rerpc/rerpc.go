@@ -124,40 +124,37 @@ func clientSignature(g *protogen.GeneratedFile, cname string, method *protogen.M
 	}
 	if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
 		// bidi streaming
-		return method.GoName + "(ctx " + g.QualifiedGoIdent(contextContext) +
-			", opts ..." + g.QualifiedGoIdent(rerpcPackage.Ident("CallOption")) + ") " +
+		return method.GoName + "(ctx " + g.QualifiedGoIdent(contextContext) + ") " +
 			"*" + g.QualifiedGoIdent(cstreamPackage.Ident("Bidirectional")) +
 			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
 	}
 	if method.Desc.IsStreamingClient() {
 		// client streaming
-		return method.GoName + "(ctx " + g.QualifiedGoIdent(contextContext) +
-			", opts ..." + g.QualifiedGoIdent(rerpcPackage.Ident("CallOption")) + ") " +
+		return method.GoName + "(ctx " + g.QualifiedGoIdent(contextContext) + ") " +
 			"*" + g.QualifiedGoIdent(cstreamPackage.Ident("Client")) +
 			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
 	}
 	if method.Desc.IsStreamingServer() {
 		// server streaming
 		return method.GoName + "(ctx " + g.QualifiedGoIdent(contextContext) +
-			", req *" + g.QualifiedGoIdent(method.Input.GoIdent) +
-			", opts ..." + g.QualifiedGoIdent(rerpcPackage.Ident("CallOption")) + ") " +
+			", req *" + g.QualifiedGoIdent(method.Input.GoIdent) + ") " +
 			"(*" + g.QualifiedGoIdent(cstreamPackage.Ident("Server")) +
 			"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
 			", error)"
 	}
 	// unary
 	return method.GoName + "(ctx " + g.QualifiedGoIdent(contextContext) +
-		", req *" + g.QualifiedGoIdent(method.Input.GoIdent) +
-		", opts ..." + g.QualifiedGoIdent(rerpcPackage.Ident("CallOption")) + ") " +
+		", req *" + g.QualifiedGoIdent(method.Input.GoIdent) + ") " +
 		"(*" + g.QualifiedGoIdent(method.Output.GoIdent) + ", error)"
 }
 
 func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, name string) {
 	// Client struct.
+	callOption := rerpcPackage.Ident("CallOption")
 	g.P("type ", unexport(name), " struct {")
 	g.P("doer ", rerpcPackage.Ident("Doer"))
 	g.P("baseURL string")
-	g.P("options []", rerpcPackage.Ident("CallOption"))
+	g.P("options []", callOption)
 	g.P("}")
 	g.P()
 
@@ -171,7 +168,6 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		g.P("//")
 		deprecated(g)
 	}
-	callOption := rerpcPackage.Ident("CallOption")
 	g.P("func New", name, " (baseURL string, doer ", rerpcPackage.Ident("Doer"),
 		", opts ...", callOption, ") ", name, " {")
 	g.P("return &", unexport(name), "{")
@@ -179,18 +175,6 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	g.P("doer: doer,")
 	g.P("options: opts,")
 	g.P("}")
-	g.P("}")
-	g.P()
-
-	g.P("func (c *", unexport(name), ") mergeOptions(opts []", callOption, ") []", callOption, " {")
-	g.P("merged := make([]", rerpcPackage.Ident("CallOption"), ", 0, len(c.options)+len(opts))")
-	g.P("for _, o := range c.options {")
-	g.P("merged = append(merged, o)")
-	g.P("}")
-	g.P("for _, o := range opts {")
-	g.P("merged = append(merged, o)")
-	g.P("}")
-	g.P("return merged")
 	g.P("}")
 	g.P()
 
@@ -210,7 +194,6 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, cname st
 		deprecated(g)
 	}
 	g.P("func (c *", unexport(method.Parent.GoName), "ClientReRPC) ", clientSignature(g, cname, method), " {")
-	g.P("merged := c.mergeOptions(opts)")
 
 	if isStreamingClient || isStreamingServer {
 		g.P("ctx, call := ", rerpcPackage.Ident("NewClientStream"), "(")
@@ -227,7 +210,7 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, cname st
 		g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
 		g.P(`"`, service.Desc.Name(), `", // protobuf service`)
 		g.P(`"`, method.Desc.Name(), `", // protobuf method`)
-		g.P("merged...,")
+		g.P("c.options...,")
 		g.P(")")
 
 		g.P("stream := call(ctx)")
@@ -257,13 +240,14 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, cname st
 		return
 	}
 
+	// TODO: do this once on client construction
 	g.P("call := ", rerpcPackage.Ident("NewClientFunc"), "[", method.Input.GoIdent, ", ", method.Output.GoIdent, "](")
 	g.P("c.doer,")
 	g.P("c.baseURL,")
 	g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
 	g.P(`"`, service.Desc.Name(), `", // protobuf service`)
 	g.P(`"`, method.Desc.Name(), `", // protobuf method`)
-	g.P("merged...,")
+	g.P("c.options...,")
 	g.P(")")
 	g.P("return call(ctx, req)")
 	g.P("}")

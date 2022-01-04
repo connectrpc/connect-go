@@ -28,7 +28,7 @@ const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 type ServerReflectionClientReRPC interface {
 	// The reflection service is structured as a bidirectional stream, ensuring
 	// all related requests go to a single server.
-	ServerReflectionInfo(ctx context.Context, opts ...rerpc.CallOption) *callstream.Bidirectional[ServerReflectionRequest, ServerReflectionResponse]
+	ServerReflectionInfo(ctx context.Context) *callstream.Bidirectional[ServerReflectionRequest, ServerReflectionResponse]
 }
 
 type serverReflectionClientReRPC struct {
@@ -51,22 +51,10 @@ func NewServerReflectionClientReRPC(baseURL string, doer rerpc.Doer, opts ...rer
 	}
 }
 
-func (c *serverReflectionClientReRPC) mergeOptions(opts []rerpc.CallOption) []rerpc.CallOption {
-	merged := make([]rerpc.CallOption, 0, len(c.options)+len(opts))
-	for _, o := range c.options {
-		merged = append(merged, o)
-	}
-	for _, o := range opts {
-		merged = append(merged, o)
-	}
-	return merged
-}
-
 // ServerReflectionInfo calls
 // internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo. Call
 // options passed here apply only to this call.
-func (c *serverReflectionClientReRPC) ServerReflectionInfo(ctx context.Context, opts ...rerpc.CallOption) *callstream.Bidirectional[ServerReflectionRequest, ServerReflectionResponse] {
-	merged := c.mergeOptions(opts)
+func (c *serverReflectionClientReRPC) ServerReflectionInfo(ctx context.Context) *callstream.Bidirectional[ServerReflectionRequest, ServerReflectionResponse] {
 	ctx, call := rerpc.NewClientStream(
 		ctx,
 		c.doer,
@@ -75,7 +63,7 @@ func (c *serverReflectionClientReRPC) ServerReflectionInfo(ctx context.Context, 
 		"internal.reflection.v1alpha1", // protobuf package
 		"ServerReflection",             // protobuf service
 		"ServerReflectionInfo",         // protobuf method
-		merged...,
+		c.options...,
 	)
 	stream := call(ctx)
 	return callstream.NewBidirectional[ServerReflectionRequest, ServerReflectionResponse](stream)

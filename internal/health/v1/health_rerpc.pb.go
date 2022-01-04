@@ -27,7 +27,7 @@ const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 type HealthClientReRPC interface {
 	// If the requested service is unknown, the call will fail with status
 	// NOT_FOUND.
-	Check(ctx context.Context, req *HealthCheckRequest, opts ...rerpc.CallOption) (*HealthCheckResponse, error)
+	Check(ctx context.Context, req *HealthCheckRequest) (*HealthCheckResponse, error)
 	// Performs a watch for the serving status of the requested service.
 	// The server will immediately send back a message indicating the current
 	// serving status.  It will then subsequently send a new message whenever
@@ -43,7 +43,7 @@ type HealthClientReRPC interface {
 	// should assume this method is not supported and should not retry the
 	// call.  If the call terminates with any other status (including OK),
 	// clients should retry the call with appropriate exponential backoff.
-	Watch(ctx context.Context, req *HealthCheckRequest, opts ...rerpc.CallOption) (*callstream.Server[HealthCheckResponse], error)
+	Watch(ctx context.Context, req *HealthCheckRequest) (*callstream.Server[HealthCheckResponse], error)
 }
 
 type healthClientReRPC struct {
@@ -65,36 +65,23 @@ func NewHealthClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOpt
 	}
 }
 
-func (c *healthClientReRPC) mergeOptions(opts []rerpc.CallOption) []rerpc.CallOption {
-	merged := make([]rerpc.CallOption, 0, len(c.options)+len(opts))
-	for _, o := range c.options {
-		merged = append(merged, o)
-	}
-	for _, o := range opts {
-		merged = append(merged, o)
-	}
-	return merged
-}
-
 // Check calls internal.health.v1.Health.Check. Call options passed here apply
 // only to this call.
-func (c *healthClientReRPC) Check(ctx context.Context, req *HealthCheckRequest, opts ...rerpc.CallOption) (*HealthCheckResponse, error) {
-	merged := c.mergeOptions(opts)
+func (c *healthClientReRPC) Check(ctx context.Context, req *HealthCheckRequest) (*HealthCheckResponse, error) {
 	call := rerpc.NewClientFunc[HealthCheckRequest, HealthCheckResponse](
 		c.doer,
 		c.baseURL,
 		"internal.health.v1", // protobuf package
 		"Health",             // protobuf service
 		"Check",              // protobuf method
-		merged...,
+		c.options...,
 	)
 	return call(ctx, req)
 }
 
 // Watch calls internal.health.v1.Health.Watch. Call options passed here apply
 // only to this call.
-func (c *healthClientReRPC) Watch(ctx context.Context, req *HealthCheckRequest, opts ...rerpc.CallOption) (*callstream.Server[HealthCheckResponse], error) {
-	merged := c.mergeOptions(opts)
+func (c *healthClientReRPC) Watch(ctx context.Context, req *HealthCheckRequest) (*callstream.Server[HealthCheckResponse], error) {
 	ctx, call := rerpc.NewClientStream(
 		ctx,
 		c.doer,
@@ -103,7 +90,7 @@ func (c *healthClientReRPC) Watch(ctx context.Context, req *HealthCheckRequest, 
 		"internal.health.v1", // protobuf package
 		"Health",             // protobuf service
 		"Watch",              // protobuf method
-		merged...,
+		c.options...,
 	)
 	stream := call(ctx)
 	if err := stream.Send(req); err != nil {

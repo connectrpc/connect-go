@@ -26,11 +26,11 @@ const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 // PingServiceClientReRPC is a client for the internal.ping.v1test.PingService
 // service.
 type PingServiceClientReRPC interface {
-	Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error)
-	Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error)
-	Sum(ctx context.Context, opts ...rerpc.CallOption) *callstream.Client[SumRequest, SumResponse]
-	CountUp(ctx context.Context, req *CountUpRequest, opts ...rerpc.CallOption) (*callstream.Server[CountUpResponse], error)
-	CumSum(ctx context.Context, opts ...rerpc.CallOption) *callstream.Bidirectional[CumSumRequest, CumSumResponse]
+	Ping(ctx context.Context, req *PingRequest) (*PingResponse, error)
+	Fail(ctx context.Context, req *FailRequest) (*FailResponse, error)
+	Sum(ctx context.Context) *callstream.Client[SumRequest, SumResponse]
+	CountUp(ctx context.Context, req *CountUpRequest) (*callstream.Server[CountUpResponse], error)
+	CumSum(ctx context.Context) *callstream.Bidirectional[CumSumRequest, CumSumResponse]
 }
 
 type pingServiceClientReRPC struct {
@@ -53,51 +53,37 @@ func NewPingServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.Ca
 	}
 }
 
-func (c *pingServiceClientReRPC) mergeOptions(opts []rerpc.CallOption) []rerpc.CallOption {
-	merged := make([]rerpc.CallOption, 0, len(c.options)+len(opts))
-	for _, o := range c.options {
-		merged = append(merged, o)
-	}
-	for _, o := range opts {
-		merged = append(merged, o)
-	}
-	return merged
-}
-
 // Ping calls internal.ping.v1test.PingService.Ping. Call options passed here
 // apply only to this call.
-func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error) {
-	merged := c.mergeOptions(opts)
+func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *PingRequest) (*PingResponse, error) {
 	call := rerpc.NewClientFunc[PingRequest, PingResponse](
 		c.doer,
 		c.baseURL,
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"Ping",                 // protobuf method
-		merged...,
+		c.options...,
 	)
 	return call(ctx, req)
 }
 
 // Fail calls internal.ping.v1test.PingService.Fail. Call options passed here
 // apply only to this call.
-func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error) {
-	merged := c.mergeOptions(opts)
+func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest) (*FailResponse, error) {
 	call := rerpc.NewClientFunc[FailRequest, FailResponse](
 		c.doer,
 		c.baseURL,
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"Fail",                 // protobuf method
-		merged...,
+		c.options...,
 	)
 	return call(ctx, req)
 }
 
 // Sum calls internal.ping.v1test.PingService.Sum. Call options passed here
 // apply only to this call.
-func (c *pingServiceClientReRPC) Sum(ctx context.Context, opts ...rerpc.CallOption) *callstream.Client[SumRequest, SumResponse] {
-	merged := c.mergeOptions(opts)
+func (c *pingServiceClientReRPC) Sum(ctx context.Context) *callstream.Client[SumRequest, SumResponse] {
 	ctx, call := rerpc.NewClientStream(
 		ctx,
 		c.doer,
@@ -106,7 +92,7 @@ func (c *pingServiceClientReRPC) Sum(ctx context.Context, opts ...rerpc.CallOpti
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"Sum",                  // protobuf method
-		merged...,
+		c.options...,
 	)
 	stream := call(ctx)
 	return callstream.NewClient[SumRequest, SumResponse](stream)
@@ -114,8 +100,7 @@ func (c *pingServiceClientReRPC) Sum(ctx context.Context, opts ...rerpc.CallOpti
 
 // CountUp calls internal.ping.v1test.PingService.CountUp. Call options passed
 // here apply only to this call.
-func (c *pingServiceClientReRPC) CountUp(ctx context.Context, req *CountUpRequest, opts ...rerpc.CallOption) (*callstream.Server[CountUpResponse], error) {
-	merged := c.mergeOptions(opts)
+func (c *pingServiceClientReRPC) CountUp(ctx context.Context, req *CountUpRequest) (*callstream.Server[CountUpResponse], error) {
 	ctx, call := rerpc.NewClientStream(
 		ctx,
 		c.doer,
@@ -124,7 +109,7 @@ func (c *pingServiceClientReRPC) CountUp(ctx context.Context, req *CountUpReques
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"CountUp",              // protobuf method
-		merged...,
+		c.options...,
 	)
 	stream := call(ctx)
 	if err := stream.Send(req); err != nil {
@@ -141,8 +126,7 @@ func (c *pingServiceClientReRPC) CountUp(ctx context.Context, req *CountUpReques
 
 // CumSum calls internal.ping.v1test.PingService.CumSum. Call options passed
 // here apply only to this call.
-func (c *pingServiceClientReRPC) CumSum(ctx context.Context, opts ...rerpc.CallOption) *callstream.Bidirectional[CumSumRequest, CumSumResponse] {
-	merged := c.mergeOptions(opts)
+func (c *pingServiceClientReRPC) CumSum(ctx context.Context) *callstream.Bidirectional[CumSumRequest, CumSumResponse] {
 	ctx, call := rerpc.NewClientStream(
 		ctx,
 		c.doer,
@@ -151,7 +135,7 @@ func (c *pingServiceClientReRPC) CumSum(ctx context.Context, opts ...rerpc.CallO
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"CumSum",               // protobuf method
-		merged...,
+		c.options...,
 	)
 	stream := call(ctx)
 	return callstream.NewBidirectional[CumSumRequest, CumSumResponse](stream)

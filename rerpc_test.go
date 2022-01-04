@@ -484,7 +484,7 @@ func TestServerProtoGRPC(t *testing.T) {
 	testBadRoute := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
 		t.Run("bad_route", func(t *testing.T) {
 			req := &pingpb.PingRequest{}
-			res, err := client.Ping(context.Background(), req, rerpc.OverrideProtobufPackage("test.badroute"))
+			res, err := client.Ping(context.Background(), req)
 			assert.Nil(t, res, "fail RPC response")
 			assert.NotNil(t, err, "fail RPC error")
 			rerr, ok := rerpc.AsError(err)
@@ -678,8 +678,14 @@ func TestServerProtoGRPC(t *testing.T) {
 			testCountUp(t, client)
 			testCumSum(t, client, bidi)
 			testErrors(t, client)
-			testBadRoute(t, client)
 			testHealth(t, server.URL, server.Client())
+
+			badRouteClient := pingpb.NewPingServiceClientReRPC(
+				server.URL,
+				server.Client(),
+				rerpc.OverrideProtobufPackage("test.badroute"),
+			)
+			testBadRoute(t, badRouteClient)
 		})
 		t.Run("gzip", func(t *testing.T) {
 			client := pingpb.NewPingServiceClientReRPC(
@@ -692,8 +698,14 @@ func TestServerProtoGRPC(t *testing.T) {
 			testCountUp(t, client)
 			testCumSum(t, client, bidi)
 			testErrors(t, client)
-			testBadRoute(t, client)
 			testHealth(t, server.URL, server.Client(), rerpc.Gzip(true))
+
+			badRouteClient := pingpb.NewPingServiceClientReRPC(
+				server.URL,
+				server.Client(),
+				rerpc.OverrideProtobufPackage("test.badroute"),
+			)
+			testBadRoute(t, badRouteClient)
 		})
 	}
 
