@@ -276,7 +276,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 		cs.setResponseError(wrap(code, err))
 		return
 	}
-	*md.res = NewHeader(res.Header)
+	*md.res = Header{raw: res.Header}
 
 	if res.StatusCode != http.StatusOK {
 		code := CodeUnknown

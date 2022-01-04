@@ -175,12 +175,6 @@ type Header struct {
 	raw http.Header
 }
 
-// NewHeader wraps an http.Header in reRPC's validation logic. Keys and values
-// added directly to the http.Header aren't validated.
-func NewHeader(raw http.Header) Header {
-	return Header{raw: raw}
-}
-
 // Get returns the first value associated with the given key. Like the standard
 // library's http.Header, keys are case-insensitive and canonicalized with
 // textproto.CanonicalMIMEHeaderKey.

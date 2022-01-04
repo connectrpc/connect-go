@@ -39,7 +39,7 @@ type Metadata struct {
 // Request returns the request headers.
 func (m Metadata) Request() Header {
 	if m.req == nil {
-		return NewHeader(make(http.Header))
+		return Header{raw: make(http.Header)}
 	}
 	return *m.req
 }
@@ -48,7 +48,7 @@ func (m Metadata) Request() Header {
 // response isn't populated until the request is sent to the server.
 func (m Metadata) Response() Header {
 	if m.res == nil {
-		return NewHeader(make(http.Header))
+		return Header{raw: make(http.Header)}
 	}
 	return *m.res
 }
