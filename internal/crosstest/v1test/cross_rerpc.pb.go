@@ -26,11 +26,11 @@ const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 // CrossServiceClientReRPC is a client for the
 // internal.crosstest.v1test.CrossService service.
 type CrossServiceClientReRPC interface {
-	Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error)
-	Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error)
-	Sum(ctx context.Context, opts ...rerpc.CallOption) *callstream.Client[SumRequest, SumResponse]
-	CountUp(ctx context.Context, req *CountUpRequest, opts ...rerpc.CallOption) (*callstream.Server[CountUpResponse], error)
-	CumSum(ctx context.Context, opts ...rerpc.CallOption) *callstream.Bidirectional[CumSumRequest, CumSumResponse]
+	Ping(ctx context.Context, req *PingRequest) (*PingResponse, error)
+	Fail(ctx context.Context, req *FailRequest) (*FailResponse, error)
+	Sum(ctx context.Context) *callstream.Client[SumRequest, SumResponse]
+	CountUp(ctx context.Context, req *CountUpRequest) (*callstream.Server[CountUpResponse], error)
+	CumSum(ctx context.Context) *callstream.Bidirectional[CumSumRequest, CumSumResponse]
 }
 
 type crossServiceClientReRPC struct {
@@ -53,51 +53,37 @@ func NewCrossServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.C
 	}
 }
 
-func (c *crossServiceClientReRPC) mergeOptions(opts []rerpc.CallOption) []rerpc.CallOption {
-	merged := make([]rerpc.CallOption, 0, len(c.options)+len(opts))
-	for _, o := range c.options {
-		merged = append(merged, o)
-	}
-	for _, o := range opts {
-		merged = append(merged, o)
-	}
-	return merged
-}
-
 // Ping calls internal.crosstest.v1test.CrossService.Ping. Call options passed
 // here apply only to this call.
-func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest, opts ...rerpc.CallOption) (*PingResponse, error) {
-	merged := c.mergeOptions(opts)
+func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest) (*PingResponse, error) {
 	call := rerpc.NewClientFunc[PingRequest, PingResponse](
 		c.doer,
 		c.baseURL,
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"Ping",                      // protobuf method
-		merged...,
+		c.options...,
 	)
 	return call(ctx, req)
 }
 
 // Fail calls internal.crosstest.v1test.CrossService.Fail. Call options passed
 // here apply only to this call.
-func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest, opts ...rerpc.CallOption) (*FailResponse, error) {
-	merged := c.mergeOptions(opts)
+func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest) (*FailResponse, error) {
 	call := rerpc.NewClientFunc[FailRequest, FailResponse](
 		c.doer,
 		c.baseURL,
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"Fail",                      // protobuf method
-		merged...,
+		c.options...,
 	)
 	return call(ctx, req)
 }
 
 // Sum calls internal.crosstest.v1test.CrossService.Sum. Call options passed
 // here apply only to this call.
-func (c *crossServiceClientReRPC) Sum(ctx context.Context, opts ...rerpc.CallOption) *callstream.Client[SumRequest, SumResponse] {
-	merged := c.mergeOptions(opts)
+func (c *crossServiceClientReRPC) Sum(ctx context.Context) *callstream.Client[SumRequest, SumResponse] {
 	ctx, call := rerpc.NewClientStream(
 		ctx,
 		c.doer,
@@ -106,7 +92,7 @@ func (c *crossServiceClientReRPC) Sum(ctx context.Context, opts ...rerpc.CallOpt
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"Sum",                       // protobuf method
-		merged...,
+		c.options...,
 	)
 	stream := call(ctx)
 	return callstream.NewClient[SumRequest, SumResponse](stream)
@@ -114,8 +100,7 @@ func (c *crossServiceClientReRPC) Sum(ctx context.Context, opts ...rerpc.CallOpt
 
 // CountUp calls internal.crosstest.v1test.CrossService.CountUp. Call options
 // passed here apply only to this call.
-func (c *crossServiceClientReRPC) CountUp(ctx context.Context, req *CountUpRequest, opts ...rerpc.CallOption) (*callstream.Server[CountUpResponse], error) {
-	merged := c.mergeOptions(opts)
+func (c *crossServiceClientReRPC) CountUp(ctx context.Context, req *CountUpRequest) (*callstream.Server[CountUpResponse], error) {
 	ctx, call := rerpc.NewClientStream(
 		ctx,
 		c.doer,
@@ -124,7 +109,7 @@ func (c *crossServiceClientReRPC) CountUp(ctx context.Context, req *CountUpReque
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"CountUp",                   // protobuf method
-		merged...,
+		c.options...,
 	)
 	stream := call(ctx)
 	if err := stream.Send(req); err != nil {
@@ -141,8 +126,7 @@ func (c *crossServiceClientReRPC) CountUp(ctx context.Context, req *CountUpReque
 
 // CumSum calls internal.crosstest.v1test.CrossService.CumSum. Call options
 // passed here apply only to this call.
-func (c *crossServiceClientReRPC) CumSum(ctx context.Context, opts ...rerpc.CallOption) *callstream.Bidirectional[CumSumRequest, CumSumResponse] {
-	merged := c.mergeOptions(opts)
+func (c *crossServiceClientReRPC) CumSum(ctx context.Context) *callstream.Bidirectional[CumSumRequest, CumSumResponse] {
 	ctx, call := rerpc.NewClientStream(
 		ctx,
 		c.doer,
@@ -151,7 +135,7 @@ func (c *crossServiceClientReRPC) CumSum(ctx context.Context, opts ...rerpc.Call
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"CumSum",                    // protobuf method
-		merged...,
+		c.options...,
 	)
 	stream := call(ctx)
 	return callstream.NewBidirectional[CumSumRequest, CumSumResponse](stream)
