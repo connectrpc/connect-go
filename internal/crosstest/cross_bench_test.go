@@ -34,7 +34,8 @@ func BenchmarkReRPC(b *testing.B) {
 	b.Run("unary", func(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				_, _ = client.Ping(context.Background(), &crosspb.PingRequest{Number: 42})
+				req := rerpc.NewRequest(&crosspb.PingRequest{Number: 42})
+				_, _ = client.Ping(context.Background(), req)
 			}
 		})
 	})

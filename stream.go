@@ -17,25 +17,98 @@ import (
 	"github.com/rerpc/rerpc/internal/twirp"
 )
 
+// Request is a request message and a variety of metadata.
+type Request[Req any] struct {
+	Msg *Req
+
+	spec Specification
+	hdr  Header
+}
+
+func NewRequest[Req any](msg *Req) *Request[Req] {
+	return &Request[Req]{
+		Msg: msg,
+		hdr: Header{raw: make(http.Header)},
+	}
+}
+
+func NewReceivedRequest[Req any](stream Stream) (*Request[Req], error) {
+	var msg Req
+	if err := stream.Receive(&msg); err != nil {
+		return nil, err
+	}
+	return &Request[Req]{
+		Msg:  &msg,
+		spec: stream.Spec(),
+		hdr:  stream.ReceivedHeader(),
+	}, nil
+}
+
+func (r *Request[_]) Any() interface{} {
+	return r.Msg
+}
+
+func (r *Request[_]) Spec() Specification {
+	return r.spec
+}
+
+func (r *Request[_]) Header() Header {
+	return r.hdr
+}
+
+func (r *Request[_]) internalOnly() {}
+
+type Response[Res any] struct {
+	Msg *Res
+
+	hdr Header
+}
+
+func NewResponse[Res any](msg *Res) *Response[Res] {
+	return &Response[Res]{
+		Msg: msg,
+		hdr: Header{raw: make(http.Header)},
+	}
+}
+
+func newResponseWithHeader[Res any](msg *Res, header Header) *Response[Res] {
+	return &Response[Res]{
+		Msg: msg,
+		hdr: header,
+	}
+}
+
+func (r *Response[_]) Any() interface{} {
+	return r.Msg
+}
+
+func (r *Response[_]) Header() Header {
+	return r.hdr
+}
+
+func (r *Response[_]) internalOnly() {}
+
 // Stream is a bidirectional stream of protobuf messages.
 //
 // Stream implementations must support a limited form of concurrency: one
 // goroutine may call Send and CloseSend, and another may call Receive and
 // CloseReceive. Either goroutine may call Context.
 type Stream interface {
-	// Implementations must ensure that Context is safe to call concurrently. It
-	// must not race with any other methods.
-	Context() context.Context
+	Spec() Specification
 
-	// Implementations must ensure that Send and CloseSend don't race with
-	// Context, Receive, or CloseReceive. They may race with each other.
+	// Implementations must ensure that Send, CloseSend, and Header don't race
+	// with Context, Receive, CloseReceive, ReceivedHeader, and ReceivedTrailer.
+	// They may race with each other.
 	Send(interface{}) error
 	CloseSend(error) error
+	Header() Header
 
-	// Implementations must ensure that Receive and CloseReceive don't race with
-	// Context, Send, or CloseSend. They may race with each other.
+	// Implementations must ensure that Receive, CloseReceive, ReceivedHeader,
+	// and ReceivedTrailer don't race with Context, Send, CloseSend, or Header.
+	// They may race with each other.
 	Receive(interface{}) error
 	CloseReceive() error
+	ReceivedHeader() Header // blocks until response headers arrive
 }
 
 // clientStream represents a bidirectional exchange of protobuf messages
@@ -49,11 +122,14 @@ type clientStream struct {
 	ctx          context.Context
 	doer         Doer
 	url          string
+	spec         Specification
 	maxReadBytes int64
 
 	// send
-	writer    *io.PipeWriter
-	marshaler marshaler
+	prepareOnce sync.Once
+	writer      *io.PipeWriter
+	marshaler   marshaler
+	header      Header
 
 	// receive goroutine
 	reader        *io.PipeReader
@@ -70,9 +146,11 @@ var _ Stream = (*clientStream)(nil)
 func newClientStream(
 	ctx context.Context,
 	doer Doer,
-	url string,
-	maxReadBytes int64,
+	baseURL string,
+	spec Specification,
+	header Header,
 	gzipRequest bool,
+	maxReadBytes int64,
 ) *clientStream {
 	// In a typical HTTP/1.1 request, we'd put the body into a bytes.Buffer, hand
 	// the buffer to http.NewRequest, and fire off the request with doer.Do. That
@@ -87,34 +165,42 @@ func newClientStream(
 	// the first protobuf message that we send, it'll send back headers and start
 	// the response stream.
 	pr, pw := io.Pipe()
-	stream := clientStream{
+	return &clientStream{
 		ctx:           ctx,
 		doer:          doer,
-		url:           url,
+		url:           baseURL + "/" + spec.Procedure,
+		spec:          spec,
 		maxReadBytes:  maxReadBytes,
 		writer:        pw,
 		marshaler:     marshaler{w: pw, ctype: TypeDefaultGRPC, gzipGRPC: gzipRequest},
+		header:        header,
 		reader:        pr,
 		responseReady: make(chan struct{}),
 	}
-	// stream.makeRequest hands the read side of the pipe off to net/http and
-	// waits to establish the response stream. There's a small class of errors we
-	// can catch without even sending data over the network, though, so we don't
-	// return from this constructor until we're sure that we're actually waiting
-	// on the server. This makes user-visible behavior more predictable: for
-	// example, if they've configured the server's base URL as "hwws://acme.com",
-	// they'll always get an invalid URL error on their first attempt to send.
-	requestPrepared := make(chan struct{})
-	go stream.makeRequest(requestPrepared)
-	<-requestPrepared
-	return &stream
 }
 
-func (cs *clientStream) Context() context.Context {
-	return cs.ctx
+func (cs *clientStream) Spec() Specification {
+	return cs.spec
+}
+
+func (cs *clientStream) Header() Header {
+	return cs.header
 }
 
 func (cs *clientStream) Send(m interface{}) error {
+	// stream.makeRequest hands the read side of the pipe off to net/http and
+	// waits to establish the response stream. There's a small class of errors we
+	// can catch without even sending data over the network, though, so we don't
+	// want to start writing to the stream until we're sure that we're actually
+	// waiting on the server. This makes user-visible behavior more predictable:
+	// for example, if they've configured the server's base URL as
+	// "hwws://acme.com", they'll always get an invalid URL error on their first
+	// attempt to send.
+	cs.prepareOnce.Do(func() {
+		requestPrepared := make(chan struct{})
+		go cs.makeRequest(requestPrepared)
+		<-requestPrepared
+	})
 	// TODO: update this when codec is pluggable
 	msg, ok := m.(proto.Message)
 	if !ok {
@@ -214,24 +300,22 @@ func (cs *clientStream) CloseReceive() error {
 	return nil
 }
 
+func (cs *clientStream) ReceivedHeader() Header {
+	<-cs.responseReady
+	return Header{raw: cs.response.Header}
+}
+
 func (cs *clientStream) makeRequest(prepared chan struct{}) {
 	// This runs concurrently with Send and CloseSend. Receive and CloseReceive
 	// wait on cs.responseReady, so we can't race with them.
 	defer close(cs.responseReady)
-
-	md, ok := CallMetadata(cs.ctx)
-	if !ok {
-		cs.setResponseError(errorf(CodeInternal, "no call metadata available on context"))
-		close(prepared)
-		return
-	}
 
 	if deadline, ok := cs.ctx.Deadline(); ok {
 		untilDeadline := time.Until(deadline)
 		if enc, err := encodeTimeout(untilDeadline); err == nil {
 			// Tests verify that the error in encodeTimeout is unreachable, so we
 			// should be safe without observability for the error case.
-			md.req.raw["Grpc-Timeout"] = []string{enc}
+			cs.header.raw["Grpc-Timeout"] = []string{enc}
 		}
 	}
 
@@ -241,7 +325,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 		close(prepared)
 		return
 	}
-	req.Header = md.req.raw
+	req.Header = cs.header.raw
 
 	// Before we send off a request, check if we're already out of time.
 	if err := cs.ctx.Err(); err != nil {
@@ -276,7 +360,6 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 		cs.setResponseError(wrap(code, err))
 		return
 	}
-	*md.res = Header{raw: res.Header}
 
 	if res.StatusCode != http.StatusOK {
 		code := CodeUnknown
@@ -334,12 +417,13 @@ func (cs *clientStream) getResponseError() error {
 }
 
 type serverStream struct {
-	ctx         context.Context
-	unmarshaler unmarshaler
-	marshaler   marshaler
-	writer      http.ResponseWriter
-	reader      io.ReadCloser
-	ctype       string
+	spec           Specification
+	unmarshaler    unmarshaler
+	marshaler      marshaler
+	writer         http.ResponseWriter
+	reader         io.ReadCloser
+	receivedHeader Header
+	ctype          string
 }
 
 var _ Stream = (*serverStream)(nil)
@@ -348,25 +432,35 @@ var _ Stream = (*serverStream)(nil)
 // gives us the request body and response writer at the same time, so we don't
 // need to worry about concurrency.
 func newServerStream(
-	ctx context.Context,
+	spec Specification,
 	w http.ResponseWriter,
 	r io.ReadCloser,
+	receivedHeader Header,
 	ctype string,
 	maxReadBytes int64,
 	gzipResponse bool,
 ) *serverStream {
 	return &serverStream{
-		ctx:         ctx,
-		unmarshaler: unmarshaler{r: r, ctype: ctype, max: maxReadBytes},
-		marshaler:   marshaler{w: w, ctype: ctype, gzipGRPC: gzipResponse},
-		writer:      w,
-		reader:      r,
-		ctype:       ctype,
+		spec:           spec,
+		unmarshaler:    unmarshaler{r: r, ctype: ctype, max: maxReadBytes},
+		marshaler:      marshaler{w: w, ctype: ctype, gzipGRPC: gzipResponse},
+		writer:         w,
+		reader:         r,
+		receivedHeader: receivedHeader,
+		ctype:          ctype,
 	}
 }
 
-func (ss *serverStream) Context() context.Context {
-	return ss.ctx
+func (ss *serverStream) Spec() Specification {
+	return ss.spec
+}
+
+func (ss *serverStream) Header() Header {
+	return Header{raw: ss.writer.Header()}
+}
+
+func (ss *serverStream) ReceivedHeader() Header {
+	return ss.receivedHeader
 }
 
 func (ss *serverStream) Receive(m interface{}) error {

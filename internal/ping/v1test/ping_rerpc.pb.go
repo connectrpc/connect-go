@@ -26,26 +26,25 @@ const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 // PingServiceClientReRPC is a client for the internal.ping.v1test.PingService
 // service.
 type PingServiceClientReRPC interface {
-	Ping(ctx context.Context, req *PingRequest) (*PingResponse, error)
-	Fail(ctx context.Context, req *FailRequest) (*FailResponse, error)
+	Ping(ctx context.Context, req *rerpc.Request[PingRequest]) (*rerpc.Response[PingResponse], error)
+	Fail(ctx context.Context, req *rerpc.Request[FailRequest]) (*rerpc.Response[FailResponse], error)
 	Sum(ctx context.Context) *callstream.Client[SumRequest, SumResponse]
-	CountUp(ctx context.Context, req *CountUpRequest) (*callstream.Server[CountUpResponse], error)
+	CountUp(ctx context.Context, req *rerpc.Request[CountUpRequest]) (*callstream.Server[CountUpResponse], error)
 	CumSum(ctx context.Context) *callstream.Bidirectional[CumSumRequest, CumSumResponse]
 }
 
 type pingServiceClientReRPC struct {
 	doer    rerpc.Doer
 	baseURL string
-	options []rerpc.CallOption
+	options []rerpc.ClientOption
 }
 
 // NewPingServiceClientReRPC constructs a client for the
-// internal.ping.v1test.PingService service. Call options passed here apply to
-// all calls made with this client.
+// internal.ping.v1test.PingService service.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
 // https://api.acme.com or https://acme.com/grpc).
-func NewPingServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) PingServiceClientReRPC {
+func NewPingServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) PingServiceClientReRPC {
 	return &pingServiceClientReRPC{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		doer:    doer,
@@ -53,9 +52,8 @@ func NewPingServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.Ca
 	}
 }
 
-// Ping calls internal.ping.v1test.PingService.Ping. Call options passed here
-// apply only to this call.
-func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *PingRequest) (*PingResponse, error) {
+// Ping calls internal.ping.v1test.PingService.Ping.
+func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *rerpc.Request[PingRequest]) (*rerpc.Response[PingResponse], error) {
 	call := rerpc.NewClientFunc[PingRequest, PingResponse](
 		c.doer,
 		c.baseURL,
@@ -67,9 +65,8 @@ func (c *pingServiceClientReRPC) Ping(ctx context.Context, req *PingRequest) (*P
 	return call(ctx, req)
 }
 
-// Fail calls internal.ping.v1test.PingService.Fail. Call options passed here
-// apply only to this call.
-func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest) (*FailResponse, error) {
+// Fail calls internal.ping.v1test.PingService.Fail.
+func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *rerpc.Request[FailRequest]) (*rerpc.Response[FailResponse], error) {
 	call := rerpc.NewClientFunc[FailRequest, FailResponse](
 		c.doer,
 		c.baseURL,
@@ -81,11 +78,9 @@ func (c *pingServiceClientReRPC) Fail(ctx context.Context, req *FailRequest) (*F
 	return call(ctx, req)
 }
 
-// Sum calls internal.ping.v1test.PingService.Sum. Call options passed here
-// apply only to this call.
+// Sum calls internal.ping.v1test.PingService.Sum.
 func (c *pingServiceClientReRPC) Sum(ctx context.Context) *callstream.Client[SumRequest, SumResponse] {
-	ctx, call := rerpc.NewClientStream(
-		ctx,
+	call := rerpc.NewClientStream(
 		c.doer,
 		rerpc.StreamTypeClient,
 		c.baseURL,
@@ -94,15 +89,13 @@ func (c *pingServiceClientReRPC) Sum(ctx context.Context) *callstream.Client[Sum
 		"Sum",                  // protobuf method
 		c.options...,
 	)
-	stream := call(ctx)
+	_, stream := call(ctx)
 	return callstream.NewClient[SumRequest, SumResponse](stream)
 }
 
-// CountUp calls internal.ping.v1test.PingService.CountUp. Call options passed
-// here apply only to this call.
-func (c *pingServiceClientReRPC) CountUp(ctx context.Context, req *CountUpRequest) (*callstream.Server[CountUpResponse], error) {
-	ctx, call := rerpc.NewClientStream(
-		ctx,
+// CountUp calls internal.ping.v1test.PingService.CountUp.
+func (c *pingServiceClientReRPC) CountUp(ctx context.Context, req *rerpc.Request[CountUpRequest]) (*callstream.Server[CountUpResponse], error) {
+	call := rerpc.NewClientStream(
 		c.doer,
 		rerpc.StreamTypeServer,
 		c.baseURL,
@@ -111,8 +104,8 @@ func (c *pingServiceClientReRPC) CountUp(ctx context.Context, req *CountUpReques
 		"CountUp",              // protobuf method
 		c.options...,
 	)
-	stream := call(ctx)
-	if err := stream.Send(req); err != nil {
+	_, stream := call(ctx)
+	if err := stream.Send(req.Any()); err != nil {
 		_ = stream.CloseSend(err)
 		_ = stream.CloseReceive()
 		return nil, err
@@ -124,11 +117,9 @@ func (c *pingServiceClientReRPC) CountUp(ctx context.Context, req *CountUpReques
 	return callstream.NewServer[CountUpResponse](stream), nil
 }
 
-// CumSum calls internal.ping.v1test.PingService.CumSum. Call options passed
-// here apply only to this call.
+// CumSum calls internal.ping.v1test.PingService.CumSum.
 func (c *pingServiceClientReRPC) CumSum(ctx context.Context) *callstream.Bidirectional[CumSumRequest, CumSumResponse] {
-	ctx, call := rerpc.NewClientStream(
-		ctx,
+	call := rerpc.NewClientStream(
 		c.doer,
 		rerpc.StreamTypeBidirectional,
 		c.baseURL,
@@ -137,7 +128,7 @@ func (c *pingServiceClientReRPC) CumSum(ctx context.Context) *callstream.Bidirec
 		"CumSum",               // protobuf method
 		c.options...,
 	)
-	stream := call(ctx)
+	_, stream := call(ctx)
 	return callstream.NewBidirectional[CumSumRequest, CumSumResponse](stream)
 }
 
@@ -150,10 +141,10 @@ func (c *pingServiceClientReRPC) CumSum(ctx context.Context) *callstream.Bidirec
 // requirement. See https://github.com/grpc/grpc-go/issues/3794 for a longer
 // discussion.
 type PingServiceReRPC interface {
-	Ping(context.Context, *PingRequest) (*PingResponse, error)
-	Fail(context.Context, *FailRequest) (*FailResponse, error)
+	Ping(context.Context, *rerpc.Request[PingRequest]) (*rerpc.Response[PingResponse], error)
+	Fail(context.Context, *rerpc.Request[FailRequest]) (*rerpc.Response[FailResponse], error)
 	Sum(context.Context, *handlerstream.Client[SumRequest, SumResponse]) error
-	CountUp(context.Context, *CountUpRequest, *handlerstream.Server[CountUpResponse]) error
+	CountUp(context.Context, *rerpc.Request[CountUpRequest], *handlerstream.Server[CountUpResponse]) error
 	CumSum(context.Context, *handlerstream.Bidirectional[CumSumRequest, CumSumResponse]) error
 	mustEmbedUnimplementedPingServiceReRPC()
 }
@@ -186,10 +177,9 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"Sum",                  // protobuf method
-		func(ctx context.Context, sf rerpc.StreamFunc) {
-			stream := sf(ctx)
+		func(ctx context.Context, stream rerpc.Stream) {
 			typed := handlerstream.NewClient[SumRequest, SumResponse](stream)
-			err := svc.Sum(stream.Context(), typed)
+			err := svc.Sum(ctx, typed)
 			_ = stream.CloseReceive()
 			if err != nil {
 				if _, ok := rerpc.AsError(err); !ok {
@@ -212,20 +202,19 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"CountUp",              // protobuf method
-		func(ctx context.Context, sf rerpc.StreamFunc) {
-			stream := sf(ctx)
+		func(ctx context.Context, stream rerpc.Stream) {
 			typed := handlerstream.NewServer[CountUpResponse](stream)
-			var req CountUpRequest
-			if err := stream.Receive(&req); err != nil {
+			req, err := rerpc.NewReceivedRequest[CountUpRequest](stream)
+			if err != nil {
 				_ = stream.CloseReceive()
 				_ = stream.CloseSend(err)
 				return
 			}
-			if err := stream.CloseReceive(); err != nil {
+			if err = stream.CloseReceive(); err != nil {
 				_ = stream.CloseSend(err)
 				return
 			}
-			err := svc.CountUp(stream.Context(), &req, typed)
+			err = svc.CountUp(ctx, req, typed)
 			if err != nil {
 				if _, ok := rerpc.AsError(err); !ok {
 					if errors.Is(err, context.Canceled) {
@@ -247,10 +236,9 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 		"internal.ping.v1test", // protobuf package
 		"PingService",          // protobuf service
 		"CumSum",               // protobuf method
-		func(ctx context.Context, sf rerpc.StreamFunc) {
-			stream := sf(ctx)
+		func(ctx context.Context, stream rerpc.Stream) {
 			typed := handlerstream.NewBidirectional[CumSumRequest, CumSumResponse](stream)
-			err := svc.CumSum(stream.Context(), typed)
+			err := svc.CumSum(ctx, typed)
 			_ = stream.CloseReceive()
 			if err != nil {
 				if _, ok := rerpc.AsError(err); !ok {
@@ -278,11 +266,11 @@ var _ PingServiceReRPC = (*UnimplementedPingServiceReRPC)(nil) // verify interfa
 // embed UnimplementedPingServiceReRPC.
 type UnimplementedPingServiceReRPC struct{}
 
-func (UnimplementedPingServiceReRPC) Ping(context.Context, *PingRequest) (*PingResponse, error) {
+func (UnimplementedPingServiceReRPC) Ping(context.Context, *rerpc.Request[PingRequest]) (*rerpc.Response[PingResponse], error) {
 	return nil, rerpc.Errorf(rerpc.CodeUnimplemented, "internal.ping.v1test.PingService.Ping isn't implemented")
 }
 
-func (UnimplementedPingServiceReRPC) Fail(context.Context, *FailRequest) (*FailResponse, error) {
+func (UnimplementedPingServiceReRPC) Fail(context.Context, *rerpc.Request[FailRequest]) (*rerpc.Response[FailResponse], error) {
 	return nil, rerpc.Errorf(rerpc.CodeUnimplemented, "internal.ping.v1test.PingService.Fail isn't implemented")
 }
 
@@ -290,7 +278,7 @@ func (UnimplementedPingServiceReRPC) Sum(context.Context, *handlerstream.Client[
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.ping.v1test.PingService.Sum isn't implemented")
 }
 
-func (UnimplementedPingServiceReRPC) CountUp(context.Context, *CountUpRequest, *handlerstream.Server[CountUpResponse]) error {
+func (UnimplementedPingServiceReRPC) CountUp(context.Context, *rerpc.Request[CountUpRequest], *handlerstream.Server[CountUpResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.ping.v1test.PingService.CountUp isn't implemented")
 }
 

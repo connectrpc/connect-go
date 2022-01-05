@@ -11,10 +11,8 @@ import (
 
 func ExampleCallMetadata() {
 	logger := rerpc.UnaryInterceptorFunc(func(next rerpc.Func) rerpc.Func {
-		return rerpc.Func(func(ctx context.Context, req interface{}) (interface{}, error) {
-			if md, ok := rerpc.CallMetadata(ctx); ok {
-				fmt.Println("calling", md.Spec.Method)
-			}
+		return rerpc.Func(func(ctx context.Context, req rerpc.AnyRequest) (rerpc.AnyResponse, error) {
+			fmt.Println("calling", req.Spec().Procedure)
 			return next(ctx, req)
 		})
 	})
@@ -26,15 +24,15 @@ func ExampleCallMetadata() {
 		http.DefaultClient,
 		rerpc.Intercept(rerpc.NewChain(logger, short)),
 	)
-	client.Ping(context.Background(), &pingpb.PingRequest{})
+	client.Ping(context.Background(), rerpc.NewRequest(&pingpb.PingRequest{}))
 
 	// Output:
-	// calling Ping
+	// calling internal.ping.v1test.PingService/Ping
 }
 
 func ExampleChain() {
 	outer := rerpc.UnaryInterceptorFunc(func(next rerpc.Func) rerpc.Func {
-		return rerpc.Func(func(ctx context.Context, req interface{}) (interface{}, error) {
+		return rerpc.Func(func(ctx context.Context, req rerpc.AnyRequest) (rerpc.AnyResponse, error) {
 			fmt.Println("outer interceptor: before call")
 			res, err := next(ctx, req)
 			fmt.Println("outer interceptor: after call")
@@ -42,7 +40,7 @@ func ExampleChain() {
 		})
 	})
 	inner := rerpc.UnaryInterceptorFunc(func(next rerpc.Func) rerpc.Func {
-		return rerpc.Func(func(ctx context.Context, req interface{}) (interface{}, error) {
+		return rerpc.Func(func(ctx context.Context, req rerpc.AnyRequest) (rerpc.AnyResponse, error) {
 			fmt.Println("inner interceptor: before call")
 			res, err := next(ctx, req)
 			fmt.Println("inner interceptor: after call")
@@ -57,7 +55,7 @@ func ExampleChain() {
 		http.DefaultClient,
 		rerpc.Intercept(rerpc.NewChain(outer, inner, short)),
 	)
-	client.Ping(context.Background(), &pingpb.PingRequest{})
+	client.Ping(context.Background(), rerpc.NewRequest(&pingpb.PingRequest{}))
 
 	// Output:
 	// outer interceptor: before call

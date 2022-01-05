@@ -12,9 +12,9 @@ import (
 )
 
 func assertingFunc(f func(context.Context)) Func {
-	return Func(func(ctx context.Context, _ interface{}) (interface{}, error) {
+	return Func(func(ctx context.Context, _ AnyRequest) (AnyResponse, error) {
 		f(ctx)
-		return &emptypb.Empty{}, nil
+		return NewResponse(&emptypb.Empty{}), nil
 	})
 }
 
@@ -24,7 +24,7 @@ type loggingInterceptor struct {
 }
 
 func (i *loggingInterceptor) Wrap(next Func) Func {
-	return Func(func(ctx context.Context, req interface{}) (interface{}, error) {
+	return Func(func(ctx context.Context, req AnyRequest) (AnyResponse, error) {
 		io.WriteString(i.w, i.before)
 		defer func() { io.WriteString(i.w, i.after) }()
 		return next(ctx, req)
@@ -32,7 +32,7 @@ func (i *loggingInterceptor) Wrap(next Func) Func {
 }
 
 func (i *loggingInterceptor) WrapStream(next StreamFunc) StreamFunc {
-	return StreamFunc(func(ctx context.Context) Stream {
+	return StreamFunc(func(ctx context.Context) (context.Context, Stream) {
 		io.WriteString(i.w, i.before)
 		defer func() { io.WriteString(i.w, i.after) }()
 		return next(ctx)
@@ -56,7 +56,10 @@ func TestChain(t *testing.T) {
 		next := assertingFunc(func(_ context.Context) {
 			called = true
 		})
-		res, err := chain.Wrap(next)(context.Background(), &emptypb.Empty{})
+		res, err := chain.Wrap(next)(
+			context.Background(),
+			NewRequest(&emptypb.Empty{}),
+		)
 		assert.Nil(t, err, "returned error")
 		assert.NotNil(t, res, "returned result")
 		assert.Equal(t, out.String(), onion, "execution onion")
@@ -65,11 +68,11 @@ func TestChain(t *testing.T) {
 	t.Run("stream", func(t *testing.T) {
 		out.Reset()
 		var called bool
-		next := StreamFunc(func(_ context.Context) Stream {
+		next := StreamFunc(func(ctx context.Context) (context.Context, Stream) {
 			called = true
-			return &panicStream{}
+			return ctx, &panicStream{}
 		})
-		stream := chain.WrapStream(next)(context.Background())
+		_, stream := chain.WrapStream(next)(context.Background())
 		assert.NotNil(t, stream, "returned stream")
 		assert.Equal(t, out.String(), onion, "execution onion")
 		assert.True(t, called, "original StreamFunc called")
