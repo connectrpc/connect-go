@@ -27,7 +27,7 @@ const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 type HealthClientReRPC interface {
 	// If the requested service is unknown, the call will fail with status
 	// NOT_FOUND.
-	Check(ctx context.Context, req *HealthCheckRequest) (*HealthCheckResponse, error)
+	Check(ctx context.Context, req *rerpc.Request[HealthCheckRequest]) (*rerpc.Response[HealthCheckResponse], error)
 	// Performs a watch for the serving status of the requested service.
 	// The server will immediately send back a message indicating the current
 	// serving status.  It will then subsequently send a new message whenever
@@ -43,21 +43,21 @@ type HealthClientReRPC interface {
 	// should assume this method is not supported and should not retry the
 	// call.  If the call terminates with any other status (including OK),
 	// clients should retry the call with appropriate exponential backoff.
-	Watch(ctx context.Context, req *HealthCheckRequest) (*callstream.Server[HealthCheckResponse], error)
+	Watch(ctx context.Context, req *rerpc.Request[HealthCheckRequest]) (*callstream.Server[HealthCheckResponse], error)
 }
 
 type healthClientReRPC struct {
 	doer    rerpc.Doer
 	baseURL string
-	options []rerpc.CallOption
+	options []rerpc.ClientOption
 }
 
 // NewHealthClientReRPC constructs a client for the internal.health.v1.Health
-// service. Call options passed here apply to all calls made with this client.
+// service.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
 // https://api.acme.com or https://acme.com/grpc).
-func NewHealthClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) HealthClientReRPC {
+func NewHealthClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) HealthClientReRPC {
 	return &healthClientReRPC{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		doer:    doer,
@@ -65,9 +65,8 @@ func NewHealthClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOpt
 	}
 }
 
-// Check calls internal.health.v1.Health.Check. Call options passed here apply
-// only to this call.
-func (c *healthClientReRPC) Check(ctx context.Context, req *HealthCheckRequest) (*HealthCheckResponse, error) {
+// Check calls internal.health.v1.Health.Check.
+func (c *healthClientReRPC) Check(ctx context.Context, req *rerpc.Request[HealthCheckRequest]) (*rerpc.Response[HealthCheckResponse], error) {
 	call := rerpc.NewClientFunc[HealthCheckRequest, HealthCheckResponse](
 		c.doer,
 		c.baseURL,
@@ -79,11 +78,9 @@ func (c *healthClientReRPC) Check(ctx context.Context, req *HealthCheckRequest) 
 	return call(ctx, req)
 }
 
-// Watch calls internal.health.v1.Health.Watch. Call options passed here apply
-// only to this call.
-func (c *healthClientReRPC) Watch(ctx context.Context, req *HealthCheckRequest) (*callstream.Server[HealthCheckResponse], error) {
-	ctx, call := rerpc.NewClientStream(
-		ctx,
+// Watch calls internal.health.v1.Health.Watch.
+func (c *healthClientReRPC) Watch(ctx context.Context, req *rerpc.Request[HealthCheckRequest]) (*callstream.Server[HealthCheckResponse], error) {
+	call := rerpc.NewClientStream(
 		c.doer,
 		rerpc.StreamTypeServer,
 		c.baseURL,
@@ -92,8 +89,8 @@ func (c *healthClientReRPC) Watch(ctx context.Context, req *HealthCheckRequest) 
 		"Watch",              // protobuf method
 		c.options...,
 	)
-	stream := call(ctx)
-	if err := stream.Send(req); err != nil {
+	_, stream := call(ctx)
+	if err := stream.Send(req.Any()); err != nil {
 		_ = stream.CloseSend(err)
 		_ = stream.CloseReceive()
 		return nil, err
@@ -116,7 +113,7 @@ func (c *healthClientReRPC) Watch(ctx context.Context, req *HealthCheckRequest) 
 type HealthReRPC interface {
 	// If the requested service is unknown, the call will fail with status
 	// NOT_FOUND.
-	Check(context.Context, *HealthCheckRequest) (*HealthCheckResponse, error)
+	Check(context.Context, *rerpc.Request[HealthCheckRequest]) (*rerpc.Response[HealthCheckResponse], error)
 	// Performs a watch for the serving status of the requested service.
 	// The server will immediately send back a message indicating the current
 	// serving status.  It will then subsequently send a new message whenever
@@ -132,7 +129,7 @@ type HealthReRPC interface {
 	// should assume this method is not supported and should not retry the
 	// call.  If the call terminates with any other status (including OK),
 	// clients should retry the call with appropriate exponential backoff.
-	Watch(context.Context, *HealthCheckRequest, *handlerstream.Server[HealthCheckResponse]) error
+	Watch(context.Context, *rerpc.Request[HealthCheckRequest], *handlerstream.Server[HealthCheckResponse]) error
 	mustEmbedUnimplementedHealthReRPC()
 }
 
@@ -155,20 +152,19 @@ func NewHealthHandlerReRPC(svc HealthReRPC, opts ...rerpc.HandlerOption) []*rerp
 		"internal.health.v1", // protobuf package
 		"Health",             // protobuf service
 		"Watch",              // protobuf method
-		func(ctx context.Context, sf rerpc.StreamFunc) {
-			stream := sf(ctx)
+		func(ctx context.Context, stream rerpc.Stream) {
 			typed := handlerstream.NewServer[HealthCheckResponse](stream)
-			var req HealthCheckRequest
-			if err := stream.Receive(&req); err != nil {
+			req, err := rerpc.NewReceivedRequest[HealthCheckRequest](stream)
+			if err != nil {
 				_ = stream.CloseReceive()
 				_ = stream.CloseSend(err)
 				return
 			}
-			if err := stream.CloseReceive(); err != nil {
+			if err = stream.CloseReceive(); err != nil {
 				_ = stream.CloseSend(err)
 				return
 			}
-			err := svc.Watch(stream.Context(), &req, typed)
+			err = svc.Watch(ctx, req, typed)
 			if err != nil {
 				if _, ok := rerpc.AsError(err); !ok {
 					if errors.Is(err, context.Canceled) {
@@ -195,11 +191,11 @@ var _ HealthReRPC = (*UnimplementedHealthReRPC)(nil) // verify interface impleme
 // UnimplementedHealthReRPC.
 type UnimplementedHealthReRPC struct{}
 
-func (UnimplementedHealthReRPC) Check(context.Context, *HealthCheckRequest) (*HealthCheckResponse, error) {
+func (UnimplementedHealthReRPC) Check(context.Context, *rerpc.Request[HealthCheckRequest]) (*rerpc.Response[HealthCheckResponse], error) {
 	return nil, rerpc.Errorf(rerpc.CodeUnimplemented, "internal.health.v1.Health.Check isn't implemented")
 }
 
-func (UnimplementedHealthReRPC) Watch(context.Context, *HealthCheckRequest, *handlerstream.Server[HealthCheckResponse]) error {
+func (UnimplementedHealthReRPC) Watch(context.Context, *rerpc.Request[HealthCheckRequest], *handlerstream.Server[HealthCheckResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.health.v1.Health.Watch isn't implemented")
 }
 

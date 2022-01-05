@@ -34,16 +34,15 @@ type ServerReflectionClientReRPC interface {
 type serverReflectionClientReRPC struct {
 	doer    rerpc.Doer
 	baseURL string
-	options []rerpc.CallOption
+	options []rerpc.ClientOption
 }
 
 // NewServerReflectionClientReRPC constructs a client for the
-// internal.reflection.v1alpha1.ServerReflection service. Call options passed
-// here apply to all calls made with this client.
+// internal.reflection.v1alpha1.ServerReflection service.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
 // https://api.acme.com or https://acme.com/grpc).
-func NewServerReflectionClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) ServerReflectionClientReRPC {
+func NewServerReflectionClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) ServerReflectionClientReRPC {
 	return &serverReflectionClientReRPC{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		doer:    doer,
@@ -52,11 +51,9 @@ func NewServerReflectionClientReRPC(baseURL string, doer rerpc.Doer, opts ...rer
 }
 
 // ServerReflectionInfo calls
-// internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo. Call
-// options passed here apply only to this call.
+// internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo.
 func (c *serverReflectionClientReRPC) ServerReflectionInfo(ctx context.Context) *callstream.Bidirectional[ServerReflectionRequest, ServerReflectionResponse] {
-	ctx, call := rerpc.NewClientStream(
-		ctx,
+	call := rerpc.NewClientStream(
 		c.doer,
 		rerpc.StreamTypeBidirectional,
 		c.baseURL,
@@ -65,7 +62,7 @@ func (c *serverReflectionClientReRPC) ServerReflectionInfo(ctx context.Context) 
 		"ServerReflectionInfo",         // protobuf method
 		c.options...,
 	)
-	stream := call(ctx)
+	_, stream := call(ctx)
 	return callstream.NewBidirectional[ServerReflectionRequest, ServerReflectionResponse](stream)
 }
 
@@ -96,10 +93,9 @@ func NewServerReflectionHandlerReRPC(svc ServerReflectionReRPC, opts ...rerpc.Ha
 		"internal.reflection.v1alpha1", // protobuf package
 		"ServerReflection",             // protobuf service
 		"ServerReflectionInfo",         // protobuf method
-		func(ctx context.Context, sf rerpc.StreamFunc) {
-			stream := sf(ctx)
+		func(ctx context.Context, stream rerpc.Stream) {
 			typed := handlerstream.NewBidirectional[ServerReflectionRequest, ServerReflectionResponse](stream)
-			err := svc.ServerReflectionInfo(stream.Context(), typed)
+			err := svc.ServerReflectionInfo(ctx, typed)
 			_ = stream.CloseReceive()
 			if err != nil {
 				if _, ok := rerpc.AsError(err); !ok {

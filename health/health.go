@@ -54,19 +54,19 @@ type server struct {
 	check func(context.Context, string) (Status, error)
 }
 
-func (s *server) Check(ctx context.Context, req *healthpb.HealthCheckRequest) (*healthpb.HealthCheckResponse, error) {
-	status, err := s.check(ctx, req.Service)
+func (s *server) Check(ctx context.Context, req *rerpc.Request[healthpb.HealthCheckRequest]) (*rerpc.Response[healthpb.HealthCheckResponse], error) {
+	status, err := s.check(ctx, req.Msg.Service)
 	if err != nil {
 		return nil, err
 	}
-	return &healthpb.HealthCheckResponse{
+	return rerpc.NewResponse(&healthpb.HealthCheckResponse{
 		Status: healthpb.HealthCheckResponse_ServingStatus(status),
-	}, nil
+	}), nil
 }
 
 func (s *server) Watch(
 	_ context.Context,
-	_ *healthpb.HealthCheckRequest,
+	_ *rerpc.Request[healthpb.HealthCheckRequest],
 	_ *handlerstream.Server[healthpb.HealthCheckResponse],
 ) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "reRPC doesn't support watching health state")
@@ -117,7 +117,7 @@ type Client struct {
 }
 
 // NewClient constructs a Client.
-func NewClient(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) *Client {
+func NewClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) *Client {
 	return &Client{healthpb.NewHealthClientReRPC(
 		baseURL,
 		doer,
@@ -126,10 +126,13 @@ func NewClient(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) *Clien
 }
 
 // Check the health of a service.
-func (c *Client) Check(ctx context.Context, req *CheckRequest, opts ...rerpc.CallOption) (*CheckResponse, error) {
-	res, err := c.health.Check(ctx, &healthpb.HealthCheckRequest{Service: req.Service})
+func (c *Client) Check(ctx context.Context, req *CheckRequest) (*CheckResponse, error) {
+	res, err := c.health.Check(
+		ctx,
+		rerpc.NewRequest(&healthpb.HealthCheckRequest{Service: req.Service}),
+	)
 	if err != nil {
 		return nil, err
 	}
-	return &CheckResponse{Status: Status(res.Status)}, nil
+	return &CheckResponse{Status: Status(res.Msg.Status)}, nil
 }

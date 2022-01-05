@@ -13,14 +13,15 @@ type shortCircuit struct {
 var _ rerpc.Interceptor = (*shortCircuit)(nil)
 
 func (sc *shortCircuit) Wrap(next rerpc.Func) rerpc.Func {
-	return rerpc.Func(func(_ context.Context, _ interface{}) (interface{}, error) {
+	return rerpc.Func(func(_ context.Context, _ rerpc.AnyRequest) (rerpc.AnyResponse, error) {
 		return nil, sc.err
 	})
 }
 
 func (sc *shortCircuit) WrapStream(next rerpc.StreamFunc) rerpc.StreamFunc {
-	return rerpc.StreamFunc(func(ctx context.Context) rerpc.Stream {
-		return &errStream{ctx, sc.err}
+	return rerpc.StreamFunc(func(ctx context.Context) (context.Context, rerpc.Stream) {
+		ctx, stream := next(ctx)
+		return ctx, &errStream{Stream: stream, err: sc.err}
 	})
 }
 
@@ -35,13 +36,13 @@ func ShortCircuit(err error) rerpc.Interceptor {
 }
 
 type errStream struct {
-	ctx context.Context
+	rerpc.Stream
+
 	err error
 }
 
 var _ rerpc.Stream = (*errStream)(nil)
 
-func (s *errStream) Context() context.Context    { return s.ctx }
 func (s *errStream) Receive(_ interface{}) error { return s.err }
 func (s *errStream) CloseReceive() error         { return s.err }
 func (s *errStream) Send(_ interface{}) error    { return s.err }

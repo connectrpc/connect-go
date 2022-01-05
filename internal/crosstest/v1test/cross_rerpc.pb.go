@@ -26,26 +26,25 @@ const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 // CrossServiceClientReRPC is a client for the
 // internal.crosstest.v1test.CrossService service.
 type CrossServiceClientReRPC interface {
-	Ping(ctx context.Context, req *PingRequest) (*PingResponse, error)
-	Fail(ctx context.Context, req *FailRequest) (*FailResponse, error)
+	Ping(ctx context.Context, req *rerpc.Request[PingRequest]) (*rerpc.Response[PingResponse], error)
+	Fail(ctx context.Context, req *rerpc.Request[FailRequest]) (*rerpc.Response[FailResponse], error)
 	Sum(ctx context.Context) *callstream.Client[SumRequest, SumResponse]
-	CountUp(ctx context.Context, req *CountUpRequest) (*callstream.Server[CountUpResponse], error)
+	CountUp(ctx context.Context, req *rerpc.Request[CountUpRequest]) (*callstream.Server[CountUpResponse], error)
 	CumSum(ctx context.Context) *callstream.Bidirectional[CumSumRequest, CumSumResponse]
 }
 
 type crossServiceClientReRPC struct {
 	doer    rerpc.Doer
 	baseURL string
-	options []rerpc.CallOption
+	options []rerpc.ClientOption
 }
 
 // NewCrossServiceClientReRPC constructs a client for the
-// internal.crosstest.v1test.CrossService service. Call options passed here
-// apply to all calls made with this client.
+// internal.crosstest.v1test.CrossService service.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
 // https://api.acme.com or https://acme.com/grpc).
-func NewCrossServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.CallOption) CrossServiceClientReRPC {
+func NewCrossServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) CrossServiceClientReRPC {
 	return &crossServiceClientReRPC{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		doer:    doer,
@@ -53,9 +52,8 @@ func NewCrossServiceClientReRPC(baseURL string, doer rerpc.Doer, opts ...rerpc.C
 	}
 }
 
-// Ping calls internal.crosstest.v1test.CrossService.Ping. Call options passed
-// here apply only to this call.
-func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest) (*PingResponse, error) {
+// Ping calls internal.crosstest.v1test.CrossService.Ping.
+func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *rerpc.Request[PingRequest]) (*rerpc.Response[PingResponse], error) {
 	call := rerpc.NewClientFunc[PingRequest, PingResponse](
 		c.doer,
 		c.baseURL,
@@ -67,9 +65,8 @@ func (c *crossServiceClientReRPC) Ping(ctx context.Context, req *PingRequest) (*
 	return call(ctx, req)
 }
 
-// Fail calls internal.crosstest.v1test.CrossService.Fail. Call options passed
-// here apply only to this call.
-func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest) (*FailResponse, error) {
+// Fail calls internal.crosstest.v1test.CrossService.Fail.
+func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *rerpc.Request[FailRequest]) (*rerpc.Response[FailResponse], error) {
 	call := rerpc.NewClientFunc[FailRequest, FailResponse](
 		c.doer,
 		c.baseURL,
@@ -81,11 +78,9 @@ func (c *crossServiceClientReRPC) Fail(ctx context.Context, req *FailRequest) (*
 	return call(ctx, req)
 }
 
-// Sum calls internal.crosstest.v1test.CrossService.Sum. Call options passed
-// here apply only to this call.
+// Sum calls internal.crosstest.v1test.CrossService.Sum.
 func (c *crossServiceClientReRPC) Sum(ctx context.Context) *callstream.Client[SumRequest, SumResponse] {
-	ctx, call := rerpc.NewClientStream(
-		ctx,
+	call := rerpc.NewClientStream(
 		c.doer,
 		rerpc.StreamTypeClient,
 		c.baseURL,
@@ -94,15 +89,13 @@ func (c *crossServiceClientReRPC) Sum(ctx context.Context) *callstream.Client[Su
 		"Sum",                       // protobuf method
 		c.options...,
 	)
-	stream := call(ctx)
+	_, stream := call(ctx)
 	return callstream.NewClient[SumRequest, SumResponse](stream)
 }
 
-// CountUp calls internal.crosstest.v1test.CrossService.CountUp. Call options
-// passed here apply only to this call.
-func (c *crossServiceClientReRPC) CountUp(ctx context.Context, req *CountUpRequest) (*callstream.Server[CountUpResponse], error) {
-	ctx, call := rerpc.NewClientStream(
-		ctx,
+// CountUp calls internal.crosstest.v1test.CrossService.CountUp.
+func (c *crossServiceClientReRPC) CountUp(ctx context.Context, req *rerpc.Request[CountUpRequest]) (*callstream.Server[CountUpResponse], error) {
+	call := rerpc.NewClientStream(
 		c.doer,
 		rerpc.StreamTypeServer,
 		c.baseURL,
@@ -111,8 +104,8 @@ func (c *crossServiceClientReRPC) CountUp(ctx context.Context, req *CountUpReque
 		"CountUp",                   // protobuf method
 		c.options...,
 	)
-	stream := call(ctx)
-	if err := stream.Send(req); err != nil {
+	_, stream := call(ctx)
+	if err := stream.Send(req.Any()); err != nil {
 		_ = stream.CloseSend(err)
 		_ = stream.CloseReceive()
 		return nil, err
@@ -124,11 +117,9 @@ func (c *crossServiceClientReRPC) CountUp(ctx context.Context, req *CountUpReque
 	return callstream.NewServer[CountUpResponse](stream), nil
 }
 
-// CumSum calls internal.crosstest.v1test.CrossService.CumSum. Call options
-// passed here apply only to this call.
+// CumSum calls internal.crosstest.v1test.CrossService.CumSum.
 func (c *crossServiceClientReRPC) CumSum(ctx context.Context) *callstream.Bidirectional[CumSumRequest, CumSumResponse] {
-	ctx, call := rerpc.NewClientStream(
-		ctx,
+	call := rerpc.NewClientStream(
 		c.doer,
 		rerpc.StreamTypeBidirectional,
 		c.baseURL,
@@ -137,7 +128,7 @@ func (c *crossServiceClientReRPC) CumSum(ctx context.Context) *callstream.Bidire
 		"CumSum",                    // protobuf method
 		c.options...,
 	)
-	stream := call(ctx)
+	_, stream := call(ctx)
 	return callstream.NewBidirectional[CumSumRequest, CumSumResponse](stream)
 }
 
@@ -150,10 +141,10 @@ func (c *crossServiceClientReRPC) CumSum(ctx context.Context) *callstream.Bidire
 // requirement. See https://github.com/grpc/grpc-go/issues/3794 for a longer
 // discussion.
 type CrossServiceReRPC interface {
-	Ping(context.Context, *PingRequest) (*PingResponse, error)
-	Fail(context.Context, *FailRequest) (*FailResponse, error)
+	Ping(context.Context, *rerpc.Request[PingRequest]) (*rerpc.Response[PingResponse], error)
+	Fail(context.Context, *rerpc.Request[FailRequest]) (*rerpc.Response[FailResponse], error)
 	Sum(context.Context, *handlerstream.Client[SumRequest, SumResponse]) error
-	CountUp(context.Context, *CountUpRequest, *handlerstream.Server[CountUpResponse]) error
+	CountUp(context.Context, *rerpc.Request[CountUpRequest], *handlerstream.Server[CountUpResponse]) error
 	CumSum(context.Context, *handlerstream.Bidirectional[CumSumRequest, CumSumResponse]) error
 	mustEmbedUnimplementedCrossServiceReRPC()
 }
@@ -186,10 +177,9 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"Sum",                       // protobuf method
-		func(ctx context.Context, sf rerpc.StreamFunc) {
-			stream := sf(ctx)
+		func(ctx context.Context, stream rerpc.Stream) {
 			typed := handlerstream.NewClient[SumRequest, SumResponse](stream)
-			err := svc.Sum(stream.Context(), typed)
+			err := svc.Sum(ctx, typed)
 			_ = stream.CloseReceive()
 			if err != nil {
 				if _, ok := rerpc.AsError(err); !ok {
@@ -212,20 +202,19 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"CountUp",                   // protobuf method
-		func(ctx context.Context, sf rerpc.StreamFunc) {
-			stream := sf(ctx)
+		func(ctx context.Context, stream rerpc.Stream) {
 			typed := handlerstream.NewServer[CountUpResponse](stream)
-			var req CountUpRequest
-			if err := stream.Receive(&req); err != nil {
+			req, err := rerpc.NewReceivedRequest[CountUpRequest](stream)
+			if err != nil {
 				_ = stream.CloseReceive()
 				_ = stream.CloseSend(err)
 				return
 			}
-			if err := stream.CloseReceive(); err != nil {
+			if err = stream.CloseReceive(); err != nil {
 				_ = stream.CloseSend(err)
 				return
 			}
-			err := svc.CountUp(stream.Context(), &req, typed)
+			err = svc.CountUp(ctx, req, typed)
 			if err != nil {
 				if _, ok := rerpc.AsError(err); !ok {
 					if errors.Is(err, context.Canceled) {
@@ -247,10 +236,9 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 		"internal.crosstest.v1test", // protobuf package
 		"CrossService",              // protobuf service
 		"CumSum",                    // protobuf method
-		func(ctx context.Context, sf rerpc.StreamFunc) {
-			stream := sf(ctx)
+		func(ctx context.Context, stream rerpc.Stream) {
 			typed := handlerstream.NewBidirectional[CumSumRequest, CumSumResponse](stream)
-			err := svc.CumSum(stream.Context(), typed)
+			err := svc.CumSum(ctx, typed)
 			_ = stream.CloseReceive()
 			if err != nil {
 				if _, ok := rerpc.AsError(err); !ok {
@@ -278,11 +266,11 @@ var _ CrossServiceReRPC = (*UnimplementedCrossServiceReRPC)(nil) // verify inter
 // embed UnimplementedCrossServiceReRPC.
 type UnimplementedCrossServiceReRPC struct{}
 
-func (UnimplementedCrossServiceReRPC) Ping(context.Context, *PingRequest) (*PingResponse, error) {
+func (UnimplementedCrossServiceReRPC) Ping(context.Context, *rerpc.Request[PingRequest]) (*rerpc.Response[PingResponse], error) {
 	return nil, rerpc.Errorf(rerpc.CodeUnimplemented, "internal.crosstest.v1test.CrossService.Ping isn't implemented")
 }
 
-func (UnimplementedCrossServiceReRPC) Fail(context.Context, *FailRequest) (*FailResponse, error) {
+func (UnimplementedCrossServiceReRPC) Fail(context.Context, *rerpc.Request[FailRequest]) (*rerpc.Response[FailResponse], error) {
 	return nil, rerpc.Errorf(rerpc.CodeUnimplemented, "internal.crosstest.v1test.CrossService.Fail isn't implemented")
 }
 
@@ -290,7 +278,7 @@ func (UnimplementedCrossServiceReRPC) Sum(context.Context, *handlerstream.Client
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.crosstest.v1test.CrossService.Sum isn't implemented")
 }
 
-func (UnimplementedCrossServiceReRPC) CountUp(context.Context, *CountUpRequest, *handlerstream.Server[CountUpResponse]) error {
+func (UnimplementedCrossServiceReRPC) CountUp(context.Context, *rerpc.Request[CountUpRequest], *handlerstream.Server[CountUpResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.crosstest.v1test.CrossService.CountUp isn't implemented")
 }
 

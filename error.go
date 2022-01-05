@@ -178,10 +178,10 @@ func newMalformedError(msg string) *twirpError {
 	}
 }
 
-func newBadRouteError(path string) *twirpError {
+func newBadRouteError(procedure string) *twirpError {
 	return &twirpError{
 		code: "bad_route",
-		err:  fmt.Errorf("no handler for path %s", path),
+		err:  fmt.Errorf("no handler for procedure %s", procedure),
 	}
 }
 

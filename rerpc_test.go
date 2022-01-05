@@ -23,7 +23,6 @@ import (
 	"github.com/rerpc/rerpc/internal/assert"
 	healthpb "github.com/rerpc/rerpc/internal/health/v1"
 	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
-	reflectionpb "github.com/rerpc/rerpc/internal/reflection/v1alpha1"
 	"github.com/rerpc/rerpc/internal/twirp"
 	"github.com/rerpc/rerpc/reflection"
 )
@@ -34,12 +33,15 @@ type pingServer struct {
 	pingpb.UnimplementedPingServiceReRPC
 }
 
-func (p pingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingpb.PingResponse, error) {
-	return &pingpb.PingResponse{Number: req.Number, Msg: req.Msg}, nil
+func (p pingServer) Ping(ctx context.Context, req *rerpc.Request[pingpb.PingRequest]) (*rerpc.Response[pingpb.PingResponse], error) {
+	return rerpc.NewResponse(&pingpb.PingResponse{
+		Number: req.Msg.Number,
+		Msg:    req.Msg.Msg,
+	}), nil
 }
 
-func (p pingServer) Fail(ctx context.Context, req *pingpb.FailRequest) (*pingpb.FailResponse, error) {
-	return nil, rerpc.Errorf(rerpc.Code(req.Code), errMsg)
+func (p pingServer) Fail(ctx context.Context, req *rerpc.Request[pingpb.FailRequest]) (*rerpc.Response[pingpb.FailResponse], error) {
+	return nil, rerpc.Errorf(rerpc.Code(req.Msg.Code), errMsg)
 }
 
 func (p pingServer) Sum(
@@ -65,13 +67,13 @@ func (p pingServer) Sum(
 
 func (p pingServer) CountUp(
 	ctx context.Context,
-	req *pingpb.CountUpRequest,
+	req *rerpc.Request[pingpb.CountUpRequest],
 	stream *handlerstream.Server[pingpb.CountUpResponse],
 ) error {
-	if req.Number <= 0 {
-		return rerpc.Errorf(rerpc.CodeInvalidArgument, "number must be positive: got %v", req.Number)
+	if req.Msg.Number <= 0 {
+		return rerpc.Errorf(rerpc.CodeInvalidArgument, "number must be positive: got %v", req.Msg.Number)
 	}
-	for i := int64(1); i <= req.Number; i++ {
+	for i := int64(1); i <= req.Msg.Number; i++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -239,7 +241,7 @@ func TestHandlerTwirp(t *testing.T) {
 
 			expected := &twirp.Status{
 				Code:    "bad_route",
-				Message: "no handler for path /internal.ping.v1test.PingService/Foo",
+				Message: "no handler for procedure ",
 			}
 			assertError(t, response, expected)
 		})
@@ -359,7 +361,7 @@ func TestHandlerTwirp(t *testing.T) {
 
 			expected := &twirp.Status{
 				Code:    "bad_route",
-				Message: "no handler for path /internal.ping.v1test.PingService/Foo",
+				Message: "no handler for procedure ",
 			}
 			assertError(t, response, expected)
 		})
@@ -381,9 +383,9 @@ func TestServerProtoGRPC(t *testing.T) {
 			num := rand.Int63()
 			req := &pingpb.PingRequest{Number: num}
 			expect := &pingpb.PingResponse{Number: num}
-			res, err := client.Ping(context.Background(), req)
+			res, err := client.Ping(context.Background(), rerpc.NewRequest(req))
 			assert.Nil(t, err, "ping error")
-			assert.Equal(t, res, expect, "ping response")
+			assert.Equal(t, res.Msg, expect, "ping response")
 		})
 	}
 	testSum := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
@@ -410,7 +412,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			}
 			stream, err := client.CountUp(
 				context.Background(),
-				&pingpb.CountUpRequest{Number: n},
+				rerpc.NewRequest(&pingpb.CountUpRequest{Number: n}),
 			)
 			assert.Nil(t, err, "send error")
 			for {
@@ -471,7 +473,7 @@ func TestServerProtoGRPC(t *testing.T) {
 	testErrors := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
 		t.Run("errors", func(t *testing.T) {
 			req := &pingpb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)}
-			res, err := client.Fail(context.Background(), req)
+			res, err := client.Fail(context.Background(), rerpc.NewRequest(req))
 			assert.Nil(t, res, "fail RPC response")
 			assert.NotNil(t, err, "fail RPC error")
 			rerr, ok := rerpc.AsError(err)
@@ -484,17 +486,17 @@ func TestServerProtoGRPC(t *testing.T) {
 	testBadRoute := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
 		t.Run("bad_route", func(t *testing.T) {
 			req := &pingpb.PingRequest{}
-			res, err := client.Ping(context.Background(), req)
+			res, err := client.Ping(context.Background(), rerpc.NewRequest(req))
 			assert.Nil(t, res, "fail RPC response")
 			assert.NotNil(t, err, "fail RPC error")
 			rerr, ok := rerpc.AsError(err)
 			assert.True(t, ok, "conversion to *rerpc.Error")
 			assert.Equal(t, rerr.Code(), rerpc.CodeNotFound, "error code")
-			assert.Equal(t, rerr.Error(), "NotFound: no handler for path /test.badroute.PingService/Ping", "error message")
+			assert.Equal(t, rerr.Error(), "NotFound: no handler for procedure ", "error message")
 			assert.Zero(t, rerr.Details(), "error details")
 		})
 	}
-	testHealth := func(t *testing.T, url string, doer rerpc.Doer, opts ...rerpc.CallOption) {
+	testHealth := func(t *testing.T, url string, doer rerpc.Doer, opts ...rerpc.ClientOption) {
 		t.Run("health", func(t *testing.T) {
 			const pingFQN = "internal.ping.v1test.PingService"
 			const unknown = "foobar"
@@ -522,7 +524,10 @@ func TestServerProtoGRPC(t *testing.T) {
 			t.Run("watch", func(t *testing.T) {
 				options := append(opts, rerpc.OverrideProtobufPackage("grpc.health.v1"))
 				client := healthpb.NewHealthClientReRPC(url, doer, options...)
-				stream, err := client.Watch(context.Background(), &healthpb.HealthCheckRequest{Service: pingFQN})
+				stream, err := client.Watch(
+					context.Background(),
+					rerpc.NewRequest(&healthpb.HealthCheckRequest{Service: pingFQN}),
+				)
 				assert.Nil(t, err, "rpc error")
 				defer stream.Close()
 				_, err = stream.Receive()
@@ -538,136 +543,6 @@ func TestServerProtoGRPC(t *testing.T) {
 					t.Fatalf("expected CodeUnknown or CodeUnimplemented, got %v", rerr)
 				}
 			})
-		})
-	}
-	testReflection := func(t *testing.T, url string, doer rerpc.Doer, opts ...rerpc.CallOption) {
-		pingRequestFQN := string((&pingpb.PingRequest{}).ProtoReflect().Descriptor().FullName())
-		assert.Equal(t, reg.Services(), []string{
-			"internal.ping.v1test.PingService",
-		}, "services registered in memory")
-
-		callReflect := func(req *reflectionpb.ServerReflectionRequest, opts ...rerpc.CallOption) (*reflectionpb.ServerReflectionResponse, error) {
-			ctx, call := rerpc.NewClientStream(
-				context.Background(),
-				doer,
-				rerpc.StreamTypeUnary,
-				url,
-				"grpc.reflection.v1alpha", "ServerReflection", "ServerReflectionInfo",
-				opts...,
-			)
-			stream := call(ctx)
-			if err := stream.Send(req); err != nil {
-				_ = stream.CloseSend(err)
-				_ = stream.CloseReceive()
-				return nil, err
-			}
-			if err := stream.CloseSend(nil); err != nil {
-				_ = stream.CloseReceive()
-				return nil, err
-			}
-			var res reflectionpb.ServerReflectionResponse
-			if err := stream.Receive(&res); err != nil {
-				_ = stream.CloseReceive()
-				return nil, err
-			}
-			return &res, stream.CloseReceive()
-		}
-		t.Run("list_services", func(t *testing.T) {
-			req := &reflectionpb.ServerReflectionRequest{
-				Host: "some-host",
-				MessageRequest: &reflectionpb.ServerReflectionRequest_ListServices{
-					ListServices: "ignored per proto documentation",
-				},
-			}
-			res, err := callReflect(req, opts...)
-			assert.Nil(t, err, "reflection RPC error")
-			expect := &reflectionpb.ServerReflectionResponse{
-				ValidHost:       req.Host,
-				OriginalRequest: req,
-				MessageResponse: &reflectionpb.ServerReflectionResponse_ListServicesResponse{
-					ListServicesResponse: &reflectionpb.ListServiceResponse{
-						Service: []*reflectionpb.ServiceResponse{
-							{Name: "internal.ping.v1test.PingService"},
-						},
-					},
-				},
-			}
-			assert.Equal(t, res, expect, "response")
-		})
-		t.Run("file_by_filename", func(t *testing.T) {
-			req := &reflectionpb.ServerReflectionRequest{
-				Host: "some-host",
-				MessageRequest: &reflectionpb.ServerReflectionRequest_FileByFilename{
-					FileByFilename: "internal/ping/v1test/ping.proto",
-				},
-			}
-			res, err := callReflect(req, opts...)
-			assert.Nil(t, err, "reflection RPC error")
-			assert.Nil(t, res.GetErrorResponse(), "error in response")
-			fds := res.GetFileDescriptorResponse()
-			assert.NotNil(t, fds, "file descriptor response")
-			assert.Equal(t, len(fds.FileDescriptorProto), 1, "number of fds returned")
-			assert.True(
-				t,
-				bytes.Contains(fds.FileDescriptorProto[0], []byte(pingRequestFQN)),
-				"fd should contain PingRequest struct",
-			)
-		})
-		t.Run("file_containing_symbol", func(t *testing.T) {
-			req := &reflectionpb.ServerReflectionRequest{
-				Host: "some-host",
-				MessageRequest: &reflectionpb.ServerReflectionRequest_FileContainingSymbol{
-					FileContainingSymbol: pingRequestFQN,
-				},
-			}
-			res, err := callReflect(req, opts...)
-			assert.Nil(t, err, "reflection RPC error")
-			assert.Nil(t, res.GetErrorResponse(), "error in response")
-			fds := res.GetFileDescriptorResponse()
-			assert.NotNil(t, fds, "file descriptor response")
-			assert.Equal(t, len(fds.FileDescriptorProto), 1, "number of fds returned")
-			assert.True(
-				t,
-				bytes.Contains(fds.FileDescriptorProto[0], []byte(pingRequestFQN)),
-				"fd should contain PingRequest struct",
-			)
-		})
-		t.Run("file_containing_extension", func(t *testing.T) {
-			req := &reflectionpb.ServerReflectionRequest{
-				Host: "some-host",
-				MessageRequest: &reflectionpb.ServerReflectionRequest_FileContainingExtension{
-					FileContainingExtension: &reflectionpb.ExtensionRequest{
-						ContainingType:  pingRequestFQN,
-						ExtensionNumber: 42,
-					},
-				},
-			}
-			res, err := callReflect(req, opts...)
-			assert.Nil(t, err, "reflection RPC error")
-			msgerr := res.GetErrorResponse()
-			assert.NotNil(t, msgerr, "error in response proto")
-			assert.Equal(t, msgerr.ErrorCode, int32(rerpc.CodeNotFound), "error code")
-			assert.NotZero(t, msgerr.ErrorMessage, "error message")
-		})
-		t.Run("all_extension_numbers_of_type", func(t *testing.T) {
-			req := &reflectionpb.ServerReflectionRequest{
-				Host: "some-host",
-				MessageRequest: &reflectionpb.ServerReflectionRequest_AllExtensionNumbersOfType{
-					AllExtensionNumbersOfType: pingRequestFQN,
-				},
-			}
-			res, err := callReflect(req, opts...)
-			assert.Nil(t, err, "reflection RPC error")
-			expect := &reflectionpb.ServerReflectionResponse{
-				ValidHost:       req.Host,
-				OriginalRequest: req,
-				MessageResponse: &reflectionpb.ServerReflectionResponse_AllExtensionNumbersResponse{
-					AllExtensionNumbersResponse: &reflectionpb.ExtensionNumberResponse{
-						BaseTypeName: pingRequestFQN,
-					},
-				},
-			}
-			assert.Equal(t, res, expect, "response")
 		})
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) {
@@ -720,59 +595,103 @@ func TestServerProtoGRPC(t *testing.T) {
 		server.StartTLS()
 		defer server.Close()
 		testMatrix(t, server, true /* bidi */)
-		testReflection(t, server.URL, server.Client())
 	})
 }
 
-type metadataIntegrationInterceptor struct {
+type pluggablePingServer struct {
+	pingpb.UnimplementedPingServiceReRPC
+
+	ping func(context.Context, *rerpc.Request[pingpb.PingRequest]) (*rerpc.Response[pingpb.PingResponse], error)
+}
+
+func (p *pluggablePingServer) Ping(ctx context.Context, req *rerpc.Request[pingpb.PingRequest]) (*rerpc.Response[pingpb.PingResponse], error) {
+	return p.ping(ctx, req)
+}
+
+func TestHeaderBasic(t *testing.T) {
+	const key = "Test-Key"
+	const cval, hval = "client value", "handler value"
+
+	srv := &pluggablePingServer{
+		ping: func(ctx context.Context, req *rerpc.Request[pingpb.PingRequest]) (*rerpc.Response[pingpb.PingResponse], error) {
+			assert.Equal(t, req.Header().Get(key), cval, "expected handler to receive headers")
+			res := rerpc.NewResponse(&pingpb.PingResponse{})
+			res.Header().Set(key, hval)
+			return res, nil
+		},
+	}
+	mux := rerpc.NewServeMux(pingpb.NewPingServiceHandlerReRPC(srv))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client())
+	req := rerpc.NewRequest(&pingpb.PingRequest{})
+	req.Header().Set(key, cval)
+	res, err := client.Ping(context.Background(), req)
+	assert.Nil(t, err, "error making request")
+	assert.Equal(t, res.Header().Get(key), hval, "expected client to receive headers")
+}
+
+type headerIntegrationInterceptor struct {
 	tb         testing.TB
 	key, value string
 }
 
-func (i *metadataIntegrationInterceptor) Wrap(next rerpc.Func) rerpc.Func {
-	return rerpc.Func(func(ctx context.Context, req interface{}) (interface{}, error) {
-		callMD, isCall := rerpc.CallMetadata(ctx)
-		handlerMD, isHandler := rerpc.HandlerMetadata(ctx)
-		assert.False(
-			i.tb,
-			isCall == isHandler,
-			"must be call xor handler: got handler %v, call %v",
-			assert.Fmt(isHandler, isCall),
-		)
-
-		var ua string
-		if isCall {
-			// Headers that interceptors can't modify should have been set already.
-			ua = callMD.Request().Get("User-Agent")
+func (i *headerIntegrationInterceptor) Wrap(next rerpc.Func) rerpc.Func {
+	return rerpc.Func(func(ctx context.Context, req rerpc.AnyRequest) (rerpc.AnyResponse, error) {
+		spec := req.Spec()
+		// Client should set protocol-related headers like user-agent before the
+		// interceptor chain takes effect. Servers should receive user-agent from
+		// the client.
+		assert.NotZero(i.tb, req.Header().Get("User-Agent"), "user-agent is missing")
+		if spec.IsClient {
 			// Server will verify that it received this header.
-			assert.Nil(i.tb, callMD.Request().Set(i.key, i.value), "set custom request header")
-		}
-		if isHandler {
+			assert.Nil(
+				i.tb,
+				req.Header().Set(i.key, i.value),
+				"set custom request header",
+			)
+		} else if spec.IsServer {
 			// Client should have sent both of these headers.
-			ua = handlerMD.Request().Get("User-Agent")
-			assert.Equal(i.tb, handlerMD.Request().Get(i.key), i.value, "custom header %q from client", assert.Fmt(i.key))
-			// Client will verify that it receives this header.
-			assert.Nil(i.tb, handlerMD.Response().Set(i.key, i.value), "set custom response header")
+			assert.Equal(
+				i.tb,
+				req.Header().Get(i.key), i.value,
+				"custom header %q from client", assert.Fmt(i.key),
+			)
 		}
-		assert.True(i.tb, strings.HasPrefix(ua, "grpc-go-rerpc/"), "wrong user-agent, got %v", assert.Fmt(ua))
 
 		res, err := next(ctx, req)
 
-		if isCall {
+		if spec.IsClient {
 			// Server should have sent this response header.
-			assert.Equal(i.tb, callMD.Response().Get(i.key), i.value, "custom header %q from server", assert.Fmt(i.key))
+			assert.Equal(
+				i.tb,
+				res.Header().Get(i.key), i.value,
+				"custom header %q from server", assert.Fmt(i.key),
+			)
+		} else if spec.IsServer {
+			// Client will verify that it receives this header.
+			assert.Nil(
+				i.tb,
+				res.Header().Set(i.key, i.value),
+				"set custom response header",
+			)
 		}
 
 		return res, err
 	})
 }
 
-func (i *metadataIntegrationInterceptor) WrapStream(next rerpc.StreamFunc) rerpc.StreamFunc {
+func (i *headerIntegrationInterceptor) WrapStream(next rerpc.StreamFunc) rerpc.StreamFunc {
 	return next
 }
 
-func TestCallMetadataIntegration(t *testing.T) {
-	intercept := rerpc.Intercept(&metadataIntegrationInterceptor{tb: t, key: "Foo-Bar", value: "baz"})
+func TestHeaderIntegration(t *testing.T) {
+	const key, value = "Foo-Bar", "baz"
+	intercept := rerpc.Intercept(&headerIntegrationInterceptor{
+		tb:    t,
+		key:   key,
+		value: value,
+	})
 	mux := rerpc.NewServeMux(
 		pingpb.NewPingServiceHandlerReRPC(pingServer{}, intercept),
 	)
@@ -780,7 +699,10 @@ func TestCallMetadataIntegration(t *testing.T) {
 	defer server.Close()
 	client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client(), intercept)
 
-	res, err := client.Ping(context.Background(), &pingpb.PingRequest{})
+	req := rerpc.NewRequest(&pingpb.PingRequest{})
+	res, err := client.Ping(context.Background(), req)
 	assert.Nil(t, err, "call error")
-	assert.Equal(t, res, &pingpb.PingResponse{}, "call response")
+	assert.Equal(t, res.Msg, &pingpb.PingResponse{}, "call response")
+	assert.NotZero(t, req.Header().Get("User-Agent"), "user-agent is missing")
+	assert.Equal(t, req.Header().Get(key), value, "header set by interceptor is missing")
 }

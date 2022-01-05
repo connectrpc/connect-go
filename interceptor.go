@@ -4,15 +4,34 @@ import (
 	"context"
 )
 
+type AnyRequest interface {
+	Any() interface{}
+	Spec() Specification
+	Header() Header
+
+	// Only internal implementations, so we can add methods without breaking
+	// backward compatibility.
+	internalOnly()
+}
+
+type AnyResponse interface {
+	Any() interface{}
+	Header() Header
+
+	// Only internal implementations, so we can add methods without breaking
+	// backward compatibility.
+	internalOnly()
+}
+
 // Func is the generic signature of a unary RPC. Interceptors wrap Funcs.
 //
 // The type of the request and response struct depend on the codec being used.
 // When using protobuf, they'll always be proto.Message implementations.
-type Func func(context.Context, interface{}) (interface{}, error)
+type Func func(context.Context, AnyRequest) (AnyResponse, error)
 
 // StreamFunc is the generic signature of a streaming RPC. Interceptors wrap
 // StreamFuncs.
-type StreamFunc func(context.Context) Stream
+type StreamFunc func(context.Context) (context.Context, Stream)
 
 // An Interceptor adds logic to a generated handler or client, like the
 // decorators or middleware you may have seen in other libraries. Interceptors

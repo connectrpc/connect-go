@@ -14,6 +14,11 @@ func NewClient[Req, Res any](stream rerpc.Stream) *Client[Req, Res] {
 	return &Client[Req, Res]{stream: stream}
 }
 
+// ReceivedHeader returns the headers received from the client.
+func (c *Client[Req, Res]) ReceivedHeader() rerpc.Header {
+	return c.stream.ReceivedHeader()
+}
+
 // Receive a message. When the client is done sending messages, Receive returns
 // an error that wraps io.EOF.
 func (c *Client[Req, Res]) Receive() (*Req, error) {
@@ -22,6 +27,12 @@ func (c *Client[Req, Res]) Receive() (*Req, error) {
 		return nil, err
 	}
 	return &req, nil
+}
+
+// Header returns the response headers. Headers are sent when SendAndClose is
+// called.
+func (c *Client[Req, Res]) Header() rerpc.Header {
+	return c.stream.Header()
 }
 
 // SendAndClose closes the receive side of the stream, then sends a response
@@ -43,6 +54,12 @@ func NewServer[Res any](stream rerpc.Stream) *Server[Res] {
 	return &Server[Res]{stream: stream}
 }
 
+// Header returns the response headers. Headers are sent with the first call to
+// Send.
+func (s *Server[Res]) Header() rerpc.Header {
+	return s.stream.Header()
+}
+
 // Send a message to the client.
 func (s *Server[Res]) Send(msg *Res) error {
 	return s.stream.Send(msg)
@@ -58,6 +75,11 @@ func NewBidirectional[Req, Res any](stream rerpc.Stream) *Bidirectional[Req, Res
 	return &Bidirectional[Req, Res]{stream: stream}
 }
 
+// ReceivedHeader returns the headers received from the client.
+func (b *Bidirectional[Req, Res]) ReceivedHeader() rerpc.Header {
+	return b.stream.ReceivedHeader()
+}
+
 // Receive a message. When the client is done sending messages, Receive will
 // return an error that wraps io.EOF.
 func (b *Bidirectional[Req, Res]) Receive() (*Req, error) {
@@ -68,7 +90,12 @@ func (b *Bidirectional[Req, Res]) Receive() (*Req, error) {
 	return &req, nil
 }
 
+// Header returns the response headers. Headers are sent with the first call to
+// Send.
+func (b *Bidirectional[Req, Res]) Header() rerpc.Header {
+	return b.stream.Header()
+}
+
 func (b *Bidirectional[Req, Res]) Send(msg *Res) error {
 	return b.stream.Send(msg)
 }
-

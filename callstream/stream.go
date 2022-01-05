@@ -14,6 +14,11 @@ func NewClient[Req, Res any](stream rerpc.Stream) *Client[Req, Res] {
 	return &Client[Req, Res]{stream: stream}
 }
 
+// Header returns the headers. Headers are sent with the first call to Send.
+func (c *Client[Req, Res]) Header() rerpc.Header {
+	return c.stream.Header()
+}
+
 // Send a message to the server.
 func (c *Client[Req, Res]) Send(msg *Req) error {
 	return c.stream.Send(msg)
@@ -36,6 +41,12 @@ func (c *Client[Req, Res]) CloseAndReceive() (*Res, error) {
 	return &res, nil
 }
 
+// ReceivedHeader returns the headers received from the server. It blocks until
+// the response headers arrive.
+func (c *Client[Req, Res]) ReceivedHeader() rerpc.Header {
+	return c.stream.ReceivedHeader()
+}
+
 // Server is the client's view of a server streaming RPC.
 type Server[Res any] struct {
 	stream rerpc.Stream
@@ -56,6 +67,12 @@ func (s *Server[Res]) Receive() (*Res, error) {
 	return &res, nil
 }
 
+// ReceivedHeader returns the headers received from the server. It blocks until
+// the response headers arrive.
+func (s *Server[Res]) ReceivedHeader() rerpc.Header {
+	return s.stream.ReceivedHeader()
+}
+
 // Close the receive side of the stream.
 func (s *Server[Res]) Close() error {
 	return s.stream.CloseReceive()
@@ -69,6 +86,11 @@ type Bidirectional[Req, Res any] struct {
 // NewBidirectional constructs a Bidirectional.
 func NewBidirectional[Req, Res any](stream rerpc.Stream) *Bidirectional[Req, Res] {
 	return &Bidirectional[Req, Res]{stream: stream}
+}
+
+// Header returns the headers. Headers are sent with the first call to Send.
+func (b *Bidirectional[Req, Res]) Header() rerpc.Header {
+	return b.stream.Header()
 }
 
 // Send a message to the server.
@@ -96,3 +118,8 @@ func (b *Bidirectional[Req, Res]) CloseReceive() error {
 	return b.stream.CloseReceive()
 }
 
+// ReceivedHeader returns the headers received from the server. It blocks until
+// the response headers arrive.
+func (b *Bidirectional[Req, Res]) ReceivedHeader() rerpc.Header {
+	return b.stream.ReceivedHeader()
+}

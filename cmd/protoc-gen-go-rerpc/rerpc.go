@@ -137,30 +137,32 @@ func clientSignature(g *protogen.GeneratedFile, cname string, method *protogen.M
 	if method.Desc.IsStreamingServer() {
 		// server streaming
 		return method.GoName + "(ctx " + g.QualifiedGoIdent(contextContext) +
-			", req *" + g.QualifiedGoIdent(method.Input.GoIdent) + ") " +
+			", req *" + g.QualifiedGoIdent(rerpcPackage.Ident("Request")) + "[" +
+			g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
 			"(*" + g.QualifiedGoIdent(cstreamPackage.Ident("Server")) +
 			"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
 			", error)"
 	}
 	// unary
 	return method.GoName + "(ctx " + g.QualifiedGoIdent(contextContext) +
-		", req *" + g.QualifiedGoIdent(method.Input.GoIdent) + ") " +
-		"(*" + g.QualifiedGoIdent(method.Output.GoIdent) + ", error)"
+		", req *" + g.QualifiedGoIdent(rerpcPackage.Ident("Request")) + "[" +
+		g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
+		"(*" + g.QualifiedGoIdent(rerpcPackage.Ident("Response")) + "[" +
+		g.QualifiedGoIdent(method.Output.GoIdent) + "], error)"
 }
 
 func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, name string) {
 	// Client struct.
-	callOption := rerpcPackage.Ident("CallOption")
+	clientOption := rerpcPackage.Ident("ClientOption")
 	g.P("type ", unexport(name), " struct {")
 	g.P("doer ", rerpcPackage.Ident("Doer"))
 	g.P("baseURL string")
-	g.P("options []", callOption)
+	g.P("options []", clientOption)
 	g.P("}")
 	g.P()
 
 	// Client constructor.
-	comment(g, "New", name, " constructs a client for the ", service.Desc.FullName(),
-		" service. Call options passed here apply to all calls made with this client.")
+	comment(g, "New", name, " constructs a client for the ", service.Desc.FullName(), " service.")
 	g.P("//")
 	comment(g, "The URL supplied here should be the base URL for the gRPC server ",
 		"(e.g., https://api.acme.com or https://acme.com/grpc).")
@@ -169,7 +171,7 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		deprecated(g)
 	}
 	g.P("func New", name, " (baseURL string, doer ", rerpcPackage.Ident("Doer"),
-		", opts ...", callOption, ") ", name, " {")
+		", opts ...", clientOption, ") ", name, " {")
 	g.P("return &", unexport(name), "{")
 	g.P("baseURL: ", stringsPackage.Ident("TrimRight"), `(baseURL, "/"),`)
 	g.P("doer: doer,")
@@ -187,8 +189,7 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, cname string, method *protogen.Method) {
 	isStreamingClient := method.Desc.IsStreamingClient()
 	isStreamingServer := method.Desc.IsStreamingServer()
-	comment(g, method.GoName, " calls ", method.Desc.FullName(), ".",
-		" Call options passed here apply only to this call.")
+	comment(g, method.GoName, " calls ", method.Desc.FullName(), ".")
 	if method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
@@ -196,8 +197,7 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, cname st
 	g.P("func (c *", unexport(method.Parent.GoName), "ClientReRPC) ", clientSignature(g, cname, method), " {")
 
 	if isStreamingClient || isStreamingServer {
-		g.P("ctx, call := ", rerpcPackage.Ident("NewClientStream"), "(")
-		g.P("ctx,")
+		g.P("call := ", rerpcPackage.Ident("NewClientStream"), "(")
 		g.P("c.doer,")
 		if isStreamingClient && isStreamingServer {
 			g.P(rerpcPackage.Ident("StreamTypeBidirectional"), ",")
@@ -213,10 +213,10 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, cname st
 		g.P("c.options...,")
 		g.P(")")
 
-		g.P("stream := call(ctx)")
+		g.P("_, stream := call(ctx)")
 		if !isStreamingClient && isStreamingServer {
 			// server streaming, we need to send the request.
-			g.P("if err := stream.Send(req); err != nil {")
+			g.P("if err := stream.Send(req.Any()); err != nil {")
 			g.P("_ = stream.CloseSend(err)")
 			g.P("_ = stream.CloseReceive()")
 			g.P("return nil, err")
@@ -298,15 +298,18 @@ func serverSignature(g *protogen.GeneratedFile, sname string, method *protogen.M
 	if method.Desc.IsStreamingServer() {
 		// server streaming
 		return method.GoName + "(" + g.QualifiedGoIdent(contextContext) +
-			", *" + g.QualifiedGoIdent(method.Input.GoIdent) +
-			", *" + g.QualifiedGoIdent(hstreamPackage.Ident("Server")) +
+			", *" + g.QualifiedGoIdent(rerpcPackage.Ident("Request")) + "[" +
+			g.QualifiedGoIdent(method.Input.GoIdent) +
+			"], *" + g.QualifiedGoIdent(hstreamPackage.Ident("Server")) +
 			"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
 			") error"
 	}
 	// unary
 	return method.GoName + "(" + g.QualifiedGoIdent(contextContext) +
-		", *" + g.QualifiedGoIdent(method.Input.GoIdent) + ") " +
-		"(*" + g.QualifiedGoIdent(method.Output.GoIdent) + ", error)"
+		", *" + g.QualifiedGoIdent(rerpcPackage.Ident("Request")) + "[" +
+		g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
+		"(*" + g.QualifiedGoIdent(rerpcPackage.Ident("Response")) + "[" +
+		g.QualifiedGoIdent(method.Output.GoIdent) + "], error)"
 }
 
 func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, name string) {
@@ -335,8 +338,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 			g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
 			g.P(`"`, service.Desc.Name(), `", // protobuf service`)
 			g.P(`"`, method.Desc.Name(), `", // protobuf method`)
-			g.P("func(ctx ", contextContext, ", sf ", rerpcPackage.Ident("StreamFunc"), ") {")
-			g.P("stream := sf(ctx)")
+			g.P("func(ctx ", contextContext, ", stream ", rerpcPackage.Ident("Stream"), ") {")
 			if method.Desc.IsStreamingServer() && method.Desc.IsStreamingClient() {
 				// bidi streaming
 				g.P("typed := ", hstreamPackage.Ident("NewBidirectional"),
@@ -351,22 +353,24 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 					"[", method.Output.GoIdent, "]", "(stream)")
 			}
 			if method.Desc.IsStreamingServer() && !method.Desc.IsStreamingClient() {
-				g.P("var req ", method.Input.GoIdent)
-				g.P("if err := stream.Receive(&req); err != nil {")
+				g.P("req, err := ", rerpcPackage.Ident("NewReceivedRequest"), "[", method.Input.GoIdent, "]",
+					"(stream)")
+				g.P("if err != nil {")
 				g.P("_ = stream.CloseReceive()")
 				g.P("_ = stream.CloseSend(err)")
 				g.P("return")
 				g.P("}")
-				g.P("if err := stream.CloseReceive(); err != nil {")
+				g.P("if err = stream.CloseReceive(); err != nil {")
 				g.P("_ = stream.CloseSend(err)")
 				g.P("return")
 				g.P("}")
-				g.P("err := svc.", method.GoName, "(stream.Context(), &req, typed)")
+				g.P("err = svc.", method.GoName, "(ctx, req, typed)")
 			} else {
-				g.P("err := svc.", method.GoName, "(stream.Context(), typed)")
+				g.P("err := svc.", method.GoName, "(ctx, typed)")
 				g.P("_ = stream.CloseReceive()")
 			}
 			g.P("if err != nil {")
+			// TODO: Dry up context error handling
 			g.P("if _, ok := ", rerpcPackage.Ident("AsError"), "(err); !ok {")
 			g.P("if ", errorsIs, "(err, ", contextCanceled, ") {")
 			g.P("err = ", rerpcPackage.Ident("Wrap"), "(", rerpcPackage.Ident("CodeCanceled"), ", err)")
