@@ -71,7 +71,7 @@ func ServeTwirp(enable bool) HandlerOption {
 type Handler struct {
 	stype          StreamType
 	config         handlerCfg
-	implementation func(context.Context, StreamFunc)
+	implementation func(context.Context, Stream)
 }
 
 // NewUnaryHandler constructs a Handler. The supplied package, service, and
@@ -83,7 +83,7 @@ type Handler struct {
 // users won't need to deal with protobuf identifiers directly.
 func NewUnaryHandler[Req, Res any](
 	pkg, service, method string,
-	implementation func(context.Context, *Req) (*Res, error),
+	implementation func(context.Context, *Request[Req]) (*Response[Res], error),
 	opts ...HandlerOption,
 ) *Handler {
 	cfg := handlerCfg{
@@ -97,54 +97,58 @@ func NewUnaryHandler[Req, Res any](
 	if reg := cfg.Registrar; reg != nil && !cfg.DisableRegistration {
 		reg.register(cfg.Package, cfg.Service)
 	}
-	untyped := Func(func(ctx context.Context, req interface{}) (interface{}, error) {
-		typed, ok := req.(*Req)
+
+	untyped := Func(func(ctx context.Context, req AnyRequest) (AnyResponse, error) {
+		typed, ok := req.(*Request[Req])
 		if !ok {
-			var expected Req
-			return nil, Errorf(CodeInternal, "expected response to be *%T, got %T", expected, req)
+			return nil, Errorf(CodeInternal, "unexpected handler request type %T", req)
 		}
 		return implementation(ctx, typed)
 	})
 	if ic := cfg.Interceptor; ic != nil {
 		untyped = ic.Wrap(untyped)
 	}
-	return &Handler{
-		stype:  StreamTypeUnary,
-		config: cfg,
-		implementation: func(ctx context.Context, sf StreamFunc) {
-			stream := sf(ctx)
-			defer stream.CloseReceive()
-			if err := ctx.Err(); err != nil {
+	streamer := func(ctx context.Context, stream Stream) {
+		defer stream.CloseReceive()
+		if err := ctx.Err(); err != nil {
+			// TODO: Factor out repeated context error coding.
+			if errors.Is(err, context.Canceled) {
+				_ = stream.CloseSend(Wrap(CodeCanceled, err))
+				return
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				_ = stream.CloseSend(Wrap(CodeDeadlineExceeded, err))
+				return
+			}
+			_ = stream.CloseSend(err) // unreachable per context docs
+		}
+		req, err := NewReceivedRequest[Req](stream)
+		if err != nil {
+			_ = stream.CloseSend(err)
+			return
+		}
+		res, err := untyped(ctx, req)
+		if err != nil {
+			if _, ok := AsError(err); !ok {
 				if errors.Is(err, context.Canceled) {
-					_ = stream.CloseSend(Wrap(CodeCanceled, err))
-					return
+					err = Wrap(CodeCanceled, err)
 				}
 				if errors.Is(err, context.DeadlineExceeded) {
-					_ = stream.CloseSend(Wrap(CodeDeadlineExceeded, err))
-					return
+					err = Wrap(CodeDeadlineExceeded, err)
 				}
-				_ = stream.CloseSend(err) // unreachable per context docs
 			}
-			var req Req
-			if err := stream.Receive(&req); err != nil {
-				_ = stream.CloseSend(err)
-				return
-			}
-			res, err := untyped(ctx, &req)
-			if err != nil {
-				if _, ok := AsError(err); !ok {
-					if errors.Is(err, context.Canceled) {
-						err = Wrap(CodeCanceled, err)
-					}
-					if errors.Is(err, context.DeadlineExceeded) {
-						err = Wrap(CodeDeadlineExceeded, err)
-					}
-				}
-				_ = stream.CloseSend(err)
-				return
-			}
-			_ = stream.CloseSend(stream.Send(res))
-		},
+			_ = stream.CloseSend(err)
+			return
+		}
+		for k, v := range res.Header().raw {
+			stream.Header().raw[k] = v
+		}
+		_ = stream.CloseSend(stream.Send(res.Any()))
+	}
+	return &Handler{
+		stype:          StreamTypeUnary,
+		config:         cfg,
+		implementation: streamer,
 	}
 }
 
@@ -158,7 +162,7 @@ func NewUnaryHandler[Req, Res any](
 func NewStreamingHandler(
 	stype StreamType,
 	pkg, service, method string,
-	implementation func(context.Context, StreamFunc),
+	implementation func(context.Context, Stream),
 	opts ...HandlerOption,
 ) *Handler {
 	cfg := handlerCfg{
@@ -213,15 +217,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	procedure := fmt.Sprintf("%s.%s/%s", h.config.Package, h.config.Service, h.config.Method)
 	spec := Specification{
-		Type:                h.stype,
-		Package:             h.config.Package,
-		Service:             h.config.Service,
-		Method:              h.config.Method,
-		Path:                r.URL.Path,
-		ContentType:         ctype,
-		RequestCompression:  CompressionIdentity,
-		ResponseCompression: CompressionIdentity,
+		Type:      h.stype,
+		Procedure: procedure,
+		IsServer:  true,
 	}
 
 	// We need to parse metadata before entering the interceptor stack, but we'd
@@ -243,22 +243,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(ctx)
 	} // else err == errNoTimeout, nothing to do
 
-	if spec.ContentType == TypeJSON || spec.ContentType == TypeProtoTwirp {
+	requestCompression := CompressionIdentity
+	responseCompression := CompressionIdentity
+	if ctype == TypeJSON || ctype == TypeProtoTwirp {
 		if r.Header.Get("Content-Encoding") == "gzip" {
-			spec.RequestCompression = CompressionGzip
+			requestCompression = CompressionGzip
 		}
 		// TODO: Actually parse Accept-Encoding instead of this hackery.
 		if !h.config.DisableGzipResponse && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			spec.ResponseCompression = CompressionGzip
+			responseCompression = CompressionGzip
 		}
 	} else {
-		spec.RequestCompression = CompressionIdentity
 		if me := r.Header.Get("Grpc-Encoding"); me != "" {
 			switch me {
 			case CompressionIdentity:
-				spec.RequestCompression = CompressionIdentity
+				requestCompression = CompressionIdentity
 			case CompressionGzip:
-				spec.RequestCompression = CompressionGzip
+				requestCompression = CompressionGzip
 			default:
 				// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
 				// should return CodeUnimplemented and specify acceptable compression(s)
@@ -275,17 +276,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Follow https://github.com/grpc/grpc/blob/master/doc/compression.md.
 		// (The grpc-go implementation doesn't read the "grpc-accept-encoding" header
 		// and doesn't support compression method asymmetry.)
-		spec.ResponseCompression = spec.RequestCompression
+		responseCompression = requestCompression
 		if h.config.DisableGzipResponse {
-			spec.ResponseCompression = CompressionIdentity
+			responseCompression = CompressionIdentity
 		} else if mae := r.Header.Get("Grpc-Accept-Encoding"); mae != "" {
 			for _, enc := range strings.FieldsFunc(mae, splitOnCommasAndSpaces) {
 				switch enc {
 				case CompressionGzip:
-					spec.ResponseCompression = CompressionGzip
+					responseCompression = CompressionGzip
 					// prefer gzip, so no continue
 				case CompressionIdentity:
-					spec.ResponseCompression = CompressionIdentity
+					responseCompression = CompressionIdentity
 					continue
 				default:
 					continue
@@ -303,10 +304,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// skip the normalization in Header.Set. To avoid allocating re-allocating
 	// the same slices over and over, we use pre-allocated globals for the header
 	// values.
-	w.Header()["Content-Type"] = typeToSlice(spec.ContentType)
-	if spec.ContentType != TypeJSON && spec.ContentType != TypeProtoTwirp {
+	w.Header()["Content-Type"] = typeToSlice(ctype)
+	if ctype != TypeJSON && ctype != TypeProtoTwirp {
 		w.Header()["Grpc-Accept-Encoding"] = acceptEncodingValueSlice
-		w.Header()["Grpc-Encoding"] = compressionToSlice(spec.ResponseCompression)
+		w.Header()["Grpc-Encoding"] = compressionToSlice(responseCompression)
 		// Every gRPC response will have these trailers.
 		w.Header()["Trailer"] = grpcStatusTrailers
 	}
@@ -314,8 +315,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Unlike gRPC, Twirp manages compression using the standard HTTP mechanisms.
 	// Since they apply to the whole stream, it's easiest to handle it here.
 	var requestBody io.Reader = r.Body
-	if spec.ContentType == TypeJSON || spec.ContentType == TypeProtoTwirp {
-		if spec.RequestCompression == CompressionGzip {
+	if ctype == TypeJSON || ctype == TypeProtoTwirp {
+		if requestCompression == CompressionGzip {
 			gr, err := getGzipReader(requestBody)
 			if err != nil && failed == nil {
 				failed = errorf(CodeInvalidArgument, "can't read gzipped body: %w", err)
@@ -327,7 +328,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		// Checking Content-Encoding ensures that some other user-supplied
 		// middleware isn't already compressing the response.
-		if spec.ResponseCompression == CompressionGzip && w.Header().Get("Content-Encoding") == "" {
+		if responseCompression == CompressionGzip && w.Header().Get("Content-Encoding") == "" {
 			w.Header().Set("Content-Encoding", "gzip")
 			gw := getGzipWriter(w)
 			defer putGzipWriter(gw)
@@ -335,27 +336,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx := NewHandlerContext(r.Context(), spec, r.Header, w.Header())
-	sf := StreamFunc(func(ctx context.Context) Stream {
-		return newServerStream(
-			ctx,
+	sf := StreamFunc(func(ctx context.Context) (context.Context, Stream) {
+		return ctx, newServerStream(
+			spec,
 			w,
 			&readCloser{Reader: requestBody, Closer: r.Body},
-			spec.ContentType,
+			Header{raw: r.Header},
+			ctype,
 			h.config.MaxRequestBytes,
-			spec.ResponseCompression == CompressionGzip,
+			responseCompression == CompressionGzip,
 		)
 	})
 	if ic := h.config.Interceptor; ic != nil && h.stype != StreamTypeUnary {
 		sf = ic.WrapStream(sf)
 	}
+	ctx, stream := sf(r.Context())
 	if failed != nil {
-		stream := sf(ctx)
 		_ = stream.CloseReceive()
 		_ = stream.CloseSend(failed)
 		return
 	}
-	h.implementation(ctx, sf)
+	h.implementation(ctx, stream)
 }
 
 // Path returns the URL pattern to use when registering this handler. It's used

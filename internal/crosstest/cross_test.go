@@ -56,17 +56,17 @@ type crossServerReRPC struct {
 	crosspb.UnimplementedCrossServiceReRPC
 }
 
-func (c crossServerReRPC) Ping(ctx context.Context, req *crosspb.PingRequest) (*crosspb.PingResponse, error) {
-	if err := req.Sleep.CheckValid(); req.Sleep != nil && err != nil {
+func (c crossServerReRPC) Ping(ctx context.Context, req *rerpc.Request[crosspb.PingRequest]) (*rerpc.Response[crosspb.PingResponse], error) {
+	if err := req.Msg.Sleep.CheckValid(); req.Msg.Sleep != nil && err != nil {
 		return nil, rerpc.Wrap(rerpc.CodeInvalidArgument, err)
 	}
-	if d := req.Sleep.AsDuration(); d > 0 {
+	if d := req.Msg.Sleep.AsDuration(); d > 0 {
 		time.Sleep(d)
 	}
-	return &crosspb.PingResponse{Number: req.Number}, nil
+	return rerpc.NewResponse(&crosspb.PingResponse{Number: req.Msg.Number}), nil
 }
 
-func (c crossServerReRPC) Fail(ctx context.Context, req *crosspb.FailRequest) (*crosspb.FailResponse, error) {
+func (c crossServerReRPC) Fail(ctx context.Context, req *rerpc.Request[crosspb.FailRequest]) (*rerpc.Response[crosspb.FailResponse], error) {
 	return nil, rerpc.Errorf(rerpc.CodeResourceExhausted, errMsg)
 }
 
@@ -93,13 +93,16 @@ func (c crossServerReRPC) Sum(
 
 func (c crossServerReRPC) CountUp(
 	ctx context.Context,
-	req *crosspb.CountUpRequest,
+	req *rerpc.Request[crosspb.CountUpRequest],
 	stream *handlerstream.Server[crosspb.CountUpResponse],
 ) error {
-	if req.Number <= 0 {
-		return rerpc.Errorf(rerpc.CodeInvalidArgument, "number must be positive: got %v", req.Number)
+	if req.Msg.Number <= 0 {
+		return rerpc.Errorf(
+			rerpc.CodeInvalidArgument,
+			"number must be positive: got %v", req.Msg.Number,
+		)
 	}
-	for i := int64(1); i <= req.Number; i++ {
+	for i := int64(1); i <= req.Msg.Number; i++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -231,13 +234,13 @@ func testWithReRPCClient(t *testing.T, client crosspb.CrossServiceClientReRPC) {
 		num := rand.Int63()
 		req := &crosspb.PingRequest{Number: num}
 		expect := &crosspb.PingResponse{Number: num}
-		res, err := client.Ping(context.Background(), req)
+		res, err := client.Ping(context.Background(), rerpc.NewRequest(req))
 		assert.Nil(t, err, "ping error")
-		assert.Equal(t, res, expect, "ping response")
+		assert.Equal(t, res.Msg, expect, "ping response")
 	})
 	t.Run("errors", func(t *testing.T) {
 		req := &crosspb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)}
-		res, err := client.Fail(context.Background(), req)
+		res, err := client.Fail(context.Background(), rerpc.NewRequest(req))
 		assert.Nil(t, res, "fail RPC response")
 		rerr := assertErrorReRPC(t, err, "fail RPC error")
 		assert.Equal(t, rerr.Code(), rerpc.CodeResourceExhausted, "error code")
@@ -248,7 +251,7 @@ func testWithReRPCClient(t *testing.T, client crosspb.CrossServiceClientReRPC) {
 		req := &crosspb.PingRequest{}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		cancel()
-		_, err := client.Ping(ctx, req)
+		_, err := client.Ping(ctx, rerpc.NewRequest(req))
 		rerr := assertErrorReRPC(t, err, "error after canceling context")
 		assert.Equal(t, rerr.Code(), rerpc.CodeCanceled, "error code")
 		assert.Equal(t, rerr.Error(), "Canceled: context canceled", "error message")
@@ -257,7 +260,7 @@ func testWithReRPCClient(t *testing.T, client crosspb.CrossServiceClientReRPC) {
 		req := &crosspb.PingRequest{Sleep: durationpb.New(time.Second)}
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		_, err := client.Ping(ctx, req)
+		_, err := client.Ping(ctx, rerpc.NewRequest(req))
 		rerr := assertErrorReRPC(t, err, "deadline exceeded error")
 		assert.Equal(t, rerr.Code(), rerpc.CodeDeadlineExceeded, "error code")
 		assert.ErrorIs(t, rerr, context.DeadlineExceeded, "error unwraps to context.DeadlineExceeded")
@@ -283,7 +286,7 @@ func testWithReRPCClient(t *testing.T, client crosspb.CrossServiceClientReRPC) {
 		}
 		stream, err := client.CountUp(
 			context.Background(),
-			&crosspb.CountUpRequest{Number: n},
+			rerpc.NewRequest(&crosspb.CountUpRequest{Number: n}),
 		)
 		assert.Nil(t, err, "send error")
 		for {

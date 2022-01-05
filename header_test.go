@@ -195,4 +195,8 @@ func TestHeaderWrappers(t *testing.T) {
 	decoded, err := h.GetBinary(k)
 	assert.Nil(t, err, "decode binary header")
 	assert.Equal(t, string(decoded), binary, "round-trip binary header")
+
+	missing, err := h.GetBinary("Missing-Key")
+	assert.Nil(t, err, "get missing binary header")
+	assert.Zero(t, len(missing), "expected zero-len byte slice for missing binary header")
 }

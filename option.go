@@ -1,9 +1,9 @@
 package rerpc
 
-// Option implements both CallOption and HandlerOption, so it can be applied
+// Option implements both ClientOption and HandlerOption, so it can be applied
 // both client-side and server-side.
 type Option interface {
-	CallOption
+	ClientOption
 	HandlerOption
 }
 
@@ -26,7 +26,7 @@ func OverrideProtobufPackage(pkg string) Option {
 	return &overridePkg{pkg}
 }
 
-func (o *overridePkg) applyToCall(cfg *callCfg) {
+func (o *overridePkg) applyToClient(cfg *clientCfg) {
 	cfg.Package = o.pkg
 }
 
@@ -52,7 +52,7 @@ func ReadMaxBytes(n int64) Option {
 	return &readMaxBytes{n}
 }
 
-func (o *readMaxBytes) applyToCall(cfg *callCfg) {
+func (o *readMaxBytes) applyToClient(cfg *clientCfg) {
 	cfg.MaxResponseBytes = o.Max
 }
 
@@ -81,7 +81,7 @@ func Gzip(enable bool) Option {
 	return &gzipOption{enable}
 }
 
-func (o *gzipOption) applyToCall(cfg *callCfg) {
+func (o *gzipOption) applyToClient(cfg *clientCfg) {
 	// NB, defaulting to identity is required by
 	// https://github.com/grpc/grpc/blob/master/doc/compression.md - see test
 	// case 6.
@@ -103,7 +103,7 @@ func Intercept(interceptor Interceptor) Option {
 	return &interceptOption{interceptor}
 }
 
-func (o *interceptOption) applyToCall(cfg *callCfg) {
+func (o *interceptOption) applyToClient(cfg *clientCfg) {
 	cfg.Interceptor = o.interceptor
 }
 

@@ -196,7 +196,6 @@ func (h Header) GetBinary(key string) ([]byte, error) {
 	if h.raw == nil {
 		return nil, nil
 	}
-	// TODO: what if the key's not present?
 	return decodeBinaryHeader(h.raw.Get(key + "-Bin"))
 }
 
