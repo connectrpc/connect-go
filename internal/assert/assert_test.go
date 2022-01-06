@@ -26,7 +26,7 @@ func TestAssertions(t *testing.T) {
 
 		NotNil(t, make(chan int), "")
 		NotNil(t, func() {}, "")
-		NotNil(t, interface{}(1), "")
+		NotNil(t, any(1), "")
 		NotNil(t, make(map[int]int), "")
 		NotNil(t, &Pair{}, "")
 		NotNil(t, make([]int, 0), "")

@@ -339,7 +339,7 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrossServiceClient, opts ..
 		s := assertErrorGRPC(t, err, "fail RPC error")
 		assert.Equal(t, s.Code(), codes.ResourceExhausted, "error code")
 		assert.Equal(t, s.Message(), errMsg, "error message")
-		assert.Equal(t, s.Details(), []interface{}{}, "error details")
+		assert.Equal(t, s.Details(), []any{}, "error details")
 	})
 	t.Run("cancel", func(t *testing.T) {
 		req := &crosspb.PingRequest{}

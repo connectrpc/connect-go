@@ -41,7 +41,7 @@ func NewReceivedRequest[Req any](stream Stream) (*Request[Req], error) {
 	}, nil
 }
 
-func (r *Request[_]) Any() interface{} {
+func (r *Request[_]) Any() any {
 	return r.Msg
 }
 
@@ -75,7 +75,7 @@ func newResponseWithHeader[Res any](msg *Res, header Header) *Response[Res] {
 	}
 }
 
-func (r *Response[_]) Any() interface{} {
+func (r *Response[_]) Any() any {
 	return r.Msg
 }
 
@@ -96,14 +96,14 @@ type Stream interface {
 	// Implementations must ensure that Send, CloseSend, and Header don't race
 	// with Context, Receive, CloseReceive, ReceivedHeader, and ReceivedTrailer.
 	// They may race with each other.
-	Send(interface{}) error
+	Send(any) error
 	CloseSend(error) error
 	Header() Header
 
 	// Implementations must ensure that Receive, CloseReceive, ReceivedHeader,
 	// and ReceivedTrailer don't race with Context, Send, CloseSend, or Header.
 	// They may race with each other.
-	Receive(interface{}) error
+	Receive(any) error
 	CloseReceive() error
 	ReceivedHeader() Header // blocks until response headers arrive
 }
@@ -184,7 +184,7 @@ func (cs *clientStream) Header() Header {
 	return cs.header
 }
 
-func (cs *clientStream) Send(m interface{}) error {
+func (cs *clientStream) Send(m any) error {
 	// stream.makeRequest hands the read side of the pipe off to net/http and
 	// waits to establish the response stream. There's a small class of errors we
 	// can catch without even sending data over the network, though, so we don't
@@ -252,7 +252,7 @@ func (cs *clientStream) CloseSend(_ error) error {
 	return nil
 }
 
-func (cs *clientStream) Receive(m interface{}) error {
+func (cs *clientStream) Receive(m any) error {
 	// TODO: update this when codec is pluggable
 	msg, ok := m.(proto.Message)
 	if !ok {
@@ -454,7 +454,7 @@ func (ss *serverStream) ReceivedHeader() Header {
 	return Header{raw: ss.request.Header}
 }
 
-func (ss *serverStream) Receive(m interface{}) error {
+func (ss *serverStream) Receive(m any) error {
 	// TODO: update this when codec is pluggable
 	msg, ok := m.(proto.Message)
 	if !ok {
@@ -478,7 +478,7 @@ func (ss *serverStream) CloseReceive() error {
 	return nil
 }
 
-func (ss *serverStream) Send(m interface{}) error {
+func (ss *serverStream) Send(m any) error {
 	// TODO: update this when codec is pluggable
 	msg, ok := m.(proto.Message)
 	if !ok {
