@@ -64,7 +64,7 @@ func wrap(c Code, err error) *Error {
 // Errorf calls fmt.Errorf with the supplied template and arguments, then wraps
 // the resulting error. If the code is CodeOK, the returned error is nil.
 // Otherwise, the returned error will be an *Error.
-func Errorf(c Code, template string, args ...interface{}) error {
+func Errorf(c Code, template string, args ...any) error {
 	if e := errorf(c, template, args...); e != nil {
 		return e
 	}
@@ -73,7 +73,7 @@ func Errorf(c Code, template string, args ...interface{}) error {
 
 // For internal use: lets us distinguish code-carrying errors from generic
 // errors (which may leak server details) at the type level without casts.
-func errorf(c Code, template string, args ...interface{}) *Error {
+func errorf(c Code, template string, args ...any) *Error {
 	return wrap(c, fmt.Errorf(template, args...))
 }
 

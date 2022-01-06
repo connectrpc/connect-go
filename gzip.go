@@ -12,7 +12,7 @@ import (
 var emptyGzipBytes []byte
 
 var gzWriterPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return gzip.NewWriter(io.Discard)
 	},
 }
@@ -30,7 +30,7 @@ func putGzipWriter(gw *gzip.Writer) {
 }
 
 var gzReaderPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		// We don't want to use gzip.NewReader, because it requires a source of
 		// valid gzipped bytes.
 		var r gzip.Reader

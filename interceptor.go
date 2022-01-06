@@ -5,7 +5,7 @@ import (
 )
 
 type AnyRequest interface {
-	Any() interface{}
+	Any() any
 	Spec() Specification
 	Header() Header
 
@@ -15,7 +15,7 @@ type AnyRequest interface {
 }
 
 type AnyResponse interface {
-	Any() interface{}
+	Any() any
 	Header() Header
 
 	// Only internal implementations, so we can add methods without breaking
