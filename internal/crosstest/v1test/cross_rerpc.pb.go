@@ -133,20 +133,13 @@ func (c *crossServiceClientReRPC) CumSum(ctx context.Context) *callstream.Bidire
 }
 
 // CrossServiceReRPC is a server for the internal.crosstest.v1test.CrossService
-// service. To make sure that adding methods to this protobuf service doesn't
-// break all implementations of this interface, all implementations must embed
-// UnimplementedCrossServiceReRPC.
-//
-// By default, recent versions of grpc-go have a similar forward compatibility
-// requirement. See https://github.com/grpc/grpc-go/issues/3794 for a longer
-// discussion.
+// service.
 type CrossServiceReRPC interface {
 	Ping(context.Context, *rerpc.Request[PingRequest]) (*rerpc.Response[PingResponse], error)
 	Fail(context.Context, *rerpc.Request[FailRequest]) (*rerpc.Response[FailResponse], error)
 	Sum(context.Context, *handlerstream.Client[SumRequest, SumResponse]) error
 	CountUp(context.Context, *rerpc.Request[CountUpRequest], *handlerstream.Server[CountUpResponse]) error
 	CumSum(context.Context, *handlerstream.Bidirectional[CumSumRequest, CumSumResponse]) error
-	mustEmbedUnimplementedCrossServiceReRPC()
 }
 
 // NewCrossServiceHandlerReRPC wraps each method on the service implementation
@@ -261,9 +254,7 @@ func NewCrossServiceHandlerReRPC(svc CrossServiceReRPC, opts ...rerpc.HandlerOpt
 
 var _ CrossServiceReRPC = (*UnimplementedCrossServiceReRPC)(nil) // verify interface implementation
 
-// UnimplementedCrossServiceReRPC returns CodeUnimplemented from all methods. To
-// maintain forward compatibility, all implementations of CrossServiceReRPC must
-// embed UnimplementedCrossServiceReRPC.
+// UnimplementedCrossServiceReRPC returns CodeUnimplemented from all methods.
 type UnimplementedCrossServiceReRPC struct{}
 
 func (UnimplementedCrossServiceReRPC) Ping(context.Context, *rerpc.Request[PingRequest]) (*rerpc.Response[PingResponse], error) {
@@ -285,5 +276,3 @@ func (UnimplementedCrossServiceReRPC) CountUp(context.Context, *rerpc.Request[Co
 func (UnimplementedCrossServiceReRPC) CumSum(context.Context, *handlerstream.Bidirectional[CumSumRequest, CumSumResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.crosstest.v1test.CrossService.CumSum isn't implemented")
 }
-
-func (UnimplementedCrossServiceReRPC) mustEmbedUnimplementedCrossServiceReRPC() {}

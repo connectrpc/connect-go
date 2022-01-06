@@ -255,13 +255,7 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, cname st
 }
 
 func serverInterface(g *protogen.GeneratedFile, service *protogen.Service, name string) {
-	comment(g, name, " is a server for the ", service.Desc.FullName(),
-		" service. To make sure that adding methods to this protobuf service doesn't break all ",
-		"implementations of this interface, all implementations must embed Unimplemented",
-		name, ".")
-	g.P("//")
-	comment(g, "By default, recent versions of grpc-go have a similar forward compatibility ",
-		"requirement. See https://github.com/grpc/grpc-go/issues/3794 for a longer discussion.")
+	comment(g, name, " is a server for the ", service.Desc.FullName(), " service.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
@@ -272,7 +266,6 @@ func serverInterface(g *protogen.GeneratedFile, service *protogen.Service, name 
 		g.Annotate(name+"."+method.GoName, method.Location)
 		g.P(method.Comments.Leading, serverSignature(g, name, method))
 	}
-	g.P("mustEmbedUnimplemented", name, "()")
 	g.P("}")
 	g.P()
 }
@@ -404,10 +397,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 func serverImplementation(g *protogen.GeneratedFile, service *protogen.Service, name string) {
 	g.P("var _ ", name, " = (*Unimplemented", name, ")(nil) // verify interface implementation")
 	g.P()
-	// Unimplemented server implementation (for forward compatibility).
-	comment(g, "Unimplemented", name, " returns CodeUnimplemented from",
-		" all methods. To maintain forward compatibility, all implementations",
-		" of ", name, " must embed Unimplemented", name, ". ")
+	comment(g, "Unimplemented", name, " returns CodeUnimplemented from all methods.")
 	g.P("type Unimplemented", name, " struct {}")
 	g.P()
 	for _, method := range service.Methods {
@@ -420,7 +410,6 @@ func serverImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		g.P("}")
 		g.P()
 	}
-	g.P("func (Unimplemented", name, ") mustEmbedUnimplemented", name, "() {}")
 	g.P()
 }
 

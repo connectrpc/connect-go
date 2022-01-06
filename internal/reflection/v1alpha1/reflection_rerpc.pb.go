@@ -67,19 +67,11 @@ func (c *serverReflectionClientReRPC) ServerReflectionInfo(ctx context.Context) 
 }
 
 // ServerReflectionReRPC is a server for the
-// internal.reflection.v1alpha1.ServerReflection service. To make sure that
-// adding methods to this protobuf service doesn't break all implementations of
-// this interface, all implementations must embed
-// UnimplementedServerReflectionReRPC.
-//
-// By default, recent versions of grpc-go have a similar forward compatibility
-// requirement. See https://github.com/grpc/grpc-go/issues/3794 for a longer
-// discussion.
+// internal.reflection.v1alpha1.ServerReflection service.
 type ServerReflectionReRPC interface {
 	// The reflection service is structured as a bidirectional stream, ensuring
 	// all related requests go to a single server.
 	ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[ServerReflectionRequest, ServerReflectionResponse]) error
-	mustEmbedUnimplementedServerReflectionReRPC()
 }
 
 // NewServerReflectionHandlerReRPC wraps each method on the service
@@ -119,12 +111,9 @@ func NewServerReflectionHandlerReRPC(svc ServerReflectionReRPC, opts ...rerpc.Ha
 var _ ServerReflectionReRPC = (*UnimplementedServerReflectionReRPC)(nil) // verify interface implementation
 
 // UnimplementedServerReflectionReRPC returns CodeUnimplemented from all
-// methods. To maintain forward compatibility, all implementations of
-// ServerReflectionReRPC must embed UnimplementedServerReflectionReRPC.
+// methods.
 type UnimplementedServerReflectionReRPC struct{}
 
 func (UnimplementedServerReflectionReRPC) ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[ServerReflectionRequest, ServerReflectionResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo isn't implemented")
 }
-
-func (UnimplementedServerReflectionReRPC) mustEmbedUnimplementedServerReflectionReRPC() {}
