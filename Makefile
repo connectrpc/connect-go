@@ -8,7 +8,7 @@ MAKEFLAGS += --no-builtin-rules
 BENCHFLAGS ?= -cpuprofile=cpu.pprof -memprofile=mem.pprof -benchmem -benchtime=30s
 GO ?= go
 
-HANDWRITTEN=$(shell find . -type f -name '*.go' | grep -v -e '\.pb\.go$$' -e '\.twirp\.go$$' -e '_string.go$$')
+HANDWRITTEN=$(shell find . -type f -name '*.go' | grep -v -e '\.pb\.go$$' -e '_string.go$$')
 PROTOBUFS=$(shell find . -type f -name '*.proto')
 
 .PHONY: help
@@ -65,11 +65,11 @@ cover.out: gen $(HANDWRITTEN)
 .PHONY: gen
 gen: .faux.pb ## Regenerate code
 
-.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go bin/protoc-gen-go-grpc bin/protoc-gen-twirp bin/protoc-gen-go-rerpc buf.gen.yaml
+.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go bin/protoc-gen-go-grpc bin/protoc-gen-go-rerpc buf.gen.yaml
 	./bin/buf generate
-	rm internal/ping/v1test/ping{.twirp,_grpc.pb}.go
-	rm internal/health/v1/health{.twirp,_grpc.pb}.go
-	rm internal/reflection/v1alpha1/reflection{.twirp,_grpc.pb}.go
+	rm internal/ping/v1test/ping_grpc.pb.go
+	rm internal/health/v1/health_grpc.pb.go
+	rm internal/reflection/v1alpha1/reflection_grpc.pb.go
 	touch $(@)
 
 # Don't make this depend on $(PROTOBUFS), since we don't want to keep
@@ -85,9 +85,6 @@ bin/protoc-gen-go-grpc: internal/crosstest/go.mod
 
 bin/protoc-gen-go-rerpc: $(shell ls cmd/protoc-gen-go-rerpc/*.go) go.mod
 	$(GO) build -o $(@) ./cmd/protoc-gen-go-rerpc
-
-bin/protoc-gen-twirp: internal/crosstest/go.mod
-	cd internal/crosstest && GOBIN=$(PWD)/bin $(GO) install github.com/twitchtv/twirp/protoc-gen-twirp
 
 bin/buf: internal/crosstest/go.mod
 	cd internal/crosstest && GOBIN=$(PWD)/bin $(GO) install github.com/bufbuild/buf/cmd/buf

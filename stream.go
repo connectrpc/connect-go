@@ -2,9 +2,7 @@ package rerpc
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -14,7 +12,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	statuspb "github.com/rerpc/rerpc/internal/status/v1"
-	"github.com/rerpc/rerpc/internal/twirp"
 )
 
 // Request is a request message and a variety of metadata.
@@ -172,7 +169,7 @@ func newClientStream(
 		spec:          spec,
 		maxReadBytes:  maxReadBytes,
 		writer:        pw,
-		marshaler:     marshaler{w: pw, ctype: TypeDefaultGRPC, gzipGRPC: gzipRequest},
+		marshaler:     marshaler{w: pw, gzip: gzipRequest},
 		header:        header,
 		reader:        pr,
 		responseReady: make(chan struct{}),
@@ -396,7 +393,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 	// Success! We got a response with valid headers and no error, so there's
 	// probably a message waiting in the stream.
 	cs.response = res
-	cs.unmarshaler = unmarshaler{r: res.Body, ctype: TypeDefaultGRPC, max: cs.maxReadBytes}
+	cs.unmarshaler = unmarshaler{r: res.Body, max: cs.maxReadBytes}
 }
 
 func (cs *clientStream) setResponseError(err error) {
@@ -417,13 +414,11 @@ func (cs *clientStream) getResponseError() error {
 }
 
 type serverStream struct {
-	spec           Specification
-	unmarshaler    unmarshaler
-	marshaler      marshaler
-	writer         http.ResponseWriter
-	reader         io.ReadCloser
-	receivedHeader Header
-	ctype          string
+	spec        Specification
+	unmarshaler unmarshaler
+	marshaler   marshaler
+	writer      http.ResponseWriter
+	request     *http.Request
 }
 
 var _ Stream = (*serverStream)(nil)
@@ -434,20 +429,16 @@ var _ Stream = (*serverStream)(nil)
 func newServerStream(
 	spec Specification,
 	w http.ResponseWriter,
-	r io.ReadCloser,
-	receivedHeader Header,
-	ctype string,
+	r *http.Request,
 	maxReadBytes int64,
 	gzipResponse bool,
 ) *serverStream {
 	return &serverStream{
-		spec:           spec,
-		unmarshaler:    unmarshaler{r: r, ctype: ctype, max: maxReadBytes},
-		marshaler:      marshaler{w: w, ctype: ctype, gzipGRPC: gzipResponse},
-		writer:         w,
-		reader:         r,
-		receivedHeader: receivedHeader,
-		ctype:          ctype,
+		spec:        spec,
+		unmarshaler: unmarshaler{r: r.Body, max: maxReadBytes},
+		marshaler:   marshaler{w: w, gzip: gzipResponse},
+		writer:      w,
+		request:     r,
 	}
 }
 
@@ -460,7 +451,7 @@ func (ss *serverStream) Header() Header {
 }
 
 func (ss *serverStream) ReceivedHeader() Header {
-	return ss.receivedHeader
+	return Header{raw: ss.request.Header}
 }
 
 func (ss *serverStream) Receive(m interface{}) error {
@@ -477,8 +468,8 @@ func (ss *serverStream) Receive(m interface{}) error {
 }
 
 func (ss *serverStream) CloseReceive() error {
-	discard(ss.reader)
-	if err := ss.reader.Close(); err != nil {
+	discard(ss.request.Body)
+	if err := ss.request.Body.Close(); err != nil {
 		if rerr, ok := AsError(err); ok {
 			return rerr
 		}
@@ -503,14 +494,7 @@ func (ss *serverStream) Send(m interface{}) error {
 
 func (ss *serverStream) CloseSend(err error) error {
 	defer ss.flush()
-	switch ss.ctype {
-	case TypeJSON, TypeProtoTwirp:
-		return ss.sendErrorTwirp(err)
-	case TypeDefaultGRPC, TypeProtoGRPC:
-		return ss.sendErrorGRPC(err)
-	default:
-		return errorf(CodeInvalidArgument, "unsupported Content-Type %q", ss.ctype)
-	}
+	return ss.sendErrorGRPC(err)
 }
 
 func (ss *serverStream) sendErrorGRPC(err error) error {
@@ -531,37 +515,6 @@ func (ss *serverStream) sendErrorGRPC(err error) error {
 	ss.writer.Header().Set("Grpc-Status", code)
 	ss.writer.Header().Set("Grpc-Message", percentEncode(s.Message))
 	ss.writer.Header().Set("Grpc-Status-Details-Bin", encodeBinaryHeader(bin))
-	return nil
-}
-
-func (ss *serverStream) sendErrorTwirp(err error) error {
-	if err == nil {
-		return nil
-	}
-	gs := statusFromError(err)
-	s := &twirp.Status{
-		Code:    Code(gs.Code).twirp(),
-		Message: gs.Message,
-	}
-	if te, ok := asTwirpError(err); ok {
-		s.Code = te.TwirpCode()
-	}
-	// Even if the caller sends TypeProtoTwirp, we respond with TypeJSON on
-	// errors.
-	ss.writer.Header().Set("Content-Type", TypeJSON)
-	bs, merr := json.Marshal(s)
-	if merr != nil {
-		ss.writer.WriteHeader(http.StatusInternalServerError)
-		// codes don't need to be escaped in JSON, so this is okay
-		const tmpl = `{"code": "%s", "msg": "error marshaling error with code %s"}`
-		// Ignore this error. We're well past the point of no return here.
-		_, _ = fmt.Fprintf(ss.writer, tmpl, CodeInternal.twirp(), s.Code)
-		return errorf(CodeInternal, "couldn't marshal Twirp status to JSON: %w", merr)
-	}
-	ss.writer.WriteHeader(CodeOf(err).http())
-	if _, err = ss.writer.Write(bs); err != nil {
-		return wrap(CodeUnknown, err)
-	}
 	return nil
 }
 
@@ -588,8 +541,7 @@ func statusFromError(err error) *statuspb.Status {
 
 func extractError(h http.Header) *Error {
 	codeHeader := h.Get("Grpc-Status")
-	codeIsSuccess := (codeHeader == "" || codeHeader == "0")
-	if codeIsSuccess {
+	if codeHeader == "" || codeHeader == "0" {
 		return nil
 	}
 

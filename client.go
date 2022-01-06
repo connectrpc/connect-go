@@ -165,13 +165,13 @@ func addGRPCClientHeaders(h Header, gzipRequest bool) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set. To avoid allocating the same slices over and over,
 	// we use pre-allocated globals for the header values.
-	h.raw["User-Agent"] = userAgentSlice
-	h.raw["Content-Type"] = typeDefaultGRPCSlice
+	h.raw["User-Agent"] = []string{userAgent}
+	h.raw["Content-Type"] = []string{TypeProtoGRPC}
 	compression := CompressionIdentity
 	if gzipRequest {
 		compression = CompressionGzip
 	}
-	h.raw["Grpc-Encoding"] = compressionToSlice(compression)
-	h.raw["Grpc-Accept-Encoding"] = acceptEncodingValueSlice // always advertise identity & gzip
+	h.raw["Grpc-Encoding"] = []string{compression}
+	h.raw["Grpc-Accept-Encoding"] = []string{acceptEncodingValue} // always advertise identity & gzip
 	h.raw["Te"] = teTrailersSlice
 }
