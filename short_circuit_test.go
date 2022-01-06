@@ -43,7 +43,7 @@ type errStream struct {
 
 var _ rerpc.Stream = (*errStream)(nil)
 
-func (s *errStream) Receive(_ interface{}) error { return s.err }
-func (s *errStream) CloseReceive() error         { return s.err }
-func (s *errStream) Send(_ interface{}) error    { return s.err }
-func (s *errStream) CloseSend(_ error) error     { return s.err }
+func (s *errStream) Receive(_ any) error     { return s.err }
+func (s *errStream) CloseReceive() error     { return s.err }
+func (s *errStream) Send(_ any) error        { return s.err }
+func (s *errStream) CloseSend(_ error) error { return s.err }

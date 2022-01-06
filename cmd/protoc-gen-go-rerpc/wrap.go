@@ -11,7 +11,7 @@ import (
 
 // Raggedy comments in the generated code are driving me insane. This
 // word-wrapping function is ruinously inefficient, but it gets the job done.
-func comment(g *protogen.GeneratedFile, elems ...interface{}) {
+func comment(g *protogen.GeneratedFile, elems ...any) {
 	const width = 77 // leave room for "// "
 	text := &bytes.Buffer{}
 	for _, el := range elems {

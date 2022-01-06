@@ -13,13 +13,13 @@ import (
 )
 
 type params struct {
-	got, want interface{}
+	got, want any
 	cmpOpts   []cmp.Option // user-supplied equality configuration
 	msg       string       // user-supplied description of failure
 	diff      bool         // include diff in failure output
 }
 
-func newParams(got, want interface{}, msg string, opts ...Option) *params {
+func newParams(got, want any, msg string, opts ...Option) *params {
 	p := &params{
 		got:     got,
 		want:    want,
@@ -57,7 +57,7 @@ func Cmp(opts ...cmp.Option) Option {
 //   assert.Equal(t, 0, 1, "failed to parse %q", assert.Fmt("foobar"))
 // will print the message
 //   failed to parse "foobar"
-func Fmt(args ...interface{}) Option {
+func Fmt(args ...any) Option {
 	return optionFunc(func(p *params) {
 		if len(args) > 0 {
 			p.msg = fmt.Sprintf(p.msg, args...)
@@ -73,7 +73,7 @@ func Diff() Option {
 }
 
 // Equal asserts that two values are equal.
-func Equal(t testing.TB, got, want interface{}, msg string, opts ...Option) bool {
+func Equal(t testing.TB, got, want any, msg string, opts ...Option) bool {
 	t.Helper()
 	params := newParams(got, want, msg, opts...)
 	if cmp.Equal(got, want, params.cmpOpts...) {
@@ -84,7 +84,7 @@ func Equal(t testing.TB, got, want interface{}, msg string, opts ...Option) bool
 }
 
 // NotEqual asserts that two values aren't equal.
-func NotEqual(t testing.TB, got, want interface{}, msg string, opts ...Option) bool {
+func NotEqual(t testing.TB, got, want any, msg string, opts ...Option) bool {
 	t.Helper()
 	params := newParams(got, want, msg, opts...)
 	if !cmp.Equal(got, want, params.cmpOpts...) {
@@ -95,7 +95,7 @@ func NotEqual(t testing.TB, got, want interface{}, msg string, opts ...Option) b
 }
 
 // Nil asserts that the value is nil.
-func Nil(t testing.TB, got interface{}, msg string, opts ...Option) bool {
+func Nil(t testing.TB, got any, msg string, opts ...Option) bool {
 	t.Helper()
 	if isNil(got) {
 		return true
@@ -106,7 +106,7 @@ func Nil(t testing.TB, got interface{}, msg string, opts ...Option) bool {
 }
 
 // NotNil asserts that the value isn't nil.
-func NotNil(t testing.TB, got interface{}, msg string, opts ...Option) bool {
+func NotNil(t testing.TB, got any, msg string, opts ...Option) bool {
 	t.Helper()
 	if !isNil(got) {
 		return true
@@ -117,7 +117,7 @@ func NotNil(t testing.TB, got interface{}, msg string, opts ...Option) bool {
 }
 
 // Zero asserts that the value is its type's zero value.
-func Zero(t testing.TB, got interface{}, msg string, opts ...Option) bool {
+func Zero(t testing.TB, got any, msg string, opts ...Option) bool {
 	t.Helper()
 	if got == nil {
 		return true
@@ -132,7 +132,7 @@ func Zero(t testing.TB, got interface{}, msg string, opts ...Option) bool {
 }
 
 // NotZero asserts that the value is non-zero.
-func NotZero(t testing.TB, got interface{}, msg string, opts ...Option) bool {
+func NotZero(t testing.TB, got any, msg string, opts ...Option) bool {
 	t.Helper()
 	if got != nil {
 		want := makeZero(got)
@@ -226,7 +226,7 @@ func report(t testing.TB, params *params, desc string, showWant bool) {
 	t.Fatal(w.String())
 }
 
-func isNil(got interface{}) bool {
+func isNil(got any) bool {
 	// Simple case, true only when the user directly passes a literal nil.
 	if got == nil {
 		return true
@@ -244,7 +244,7 @@ func isNil(got interface{}) bool {
 	}
 }
 
-func makeZero(i interface{}) interface{} {
+func makeZero(i any) any {
 	typ := reflect.TypeOf(i)
 	return reflect.Zero(typ).Interface()
 }
