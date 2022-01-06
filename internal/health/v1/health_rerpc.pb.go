@@ -102,14 +102,7 @@ func (c *healthClientReRPC) Watch(ctx context.Context, req *rerpc.Request[Health
 	return callstream.NewServer[HealthCheckResponse](stream), nil
 }
 
-// HealthReRPC is a server for the internal.health.v1.Health service. To make
-// sure that adding methods to this protobuf service doesn't break all
-// implementations of this interface, all implementations must embed
-// UnimplementedHealthReRPC.
-//
-// By default, recent versions of grpc-go have a similar forward compatibility
-// requirement. See https://github.com/grpc/grpc-go/issues/3794 for a longer
-// discussion.
+// HealthReRPC is a server for the internal.health.v1.Health service.
 type HealthReRPC interface {
 	// If the requested service is unknown, the call will fail with status
 	// NOT_FOUND.
@@ -130,7 +123,6 @@ type HealthReRPC interface {
 	// call.  If the call terminates with any other status (including OK),
 	// clients should retry the call with appropriate exponential backoff.
 	Watch(context.Context, *rerpc.Request[HealthCheckRequest], *handlerstream.Server[HealthCheckResponse]) error
-	mustEmbedUnimplementedHealthReRPC()
 }
 
 // NewHealthHandlerReRPC wraps each method on the service implementation in a
@@ -186,9 +178,7 @@ func NewHealthHandlerReRPC(svc HealthReRPC, opts ...rerpc.HandlerOption) []*rerp
 
 var _ HealthReRPC = (*UnimplementedHealthReRPC)(nil) // verify interface implementation
 
-// UnimplementedHealthReRPC returns CodeUnimplemented from all methods. To
-// maintain forward compatibility, all implementations of HealthReRPC must embed
-// UnimplementedHealthReRPC.
+// UnimplementedHealthReRPC returns CodeUnimplemented from all methods.
 type UnimplementedHealthReRPC struct{}
 
 func (UnimplementedHealthReRPC) Check(context.Context, *rerpc.Request[HealthCheckRequest]) (*rerpc.Response[HealthCheckResponse], error) {
@@ -198,5 +188,3 @@ func (UnimplementedHealthReRPC) Check(context.Context, *rerpc.Request[HealthChec
 func (UnimplementedHealthReRPC) Watch(context.Context, *rerpc.Request[HealthCheckRequest], *handlerstream.Server[HealthCheckResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.health.v1.Health.Watch isn't implemented")
 }
-
-func (UnimplementedHealthReRPC) mustEmbedUnimplementedHealthReRPC() {}

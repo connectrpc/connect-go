@@ -133,20 +133,13 @@ func (c *pingServiceClientReRPC) CumSum(ctx context.Context) *callstream.Bidirec
 }
 
 // PingServiceReRPC is a server for the internal.ping.v1test.PingService
-// service. To make sure that adding methods to this protobuf service doesn't
-// break all implementations of this interface, all implementations must embed
-// UnimplementedPingServiceReRPC.
-//
-// By default, recent versions of grpc-go have a similar forward compatibility
-// requirement. See https://github.com/grpc/grpc-go/issues/3794 for a longer
-// discussion.
+// service.
 type PingServiceReRPC interface {
 	Ping(context.Context, *rerpc.Request[PingRequest]) (*rerpc.Response[PingResponse], error)
 	Fail(context.Context, *rerpc.Request[FailRequest]) (*rerpc.Response[FailResponse], error)
 	Sum(context.Context, *handlerstream.Client[SumRequest, SumResponse]) error
 	CountUp(context.Context, *rerpc.Request[CountUpRequest], *handlerstream.Server[CountUpResponse]) error
 	CumSum(context.Context, *handlerstream.Bidirectional[CumSumRequest, CumSumResponse]) error
-	mustEmbedUnimplementedPingServiceReRPC()
 }
 
 // NewPingServiceHandlerReRPC wraps each method on the service implementation in
@@ -261,9 +254,7 @@ func NewPingServiceHandlerReRPC(svc PingServiceReRPC, opts ...rerpc.HandlerOptio
 
 var _ PingServiceReRPC = (*UnimplementedPingServiceReRPC)(nil) // verify interface implementation
 
-// UnimplementedPingServiceReRPC returns CodeUnimplemented from all methods. To
-// maintain forward compatibility, all implementations of PingServiceReRPC must
-// embed UnimplementedPingServiceReRPC.
+// UnimplementedPingServiceReRPC returns CodeUnimplemented from all methods.
 type UnimplementedPingServiceReRPC struct{}
 
 func (UnimplementedPingServiceReRPC) Ping(context.Context, *rerpc.Request[PingRequest]) (*rerpc.Response[PingResponse], error) {
@@ -285,5 +276,3 @@ func (UnimplementedPingServiceReRPC) CountUp(context.Context, *rerpc.Request[Cou
 func (UnimplementedPingServiceReRPC) CumSum(context.Context, *handlerstream.Bidirectional[CumSumRequest, CumSumResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.ping.v1test.PingService.CumSum isn't implemented")
 }
-
-func (UnimplementedPingServiceReRPC) mustEmbedUnimplementedPingServiceReRPC() {}
