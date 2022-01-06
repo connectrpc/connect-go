@@ -20,7 +20,6 @@ import (
 	jsonpbv1 "github.com/golang/protobuf/jsonpb"
 	protov1 "github.com/golang/protobuf/proto"
 	"github.com/jhump/protoreflect/grpcreflect"
-	"github.com/twitchtv/twirp"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
@@ -219,14 +218,6 @@ func assertErrorReRPC(t testing.TB, err error, msg string) *rerpc.Error {
 	rerr, ok := rerpc.AsError(err)
 	assert.True(t, ok, "conversion to *rerpc.Error")
 	return rerr
-}
-
-func assertErrorTwirp(t testing.TB, err error, msg string) twirp.Error {
-	t.Helper()
-	assert.NotNil(t, err, msg)
-	twerr, ok := err.(twirp.Error)
-	assert.True(t, ok, "conversion to twirp.Error")
-	return twerr
 }
 
 func testWithReRPCClient(t *testing.T, client crosspb.CrossServiceClientReRPC) {
@@ -439,47 +430,6 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrossServiceClient, opts ..
 	})
 }
 
-func testWithTwirpClient(t *testing.T, client crosspb.CrossService) {
-	t.Run("ping", func(t *testing.T) {
-		num := rand.Int63()
-		req := &crosspb.PingRequest{Number: num}
-		expect := &crosspb.PingResponse{Number: num}
-		res, err := client.Ping(context.Background(), req)
-		assert.Nil(t, err, "ping error")
-		assert.Equal(t, res, expect, "ping response")
-	})
-	t.Run("errors", func(t *testing.T) {
-		req := &crosspb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)}
-		_, err := client.Fail(context.Background(), req)
-		twerr := assertErrorTwirp(t, err, "fail RPC error")
-		assert.Equal(t, twerr.Code(), twirp.ResourceExhausted, "error code")
-		assert.Equal(t, twerr.Msg(), errMsg, "error message")
-		assert.Equal(t, len(twerr.MetaMap()), 0, "error metadata len")
-	})
-	t.Run("cancel", func(t *testing.T) {
-		req := &crosspb.PingRequest{}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		cancel()
-		_, err := client.Ping(ctx, req)
-		twerr := assertErrorTwirp(t, err, "error after canceling context")
-		// As of Twirp 8.1, clients return twirp.Internal if the context is
-		// canceled before the request is sent. This seems strange.
-		assert.Equal(t, twerr.Code(), twirp.Internal, "error code")
-		assert.ErrorIs(t, twerr, context.Canceled, "underlying error")
-	})
-	t.Run("exceed_deadline", func(t *testing.T) {
-		req := &crosspb.PingRequest{Sleep: durationpb.New(time.Second)}
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer cancel()
-		_, err := client.Ping(ctx, req)
-		twerr := assertErrorTwirp(t, err, "deadline exceeded error")
-		// As of Twirp 8.1, clients also return twirp.Internal if the deadline is
-		// exceeded. Again, this seems strange.
-		assert.Equal(t, twerr.Code(), twirp.Internal, "error code")
-		assert.ErrorIs(t, twerr, context.DeadlineExceeded, "underlying error")
-	})
-}
-
 func TestReRPCServer(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	mux := rerpc.NewServeMux(
@@ -549,20 +499,6 @@ func TestReRPCServer(t *testing.T) {
 			assert.True(t, strings.Contains(out.String(), "number: 42"), "grpcurl output")
 		})
 	})
-	t.Run("twirp_client", func(t *testing.T) {
-		opts := []twirp.ClientOption{
-			twirp.WithClientPathPrefix(""),    // by default, reRPC doesn't use a prefix
-			twirp.WithClientLiteralURLs(true), // Twirp clients don't follow spec by default
-		}
-		t.Run("json", func(t *testing.T) {
-			client := crosspb.NewCrossServiceJSONClient(server.URL, server.Client(), opts...)
-			testWithTwirpClient(t, client)
-		})
-		t.Run("protobuf", func(t *testing.T) {
-			client := crosspb.NewCrossServiceProtobufClient(server.URL, server.Client(), opts...)
-			testWithTwirpClient(t, client)
-		})
-	})
 }
 
 func TestReRPCServerH2C(t *testing.T) {
@@ -593,20 +529,6 @@ func TestReRPCServerH2C(t *testing.T) {
 		})
 		t.Run("gzip", func(t *testing.T) {
 			testWithGRPCClient(t, client, grpc.UseCompressor(gzip.Name))
-		})
-	})
-	t.Run("twirp_client", func(t *testing.T) {
-		opts := []twirp.ClientOption{
-			twirp.WithClientPathPrefix(""),    // by default, reRPC doesn't use a prefix
-			twirp.WithClientLiteralURLs(true), // Twirp clients don't follow spec by default
-		}
-		t.Run("json", func(t *testing.T) {
-			client := crosspb.NewCrossServiceJSONClient(server.URL, server.Client(), opts...)
-			testWithTwirpClient(t, client)
-		})
-		t.Run("protobuf", func(t *testing.T) {
-			client := crosspb.NewCrossServiceProtobufClient(server.URL, server.Client(), opts...)
-			testWithTwirpClient(t, client)
 		})
 	})
 }

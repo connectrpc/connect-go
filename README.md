@@ -49,10 +49,7 @@ type PingServer struct {
 
 func main() {
   ping := &PingServer{}
-  mux := rerpc.NewServeMux(
-    pingpb.NewPingHandlerReRPC(ping),
-    rerpc.NewBadRouteHandler(),
-  )
+  mux := rerpc.NewServeMux(pingpb.NewPingHandlerReRPC(ping))
   handler := h2c.NewHandler(mux, &http2.Server{})
   http.ListenAndServe(":8081", handler)
 }
