@@ -41,7 +41,6 @@ func Example() {
 		pingpb.NewPingServiceHandlerReRPC(ping, reg, limit), // business logic
 		reflection.NewHandler(reg),                          // server reflection
 		health.NewHandler(checker),                          // health checks
-		rerpc.NewBadRouteHandler(),                          // Twirp-compatible 404s
 	)
 
 	// Timeouts, connection handling, TLS configuration, and other low-level

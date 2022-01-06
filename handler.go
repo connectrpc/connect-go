@@ -11,22 +11,13 @@ import (
 
 var (
 	// Always advertise that reRPC accepts gzip compression.
-	acceptEncodingValue      = strings.Join([]string{CompressionGzip, CompressionIdentity}, ",")
-	acceptEncodingValueSlice = []string{acceptEncodingValue}
-	acceptPostValueDefault   = strings.Join(
-		[]string{TypeDefaultGRPC, TypeProtoGRPC, TypeProtoTwirp, TypeJSON},
-		",",
-	)
-	acceptPostValueWithoutTwirp = strings.Join(
-		[]string{TypeDefaultGRPC, TypeProtoGRPC},
-		",",
-	)
-	grpcStatusTrailers = []string{"Grpc-Status", "Grpc-Message", "Grpc-Status-Details-Bin"}
+	acceptEncodingValue = strings.Join([]string{CompressionGzip, CompressionIdentity}, ",")
+	acceptPostValue     = strings.Join([]string{TypeDefaultGRPC, TypeProtoGRPC}, ",")
+	grpcStatusTrailers  = []string{"Grpc-Status", "Grpc-Message", "Grpc-Status-Details-Bin"}
 )
 
 type handlerCfg struct {
 	DisableGzipResponse bool
-	DisableTwirp        bool
 	MaxRequestBytes     int64
 	Registrar           *Registrar
 	Interceptor         Interceptor
@@ -42,23 +33,6 @@ type handlerCfg struct {
 // Registrars and Options are also valid HandlerOptions.
 type HandlerOption interface {
 	applyToHandler(*handlerCfg)
-}
-
-type serveTwirpOption struct {
-	Disable bool
-}
-
-func (o *serveTwirpOption) applyToHandler(cfg *handlerCfg) {
-	cfg.DisableTwirp = o.Disable
-}
-
-// ServeTwirp enables or disables support for Twirp's JSON and protobuf
-// formats. Disable Twirp if you only want your handlers to speak the gRPC
-// protocol.
-//
-// By default, handlers support Twirp.
-func ServeTwirp(enable bool) HandlerOption {
-	return &serveTwirpOption{!enable}
 }
 
 // A Handler is the server-side implementation of a single RPC defined by a
@@ -204,15 +178,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctype := r.Header.Get("Content-Type")
-	if (ctype == TypeJSON || ctype == TypeProtoTwirp) && (h.config.DisableTwirp || h.stype != StreamTypeUnary) {
-		w.Header().Set("Accept-Post", acceptPostValueWithoutTwirp)
-		w.WriteHeader(http.StatusUnsupportedMediaType)
-		return
-	}
-	if ctype != TypeDefaultGRPC && ctype != TypeProtoGRPC && ctype != TypeProtoTwirp && ctype != TypeJSON {
+	if ctype != TypeDefaultGRPC && ctype != TypeProtoGRPC {
 		// grpc-go returns 500, but the spec recommends 415.
 		// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#requests
-		w.Header().Set("Accept-Post", acceptPostValueDefault)
+		w.Header().Set("Accept-Post", acceptPostValue)
 		w.WriteHeader(http.StatusUnsupportedMediaType)
 		return
 	}
@@ -244,55 +213,44 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} // else err == errNoTimeout, nothing to do
 
 	requestCompression := CompressionIdentity
-	responseCompression := CompressionIdentity
-	if ctype == TypeJSON || ctype == TypeProtoTwirp {
-		if r.Header.Get("Content-Encoding") == "gzip" {
+	if me := r.Header.Get("Grpc-Encoding"); me != "" {
+		switch me {
+		case CompressionIdentity:
+			requestCompression = CompressionIdentity
+		case CompressionGzip:
 			requestCompression = CompressionGzip
+		default:
+			// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
+			// should return CodeUnimplemented and specify acceptable compression(s)
+			// (in addition to setting the Grpc-Accept-Encoding header).
+			if failed == nil {
+				failed = errorf(
+					CodeUnimplemented,
+					"unknown compression %q: accepted grpc-encoding values are %v",
+					me, acceptEncodingValue,
+				)
+			}
 		}
-		// TODO: Actually parse Accept-Encoding instead of this hackery.
-		if !h.config.DisableGzipResponse && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			responseCompression = CompressionGzip
-		}
-	} else {
-		if me := r.Header.Get("Grpc-Encoding"); me != "" {
-			switch me {
-			case CompressionIdentity:
-				requestCompression = CompressionIdentity
+	}
+	// Follow https://github.com/grpc/grpc/blob/master/doc/compression.md.
+	// (The grpc-go implementation doesn't read the "grpc-accept-encoding" header
+	// and doesn't support compression method asymmetry.)
+	responseCompression := requestCompression
+	if h.config.DisableGzipResponse {
+		responseCompression = CompressionIdentity
+	} else if mae := r.Header.Get("Grpc-Accept-Encoding"); mae != "" {
+		for _, enc := range strings.FieldsFunc(mae, splitOnCommasAndSpaces) {
+			switch enc {
 			case CompressionGzip:
-				requestCompression = CompressionGzip
+				responseCompression = CompressionGzip
+				// prefer gzip, so no continue
+			case CompressionIdentity:
+				responseCompression = CompressionIdentity
+				continue
 			default:
-				// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
-				// should return CodeUnimplemented and specify acceptable compression(s)
-				// (in addition to setting the Grpc-Accept-Encoding header).
-				if failed == nil {
-					failed = errorf(
-						CodeUnimplemented,
-						"unknown compression %q: accepted grpc-encoding values are %v",
-						me, acceptEncodingValue,
-					)
-				}
+				continue
 			}
-		}
-		// Follow https://github.com/grpc/grpc/blob/master/doc/compression.md.
-		// (The grpc-go implementation doesn't read the "grpc-accept-encoding" header
-		// and doesn't support compression method asymmetry.)
-		responseCompression = requestCompression
-		if h.config.DisableGzipResponse {
-			responseCompression = CompressionIdentity
-		} else if mae := r.Header.Get("Grpc-Accept-Encoding"); mae != "" {
-			for _, enc := range strings.FieldsFunc(mae, splitOnCommasAndSpaces) {
-				switch enc {
-				case CompressionGzip:
-					responseCompression = CompressionGzip
-					// prefer gzip, so no continue
-				case CompressionIdentity:
-					responseCompression = CompressionIdentity
-					continue
-				default:
-					continue
-				}
-				break
-			}
+			break
 		}
 	}
 
@@ -304,45 +262,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// skip the normalization in Header.Set. To avoid allocating re-allocating
 	// the same slices over and over, we use pre-allocated globals for the header
 	// values.
-	w.Header()["Content-Type"] = typeToSlice(ctype)
-	if ctype != TypeJSON && ctype != TypeProtoTwirp {
-		w.Header()["Grpc-Accept-Encoding"] = acceptEncodingValueSlice
-		w.Header()["Grpc-Encoding"] = compressionToSlice(responseCompression)
-		// Every gRPC response will have these trailers.
-		w.Header()["Trailer"] = grpcStatusTrailers
-	}
-
-	// Unlike gRPC, Twirp manages compression using the standard HTTP mechanisms.
-	// Since they apply to the whole stream, it's easiest to handle it here.
-	var requestBody io.Reader = r.Body
-	if ctype == TypeJSON || ctype == TypeProtoTwirp {
-		if requestCompression == CompressionGzip {
-			gr, err := getGzipReader(requestBody)
-			if err != nil && failed == nil {
-				failed = errorf(CodeInvalidArgument, "can't read gzipped body: %w", err)
-			} else if err == nil {
-				defer putGzipReader(gr)
-				defer gr.Close()
-				requestBody = gr
-			}
-		}
-		// Checking Content-Encoding ensures that some other user-supplied
-		// middleware isn't already compressing the response.
-		if responseCompression == CompressionGzip && w.Header().Get("Content-Encoding") == "" {
-			w.Header().Set("Content-Encoding", "gzip")
-			gw := getGzipWriter(w)
-			defer putGzipWriter(gw)
-			w = &gzipResponseWriter{ResponseWriter: w, gw: gw}
-		}
-	}
+	w.Header()["Content-Type"] = []string{ctype}
+	w.Header()["Grpc-Accept-Encoding"] = []string{acceptEncodingValue}
+	w.Header()["Grpc-Encoding"] = []string{responseCompression}
+	// Every gRPC response will have these trailers.
+	w.Header()["Trailer"] = grpcStatusTrailers
 
 	sf := StreamFunc(func(ctx context.Context) (context.Context, Stream) {
 		return ctx, newServerStream(
 			spec,
 			w,
-			&readCloser{Reader: requestBody, Closer: r.Body},
-			Header{raw: r.Header},
-			ctype,
+			r,
 			h.config.MaxRequestBytes,
 			responseCompression == CompressionGzip,
 		)
@@ -371,9 +301,4 @@ func (h *Handler) Path() string {
 
 func splitOnCommasAndSpaces(c rune) bool {
 	return c == ',' || c == ' '
-}
-
-type readCloser struct {
-	io.Reader
-	io.Closer
 }

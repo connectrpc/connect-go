@@ -47,7 +47,6 @@ func (r *Registrar) IsRegistered(service string) bool {
 // concurrently.
 func (r *Registrar) register(pkg, service string) {
 	if pkg == "" || service == "" {
-		// Typically BadRouteHandler.
 		return
 	}
 	fqn := pkg + "." + service

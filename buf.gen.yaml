@@ -8,10 +8,6 @@ plugins:
     out: .
     opt: paths=source_relative
     path: ./bin/protoc-gen-go-grpc
-  - name: twirp
-    out: .
-    opt: paths=source_relative
-    path: ./bin/protoc-gen-twirp
   - name: go-rerpc
     out: .
     opt: paths=source_relative

@@ -1,21 +1,14 @@
 package rerpc_test
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"math/rand"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
-
-	"google.golang.org/protobuf/proto"
 
 	"github.com/rerpc/rerpc"
 	"github.com/rerpc/rerpc/handlerstream"
@@ -23,7 +16,6 @@ import (
 	"github.com/rerpc/rerpc/internal/assert"
 	healthpb "github.com/rerpc/rerpc/internal/health/v1"
 	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
-	"github.com/rerpc/rerpc/internal/twirp"
 	"github.com/rerpc/rerpc/reflection"
 )
 
@@ -106,268 +98,6 @@ func (p pingServer) CumSum(
 	}
 }
 
-func TestHandlerTwirp(t *testing.T) {
-	mux := rerpc.NewServeMux(
-		pingpb.NewPingServiceHandlerReRPC(pingServer{}),
-		rerpc.NewBadRouteHandler(),
-	)
-	server := httptest.NewServer(mux)
-	defer server.Close()
-
-	testHeaders := func(t testing.TB, response *http.Response) {
-		t.Helper()
-		assert.Equal(t, response.ProtoMajor, 1, "HTTP protocol major version")
-		// Should be using HTTP's standard Content-Encoding and Accept-Encoding
-		// instead.
-		assert.Zero(t, response.Header.Get("Grpc-Encoding"), "grpc-encoding header")
-		assert.Zero(t, response.Header.Get("Grpc-Accept-Encoding"), "grpc-accept-encoding header")
-	}
-
-	assertBodyEquals := func(t testing.TB, body io.Reader, expected string) {
-		t.Helper()
-		contents, err := io.ReadAll(body)
-		assert.Nil(t, err, "read response body")
-		assert.Equal(t, string(contents), expected, "body contents")
-	}
-
-	assertError := func(t testing.TB, response *http.Response, expected *twirp.Status) {
-		t.Helper()
-		assert.Equal(t, response.Header.Get("Content-Type"), rerpc.TypeJSON, "error response content-type")
-		got := &twirp.Status{}
-		contents, err := io.ReadAll(response.Body)
-		assert.Nil(t, err, "read response body")
-		assert.Nil(t, json.Unmarshal(contents, got), "unmarshal JSON")
-		assert.Equal(t, got, expected, "unmarshaled Twirp status")
-	}
-
-	t.Run("json", func(t *testing.T) {
-		t.Run("zero", func(t *testing.T) {
-			r, err := http.NewRequest(
-				http.MethodPost,
-				fmt.Sprintf("%s/internal.ping.v1test.PingService/Ping", server.URL),
-				bytes.NewReader(nil),
-			)
-			assert.Nil(t, err, "create request")
-			r.Header.Set("Content-Type", rerpc.TypeJSON)
-
-			response, err := server.Client().Do(r)
-			assert.Nil(t, err, "make request")
-
-			testHeaders(t, response)
-			assert.Equal(t, response.StatusCode, http.StatusOK, "HTTP status code")
-			assertBodyEquals(t, response.Body, "{}") // zero value
-		})
-		t.Run("ping", func(t *testing.T) {
-			probe := `{"number":"42"}`
-			r, err := http.NewRequest(
-				http.MethodPost,
-				fmt.Sprintf("%s/internal.ping.v1test.PingService/Ping", server.URL),
-				strings.NewReader(probe),
-			)
-			assert.Nil(t, err, "create request")
-			r.Header.Set("Content-Type", rerpc.TypeJSON)
-
-			response, err := server.Client().Do(r)
-			assert.Nil(t, err, "make request")
-
-			testHeaders(t, response)
-			assert.Equal(t, response.StatusCode, http.StatusOK, "HTTP status code")
-			assertBodyEquals(t, response.Body, probe)
-		})
-
-		t.Run("gzip", func(t *testing.T) {
-			probe := `{"number":"42"}`
-			buf := &bytes.Buffer{}
-			gzipW := gzip.NewWriter(buf)
-			io.WriteString(gzipW, probe)
-			gzipW.Close()
-
-			r, err := http.NewRequest(
-				http.MethodPost,
-				fmt.Sprintf("%s/internal.ping.v1test.PingService/Ping", server.URL),
-				buf,
-			)
-			assert.Nil(t, err, "create request")
-			r.Header.Set("Content-Type", rerpc.TypeJSON)
-			r.Header.Set("Content-Encoding", "gzip")
-			r.Header.Set("Accept-Encoding", "gzip")
-
-			response, err := server.Client().Do(r)
-			assert.Nil(t, err, "make request")
-			testHeaders(t, response)
-			assert.Equal(t, response.StatusCode, http.StatusOK, "HTTP status code")
-			assert.Equal(t, response.Header.Get("Content-Encoding"), "gzip", "content-encoding header")
-
-			bodyR, err := gzip.NewReader(response.Body)
-			assert.Nil(t, err, "read body as gzip")
-			assertBodyEquals(t, bodyR, probe)
-		})
-
-		t.Run("fail", func(t *testing.T) {
-			probe := fmt.Sprintf(`{"code":%d}`, rerpc.CodeResourceExhausted)
-			r, err := http.NewRequest(
-				http.MethodPost,
-				fmt.Sprintf("%s/internal.ping.v1test.PingService/Fail", server.URL),
-				strings.NewReader(probe),
-			)
-			assert.Nil(t, err, "create request")
-			r.Header.Set("Content-Type", rerpc.TypeJSON)
-
-			response, err := server.Client().Do(r)
-			assert.Nil(t, err, "make request")
-			testHeaders(t, response)
-			assert.Equal(t, response.StatusCode, http.StatusTooManyRequests, "HTTP status code")
-
-			expected := &twirp.Status{
-				Code:    "resource_exhausted",
-				Message: "oh no",
-			}
-			assertError(t, response, expected)
-		})
-
-		t.Run("bad_route", func(t *testing.T) {
-			r, err := http.NewRequest(
-				http.MethodPost,
-				fmt.Sprintf("%s/internal.ping.v1test.PingService/Foo", server.URL),
-				bytes.NewReader(nil),
-			)
-			assert.Nil(t, err, "create request")
-			r.Header.Set("Content-Type", rerpc.TypeJSON)
-
-			response, err := server.Client().Do(r)
-			assert.Nil(t, err, "make request")
-			testHeaders(t, response)
-			assert.Equal(t, response.StatusCode, http.StatusNotFound, "HTTP status code")
-
-			expected := &twirp.Status{
-				Code:    "bad_route",
-				Message: "no handler for procedure ",
-			}
-			assertError(t, response, expected)
-		})
-	})
-
-	t.Run("protobuf", func(t *testing.T) {
-		newProtobufReader := func(t testing.TB, msg proto.Message) io.Reader {
-			t.Helper()
-			bs, err := proto.Marshal(msg)
-			assert.Nil(t, err, "marshal request")
-			return bytes.NewReader(bs)
-		}
-		unmarshalResponse := func(t testing.TB, r io.Reader) *pingpb.PingResponse {
-			var res pingpb.PingResponse
-			bs, err := io.ReadAll(r)
-			assert.Nil(t, err, "read body")
-			assert.Nil(t, proto.Unmarshal(bs, &res), "unmarshal body")
-			return &res
-		}
-		t.Run("zero", func(t *testing.T) {
-			r, err := http.NewRequest(
-				http.MethodPost,
-				fmt.Sprintf("%s/internal.ping.v1test.PingService/Ping", server.URL),
-				bytes.NewReader(nil),
-			)
-			assert.Nil(t, err, "create request")
-			r.Header.Set("Content-Type", rerpc.TypeProtoTwirp)
-
-			response, err := server.Client().Do(r)
-			assert.Nil(t, err, "make request")
-
-			testHeaders(t, response)
-			assert.Equal(t, response.StatusCode, http.StatusOK, "HTTP status code")
-			assertBodyEquals(t, response.Body, "") // zero value
-		})
-		t.Run("ping", func(t *testing.T) {
-			r, err := http.NewRequest(
-				http.MethodPost,
-				fmt.Sprintf("%s/internal.ping.v1test.PingService/Ping", server.URL),
-				newProtobufReader(t, &pingpb.PingRequest{Number: 42}),
-			)
-			assert.Nil(t, err, "create request")
-			r.Header.Set("Content-Type", rerpc.TypeProtoTwirp)
-
-			response, err := server.Client().Do(r)
-			assert.Nil(t, err, "make request")
-
-			testHeaders(t, response)
-			assert.Equal(t, response.StatusCode, http.StatusOK, "HTTP status code")
-			assert.Equal(t, unmarshalResponse(t, response.Body).Number, int64(42), "response")
-		})
-
-		t.Run("gzip", func(t *testing.T) {
-			probe := newProtobufReader(t, &pingpb.PingRequest{Number: 42})
-			buf := &bytes.Buffer{}
-			gzipW := gzip.NewWriter(buf)
-			io.Copy(gzipW, probe)
-			gzipW.Close()
-
-			r, err := http.NewRequest(
-				http.MethodPost,
-				fmt.Sprintf("%s/internal.ping.v1test.PingService/Ping", server.URL),
-				buf,
-			)
-			assert.Nil(t, err, "create request")
-			r.Header.Set("Content-Type", rerpc.TypeProtoTwirp)
-			r.Header.Set("Content-Encoding", "gzip")
-			r.Header.Set("Accept-Encoding", "gzip")
-
-			response, err := server.Client().Do(r)
-			assert.Nil(t, err, "make request")
-			testHeaders(t, response)
-			assert.Equal(t, response.StatusCode, http.StatusOK, "HTTP status code")
-			assert.Equal(t, response.Header.Get("Content-Encoding"), "gzip", "content-encoding header")
-
-			bodyR, err := gzip.NewReader(response.Body)
-			assert.Nil(t, err, "read body as gzip")
-			assert.Equal(t, unmarshalResponse(t, bodyR).Number, int64(42), "response")
-		})
-
-		t.Run("fail", func(t *testing.T) {
-			probe := newProtobufReader(t, &pingpb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)})
-			r, err := http.NewRequest(
-				http.MethodPost,
-				fmt.Sprintf("%s/internal.ping.v1test.PingService/Fail", server.URL),
-				probe,
-			)
-			assert.Nil(t, err, "create request")
-			r.Header.Set("Content-Type", rerpc.TypeProtoTwirp)
-
-			response, err := server.Client().Do(r)
-			assert.Nil(t, err, "make request")
-			testHeaders(t, response)
-			assert.Equal(t, response.StatusCode, http.StatusTooManyRequests, "HTTP status code")
-
-			expected := &twirp.Status{
-				Code:    "resource_exhausted",
-				Message: "oh no",
-			}
-			assertError(t, response, expected)
-		})
-
-		t.Run("bad_route", func(t *testing.T) {
-			r, err := http.NewRequest(
-				http.MethodPost,
-				fmt.Sprintf("%s/internal.ping.v1test.PingService/Foo", server.URL),
-				bytes.NewReader(nil),
-			)
-			assert.Nil(t, err, "create request")
-			r.Header.Set("Content-Type", rerpc.TypeProtoTwirp)
-
-			response, err := server.Client().Do(r)
-			assert.Nil(t, err, "make request")
-
-			testHeaders(t, response)
-			assert.Equal(t, response.StatusCode, http.StatusNotFound, "HTTP status code")
-
-			expected := &twirp.Status{
-				Code:    "bad_route",
-				Message: "no handler for procedure ",
-			}
-			assertError(t, response, expected)
-		})
-	})
-}
-
 func TestServerProtoGRPC(t *testing.T) {
 	const errMsg = "oh no"
 	reg := rerpc.NewRegistrar()
@@ -375,7 +105,6 @@ func TestServerProtoGRPC(t *testing.T) {
 		pingpb.NewPingServiceHandlerReRPC(pingServer{}, reg),
 		health.NewHandler(health.NewChecker(reg)),
 		reflection.NewHandler(reg),
-		rerpc.NewBadRouteHandler(),
 	)
 
 	testPing := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
@@ -483,19 +212,6 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.Zero(t, rerr.Details(), "error details")
 		})
 	}
-	testBadRoute := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
-		t.Run("bad_route", func(t *testing.T) {
-			req := &pingpb.PingRequest{}
-			res, err := client.Ping(context.Background(), rerpc.NewRequest(req))
-			assert.Nil(t, res, "fail RPC response")
-			assert.NotNil(t, err, "fail RPC error")
-			rerr, ok := rerpc.AsError(err)
-			assert.True(t, ok, "conversion to *rerpc.Error")
-			assert.Equal(t, rerr.Code(), rerpc.CodeNotFound, "error code")
-			assert.Equal(t, rerr.Error(), "NotFound: no handler for procedure ", "error message")
-			assert.Zero(t, rerr.Details(), "error details")
-		})
-	}
 	testHealth := func(t *testing.T, url string, doer rerpc.Doer, opts ...rerpc.ClientOption) {
 		t.Run("health", func(t *testing.T) {
 			const pingFQN = "internal.ping.v1test.PingService"
@@ -554,13 +270,6 @@ func TestServerProtoGRPC(t *testing.T) {
 			testCumSum(t, client, bidi)
 			testErrors(t, client)
 			testHealth(t, server.URL, server.Client())
-
-			badRouteClient := pingpb.NewPingServiceClientReRPC(
-				server.URL,
-				server.Client(),
-				rerpc.OverrideProtobufPackage("test.badroute"),
-			)
-			testBadRoute(t, badRouteClient)
 		})
 		t.Run("gzip", func(t *testing.T) {
 			client := pingpb.NewPingServiceClientReRPC(
@@ -574,13 +283,6 @@ func TestServerProtoGRPC(t *testing.T) {
 			testCumSum(t, client, bidi)
 			testErrors(t, client)
 			testHealth(t, server.URL, server.Client(), rerpc.Gzip(true))
-
-			badRouteClient := pingpb.NewPingServiceClientReRPC(
-				server.URL,
-				server.Client(),
-				rerpc.OverrideProtobufPackage("test.badroute"),
-			)
-			testBadRoute(t, badRouteClient)
 		})
 	}
 
