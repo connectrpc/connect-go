@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+// This package is for internal use by reRPC, and provides no
+// backward compatibility guarantees whatsoever.
+package grpc.status.v1;
+
+import "google/protobuf/any.proto";
+
+option go_package = "github.com/rerpc/rerpc/internal/status/v1;statuspb";
+
+// See https://cloud.google.com/apis/design/errors.
+//
+// This struct must remain binary-compatible with
+// https://github.com/googleapis/googleapis/blob/master/google/rpc/status.proto.
+message Status {
+  int32 code = 1; // a google.rpc.Code
+  string message = 2; // developer-facing, English (localize in details or client-side)
+  repeated google.protobuf.Any details = 3;
+}

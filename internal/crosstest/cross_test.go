@@ -33,7 +33,8 @@ import (
 	"github.com/rerpc/rerpc"
 	"github.com/rerpc/rerpc/handlerstream"
 	"github.com/rerpc/rerpc/internal/assert"
-	crosspb "github.com/rerpc/rerpc/internal/crosstest/v1test"
+	crossrpc "github.com/rerpc/rerpc/internal/crosstest/gen/proto/go-rerpc/cross/v1test"
+	crosspb "github.com/rerpc/rerpc/internal/crosstest/gen/proto/go/cross/v1test"
 	"github.com/rerpc/rerpc/reflection"
 )
 
@@ -52,7 +53,7 @@ func newClientH2C() *http.Client {
 }
 
 type crossServerReRPC struct {
-	crosspb.UnimplementedCrossServiceReRPC
+	crossrpc.UnimplementedCrossServiceServer
 }
 
 func (c crossServerReRPC) Ping(ctx context.Context, req *rerpc.Request[crosspb.PingRequest]) (*rerpc.Response[crosspb.PingResponse], error) {
@@ -220,18 +221,18 @@ func assertErrorReRPC(t testing.TB, err error, msg string) *rerpc.Error {
 	return rerr
 }
 
-func testWithReRPCClient(t *testing.T, client crosspb.CrossServiceClientReRPC) {
+func testWithReRPCClient(t *testing.T, client *crossrpc.CrossServiceClient) {
 	t.Run("ping", func(t *testing.T) {
 		num := rand.Int63()
 		req := &crosspb.PingRequest{Number: num}
 		expect := &crosspb.PingResponse{Number: num}
-		res, err := client.Ping(context.Background(), rerpc.NewRequest(req))
+		res, err := client.Ping(context.Background(), req)
 		assert.Nil(t, err, "ping error")
-		assert.Equal(t, res.Msg, expect, "ping response")
+		assert.Equal(t, res, expect, "ping response")
 	})
 	t.Run("errors", func(t *testing.T) {
 		req := &crosspb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)}
-		res, err := client.Fail(context.Background(), rerpc.NewRequest(req))
+		res, err := client.Fail(context.Background(), req)
 		assert.Nil(t, res, "fail RPC response")
 		rerr := assertErrorReRPC(t, err, "fail RPC error")
 		assert.Equal(t, rerr.Code(), rerpc.CodeResourceExhausted, "error code")
@@ -239,10 +240,9 @@ func testWithReRPCClient(t *testing.T, client crosspb.CrossServiceClientReRPC) {
 		assert.Zero(t, rerr.Details(), "error details")
 	})
 	t.Run("cancel", func(t *testing.T) {
-		req := &crosspb.PingRequest{}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		cancel()
-		_, err := client.Ping(ctx, rerpc.NewRequest(req))
+		_, err := client.Ping(ctx, &crosspb.PingRequest{})
 		rerr := assertErrorReRPC(t, err, "error after canceling context")
 		assert.Equal(t, rerr.Code(), rerpc.CodeCanceled, "error code")
 		assert.Equal(t, rerr.Error(), "Canceled: context canceled", "error message")
@@ -251,7 +251,7 @@ func testWithReRPCClient(t *testing.T, client crosspb.CrossServiceClientReRPC) {
 		req := &crosspb.PingRequest{Sleep: durationpb.New(time.Second)}
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		_, err := client.Ping(ctx, rerpc.NewRequest(req))
+		_, err := client.Ping(ctx, req)
 		rerr := assertErrorReRPC(t, err, "deadline exceeded error")
 		assert.Equal(t, rerr.Code(), rerpc.CodeDeadlineExceeded, "error code")
 		assert.ErrorIs(t, rerr, context.DeadlineExceeded, "error unwraps to context.DeadlineExceeded")
@@ -277,7 +277,7 @@ func testWithReRPCClient(t *testing.T, client crosspb.CrossServiceClientReRPC) {
 		}
 		stream, err := client.CountUp(
 			context.Background(),
-			rerpc.NewRequest(&crosspb.CountUpRequest{Number: n}),
+			&crosspb.CountUpRequest{Number: n},
 		)
 		assert.Nil(t, err, "send error")
 		for {
@@ -433,7 +433,7 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrossServiceClient, opts ..
 func TestReRPCServer(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	mux := rerpc.NewServeMux(
-		crosspb.NewCrossServiceHandlerReRPC(crossServerReRPC{}, reg),
+		crossrpc.NewFullCrossServiceHandler(crossServerReRPC{}, reg),
 		reflection.NewHandler(reg),
 	)
 	server := httptest.NewUnstartedServer(mux)
@@ -443,11 +443,11 @@ func TestReRPCServer(t *testing.T) {
 
 	t.Run("rerpc_client", func(t *testing.T) {
 		t.Run("gzip", func(t *testing.T) {
-			client := crosspb.NewCrossServiceClientReRPC(server.URL, server.Client(), rerpc.Gzip(true))
+			client := crossrpc.NewCrossServiceClient(server.URL, server.Client(), rerpc.Gzip(true))
 			testWithReRPCClient(t, client)
 		})
 		t.Run("identity", func(t *testing.T) {
-			client := crosspb.NewCrossServiceClientReRPC(server.URL, server.Client())
+			client := crossrpc.NewCrossServiceClient(server.URL, server.Client())
 			testWithReRPCClient(t, client)
 		})
 	})
@@ -489,7 +489,7 @@ func TestReRPCServer(t *testing.T) {
 				context.Background(),
 				source,
 				gconn,
-				"internal.crosstest.v1test.CrossService.Ping",
+				"cross.v1test.CrossService.Ping",
 				nil, // headers
 				eventHandler,
 				msg, // request data
@@ -502,18 +502,18 @@ func TestReRPCServer(t *testing.T) {
 }
 
 func TestReRPCServerH2C(t *testing.T) {
-	mux := rerpc.NewServeMux(crosspb.NewCrossServiceHandlerReRPC(crossServerReRPC{}))
+	mux := rerpc.NewServeMux(crossrpc.NewFullCrossServiceHandler(crossServerReRPC{}))
 	server := httptest.NewServer(h2c.NewHandler(mux, &http2.Server{}))
 	defer server.Close()
 
 	t.Run("rerpc_client", func(t *testing.T) {
 		hclient := newClientH2C()
 		t.Run("identity", func(t *testing.T) {
-			client := crosspb.NewCrossServiceClientReRPC(server.URL, hclient)
+			client := crossrpc.NewCrossServiceClient(server.URL, hclient)
 			testWithReRPCClient(t, client)
 		})
 		t.Run("gzip", func(t *testing.T) {
-			client := crosspb.NewCrossServiceClientReRPC(server.URL, hclient, rerpc.Gzip(true))
+			client := crossrpc.NewCrossServiceClient(server.URL, hclient, rerpc.Gzip(true))
 			testWithReRPCClient(t, client)
 		})
 	})
@@ -550,12 +550,13 @@ func TestGRPCServer(t *testing.T) {
 
 	t.Run("rerpc_client", func(t *testing.T) {
 		hclient := newClientH2C()
+		url := "http://" + lis.Addr().String()
 		t.Run("identity", func(t *testing.T) {
-			client := crosspb.NewCrossServiceClientReRPC("http://"+lis.Addr().String(), hclient)
+			client := crossrpc.NewCrossServiceClient(url, hclient)
 			testWithReRPCClient(t, client)
 		})
 		t.Run("gzip", func(t *testing.T) {
-			client := crosspb.NewCrossServiceClientReRPC("http://"+lis.Addr().String(), hclient, rerpc.Gzip(true))
+			client := crossrpc.NewCrossServiceClient(url, hclient, rerpc.Gzip(true))
 			testWithReRPCClient(t, client)
 		})
 	})

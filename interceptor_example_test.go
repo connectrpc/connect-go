@@ -6,7 +6,8 @@ import (
 	"net/http"
 
 	"github.com/rerpc/rerpc"
-	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
+	pingrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/rerpc/ping/v1test"
+	pingpb "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
 )
 
 func ExampleCallMetadata() {
@@ -19,15 +20,15 @@ func ExampleCallMetadata() {
 	// This interceptor prevents the client from making network requests in
 	// examples. Leave it out in real code!
 	short := ShortCircuit(rerpc.Errorf(rerpc.CodeUnimplemented, "no networking in examples"))
-	client := pingpb.NewPingServiceClientReRPC(
+	client := pingrpc.NewPingServiceClient(
 		"https://invalid-test-url",
 		http.DefaultClient,
 		rerpc.Intercept(rerpc.NewChain(logger, short)),
 	)
-	client.Ping(context.Background(), rerpc.NewRequest(&pingpb.PingRequest{}))
+	client.Ping(context.Background(), &pingpb.PingRequest{})
 
 	// Output:
-	// calling internal.ping.v1test.PingService/Ping
+	// calling rerpc.ping.v1test.PingService/Ping
 }
 
 func ExampleChain() {
@@ -50,12 +51,12 @@ func ExampleChain() {
 	// This interceptor prevents the client from making network requests in
 	// examples. Leave it out in real code!
 	short := ShortCircuit(rerpc.Errorf(rerpc.CodeUnimplemented, "no networking in examples"))
-	client := pingpb.NewPingServiceClientReRPC(
+	client := pingrpc.NewPingServiceClient(
 		"https://invalid-test-url",
 		http.DefaultClient,
 		rerpc.Intercept(rerpc.NewChain(outer, inner, short)),
 	)
-	client.Ping(context.Background(), rerpc.NewRequest(&pingpb.PingRequest{}))
+	client.Ping(context.Background(), &pingpb.PingRequest{})
 
 	// Output:
 	// outer interceptor: before call

@@ -14,26 +14,26 @@ import (
 	"github.com/rerpc/rerpc/handlerstream"
 	"github.com/rerpc/rerpc/health"
 	"github.com/rerpc/rerpc/internal/assert"
-	healthpb "github.com/rerpc/rerpc/internal/health/v1"
-	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
+	pingrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/rerpc/ping/v1test"
+	pingpb "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
 	"github.com/rerpc/rerpc/reflection"
 )
 
 const errMsg = "oh no"
 
 type pingServer struct {
-	pingpb.UnimplementedPingServiceReRPC
+	pingrpc.UnimplementedPingServiceServer
 }
 
-func (p pingServer) Ping(ctx context.Context, req *rerpc.Request[pingpb.PingRequest]) (*rerpc.Response[pingpb.PingResponse], error) {
-	return rerpc.NewResponse(&pingpb.PingResponse{
-		Number: req.Msg.Number,
-		Msg:    req.Msg.Msg,
-	}), nil
+func (p pingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingpb.PingResponse, error) {
+	return &pingpb.PingResponse{
+		Number: req.Number,
+		Msg:    req.Msg,
+	}, nil
 }
 
-func (p pingServer) Fail(ctx context.Context, req *rerpc.Request[pingpb.FailRequest]) (*rerpc.Response[pingpb.FailResponse], error) {
-	return nil, rerpc.Errorf(rerpc.Code(req.Msg.Code), errMsg)
+func (p pingServer) Fail(ctx context.Context, req *pingpb.FailRequest) (*pingpb.FailResponse, error) {
+	return nil, rerpc.Errorf(rerpc.Code(req.Code), errMsg)
 }
 
 func (p pingServer) Sum(
@@ -59,13 +59,13 @@ func (p pingServer) Sum(
 
 func (p pingServer) CountUp(
 	ctx context.Context,
-	req *rerpc.Request[pingpb.CountUpRequest],
+	req *pingpb.CountUpRequest,
 	stream *handlerstream.Server[pingpb.CountUpResponse],
 ) error {
-	if req.Msg.Number <= 0 {
-		return rerpc.Errorf(rerpc.CodeInvalidArgument, "number must be positive: got %v", req.Msg.Number)
+	if req.Number <= 0 {
+		return rerpc.Errorf(rerpc.CodeInvalidArgument, "number must be positive: got %v", req.Number)
 	}
-	for i := int64(1); i <= req.Msg.Number; i++ {
+	for i := int64(1); i <= req.Number; i++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -101,23 +101,25 @@ func (p pingServer) CumSum(
 func TestServerProtoGRPC(t *testing.T) {
 	const errMsg = "oh no"
 	reg := rerpc.NewRegistrar()
+	pingHandlers, err := pingrpc.NewPingServiceHandler(pingServer{}, reg)
+	assert.Nil(t, err, "build ping handlers")
 	mux := rerpc.NewServeMux(
-		pingpb.NewPingServiceHandlerReRPC(pingServer{}, reg),
+		pingHandlers,
 		health.NewHandler(health.NewChecker(reg)),
 		reflection.NewHandler(reg),
 	)
 
-	testPing := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
+	testPing := func(t *testing.T, client pingrpc.SimplePingServiceClient) {
 		t.Run("ping", func(t *testing.T) {
 			num := rand.Int63()
-			req := &pingpb.PingRequest{Number: num}
-			expect := &pingpb.PingResponse{Number: num}
-			res, err := client.Ping(context.Background(), rerpc.NewRequest(req))
+			req := pingpb.PingRequest{Number: num}
+			expect := pingpb.PingResponse{Number: num}
+			res, err := client.Ping(context.Background(), &req)
 			assert.Nil(t, err, "ping error")
-			assert.Equal(t, res.Msg, expect, "ping response")
+			assert.Equal(t, *res, expect, "ping response")
 		})
 	}
-	testSum := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
+	testSum := func(t *testing.T, client pingrpc.SimplePingServiceClient) {
 		t.Run("sum", func(t *testing.T) {
 			const upTo = 10
 			const expect = 55 // 1+10 + 2+9 + ... + 5+6 = 55
@@ -131,7 +133,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.Equal(t, res, &pingpb.SumResponse{Sum: expect}, "response")
 		})
 	}
-	testCountUp := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
+	testCountUp := func(t *testing.T, client pingrpc.SimplePingServiceClient) {
 		t.Run("count_up", func(t *testing.T) {
 			const n = 5
 			got := make([]int64, 0, n)
@@ -141,7 +143,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			}
 			stream, err := client.CountUp(
 				context.Background(),
-				rerpc.NewRequest(&pingpb.CountUpRequest{Number: n}),
+				&pingpb.CountUpRequest{Number: n},
 			)
 			assert.Nil(t, err, "send error")
 			for {
@@ -157,7 +159,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.Equal(t, got, expect, "responses")
 		})
 	}
-	testCumSum := func(t *testing.T, client pingpb.PingServiceClientReRPC, expectSuccess bool) {
+	testCumSum := func(t *testing.T, client pingrpc.SimplePingServiceClient, expectSuccess bool) {
 		t.Run("cumsum", func(t *testing.T) {
 			send := []int64{3, 5, 1}
 			expect := []int64{3, 8, 9}
@@ -199,10 +201,10 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.Equal(t, got, expect, "sums")
 		})
 	}
-	testErrors := func(t *testing.T, client pingpb.PingServiceClientReRPC) {
+	testErrors := func(t *testing.T, client pingrpc.SimplePingServiceClient) {
 		t.Run("errors", func(t *testing.T) {
-			req := &pingpb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)}
-			res, err := client.Fail(context.Background(), rerpc.NewRequest(req))
+			req := pingpb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)}
+			res, err := client.Fail(context.Background(), &req)
 			assert.Nil(t, res, "fail RPC response")
 			assert.NotNil(t, err, "fail RPC error")
 			rerr, ok := rerpc.AsError(err)
@@ -212,67 +214,17 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.Zero(t, rerr.Details(), "error details")
 		})
 	}
-	testHealth := func(t *testing.T, url string, doer rerpc.Doer, opts ...rerpc.ClientOption) {
-		t.Run("health", func(t *testing.T) {
-			const pingFQN = "internal.ping.v1test.PingService"
-			const unknown = "foobar"
-			assert.True(t, reg.IsRegistered(pingFQN), "ping service registered")
-			assert.False(t, reg.IsRegistered(unknown), "unknown service registered")
-			client := health.NewClient(url, doer, opts...)
-
-			t.Run("process", func(t *testing.T) {
-				res, err := client.Check(context.Background(), &health.CheckRequest{})
-				assert.Nil(t, err, "rpc error")
-				assert.Equal(t, res.Status, health.StatusServing, "status")
-			})
-			t.Run("known", func(t *testing.T) {
-				res, err := client.Check(context.Background(), &health.CheckRequest{Service: pingFQN})
-				assert.Nil(t, err, "rpc error")
-				assert.Equal(t, health.Status(res.Status), health.StatusServing, "status")
-			})
-			t.Run("unknown", func(t *testing.T) {
-				_, err := client.Check(context.Background(), &health.CheckRequest{Service: unknown})
-				assert.NotNil(t, err, "rpc error")
-				rerr, ok := rerpc.AsError(err)
-				assert.True(t, ok, "convert to rerpc error")
-				assert.Equal(t, rerr.Code(), rerpc.CodeNotFound, "error code")
-			})
-			t.Run("watch", func(t *testing.T) {
-				options := append(opts, rerpc.OverrideProtobufPackage("grpc.health.v1"))
-				client := healthpb.NewHealthClientReRPC(url, doer, options...)
-				stream, err := client.Watch(
-					context.Background(),
-					rerpc.NewRequest(&healthpb.HealthCheckRequest{Service: pingFQN}),
-				)
-				assert.Nil(t, err, "rpc error")
-				defer stream.Close()
-				_, err = stream.Receive()
-				assert.NotNil(t, err, "receive err")
-				rerr, ok := rerpc.AsError(err)
-				assert.True(t, ok, "convert to rerpc error")
-				switch rerr.Code() {
-				case rerpc.CodeUnimplemented:
-					// Expected if we're using HTTP/2.
-				case rerpc.CodeUnknown:
-					assert.Equal(t, rerr.Error(), "Unknown: HTTP status 505 HTTP Version Not Supported", "error message for CodeUnknown")
-				default:
-					t.Fatalf("expected CodeUnknown or CodeUnimplemented, got %v", rerr)
-				}
-			})
-		})
-	}
 	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) {
 		t.Run("identity", func(t *testing.T) {
-			client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client())
+			client := pingrpc.NewPingServiceClient(server.URL, server.Client())
 			testPing(t, client)
 			testSum(t, client)
 			testCountUp(t, client)
 			testCumSum(t, client, bidi)
 			testErrors(t, client)
-			testHealth(t, server.URL, server.Client())
 		})
 		t.Run("gzip", func(t *testing.T) {
-			client := pingpb.NewPingServiceClientReRPC(
+			client := pingrpc.NewPingServiceClient(
 				server.URL,
 				server.Client(),
 				rerpc.Gzip(true),
@@ -282,7 +234,6 @@ func TestServerProtoGRPC(t *testing.T) {
 			testCountUp(t, client)
 			testCumSum(t, client, bidi)
 			testErrors(t, client)
-			testHealth(t, server.URL, server.Client(), rerpc.Gzip(true))
 		})
 	}
 
@@ -301,7 +252,7 @@ func TestServerProtoGRPC(t *testing.T) {
 }
 
 type pluggablePingServer struct {
-	pingpb.UnimplementedPingServiceReRPC
+	pingrpc.UnimplementedPingServiceServer
 
 	ping func(context.Context, *rerpc.Request[pingpb.PingRequest]) (*rerpc.Response[pingpb.PingResponse], error)
 }
@@ -322,13 +273,13 @@ func TestHeaderBasic(t *testing.T) {
 			return res, nil
 		},
 	}
-	mux := rerpc.NewServeMux(pingpb.NewPingServiceHandlerReRPC(srv))
+	mux := rerpc.NewServeMux(pingrpc.NewFullPingServiceHandler(srv))
 	server := httptest.NewServer(mux)
 	defer server.Close()
-	client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client())
+	client := pingrpc.NewPingServiceClient(server.URL, server.Client())
 	req := rerpc.NewRequest(&pingpb.PingRequest{})
 	req.Header().Set(key, cval)
-	res, err := client.Ping(context.Background(), req)
+	res, err := client.Full().Ping(context.Background(), req)
 	assert.Nil(t, err, "error making request")
 	assert.Equal(t, res.Header().Get(key), hval, "expected client to receive headers")
 }
@@ -362,6 +313,9 @@ func (i *headerIntegrationInterceptor) Wrap(next rerpc.Func) rerpc.Func {
 		}
 
 		res, err := next(ctx, req)
+		if err != nil {
+			return nil, err
+		}
 
 		if spec.IsClient {
 			// Server should have sent this response header.
@@ -379,7 +333,7 @@ func (i *headerIntegrationInterceptor) Wrap(next rerpc.Func) rerpc.Func {
 			)
 		}
 
-		return res, err
+		return res, nil
 	})
 }
 
@@ -394,15 +348,15 @@ func TestHeaderIntegration(t *testing.T) {
 		key:   key,
 		value: value,
 	})
-	mux := rerpc.NewServeMux(
-		pingpb.NewPingServiceHandlerReRPC(pingServer{}, intercept),
-	)
+	handlers, err := pingrpc.NewPingServiceHandler(pingServer{}, intercept)
+	assert.Nil(t, err, "error building handlers")
+	mux := rerpc.NewServeMux(handlers)
 	server := httptest.NewServer(mux)
 	defer server.Close()
-	client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client(), intercept)
+	client := pingrpc.NewPingServiceClient(server.URL, server.Client(), intercept)
 
 	req := rerpc.NewRequest(&pingpb.PingRequest{})
-	res, err := client.Ping(context.Background(), req)
+	res, err := client.Full().Ping(context.Background(), req)
 	assert.Nil(t, err, "call error")
 	assert.Equal(t, res.Msg, &pingpb.PingResponse{}, "call response")
 	assert.NotZero(t, req.Header().Get("User-Agent"), "user-agent is missing")

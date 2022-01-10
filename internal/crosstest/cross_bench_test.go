@@ -18,24 +18,24 @@ import (
 
 	"github.com/rerpc/rerpc"
 	"github.com/rerpc/rerpc/internal/assert"
-	crosspb "github.com/rerpc/rerpc/internal/crosstest/v1test"
+	crossrpc "github.com/rerpc/rerpc/internal/crosstest/gen/proto/go-rerpc/cross/v1test"
+	crosspb "github.com/rerpc/rerpc/internal/crosstest/gen/proto/go/cross/v1test"
 )
 
 func BenchmarkReRPC(b *testing.B) {
-	mux := rerpc.NewServeMux(crosspb.NewCrossServiceHandlerReRPC(crossServerReRPC{}))
+	mux := rerpc.NewServeMux(crossrpc.NewFullCrossServiceHandler(crossServerReRPC{}))
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
 	defer server.Close()
 
-	client := crosspb.NewCrossServiceClientReRPC(server.URL, server.Client(), rerpc.Gzip(true))
+	client := crossrpc.NewCrossServiceClient(server.URL, server.Client(), rerpc.Gzip(true))
 	b.ResetTimer()
 
 	b.Run("unary", func(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				req := rerpc.NewRequest(&crosspb.PingRequest{Number: 42})
-				_, _ = client.Ping(context.Background(), req)
+				_, _ = client.Ping(context.Background(), &crosspb.PingRequest{Number: 42})
 			}
 		})
 	})
