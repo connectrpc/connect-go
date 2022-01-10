@@ -10,19 +10,22 @@ import (
 
 	"github.com/rerpc/rerpc"
 	"github.com/rerpc/rerpc/internal/assert"
-	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
+	pingrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/rerpc/ping/v1test"
+	pingpb "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
 )
 
 func TestHandlerReadMaxBytes(t *testing.T) {
 	const readMaxBytes = 32
-	ping := rerpc.NewServeMux(pingpb.NewPingServiceHandlerReRPC(
+	handlers, err := pingrpc.NewPingServiceHandler(
 		&ExamplePingServer{},
 		rerpc.ReadMaxBytes(readMaxBytes),
-	))
+	)
+	assert.Nil(t, err, "build ping handlers")
+	ping := rerpc.NewServeMux(handlers)
 
 	server := httptest.NewServer(ping)
 	defer server.Close()
-	client := pingpb.NewPingServiceClientReRPC(server.URL, server.Client())
+	client := pingrpc.NewPingServiceClient(server.URL, server.Client())
 
 	padding := "padding                      "
 	req := &pingpb.PingRequest{Number: 42, Msg: padding}
@@ -31,7 +34,7 @@ func TestHandlerReadMaxBytes(t *testing.T) {
 	assert.Nil(t, err, "marshal request")
 	assert.Equal(t, len(probeBytes), readMaxBytes+1, "probe size")
 
-	_, err = client.Ping(context.Background(), rerpc.NewRequest(req))
+	_, err = client.Ping(context.Background(), req)
 
 	assert.NotNil(t, err, "ping error")
 	assert.Equal(t, rerpc.CodeOf(err), rerpc.CodeInvalidArgument, "error code")

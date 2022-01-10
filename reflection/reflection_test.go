@@ -9,19 +9,20 @@ import (
 	"github.com/rerpc/rerpc"
 	"github.com/rerpc/rerpc/health"
 	"github.com/rerpc/rerpc/internal/assert"
-	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
-	reflectionpb "github.com/rerpc/rerpc/internal/reflection/v1alpha1"
+	pingrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/rerpc/ping/v1test"
+	reflectionpb "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/reflection/v1alpha"
+	pingpb "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
 	"github.com/rerpc/rerpc/reflection"
 )
 
 type pingServer struct {
-	pingpb.UnimplementedPingServiceReRPC
+	pingrpc.UnimplementedPingServiceServer
 }
 
 func TestReflection(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	mux := rerpc.NewServeMux(
-		pingpb.NewPingServiceHandlerReRPC(pingServer{}, reg),
+		pingrpc.NewFullPingServiceHandler(pingServer{}, reg),
 		health.NewHandler(health.NewChecker(reg)),
 		reflection.NewHandler(reg),
 	)
@@ -33,7 +34,7 @@ func TestReflection(t *testing.T) {
 
 	pingRequestFQN := string((&pingpb.PingRequest{}).ProtoReflect().Descriptor().FullName())
 	assert.Equal(t, reg.Services(), []string{
-		"internal.ping.v1test.PingService",
+		"rerpc.ping.v1test.PingService",
 	}, "services registered in memory")
 
 	// TODO: Build this simplification into base package.
@@ -68,7 +69,7 @@ func TestReflection(t *testing.T) {
 			MessageResponse: &reflectionpb.ServerReflectionResponse_ListServicesResponse{
 				ListServicesResponse: &reflectionpb.ListServiceResponse{
 					Service: []*reflectionpb.ServiceResponse{
-						{Name: "internal.ping.v1test.PingService"},
+						{Name: "rerpc.ping.v1test.PingService"},
 					},
 				},
 			},
@@ -79,7 +80,7 @@ func TestReflection(t *testing.T) {
 		req := &reflectionpb.ServerReflectionRequest{
 			Host: "some-host",
 			MessageRequest: &reflectionpb.ServerReflectionRequest_FileByFilename{
-				FileByFilename: "internal/ping/v1test/ping.proto",
+				FileByFilename: "rerpc/ping/v1test/ping.proto",
 			},
 		}
 		res, err := call(req)

@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"github.com/rerpc/rerpc"
-	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
+	pingrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/rerpc/ping/v1test"
+	pingpb "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
 )
 
 func ExampleClient() {
@@ -41,11 +42,8 @@ func ExampleClient() {
 	// Leave it out in real code!
 	short := ShortCircuit(rerpc.Errorf(rerpc.CodeUnimplemented, "no networking in examples"))
 
-	client := pingpb.NewPingServiceClientReRPC("http://invalid-test-url", doer, rerpc.Intercept(short))
-	res, err := client.Ping(
-		context.Background(),
-		rerpc.NewRequest(&pingpb.PingRequest{}),
-	)
+	client := pingrpc.NewPingServiceClient("http://invalid-test-url", doer, rerpc.Intercept(short))
+	res, err := client.Ping(context.Background(), &pingpb.PingRequest{})
 	fmt.Println("Response:", res)
 	fmt.Println("Error:", err)
 

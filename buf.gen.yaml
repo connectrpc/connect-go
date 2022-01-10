@@ -1,14 +1,16 @@
 version: v1
+managed:
+  enabled: true
+  go_package_prefix:
+    default: github.com/rerpc/rerpc/internal/gen/proto/go
 plugins:
   - name: go
-    out: .
+    out: internal/gen/proto/go
     opt: paths=source_relative
     path: ./bin/protoc-gen-go
-  - name: go-grpc
-    out: .
-    opt: paths=source_relative
-    path: ./bin/protoc-gen-go-grpc
   - name: go-rerpc
-    out: .
-    opt: paths=source_relative
+    out: internal/gen/proto/go-rerpc
+    opt:
+      - paths=source_relative
+      - external_go_types=true
     path: ./bin/protoc-gen-go-rerpc
