@@ -19,6 +19,7 @@ help: ## Describe useful make targets
 clean: ## Delete build output
 	rm -f bin/{buf,gofmt,goimports,staticcheck,protoc-gen-*}
 	rm -f .faux.pb
+	rm -rf internal/gen/proto internal/crosstest/gen/proto
 	touch $(PROTOBUFS)
 
 .PHONY: test
@@ -49,11 +50,10 @@ lintfix: bin/gofmt bin/goimports ## Automatically fix some lint errors
 	@./bin/goimports -local github.com/rerpc/rerpc -w $(HANDWRITTEN)
 
 .PHONY: lintpb
-lintpb: bin/buf buf.yaml $(PROTOBUFS)
+lintpb: bin/buf proto/buf.yaml internal/crosstest/proto/buf.yaml $(PROTOBUFS)
 	@echo "Checking with buf lint..."
 	@./bin/buf lint
-	@echo "Checking with buf breaking..."
-	@./bin/buf breaking --against image_v1.bin
+	@cd internal/crosstest && ../../bin/buf lint
 
 .PHONY: cover
 cover: cover.out ## Browse coverage for the main package
@@ -65,17 +65,10 @@ cover.out: gen $(HANDWRITTEN)
 .PHONY: gen
 gen: .faux.pb ## Regenerate code
 
-.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go bin/protoc-gen-go-grpc bin/protoc-gen-go-rerpc buf.gen.yaml
+.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go bin/protoc-gen-go-grpc bin/protoc-gen-go-rerpc buf.work.yaml buf.gen.yaml proto/buf.yaml internal/crosstest/buf.work.yaml internal/crosstest/buf.gen.yaml internal/crosstest/proto/buf.yaml
 	./bin/buf generate
-	rm internal/ping/v1test/ping_grpc.pb.go
-	rm internal/health/v1/health_grpc.pb.go
-	rm internal/reflection/v1alpha1/reflection_grpc.pb.go
+	cd internal/crosstest && ../../bin/buf generate
 	touch $(@)
-
-# Don't make this depend on $(PROTOBUFS), since we don't want to keep
-# regenerating it.
-image_v1.bin: bin/buf
-	./bin/buf build -o $(@)
 
 bin/protoc-gen-go: internal/crosstest/go.mod
 	cd internal/crosstest && GOBIN=$(PWD)/bin $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go

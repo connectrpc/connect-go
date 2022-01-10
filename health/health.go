@@ -6,7 +6,8 @@ import (
 
 	"github.com/rerpc/rerpc"
 	"github.com/rerpc/rerpc/handlerstream"
-	healthpb "github.com/rerpc/rerpc/internal/health/v1"
+	healthrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/grpc/health/v1"
+	healthpb "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/health/v1"
 )
 
 // Status describes the health of a service.
@@ -50,7 +51,8 @@ func NewChecker(reg Registrar) func(context.Context, string) (Status, error) {
 }
 
 type server struct {
-	healthpb.UnimplementedHealthReRPC
+	healthrpc.UnimplementedHealthServer
+
 	check func(context.Context, string) (Status, error)
 }
 
@@ -93,8 +95,8 @@ func (s *server) Watch(
 func NewHandler(
 	checker func(context.Context, string) (Status, error),
 	opts ...rerpc.HandlerOption,
-) []*rerpc.Handler {
-	return healthpb.NewHealthHandlerReRPC(
+) []rerpc.Handler {
+	return healthrpc.NewFullHealthHandler(
 		&server{check: checker},
 		append(opts, rerpc.OverrideProtobufPackage("grpc.health.v1"))...,
 	)
@@ -113,12 +115,12 @@ type CheckResponse struct {
 
 // A Client for any gRPC-compatible health service.
 type Client struct {
-	health healthpb.HealthClientReRPC
+	health *healthrpc.HealthClient
 }
 
 // NewClient constructs a Client.
 func NewClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) *Client {
-	return &Client{healthpb.NewHealthClientReRPC(
+	return &Client{healthrpc.NewHealthClient(
 		baseURL,
 		doer,
 		append(opts, rerpc.OverrideProtobufPackage("grpc.health.v1"))...,
@@ -127,12 +129,9 @@ func NewClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) *Cli
 
 // Check the health of a service.
 func (c *Client) Check(ctx context.Context, req *CheckRequest) (*CheckResponse, error) {
-	res, err := c.health.Check(
-		ctx,
-		rerpc.NewRequest(&healthpb.HealthCheckRequest{Service: req.Service}),
-	)
+	res, err := c.health.Check(ctx, &healthpb.HealthCheckRequest{Service: req.Service})
 	if err != nil {
 		return nil, err
 	}
-	return &CheckResponse{Status: Status(res.Msg.Status)}, nil
+	return &CheckResponse{Status: Status(res.Status)}, nil
 }

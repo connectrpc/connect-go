@@ -17,7 +17,8 @@ import (
 
 	"github.com/rerpc/rerpc"
 	"github.com/rerpc/rerpc/handlerstream"
-	rpb "github.com/rerpc/rerpc/internal/reflection/v1alpha1"
+	reflectionrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/grpc/reflection/v1alpha"
+	rpb "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/reflection/v1alpha"
 )
 
 // Registrar lists all registered protobuf services. The returned names must be
@@ -42,14 +43,14 @@ type Registrar interface {
 // https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md,
 // https://github.com/grpc/grpc/blob/master/doc/server-reflection.md, and
 // https://github.com/fullstorydev/grpcurl.
-func NewHandler(reg Registrar, opts ...rerpc.HandlerOption) []*rerpc.Handler {
+func NewHandler(reg Registrar, opts ...rerpc.HandlerOption) []rerpc.Handler {
 	const pkg = "grpc.reflection.v1alpha"
 	opts = append(opts, rerpc.OverrideProtobufPackage(pkg))
-	return rpb.NewServerReflectionHandlerReRPC(&server{reg: reg}, opts...)
+	return reflectionrpc.NewFullServerReflectionHandler(&server{reg: reg}, opts...)
 }
 
 type server struct {
-	rpb.UnimplementedServerReflectionReRPC
+	reflectionrpc.UnimplementedServerReflectionServer
 
 	reg Registrar
 }

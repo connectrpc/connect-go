@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package rerpc.ping.v1test;
+
+message PingRequest {
+    int64 number = 1;
+    string msg = 2;
+}
+
+message PingResponse {
+    int64 number = 1;
+    string msg = 2;
+}
+
+message FailRequest {
+    int32 code = 1;
+}
+
+message FailResponse {
+}
+
+message SumRequest {
+    int64 number = 1;
+}
+
+message SumResponse {
+    int64 sum = 1;
+}
+
+message CountUpRequest {
+    int64 number = 1;
+}
+
+message CountUpResponse {
+    int64 number = 1;
+}
+
+message CumSumRequest {
+    int64 number = 1;
+}
+
+message CumSumResponse {
+    int64 sum = 1;
+}
+
+service PingService {
+    rpc Ping(PingRequest) returns (PingResponse) {}
+    rpc Fail(FailRequest) returns (FailResponse) {}
+    rpc Sum(stream SumRequest) returns (SumResponse) {}
+    rpc CountUp(CountUpRequest) returns (stream CountUpResponse) {}
+    rpc CumSum(stream CumSumRequest) returns (stream CumSumResponse) {}
+}

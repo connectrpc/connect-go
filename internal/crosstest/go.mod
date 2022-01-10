@@ -8,7 +8,6 @@ require (
 	github.com/golang/protobuf v1.5.2
 	github.com/jhump/protoreflect v1.9.0
 	github.com/rerpc/rerpc v0.0.0-20210731172712-57d99a145c97
-	github.com/twitchtv/twirp v8.1.0+incompatible
 	golang.org/x/net v0.0.0-20210726213435-c6fcb2dbf985
 	google.golang.org/grpc v1.41.0-dev
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0
@@ -25,10 +24,10 @@ require (
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/klauspost/compress v1.13.1 // indirect
 	github.com/klauspost/pgzip v1.2.5 // indirect
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pkg/profile v1.6.0 // indirect
 	github.com/spf13/cobra v1.2.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/twitchtv/twirp v8.1.0+incompatible // indirect
 	go.opencensus.io v0.23.0 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.7.0 // indirect

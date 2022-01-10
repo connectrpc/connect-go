@@ -7,22 +7,23 @@ import (
 
 	"github.com/rerpc/rerpc"
 	"github.com/rerpc/rerpc/health"
-	pingpb "github.com/rerpc/rerpc/internal/ping/v1test"
+	pingrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/rerpc/ping/v1test"
+	pingpb "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
 	"github.com/rerpc/rerpc/reflection"
 )
 
 // ExamplePingServer implements some trivial business logic. The protobuf
 // definition for this API is in internal/ping/v1test/ping.proto.
 type ExamplePingServer struct {
-	pingpb.UnimplementedPingServiceReRPC
+	pingrpc.UnimplementedPingServiceServer
 }
 
 // Ping implements pingpb.PingServiceReRPC.
-func (*ExamplePingServer) Ping(ctx context.Context, req *rerpc.Request[pingpb.PingRequest]) (*rerpc.Response[pingpb.PingResponse], error) {
-	return rerpc.NewResponse(&pingpb.PingResponse{
-		Number: req.Msg.Number,
-		Msg:    req.Msg.Msg,
-	}), nil
+func (*ExamplePingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingpb.PingResponse, error) {
+	return &pingpb.PingResponse{
+		Number: req.Number,
+		Msg:    req.Msg,
+	}, nil
 }
 
 func Example() {
@@ -34,13 +35,20 @@ func Example() {
 	checker := health.NewChecker(reg)        // basic health checks
 	limit := rerpc.ReadMaxBytes(1024 * 1024) // limit request size
 
+	// Next, we convert our implementation of the PingService into a slice
+	// of net/http Handlers.
+	pingHandler, err := pingrpc.NewPingServiceHandler(ping, reg, limit)
+	if err != nil {
+		panic(err)
+	}
+
 	// NewServeMux returns a plain net/http *ServeMux. Since a mux is an
 	// http.Handler, reRPC works with any Go HTTP middleware (e.g., net/http's
 	// StripPrefix).
 	mux := rerpc.NewServeMux(
-		pingpb.NewPingServiceHandlerReRPC(ping, reg, limit), // business logic
-		reflection.NewHandler(reg),                          // server reflection
-		health.NewHandler(checker),                          // health checks
+		pingHandler,                // business logic
+		reflection.NewHandler(reg), // server reflection
+		health.NewHandler(checker), // health checks
 	)
 
 	// Timeouts, connection handling, TLS configuration, and other low-level

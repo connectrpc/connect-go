@@ -11,7 +11,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	statuspb "github.com/rerpc/rerpc/internal/status/v1"
+	statuspb "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/status/v1"
 )
 
 // Request is a request message and a variety of metadata.

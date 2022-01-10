@@ -163,7 +163,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// EOF: the stream we construct later on already does that, and we only
 	// return early when dealing with misbehaving clients. In those cases, it's
 	// okay if we can't re-use the connection.
-
 	isBidi := (h.stype & StreamTypeBidirectional) == StreamTypeBidirectional
 	if isBidi && r.ProtoMajor < 2 {
 		w.WriteHeader(http.StatusHTTPVersionNotSupported)
