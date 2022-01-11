@@ -96,7 +96,7 @@ func NewUnaryHandler[Req, Res any](
 			}
 			_ = stream.CloseSend(err) // unreachable per context docs
 		}
-		req, err := NewReceivedRequest[Req](stream)
+		req, err := ReceiveRequest[Req](stream)
 		if err != nil {
 			_ = stream.CloseSend(err)
 			return

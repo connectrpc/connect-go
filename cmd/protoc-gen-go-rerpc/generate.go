@@ -511,7 +511,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 					"[", method.Output.GoIdent, "]", "(stream)")
 			}
 			if method.Desc.IsStreamingServer() && !method.Desc.IsStreamingClient() {
-				g.P("req, err := ", rerpcPackage.Ident("NewReceivedRequest"), "[", method.Input.GoIdent, "]",
+				g.P("req, err := ", rerpcPackage.Ident("ReceiveRequest"), "[", method.Input.GoIdent, "]",
 					"(stream)")
 				g.P("if err != nil {")
 				g.P("_ = stream.CloseReceive()")

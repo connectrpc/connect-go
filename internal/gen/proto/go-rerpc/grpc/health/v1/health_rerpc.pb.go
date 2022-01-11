@@ -223,7 +223,7 @@ func NewFullHealthHandler(svc FullHealthServer, opts ...rerpc.HandlerOption) []r
 		"Watch",              // protobuf method
 		func(ctx context.Context, stream rerpc.Stream) {
 			typed := handlerstream.NewServer[v1.HealthCheckResponse](stream)
-			req, err := rerpc.NewReceivedRequest[v1.HealthCheckRequest](stream)
+			req, err := rerpc.ReceiveRequest[v1.HealthCheckRequest](stream)
 			if err != nil {
 				_ = stream.CloseReceive()
 				_ = stream.CloseSend(err)
