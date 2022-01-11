@@ -53,7 +53,10 @@ func main() {
   if err != nil {
     panic(err)
   }
-  mux := rerpc.NewServeMux(handlers)
+  mux := rerpc.NewServeMux(
+    rerpc.NewNotFoundHandler(), // fallback
+    handlers,                   // our logic
+  )
   http.ListenAndServe(
     ":8081",
     h2c.NewHandler(mux, &http2.Server{}),

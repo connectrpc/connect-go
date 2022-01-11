@@ -104,6 +104,7 @@ func TestServerProtoGRPC(t *testing.T) {
 	pingHandlers, err := pingrpc.NewPingServiceHandler(pingServer{}, reg)
 	assert.Nil(t, err, "build ping handlers")
 	mux := rerpc.NewServeMux(
+		rerpc.NewNotFoundHandler(),
 		pingHandlers,
 		health.NewHandler(health.NewChecker(reg)),
 		reflection.NewHandler(reg),
@@ -273,7 +274,10 @@ func TestHeaderBasic(t *testing.T) {
 			return res, nil
 		},
 	}
-	mux := rerpc.NewServeMux(pingrpc.NewFullPingServiceHandler(srv))
+	mux := rerpc.NewServeMux(
+		rerpc.NewNotFoundHandler(),
+		pingrpc.NewFullPingServiceHandler(srv),
+	)
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	client := pingrpc.NewPingServiceClient(server.URL, server.Client())
@@ -350,7 +354,7 @@ func TestHeaderIntegration(t *testing.T) {
 	})
 	handlers, err := pingrpc.NewPingServiceHandler(pingServer{}, intercept)
 	assert.Nil(t, err, "error building handlers")
-	mux := rerpc.NewServeMux(handlers)
+	mux := rerpc.NewServeMux(rerpc.NewNotFoundHandler(), handlers)
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	client := pingrpc.NewPingServiceClient(server.URL, server.Client(), intercept)
