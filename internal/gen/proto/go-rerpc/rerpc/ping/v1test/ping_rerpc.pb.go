@@ -268,7 +268,7 @@ func NewFullPingServiceHandler(svc FullPingServiceServer, opts ...rerpc.HandlerO
 		"CountUp",           // protobuf method
 		func(ctx context.Context, stream rerpc.Stream) {
 			typed := handlerstream.NewServer[v1test.CountUpResponse](stream)
-			req, err := rerpc.NewReceivedRequest[v1test.CountUpRequest](stream)
+			req, err := rerpc.ReceiveRequest[v1test.CountUpRequest](stream)
 			if err != nil {
 				_ = stream.CloseReceive()
 				_ = stream.CloseSend(err)

@@ -29,7 +29,7 @@ func NewRequest[Req any](msg *Req) *Request[Req] {
 	}
 }
 
-func NewReceivedRequest[Req any](stream Stream) (*Request[Req], error) {
+func ReceiveRequest[Req any](stream Stream) (*Request[Req], error) {
 	var msg Req
 	if err := stream.Receive(&msg); err != nil {
 		return nil, err
