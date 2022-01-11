@@ -44,7 +44,7 @@ func TestErrorDetails(t *testing.T) {
 	second := durationpb.New(time.Second)
 	detail, err := anypb.New(second)
 	assert.Nil(t, err, "create anypb.Any")
-	rerr := Errorf(CodeUnknown, "details").(*Error)
+	rerr := Errorf(CodeUnknown, "details")
 	assert.Zero(t, rerr.Details(), "fresh error")
 	assert.Nil(t, rerr.AddDetail(second), "add detail")
 	assert.Equal(t, rerr.Details(), []*anypb.Any{detail}, "retrieve details")

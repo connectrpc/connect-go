@@ -201,7 +201,7 @@ func (cs *clientStream) Send(m any) error {
 	// TODO: update this when codec is pluggable
 	msg, ok := m.(proto.Message)
 	if !ok {
-		return errorf(CodeInternal, "expected proto.Message, got %T", m)
+		return Errorf(CodeInternal, "expected proto.Message, got %T", m)
 	}
 	// Calling Marshal writes data to the send stream. It's safe to do this while
 	// makeRequest is running, because we're writing to our side of the pipe
@@ -247,7 +247,7 @@ func (cs *clientStream) CloseSend(_ error) error {
 		if rerr, ok := AsError(err); ok {
 			return rerr
 		}
-		return wrap(CodeUnknown, err)
+		return Wrap(CodeUnknown, err)
 	}
 	return nil
 }
@@ -256,7 +256,7 @@ func (cs *clientStream) Receive(m any) error {
 	// TODO: update this when codec is pluggable
 	msg, ok := m.(proto.Message)
 	if !ok {
-		return errorf(CodeInternal, "expected proto.Message, got %T", m)
+		return Errorf(CodeInternal, "expected proto.Message, got %T", m)
 	}
 	// First, we wait until we've gotten the response headers and established the
 	// server-to-client side of the stream.
@@ -292,7 +292,7 @@ func (cs *clientStream) CloseReceive() error {
 	}
 	discard(cs.response.Body)
 	if err := cs.response.Body.Close(); err != nil {
-		return wrap(CodeUnknown, err)
+		return Wrap(CodeUnknown, err)
 	}
 	return nil
 }
@@ -318,7 +318,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 
 	req, err := http.NewRequestWithContext(cs.ctx, http.MethodPost, cs.url, cs.reader)
 	if err != nil {
-		cs.setResponseError(errorf(CodeUnknown, "construct *http.Request: %w", err))
+		cs.setResponseError(Errorf(CodeUnknown, "construct *http.Request: %w", err))
 		close(prepared)
 		return
 	}
@@ -333,7 +333,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 		if errors.Is(err, context.DeadlineExceeded) {
 			code = CodeDeadlineExceeded
 		}
-		cs.setResponseError(wrap(code, err))
+		cs.setResponseError(Wrap(code, err))
 		close(prepared)
 		return
 	}
@@ -354,7 +354,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 		if errors.Is(err, context.DeadlineExceeded) {
 			code = CodeDeadlineExceeded
 		}
-		cs.setResponseError(wrap(code, err))
+		cs.setResponseError(Wrap(code, err))
 		return
 	}
 
@@ -363,7 +363,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 		if c, ok := httpToGRPC[res.StatusCode]; ok {
 			code = c
 		}
-		cs.setResponseError(errorf(code, "HTTP status %v", res.Status))
+		cs.setResponseError(Errorf(code, "HTTP status %v", res.Status))
 		return
 	}
 	compression := res.Header.Get("Grpc-Encoding")
@@ -376,7 +376,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 		// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
 		// should return CodeInternal and specify acceptable compression(s) (in
 		// addition to setting the Grpc-Accept-Encoding header).
-		cs.setResponseError(errorf(
+		cs.setResponseError(Errorf(
 			CodeInternal,
 			"unknown compression %q: accepted grpc-encoding values are %v",
 			compression,
@@ -458,7 +458,7 @@ func (ss *serverStream) Receive(m any) error {
 	// TODO: update this when codec is pluggable
 	msg, ok := m.(proto.Message)
 	if !ok {
-		return errorf(CodeInternal, "expected proto.Message, got %T", m)
+		return Errorf(CodeInternal, "expected proto.Message, got %T", m)
 	}
 	if err := ss.unmarshaler.Unmarshal(msg); err != nil {
 		return err // already coded
@@ -473,7 +473,7 @@ func (ss *serverStream) CloseReceive() error {
 		if rerr, ok := AsError(err); ok {
 			return rerr
 		}
-		return wrap(CodeUnknown, err)
+		return Wrap(CodeUnknown, err)
 	}
 	return nil
 }
@@ -482,7 +482,7 @@ func (ss *serverStream) Send(m any) error {
 	// TODO: update this when codec is pluggable
 	msg, ok := m.(proto.Message)
 	if !ok {
-		return errorf(CodeInternal, "expected proto.Message, got %T", m)
+		return Errorf(CodeInternal, "expected proto.Message, got %T", m)
 	}
 	defer ss.flush()
 	if err := ss.marshaler.Marshal(msg); err != nil {
@@ -510,7 +510,7 @@ func (ss *serverStream) sendErrorGRPC(err error) error {
 	if err != nil {
 		ss.writer.Header().Set("Grpc-Status", strconv.Itoa(int(CodeInternal)))
 		ss.writer.Header().Set("Grpc-Message", percentEncode("error marshaling protobuf status with code "+code))
-		return errorf(CodeInternal, "couldn't marshal protobuf status: %w", err)
+		return Errorf(CodeInternal, "couldn't marshal protobuf status: %w", err)
 	}
 	ss.writer.Header().Set("Grpc-Status", code)
 	ss.writer.Header().Set("Grpc-Message", percentEncode(s.Message))
@@ -547,20 +547,20 @@ func extractError(h http.Header) *Error {
 
 	code, err := strconv.ParseUint(codeHeader, 10 /* base */, 32 /* bitsize */)
 	if err != nil {
-		return errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
+		return Errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
 	}
 	message := percentDecode(h.Get("Grpc-Message"))
-	ret := wrap(Code(code), errors.New(message))
+	ret := Wrap(Code(code), errors.New(message))
 
 	detailsBinaryEncoded := h.Get("Grpc-Status-Details-Bin")
 	if len(detailsBinaryEncoded) > 0 {
 		detailsBinary, err := decodeBinaryHeader(detailsBinaryEncoded)
 		if err != nil {
-			return errorf(CodeUnknown, "server returned invalid grpc-error-details-bin trailer: %w", err)
+			return Errorf(CodeUnknown, "server returned invalid grpc-error-details-bin trailer: %w", err)
 		}
 		var status statuspb.Status
 		if err := proto.Unmarshal(detailsBinary, &status); err != nil {
-			return errorf(CodeUnknown, "server returned invalid protobuf for error details: %w", err)
+			return Errorf(CodeUnknown, "server returned invalid protobuf for error details: %w", err)
 		}
 		ret.details = status.Details
 		// Prefer the protobuf-encoded data to the headers (grpc-go does this too).

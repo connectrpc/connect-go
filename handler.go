@@ -204,7 +204,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil && err != errNoTimeout {
 		// Errors here indicate that the client sent an invalid timeout header, so
 		// the error text is safe to send back.
-		failed = wrap(CodeInvalidArgument, err)
+		failed = Wrap(CodeInvalidArgument, err)
 	} else if err == nil {
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
@@ -223,7 +223,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// should return CodeUnimplemented and specify acceptable compression(s)
 			// (in addition to setting the Grpc-Accept-Encoding header).
 			if failed == nil {
-				failed = errorf(
+				failed = Errorf(
 					CodeUnimplemented,
 					"unknown compression %q: accepted grpc-encoding values are %v",
 					me, acceptEncodingValue,
