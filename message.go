@@ -81,9 +81,9 @@ func (u *unmarshaler) Unmarshal(msg proto.Message) *Error {
 	// four-byte unsigned integer indicating the message length.
 	prefixes := make([]byte, 5)
 	n, err := u.r.Read(prefixes)
-	if err != nil && errors.Is(err, io.EOF) && n == 5 && bytes.Equal(prefixes[1:5], sizeZeroPrefix) {
-		// Successfully read prefix, expect no additional data, and got an EOF, so
-		// there's nothing left to do - the zero value of the msg is correct.
+	if (err == nil || errors.Is(err, io.EOF)) && n == 5 && bytes.Equal(prefixes[1:5], sizeZeroPrefix) {
+		// Successfully read prefix and expect no additional data, so there's
+		// nothing left to do - the zero value of the msg is correct.
 		return nil
 	} else if err != nil || n < 5 {
 		// Even an EOF is unacceptable here, since we always need a message for
@@ -121,15 +121,26 @@ func (u *unmarshaler) Unmarshal(msg proto.Message) *Error {
 	buf.Grow(size)
 	raw := buf.Bytes()[0:size]
 	if size > 0 {
-		n, err = u.r.Read(raw)
-		if err != nil && !errors.Is(err, io.EOF) {
-			return Errorf(CodeUnknown, "error reading length-prefixed message data: %w", err)
-		}
-		if n < size {
-			return Errorf(
-				CodeInvalidArgument,
-				"gRPC protocol error: promised %d bytes in length-prefixed message, got %d bytes", size, n,
-			)
+		// At layer 7, we don't know exactly what's happening down in L4. Large
+		// length-prefixed messages may arrive in chunks, so we may need to read
+		// the request body past EOF. We also need to take care that we don't retry
+		// forever if the LPM is malformed.
+		remaining := size
+		for remaining > 0 {
+			n, err = u.r.Read(raw[size-remaining : size])
+			if err != nil && !errors.Is(err, io.EOF) {
+				return Errorf(CodeUnknown, "error reading length-prefixed message data: %w", err)
+			}
+			if errors.Is(err, io.EOF) && n == 0 {
+				// Message is likely malformed, stop waiting around.
+				return Errorf(
+					CodeInvalidArgument,
+					"gRPC protocol error: promised %d bytes in length-prefixed message, got %d bytes",
+					size,
+					size-remaining,
+				)
+			}
+			remaining -= n
 		}
 	}
 
