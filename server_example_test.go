@@ -46,6 +46,7 @@ func Example() {
 	// http.Handler, reRPC works with any Go HTTP middleware (e.g., net/http's
 	// StripPrefix).
 	mux := rerpc.NewServeMux(
+		rerpc.NewNotFoundHandler(), // fallback handler
 		pingHandler,                // business logic
 		reflection.NewHandler(reg), // server reflection
 		health.NewHandler(checker), // health checks

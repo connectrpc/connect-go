@@ -22,6 +22,7 @@ type pingServer struct {
 func TestReflection(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	mux := rerpc.NewServeMux(
+		rerpc.NewNotFoundHandler(),
 		pingrpc.NewFullPingServiceHandler(pingServer{}, reg),
 		health.NewHandler(health.NewChecker(reg)),
 		reflection.NewHandler(reg),

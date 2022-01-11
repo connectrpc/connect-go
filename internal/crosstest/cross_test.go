@@ -433,6 +433,7 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrossServiceClient, opts ..
 func TestReRPCServer(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	mux := rerpc.NewServeMux(
+		rerpc.NewNotFoundHandler(),
 		crossrpc.NewFullCrossServiceHandler(crossServerReRPC{}, reg),
 		reflection.NewHandler(reg),
 	)
@@ -502,7 +503,10 @@ func TestReRPCServer(t *testing.T) {
 }
 
 func TestReRPCServerH2C(t *testing.T) {
-	mux := rerpc.NewServeMux(crossrpc.NewFullCrossServiceHandler(crossServerReRPC{}))
+	mux := rerpc.NewServeMux(
+		rerpc.NewNotFoundHandler(),
+		crossrpc.NewFullCrossServiceHandler(crossServerReRPC{}),
+	)
 	server := httptest.NewServer(h2c.NewHandler(mux, &http2.Server{}))
 	defer server.Close()
 
