@@ -28,20 +28,17 @@ var (
 	}
 	grpcToHTTP = map[Code]int{
 		// Codes are numbers rather than net/http constants to make copying from
-		// the specification easy. Since we only use these for the application/json
-		// and application/protobuf content types, these are the Twirp mappings
-		// rather than the gRPC ones. See
-		// https://github.com/twitchtv/twirp/blob/main/PROTOCOL.md.
+		// the specification easy.
 		CodeOK:                 200,
-		CodeCanceled:           408, // 499 in gRPC
+		CodeCanceled:           499,
 		CodeUnknown:            500,
 		CodeInvalidArgument:    400,
-		CodeDeadlineExceeded:   408, // 504 in gRPC
+		CodeDeadlineExceeded:   504,
 		CodeNotFound:           404,
 		CodeAlreadyExists:      409,
 		CodePermissionDenied:   403,
 		CodeResourceExhausted:  429,
-		CodeFailedPrecondition: 412, // 400 in gRPC
+		CodeFailedPrecondition: 400,
 		CodeAborted:            409,
 		CodeOutOfRange:         400,
 		CodeUnimplemented:      501,
@@ -151,14 +148,6 @@ func (c Code) http() int {
 		return http.StatusInternalServerError
 	}
 	return grpcToHTTP[c]
-}
-
-func (c Code) twirp() string {
-	if c < minCode || c > maxCode {
-		// Code is invalid, which is definitely "internal"
-		return grpcToTwirp[CodeInternal]
-	}
-	return grpcToTwirp[c]
 }
 
 func (c Code) String() string {

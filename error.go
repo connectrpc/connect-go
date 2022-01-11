@@ -26,8 +26,7 @@ import (
 // formal proposal process, so they're not clearly documented anywhere and
 // may differ slightly between implementations. Roughly, they're an optional
 // mechanism for servers, middleware, and proxies to send strongly-typed errors
-// and localized messages to clients. Error details aren't exposed over the
-// Twirp protocol.
+// and localized messages to clients.
 //
 // See https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md and
 // https://github.com/grpc/grpc/blob/master/doc/statuscodes.md for further
@@ -39,42 +38,25 @@ type Error struct {
 }
 
 // Wrap annotates any error with a status code and error details. If the code
-// is CodeOK, the returned error is nil. Otherwise, the returned error will be
-// an *Error.
-func Wrap(c Code, err error, details ...proto.Message) error {
-	if e := wrap(c, err); e != nil {
-		e.SetDetails(details...)
-		return e
-	}
-	return nil
-}
-
-// For internal use: lets us distinguish code-carrying errors from generic
-// errors (which may leak server details) at the type level without casts.
-func wrap(c Code, err error) *Error {
+// is CodeOK, the returned error is nil.
+func Wrap(c Code, err error, details ...proto.Message) *Error {
 	if c == CodeOK {
 		return nil
 	}
-	return &Error{
+	e := &Error{
 		code: c,
 		err:  err,
 	}
+	if len(details) > 0 {
+		e.SetDetails(details...)
+	}
+	return e
 }
 
 // Errorf calls fmt.Errorf with the supplied template and arguments, then wraps
 // the resulting error. If the code is CodeOK, the returned error is nil.
-// Otherwise, the returned error will be an *Error.
-func Errorf(c Code, template string, args ...any) error {
-	if e := errorf(c, template, args...); e != nil {
-		return e
-	}
-	return nil
-}
-
-// For internal use: lets us distinguish code-carrying errors from generic
-// errors (which may leak server details) at the type level without casts.
-func errorf(c Code, template string, args ...any) *Error {
-	return wrap(c, fmt.Errorf(template, args...))
+func Errorf(c Code, template string, args ...any) *Error {
+	return Wrap(c, fmt.Errorf(template, args...))
 }
 
 // AsError uses errors.As to unwrap any error and look for a reRPC *Error.

@@ -21,14 +21,14 @@ type marshaler struct {
 func (m *marshaler) Marshal(msg proto.Message) *Error {
 	raw, err := proto.Marshal(msg)
 	if err != nil {
-		return errorf(CodeInternal, "couldn't marshal protobuf message: %w", err)
+		return Errorf(CodeInternal, "couldn't marshal protobuf message: %w", err)
 	}
 	if !m.gzip || !isWorthCompressing(raw) {
 		if err := m.writeGRPCPrefix(false, len(raw)); err != nil {
 			return err // already enriched
 		}
 		if _, err := m.w.Write(raw); err != nil {
-			return errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
+			return Errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
 		}
 		return nil
 	}
@@ -38,10 +38,10 @@ func (m *marshaler) Marshal(msg proto.Message) *Error {
 	defer putGzipWriter(gw)
 
 	if _, err = gw.Write(raw); err != nil { // returns uncompressed size, which isn't useful
-		return errorf(CodeInternal, "couldn't gzip data: %w", err)
+		return Errorf(CodeInternal, "couldn't gzip data: %w", err)
 	}
 	if err := gw.Close(); err != nil {
-		return errorf(CodeInternal, "couldn't close gzip writer: %w", err)
+		return Errorf(CodeInternal, "couldn't close gzip writer: %w", err)
 	}
 	if err := m.writeGRPCPrefix(true, data.Len()); err != nil {
 		return err // already enriched
@@ -50,7 +50,7 @@ func (m *marshaler) Marshal(msg proto.Message) *Error {
 		if rerr, ok := AsError(err); ok {
 			return rerr
 		}
-		return errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
+		return Errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
 	}
 	return nil
 }
@@ -65,7 +65,7 @@ func (m *marshaler) writeGRPCPrefix(compressed bool, size int) *Error {
 		if rerr, ok := AsError(err); ok {
 			return rerr
 		}
-		return errorf(CodeUnknown, "couldn't write prefix of length-prefixed message: %w", err)
+		return Errorf(CodeUnknown, "couldn't write prefix of length-prefixed message: %w", err)
 	}
 	return nil
 }
@@ -88,7 +88,7 @@ func (u *unmarshaler) Unmarshal(msg proto.Message) *Error {
 	} else if err != nil || n < 5 {
 		// Even an EOF is unacceptable here, since we always need a message for
 		// unary RPC.
-		return errorf(
+		return Errorf(
 			CodeInvalidArgument,
 			"gRPC protocol error: missing length-prefixed message metadata: %w", err,
 		)
@@ -103,7 +103,7 @@ func (u *unmarshaler) Unmarshal(msg proto.Message) *Error {
 	case 1:
 		compressed = true
 	default:
-		return errorf(
+		return Errorf(
 			CodeInvalidArgument,
 			"gRPC protocol error: length-prefixed message has invalid compressed flag %v", prefixes[0],
 		)
@@ -111,9 +111,9 @@ func (u *unmarshaler) Unmarshal(msg proto.Message) *Error {
 
 	size := int(binary.BigEndian.Uint32(prefixes[1:5]))
 	if size < 0 {
-		return errorf(CodeInvalidArgument, "message size %d overflowed uint32", size)
+		return Errorf(CodeInvalidArgument, "message size %d overflowed uint32", size)
 	} else if u.max > 0 && int64(size) > u.max {
-		return errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", size, u.max)
+		return Errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", size, u.max)
 	}
 	buf := getBuffer()
 	defer putBuffer(buf)
@@ -123,10 +123,10 @@ func (u *unmarshaler) Unmarshal(msg proto.Message) *Error {
 	if size > 0 {
 		n, err = u.r.Read(raw)
 		if err != nil && !errors.Is(err, io.EOF) {
-			return errorf(CodeUnknown, "error reading length-prefixed message data: %w", err)
+			return Errorf(CodeUnknown, "error reading length-prefixed message data: %w", err)
 		}
 		if n < size {
-			return errorf(
+			return Errorf(
 				CodeInvalidArgument,
 				"gRPC protocol error: promised %d bytes in length-prefixed message, got %d bytes", size, n,
 			)
@@ -136,21 +136,21 @@ func (u *unmarshaler) Unmarshal(msg proto.Message) *Error {
 	if compressed {
 		gr, err := getGzipReader(bytes.NewReader(raw))
 		if err != nil {
-			return errorf(CodeInvalidArgument, "can't decompress gzipped data: %w", err)
+			return Errorf(CodeInvalidArgument, "can't decompress gzipped data: %w", err)
 		}
 		defer putGzipReader(gr)
 		defer gr.Close()
 		decompressed := getBuffer()
 		defer putBuffer(decompressed)
 		if _, err := decompressed.ReadFrom(gr); err != nil {
-			return errorf(CodeInvalidArgument, "can't decompress gzipped data: %w", err)
+			return Errorf(CodeInvalidArgument, "can't decompress gzipped data: %w", err)
 		}
 		raw = decompressed.Bytes()
 	}
 
 	if err := proto.Unmarshal(raw, msg); err != nil {
 		fqn := msg.ProtoReflect().Descriptor().FullName()
-		return errorf(CodeInvalidArgument, "can't unmarshal protobuf into %v: %w", fqn, err)
+		return Errorf(CodeInvalidArgument, "can't unmarshal protobuf into %v: %w", fqn, err)
 	}
 
 	return nil
