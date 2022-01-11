@@ -16,6 +16,7 @@ import (
 func TestHealth(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	mux := rerpc.NewServeMux(
+		rerpc.NewNotFoundHandler(),
 		pingrpc.NewFullPingServiceHandler(pingrpc.UnimplementedPingServiceServer{}, reg),
 		health.NewHandler(health.NewChecker(reg)),
 	)

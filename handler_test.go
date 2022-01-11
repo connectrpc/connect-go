@@ -21,7 +21,7 @@ func TestHandlerReadMaxBytes(t *testing.T) {
 		rerpc.ReadMaxBytes(readMaxBytes),
 	)
 	assert.Nil(t, err, "build ping handlers")
-	ping := rerpc.NewServeMux(handlers)
+	ping := rerpc.NewServeMux(rerpc.NewNotFoundHandler(), handlers)
 
 	server := httptest.NewServer(ping)
 	defer server.Close()
