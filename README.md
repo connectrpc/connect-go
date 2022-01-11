@@ -10,13 +10,10 @@ definition file and implement your application logic, and reRPC generates code
 to handle marshaling, routing, error handling, and content-type negotiation. It
 also generates an idiomatic, type-safe client.
 
-reRPC is wire-compatible with *both* the [gRPC][grpc] and [Twirp][twirp]
-protocols, including full support for gRPC streaming. reRPC servers
-interoperate seamlessly with generated clients in [more][grpc-implementations]
-[than][twirp-implementations] a dozen languages, command-line tools like
-[grpcurl][], and proxies like [Envoy][envoy] and [gRPC-Gateway][grpc-gateway].
-Thanks to Twirp's simple, human-readable JSON protocol, reRPC servers are also
-easy to debug with cURL.
+reRPC is wire-compatible with the [gRPC][grpc] protocol, including streaming.
+reRPC servers interoperate seamlessly with generated clients in [more than a
+dozen languages][grpc-implementations], command-line tools like [grpcurl][],
+and proxies like [Envoy][envoy] and [gRPC-Gateway][grpc-gateway].
 
 Under the hood, reRPC is just [protocol buffers][protobuf] and the standard
 library: no custom HTTP implementation, no new name resolution or load
@@ -44,27 +41,27 @@ import (
 )
 
 type PingServer struct {
-  pingpb.UnimplementedPingServiceReRPC // returns errors from all methods
+  pingpb.UnimplementedPingServiceServer // returns errors from all methods
+}
+
+func (ps *PingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingpb.PingResponse, error) {
+  return &pingpb.PingResponse{Number: 42}, nil
 }
 
 func main() {
-  ping := &PingServer{}
-  mux := rerpc.NewServeMux(pingpb.NewPingHandlerReRPC(ping))
-  handler := h2c.NewHandler(mux, &http2.Server{})
-  http.ListenAndServe(":8081", handler)
+  handlers, err := pingpb.NewPingServiceHandler(&PingServer{})
+  if err != nil {
+    panic(err)
+  }
+  mux := rerpc.NewServeMux(handlers)
+  http.ListenAndServe(
+    ":8081",
+    h2c.NewHandler(mux, &http2.Server{}),
+  )
 }
 ```
 
-With that server running, you can make requests with any gRPC client or with
-cURL:
-
-```bash
-$ curl --request POST \
-  --header "Content-Type: application/json" \
-  http://localhost:8081/internal.ping.v1test.PingService/Ping
-
-{"code":"unimplemented","msg":"internal.ping.v1test.PingService.Ping isn't implemented"}
-```
+With that server running, you can make requests with any gRPC client.
 
 You can find production-ready examples of [servers][prod-server] and
 [clients][prod-client] in the API documentation.
@@ -78,7 +75,8 @@ release.
 
 reRPC supports:
 
-* The [two most recent major releases][go-support-policy] of Go.
+* The [two most recent major releases][go-support-policy] of Go, with a minimum
+  of Go 1.18.
 * Version 3 of the protocol buffer language ([proto3][]).
 * [APIv2][] of protocol buffers in Go (`google.golang.org/protobuf`).
 
@@ -86,9 +84,7 @@ Within those parameters, reRPC follows semantic versioning.
 
 ## Legal
 
-Offered under the [MIT license][license]. This is a personal project developed
-in my spare time - it's not endorsed by, supported by, or (as far as I know)
-used by my current or former employers.
+Offered under the [MIT license][license].
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
 [docs]: https://rerpc.github.io
