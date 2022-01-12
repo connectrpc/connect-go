@@ -19,6 +19,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v2
         with:
+          stable: '!contains(${{ matrix.go }}, "beta") && !contains(${{ matrix.go }}, "rc")'
           go-version: ${{ matrix.go-version }}
       - name: Checkout Code
         uses: actions/checkout@v2
