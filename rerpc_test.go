@@ -117,7 +117,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			expect := pingpb.PingResponse{Number: num}
 			res, err := client.Ping(context.Background(), &req)
 			assert.Nil(t, err, "ping error")
-			assert.Equal(t, *res, expect, "ping response")
+			assert.Equal(t, res, &expect, "ping response")
 		})
 		t.Run("large ping", func(t *testing.T) {
 			// Using a large payload splits the request and response over multiple
