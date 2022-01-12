@@ -10,7 +10,7 @@ import (
 	pingpb "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
 )
 
-func ExampleCallMetadata() {
+func ExampleInterceptor() {
 	logger := rerpc.UnaryInterceptorFunc(func(next rerpc.Func) rerpc.Func {
 		return rerpc.Func(func(ctx context.Context, req rerpc.AnyRequest) (rerpc.AnyResponse, error) {
 			fmt.Println("calling", req.Spec().Procedure)
