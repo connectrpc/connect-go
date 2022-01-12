@@ -2,16 +2,27 @@
 // point of view.
 package callstream
 
-import "github.com/rerpc/rerpc"
+import (
+	"context"
+
+	"github.com/rerpc/rerpc"
+)
 
 // Client is the client's view of a client streaming RPC.
 type Client[Req, Res any] struct {
+	ctx    context.Context
 	stream rerpc.Stream
 }
 
 // NewClient constructs a Client.
-func NewClient[Req, Res any](stream rerpc.Stream) *Client[Req, Res] {
-	return &Client[Req, Res]{stream: stream}
+func NewClient[Req, Res any](ctx context.Context, stream rerpc.Stream) *Client[Req, Res] {
+	return &Client[Req, Res]{ctx: ctx, stream: stream}
+}
+
+// Context returns the context for the stream. If the client is configured with
+// interceptors, they've already had an opportunity to modify the context.
+func (c *Client[Req, Res]) Context() context.Context {
+	return c.ctx
 }
 
 // Header returns the headers. Headers are sent with the first call to Send.
@@ -49,12 +60,19 @@ func (c *Client[Req, Res]) ReceivedHeader() rerpc.Header {
 
 // Server is the client's view of a server streaming RPC.
 type Server[Res any] struct {
+	ctx    context.Context
 	stream rerpc.Stream
 }
 
 // NewServer constructs a Server.
-func NewServer[Res any](stream rerpc.Stream) *Server[Res] {
-	return &Server[Res]{stream: stream}
+func NewServer[Res any](ctx context.Context, stream rerpc.Stream) *Server[Res] {
+	return &Server[Res]{ctx: ctx, stream: stream}
+}
+
+// Context returns the context for the stream. If the client is configured with
+// interceptors, they've already had an opportunity to modify the context.
+func (s *Server[Res]) Context() context.Context {
+	return s.ctx
 }
 
 // Receive a message. When the server is done sending messages, Receive will
@@ -80,12 +98,22 @@ func (s *Server[Res]) Close() error {
 
 // Bidirectional is the client's view of a bidirectional streaming RPC.
 type Bidirectional[Req, Res any] struct {
+	ctx    context.Context
 	stream rerpc.Stream
 }
 
 // NewBidirectional constructs a Bidirectional.
-func NewBidirectional[Req, Res any](stream rerpc.Stream) *Bidirectional[Req, Res] {
-	return &Bidirectional[Req, Res]{stream: stream}
+func NewBidirectional[Req, Res any](
+	ctx context.Context,
+	stream rerpc.Stream,
+) *Bidirectional[Req, Res] {
+	return &Bidirectional[Req, Res]{ctx: ctx, stream: stream}
+}
+
+// Context returns the context for the stream. If the client is configured with
+// interceptors, they've already had an opportunity to modify the context.
+func (b *Bidirectional[Req, Res]) Context() context.Context {
+	return b.ctx
 }
 
 // Header returns the headers. Headers are sent with the first call to Send.

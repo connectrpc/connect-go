@@ -167,13 +167,13 @@ func (c *fullPingServiceClient) Fail(ctx context.Context, req *rerpc.Request[v1t
 
 // Sum calls rerpc.ping.v1test.PingService.Sum.
 func (c *fullPingServiceClient) Sum(ctx context.Context) *callstream.Client[v1test.SumRequest, v1test.SumResponse] {
-	_, stream := c.sum(ctx)
-	return callstream.NewClient[v1test.SumRequest, v1test.SumResponse](stream)
+	decorated, stream := c.sum(ctx)
+	return callstream.NewClient[v1test.SumRequest, v1test.SumResponse](decorated, stream)
 }
 
 // CountUp calls rerpc.ping.v1test.PingService.CountUp.
 func (c *fullPingServiceClient) CountUp(ctx context.Context, req *rerpc.Request[v1test.CountUpRequest]) (*callstream.Server[v1test.CountUpResponse], error) {
-	_, stream := c.countUp(ctx)
+	decorated, stream := c.countUp(ctx)
 	if err := stream.Send(req.Any()); err != nil {
 		_ = stream.CloseSend(err)
 		_ = stream.CloseReceive()
@@ -183,13 +183,13 @@ func (c *fullPingServiceClient) CountUp(ctx context.Context, req *rerpc.Request[
 		_ = stream.CloseReceive()
 		return nil, err
 	}
-	return callstream.NewServer[v1test.CountUpResponse](stream), nil
+	return callstream.NewServer[v1test.CountUpResponse](decorated, stream), nil
 }
 
 // CumSum calls rerpc.ping.v1test.PingService.CumSum.
 func (c *fullPingServiceClient) CumSum(ctx context.Context) *callstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
-	_, stream := c.cumSum(ctx)
-	return callstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](stream)
+	decorated, stream := c.cumSum(ctx)
+	return callstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](decorated, stream)
 }
 
 // FullPingServiceServer is a server for the rerpc.ping.v1test.PingService

@@ -91,8 +91,8 @@ var _ FullServerReflectionClient = (*fullServerReflectionClient)(nil)
 // ServerReflectionInfo calls
 // internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo.
 func (c *fullServerReflectionClient) ServerReflectionInfo(ctx context.Context) *callstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
-	_, stream := c.serverReflectionInfo(ctx)
-	return callstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](stream)
+	decorated, stream := c.serverReflectionInfo(ctx)
+	return callstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](decorated, stream)
 }
 
 // FullServerReflectionServer is a server for the

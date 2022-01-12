@@ -141,7 +141,7 @@ func (c *fullHealthClient) Check(ctx context.Context, req *rerpc.Request[v1.Heal
 
 // Watch calls internal.health.v1.Health.Watch.
 func (c *fullHealthClient) Watch(ctx context.Context, req *rerpc.Request[v1.HealthCheckRequest]) (*callstream.Server[v1.HealthCheckResponse], error) {
-	_, stream := c.watch(ctx)
+	decorated, stream := c.watch(ctx)
 	if err := stream.Send(req.Any()); err != nil {
 		_ = stream.CloseSend(err)
 		_ = stream.CloseReceive()
@@ -151,7 +151,7 @@ func (c *fullHealthClient) Watch(ctx context.Context, req *rerpc.Request[v1.Heal
 		_ = stream.CloseReceive()
 		return nil, err
 	}
-	return callstream.NewServer[v1.HealthCheckResponse](stream), nil
+	return callstream.NewServer[v1.HealthCheckResponse](decorated, stream), nil
 }
 
 // FullHealthServer is a server for the internal.health.v1.Health service.

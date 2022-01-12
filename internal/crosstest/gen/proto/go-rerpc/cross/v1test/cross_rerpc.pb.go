@@ -167,13 +167,13 @@ func (c *fullCrossServiceClient) Fail(ctx context.Context, req *rerpc.Request[v1
 
 // Sum calls cross.v1test.CrossService.Sum.
 func (c *fullCrossServiceClient) Sum(ctx context.Context) *callstream.Client[v1test.SumRequest, v1test.SumResponse] {
-	_, stream := c.sum(ctx)
-	return callstream.NewClient[v1test.SumRequest, v1test.SumResponse](stream)
+	decorated, stream := c.sum(ctx)
+	return callstream.NewClient[v1test.SumRequest, v1test.SumResponse](decorated, stream)
 }
 
 // CountUp calls cross.v1test.CrossService.CountUp.
 func (c *fullCrossServiceClient) CountUp(ctx context.Context, req *rerpc.Request[v1test.CountUpRequest]) (*callstream.Server[v1test.CountUpResponse], error) {
-	_, stream := c.countUp(ctx)
+	decorated, stream := c.countUp(ctx)
 	if err := stream.Send(req.Any()); err != nil {
 		_ = stream.CloseSend(err)
 		_ = stream.CloseReceive()
@@ -183,13 +183,13 @@ func (c *fullCrossServiceClient) CountUp(ctx context.Context, req *rerpc.Request
 		_ = stream.CloseReceive()
 		return nil, err
 	}
-	return callstream.NewServer[v1test.CountUpResponse](stream), nil
+	return callstream.NewServer[v1test.CountUpResponse](decorated, stream), nil
 }
 
 // CumSum calls cross.v1test.CrossService.CumSum.
 func (c *fullCrossServiceClient) CumSum(ctx context.Context) *callstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
-	_, stream := c.cumSum(ctx)
-	return callstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](stream)
+	decorated, stream := c.cumSum(ctx)
+	return callstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](decorated, stream)
 }
 
 // FullCrossServiceServer is a server for the cross.v1test.CrossService service.

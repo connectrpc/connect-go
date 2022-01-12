@@ -351,7 +351,7 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *
 	}
 
 	if isStreamingClient || isStreamingServer {
-		g.P("_, stream := c.", unexport(method.GoName), "(ctx)")
+		g.P("decorated, stream := c.", unexport(method.GoName), "(ctx)")
 		if !isStreamingClient && isStreamingServer {
 			// server streaming, we need to send the request.
 			g.P("if err := stream.Send(req.Any()); err != nil {")
@@ -363,15 +363,18 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *
 			g.P("_ = stream.CloseReceive()")
 			g.P("return nil, err")
 			g.P("}")
-			g.P("return ", cstreamPackage.Ident("NewServer"), "[", method.Output.GoIdent, "]", "(stream), nil")
+			g.P("return ", cstreamPackage.Ident("NewServer"), "[",
+				method.Output.GoIdent, "]", "(decorated, stream), nil")
 		} else if isStreamingClient && !isStreamingServer {
 			// client streaming
 			g.P("return ", cstreamPackage.Ident("NewClient"),
-				"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]", "(stream)")
+				"[", method.Input.GoIdent, ", ", method.Output.GoIdent,
+				"]", "(decorated, stream)")
 		} else {
 			// bidi streaming
 			g.P("return ", cstreamPackage.Ident("NewBidirectional"),
-				"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]", "(stream)")
+				"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]",
+				"(decorated, stream)")
 		}
 	} else {
 		g.P("return c.", unexport(method.GoName), "(ctx, req)")
