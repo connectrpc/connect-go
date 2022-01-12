@@ -83,14 +83,12 @@ func TestIsValidHeaderKey(t *testing.T) {
 		{"Te", false},
 		{"Grpc-Foo", false},
 		{"Rerpc-Foo", false},
-		{"Twirp-Foo", false},
 
 		// Available
 		{"Content-Length", true},
 		{"Transfer-Encoding", true},
 		{"Grpcfoo", true},
 		{"Rerpcfoo", true},
-		{"Twirpfoo", true},
 		{"Google-Cloud-Trace-Id", true},
 		{"Foo_bar", true},
 		{"Foo.bar", true},
