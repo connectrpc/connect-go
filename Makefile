@@ -42,7 +42,8 @@ lint: lintpb bin/gofmt bin/goimports bin/staticcheck ## Lint Go and protobuf
 	@echo "Checking with go vet..."
 	@$(GO) vet ./...
 	@echo "Checking with staticcheck..."
-	@bin/staticcheck -checks "inherit,ST1020,ST1021,ST1022" ./...
+	@# TODO: re-enable when staticcheck supports Go 1.18
+	@#bin/staticcheck -checks "inherit,ST1020,ST1021,ST1022" ./...
 
 .PHONY: lintfix
 lintfix: bin/gofmt bin/goimports ## Automatically fix some lint errors
