@@ -47,25 +47,6 @@ var (
 		CodeDataLoss:           500,
 		CodeUnauthenticated:    401,
 	}
-	grpcToTwirp = map[Code]string{
-		CodeOK:                 "ok",
-		CodeCanceled:           "canceled",
-		CodeUnknown:            "unknown",
-		CodeInvalidArgument:    "invalid_argument",
-		CodeDeadlineExceeded:   "deadline_exceeded",
-		CodeNotFound:           "not_found",
-		CodeAlreadyExists:      "already_exists",
-		CodePermissionDenied:   "permission_denied",
-		CodeResourceExhausted:  "resource_exhausted",
-		CodeFailedPrecondition: "failed_precondition",
-		CodeAborted:            "aborted",
-		CodeOutOfRange:         "out_of_range",
-		CodeUnimplemented:      "unimplemented",
-		CodeInternal:           "internal",
-		CodeUnavailable:        "unavailable",
-		CodeDataLoss:           "dataloss",
-		CodeUnauthenticated:    "unauthenticated",
-	}
 	// From https://github.com/grpc/grpc/blob/master/doc/http-grpc-status-mapping.md.
 	// Note that these are not the inverse of the previous mapping.
 	httpToGRPC = map[int]Code{

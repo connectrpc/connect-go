@@ -37,7 +37,7 @@ type ClientOption interface {
 //
 // It's the interface between the reRPC library and the client code generated
 // by protoc-gen-go-rerpc; most users won't ever need to deal with it directly.
-// To see an example of how NewCall is used in the generated code, see the
+// To see an example of how NewClientStream is used in the generated code, see the
 // internal/ping/v1test package.
 func NewClientStream(
 	doer Doer,
@@ -83,7 +83,7 @@ func NewClientStream(
 //
 // It's the interface between the reRPC library and the client code generated
 // by protoc-gen-go-rerpc; most users won't ever need to deal with it directly.
-// To see an example of how NewFunc is used in the generated code, see the
+// To see an example of how NewClientFunc is used in the generated code, see the
 // internal/ping/v1test package.
 func NewClientFunc[Req, Res any](
 	doer Doer,

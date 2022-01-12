@@ -60,8 +60,6 @@ func IsValidHeaderKey(key string) error {
 		return fmt.Errorf("%q is reserved for the gRPC protocol", key)
 	case strings.HasPrefix(canonical, "Rerpc-"):
 		return fmt.Errorf("%q is reserved for future use by reRPC", key)
-	case strings.HasPrefix(canonical, "Twirp-"):
-		return fmt.Errorf("%q is reserved for future use by the Twirp protocol", key)
 	default:
 		return nil
 	}
