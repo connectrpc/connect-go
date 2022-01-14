@@ -17,6 +17,7 @@ import (
 	grpcgzip "google.golang.org/grpc/encoding/gzip"
 
 	"github.com/rerpc/rerpc"
+	"github.com/rerpc/rerpc/compress"
 	"github.com/rerpc/rerpc/internal/assert"
 	crossrpc "github.com/rerpc/rerpc/internal/crosstest/gen/proto/go-rerpc/cross/v1test"
 	crosspb "github.com/rerpc/rerpc/internal/crosstest/gen/proto/go/cross/v1test"
@@ -32,7 +33,11 @@ func BenchmarkReRPC(b *testing.B) {
 	server.StartTLS()
 	defer server.Close()
 
-	client := crossrpc.NewCrossServiceClient(server.URL, server.Client(), rerpc.Gzip(true))
+	client := crossrpc.NewCrossServiceClient(
+		server.URL,
+		server.Client(),
+		rerpc.UseCompressor(compress.NameGzip),
+	)
 	b.ResetTimer()
 
 	b.Run("unary", func(b *testing.B) {

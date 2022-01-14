@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+
+	"github.com/rerpc/rerpc/compress"
 )
 
 var teTrailersSlice = []string{"trailers"}
@@ -18,9 +20,10 @@ type clientCfg struct {
 	Package           string
 	Service           string
 	Method            string
-	EnableGzipRequest bool
 	MaxResponseBytes  int64
 	Interceptor       Interceptor
+	Compressors       map[string]compress.Compressor
+	RequestCompressor string
 }
 
 // A ClientOption configures a reRPC client.
@@ -29,6 +32,24 @@ type clientCfg struct {
 // Options are also valid ClientOptions.
 type ClientOption interface {
 	applyToClient(*clientCfg)
+}
+
+type useCompressorOption struct {
+	Name string
+}
+
+// UseCompressor configures the client to use the specified algorithm to
+// compress request messages. If the algorithm has not been registered using
+// Compressor, the request message is sent uncompressed.
+//
+// Because some servers don't support compression, clients default to sending
+// uncompressed requests.
+func UseCompressor(name string) ClientOption {
+	return &useCompressorOption{Name: name}
+}
+
+func (o *useCompressorOption) applyToClient(cfg *clientCfg) {
+	cfg.RequestCompressor = o.Name
 }
 
 // NewClientStream returns the context and StreamFunc required to call a
@@ -49,9 +70,16 @@ func NewClientStream(
 		Package: pkg,
 		Service: service,
 		Method:  method,
+		// NB, defaulting RequestCompressor to identity is required by
+		// https://github.com/grpc/grpc/blob/master/doc/compression.md - see test
+		// case 6.
 	}
 	for _, opt := range opts {
 		opt.applyToClient(&cfg)
+	}
+	compressors := newROCompressors(cfg.Compressors)
+	if !compressors.Contains(cfg.RequestCompressor) {
+		cfg.RequestCompressor = ""
 	}
 	procedure := fmt.Sprintf("%s.%s/%s", cfg.Package, cfg.Service, cfg.Method)
 	spec := Specification{
@@ -61,15 +89,16 @@ func NewClientStream(
 	}
 	sf := StreamFunc(func(ctx context.Context) (context.Context, Stream) {
 		header := Header{raw: make(http.Header, 8)}
-		addGRPCClientHeaders(header, cfg.EnableGzipRequest)
+		addGRPCClientHeaders(header, compressors.Names(), cfg.RequestCompressor)
 		return ctx, newClientStream(
 			ctx,
 			doer,
 			baseURL,
 			spec,
 			header,
-			cfg.EnableGzipRequest,
 			cfg.MaxResponseBytes,
+			compressors.Get(cfg.RequestCompressor),
+			compressors,
 		)
 	})
 	if ic := cfg.Interceptor; ic != nil {
@@ -98,6 +127,10 @@ func NewClientFunc[Req, Res any](
 	for _, opt := range opts {
 		opt.applyToClient(&cfg)
 	}
+	compressors := newROCompressors(cfg.Compressors)
+	if !compressors.Contains(cfg.RequestCompressor) {
+		cfg.RequestCompressor = ""
+	}
 	procedure := fmt.Sprintf("%s.%s/%s", cfg.Package, cfg.Service, cfg.Method)
 	spec := Specification{
 		Type:      StreamTypeUnary,
@@ -111,8 +144,9 @@ func NewClientFunc[Req, Res any](
 			baseURL,
 			spec,
 			msg.Header(),
-			cfg.EnableGzipRequest,
 			cfg.MaxResponseBytes,
+			compressors.Get(cfg.RequestCompressor),
+			compressors,
 		)
 		if err := stream.Send(msg.Any()); err != nil {
 			_ = stream.CloseSend(err)
@@ -140,7 +174,7 @@ func NewClientFunc[Req, Res any](
 				return nil, Errorf(CodeInternal, "unexpected client request type %T", req)
 			}
 			typed.spec = spec
-			addGRPCClientHeaders(req.Header(), cfg.EnableGzipRequest)
+			addGRPCClientHeaders(req.Header(), compressors.Names(), cfg.RequestCompressor)
 			return next(ctx, typed)
 		}
 	}
@@ -161,17 +195,17 @@ func NewClientFunc[Req, Res any](
 	}
 }
 
-func addGRPCClientHeaders(h Header, gzipRequest bool) {
+func addGRPCClientHeaders(h Header, acceptCompression string, requestCompressor string) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set. To avoid allocating the same slices over and over,
 	// we use pre-allocated globals for the header values.
 	h.raw["User-Agent"] = []string{userAgent}
 	h.raw["Content-Type"] = []string{TypeProtoGRPC}
-	compression := CompressionIdentity
-	if gzipRequest {
-		compression = CompressionGzip
+	if requestCompressor != "" && requestCompressor != compress.NameIdentity {
+		h.raw["Grpc-Encoding"] = []string{requestCompressor}
 	}
-	h.raw["Grpc-Encoding"] = []string{compression}
-	h.raw["Grpc-Accept-Encoding"] = []string{acceptEncodingValue} // always advertise identity & gzip
+	if acceptCompression != "" {
+		h.raw["Grpc-Accept-Encoding"] = []string{acceptCompression}
+	}
 	h.raw["Te"] = teTrailersSlice
 }

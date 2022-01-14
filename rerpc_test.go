@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rerpc/rerpc"
+	"github.com/rerpc/rerpc/compress"
 	"github.com/rerpc/rerpc/handlerstream"
 	"github.com/rerpc/rerpc/health"
 	"github.com/rerpc/rerpc/internal/assert"
@@ -238,7 +239,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			client := pingrpc.NewPingServiceClient(
 				server.URL,
 				server.Client(),
-				rerpc.Gzip(true),
+				rerpc.UseCompressor(compress.NameGzip),
 			)
 			testPing(t, client)
 			testSum(t, client)

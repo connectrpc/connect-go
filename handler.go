@@ -7,17 +7,17 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/rerpc/rerpc/compress"
 )
 
 var (
-	// Always advertise that reRPC accepts gzip compression.
-	acceptEncodingValue = strings.Join([]string{CompressionGzip, CompressionIdentity}, ",")
-	acceptPostValue     = strings.Join([]string{TypeDefaultGRPC, TypeProtoGRPC}, ",")
-	grpcStatusTrailers  = []string{"Grpc-Status", "Grpc-Message", "Grpc-Status-Details-Bin"}
+	acceptPostValue    = strings.Join([]string{TypeDefaultGRPC, TypeProtoGRPC}, ",")
+	grpcStatusTrailers = []string{"Grpc-Status", "Grpc-Message", "Grpc-Status-Details-Bin"}
 )
 
 type handlerCfg struct {
-	DisableGzipResponse bool
+	Compressors         map[string]compress.Compressor
 	MaxRequestBytes     int64
 	Registrar           *Registrar
 	Interceptor         Interceptor
@@ -46,6 +46,7 @@ type Handler struct {
 	stype          StreamType
 	config         handlerCfg
 	implementation func(context.Context, Stream)
+	compressors    roCompressors
 }
 
 // NewUnaryHandler constructs a Handler. The supplied package, service, and
@@ -64,6 +65,9 @@ func NewUnaryHandler[Req, Res any](
 		Package: pkg,
 		Service: service,
 		Method:  method,
+		Compressors: map[string]compress.Compressor{
+			compress.NameGzip: compress.NewGzip(),
+		},
 	}
 	for _, opt := range opts {
 		opt.applyToHandler(&cfg)
@@ -123,6 +127,7 @@ func NewUnaryHandler[Req, Res any](
 		stype:          StreamTypeUnary,
 		config:         cfg,
 		implementation: streamer,
+		compressors:    newROCompressors(cfg.Compressors),
 	}
 }
 
@@ -154,6 +159,7 @@ func NewStreamingHandler(
 		stype:          stype,
 		config:         cfg,
 		implementation: implementation,
+		compressors:    newROCompressors(cfg.Compressors),
 	}
 }
 
@@ -211,45 +217,39 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(ctx)
 	} // else err == errNoTimeout, nothing to do
 
-	requestCompression := CompressionIdentity
-	if me := r.Header.Get("Grpc-Encoding"); me != "" {
-		switch me {
-		case CompressionIdentity:
-			requestCompression = CompressionIdentity
-		case CompressionGzip:
-			requestCompression = CompressionGzip
-		default:
+	requestCompression := compress.NameIdentity
+	if me := r.Header.Get("Grpc-Encoding"); me != "" && me != compress.NameIdentity {
+		// We default to identity, so we only care if the client sends something
+		// other than the empty string or compress.NameIdentity.
+		if h.compressors.Contains(me) {
+			requestCompression = me
+		} else if failed == nil {
 			// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
 			// should return CodeUnimplemented and specify acceptable compression(s)
 			// (in addition to setting the Grpc-Accept-Encoding header).
-			if failed == nil {
-				failed = Errorf(
-					CodeUnimplemented,
-					"unknown compression %q: accepted grpc-encoding values are %v",
-					me, acceptEncodingValue,
-				)
-			}
+			failed = Errorf(
+				CodeUnimplemented,
+				"unknown compression %q: accepted grpc-encoding values are %v",
+				me, h.compressors.Names(),
+			)
 		}
 	}
 	// Follow https://github.com/grpc/grpc/blob/master/doc/compression.md.
 	// (The grpc-go implementation doesn't read the "grpc-accept-encoding" header
 	// and doesn't support compression method asymmetry.)
 	responseCompression := requestCompression
-	if h.config.DisableGzipResponse {
-		responseCompression = CompressionIdentity
-	} else if mae := r.Header.Get("Grpc-Accept-Encoding"); mae != "" {
-		for _, enc := range strings.FieldsFunc(mae, splitOnCommasAndSpaces) {
-			switch enc {
-			case CompressionGzip:
-				responseCompression = CompressionGzip
-				// prefer gzip, so no continue
-			case CompressionIdentity:
-				responseCompression = CompressionIdentity
-				continue
-			default:
-				continue
+	// If we're not already planning to compress the response, check whether the
+	// client requested a compression algorithm we support.
+	if responseCompression == compress.NameIdentity {
+		if mae := r.Header.Get("Grpc-Accept-Encoding"); mae != "" {
+			for _, enc := range strings.FieldsFunc(mae, splitOnCommasAndSpaces) {
+				if h.compressors.Contains(enc) {
+					// We found a mutually supported compression algorithm. Unlike standard
+					// HTTP, there's no preference weighting, so can bail out immediately.
+					responseCompression = enc
+					break
+				}
 			}
-			break
 		}
 	}
 
@@ -262,7 +262,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// the same slices over and over, we use pre-allocated globals for the header
 	// values.
 	w.Header()["Content-Type"] = []string{ctype}
-	w.Header()["Grpc-Accept-Encoding"] = []string{acceptEncodingValue}
+	w.Header()["Grpc-Accept-Encoding"] = []string{h.compressors.Names()}
 	w.Header()["Grpc-Encoding"] = []string{responseCompression}
 	// Every gRPC response will have these trailers.
 	w.Header()["Trailer"] = grpcStatusTrailers
@@ -273,7 +273,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w,
 			r,
 			h.config.MaxRequestBytes,
-			responseCompression == CompressionGzip,
+			h.config.Compressors[requestCompression],
+			h.config.Compressors[responseCompression],
 		)
 	})
 	if ic := h.config.Interceptor; ic != nil && h.stype != StreamTypeUnary {
