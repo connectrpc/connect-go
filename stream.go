@@ -11,6 +11,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/rerpc/rerpc/compress"
 	statuspb "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/status/v1"
 )
 
@@ -133,6 +134,7 @@ type clientStream struct {
 	response      *http.Response
 	responseReady chan struct{}
 	unmarshaler   unmarshaler
+	compressors   roCompressors
 
 	responseErrMu sync.Mutex
 	responseErr   error
@@ -146,8 +148,9 @@ func newClientStream(
 	baseURL string,
 	spec Specification,
 	header Header,
-	gzipRequest bool,
 	maxReadBytes int64,
+	requestCompressor compress.Compressor,
+	compressors roCompressors,
 ) *clientStream {
 	// In a typical HTTP/1.1 request, we'd put the body into a bytes.Buffer, hand
 	// the buffer to http.NewRequest, and fire off the request with doer.Do. That
@@ -169,9 +172,10 @@ func newClientStream(
 		spec:          spec,
 		maxReadBytes:  maxReadBytes,
 		writer:        pw,
-		marshaler:     marshaler{w: pw, gzip: gzipRequest},
+		marshaler:     marshaler{w: pw, compressor: requestCompressor},
 		header:        header,
 		reader:        pr,
+		compressors:   compressors,
 		responseReady: make(chan struct{}),
 	}
 }
@@ -339,12 +343,10 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 	}
 
 	// At this point, we've caught all the errors we can - it's time to send data
-	// to the server. Unblock the constructor.
+	// to the server. Unblock Send.
 	close(prepared)
-	// It's possible that the server sends back a response immediately after
-	// receiving the request headers, but in most cases we'll block here until
-	// the user calls Send. Once we send a message to the server, they send a
-	// message back and establish the receive side of the stream.
+	// Once we send a message to the server, they send a message back and
+	// establish the receive side of the stream.
 	res, err := cs.doer.Do(req)
 	if err != nil {
 		code := CodeUnknown
@@ -367,12 +369,9 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 		return
 	}
 	compression := res.Header.Get("Grpc-Encoding")
-	if compression == "" {
-		compression = CompressionIdentity
-	}
-	switch compression {
-	case CompressionIdentity, CompressionGzip:
-	default:
+	if compression == "" || compression == compress.NameIdentity {
+		compression = compress.NameIdentity
+	} else if !cs.compressors.Contains(compression) {
 		// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
 		// should return CodeInternal and specify acceptable compression(s) (in
 		// addition to setting the Grpc-Accept-Encoding header).
@@ -380,7 +379,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 			CodeInternal,
 			"unknown compression %q: accepted grpc-encoding values are %v",
 			compression,
-			acceptEncodingValue,
+			cs.compressors.Names(),
 		))
 		return
 	}
@@ -393,7 +392,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 	// Success! We got a response with valid headers and no error, so there's
 	// probably a message waiting in the stream.
 	cs.response = res
-	cs.unmarshaler = unmarshaler{r: res.Body, max: cs.maxReadBytes}
+	cs.unmarshaler = unmarshaler{r: res.Body, max: cs.maxReadBytes, compressor: cs.compressors.Get(compression)}
 }
 
 func (cs *clientStream) setResponseError(err error) {
@@ -431,12 +430,13 @@ func newServerStream(
 	w http.ResponseWriter,
 	r *http.Request,
 	maxReadBytes int64,
-	gzipResponse bool,
+	requestCompressor compress.Compressor,
+	responseCompressor compress.Compressor,
 ) *serverStream {
 	return &serverStream{
 		spec:        spec,
-		unmarshaler: unmarshaler{r: r.Body, max: maxReadBytes},
-		marshaler:   marshaler{w: w, gzip: gzipResponse},
+		unmarshaler: unmarshaler{r: r.Body, max: maxReadBytes, compressor: requestCompressor},
+		marshaler:   marshaler{w: w, compressor: responseCompressor},
 		writer:      w,
 		request:     r,
 	}

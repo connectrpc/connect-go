@@ -7,6 +7,8 @@ import (
 	"io"
 
 	"google.golang.org/protobuf/proto"
+
+	"github.com/rerpc/rerpc/compress"
 )
 
 var (
@@ -14,8 +16,8 @@ var (
 )
 
 type marshaler struct {
-	w    io.Writer
-	gzip bool
+	w          io.Writer
+	compressor compress.Compressor
 }
 
 func (m *marshaler) Marshal(msg proto.Message) *Error {
@@ -23,7 +25,7 @@ func (m *marshaler) Marshal(msg proto.Message) *Error {
 	if err != nil {
 		return Errorf(CodeInternal, "couldn't marshal protobuf message: %w", err)
 	}
-	if !m.gzip || !isWorthCompressing(raw) {
+	if m.compressor == nil || !m.compressor.ShouldCompress(raw) {
 		if err := m.writeGRPCPrefix(false, len(raw)); err != nil {
 			return err // already enriched
 		}
@@ -34,13 +36,13 @@ func (m *marshaler) Marshal(msg proto.Message) *Error {
 	}
 	data := getBuffer()
 	defer putBuffer(data)
-	gw := getGzipWriter(data)
-	defer putGzipWriter(gw)
+	cw := m.compressor.GetWriter(data)
+	defer m.compressor.PutWriter(cw)
 
-	if _, err = gw.Write(raw); err != nil { // returns uncompressed size, which isn't useful
+	if _, err = cw.Write(raw); err != nil { // returns uncompressed size, which isn't useful
 		return Errorf(CodeInternal, "couldn't gzip data: %w", err)
 	}
-	if err := gw.Close(); err != nil {
+	if err := cw.Close(); err != nil {
 		return Errorf(CodeInternal, "couldn't close gzip writer: %w", err)
 	}
 	if err := m.writeGRPCPrefix(true, data.Len()); err != nil {
@@ -71,8 +73,9 @@ func (m *marshaler) writeGRPCPrefix(compressed bool, size int) *Error {
 }
 
 type unmarshaler struct {
-	r   io.Reader
-	max int64
+	r          io.Reader
+	max        int64
+	compressor compress.Compressor
 }
 
 func (u *unmarshaler) Unmarshal(msg proto.Message) *Error {
@@ -144,16 +147,23 @@ func (u *unmarshaler) Unmarshal(msg proto.Message) *Error {
 		}
 	}
 
+	if compressed && u.compressor == nil {
+		return Errorf(
+			CodeInvalidArgument,
+			"gRPC protocol error: sent compressed message without Grpc-Encoding header",
+		)
+	}
+
 	if compressed {
-		gr, err := getGzipReader(bytes.NewReader(raw))
+		cr, err := u.compressor.GetReader(bytes.NewReader(raw))
 		if err != nil {
 			return Errorf(CodeInvalidArgument, "can't decompress gzipped data: %w", err)
 		}
-		defer putGzipReader(gr)
-		defer gr.Close()
+		defer u.compressor.PutReader(cr)
+		defer cr.Close()
 		decompressed := getBuffer()
 		defer putBuffer(decompressed)
-		if _, err := decompressed.ReadFrom(gr); err != nil {
+		if _, err := decompressed.ReadFrom(cr); err != nil {
 			return Errorf(CodeInvalidArgument, "can't decompress gzipped data: %w", err)
 		}
 		raw = decompressed.Bytes()
