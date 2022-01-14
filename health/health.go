@@ -119,12 +119,16 @@ type Client struct {
 }
 
 // NewClient constructs a Client.
-func NewClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) *Client {
-	return &Client{healthrpc.NewHealthClient(
+func NewClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) (*Client, error) {
+	c, err := healthrpc.NewHealthClient(
 		baseURL,
 		doer,
 		append(opts, rerpc.OverrideProtobufPackage("grpc.health.v1"))...,
-	)}
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{c}, nil
 }
 
 // Check the health of a service.

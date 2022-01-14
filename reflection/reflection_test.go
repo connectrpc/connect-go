@@ -39,7 +39,7 @@ func TestReflection(t *testing.T) {
 	}, "services registered in memory")
 
 	// TODO: Build this simplification into base package.
-	detailed := rerpc.NewClientFunc[
+	detailed, err := rerpc.NewClientFunc[
 		reflectionpb.ServerReflectionRequest,
 		reflectionpb.ServerReflectionResponse,
 	](
@@ -47,6 +47,7 @@ func TestReflection(t *testing.T) {
 		server.URL,
 		"grpc.reflection.v1alpha", "ServerReflection", "ServerReflectionInfo",
 	)
+	assert.Nil(t, err, "client construction error")
 	call := func(req *reflectionpb.ServerReflectionRequest) (*reflectionpb.ServerReflectionResponse, error) {
 		res, err := detailed(context.Background(), rerpc.NewRequest(req))
 		if err != nil {
