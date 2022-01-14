@@ -38,12 +38,14 @@ func NewServer(h http.Handler) *Server {
 }
 
 // Client returns an HTTP client configured to trust the server's TLS
-// certificate and use HTTP/2 over an in-memory pipe. It closes its idle
-// connections when the server is closed.
+// certificate and use HTTP/2 over an in-memory pipe. Automatic HTTP-level gzip
+// compression is disabled. It closes its idle connections when the server is
+// closed.
 func (s *Server) Client() *http.Client {
 	c := s.srv.Client()
 	if tr, ok := c.Transport.(*http.Transport); ok {
 		tr.DialContext = s.lis.DialContext
+		tr.DisableCompression = true
 	}
 	return c
 }
