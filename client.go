@@ -99,10 +99,10 @@ func NewClientStream(
 		Procedure: procedure,
 		IsClient:  true,
 	}
-	sf := StreamFunc(func(ctx context.Context) (context.Context, Stream) {
+	sf := StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
 		header := Header{raw: make(http.Header, 8)}
 		addGRPCClientHeaders(header, compressors.Names(), cfg.RequestCompressor)
-		return ctx, newClientStream(
+		sender, receiver := newClientStream(
 			ctx,
 			doer,
 			baseURL,
@@ -112,6 +112,7 @@ func NewClientStream(
 			compressors.Get(cfg.RequestCompressor),
 			compressors,
 		)
+		return ctx, sender, receiver
 	})
 	if ic := cfg.Interceptor; ic != nil {
 		sf = ic.WrapStream(sf)
@@ -153,7 +154,7 @@ func NewClientFunc[Req, Res any](
 		IsClient:  true,
 	}
 	send := Func(func(ctx context.Context, msg AnyRequest) (AnyResponse, error) {
-		stream := newClientStream(
+		sender, receiver := newClientStream(
 			ctx,
 			doer,
 			baseURL,
@@ -163,21 +164,21 @@ func NewClientFunc[Req, Res any](
 			compressors.Get(cfg.RequestCompressor),
 			compressors,
 		)
-		if err := stream.Send(msg.Any()); err != nil {
-			_ = stream.CloseSend(err)
-			_ = stream.CloseReceive()
+		if err := sender.Send(msg.Any()); err != nil {
+			_ = sender.Close(err)
+			_ = receiver.Close()
 			return nil, err
 		}
-		if err := stream.CloseSend(nil); err != nil {
-			_ = stream.CloseReceive()
+		if err := sender.Close(nil); err != nil {
+			_ = receiver.Close()
 			return nil, err
 		}
 		var res Res
-		if err := stream.Receive(&res); err != nil {
-			_ = stream.CloseReceive()
+		if err := receiver.Receive(&res); err != nil {
+			_ = receiver.Close()
 			return nil, err
 		}
-		return newResponseWithHeader(&res, stream.ReceivedHeader()), stream.CloseReceive()
+		return newResponseWithHeader(&res, receiver.Header()), receiver.Close()
 	})
 	// To make the specification and RPC headers visible to the full interceptor
 	// chain (as though they were supplied by the caller), we'll add them in the

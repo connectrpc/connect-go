@@ -95,8 +95,8 @@ var _ FullServerReflectionClient = (*fullServerReflectionClient)(nil)
 // ServerReflectionInfo calls
 // internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo.
 func (c *fullServerReflectionClient) ServerReflectionInfo(ctx context.Context) *callstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
-	_, stream := c.serverReflectionInfo(ctx)
-	return callstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](stream)
+	_, sender, receiver := c.serverReflectionInfo(ctx)
+	return callstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
 }
 
 // FullServerReflectionServer is a server for the
@@ -127,10 +127,10 @@ func NewFullServerReflectionHandler(svc FullServerReflectionServer, opts ...rerp
 		"internal.reflection.v1alpha1", // protobuf package
 		"ServerReflection",             // protobuf service
 		"ServerReflectionInfo",         // protobuf method
-		func(ctx context.Context, stream rerpc.Stream) {
-			typed := handlerstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](stream)
+		func(ctx context.Context, sender rerpc.Sender, receiver rerpc.Receiver) {
+			typed := handlerstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
 			err := svc.ServerReflectionInfo(ctx, typed)
-			_ = stream.CloseReceive()
+			_ = receiver.Close()
 			if err != nil {
 				if _, ok := rerpc.AsError(err); !ok {
 					if errors.Is(err, context.Canceled) {
@@ -141,7 +141,7 @@ func NewFullServerReflectionHandler(svc FullServerReflectionServer, opts ...rerp
 					}
 				}
 			}
-			_ = stream.CloseSend(err)
+			_ = sender.Close(err)
 		},
 		opts...,
 	)

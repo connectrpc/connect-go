@@ -32,15 +32,19 @@ func (i *loggingInterceptor) Wrap(next Func) Func {
 }
 
 func (i *loggingInterceptor) WrapStream(next StreamFunc) StreamFunc {
-	return StreamFunc(func(ctx context.Context) (context.Context, Stream) {
+	return StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
 		io.WriteString(i.w, i.before)
 		defer func() { io.WriteString(i.w, i.after) }()
 		return next(ctx)
 	})
 }
 
-type panicStream struct {
-	Stream
+type panicSender struct {
+	Sender
+}
+
+type panicReceiver struct {
+	Receiver
 }
 
 func TestChain(t *testing.T) {
@@ -68,12 +72,13 @@ func TestChain(t *testing.T) {
 	t.Run("stream", func(t *testing.T) {
 		out.Reset()
 		var called bool
-		next := StreamFunc(func(ctx context.Context) (context.Context, Stream) {
+		next := StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
 			called = true
-			return ctx, &panicStream{}
+			return ctx, &panicSender{}, &panicReceiver{}
 		})
-		_, stream := chain.WrapStream(next)(context.Background())
-		assert.NotNil(t, stream, "returned stream")
+		_, sender, receiver := chain.WrapStream(next)(context.Background())
+		assert.NotNil(t, sender, "returned sender")
+		assert.NotNil(t, receiver, "returned receiver")
 		assert.Equal(t, out.String(), onion, "execution onion")
 		assert.True(t, called, "original StreamFunc called")
 	})
