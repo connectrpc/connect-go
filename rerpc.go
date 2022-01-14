@@ -20,12 +20,6 @@ const (
 	TypeProtoGRPC   = "application/grpc+proto"
 )
 
-// ReRPC's supported compression methods.
-const (
-	CompressionIdentity = "identity"
-	CompressionGzip     = "gzip"
-)
-
 // StreamType describes whether the client, server, neither, or both is
 // streaming.
 type StreamType uint8

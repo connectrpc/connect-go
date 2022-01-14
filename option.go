@@ -1,5 +1,7 @@
 package rerpc
 
+import "github.com/rerpc/rerpc/compress"
+
 // Option implements both ClientOption and HandlerOption, so it can be applied
 // both client-side and server-side.
 type Option interface {
@@ -60,36 +62,50 @@ func (o *readMaxBytes) applyToHandler(cfg *handlerCfg) {
 	cfg.MaxRequestBytes = o.Max
 }
 
-type gzipOption struct {
-	Enable bool
+type compressorOption struct {
+	Name       string
+	Compressor compress.Compressor
 }
 
-// Gzip configures client and server compression strategies.
+// Compress configures client and server compression strategies.
 //
-// For handlers, enabling gzip compresses responses where it's likely to
-// improve overall performance. By default, handlers use gzip if the client
-// supports it, the uncompressed response message is >1 KiB, and the message is
-// likely to compress well. Disabling gzip support instructs handlers to always
-// send uncompressed responses.
+// For handlers, it registers a compression algorithm. Clients may send
+// messages compressed with that algorithm and/or request compressed responses.
+// By default, handlers support gzip (using the standard library), compressing
+// response messages if the client supports it and the uncompressed message is
+// >1KiB.
 //
-// For clients, enabling gzip compresses requests where it's likely to improve
-// performance (using the same criteria as handlers). gRPC's compression
-// negotiation is complex, but most first-party gRPC servers won't compress
-// responses unless the client enables this option. Since not all servers
-// support gzip compression, clients default to sending uncompressed requests.
-func Gzip(enable bool) Option {
-	return &gzipOption{enable}
+// For clients, registering compressors serves two purposes. First, the client
+// asks servers to compress responses using one of the registered algorithms.
+// (Note that gRPC's compression negotiation is complex, but most of Google's
+// gRPC server implementations won't compress responses unless the request is
+// compressed.) Second, it makes all the registered algorithms available for
+// use with UseCompressor. Note that actually compressing requests requires
+// using both Compressor and UseCompressor.
+//
+// To remove a previously-registered compressor, re-register the same name with
+// a nil compressor.
+func Compressor(name string, c compress.Compressor) Option {
+	return &compressorOption{
+		Name:       name,
+		Compressor: c,
+	}
 }
 
-func (o *gzipOption) applyToClient(cfg *clientCfg) {
-	// NB, defaulting to identity is required by
-	// https://github.com/grpc/grpc/blob/master/doc/compression.md - see test
-	// case 6.
-	cfg.EnableGzipRequest = o.Enable
+func (o *compressorOption) applyToClient(cfg *clientCfg) {
+	o.apply(cfg.Compressors)
 }
 
-func (o *gzipOption) applyToHandler(cfg *handlerCfg) {
-	cfg.DisableGzipResponse = !o.Enable
+func (o *compressorOption) applyToHandler(cfg *handlerCfg) {
+	o.apply(cfg.Compressors)
+}
+
+func (o *compressorOption) apply(m map[string]compress.Compressor) {
+	if o.Compressor == nil {
+		delete(m, o.Name)
+		return
+	}
+	m[o.Name] = o.Compressor
 }
 
 type interceptOption struct {

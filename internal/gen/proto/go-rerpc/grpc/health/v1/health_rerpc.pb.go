@@ -84,27 +84,35 @@ var _ SimpleHealthClient = (*HealthClient)(nil)
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
 // https://api.acme.com or https://acme.com/grpc).
-func NewHealthClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) *HealthClient {
+func NewHealthClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) (*HealthClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
+	checkFunc, err := rerpc.NewClientFunc[v1.HealthCheckRequest, v1.HealthCheckResponse](
+		doer,
+		baseURL,
+		"internal.health.v1", // protobuf package
+		"Health",             // protobuf service
+		"Check",              // protobuf method
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	watchFunc, err := rerpc.NewClientStream(
+		doer,
+		rerpc.StreamTypeServer,
+		baseURL,
+		"internal.health.v1", // protobuf package
+		"Health",             // protobuf service
+		"Watch",              // protobuf method
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
 	return &HealthClient{client: fullHealthClient{
-		check: rerpc.NewClientFunc[v1.HealthCheckRequest, v1.HealthCheckResponse](
-			doer,
-			baseURL,
-			"internal.health.v1", // protobuf package
-			"Health",             // protobuf service
-			"Check",              // protobuf method
-			opts...,
-		),
-		watch: rerpc.NewClientStream(
-			doer,
-			rerpc.StreamTypeServer,
-			baseURL,
-			"internal.health.v1", // protobuf package
-			"Health",             // protobuf service
-			"Watch",              // protobuf method
-			opts...,
-		),
-	}}
+		check: checkFunc,
+		watch: watchFunc,
+	}}, nil
 }
 
 // Check calls internal.health.v1.Health.Check.

@@ -31,6 +31,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/rerpc/rerpc"
+	"github.com/rerpc/rerpc/compress"
 	"github.com/rerpc/rerpc/handlerstream"
 	"github.com/rerpc/rerpc/internal/assert"
 	crossrpc "github.com/rerpc/rerpc/internal/crosstest/gen/proto/go-rerpc/cross/v1test"
@@ -444,11 +445,17 @@ func TestReRPCServer(t *testing.T) {
 
 	t.Run("rerpc_client", func(t *testing.T) {
 		t.Run("gzip", func(t *testing.T) {
-			client := crossrpc.NewCrossServiceClient(server.URL, server.Client(), rerpc.Gzip(true))
+			client, err := crossrpc.NewCrossServiceClient(
+				server.URL,
+				server.Client(),
+				rerpc.UseCompressor(compress.NameGzip),
+			)
+			assert.Nil(t, err, "client construction error")
 			testWithReRPCClient(t, client)
 		})
 		t.Run("identity", func(t *testing.T) {
-			client := crossrpc.NewCrossServiceClient(server.URL, server.Client())
+			client, err := crossrpc.NewCrossServiceClient(server.URL, server.Client())
+			assert.Nil(t, err, "client construction error")
 			testWithReRPCClient(t, client)
 		})
 	})
@@ -513,11 +520,17 @@ func TestReRPCServerH2C(t *testing.T) {
 	t.Run("rerpc_client", func(t *testing.T) {
 		hclient := newClientH2C()
 		t.Run("identity", func(t *testing.T) {
-			client := crossrpc.NewCrossServiceClient(server.URL, hclient)
+			client, err := crossrpc.NewCrossServiceClient(server.URL, hclient)
+			assert.Nil(t, err, "client construction error")
 			testWithReRPCClient(t, client)
 		})
 		t.Run("gzip", func(t *testing.T) {
-			client := crossrpc.NewCrossServiceClient(server.URL, hclient, rerpc.Gzip(true))
+			client, err := crossrpc.NewCrossServiceClient(
+				server.URL,
+				hclient,
+				rerpc.UseCompressor(compress.NameGzip),
+			)
+			assert.Nil(t, err, "client construction error")
 			testWithReRPCClient(t, client)
 		})
 	})
@@ -556,11 +569,17 @@ func TestGRPCServer(t *testing.T) {
 		hclient := newClientH2C()
 		url := "http://" + lis.Addr().String()
 		t.Run("identity", func(t *testing.T) {
-			client := crossrpc.NewCrossServiceClient(url, hclient)
+			client, err := crossrpc.NewCrossServiceClient(url, hclient)
+			assert.Nil(t, err, "client construction error")
 			testWithReRPCClient(t, client)
 		})
 		t.Run("gzip", func(t *testing.T) {
-			client := crossrpc.NewCrossServiceClient(url, hclient, rerpc.Gzip(true))
+			client, err := crossrpc.NewCrossServiceClient(
+				url,
+				hclient,
+				rerpc.UseCompressor(compress.NameGzip),
+			)
+			assert.Nil(t, err, "client construction error")
 			testWithReRPCClient(t, client)
 		})
 	})

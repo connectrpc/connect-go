@@ -57,53 +57,73 @@ var _ SimpleCrossServiceClient = (*CrossServiceClient)(nil)
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
 // https://api.acme.com or https://acme.com/grpc).
-func NewCrossServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) *CrossServiceClient {
+func NewCrossServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) (*CrossServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
+	pingFunc, err := rerpc.NewClientFunc[v1test.PingRequest, v1test.PingResponse](
+		doer,
+		baseURL,
+		"cross.v1test", // protobuf package
+		"CrossService", // protobuf service
+		"Ping",         // protobuf method
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	failFunc, err := rerpc.NewClientFunc[v1test.FailRequest, v1test.FailResponse](
+		doer,
+		baseURL,
+		"cross.v1test", // protobuf package
+		"CrossService", // protobuf service
+		"Fail",         // protobuf method
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	sumFunc, err := rerpc.NewClientStream(
+		doer,
+		rerpc.StreamTypeClient,
+		baseURL,
+		"cross.v1test", // protobuf package
+		"CrossService", // protobuf service
+		"Sum",          // protobuf method
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	countUpFunc, err := rerpc.NewClientStream(
+		doer,
+		rerpc.StreamTypeServer,
+		baseURL,
+		"cross.v1test", // protobuf package
+		"CrossService", // protobuf service
+		"CountUp",      // protobuf method
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	cumSumFunc, err := rerpc.NewClientStream(
+		doer,
+		rerpc.StreamTypeBidirectional,
+		baseURL,
+		"cross.v1test", // protobuf package
+		"CrossService", // protobuf service
+		"CumSum",       // protobuf method
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
 	return &CrossServiceClient{client: fullCrossServiceClient{
-		ping: rerpc.NewClientFunc[v1test.PingRequest, v1test.PingResponse](
-			doer,
-			baseURL,
-			"cross.v1test", // protobuf package
-			"CrossService", // protobuf service
-			"Ping",         // protobuf method
-			opts...,
-		),
-		fail: rerpc.NewClientFunc[v1test.FailRequest, v1test.FailResponse](
-			doer,
-			baseURL,
-			"cross.v1test", // protobuf package
-			"CrossService", // protobuf service
-			"Fail",         // protobuf method
-			opts...,
-		),
-		sum: rerpc.NewClientStream(
-			doer,
-			rerpc.StreamTypeClient,
-			baseURL,
-			"cross.v1test", // protobuf package
-			"CrossService", // protobuf service
-			"Sum",          // protobuf method
-			opts...,
-		),
-		countUp: rerpc.NewClientStream(
-			doer,
-			rerpc.StreamTypeServer,
-			baseURL,
-			"cross.v1test", // protobuf package
-			"CrossService", // protobuf service
-			"CountUp",      // protobuf method
-			opts...,
-		),
-		cumSum: rerpc.NewClientStream(
-			doer,
-			rerpc.StreamTypeBidirectional,
-			baseURL,
-			"cross.v1test", // protobuf package
-			"CrossService", // protobuf service
-			"CumSum",       // protobuf method
-			opts...,
-		),
-	}}
+		ping:    pingFunc,
+		fail:    failFunc,
+		sum:     sumFunc,
+		countUp: countUpFunc,
+		cumSum:  cumSumFunc,
+	}}, nil
 }
 
 // Ping calls cross.v1test.CrossService.Ping.

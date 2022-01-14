@@ -9,11 +9,12 @@ package pingv1test
 import (
 	context "context"
 	errors "errors"
+	strings "strings"
+
 	rerpc "github.com/rerpc/rerpc"
 	callstream "github.com/rerpc/rerpc/callstream"
 	handlerstream "github.com/rerpc/rerpc/handlerstream"
 	v1test "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
-	strings "strings"
 )
 
 // This is a compile-time assertion to ensure that this generated file and the
@@ -57,53 +58,73 @@ var _ SimplePingServiceClient = (*PingServiceClient)(nil)
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
 // https://api.acme.com or https://acme.com/grpc).
-func NewPingServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) *PingServiceClient {
+func NewPingServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) (*PingServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
+	pingFunc, err := rerpc.NewClientFunc[v1test.PingRequest, v1test.PingResponse](
+		doer,
+		baseURL,
+		"rerpc.ping.v1test", // protobuf package
+		"PingService",       // protobuf service
+		"Ping",              // protobuf method
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	failFunc, err := rerpc.NewClientFunc[v1test.FailRequest, v1test.FailResponse](
+		doer,
+		baseURL,
+		"rerpc.ping.v1test", // protobuf package
+		"PingService",       // protobuf service
+		"Fail",              // protobuf method
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	sumFunc, err := rerpc.NewClientStream(
+		doer,
+		rerpc.StreamTypeClient,
+		baseURL,
+		"rerpc.ping.v1test", // protobuf package
+		"PingService",       // protobuf service
+		"Sum",               // protobuf method
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	countUpFunc, err := rerpc.NewClientStream(
+		doer,
+		rerpc.StreamTypeServer,
+		baseURL,
+		"rerpc.ping.v1test", // protobuf package
+		"PingService",       // protobuf service
+		"CountUp",           // protobuf method
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	cumSumFunc, err := rerpc.NewClientStream(
+		doer,
+		rerpc.StreamTypeBidirectional,
+		baseURL,
+		"rerpc.ping.v1test", // protobuf package
+		"PingService",       // protobuf service
+		"CumSum",            // protobuf method
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
 	return &PingServiceClient{client: fullPingServiceClient{
-		ping: rerpc.NewClientFunc[v1test.PingRequest, v1test.PingResponse](
-			doer,
-			baseURL,
-			"rerpc.ping.v1test", // protobuf package
-			"PingService",       // protobuf service
-			"Ping",              // protobuf method
-			opts...,
-		),
-		fail: rerpc.NewClientFunc[v1test.FailRequest, v1test.FailResponse](
-			doer,
-			baseURL,
-			"rerpc.ping.v1test", // protobuf package
-			"PingService",       // protobuf service
-			"Fail",              // protobuf method
-			opts...,
-		),
-		sum: rerpc.NewClientStream(
-			doer,
-			rerpc.StreamTypeClient,
-			baseURL,
-			"rerpc.ping.v1test", // protobuf package
-			"PingService",       // protobuf service
-			"Sum",               // protobuf method
-			opts...,
-		),
-		countUp: rerpc.NewClientStream(
-			doer,
-			rerpc.StreamTypeServer,
-			baseURL,
-			"rerpc.ping.v1test", // protobuf package
-			"PingService",       // protobuf service
-			"CountUp",           // protobuf method
-			opts...,
-		),
-		cumSum: rerpc.NewClientStream(
-			doer,
-			rerpc.StreamTypeBidirectional,
-			baseURL,
-			"rerpc.ping.v1test", // protobuf package
-			"PingService",       // protobuf service
-			"CumSum",            // protobuf method
-			opts...,
-		),
-	}}
+		ping:    pingFunc,
+		fail:    failFunc,
+		sum:     sumFunc,
+		countUp: countUpFunc,
+		cumSum:  cumSumFunc,
+	}}, nil
 }
 
 // Ping calls rerpc.ping.v1test.PingService.Ping.

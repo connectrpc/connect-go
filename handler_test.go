@@ -25,7 +25,8 @@ func TestHandlerReadMaxBytes(t *testing.T) {
 
 	server := httptest.NewServer(ping)
 	defer server.Close()
-	client := pingrpc.NewPingServiceClient(server.URL, server.Client())
+	client, err := pingrpc.NewPingServiceClient(server.URL, server.Client())
+	assert.Nil(t, err, "client construction error")
 
 	padding := "padding                      "
 	req := &pingpb.PingRequest{Number: 42, Msg: padding}
