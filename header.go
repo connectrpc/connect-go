@@ -52,10 +52,13 @@ func IsValidHeaderKey(key string) error {
 	case "Accept", "Accept-Encoding", "Accept-Post",
 		"Allow",
 		"Content-Encoding", "Content-Type",
-		"Te", "Trailer":
+		"Origin", "Te", "Trailer":
 		return fmt.Errorf("%q is a reserved header", key)
 	}
 	switch {
+	case strings.HasPrefix(canonical, "Access-Control"):
+		// Don't let handlers muck with CORS.
+		return fmt.Errorf("%q is a reserved header", key)
 	case strings.HasPrefix(canonical, "Grpc-"):
 		return fmt.Errorf("%q is reserved for the gRPC protocol", key)
 	case strings.HasPrefix(canonical, "Rerpc-"):
