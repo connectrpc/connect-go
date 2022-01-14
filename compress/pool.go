@@ -11,6 +11,8 @@ import (
 const (
 	NameGzip     = "gzip"
 	NameIdentity = "identity"
+
+	oneKiB = 1024
 )
 
 //go:embed empty.gz
@@ -44,13 +46,12 @@ type GzipCompressor struct {
 // compress messages smaller than 1kb.
 func NewGzip() *GzipCompressor {
 	return &GzipCompressor{
-		min: 1024,
+		min: oneKiB,
 		readers: sync.Pool{
 			New: func() any {
 				// We don't want to use gzip.NewReader, because it requires a source of
 				// valid gzipped bytes.
-				var r gzip.Reader
-				return &r
+				return &gzip.Reader{}
 			},
 		},
 		writers: sync.Pool{

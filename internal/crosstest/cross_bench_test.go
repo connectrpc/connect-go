@@ -33,11 +33,12 @@ func BenchmarkReRPC(b *testing.B) {
 	server.StartTLS()
 	defer server.Close()
 
-	client := crossrpc.NewCrossServiceClient(
+	client, err := crossrpc.NewCrossServiceClient(
 		server.URL,
 		server.Client(),
 		rerpc.UseCompressor(compress.NameGzip),
 	)
+	assert.Nil(b, err, "client construction error")
 	b.ResetTimer()
 
 	b.Run("unary", func(b *testing.B) {

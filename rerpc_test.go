@@ -228,7 +228,8 @@ func TestServerProtoGRPC(t *testing.T) {
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) {
 		t.Run("identity", func(t *testing.T) {
-			client := pingrpc.NewPingServiceClient(server.URL, server.Client())
+			client, err := pingrpc.NewPingServiceClient(server.URL, server.Client())
+			assert.Nil(t, err, "client construction error")
 			testPing(t, client)
 			testSum(t, client)
 			testCountUp(t, client)
@@ -236,11 +237,12 @@ func TestServerProtoGRPC(t *testing.T) {
 			testErrors(t, client)
 		})
 		t.Run("gzip", func(t *testing.T) {
-			client := pingrpc.NewPingServiceClient(
+			client, err := pingrpc.NewPingServiceClient(
 				server.URL,
 				server.Client(),
 				rerpc.UseCompressor(compress.NameGzip),
 			)
+			assert.Nil(t, err, "client construction error")
 			testPing(t, client)
 			testSum(t, client)
 			testCountUp(t, client)
@@ -291,7 +293,8 @@ func TestHeaderBasic(t *testing.T) {
 	)
 	server := httptest.NewServer(mux)
 	defer server.Close()
-	client := pingrpc.NewPingServiceClient(server.URL, server.Client())
+	client, err := pingrpc.NewPingServiceClient(server.URL, server.Client())
+	assert.Nil(t, err, "client construction error")
 	req := rerpc.NewRequest(&pingpb.PingRequest{})
 	req.Header().Set(key, cval)
 	res, err := client.Full().Ping(context.Background(), req)
@@ -368,7 +371,8 @@ func TestHeaderIntegration(t *testing.T) {
 	mux := rerpc.NewServeMux(rerpc.NewNotFoundHandler(), handlers)
 	server := httptest.NewServer(mux)
 	defer server.Close()
-	client := pingrpc.NewPingServiceClient(server.URL, server.Client(), intercept)
+	client, err := pingrpc.NewPingServiceClient(server.URL, server.Client(), intercept)
+	assert.Nil(t, err, "client construction error")
 
 	req := rerpc.NewRequest(&pingpb.PingRequest{})
 	res, err := client.Full().Ping(context.Background(), req)

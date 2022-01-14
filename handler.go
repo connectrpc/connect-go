@@ -148,6 +148,9 @@ func NewStreamingHandler(
 		Package: pkg,
 		Service: service,
 		Method:  method,
+		Compressors: map[string]compress.Compressor{
+			compress.NameGzip: compress.NewGzip(),
+		},
 	}
 	for _, opt := range opts {
 		opt.applyToHandler(&cfg)

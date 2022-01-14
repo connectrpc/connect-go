@@ -24,7 +24,8 @@ func TestHealth(t *testing.T) {
 	server.EnableHTTP2 = true
 	server.StartTLS()
 	defer server.Close()
-	client := health.NewClient(server.URL, server.Client())
+	client, err := health.NewClient(server.URL, server.Client())
+	assert.Nil(t, err, "client construction error")
 
 	const pingFQN = "rerpc.ping.v1test.PingService"
 	const unknown = "foobar"
@@ -49,11 +50,12 @@ func TestHealth(t *testing.T) {
 		assert.Equal(t, rerr.Code(), rerpc.CodeNotFound, "error code")
 	})
 	t.Run("watch", func(t *testing.T) {
-		client := healthrpc.NewHealthClient(
+		client, err := healthrpc.NewHealthClient(
 			server.URL,
 			server.Client(),
 			rerpc.OverrideProtobufPackage("grpc.health.v1"),
 		)
+		assert.Nil(t, err, "client construction error")
 		stream, err := client.Watch(
 			context.Background(),
 			&healthpb.HealthCheckRequest{Service: pingFQN},

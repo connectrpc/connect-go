@@ -239,12 +239,11 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		deprecated(g)
 	}
 	g.P("func ", names.ClientConstructor, " (baseURL string, doer ", rerpcPackage.Ident("Doer"),
-		", opts ...", clientOption, ") *", names.SimpleClientImpl, " {")
+		", opts ...", clientOption, ") (*", names.SimpleClientImpl, ", error) {")
 	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
-	g.P("return &", names.SimpleClientImpl, "{client: ", names.FullClientImpl, "{")
 	for _, method := range service.Methods {
 		if method.Desc.IsStreamingClient() || method.Desc.IsStreamingServer() {
-			g.P(unexport(method.GoName), ": ", rerpcPackage.Ident("NewClientStream"), "(")
+			g.P(unexport(method.GoName), "Func, err := ", rerpcPackage.Ident("NewClientStream"), "(")
 			g.P("doer,")
 			if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
 				g.P(rerpcPackage.Ident("StreamTypeBidirectional"), ",")
@@ -258,19 +257,26 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 			g.P(`"`, service.Desc.Name(), `", // protobuf service`)
 			g.P(`"`, method.Desc.Name(), `", // protobuf method`)
 			g.P("opts...,")
-			g.P("),")
+			g.P(")")
 		} else {
-			g.P(unexport(method.GoName), ": ", rerpcPackage.Ident("NewClientFunc"), "[", method.Input.GoIdent, ", ", method.Output.GoIdent, "](")
+			g.P(unexport(method.GoName), "Func, err := ", rerpcPackage.Ident("NewClientFunc"), "[", method.Input.GoIdent, ", ", method.Output.GoIdent, "](")
 			g.P("doer,")
 			g.P("baseURL,")
 			g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
 			g.P(`"`, service.Desc.Name(), `", // protobuf service`)
 			g.P(`"`, method.Desc.Name(), `", // protobuf method`)
 			g.P("opts...,")
-			g.P("),")
+			g.P(")")
 		}
+		g.P("if err != nil {")
+		g.P("return nil, err")
+		g.P("}")
 	}
-	g.P("}}")
+	g.P("return &", names.SimpleClientImpl, "{client: ", names.FullClientImpl, "{")
+	for _, method := range service.Methods {
+		g.P(unexport(method.GoName), ": ", unexport(method.GoName), "Func,")
+	}
+	g.P("}}, nil")
 	g.P("}")
 	g.P()
 	var hasFullMethod bool

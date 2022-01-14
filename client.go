@@ -26,6 +26,15 @@ type clientCfg struct {
 	RequestCompressor string
 }
 
+func (c *clientCfg) Validate() *Error {
+	if c.RequestCompressor != "" && c.RequestCompressor != compress.NameIdentity {
+		if _, ok := c.Compressors[c.RequestCompressor]; !ok {
+			return Errorf(CodeUnknown, "no registered compressor for %q", c.RequestCompressor)
+		}
+	}
+	return nil
+}
+
 // A ClientOption configures a reRPC client.
 //
 // In addition to any options grouped in the documentation below, remember that
@@ -65,11 +74,14 @@ func NewClientStream(
 	stype StreamType,
 	baseURL, pkg, service, method string,
 	opts ...ClientOption,
-) StreamFunc {
+) (StreamFunc, error) {
 	cfg := clientCfg{
 		Package: pkg,
 		Service: service,
 		Method:  method,
+		Compressors: map[string]compress.Compressor{
+			"gzip": compress.NewGzip(),
+		},
 		// NB, defaulting RequestCompressor to identity is required by
 		// https://github.com/grpc/grpc/blob/master/doc/compression.md - see test
 		// case 6.
@@ -77,10 +89,10 @@ func NewClientStream(
 	for _, opt := range opts {
 		opt.applyToClient(&cfg)
 	}
-	compressors := newROCompressors(cfg.Compressors)
-	if !compressors.Contains(cfg.RequestCompressor) {
-		cfg.RequestCompressor = ""
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
+	compressors := newROCompressors(cfg.Compressors)
 	procedure := fmt.Sprintf("%s.%s/%s", cfg.Package, cfg.Service, cfg.Method)
 	spec := Specification{
 		Type:      stype,
@@ -104,7 +116,7 @@ func NewClientStream(
 	if ic := cfg.Interceptor; ic != nil {
 		sf = ic.WrapStream(sf)
 	}
-	return sf
+	return sf, nil
 }
 
 // NewClientFunc returns a strongly-typed function to call a unary remote
@@ -118,19 +130,22 @@ func NewClientFunc[Req, Res any](
 	doer Doer,
 	baseURL, pkg, service, method string,
 	opts ...ClientOption,
-) func(context.Context, *Request[Req]) (*Response[Res], error) {
+) (func(context.Context, *Request[Req]) (*Response[Res], error), error) {
 	cfg := clientCfg{
 		Package: pkg,
 		Service: service,
 		Method:  method,
+		Compressors: map[string]compress.Compressor{
+			"gzip": compress.NewGzip(),
+		},
 	}
 	for _, opt := range opts {
 		opt.applyToClient(&cfg)
 	}
-	compressors := newROCompressors(cfg.Compressors)
-	if !compressors.Contains(cfg.RequestCompressor) {
-		cfg.RequestCompressor = ""
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
+	compressors := newROCompressors(cfg.Compressors)
 	procedure := fmt.Sprintf("%s.%s/%s", cfg.Package, cfg.Service, cfg.Method)
 	spec := Specification{
 		Type:      StreamTypeUnary,
@@ -192,7 +207,7 @@ func NewClientFunc[Req, Res any](
 			return nil, Errorf(CodeInternal, "unexpected client response type %T", res)
 		}
 		return typed, nil
-	}
+	}, nil
 }
 
 func addGRPCClientHeaders(h Header, acceptCompression string, requestCompressor string) {

@@ -2,8 +2,9 @@ package rerpc_test
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/rerpc/rerpc"
@@ -12,6 +13,7 @@ import (
 )
 
 func ExampleClient() {
+	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 	// Timeouts, connection pooling, custom dialers, and other low-level
 	// transport details are handled by net/http. Everything you already know
 	// (or everything you learn) about hardening net/http Clients applies to
@@ -42,12 +44,18 @@ func ExampleClient() {
 	// Leave it out in real code!
 	short := ShortCircuit(rerpc.Errorf(rerpc.CodeUnimplemented, "no networking in examples"))
 
-	client := pingrpc.NewPingServiceClient("http://invalid-test-url", doer, rerpc.Intercept(short))
+	client, err := pingrpc.NewPingServiceClient("http://invalid-test-url", doer, rerpc.Intercept(short))
+	if err != nil {
+		logger.Print("Error: ", err)
+		return
+	}
 	res, err := client.Ping(context.Background(), &pingpb.PingRequest{})
-	fmt.Println("Response:", res)
-	fmt.Println("Error:", err)
+	if err != nil {
+		logger.Print("Error: ", err)
+		return
+	}
+	logger.Print("Response:", res)
 
 	// Output:
-	// Response: <nil>
 	// Error: Unimplemented: no networking in examples
 }

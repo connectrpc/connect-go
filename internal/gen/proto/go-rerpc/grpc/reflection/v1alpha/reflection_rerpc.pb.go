@@ -55,19 +55,23 @@ var _ SimpleServerReflectionClient = (*ServerReflectionClient)(nil)
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
 // https://api.acme.com or https://acme.com/grpc).
-func NewServerReflectionClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) *ServerReflectionClient {
+func NewServerReflectionClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) (*ServerReflectionClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
+	serverReflectionInfoFunc, err := rerpc.NewClientStream(
+		doer,
+		rerpc.StreamTypeBidirectional,
+		baseURL,
+		"internal.reflection.v1alpha1", // protobuf package
+		"ServerReflection",             // protobuf service
+		"ServerReflectionInfo",         // protobuf method
+		opts...,
+	)
+	if err != nil {
+		return nil, err
+	}
 	return &ServerReflectionClient{client: fullServerReflectionClient{
-		serverReflectionInfo: rerpc.NewClientStream(
-			doer,
-			rerpc.StreamTypeBidirectional,
-			baseURL,
-			"internal.reflection.v1alpha1", // protobuf package
-			"ServerReflection",             // protobuf service
-			"ServerReflectionInfo",         // protobuf method
-			opts...,
-		),
-	}}
+		serverReflectionInfo: serverReflectionInfoFunc,
+	}}, nil
 }
 
 // ServerReflectionInfo calls
