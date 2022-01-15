@@ -33,6 +33,11 @@ func BenchmarkReRPC(b *testing.B) {
 	server.StartTLS()
 	defer server.Close()
 
+	doer := server.Client()
+	httpTransport, ok := doer.Transport.(*http.Transport)
+	assert.True(b, ok, "expected HTTP client to have *http.Transport as RoundTripper")
+	httpTransport.DisableCompression = true
+
 	client, err := crossrpc.NewCrossServiceClient(
 		server.URL,
 		server.Client(),
