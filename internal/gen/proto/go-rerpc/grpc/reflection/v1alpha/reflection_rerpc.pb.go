@@ -10,7 +10,7 @@ import (
 	context "context"
 	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
-	callstream "github.com/rerpc/rerpc/callstream"
+	clientstream "github.com/rerpc/rerpc/clientstream"
 	handlerstream "github.com/rerpc/rerpc/handlerstream"
 	v1alpha "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/reflection/v1alpha"
 	strings "strings"
@@ -29,7 +29,7 @@ const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 type SimpleServerReflectionClient interface {
 	// The reflection service is structured as a bidirectional stream, ensuring
 	// all related requests go to a single server.
-	ServerReflectionInfo(context.Context) *callstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]
+	ServerReflectionInfo(context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]
 }
 
 // FullServerReflectionClient is a client for the
@@ -39,7 +39,7 @@ type SimpleServerReflectionClient interface {
 type FullServerReflectionClient interface {
 	// The reflection service is structured as a bidirectional stream, ensuring
 	// all related requests go to a single server.
-	ServerReflectionInfo(context.Context) *callstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]
+	ServerReflectionInfo(context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]
 }
 
 // ServerReflectionClient is a client for the
@@ -76,7 +76,7 @@ func NewServerReflectionClient(baseURL string, doer rerpc.Doer, opts ...rerpc.Cl
 
 // ServerReflectionInfo calls
 // internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo.
-func (c *ServerReflectionClient) ServerReflectionInfo(ctx context.Context) *callstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
+func (c *ServerReflectionClient) ServerReflectionInfo(ctx context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
 	return c.client.ServerReflectionInfo(ctx)
 }
 
@@ -94,9 +94,9 @@ var _ FullServerReflectionClient = (*fullServerReflectionClient)(nil)
 
 // ServerReflectionInfo calls
 // internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo.
-func (c *fullServerReflectionClient) ServerReflectionInfo(ctx context.Context) *callstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
+func (c *fullServerReflectionClient) ServerReflectionInfo(ctx context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
 	_, sender, receiver := c.serverReflectionInfo(ctx)
-	return callstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
+	return clientstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
 }
 
 // FullServerReflectionServer is a server for the

@@ -1,6 +1,6 @@
-// Package callstream contains typed stream implementations from the caller's
+// Package clientstream contains typed stream implementations from the caller's
 // point of view.
-package callstream
+package clientstream
 
 import "github.com/rerpc/rerpc"
 
