@@ -37,20 +37,13 @@ type Error struct {
 	details []*anypb.Any
 }
 
-// Wrap annotates any error with a status code and error details. If the code
-// is CodeOK, the returned error is nil.
-func Wrap(c Code, err error, details ...proto.Message) *Error {
+// Wrap annotates any error with a status code. If the code is CodeOK, the
+// returned error is nil.
+func Wrap(c Code, err error) *Error {
 	if c == CodeOK {
 		return nil
 	}
-	e := &Error{
-		code: c,
-		err:  err,
-	}
-	if len(details) > 0 {
-		e.SetDetails(details...)
-	}
-	return e
+	return &Error{code: c, err: err}
 }
 
 // Errorf calls fmt.Errorf with the supplied template and arguments, then wraps
