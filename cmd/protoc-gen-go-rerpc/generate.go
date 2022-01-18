@@ -357,27 +357,28 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *
 	}
 
 	if isStreamingClient || isStreamingServer {
-		g.P("_, stream := c.", unexport(method.GoName), "(ctx)")
+		g.P("_, sender, receiver := c.", unexport(method.GoName), "(ctx)")
 		if !isStreamingClient && isStreamingServer {
 			// server streaming, we need to send the request.
-			g.P("if err := stream.Send(req.Any()); err != nil {")
-			g.P("_ = stream.CloseSend(err)")
-			g.P("_ = stream.CloseReceive()")
+			g.P("if err := sender.Send(req.Any()); err != nil {")
+			g.P("_ = sender.Close(err)")
+			g.P("_ = receiver.Close()")
 			g.P("return nil, err")
 			g.P("}")
-			g.P("if err := stream.CloseSend(nil); err != nil {")
-			g.P("_ = stream.CloseReceive()")
+			g.P("if err := sender.Close(nil); err != nil {")
+			g.P("_ = receiver.Close()")
 			g.P("return nil, err")
 			g.P("}")
-			g.P("return ", cstreamPackage.Ident("NewServer"), "[", method.Output.GoIdent, "]", "(stream), nil")
+			g.P("return ", cstreamPackage.Ident("NewServer"),
+				"[", method.Output.GoIdent, "]", "(receiver), nil")
 		} else if isStreamingClient && !isStreamingServer {
 			// client streaming
 			g.P("return ", cstreamPackage.Ident("NewClient"),
-				"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]", "(stream)")
+				"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]", "(sender, receiver)")
 		} else {
 			// bidi streaming
 			g.P("return ", cstreamPackage.Ident("NewBidirectional"),
-				"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]", "(stream)")
+				"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]", "(sender, receiver)")
 		}
 	} else {
 		g.P("return c.", unexport(method.GoName), "(ctx, req)")
@@ -502,36 +503,37 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 			g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
 			g.P(`"`, service.Desc.Name(), `", // protobuf service`)
 			g.P(`"`, method.Desc.Name(), `", // protobuf method`)
-			g.P("func(ctx ", contextContext, ", stream ", rerpcPackage.Ident("Stream"), ") {")
+			g.P("func(ctx ", contextContext, ", sender ", rerpcPackage.Ident("Sender"),
+				", receiver ", rerpcPackage.Ident("Receiver"), ") {")
 			if method.Desc.IsStreamingServer() && method.Desc.IsStreamingClient() {
 				// bidi streaming
 				g.P("typed := ", hstreamPackage.Ident("NewBidirectional"),
-					"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]", "(stream)")
+					"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]", "(sender, receiver)")
 			} else if method.Desc.IsStreamingClient() {
 				// client streaming
 				g.P("typed := ", hstreamPackage.Ident("NewClient"),
-					"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]", "(stream)")
+					"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]", "(sender, receiver)")
 			} else {
 				// server streaming
 				g.P("typed := ", hstreamPackage.Ident("NewServer"),
-					"[", method.Output.GoIdent, "]", "(stream)")
+					"[", method.Output.GoIdent, "]", "(sender)")
 			}
 			if method.Desc.IsStreamingServer() && !method.Desc.IsStreamingClient() {
 				g.P("req, err := ", rerpcPackage.Ident("ReceiveRequest"), "[", method.Input.GoIdent, "]",
-					"(stream)")
+					"(receiver)")
 				g.P("if err != nil {")
-				g.P("_ = stream.CloseReceive()")
-				g.P("_ = stream.CloseSend(err)")
+				g.P("_ = receiver.Close()")
+				g.P("_ = sender.Close(err)")
 				g.P("return")
 				g.P("}")
-				g.P("if err = stream.CloseReceive(); err != nil {")
-				g.P("_ = stream.CloseSend(err)")
+				g.P("if err = receiver.Close(); err != nil {")
+				g.P("_ = sender.Close(err)")
 				g.P("return")
 				g.P("}")
 				g.P("err = svc.", method.GoName, "(ctx, req, typed)")
 			} else {
 				g.P("err := svc.", method.GoName, "(ctx, typed)")
-				g.P("_ = stream.CloseReceive()")
+				g.P("_ = receiver.Close()")
 			}
 			g.P("if err != nil {")
 			// TODO: Dry up context error handling
@@ -544,7 +546,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 			g.P("}")
 			g.P("}")
 			g.P("}")
-			g.P("_ = stream.CloseSend(err)")
+			g.P("_ = sender.Close(err)")
 			g.P("},")
 			g.P("opts...,")
 			g.P(")")
