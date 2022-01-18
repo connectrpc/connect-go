@@ -45,7 +45,7 @@ type HandlerOption interface {
 type Handler struct {
 	stype          StreamType
 	config         handlerCfg
-	implementation func(context.Context, Stream)
+	implementation func(context.Context, Sender, Receiver)
 	compressors    roCompressors
 }
 
@@ -86,23 +86,24 @@ func NewUnaryHandler[Req, Res any](
 	if ic := cfg.Interceptor; ic != nil {
 		untyped = ic.Wrap(untyped)
 	}
-	streamer := func(ctx context.Context, stream Stream) {
-		defer stream.CloseReceive()
+	streamer := func(ctx context.Context, sender Sender, receiver Receiver) {
+		defer receiver.Close()
 		if err := ctx.Err(); err != nil {
 			// TODO: Factor out repeated context error coding.
 			if errors.Is(err, context.Canceled) {
-				_ = stream.CloseSend(Wrap(CodeCanceled, err))
+				_ = sender.Close(Wrap(CodeCanceled, err))
 				return
 			}
 			if errors.Is(err, context.DeadlineExceeded) {
-				_ = stream.CloseSend(Wrap(CodeDeadlineExceeded, err))
+				_ = sender.Close(Wrap(CodeDeadlineExceeded, err))
 				return
 			}
-			_ = stream.CloseSend(err) // unreachable per context docs
+			_ = sender.Close(err) // unreachable per context docs
+			return
 		}
-		req, err := ReceiveRequest[Req](stream)
+		req, err := ReceiveRequest[Req](receiver)
 		if err != nil {
-			_ = stream.CloseSend(err)
+			_ = sender.Close(err)
 			return
 		}
 		res, err := untyped(ctx, req)
@@ -115,13 +116,13 @@ func NewUnaryHandler[Req, Res any](
 					err = Wrap(CodeDeadlineExceeded, err)
 				}
 			}
-			_ = stream.CloseSend(err)
+			_ = sender.Close(err)
 			return
 		}
 		for k, v := range res.Header().raw {
-			stream.Header().raw[k] = v
+			sender.Header().raw[k] = v
 		}
-		_ = stream.CloseSend(stream.Send(res.Any()))
+		_ = sender.Close(sender.Send(res.Any()))
 	}
 	return &Handler{
 		stype:          StreamTypeUnary,
@@ -141,7 +142,7 @@ func NewUnaryHandler[Req, Res any](
 func NewStreamingHandler(
 	stype StreamType,
 	pkg, service, method string,
-	implementation func(context.Context, Stream),
+	implementation func(context.Context, Sender, Receiver),
 	opts ...HandlerOption,
 ) *Handler {
 	cfg := handlerCfg{
@@ -270,8 +271,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Every gRPC response will have these trailers.
 	w.Header()["Trailer"] = grpcStatusTrailers
 
-	sf := StreamFunc(func(ctx context.Context) (context.Context, Stream) {
-		return ctx, newServerStream(
+	sf := StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
+		sender, receiver := newHandlerStream(
 			spec,
 			w,
 			r,
@@ -279,17 +280,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.config.Compressors[requestCompression],
 			h.config.Compressors[responseCompression],
 		)
+		return ctx, sender, receiver
 	})
 	if ic := h.config.Interceptor; ic != nil && h.stype != StreamTypeUnary {
 		sf = ic.WrapStream(sf)
 	}
-	ctx, stream := sf(r.Context())
+	ctx, sender, receiver := sf(r.Context())
 	if failed != nil {
-		_ = stream.CloseReceive()
-		_ = stream.CloseSend(failed)
+		_ = receiver.Close()
+		_ = sender.Close(failed)
 		return
 	}
-	h.implementation(ctx, stream)
+	h.implementation(ctx, sender, receiver)
 }
 
 // Path returns the URL pattern to use when registering this handler. It's used

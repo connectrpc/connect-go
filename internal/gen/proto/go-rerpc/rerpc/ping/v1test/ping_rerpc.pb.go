@@ -187,29 +187,29 @@ func (c *fullPingServiceClient) Fail(ctx context.Context, req *rerpc.Request[v1t
 
 // Sum calls rerpc.ping.v1test.PingService.Sum.
 func (c *fullPingServiceClient) Sum(ctx context.Context) *callstream.Client[v1test.SumRequest, v1test.SumResponse] {
-	_, stream := c.sum(ctx)
-	return callstream.NewClient[v1test.SumRequest, v1test.SumResponse](stream)
+	_, sender, receiver := c.sum(ctx)
+	return callstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 }
 
 // CountUp calls rerpc.ping.v1test.PingService.CountUp.
 func (c *fullPingServiceClient) CountUp(ctx context.Context, req *rerpc.Request[v1test.CountUpRequest]) (*callstream.Server[v1test.CountUpResponse], error) {
-	_, stream := c.countUp(ctx)
-	if err := stream.Send(req.Any()); err != nil {
-		_ = stream.CloseSend(err)
-		_ = stream.CloseReceive()
+	_, sender, receiver := c.countUp(ctx)
+	if err := sender.Send(req.Any()); err != nil {
+		_ = sender.Close(err)
+		_ = receiver.Close()
 		return nil, err
 	}
-	if err := stream.CloseSend(nil); err != nil {
-		_ = stream.CloseReceive()
+	if err := sender.Close(nil); err != nil {
+		_ = receiver.Close()
 		return nil, err
 	}
-	return callstream.NewServer[v1test.CountUpResponse](stream), nil
+	return callstream.NewServer[v1test.CountUpResponse](receiver), nil
 }
 
 // CumSum calls rerpc.ping.v1test.PingService.CumSum.
 func (c *fullPingServiceClient) CumSum(ctx context.Context) *callstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
-	_, stream := c.cumSum(ctx)
-	return callstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](stream)
+	_, sender, receiver := c.cumSum(ctx)
+	return callstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 }
 
 // FullPingServiceServer is a server for the rerpc.ping.v1test.PingService
@@ -261,10 +261,10 @@ func NewFullPingServiceHandler(svc FullPingServiceServer, opts ...rerpc.HandlerO
 		"rerpc.ping.v1test", // protobuf package
 		"PingService",       // protobuf service
 		"Sum",               // protobuf method
-		func(ctx context.Context, stream rerpc.Stream) {
-			typed := handlerstream.NewClient[v1test.SumRequest, v1test.SumResponse](stream)
+		func(ctx context.Context, sender rerpc.Sender, receiver rerpc.Receiver) {
+			typed := handlerstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 			err := svc.Sum(ctx, typed)
-			_ = stream.CloseReceive()
+			_ = receiver.Close()
 			if err != nil {
 				if _, ok := rerpc.AsError(err); !ok {
 					if errors.Is(err, context.Canceled) {
@@ -275,7 +275,7 @@ func NewFullPingServiceHandler(svc FullPingServiceServer, opts ...rerpc.HandlerO
 					}
 				}
 			}
-			_ = stream.CloseSend(err)
+			_ = sender.Close(err)
 		},
 		opts...,
 	)
@@ -286,16 +286,16 @@ func NewFullPingServiceHandler(svc FullPingServiceServer, opts ...rerpc.HandlerO
 		"rerpc.ping.v1test", // protobuf package
 		"PingService",       // protobuf service
 		"CountUp",           // protobuf method
-		func(ctx context.Context, stream rerpc.Stream) {
-			typed := handlerstream.NewServer[v1test.CountUpResponse](stream)
-			req, err := rerpc.ReceiveRequest[v1test.CountUpRequest](stream)
+		func(ctx context.Context, sender rerpc.Sender, receiver rerpc.Receiver) {
+			typed := handlerstream.NewServer[v1test.CountUpResponse](sender)
+			req, err := rerpc.ReceiveRequest[v1test.CountUpRequest](receiver)
 			if err != nil {
-				_ = stream.CloseReceive()
-				_ = stream.CloseSend(err)
+				_ = receiver.Close()
+				_ = sender.Close(err)
 				return
 			}
-			if err = stream.CloseReceive(); err != nil {
-				_ = stream.CloseSend(err)
+			if err = receiver.Close(); err != nil {
+				_ = sender.Close(err)
 				return
 			}
 			err = svc.CountUp(ctx, req, typed)
@@ -309,7 +309,7 @@ func NewFullPingServiceHandler(svc FullPingServiceServer, opts ...rerpc.HandlerO
 					}
 				}
 			}
-			_ = stream.CloseSend(err)
+			_ = sender.Close(err)
 		},
 		opts...,
 	)
@@ -320,10 +320,10 @@ func NewFullPingServiceHandler(svc FullPingServiceServer, opts ...rerpc.HandlerO
 		"rerpc.ping.v1test", // protobuf package
 		"PingService",       // protobuf service
 		"CumSum",            // protobuf method
-		func(ctx context.Context, stream rerpc.Stream) {
-			typed := handlerstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](stream)
+		func(ctx context.Context, sender rerpc.Sender, receiver rerpc.Receiver) {
+			typed := handlerstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 			err := svc.CumSum(ctx, typed)
-			_ = stream.CloseReceive()
+			_ = receiver.Close()
 			if err != nil {
 				if _, ok := rerpc.AsError(err); !ok {
 					if errors.Is(err, context.Canceled) {
@@ -334,7 +334,7 @@ func NewFullPingServiceHandler(svc FullPingServiceServer, opts ...rerpc.HandlerO
 					}
 				}
 			}
-			_ = stream.CloseSend(err)
+			_ = sender.Close(err)
 		},
 		opts...,
 	)

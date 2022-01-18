@@ -149,17 +149,17 @@ func (c *fullHealthClient) Check(ctx context.Context, req *rerpc.Request[v1.Heal
 
 // Watch calls internal.health.v1.Health.Watch.
 func (c *fullHealthClient) Watch(ctx context.Context, req *rerpc.Request[v1.HealthCheckRequest]) (*callstream.Server[v1.HealthCheckResponse], error) {
-	_, stream := c.watch(ctx)
-	if err := stream.Send(req.Any()); err != nil {
-		_ = stream.CloseSend(err)
-		_ = stream.CloseReceive()
+	_, sender, receiver := c.watch(ctx)
+	if err := sender.Send(req.Any()); err != nil {
+		_ = sender.Close(err)
+		_ = receiver.Close()
 		return nil, err
 	}
-	if err := stream.CloseSend(nil); err != nil {
-		_ = stream.CloseReceive()
+	if err := sender.Close(nil); err != nil {
+		_ = receiver.Close()
 		return nil, err
 	}
-	return callstream.NewServer[v1.HealthCheckResponse](stream), nil
+	return callstream.NewServer[v1.HealthCheckResponse](receiver), nil
 }
 
 // FullHealthServer is a server for the internal.health.v1.Health service.
@@ -229,16 +229,16 @@ func NewFullHealthHandler(svc FullHealthServer, opts ...rerpc.HandlerOption) []r
 		"internal.health.v1", // protobuf package
 		"Health",             // protobuf service
 		"Watch",              // protobuf method
-		func(ctx context.Context, stream rerpc.Stream) {
-			typed := handlerstream.NewServer[v1.HealthCheckResponse](stream)
-			req, err := rerpc.ReceiveRequest[v1.HealthCheckRequest](stream)
+		func(ctx context.Context, sender rerpc.Sender, receiver rerpc.Receiver) {
+			typed := handlerstream.NewServer[v1.HealthCheckResponse](sender)
+			req, err := rerpc.ReceiveRequest[v1.HealthCheckRequest](receiver)
 			if err != nil {
-				_ = stream.CloseReceive()
-				_ = stream.CloseSend(err)
+				_ = receiver.Close()
+				_ = sender.Close(err)
 				return
 			}
-			if err = stream.CloseReceive(); err != nil {
-				_ = stream.CloseSend(err)
+			if err = receiver.Close(); err != nil {
+				_ = sender.Close(err)
 				return
 			}
 			err = svc.Watch(ctx, req, typed)
@@ -252,7 +252,7 @@ func NewFullHealthHandler(svc FullHealthServer, opts ...rerpc.HandlerOption) []r
 					}
 				}
 			}
-			_ = stream.CloseSend(err)
+			_ = sender.Close(err)
 		},
 		opts...,
 	)
