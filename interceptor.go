@@ -31,7 +31,7 @@ type Func func(context.Context, AnyRequest) (AnyResponse, error)
 
 // StreamFunc is the generic signature of a streaming RPC. Interceptors wrap
 // StreamFuncs.
-type StreamFunc func(context.Context) (context.Context, Stream)
+type StreamFunc func(context.Context) (context.Context, Sender, Receiver)
 
 // An Interceptor adds logic to a generated handler or client, like the
 // decorators or middleware you may have seen in other libraries. Interceptors

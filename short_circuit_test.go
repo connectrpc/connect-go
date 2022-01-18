@@ -19,9 +19,9 @@ func (sc *shortCircuit) Wrap(next rerpc.Func) rerpc.Func {
 }
 
 func (sc *shortCircuit) WrapStream(next rerpc.StreamFunc) rerpc.StreamFunc {
-	return rerpc.StreamFunc(func(ctx context.Context) (context.Context, rerpc.Stream) {
-		ctx, stream := next(ctx)
-		return ctx, &errStream{Stream: stream, err: sc.err}
+	return rerpc.StreamFunc(func(ctx context.Context) (context.Context, rerpc.Sender, rerpc.Receiver) {
+		ctx, s, r := next(ctx)
+		return ctx, &errSender{Sender: s, err: sc.err}, &errReceiver{Receiver: r, err: sc.err}
 	})
 }
 
@@ -35,15 +35,24 @@ func ShortCircuit(err error) rerpc.Interceptor {
 	return &shortCircuit{err}
 }
 
-type errStream struct {
-	rerpc.Stream
+type errSender struct {
+	rerpc.Sender
 
 	err error
 }
 
-var _ rerpc.Stream = (*errStream)(nil)
+var _ rerpc.Sender = (*errSender)(nil)
 
-func (s *errStream) Receive(_ any) error     { return s.err }
-func (s *errStream) CloseReceive() error     { return s.err }
-func (s *errStream) Send(_ any) error        { return s.err }
-func (s *errStream) CloseSend(_ error) error { return s.err }
+func (s *errSender) Send(_ any) error    { return s.err }
+func (s *errSender) Close(_ error) error { return s.err }
+
+type errReceiver struct {
+	rerpc.Receiver
+
+	err error
+}
+
+var _ rerpc.Receiver = (*errReceiver)(nil)
+
+func (r *errReceiver) Receive(_ any) error { return r.err }
+func (r *errReceiver) Close() error        { return r.err }
