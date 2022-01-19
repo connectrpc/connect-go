@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/rerpc/rerpc"
+	"github.com/rerpc/rerpc/codec/protobuf"
 	"github.com/rerpc/rerpc/handlerstream"
 	reflectionrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/grpc/reflection/v1alpha"
 	rpb "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/reflection/v1alpha"
@@ -45,6 +46,10 @@ type Registrar interface {
 // https://github.com/fullstorydev/grpcurl.
 func NewHandler(reg Registrar, opts ...rerpc.HandlerOption) []rerpc.Handler {
 	const pkg = "grpc.reflection.v1alpha"
+	opts = append([]rerpc.HandlerOption{
+		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
+		rerpc.Codec(protobuf.NameJSON, protobuf.NewJSON()),
+	}, opts...)
 	opts = append(opts, rerpc.OverrideProtobufPackage(pkg))
 	return reflectionrpc.NewFullServerReflectionHandler(&server{reg: reg}, opts...)
 }

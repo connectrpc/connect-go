@@ -11,6 +11,7 @@ import (
 	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
 	clientstream "github.com/rerpc/rerpc/clientstream"
+	protobuf "github.com/rerpc/rerpc/codec/protobuf"
 	handlerstream "github.com/rerpc/rerpc/handlerstream"
 	v1 "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/health/v1"
 	strings "strings"
@@ -80,12 +81,15 @@ type HealthClient struct {
 var _ SimpleHealthClient = (*HealthClient)(nil)
 
 // NewHealthClient constructs a client for the internal.health.v1.Health
-// service.
+// service. By default, it uses the binary protobuf codec.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
 // https://api.acme.com or https://acme.com/grpc).
 func NewHealthClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) (*HealthClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
+	opts = append([]rerpc.ClientOption{
+		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
+	}, opts...)
 	checkFunc, err := rerpc.NewClientFunc[v1.HealthCheckRequest, v1.HealthCheckResponse](
 		doer,
 		baseURL,
@@ -212,8 +216,14 @@ type SimpleHealthServer interface {
 
 // NewFullHealthHandler wraps each method on the service implementation in a
 // rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
+//
+// By default, handlers support the binary protobuf and JSON codecs.
 func NewFullHealthHandler(svc FullHealthServer, opts ...rerpc.HandlerOption) []rerpc.Handler {
 	handlers := make([]rerpc.Handler, 0, 2)
+	opts = append([]rerpc.HandlerOption{
+		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
+		rerpc.Codec(protobuf.NameJSON, protobuf.NewJSON()),
+	}, opts...)
 
 	check := rerpc.NewUnaryHandler(
 		"internal.health.v1", // protobuf package

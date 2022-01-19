@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rerpc/rerpc"
+	"github.com/rerpc/rerpc/codec/protobuf"
 	"github.com/rerpc/rerpc/compress"
 	"github.com/rerpc/rerpc/handlerstream"
 	"github.com/rerpc/rerpc/health"
@@ -240,6 +241,20 @@ func TestServerProtoGRPC(t *testing.T) {
 			client, err := pingrpc.NewPingServiceClient(
 				server.URL,
 				server.Client(),
+				rerpc.UseCompressor(compress.NameGzip),
+			)
+			assert.Nil(t, err, "client construction error")
+			testPing(t, client)
+			testSum(t, client)
+			testCountUp(t, client)
+			testCumSum(t, client, bidi)
+			testErrors(t, client)
+		})
+		t.Run("json_gzip", func(t *testing.T) {
+			client, err := pingrpc.NewPingServiceClient(
+				server.URL,
+				server.Client(),
+				rerpc.Codec(protobuf.NameJSON, protobuf.NewJSON()),
 				rerpc.UseCompressor(compress.NameGzip),
 			)
 			assert.Nil(t, err, "client construction error")

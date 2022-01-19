@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/rerpc/rerpc"
+	"github.com/rerpc/rerpc/codec/protobuf"
 	"github.com/rerpc/rerpc/health"
 	"github.com/rerpc/rerpc/internal/assert"
 	pingrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/rerpc/ping/v1test"
@@ -38,7 +39,6 @@ func TestReflection(t *testing.T) {
 		"rerpc.ping.v1test.PingService",
 	}, "services registered in memory")
 
-	// TODO: Build this simplification into base package.
 	detailed, err := rerpc.NewClientFunc[
 		reflectionpb.ServerReflectionRequest,
 		reflectionpb.ServerReflectionResponse,
@@ -46,6 +46,7 @@ func TestReflection(t *testing.T) {
 		server.Client(),
 		server.URL,
 		"grpc.reflection.v1alpha", "ServerReflection", "ServerReflectionInfo",
+		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
 	)
 	assert.Nil(t, err, "client construction error")
 	call := func(req *reflectionpb.ServerReflectionRequest) (*reflectionpb.ServerReflectionResponse, error) {

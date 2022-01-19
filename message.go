@@ -6,8 +6,7 @@ import (
 	"errors"
 	"io"
 
-	"google.golang.org/protobuf/proto"
-
+	"github.com/rerpc/rerpc/codec"
 	"github.com/rerpc/rerpc/compress"
 )
 
@@ -18,12 +17,13 @@ var (
 type marshaler struct {
 	w          io.Writer
 	compressor compress.Compressor
+	codec      codec.Codec
 }
 
-func (m *marshaler) Marshal(msg proto.Message) *Error {
-	raw, err := proto.Marshal(msg)
+func (m *marshaler) Marshal(msg any) *Error {
+	raw, err := m.codec.Marshal(msg)
 	if err != nil {
-		return Errorf(CodeInternal, "couldn't marshal protobuf message: %w", err)
+		return Errorf(CodeInternal, "couldn't marshal message: %w", err)
 	}
 	if m.compressor == nil || !m.compressor.ShouldCompress(raw) {
 		if err := m.writeGRPCPrefix(false, len(raw)); err != nil {
@@ -75,10 +75,11 @@ func (m *marshaler) writeGRPCPrefix(compressed bool, size int) *Error {
 type unmarshaler struct {
 	r          io.Reader
 	max        int64
+	codec      codec.Codec
 	compressor compress.Compressor
 }
 
-func (u *unmarshaler) Unmarshal(msg proto.Message) *Error {
+func (u *unmarshaler) Unmarshal(msg any) *Error {
 	// Each length-prefixed message starts with 5 bytes of metadata: a one-byte
 	// unsigned integer indicating whether the payload is compressed, and a
 	// four-byte unsigned integer indicating the message length.
@@ -169,9 +170,8 @@ func (u *unmarshaler) Unmarshal(msg proto.Message) *Error {
 		raw = decompressed.Bytes()
 	}
 
-	if err := proto.Unmarshal(raw, msg); err != nil {
-		fqn := msg.ProtoReflect().Descriptor().FullName()
-		return Errorf(CodeInvalidArgument, "can't unmarshal protobuf into %v: %w", fqn, err)
+	if err := u.codec.Unmarshal(raw, msg); err != nil {
+		return Errorf(CodeInvalidArgument, "can't unmarshal into %T: %w", msg, err)
 	}
 
 	return nil
