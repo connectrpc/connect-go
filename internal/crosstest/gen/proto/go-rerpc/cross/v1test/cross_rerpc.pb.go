@@ -11,6 +11,7 @@ import (
 	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
 	clientstream "github.com/rerpc/rerpc/clientstream"
+	protobuf "github.com/rerpc/rerpc/codec/protobuf"
 	handlerstream "github.com/rerpc/rerpc/handlerstream"
 	v1test "github.com/rerpc/rerpc/internal/crosstest/gen/proto/go/cross/v1test"
 	strings "strings"
@@ -53,12 +54,15 @@ type CrossServiceClient struct {
 var _ SimpleCrossServiceClient = (*CrossServiceClient)(nil)
 
 // NewCrossServiceClient constructs a client for the cross.v1test.CrossService
-// service.
+// service. By default, it uses the binary protobuf codec.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
 // https://api.acme.com or https://acme.com/grpc).
 func NewCrossServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) (*CrossServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
+	opts = append([]rerpc.ClientOption{
+		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
+	}, opts...)
 	pingFunc, err := rerpc.NewClientFunc[v1test.PingRequest, v1test.PingResponse](
 		doer,
 		baseURL,
@@ -234,8 +238,14 @@ type SimpleCrossServiceServer interface {
 
 // NewFullCrossServiceHandler wraps each method on the service implementation in
 // a rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
+//
+// By default, handlers support the binary protobuf and JSON codecs.
 func NewFullCrossServiceHandler(svc FullCrossServiceServer, opts ...rerpc.HandlerOption) []rerpc.Handler {
 	handlers := make([]rerpc.Handler, 0, 5)
+	opts = append([]rerpc.HandlerOption{
+		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
+		rerpc.Codec(protobuf.NameJSON, protobuf.NewJSON()),
+	}, opts...)
 
 	ping := rerpc.NewUnaryHandler(
 		"cross.v1test", // protobuf package
