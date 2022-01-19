@@ -349,6 +349,10 @@ func (cs *clientStream) getResponseError() error {
 	return cs.responseErr
 }
 
+// The gRPC wire protocol specifies that errors should be serialized using the
+// binary protobuf format, even if the messages in the request/response stream
+// use a different codec. Consequently, this function needs a protobuf codec to
+// unmarshal error information in the headers.
 func extractError(protobuf codec.Codec, h http.Header) *Error {
 	codeHeader := h.Get("Grpc-Status")
 	if codeHeader == "" || codeHeader == "0" {

@@ -22,12 +22,13 @@ type pingServer struct {
 
 func TestReflection(t *testing.T) {
 	reg := rerpc.NewRegistrar()
-	mux := rerpc.NewServeMux(
+	mux, err := rerpc.NewServeMux(
 		rerpc.NewNotFoundHandler(),
-		pingrpc.NewFullPingServiceHandler(pingServer{}, reg),
-		health.NewHandler(health.NewChecker(reg)),
-		reflection.NewHandler(reg),
+		pingrpc.NewFullPingService(pingServer{}, reg),
+		health.NewService(health.NewChecker(reg)),
+		reflection.NewService(reg),
 	)
+	assert.Nil(t, err, "mux construction error")
 
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
