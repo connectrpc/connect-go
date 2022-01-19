@@ -85,7 +85,7 @@ func (s *server) Watch(
 // safe to call concurrently. The function returned by NewChecker satisfies all
 // these requirements.
 //
-// Note that the returned handlers only support the unary Check method, not the
+// Note that the returned service only supports the unary Check method, not the
 // streaming Watch. As suggested in gRPC's health schema, reRPC returns
 // rerpc.CodeUnimplemented for the Watch method. For more details on gRPC's
 // health checking protocol, see
