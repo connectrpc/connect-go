@@ -191,12 +191,12 @@ func NewClientFunc[Req, Res any](
 			_ = receiver.Close()
 			return nil, err
 		}
-		var res Res
-		if err := receiver.Receive(&res); err != nil {
+		res, err := ReceiveResponse[Res](receiver)
+		if err != nil {
 			_ = receiver.Close()
 			return nil, err
 		}
-		return newResponseWithHeader(&res, receiver.Header()), receiver.Close()
+		return res, receiver.Close()
 	})
 	// To make the specification and RPC headers visible to the full interceptor
 	// chain (as though they were supplied by the caller), we'll add them in the
