@@ -48,9 +48,9 @@ func (p pingServer) Sum(
 		}
 		msg, err := stream.Receive()
 		if errors.Is(err, io.EOF) {
-			return stream.SendAndClose(&pingpb.SumResponse{
+			return stream.SendAndClose(rerpc.NewResponse(&pingpb.SumResponse{
 				Sum: sum,
-			})
+			}))
 		} else if err != nil {
 			return err
 		}
@@ -142,7 +142,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			}
 			res, err := stream.CloseAndReceive()
 			assert.Nil(t, err, "CloseAndReceive error")
-			assert.Equal(t, res, &pingpb.SumResponse{Sum: expect}, "response")
+			assert.Equal(t, res.Msg, &pingpb.SumResponse{Sum: expect}, "response")
 		})
 	}
 	testCountUp := func(t *testing.T, client pingrpc.SimplePingServiceClient) {

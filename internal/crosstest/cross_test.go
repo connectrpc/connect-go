@@ -82,9 +82,9 @@ func (c crossServerReRPC) Sum(
 		}
 		msg, err := stream.Receive()
 		if errors.Is(err, io.EOF) {
-			return stream.SendAndClose(&crosspb.SumResponse{
+			return stream.SendAndClose(rerpc.NewResponse(&crosspb.SumResponse{
 				Sum: sum,
-			})
+			}))
 		} else if err != nil {
 			return err
 		}
@@ -267,7 +267,7 @@ func testWithReRPCClient(t *testing.T, client *crossrpc.CrossServiceClient) {
 		}
 		res, err := stream.CloseAndReceive()
 		assert.Nil(t, err, "CloseAndReceive error")
-		assert.Equal(t, res, &crosspb.SumResponse{Sum: expect}, "response")
+		assert.Equal(t, res.Msg, &crosspb.SumResponse{Sum: expect}, "response")
 	})
 	t.Run("count_up", func(t *testing.T) {
 		const n = 5

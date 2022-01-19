@@ -30,19 +30,14 @@ func (c *Client[Req, Res]) Receive() (*Req, error) {
 	return &req, nil
 }
 
-// Header returns the response headers. Headers are sent when SendAndClose is
-// called.
-func (c *Client[Req, Res]) Header() rerpc.Header {
-	return c.sender.Header()
-}
-
 // SendAndClose closes the receive side of the stream, then sends a response
 // back to the client.
-func (c *Client[Req, Res]) SendAndClose(msg *Res) error {
+func (c *Client[Req, Res]) SendAndClose(msg *rerpc.Response[Res]) error {
 	if err := c.receiver.Close(); err != nil {
 		return err
 	}
-	return c.sender.Send(msg)
+	c.sender.Header().Merge(msg.Header())
+	return c.sender.Send(msg.Msg)
 }
 
 // Server is the server's view of a server streaming RPC.
@@ -61,7 +56,8 @@ func (s *Server[Res]) Header() rerpc.Header {
 	return s.sender.Header()
 }
 
-// Send a message to the client.
+// Send a message to the client. The first call to Send also sends the response
+// headers.
 func (s *Server[Res]) Send(msg *Res) error {
 	return s.sender.Send(msg)
 }
