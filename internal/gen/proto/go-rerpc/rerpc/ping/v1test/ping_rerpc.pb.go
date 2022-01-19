@@ -10,7 +10,7 @@ import (
 	context "context"
 	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
-	callstream "github.com/rerpc/rerpc/callstream"
+	clientstream "github.com/rerpc/rerpc/clientstream"
 	handlerstream "github.com/rerpc/rerpc/handlerstream"
 	v1test "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
 	strings "strings"
@@ -29,9 +29,9 @@ const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 type SimplePingServiceClient interface {
 	Ping(context.Context, *v1test.PingRequest) (*v1test.PingResponse, error)
 	Fail(context.Context, *v1test.FailRequest) (*v1test.FailResponse, error)
-	Sum(context.Context) *callstream.Client[v1test.SumRequest, v1test.SumResponse]
-	CountUp(context.Context, *v1test.CountUpRequest) (*callstream.Server[v1test.CountUpResponse], error)
-	CumSum(context.Context) *callstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]
+	Sum(context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse]
+	CountUp(context.Context, *v1test.CountUpRequest) (*clientstream.Server[v1test.CountUpResponse], error)
+	CumSum(context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]
 }
 
 // FullPingServiceClient is a client for the rerpc.ping.v1test.PingService
@@ -40,9 +40,9 @@ type SimplePingServiceClient interface {
 type FullPingServiceClient interface {
 	Ping(context.Context, *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error)
 	Fail(context.Context, *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error)
-	Sum(context.Context) *callstream.Client[v1test.SumRequest, v1test.SumResponse]
-	CountUp(context.Context, *rerpc.Request[v1test.CountUpRequest]) (*callstream.Server[v1test.CountUpResponse], error)
-	CumSum(context.Context) *callstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]
+	Sum(context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse]
+	CountUp(context.Context, *rerpc.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error)
+	CumSum(context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]
 }
 
 // PingServiceClient is a client for the rerpc.ping.v1test.PingService service.
@@ -145,17 +145,17 @@ func (c *PingServiceClient) Fail(ctx context.Context, req *v1test.FailRequest) (
 }
 
 // Sum calls rerpc.ping.v1test.PingService.Sum.
-func (c *PingServiceClient) Sum(ctx context.Context) *callstream.Client[v1test.SumRequest, v1test.SumResponse] {
+func (c *PingServiceClient) Sum(ctx context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse] {
 	return c.client.Sum(ctx)
 }
 
 // CountUp calls rerpc.ping.v1test.PingService.CountUp.
-func (c *PingServiceClient) CountUp(ctx context.Context, req *v1test.CountUpRequest) (*callstream.Server[v1test.CountUpResponse], error) {
+func (c *PingServiceClient) CountUp(ctx context.Context, req *v1test.CountUpRequest) (*clientstream.Server[v1test.CountUpResponse], error) {
 	return c.client.CountUp(ctx, rerpc.NewRequest(req))
 }
 
 // CumSum calls rerpc.ping.v1test.PingService.CumSum.
-func (c *PingServiceClient) CumSum(ctx context.Context) *callstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
+func (c *PingServiceClient) CumSum(ctx context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
 	return c.client.CumSum(ctx)
 }
 
@@ -186,13 +186,13 @@ func (c *fullPingServiceClient) Fail(ctx context.Context, req *rerpc.Request[v1t
 }
 
 // Sum calls rerpc.ping.v1test.PingService.Sum.
-func (c *fullPingServiceClient) Sum(ctx context.Context) *callstream.Client[v1test.SumRequest, v1test.SumResponse] {
+func (c *fullPingServiceClient) Sum(ctx context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse] {
 	_, sender, receiver := c.sum(ctx)
-	return callstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
+	return clientstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 }
 
 // CountUp calls rerpc.ping.v1test.PingService.CountUp.
-func (c *fullPingServiceClient) CountUp(ctx context.Context, req *rerpc.Request[v1test.CountUpRequest]) (*callstream.Server[v1test.CountUpResponse], error) {
+func (c *fullPingServiceClient) CountUp(ctx context.Context, req *rerpc.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
 	_, sender, receiver := c.countUp(ctx)
 	if err := sender.Send(req.Any()); err != nil {
 		_ = sender.Close(err)
@@ -203,13 +203,13 @@ func (c *fullPingServiceClient) CountUp(ctx context.Context, req *rerpc.Request[
 		_ = receiver.Close()
 		return nil, err
 	}
-	return callstream.NewServer[v1test.CountUpResponse](receiver), nil
+	return clientstream.NewServer[v1test.CountUpResponse](receiver), nil
 }
 
 // CumSum calls rerpc.ping.v1test.PingService.CumSum.
-func (c *fullPingServiceClient) CumSum(ctx context.Context) *callstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
+func (c *fullPingServiceClient) CumSum(ctx context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
 	_, sender, receiver := c.cumSum(ctx)
-	return callstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
+	return clientstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 }
 
 // FullPingServiceServer is a server for the rerpc.ping.v1test.PingService

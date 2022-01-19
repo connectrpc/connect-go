@@ -300,3 +300,10 @@ func (h Header) Del(key string) error {
 	}
 	return nil
 }
+
+// Merge the contents of another Header into the receiver.
+func (h Header) Merge(from Header) {
+	for k, vals := range from.raw {
+		h.raw[k] = append(h.raw[k], vals...)
+	}
+}

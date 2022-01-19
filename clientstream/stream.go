@@ -1,6 +1,6 @@
-// Package callstream contains typed stream implementations from the caller's
+// Package clientstream contains typed stream implementations from the caller's
 // point of view.
-package callstream
+package clientstream
 
 import "github.com/rerpc/rerpc"
 
@@ -15,37 +15,33 @@ func NewClient[Req, Res any](s rerpc.Sender, r rerpc.Receiver) *Client[Req, Res]
 	return &Client[Req, Res]{sender: s, receiver: r}
 }
 
-// Header returns the headers. Headers are sent with the first call to Send.
+// Header returns the request headers. Headers are sent to the server with the
+// first call to Send.
 func (c *Client[Req, Res]) Header() rerpc.Header {
 	return c.sender.Header()
 }
 
-// Send a message to the server.
+// Send a message to the server. The first call to Send also sends the request
+// headers.
 func (c *Client[Req, Res]) Send(msg *Req) error {
 	return c.sender.Send(msg)
 }
 
 // CloseAndReceive closes the send side of the stream and waits for the
 // response.
-func (c *Client[Req, Res]) CloseAndReceive() (*Res, error) {
+func (c *Client[Req, Res]) CloseAndReceive() (*rerpc.Response[Res], error) {
 	if err := c.sender.Close(nil); err != nil {
 		return nil, err
 	}
-	var res Res
-	if err := c.receiver.Receive(&res); err != nil {
+	res, err := rerpc.ReceiveResponse[Res](c.receiver)
+	if err != nil {
 		_ = c.receiver.Close()
 		return nil, err
 	}
 	if err := c.receiver.Close(); err != nil {
 		return nil, err
 	}
-	return &res, nil
-}
-
-// ReceivedHeader returns the headers received from the server. It blocks until
-// the response headers arrive.
-func (c *Client[Req, Res]) ReceivedHeader() rerpc.Header {
-	return c.receiver.Header()
+	return res, nil
 }
 
 // Server is the client's view of a server streaming RPC.
@@ -69,7 +65,7 @@ func (s *Server[Res]) Receive() (*Res, error) {
 }
 
 // ReceivedHeader returns the headers received from the server. It blocks until
-// the response headers arrive.
+// the first call to Receive returns.
 func (s *Server[Res]) ReceivedHeader() rerpc.Header {
 	return s.receiver.Header()
 }
@@ -90,12 +86,14 @@ func NewBidirectional[Req, Res any](s rerpc.Sender, r rerpc.Receiver) *Bidirecti
 	return &Bidirectional[Req, Res]{sender: s, receiver: r}
 }
 
-// Header returns the headers. Headers are sent with the first call to Send.
+// Header returns the request headers. Headers are sent with the first call to
+// Send.
 func (b *Bidirectional[Req, Res]) Header() rerpc.Header {
 	return b.sender.Header()
 }
 
-// Send a message to the server.
+// Send a message to the server. The first call to Send also sends the request
+// headers.
 func (b *Bidirectional[Req, Res]) Send(msg *Req) error {
 	return b.sender.Send(msg)
 }
@@ -121,7 +119,7 @@ func (b *Bidirectional[Req, Res]) CloseReceive() error {
 }
 
 // ReceivedHeader returns the headers received from the server. It blocks until
-// the response headers arrive.
+// the first call to Receive returns.
 func (b *Bidirectional[Req, Res]) ReceivedHeader() rerpc.Header {
 	return b.receiver.Header()
 }

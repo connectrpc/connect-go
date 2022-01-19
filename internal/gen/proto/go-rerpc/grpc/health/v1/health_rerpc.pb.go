@@ -10,7 +10,7 @@ import (
 	context "context"
 	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
-	callstream "github.com/rerpc/rerpc/callstream"
+	clientstream "github.com/rerpc/rerpc/clientstream"
 	handlerstream "github.com/rerpc/rerpc/handlerstream"
 	v1 "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/health/v1"
 	strings "strings"
@@ -44,7 +44,7 @@ type SimpleHealthClient interface {
 	// should assume this method is not supported and should not retry the
 	// call.  If the call terminates with any other status (including OK),
 	// clients should retry the call with appropriate exponential backoff.
-	Watch(context.Context, *v1.HealthCheckRequest) (*callstream.Server[v1.HealthCheckResponse], error)
+	Watch(context.Context, *v1.HealthCheckRequest) (*clientstream.Server[v1.HealthCheckResponse], error)
 }
 
 // FullHealthClient is a client for the internal.health.v1.Health service. It's
@@ -69,7 +69,7 @@ type FullHealthClient interface {
 	// should assume this method is not supported and should not retry the
 	// call.  If the call terminates with any other status (including OK),
 	// clients should retry the call with appropriate exponential backoff.
-	Watch(context.Context, *rerpc.Request[v1.HealthCheckRequest]) (*callstream.Server[v1.HealthCheckResponse], error)
+	Watch(context.Context, *rerpc.Request[v1.HealthCheckRequest]) (*clientstream.Server[v1.HealthCheckResponse], error)
 }
 
 // HealthClient is a client for the internal.health.v1.Health service.
@@ -125,7 +125,7 @@ func (c *HealthClient) Check(ctx context.Context, req *v1.HealthCheckRequest) (*
 }
 
 // Watch calls internal.health.v1.Health.Watch.
-func (c *HealthClient) Watch(ctx context.Context, req *v1.HealthCheckRequest) (*callstream.Server[v1.HealthCheckResponse], error) {
+func (c *HealthClient) Watch(ctx context.Context, req *v1.HealthCheckRequest) (*clientstream.Server[v1.HealthCheckResponse], error) {
 	return c.client.Watch(ctx, rerpc.NewRequest(req))
 }
 
@@ -148,7 +148,7 @@ func (c *fullHealthClient) Check(ctx context.Context, req *rerpc.Request[v1.Heal
 }
 
 // Watch calls internal.health.v1.Health.Watch.
-func (c *fullHealthClient) Watch(ctx context.Context, req *rerpc.Request[v1.HealthCheckRequest]) (*callstream.Server[v1.HealthCheckResponse], error) {
+func (c *fullHealthClient) Watch(ctx context.Context, req *rerpc.Request[v1.HealthCheckRequest]) (*clientstream.Server[v1.HealthCheckResponse], error) {
 	_, sender, receiver := c.watch(ctx)
 	if err := sender.Send(req.Any()); err != nil {
 		_ = sender.Close(err)
@@ -159,7 +159,7 @@ func (c *fullHealthClient) Watch(ctx context.Context, req *rerpc.Request[v1.Heal
 		_ = receiver.Close()
 		return nil, err
 	}
-	return callstream.NewServer[v1.HealthCheckResponse](receiver), nil
+	return clientstream.NewServer[v1.HealthCheckResponse](receiver), nil
 }
 
 // FullHealthServer is a server for the internal.health.v1.Health service.
