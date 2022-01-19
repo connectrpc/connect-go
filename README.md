@@ -49,14 +49,13 @@ func (ps *PingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingp
 }
 
 func main() {
-  handlers, err := pingpb.NewPingServiceHandler(&PingServer{})
+  mux, err := rerpc.NewServeMux(
+    rerpc.NewNotFoundHandler(),            // fallback
+    pingpb.NewPingService(&PingServer{}),  // our logic
+  )
   if err != nil {
     panic(err)
   }
-  mux := rerpc.NewServeMux(
-    rerpc.NewNotFoundHandler(), // fallback
-    handlers,                   // our logic
-  )
   http.ListenAndServe(
     ":8081",
     h2c.NewHandler(mux, &http2.Server{}),

@@ -24,10 +24,11 @@ import (
 )
 
 func BenchmarkReRPC(b *testing.B) {
-	mux := rerpc.NewServeMux(
+	mux, err := rerpc.NewServeMux(
 		rerpc.NewNotFoundHandler(),
-		crossrpc.NewFullCrossServiceHandler(crossServerReRPC{}),
+		crossrpc.NewFullCrossService(crossServerReRPC{}),
 	)
+	assert.Nil(b, err, "mux construction error")
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()

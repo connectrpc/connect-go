@@ -35,22 +35,18 @@ func Example() {
 	checker := health.NewChecker(reg)        // basic health checks
 	limit := rerpc.ReadMaxBytes(1024 * 1024) // limit request size
 
-	// Next, we convert our implementation of the PingService into a slice
-	// of net/http Handlers.
-	pingHandler, err := pingrpc.NewPingServiceHandler(ping, reg, limit)
-	if err != nil {
-		panic(err)
-	}
-
 	// NewServeMux returns a plain net/http *ServeMux. Since a mux is an
 	// http.Handler, reRPC works with any Go HTTP middleware (e.g., net/http's
 	// StripPrefix).
-	mux := rerpc.NewServeMux(
-		rerpc.NewNotFoundHandler(), // fallback handler
-		pingHandler,                // business logic
-		reflection.NewHandler(reg), // server reflection
-		health.NewHandler(checker), // health checks
+	mux, err := rerpc.NewServeMux(
+		rerpc.NewNotFoundHandler(),               // fallback handler
+		pingrpc.NewPingService(ping, reg, limit), // business logic
+		reflection.NewService(reg),               // server reflection
+		health.NewService(checker),               // health checks
 	)
+	if err != nil {
+		panic(err)
+	}
 
 	// Timeouts, connection handling, TLS configuration, and other low-level
 	// transport details are handled by net/http. Everything you already know (or

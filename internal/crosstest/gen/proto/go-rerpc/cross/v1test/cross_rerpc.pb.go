@@ -236,36 +236,42 @@ type SimpleCrossServiceServer interface {
 	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
 
-// NewFullCrossServiceHandler wraps each method on the service implementation in
-// a rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
+// NewFullCrossService wraps each method on the service implementation in a
+// rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
 //
 // By default, handlers support the binary protobuf and JSON codecs.
-func NewFullCrossServiceHandler(svc FullCrossServiceServer, opts ...rerpc.HandlerOption) []rerpc.Handler {
+func NewFullCrossService(svc FullCrossServiceServer, opts ...rerpc.HandlerOption) *rerpc.Service {
 	handlers := make([]rerpc.Handler, 0, 5)
 	opts = append([]rerpc.HandlerOption{
 		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
 		rerpc.Codec(protobuf.NameJSON, protobuf.NewJSON()),
 	}, opts...)
 
-	ping := rerpc.NewUnaryHandler(
+	ping, err := rerpc.NewUnaryHandler(
 		"cross.v1test", // protobuf package
 		"CrossService", // protobuf service
 		"Ping",         // protobuf method
 		svc.Ping,
 		opts...,
 	)
+	if err != nil {
+		return rerpc.NewService(nil, err)
+	}
 	handlers = append(handlers, *ping)
 
-	fail := rerpc.NewUnaryHandler(
+	fail, err := rerpc.NewUnaryHandler(
 		"cross.v1test", // protobuf package
 		"CrossService", // protobuf service
 		"Fail",         // protobuf method
 		svc.Fail,
 		opts...,
 	)
+	if err != nil {
+		return rerpc.NewService(nil, err)
+	}
 	handlers = append(handlers, *fail)
 
-	sum := rerpc.NewStreamingHandler(
+	sum, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeClient,
 		"cross.v1test", // protobuf package
 		"CrossService", // protobuf service
@@ -288,9 +294,12 @@ func NewFullCrossServiceHandler(svc FullCrossServiceServer, opts ...rerpc.Handle
 		},
 		opts...,
 	)
+	if err != nil {
+		return rerpc.NewService(nil, err)
+	}
 	handlers = append(handlers, *sum)
 
-	countUp := rerpc.NewStreamingHandler(
+	countUp, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeServer,
 		"cross.v1test", // protobuf package
 		"CrossService", // protobuf service
@@ -322,9 +331,12 @@ func NewFullCrossServiceHandler(svc FullCrossServiceServer, opts ...rerpc.Handle
 		},
 		opts...,
 	)
+	if err != nil {
+		return rerpc.NewService(nil, err)
+	}
 	handlers = append(handlers, *countUp)
 
-	cumSum := rerpc.NewStreamingHandler(
+	cumSum, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeBidirectional,
 		"cross.v1test", // protobuf package
 		"CrossService", // protobuf service
@@ -347,9 +359,12 @@ func NewFullCrossServiceHandler(svc FullCrossServiceServer, opts ...rerpc.Handle
 		},
 		opts...,
 	)
+	if err != nil {
+		return rerpc.NewService(nil, err)
+	}
 	handlers = append(handlers, *cumSum)
 
-	return handlers
+	return rerpc.NewService(handlers, nil)
 }
 
 type pluggableCrossServiceServer struct {
@@ -380,10 +395,10 @@ func (s *pluggableCrossServiceServer) CumSum(ctx context.Context, stream *handle
 	return s.cumSum(ctx, stream)
 }
 
-// NewCrossServiceHandler wraps each method on the service implementation in a
+// NewCrossService wraps each method on the service implementation in a
 // rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
 //
-// Unlike NewFullCrossServiceHandler, it allows the service to mix and match the
+// Unlike NewFullCrossService, it allows the service to mix and match the
 // signatures of FullCrossServiceServer and SimpleCrossServiceServer. For each
 // method, it first tries to find a SimpleCrossServiceServer-style
 // implementation. If a simple implementation isn't available, it falls back to
@@ -393,7 +408,7 @@ func (s *pluggableCrossServiceServer) CumSum(ctx context.Context, stream *handle
 // Taken together, this approach lets implementations embed
 // UnimplementedCrossServiceServer and implement each method using whichever
 // signature is most convenient.
-func NewCrossServiceHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handler, error) {
+func NewCrossService(svc any, opts ...rerpc.HandlerOption) *rerpc.Service {
 	var impl pluggableCrossServiceServer
 
 	// Find an implementation of Ping
@@ -412,7 +427,7 @@ func NewCrossServiceHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handl
 	}); ok {
 		impl.ping = pinger.Ping
 	} else {
-		return nil, errors.New("no Ping implementation found")
+		return rerpc.NewService(nil, errors.New("no Ping implementation found"))
 	}
 
 	// Find an implementation of Fail
@@ -431,7 +446,7 @@ func NewCrossServiceHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handl
 	}); ok {
 		impl.fail = failer.Fail
 	} else {
-		return nil, errors.New("no Fail implementation found")
+		return rerpc.NewService(nil, errors.New("no Fail implementation found"))
 	}
 
 	// Find an implementation of Sum
@@ -440,7 +455,7 @@ func NewCrossServiceHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handl
 	}); ok {
 		impl.sum = sumer.Sum
 	} else {
-		return nil, errors.New("no Sum implementation found")
+		return rerpc.NewService(nil, errors.New("no Sum implementation found"))
 	}
 
 	// Find an implementation of CountUp
@@ -455,7 +470,7 @@ func NewCrossServiceHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handl
 	}); ok {
 		impl.countUp = countUper.CountUp
 	} else {
-		return nil, errors.New("no CountUp implementation found")
+		return rerpc.NewService(nil, errors.New("no CountUp implementation found"))
 	}
 
 	// Find an implementation of CumSum
@@ -464,10 +479,10 @@ func NewCrossServiceHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handl
 	}); ok {
 		impl.cumSum = cumSumer.CumSum
 	} else {
-		return nil, errors.New("no CumSum implementation found")
+		return rerpc.NewService(nil, errors.New("no CumSum implementation found"))
 	}
 
-	return NewFullCrossServiceHandler(&impl, opts...), nil
+	return NewFullCrossService(&impl, opts...)
 }
 
 var _ FullCrossServiceServer = (*UnimplementedCrossServiceServer)(nil) // verify interface implementation

@@ -16,12 +16,14 @@ import (
 
 func TestHandlerReadMaxBytes(t *testing.T) {
 	const readMaxBytes = 32
-	handlers, err := pingrpc.NewPingServiceHandler(
-		&ExamplePingServer{},
-		rerpc.ReadMaxBytes(readMaxBytes),
+	ping, err := rerpc.NewServeMux(
+		rerpc.NewNotFoundHandler(),
+		pingrpc.NewPingService(
+			&ExamplePingServer{},
+			rerpc.ReadMaxBytes(readMaxBytes),
+		),
 	)
-	assert.Nil(t, err, "build ping handlers")
-	ping := rerpc.NewServeMux(rerpc.NewNotFoundHandler(), handlers)
+	assert.Nil(t, err, "mux construction error")
 
 	server := httptest.NewServer(ping)
 	defer server.Close()

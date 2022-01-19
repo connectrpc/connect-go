@@ -36,6 +36,16 @@ type handlerCfg struct {
 	Method              string
 }
 
+func (c *handlerCfg) Validate() error {
+	if _, ok := c.Codecs[""]; ok {
+		return errors.New("can't register codec with an empty name")
+	}
+	if _, ok := c.Compressors[""]; ok {
+		return errors.New("can't register compressor with an empty name")
+	}
+	return nil
+}
+
 // A HandlerOption configures a Handler.
 //
 // In addition to any options grouped in the documentation below, remember that
@@ -70,7 +80,7 @@ func NewUnaryHandler[Req, Res any](
 	pkg, service, method string,
 	implementation func(context.Context, *Request[Req]) (*Response[Res], error),
 	opts ...HandlerOption,
-) *Handler {
+) (*Handler, error) {
 	cfg := handlerCfg{
 		Package: pkg,
 		Service: service,
@@ -82,6 +92,9 @@ func NewUnaryHandler[Req, Res any](
 	}
 	for _, opt := range opts {
 		opt.applyToHandler(&cfg)
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, Wrap(CodeInternal, err)
 	}
 	if reg := cfg.Registrar; reg != nil && !cfg.DisableRegistration {
 		reg.register(cfg.Package, cfg.Service)
@@ -141,7 +154,7 @@ func NewUnaryHandler[Req, Res any](
 		implementation: streamer,
 		compressors:    newROCompressors(cfg.Compressors),
 		codecs:         newROCodecs(cfg.Codecs),
-	}
+	}, nil
 }
 
 // NewStreamingHandler constructs a Handler. The supplied package, service, and
@@ -156,7 +169,7 @@ func NewStreamingHandler(
 	pkg, service, method string,
 	implementation func(context.Context, Sender, Receiver),
 	opts ...HandlerOption,
-) *Handler {
+) (*Handler, error) {
 	cfg := handlerCfg{
 		Package: pkg,
 		Service: service,
@@ -169,6 +182,9 @@ func NewStreamingHandler(
 	for _, opt := range opts {
 		opt.applyToHandler(&cfg)
 	}
+	if err := cfg.Validate(); err != nil {
+		return nil, Wrap(CodeInternal, err)
+	}
 	if reg := cfg.Registrar; reg != nil && !cfg.DisableRegistration {
 		reg.register(cfg.Package, cfg.Service)
 	}
@@ -178,7 +194,7 @@ func NewStreamingHandler(
 		implementation: implementation,
 		compressors:    newROCompressors(cfg.Compressors),
 		codecs:         newROCodecs(cfg.Codecs),
-	}
+	}, nil
 }
 
 // ServeHTTP implements http.Handler.
