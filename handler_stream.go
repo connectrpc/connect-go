@@ -1,13 +1,13 @@
 package rerpc
 
 import (
-	"errors"
 	"io"
 	"net/http"
 	"strconv"
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/rerpc/rerpc/codec"
 	"github.com/rerpc/rerpc/compress"
 	statuspb "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/status/v1"
 )
@@ -20,18 +20,30 @@ func newHandlerStream(
 	w http.ResponseWriter,
 	r *http.Request,
 	maxReadBytes int64,
+	codec codec.Codec,
+	protobuf codec.Codec,
 	requestCompressor compress.Compressor,
 	responseCompressor compress.Compressor,
 ) (*handlerSender, *handlerReceiver) {
 	sender := &handlerSender{
-		spec:      spec,
-		marshaler: marshaler{w: w, compressor: responseCompressor},
-		writer:    w,
+		spec: spec,
+		marshaler: marshaler{
+			w:          w,
+			compressor: responseCompressor,
+			codec:      codec,
+		},
+		protobuf: protobuf,
+		writer:   w,
 	}
 	receiver := &handlerReceiver{
-		spec:        spec,
-		unmarshaler: unmarshaler{r: r.Body, max: maxReadBytes, compressor: requestCompressor},
-		request:     r,
+		spec: spec,
+		unmarshaler: unmarshaler{
+			r:          r.Body,
+			max:        maxReadBytes,
+			compressor: requestCompressor,
+			codec:      codec,
+		},
+		request: r,
 	}
 	return sender, receiver
 }
@@ -39,6 +51,7 @@ func newHandlerStream(
 type handlerSender struct {
 	spec      Specification
 	marshaler marshaler
+	protobuf  codec.Codec // for errors
 	writer    http.ResponseWriter
 }
 
@@ -80,7 +93,7 @@ func (hs *handlerSender) sendErrorGRPC(err error) error {
 	}
 	s := statusFromError(err)
 	code := strconv.Itoa(int(s.Code))
-	bin, err := proto.Marshal(s)
+	bin, err := hs.protobuf.Marshal(s)
 	if err != nil {
 		hs.writer.Header().Set("Grpc-Status", strconv.Itoa(int(CodeInternal)))
 		hs.writer.Header().Set("Grpc-Message", percentEncode("error marshaling protobuf status with code "+code))
@@ -151,38 +164,6 @@ func statusFromError(err error) *statuspb.Status {
 		}
 	}
 	return s
-}
-
-func extractError(h http.Header) *Error {
-	codeHeader := h.Get("Grpc-Status")
-	if codeHeader == "" || codeHeader == "0" {
-		return nil
-	}
-
-	code, err := strconv.ParseUint(codeHeader, 10 /* base */, 32 /* bitsize */)
-	if err != nil {
-		return Errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
-	}
-	message := percentDecode(h.Get("Grpc-Message"))
-	ret := Wrap(Code(code), errors.New(message))
-
-	detailsBinaryEncoded := h.Get("Grpc-Status-Details-Bin")
-	if len(detailsBinaryEncoded) > 0 {
-		detailsBinary, err := decodeBinaryHeader(detailsBinaryEncoded)
-		if err != nil {
-			return Errorf(CodeUnknown, "server returned invalid grpc-error-details-bin trailer: %w", err)
-		}
-		var status statuspb.Status
-		if err := proto.Unmarshal(detailsBinary, &status); err != nil {
-			return Errorf(CodeUnknown, "server returned invalid protobuf for error details: %w", err)
-		}
-		ret.details = status.Details
-		// Prefer the protobuf-encoded data to the headers (grpc-go does this too).
-		ret.code = Code(status.Code)
-		ret.err = errors.New(status.Message)
-	}
-
-	return ret
 }
 
 func discard(r io.Reader) {

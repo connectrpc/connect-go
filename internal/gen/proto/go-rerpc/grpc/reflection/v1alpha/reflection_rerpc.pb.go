@@ -11,6 +11,7 @@ import (
 	errors "errors"
 	rerpc "github.com/rerpc/rerpc"
 	clientstream "github.com/rerpc/rerpc/clientstream"
+	protobuf "github.com/rerpc/rerpc/codec/protobuf"
 	handlerstream "github.com/rerpc/rerpc/handlerstream"
 	v1alpha "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/reflection/v1alpha"
 	strings "strings"
@@ -51,12 +52,16 @@ type ServerReflectionClient struct {
 var _ SimpleServerReflectionClient = (*ServerReflectionClient)(nil)
 
 // NewServerReflectionClient constructs a client for the
-// internal.reflection.v1alpha1.ServerReflection service.
+// internal.reflection.v1alpha1.ServerReflection service. By default, it uses
+// the binary protobuf codec.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
 // https://api.acme.com or https://acme.com/grpc).
 func NewServerReflectionClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) (*ServerReflectionClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
+	opts = append([]rerpc.ClientOption{
+		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
+	}, opts...)
 	serverReflectionInfoFunc, err := rerpc.NewClientStream(
 		doer,
 		rerpc.StreamTypeBidirectional,
@@ -119,8 +124,14 @@ type SimpleServerReflectionServer interface {
 // NewFullServerReflectionHandler wraps each method on the service
 // implementation in a rerpc.Handler. The returned slice can be passed to
 // rerpc.NewServeMux.
+//
+// By default, handlers support the binary protobuf and JSON codecs.
 func NewFullServerReflectionHandler(svc FullServerReflectionServer, opts ...rerpc.HandlerOption) []rerpc.Handler {
 	handlers := make([]rerpc.Handler, 0, 1)
+	opts = append([]rerpc.HandlerOption{
+		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
+		rerpc.Codec(protobuf.NameJSON, protobuf.NewJSON()),
+	}, opts...)
 
 	serverReflectionInfo := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeBidirectional,

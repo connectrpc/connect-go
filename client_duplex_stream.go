@@ -5,12 +5,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
+	"github.com/rerpc/rerpc/codec"
 	"github.com/rerpc/rerpc/compress"
+	statuspb "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/status/v1"
 )
 
 // See clientStream below: the send and receive sides of client streams are
@@ -54,6 +55,8 @@ type clientStream struct {
 	url          string
 	spec         Specification
 	maxReadBytes int64
+	codec        codec.Codec
+	protobuf     codec.Codec // for errors
 
 	// send
 	prepareOnce sync.Once
@@ -79,6 +82,8 @@ func newClientStream(
 	spec Specification,
 	header Header,
 	maxReadBytes int64,
+	codec codec.Codec,
+	protobuf codec.Codec,
 	requestCompressor compress.Compressor,
 	compressors roCompressors,
 ) (*clientSender, *clientReceiver) {
@@ -96,13 +101,19 @@ func newClientStream(
 	// the response stream.
 	pr, pw := io.Pipe()
 	duplex := &clientStream{
-		ctx:           ctx,
-		doer:          doer,
-		url:           baseURL + "/" + spec.Procedure,
-		spec:          spec,
-		maxReadBytes:  maxReadBytes,
-		writer:        pw,
-		marshaler:     marshaler{w: pw, compressor: requestCompressor},
+		ctx:          ctx,
+		doer:         doer,
+		url:          baseURL + "/" + spec.Procedure,
+		spec:         spec,
+		maxReadBytes: maxReadBytes,
+		codec:        codec,
+		protobuf:     protobuf,
+		writer:       pw,
+		marshaler: marshaler{
+			w:          pw,
+			compressor: requestCompressor,
+			codec:      codec,
+		},
 		header:        header,
 		reader:        pr,
 		compressors:   compressors,
@@ -119,7 +130,7 @@ func (cs *clientStream) Header() Header {
 	return cs.header
 }
 
-func (cs *clientStream) Send(m any) error {
+func (cs *clientStream) Send(msg any) error {
 	// stream.makeRequest hands the read side of the pipe off to net/http and
 	// waits to establish the response stream. There's a small class of errors we
 	// can catch without even sending data over the network, though, so we don't
@@ -133,11 +144,6 @@ func (cs *clientStream) Send(m any) error {
 		go cs.makeRequest(requestPrepared)
 		<-requestPrepared
 	})
-	// TODO: update this when codec is pluggable
-	msg, ok := m.(proto.Message)
-	if !ok {
-		return Errorf(CodeInternal, "expected proto.Message, got %T", m)
-	}
 	// Calling Marshal writes data to the send stream. It's safe to do this while
 	// makeRequest is running, because we're writing to our side of the pipe
 	// (which is safe to do while net/http reads from the other side).
@@ -187,12 +193,7 @@ func (cs *clientStream) CloseSend(_ error) error {
 	return nil
 }
 
-func (cs *clientStream) Receive(m any) error {
-	// TODO: update this when codec is pluggable
-	msg, ok := m.(proto.Message)
-	if !ok {
-		return Errorf(CodeInternal, "expected proto.Message, got %T", m)
-	}
+func (cs *clientStream) Receive(msg any) error {
 	// First, we wait until we've gotten the response headers and established the
 	// server-to-client side of the stream.
 	<-cs.responseReady
@@ -206,7 +207,7 @@ func (cs *clientStream) Receive(m any) error {
 		// If we can't read this LPM, see if the server sent an explicit error in
 		// trailers. First, we need to read the body to EOF.
 		discard(cs.response.Body)
-		if serverErr := extractError(cs.response.Trailer); serverErr != nil {
+		if serverErr := extractError(cs.protobuf, cs.response.Trailer); serverErr != nil {
 			cs.setResponseError(serverErr)
 			return serverErr
 		}
@@ -316,14 +317,19 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 	}
 	// When there's no body, errors sent from the first-party gRPC servers will
 	// be in the headers.
-	if err := extractError(res.Header); err != nil {
+	if err := extractError(cs.protobuf, res.Header); err != nil {
 		cs.setResponseError(err)
 		return
 	}
 	// Success! We got a response with valid headers and no error, so there's
 	// probably a message waiting in the stream.
 	cs.response = res
-	cs.unmarshaler = unmarshaler{r: res.Body, max: cs.maxReadBytes, compressor: cs.compressors.Get(compression)}
+	cs.unmarshaler = unmarshaler{
+		r:          res.Body,
+		max:        cs.maxReadBytes,
+		codec:      cs.codec,
+		compressor: cs.compressors.Get(compression),
+	}
 }
 
 func (cs *clientStream) setResponseError(err error) {
@@ -341,4 +347,36 @@ func (cs *clientStream) getResponseError() error {
 	cs.responseErrMu.Lock()
 	defer cs.responseErrMu.Unlock()
 	return cs.responseErr
+}
+
+func extractError(protobuf codec.Codec, h http.Header) *Error {
+	codeHeader := h.Get("Grpc-Status")
+	if codeHeader == "" || codeHeader == "0" {
+		return nil
+	}
+
+	code, err := strconv.ParseUint(codeHeader, 10 /* base */, 32 /* bitsize */)
+	if err != nil {
+		return Errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
+	}
+	message := percentDecode(h.Get("Grpc-Message"))
+	ret := Wrap(Code(code), errors.New(message))
+
+	detailsBinaryEncoded := h.Get("Grpc-Status-Details-Bin")
+	if len(detailsBinaryEncoded) > 0 {
+		detailsBinary, err := decodeBinaryHeader(detailsBinaryEncoded)
+		if err != nil {
+			return Errorf(CodeUnknown, "server returned invalid grpc-error-details-bin trailer: %w", err)
+		}
+		var status statuspb.Status
+		if err := protobuf.Unmarshal(detailsBinary, &status); err != nil {
+			return Errorf(CodeUnknown, "server returned invalid protobuf for error details: %w", err)
+		}
+		ret.details = status.Details
+		// Prefer the protobuf-encoded data to the headers (grpc-go does this too).
+		ret.code = Code(status.Code)
+		ret.err = errors.New(status.Message)
+	}
+
+	return ret
 }

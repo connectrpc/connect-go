@@ -12,14 +12,6 @@ const Version = "0.0.1"
 // this limit, set MaxHeaderBytes on your http.Server.
 const MaxHeaderBytes = 1024 * 8
 
-// ReRPC's supported HTTP Content-Types. Servers decide which RPC protocol to
-// use based on the request's Content-Type. See the protocol documentation at
-// https://rerpc.github.io for more information.
-const (
-	TypeDefaultGRPC = "application/grpc"
-	TypeProtoGRPC   = "application/grpc+proto"
-)
-
 // StreamType describes whether the client, server, neither, or both is
 // streaming.
 type StreamType uint8

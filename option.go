@@ -1,6 +1,9 @@
 package rerpc
 
-import "github.com/rerpc/rerpc/compress"
+import (
+	"github.com/rerpc/rerpc/codec"
+	"github.com/rerpc/rerpc/compress"
+)
 
 // Option implements both ClientOption and HandlerOption, so it can be applied
 // both client-side and server-side.
@@ -60,6 +63,44 @@ func (o *readMaxBytes) applyToClient(cfg *clientCfg) {
 
 func (o *readMaxBytes) applyToHandler(cfg *handlerCfg) {
 	cfg.MaxRequestBytes = o.Max
+}
+
+type codecOption struct {
+	Name  string
+	Codec codec.Codec
+}
+
+// Codec registers a serialization method with a client or handler.
+//
+// Typically, generated code automatically supplies this option with the
+// appropriate codec(s). For example, handlers generated from protobuf schemas
+// using protoc-gen-go-rerpc automatically register binary and JSON codecs.
+// Users with more specialized needs may override the default codecs by
+// registering a new codec under the same name.
+//
+// Handlers may have multiple codecs registered, and use whichever the client
+// chooses. Clients may only have a single codec.
+//
+// When registering protocol buffer codecs, take care to use reRPC's
+// protobuf.NameBinary ("protobuf") rather than "proto".
+func Codec(name string, c codec.Codec) Option {
+	return &codecOption{
+		Name:  name,
+		Codec: c,
+	}
+}
+
+func (o *codecOption) applyToClient(cfg *clientCfg) {
+	cfg.Codec = o.Codec
+	cfg.CodecName = o.Name
+}
+
+func (o *codecOption) applyToHandler(cfg *handlerCfg) {
+	if o.Codec == nil {
+		delete(cfg.Codecs, o.Name)
+		return
+	}
+	cfg.Codecs[o.Name] = o.Codec
 }
 
 type compressorOption struct {
