@@ -15,11 +15,12 @@ import (
 
 func TestHealth(t *testing.T) {
 	reg := rerpc.NewRegistrar()
-	mux := rerpc.NewServeMux(
+	mux, err := rerpc.NewServeMux(
 		rerpc.NewNotFoundHandler(),
-		pingrpc.NewFullPingServiceHandler(pingrpc.UnimplementedPingServiceServer{}, reg),
-		health.NewHandler(health.NewChecker(reg)),
+		pingrpc.NewFullPingService(pingrpc.UnimplementedPingServiceServer{}, reg),
+		health.NewService(health.NewChecker(reg)),
 	)
+	assert.Nil(t, err, "mux construction error")
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()

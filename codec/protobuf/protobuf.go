@@ -20,8 +20,7 @@ const (
 )
 
 // Binary marshals protobuf structs to and from binary.
-type Binary struct {
-}
+type Binary struct{}
 
 var _ codec.Codec = (*Binary)(nil)
 

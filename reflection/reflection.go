@@ -30,9 +30,8 @@ type Registrar interface {
 	Services() []string // returns fully-qualified protobuf services names
 }
 
-// NewHandler uses the information in the supplied Registrar to construct an
-// HTTP handler for gRPC's server reflection API. It returns the HTTP handler
-// and the correct path on which to mount it.
+// NewService uses the information in the supplied Registrar to construct
+// HTTP handlers for gRPC's server reflection API.
 //
 // Note that because the reflection API requires bidirectional streaming, the
 // returned handler only supports gRPC over HTTP/2 (i.e., it doesn't support
@@ -44,14 +43,17 @@ type Registrar interface {
 // https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md,
 // https://github.com/grpc/grpc/blob/master/doc/server-reflection.md, and
 // https://github.com/fullstorydev/grpcurl.
-func NewHandler(reg Registrar, opts ...rerpc.HandlerOption) []rerpc.Handler {
+func NewService(reg Registrar, opts ...rerpc.HandlerOption) *rerpc.Service {
 	const pkg = "grpc.reflection.v1alpha"
 	opts = append([]rerpc.HandlerOption{
 		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
 		rerpc.Codec(protobuf.NameJSON, protobuf.NewJSON()),
 	}, opts...)
 	opts = append(opts, rerpc.OverrideProtobufPackage(pkg))
-	return reflectionrpc.NewFullServerReflectionHandler(&server{reg: reg}, opts...)
+	return reflectionrpc.NewFullServerReflection(
+		&server{reg: reg},
+		opts...,
+	)
 }
 
 type server struct {

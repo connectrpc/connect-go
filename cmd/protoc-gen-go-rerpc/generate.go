@@ -130,9 +130,9 @@ func newNames(service *protogen.Service) names {
 		SimpleServer:               fmt.Sprintf("Simple%sServer", base),
 		FullServer:                 fmt.Sprintf("Full%sServer", base),
 		UnimplementedServer:        fmt.Sprintf("Unimplemented%sServer", base),
-		FullHandlerConstructor:     fmt.Sprintf("NewFull%sHandler", base),
+		FullHandlerConstructor:     fmt.Sprintf("NewFull%s", base),
 		AdaptiveServerImpl:         fmt.Sprintf("pluggable%sServer", base),
-		AdaptiveHandlerConstructor: fmt.Sprintf("New%sHandler", base),
+		AdaptiveHandlerConstructor: fmt.Sprintf("New%s", base),
 	}
 }
 
@@ -496,7 +496,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 	}
 	handlerOption := rerpcPackage.Ident("HandlerOption")
 	g.P("func ", names.FullHandlerConstructor, "(svc ", names.FullServer, ", opts ...", handlerOption,
-		") []", rerpcPackage.Ident("Handler"), " {")
+		") *", rerpcPackage.Ident("Service"), " {")
 	g.P("handlers := make([]", rerpcPackage.Ident("Handler"), ", 0, ", len(service.Methods), ")")
 	g.P("opts = append([]", handlerOption, "{")
 	g.P(rerpcPackage.Ident("Codec"), "(", rerpcProtoPackage.Ident("NameBinary"), ", ", rerpcProtoPackage.Ident("NewBinary"), "()", "),")
@@ -507,7 +507,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		hname := unexport(string(method.Desc.Name()))
 
 		if method.Desc.IsStreamingServer() || method.Desc.IsStreamingClient() {
-			g.P(hname, " := ", rerpcPackage.Ident("NewStreamingHandler"), "(")
+			g.P(hname, ", err := ", rerpcPackage.Ident("NewStreamingHandler"), "(")
 			if method.Desc.IsStreamingServer() && method.Desc.IsStreamingClient() {
 				g.P(rerpcPackage.Ident("StreamTypeBidirectional"), ",")
 			} else if method.Desc.IsStreamingServer() {
@@ -551,7 +551,6 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 				g.P("_ = receiver.Close()")
 			}
 			g.P("if err != nil {")
-			// TODO: Dry up context error handling
 			g.P("if _, ok := ", rerpcPackage.Ident("AsError"), "(err); !ok {")
 			g.P("if ", errorsIs, "(err, ", contextCanceled, ") {")
 			g.P("err = ", rerpcPackage.Ident("Wrap"), "(", rerpcPackage.Ident("CodeCanceled"), ", err)")
@@ -566,7 +565,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 			g.P("opts...,")
 			g.P(")")
 		} else {
-			g.P(hname, " := ", rerpcPackage.Ident("NewUnaryHandler"), "(")
+			g.P(hname, ", err := ", rerpcPackage.Ident("NewUnaryHandler"), "(")
 			g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
 			g.P(`"`, service.Desc.Name(), `", // protobuf service`)
 			g.P(`"`, method.Desc.Name(), `", // protobuf method`)
@@ -574,10 +573,13 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 			g.P("opts...,")
 			g.P(")")
 		}
+		g.P("if err != nil {")
+		g.P("return ", rerpcPackage.Ident("NewService"), "(nil, err)")
+		g.P("}")
 		g.P("handlers = append(handlers, *", hname, ")")
 		g.P()
 	}
-	g.P("return handlers")
+	g.P("return ", rerpcPackage.Ident("NewService"), "(handlers, nil)")
 	g.P("}")
 	g.P()
 }
@@ -647,7 +649,7 @@ func adaptiveServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 		deprecated(g)
 	}
 	g.P("func ", names.AdaptiveHandlerConstructor, "(svc any, opts ...", rerpcPackage.Ident("HandlerOption"),
-		") ([]", rerpcPackage.Ident("Handler"), ", error) {")
+		") *", rerpcPackage.Ident("Service"), " {")
 	g.P("var impl ", names.AdaptiveServerImpl)
 	g.P()
 	for _, method := range service.Methods {
@@ -659,7 +661,8 @@ func adaptiveServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 			g.P("if ", fnamer, ", ok := svc.(interface{", serverSignature(g, method, false /* full */), "}); ok {")
 			g.P("impl.", unexport(method.GoName), " = ", fnamer, ".", method.GoName)
 			g.P("} else {")
-			g.P("return nil, ", errorsPackage.Ident("New"), `("no `, method.GoName, ` implementation found")`)
+			g.P("return ", rerpcPackage.Ident("NewService"), "(nil, ",
+				errorsPackage.Ident("New"), `("no `, method.GoName, ` implementation found"))`)
 			g.P("}")
 			g.P()
 			continue
@@ -685,11 +688,11 @@ func adaptiveServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 		g.P("} else if ", fnamer, ", ok := svc.(interface{", serverSignature(g, method, true /* full */), "}); ok {")
 		g.P("impl.", unexport(method.GoName), " = ", fnamer, ".", method.GoName)
 		g.P("} else {")
-		g.P("return nil, ", errorsPackage.Ident("New"), `("no `, method.GoName, ` implementation found")`)
+		g.P("return ", rerpcPackage.Ident("NewService"), "(nil, ", errorsPackage.Ident("New"), `("no `, method.GoName, ` implementation found"))`)
 		g.P("}")
 		g.P()
 	}
-	g.P("return ", names.FullHandlerConstructor, "(&impl, opts...), nil")
+	g.P("return ", names.FullHandlerConstructor, "(&impl, opts...)")
 	g.P("}")
 	g.P()
 }

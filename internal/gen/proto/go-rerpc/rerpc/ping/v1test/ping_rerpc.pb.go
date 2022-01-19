@@ -238,36 +238,42 @@ type SimplePingServiceServer interface {
 	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
 
-// NewFullPingServiceHandler wraps each method on the service implementation in
-// a rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
+// NewFullPingService wraps each method on the service implementation in a
+// rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
 //
 // By default, handlers support the binary protobuf and JSON codecs.
-func NewFullPingServiceHandler(svc FullPingServiceServer, opts ...rerpc.HandlerOption) []rerpc.Handler {
+func NewFullPingService(svc FullPingServiceServer, opts ...rerpc.HandlerOption) *rerpc.Service {
 	handlers := make([]rerpc.Handler, 0, 5)
 	opts = append([]rerpc.HandlerOption{
 		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
 		rerpc.Codec(protobuf.NameJSON, protobuf.NewJSON()),
 	}, opts...)
 
-	ping := rerpc.NewUnaryHandler(
+	ping, err := rerpc.NewUnaryHandler(
 		"rerpc.ping.v1test", // protobuf package
 		"PingService",       // protobuf service
 		"Ping",              // protobuf method
 		svc.Ping,
 		opts...,
 	)
+	if err != nil {
+		return rerpc.NewService(nil, err)
+	}
 	handlers = append(handlers, *ping)
 
-	fail := rerpc.NewUnaryHandler(
+	fail, err := rerpc.NewUnaryHandler(
 		"rerpc.ping.v1test", // protobuf package
 		"PingService",       // protobuf service
 		"Fail",              // protobuf method
 		svc.Fail,
 		opts...,
 	)
+	if err != nil {
+		return rerpc.NewService(nil, err)
+	}
 	handlers = append(handlers, *fail)
 
-	sum := rerpc.NewStreamingHandler(
+	sum, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeClient,
 		"rerpc.ping.v1test", // protobuf package
 		"PingService",       // protobuf service
@@ -290,9 +296,12 @@ func NewFullPingServiceHandler(svc FullPingServiceServer, opts ...rerpc.HandlerO
 		},
 		opts...,
 	)
+	if err != nil {
+		return rerpc.NewService(nil, err)
+	}
 	handlers = append(handlers, *sum)
 
-	countUp := rerpc.NewStreamingHandler(
+	countUp, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeServer,
 		"rerpc.ping.v1test", // protobuf package
 		"PingService",       // protobuf service
@@ -324,9 +333,12 @@ func NewFullPingServiceHandler(svc FullPingServiceServer, opts ...rerpc.HandlerO
 		},
 		opts...,
 	)
+	if err != nil {
+		return rerpc.NewService(nil, err)
+	}
 	handlers = append(handlers, *countUp)
 
-	cumSum := rerpc.NewStreamingHandler(
+	cumSum, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeBidirectional,
 		"rerpc.ping.v1test", // protobuf package
 		"PingService",       // protobuf service
@@ -349,9 +361,12 @@ func NewFullPingServiceHandler(svc FullPingServiceServer, opts ...rerpc.HandlerO
 		},
 		opts...,
 	)
+	if err != nil {
+		return rerpc.NewService(nil, err)
+	}
 	handlers = append(handlers, *cumSum)
 
-	return handlers
+	return rerpc.NewService(handlers, nil)
 }
 
 type pluggablePingServiceServer struct {
@@ -382,10 +397,10 @@ func (s *pluggablePingServiceServer) CumSum(ctx context.Context, stream *handler
 	return s.cumSum(ctx, stream)
 }
 
-// NewPingServiceHandler wraps each method on the service implementation in a
+// NewPingService wraps each method on the service implementation in a
 // rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
 //
-// Unlike NewFullPingServiceHandler, it allows the service to mix and match the
+// Unlike NewFullPingService, it allows the service to mix and match the
 // signatures of FullPingServiceServer and SimplePingServiceServer. For each
 // method, it first tries to find a SimplePingServiceServer-style
 // implementation. If a simple implementation isn't available, it falls back to
@@ -395,7 +410,7 @@ func (s *pluggablePingServiceServer) CumSum(ctx context.Context, stream *handler
 // Taken together, this approach lets implementations embed
 // UnimplementedPingServiceServer and implement each method using whichever
 // signature is most convenient.
-func NewPingServiceHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handler, error) {
+func NewPingService(svc any, opts ...rerpc.HandlerOption) *rerpc.Service {
 	var impl pluggablePingServiceServer
 
 	// Find an implementation of Ping
@@ -414,7 +429,7 @@ func NewPingServiceHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handle
 	}); ok {
 		impl.ping = pinger.Ping
 	} else {
-		return nil, errors.New("no Ping implementation found")
+		return rerpc.NewService(nil, errors.New("no Ping implementation found"))
 	}
 
 	// Find an implementation of Fail
@@ -433,7 +448,7 @@ func NewPingServiceHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handle
 	}); ok {
 		impl.fail = failer.Fail
 	} else {
-		return nil, errors.New("no Fail implementation found")
+		return rerpc.NewService(nil, errors.New("no Fail implementation found"))
 	}
 
 	// Find an implementation of Sum
@@ -442,7 +457,7 @@ func NewPingServiceHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handle
 	}); ok {
 		impl.sum = sumer.Sum
 	} else {
-		return nil, errors.New("no Sum implementation found")
+		return rerpc.NewService(nil, errors.New("no Sum implementation found"))
 	}
 
 	// Find an implementation of CountUp
@@ -457,7 +472,7 @@ func NewPingServiceHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handle
 	}); ok {
 		impl.countUp = countUper.CountUp
 	} else {
-		return nil, errors.New("no CountUp implementation found")
+		return rerpc.NewService(nil, errors.New("no CountUp implementation found"))
 	}
 
 	// Find an implementation of CumSum
@@ -466,10 +481,10 @@ func NewPingServiceHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handle
 	}); ok {
 		impl.cumSum = cumSumer.CumSum
 	} else {
-		return nil, errors.New("no CumSum implementation found")
+		return rerpc.NewService(nil, errors.New("no CumSum implementation found"))
 	}
 
-	return NewFullPingServiceHandler(&impl, opts...), nil
+	return NewFullPingService(&impl, opts...)
 }
 
 var _ FullPingServiceServer = (*UnimplementedPingServiceServer)(nil) // verify interface implementation
