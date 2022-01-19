@@ -12,13 +12,16 @@ import (
 
 const (
 	contextPackage = protogen.GoImportPath("context")
-	rerpcPackage   = protogen.GoImportPath("github.com/rerpc/rerpc")
 	httpPackage    = protogen.GoImportPath("net/http")
-	protoPackage   = protogen.GoImportPath("google.golang.org/protobuf/proto")
 	stringsPackage = protogen.GoImportPath("strings")
 	errorsPackage  = protogen.GoImportPath("errors")
-	cstreamPackage = protogen.GoImportPath("github.com/rerpc/rerpc/clientstream")
-	hstreamPackage = protogen.GoImportPath("github.com/rerpc/rerpc/handlerstream")
+
+	protoPackage = protogen.GoImportPath("google.golang.org/protobuf/proto")
+
+	rerpcPackage      = protogen.GoImportPath("github.com/rerpc/rerpc")
+	rerpcProtoPackage = protogen.GoImportPath("github.com/rerpc/rerpc/codec/protobuf")
+	cstreamPackage    = protogen.GoImportPath("github.com/rerpc/rerpc/clientstream")
+	hstreamPackage    = protogen.GoImportPath("github.com/rerpc/rerpc/handlerstream")
 )
 
 var (
@@ -230,7 +233,8 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	g.P("var _ ", names.SimpleClient, " = (*", names.SimpleClientImpl, ")(nil)")
 
 	// Client constructor.
-	comment(g, names.ClientConstructor, " constructs a client for the ", service.Desc.FullName(), " service.")
+	comment(g, names.ClientConstructor, " constructs a client for the ", service.Desc.FullName(),
+		" service. By default, it uses the binary protobuf codec.")
 	g.P("//")
 	comment(g, "The URL supplied here should be the base URL for the gRPC server ",
 		"(e.g., https://api.acme.com or https://acme.com/grpc).")
@@ -241,6 +245,10 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	g.P("func ", names.ClientConstructor, " (baseURL string, doer ", rerpcPackage.Ident("Doer"),
 		", opts ...", clientOption, ") (*", names.SimpleClientImpl, ", error) {")
 	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
+	g.P("opts = append([]", clientOption, "{")
+	g.P(rerpcPackage.Ident("Codec"), "(", rerpcProtoPackage.Ident("NameBinary"), ", ",
+		rerpcProtoPackage.Ident("NewBinary"), "()),")
+	g.P("}, opts...)")
 	for _, method := range service.Methods {
 		if method.Desc.IsStreamingClient() || method.Desc.IsStreamingServer() {
 			g.P(unexport(method.GoName), "Func, err := ", rerpcPackage.Ident("NewClientStream"), "(")
@@ -480,13 +488,20 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, names names) {
 	comment(g, names.FullHandlerConstructor, " wraps each method on the service implementation",
 		" in a rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.")
+	g.P("//")
+	comment(g, "By default, handlers support the binary protobuf and JSON codecs.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
 	}
-	g.P("func ", names.FullHandlerConstructor, "(svc ", names.FullServer, ", opts ...", rerpcPackage.Ident("HandlerOption"),
+	handlerOption := rerpcPackage.Ident("HandlerOption")
+	g.P("func ", names.FullHandlerConstructor, "(svc ", names.FullServer, ", opts ...", handlerOption,
 		") []", rerpcPackage.Ident("Handler"), " {")
 	g.P("handlers := make([]", rerpcPackage.Ident("Handler"), ", 0, ", len(service.Methods), ")")
+	g.P("opts = append([]", handlerOption, "{")
+	g.P(rerpcPackage.Ident("Codec"), "(", rerpcProtoPackage.Ident("NameBinary"), ", ", rerpcProtoPackage.Ident("NewBinary"), "()", "),")
+	g.P(rerpcPackage.Ident("Codec"), "(", rerpcProtoPackage.Ident("NameJSON"), ", ", rerpcProtoPackage.Ident("NewJSON"), "()", "),")
+	g.P("}, opts...)")
 	g.P()
 	for _, method := range service.Methods {
 		hname := unexport(string(method.Desc.Name()))

@@ -8,16 +8,25 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/rerpc/rerpc/codec"
+	"github.com/rerpc/rerpc/codec/protobuf"
 	"github.com/rerpc/rerpc/compress"
 )
 
+const (
+	typeDefaultGRPC = "application/grpc"
+	typeGRPCPrefix  = typeDefaultGRPC + "+"
+	// gRPC protocol uses "proto" instead of "protobuf"
+	grpcNameProto = "proto"
+)
+
 var (
-	acceptPostValue    = strings.Join([]string{TypeDefaultGRPC, TypeProtoGRPC}, ",")
 	grpcStatusTrailers = []string{"Grpc-Status", "Grpc-Message", "Grpc-Status-Details-Bin"}
 )
 
 type handlerCfg struct {
 	Compressors         map[string]compress.Compressor
+	Codecs              map[string]codec.Codec
 	MaxRequestBytes     int64
 	Registrar           *Registrar
 	Interceptor         Interceptor
@@ -47,6 +56,7 @@ type Handler struct {
 	config         handlerCfg
 	implementation func(context.Context, Sender, Receiver)
 	compressors    roCompressors
+	codecs         roCodecs
 }
 
 // NewUnaryHandler constructs a Handler. The supplied package, service, and
@@ -68,6 +78,7 @@ func NewUnaryHandler[Req, Res any](
 		Compressors: map[string]compress.Compressor{
 			compress.NameGzip: compress.NewGzip(),
 		},
+		Codecs: make(map[string]codec.Codec),
 	}
 	for _, opt := range opts {
 		opt.applyToHandler(&cfg)
@@ -129,6 +140,7 @@ func NewUnaryHandler[Req, Res any](
 		config:         cfg,
 		implementation: streamer,
 		compressors:    newROCompressors(cfg.Compressors),
+		codecs:         newROCodecs(cfg.Codecs),
 	}
 }
 
@@ -152,6 +164,7 @@ func NewStreamingHandler(
 		Compressors: map[string]compress.Compressor{
 			compress.NameGzip: compress.NewGzip(),
 		},
+		Codecs: make(map[string]codec.Codec),
 	}
 	for _, opt := range opts {
 		opt.applyToHandler(&cfg)
@@ -164,6 +177,7 @@ func NewStreamingHandler(
 		config:         cfg,
 		implementation: implementation,
 		compressors:    newROCompressors(cfg.Compressors),
+		codecs:         newROCodecs(cfg.Codecs),
 	}
 }
 
@@ -186,11 +200,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	var clientCodec codec.Codec
 	ctype := r.Header.Get("Content-Type")
-	if ctype != TypeDefaultGRPC && ctype != TypeProtoGRPC {
+	if codecName := codecFromContentType(ctype); codecName != "" {
+		clientCodec = h.codecs.Get(codecName)
+	}
+	if clientCodec == nil {
 		// grpc-go returns 500, but the spec recommends 415.
 		// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#requests
-		w.Header().Set("Accept-Post", acceptPostValue)
+		w.Header().Set("Accept-Post", acceptPostValue(h.codecs))
 		w.WriteHeader(http.StatusUnsupportedMediaType)
 		return
 	}
@@ -277,6 +295,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w,
 			r,
 			h.config.MaxRequestBytes,
+			clientCodec,
+			h.codecs.Protobuf(), // for errors
 			h.config.Compressors[requestCompression],
 			h.config.Compressors[responseCompression],
 		)
@@ -306,4 +326,40 @@ func (h *Handler) Path() string {
 
 func splitOnCommasAndSpaces(c rune) bool {
 	return c == ',' || c == ' '
+}
+
+func acceptPostValue(codecs roCodecs) string {
+	names := codecs.Names()
+	for i, n := range names {
+		if n == protobuf.NameBinary {
+			n = "proto"
+		}
+		names[i] = "application/grpc+" + n
+	}
+	names = append(names, "application/grpc")
+	return strings.Join(names, ",")
+}
+
+func codecFromContentType(ctype string) string {
+	if ctype == typeDefaultGRPC {
+		// implicitly protobuf
+		return protobuf.NameBinary
+	}
+	if !strings.HasPrefix(ctype, typeGRPCPrefix) {
+		return ""
+	}
+	name := strings.TrimPrefix(ctype, typeGRPCPrefix)
+	if name == grpcNameProto {
+		// normalize to our "protobuf"
+		return protobuf.NameBinary
+	}
+	return name
+}
+
+func contentTypeFromCodecName(n string) string {
+	// translate back to gRPC's "proto"
+	if n == protobuf.NameBinary {
+		n = grpcNameProto
+	}
+	return typeGRPCPrefix + n
 }

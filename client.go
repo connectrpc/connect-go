@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/rerpc/rerpc/codec"
+	"github.com/rerpc/rerpc/codec/protobuf"
 	"github.com/rerpc/rerpc/compress"
 )
 
@@ -23,16 +25,28 @@ type clientCfg struct {
 	MaxResponseBytes  int64
 	Interceptor       Interceptor
 	Compressors       map[string]compress.Compressor
+	Codec             codec.Codec
+	CodecName         string
 	RequestCompressor string
 }
 
 func (c *clientCfg) Validate() *Error {
+	if c.Codec == nil || c.CodecName == "" {
+		return Errorf(CodeUnknown, "no codec configured")
+	}
 	if c.RequestCompressor != "" && c.RequestCompressor != compress.NameIdentity {
 		if _, ok := c.Compressors[c.RequestCompressor]; !ok {
 			return Errorf(CodeUnknown, "no registered compressor for %q", c.RequestCompressor)
 		}
 	}
 	return nil
+}
+
+func (c *clientCfg) Protobuf() codec.Codec {
+	if c.CodecName == protobuf.NameBinary {
+		return c.Codec
+	}
+	return protobuf.NewBinary()
 }
 
 // A ClientOption configures a reRPC client.
@@ -101,7 +115,7 @@ func NewClientStream(
 	}
 	sf := StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
 		header := Header{raw: make(http.Header, 8)}
-		addGRPCClientHeaders(header, compressors.Names(), cfg.RequestCompressor)
+		addGRPCClientHeaders(header, cfg.CodecName, compressors.Names(), cfg.RequestCompressor)
 		sender, receiver := newClientStream(
 			ctx,
 			doer,
@@ -109,6 +123,8 @@ func NewClientStream(
 			spec,
 			header,
 			cfg.MaxResponseBytes,
+			cfg.Codec,
+			cfg.Protobuf(),
 			compressors.Get(cfg.RequestCompressor),
 			compressors,
 		)
@@ -161,6 +177,8 @@ func NewClientFunc[Req, Res any](
 			spec,
 			msg.Header(),
 			cfg.MaxResponseBytes,
+			cfg.Codec,
+			cfg.Protobuf(),
 			compressors.Get(cfg.RequestCompressor),
 			compressors,
 		)
@@ -190,7 +208,7 @@ func NewClientFunc[Req, Res any](
 				return nil, Errorf(CodeInternal, "unexpected client request type %T", req)
 			}
 			typed.spec = spec
-			addGRPCClientHeaders(req.Header(), compressors.Names(), cfg.RequestCompressor)
+			addGRPCClientHeaders(req.Header(), cfg.CodecName, compressors.Names(), cfg.RequestCompressor)
 			return next(ctx, typed)
 		}
 	}
@@ -211,12 +229,12 @@ func NewClientFunc[Req, Res any](
 	}, nil
 }
 
-func addGRPCClientHeaders(h Header, acceptCompression string, requestCompressor string) {
+func addGRPCClientHeaders(h Header, codecName, acceptCompression, requestCompressor string) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set. To avoid allocating the same slices over and over,
 	// we use pre-allocated globals for the header values.
 	h.raw["User-Agent"] = []string{userAgent}
-	h.raw["Content-Type"] = []string{TypeProtoGRPC}
+	h.raw["Content-Type"] = []string{contentTypeFromCodecName(codecName)}
 	if requestCompressor != "" && requestCompressor != compress.NameIdentity {
 		h.raw["Grpc-Encoding"] = []string{requestCompressor}
 	}
