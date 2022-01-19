@@ -17,7 +17,7 @@ const (
 	protoPackage   = protogen.GoImportPath("google.golang.org/protobuf/proto")
 	stringsPackage = protogen.GoImportPath("strings")
 	errorsPackage  = protogen.GoImportPath("errors")
-	cstreamPackage = protogen.GoImportPath("github.com/rerpc/rerpc/callstream")
+	cstreamPackage = protogen.GoImportPath("github.com/rerpc/rerpc/clientstream")
 	hstreamPackage = protogen.GoImportPath("github.com/rerpc/rerpc/handlerstream")
 )
 

@@ -200,3 +200,20 @@ func TestHeaderWrappers(t *testing.T) {
 	assert.Nil(t, err, "get missing binary header")
 	assert.Zero(t, len(missing), "expected zero-len byte slice for missing binary header")
 }
+
+func TestHeaderMerge(t *testing.T) {
+	h := Header{raw: http.Header{
+		"Foo": []string{"one"},
+	}}
+	h.Merge(Header{raw: http.Header{
+		"Foo": []string{"two"},
+		"Bar": []string{"one"},
+		"Baz": nil,
+	}})
+	expect := http.Header{
+		"Foo": []string{"one", "two"},
+		"Bar": []string{"one"},
+		"Baz": nil,
+	}
+	assert.Equal(t, h.raw, expect, "merge result")
+}
