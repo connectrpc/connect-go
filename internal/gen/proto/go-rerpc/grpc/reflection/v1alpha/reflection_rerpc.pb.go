@@ -121,19 +121,18 @@ type SimpleServerReflectionServer interface {
 	ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error
 }
 
-// NewFullServerReflectionHandler wraps each method on the service
-// implementation in a rerpc.Handler. The returned slice can be passed to
-// rerpc.NewServeMux.
+// NewFullServerReflection wraps each method on the service implementation in a
+// rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
 //
 // By default, handlers support the binary protobuf and JSON codecs.
-func NewFullServerReflectionHandler(svc FullServerReflectionServer, opts ...rerpc.HandlerOption) []rerpc.Handler {
+func NewFullServerReflection(svc FullServerReflectionServer, opts ...rerpc.HandlerOption) *rerpc.Service {
 	handlers := make([]rerpc.Handler, 0, 1)
 	opts = append([]rerpc.HandlerOption{
 		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
 		rerpc.Codec(protobuf.NameJSON, protobuf.NewJSON()),
 	}, opts...)
 
-	serverReflectionInfo := rerpc.NewStreamingHandler(
+	serverReflectionInfo, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeBidirectional,
 		"internal.reflection.v1alpha1", // protobuf package
 		"ServerReflection",             // protobuf service
@@ -156,9 +155,12 @@ func NewFullServerReflectionHandler(svc FullServerReflectionServer, opts ...rerp
 		},
 		opts...,
 	)
+	if err != nil {
+		return rerpc.NewService(nil, err)
+	}
 	handlers = append(handlers, *serverReflectionInfo)
 
-	return handlers
+	return rerpc.NewService(handlers, nil)
 }
 
 type pluggableServerReflectionServer struct {
@@ -169,21 +171,20 @@ func (s *pluggableServerReflectionServer) ServerReflectionInfo(ctx context.Conte
 	return s.serverReflectionInfo(ctx, stream)
 }
 
-// NewServerReflectionHandler wraps each method on the service implementation in
-// a rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
+// NewServerReflection wraps each method on the service implementation in a
+// rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
 //
-// Unlike NewFullServerReflectionHandler, it allows the service to mix and match
-// the signatures of FullServerReflectionServer and
-// SimpleServerReflectionServer. For each method, it first tries to find a
-// SimpleServerReflectionServer-style implementation. If a simple implementation
-// isn't available, it falls back to the more complex
-// FullServerReflectionServer-style implementation. If neither is available, it
-// returns an error.
+// Unlike NewFullServerReflection, it allows the service to mix and match the
+// signatures of FullServerReflectionServer and SimpleServerReflectionServer.
+// For each method, it first tries to find a SimpleServerReflectionServer-style
+// implementation. If a simple implementation isn't available, it falls back to
+// the more complex FullServerReflectionServer-style implementation. If neither
+// is available, it returns an error.
 //
 // Taken together, this approach lets implementations embed
 // UnimplementedServerReflectionServer and implement each method using whichever
 // signature is most convenient.
-func NewServerReflectionHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handler, error) {
+func NewServerReflection(svc any, opts ...rerpc.HandlerOption) *rerpc.Service {
 	var impl pluggableServerReflectionServer
 
 	// Find an implementation of ServerReflectionInfo
@@ -192,10 +193,10 @@ func NewServerReflectionHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.H
 	}); ok {
 		impl.serverReflectionInfo = serverReflectionInfoer.ServerReflectionInfo
 	} else {
-		return nil, errors.New("no ServerReflectionInfo implementation found")
+		return rerpc.NewService(nil, errors.New("no ServerReflectionInfo implementation found"))
 	}
 
-	return NewFullServerReflectionHandler(&impl, opts...), nil
+	return NewFullServerReflection(&impl, opts...)
 }
 
 var _ FullServerReflectionServer = (*UnimplementedServerReflectionServer)(nil) // verify interface implementation

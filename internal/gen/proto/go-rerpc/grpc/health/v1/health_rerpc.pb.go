@@ -214,27 +214,30 @@ type SimpleHealthServer interface {
 	Watch(context.Context, *v1.HealthCheckRequest, *handlerstream.Server[v1.HealthCheckResponse]) error
 }
 
-// NewFullHealthHandler wraps each method on the service implementation in a
+// NewFullHealth wraps each method on the service implementation in a
 // rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
 //
 // By default, handlers support the binary protobuf and JSON codecs.
-func NewFullHealthHandler(svc FullHealthServer, opts ...rerpc.HandlerOption) []rerpc.Handler {
+func NewFullHealth(svc FullHealthServer, opts ...rerpc.HandlerOption) *rerpc.Service {
 	handlers := make([]rerpc.Handler, 0, 2)
 	opts = append([]rerpc.HandlerOption{
 		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
 		rerpc.Codec(protobuf.NameJSON, protobuf.NewJSON()),
 	}, opts...)
 
-	check := rerpc.NewUnaryHandler(
+	check, err := rerpc.NewUnaryHandler(
 		"internal.health.v1", // protobuf package
 		"Health",             // protobuf service
 		"Check",              // protobuf method
 		svc.Check,
 		opts...,
 	)
+	if err != nil {
+		return rerpc.NewService(nil, err)
+	}
 	handlers = append(handlers, *check)
 
-	watch := rerpc.NewStreamingHandler(
+	watch, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeServer,
 		"internal.health.v1", // protobuf package
 		"Health",             // protobuf service
@@ -266,9 +269,12 @@ func NewFullHealthHandler(svc FullHealthServer, opts ...rerpc.HandlerOption) []r
 		},
 		opts...,
 	)
+	if err != nil {
+		return rerpc.NewService(nil, err)
+	}
 	handlers = append(handlers, *watch)
 
-	return handlers
+	return rerpc.NewService(handlers, nil)
 }
 
 type pluggableHealthServer struct {
@@ -284,20 +290,19 @@ func (s *pluggableHealthServer) Watch(ctx context.Context, req *rerpc.Request[v1
 	return s.watch(ctx, req, stream)
 }
 
-// NewHealthHandler wraps each method on the service implementation in a
-// rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
+// NewHealth wraps each method on the service implementation in a rerpc.Handler.
+// The returned slice can be passed to rerpc.NewServeMux.
 //
-// Unlike NewFullHealthHandler, it allows the service to mix and match the
-// signatures of FullHealthServer and SimpleHealthServer. For each method, it
-// first tries to find a SimpleHealthServer-style implementation. If a simple
-// implementation isn't available, it falls back to the more complex
-// FullHealthServer-style implementation. If neither is available, it returns an
-// error.
+// Unlike NewFullHealth, it allows the service to mix and match the signatures
+// of FullHealthServer and SimpleHealthServer. For each method, it first tries
+// to find a SimpleHealthServer-style implementation. If a simple implementation
+// isn't available, it falls back to the more complex FullHealthServer-style
+// implementation. If neither is available, it returns an error.
 //
 // Taken together, this approach lets implementations embed
 // UnimplementedHealthServer and implement each method using whichever signature
 // is most convenient.
-func NewHealthHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handler, error) {
+func NewHealth(svc any, opts ...rerpc.HandlerOption) *rerpc.Service {
 	var impl pluggableHealthServer
 
 	// Find an implementation of Check
@@ -316,7 +321,7 @@ func NewHealthHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handler, er
 	}); ok {
 		impl.check = checker.Check
 	} else {
-		return nil, errors.New("no Check implementation found")
+		return rerpc.NewService(nil, errors.New("no Check implementation found"))
 	}
 
 	// Find an implementation of Watch
@@ -331,10 +336,10 @@ func NewHealthHandler(svc any, opts ...rerpc.HandlerOption) ([]rerpc.Handler, er
 	}); ok {
 		impl.watch = watcher.Watch
 	} else {
-		return nil, errors.New("no Watch implementation found")
+		return rerpc.NewService(nil, errors.New("no Watch implementation found"))
 	}
 
-	return NewFullHealthHandler(&impl, opts...), nil
+	return NewFullHealth(&impl, opts...)
 }
 
 var _ FullHealthServer = (*UnimplementedHealthServer)(nil) // verify interface implementation

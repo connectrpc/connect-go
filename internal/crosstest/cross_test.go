@@ -433,11 +433,12 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrossServiceClient, opts ..
 
 func TestReRPCServer(t *testing.T) {
 	reg := rerpc.NewRegistrar()
-	mux := rerpc.NewServeMux(
+	mux, err := rerpc.NewServeMux(
 		rerpc.NewNotFoundHandler(),
-		crossrpc.NewFullCrossServiceHandler(crossServerReRPC{}, reg),
-		reflection.NewHandler(reg),
+		crossrpc.NewFullCrossService(crossServerReRPC{}, reg),
+		reflection.NewService(reg),
 	)
+	assert.Nil(t, err, "mux construction error")
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
@@ -510,10 +511,11 @@ func TestReRPCServer(t *testing.T) {
 }
 
 func TestReRPCServerH2C(t *testing.T) {
-	mux := rerpc.NewServeMux(
+	mux, err := rerpc.NewServeMux(
 		rerpc.NewNotFoundHandler(),
-		crossrpc.NewFullCrossServiceHandler(crossServerReRPC{}),
+		crossrpc.NewFullCrossService(crossServerReRPC{}),
 	)
+	assert.Nil(t, err, "mux construction error")
 	server := httptest.NewServer(h2c.NewHandler(mux, &http2.Server{}))
 	defer server.Close()
 

@@ -74,9 +74,8 @@ func (s *server) Watch(
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "reRPC doesn't support watching health state")
 }
 
-// NewHandler wraps the supplied function to build an HTTP handler for gRPC's
-// health-checking API. It returns the HTTP handler and the correct path
-// on which to mount it. The health-checking function will be called with a
+// NewService wraps the supplied function to build HTTP handlers for gRPC's
+// health-checking API. The health-checking function will be called with a
 // fully-qualified protobuf service name (e.g., "acme.ping.v1.PingService").
 //
 // The supplied health-checking function must: (1) return StatusUnknown,
@@ -86,17 +85,17 @@ func (s *server) Watch(
 // safe to call concurrently. The function returned by NewChecker satisfies all
 // these requirements.
 //
-// Note that the returned handler only supports the unary Check method, not the
+// Note that the returned handlers only support the unary Check method, not the
 // streaming Watch. As suggested in gRPC's health schema, reRPC returns
 // rerpc.CodeUnimplemented for the Watch method. For more details on gRPC's
 // health checking protocol, see
 // https://github.com/grpc/grpc/blob/master/doc/health-checking.md and
 // https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto.
-func NewHandler(
+func NewService(
 	checker func(context.Context, string) (Status, error),
 	opts ...rerpc.HandlerOption,
-) []rerpc.Handler {
-	return healthrpc.NewFullHealthHandler(
+) *rerpc.Service {
+	return healthrpc.NewFullHealth(
 		&server{check: checker},
 		append(opts, rerpc.OverrideProtobufPackage("grpc.health.v1"))...,
 	)
