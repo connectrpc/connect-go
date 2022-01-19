@@ -82,13 +82,6 @@ func ReceiveResponse[Res any](r Receiver) (*Response[Res], error) {
 	}, nil
 }
 
-func newResponseWithHeader[Res any](msg *Res, header Header) *Response[Res] {
-	return &Response[Res]{
-		Msg: msg,
-		hdr: header,
-	}
-}
-
 // Any returns the concrete request message as an empty interface, so that
 // *Response implements the AnyResponse interface. It should only be used in
 // interceptors.
