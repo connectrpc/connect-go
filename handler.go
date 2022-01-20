@@ -25,15 +25,13 @@ var (
 )
 
 type handlerCfg struct {
-	Compressors         map[string]compress.Compressor
-	Codecs              map[string]codec.Codec
-	MaxRequestBytes     int64
-	Registrar           *Registrar
-	Interceptor         Interceptor
-	DisableRegistration bool
-	Package             string
-	Service             string
-	Method              string
+	Compressors      map[string]compress.Compressor
+	Codecs           map[string]codec.Codec
+	MaxRequestBytes  int64
+	Registrar        *Registrar
+	Interceptor      Interceptor
+	Procedure        string
+	RegistrationName string
 }
 
 func (c *handlerCfg) Validate() error {
@@ -62,7 +60,9 @@ type HandlerOption interface {
 // To see an example of how Handler is used in the generated code, see the
 // internal/ping/v1test package.
 type Handler struct {
-	stype          StreamType
+	stype StreamType
+	// TODO: pull off the config fields we need rather than keeping this whole
+	// bag.
 	config         handlerCfg
 	implementation func(context.Context, Sender, Receiver)
 	compressors    roCompressors
@@ -77,14 +77,13 @@ type Handler struct {
 // Remember that NewUnaryHandler is usually called from generated code - most
 // users won't need to deal with protobuf identifiers directly.
 func NewUnaryHandler[Req, Res any](
-	pkg, service, method string,
+	procedure, registrationName string,
 	implementation func(context.Context, *Request[Req]) (*Response[Res], error),
 	opts ...HandlerOption,
 ) (*Handler, error) {
 	cfg := handlerCfg{
-		Package: pkg,
-		Service: service,
-		Method:  method,
+		Procedure:        procedure,
+		RegistrationName: registrationName,
 		Compressors: map[string]compress.Compressor{
 			compress.NameGzip: compress.NewGzip(),
 		},
@@ -96,8 +95,8 @@ func NewUnaryHandler[Req, Res any](
 	if err := cfg.Validate(); err != nil {
 		return nil, Wrap(CodeInternal, err)
 	}
-	if reg := cfg.Registrar; reg != nil && !cfg.DisableRegistration {
-		reg.register(cfg.Package, cfg.Service)
+	if reg := cfg.Registrar; reg != nil && cfg.RegistrationName != "" {
+		reg.register(cfg.RegistrationName)
 	}
 
 	untyped := Func(func(ctx context.Context, req AnyRequest) (AnyResponse, error) {
@@ -166,14 +165,13 @@ func NewUnaryHandler[Req, Res any](
 // most users won't need to deal with protobuf identifiers directly.
 func NewStreamingHandler(
 	stype StreamType,
-	pkg, service, method string,
+	procedure, registrationName string,
 	implementation func(context.Context, Sender, Receiver),
 	opts ...HandlerOption,
 ) (*Handler, error) {
 	cfg := handlerCfg{
-		Package: pkg,
-		Service: service,
-		Method:  method,
+		Procedure:        procedure,
+		RegistrationName: registrationName,
 		Compressors: map[string]compress.Compressor{
 			compress.NameGzip: compress.NewGzip(),
 		},
@@ -185,8 +183,8 @@ func NewStreamingHandler(
 	if err := cfg.Validate(); err != nil {
 		return nil, Wrap(CodeInternal, err)
 	}
-	if reg := cfg.Registrar; reg != nil && !cfg.DisableRegistration {
-		reg.register(cfg.Package, cfg.Service)
+	if reg := cfg.Registrar; reg != nil && cfg.RegistrationName != "" {
+		reg.register(cfg.RegistrationName)
 	}
 	return &Handler{
 		stype:          stype,
@@ -229,10 +227,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	procedure := fmt.Sprintf("%s.%s/%s", h.config.Package, h.config.Service, h.config.Method)
 	spec := Specification{
 		Type:      h.stype,
-		Procedure: procedure,
+		Procedure: h.config.Procedure,
 		IsServer:  true,
 	}
 
@@ -333,11 +330,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Path returns the URL pattern to use when registering this handler. It's used
 // by the generated code.
 func (h *Handler) Path() string {
-	if h.config.Package == "" && h.config.Service == "" && h.config.Method == "" {
-		// e.g., bad route handler
-		return "/"
-	}
-	return fmt.Sprintf("/%s.%s/%s", h.config.Package, h.config.Service, h.config.Method)
+	return fmt.Sprintf("/" + h.config.Procedure)
 }
 
 func splitOnCommasAndSpaces(c rune) bool {

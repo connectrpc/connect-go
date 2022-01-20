@@ -1,6 +1,8 @@
 package rerpc
 
 import (
+	"strings"
+
 	"github.com/rerpc/rerpc/codec"
 	"github.com/rerpc/rerpc/compress"
 )
@@ -12,32 +14,45 @@ type Option interface {
 	HandlerOption
 }
 
-type overridePkg struct {
-	pkg string
+type replaceProcedurePrefixOption struct {
+	prefix      string
+	replacement string
 }
 
-// OverrideProtobufPackage replaces the protobuf package name set by the
-// generated code. This affects URLs and any Specification retrieved from a
-// call or handler context. Using this option is usually a bad idea, but it's
-// occasionally necessary to prevent protobuf package collisions. (For example,
-// reRPC uses this option to serve the health and reflection APIs without
-// generating runtime conflicts with grpc-go.)
+// ReplaceProcedurePrefix changes the URL used to call a procedure. Typically,
+// generated code sets the procedure name: for example, a protobuf procedure's
+// name and URL is composed from the fully-qualified protobuf package name, the
+// service name, and the method name. This option replaces a prefix of the
+// procedure name with another static string. Using this option is usually a
+// bad idea, but it's occasionally necessary to prevent protobuf package
+// collisions. (For example, reRPC uses this option to serve the health and
+// reflection APIs without generating runtime conflicts with grpc-go.)
 //
-// OverrideProtobufPackage does not change the data exposed by the reflection
+// ReplaceProcedurePrefix doesn't change the data exposed by the reflection
 // API. To prevent inconsistencies between the reflection data and the actual
-// service URL, using this option disables reflection for the overridden
-// service (though other services can still be introspected).
-func OverrideProtobufPackage(pkg string) Option {
-	return &overridePkg{pkg}
+// service URL, using this option disables reflection for the modified service
+// (though other services can still be introspected).
+func ReplaceProcedurePrefix(prefix, replacement string) Option {
+	return &replaceProcedurePrefixOption{
+		prefix:      prefix,
+		replacement: replacement,
+	}
 }
 
-func (o *overridePkg) applyToClient(cfg *clientCfg) {
-	cfg.Package = o.pkg
+func (o *replaceProcedurePrefixOption) applyToClient(cfg *clientCfg) {
+	cfg.Procedure = o.transform(cfg.Procedure)
 }
 
-func (o *overridePkg) applyToHandler(cfg *handlerCfg) {
-	cfg.Package = o.pkg
-	cfg.DisableRegistration = true
+func (o *replaceProcedurePrefixOption) applyToHandler(cfg *handlerCfg) {
+	cfg.Procedure = o.transform(cfg.Procedure)
+	cfg.RegistrationName = "" // disable reflection
+}
+
+func (o *replaceProcedurePrefixOption) transform(name string) string {
+	if !strings.HasPrefix(name, o.prefix) {
+		return name
+	}
+	return o.replacement + strings.TrimPrefix(name, o.prefix)
 }
 
 type readMaxBytes struct {

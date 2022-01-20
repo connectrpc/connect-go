@@ -54,7 +54,7 @@ func TestHealth(t *testing.T) {
 		client, err := healthrpc.NewHealthClient(
 			server.URL,
 			server.Client(),
-			rerpc.OverrideProtobufPackage("grpc.health.v1"),
+			rerpc.ReplaceProcedurePrefix("internal.", "grpc."),
 		)
 		assert.Nil(t, err, "client construction error")
 		stream, err := client.Watch(
