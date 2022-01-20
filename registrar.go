@@ -45,13 +45,9 @@ func (r *Registrar) IsRegistered(service string) bool {
 
 // Registers a protobuf package and service combination. Safe to call
 // concurrently.
-func (r *Registrar) register(pkg, service string) {
-	if pkg == "" || service == "" {
-		return
-	}
-	fqn := pkg + "." + service
+func (r *Registrar) register(name string) {
 	r.mu.Lock()
-	r.services[fqn] = struct{}{}
+	r.services[name] = struct{}{}
 	r.mu.Unlock()
 }
 

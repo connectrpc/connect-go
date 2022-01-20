@@ -66,9 +66,7 @@ func NewCrossServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.Client
 	pingFunc, err := rerpc.NewClientFunc[v1test.PingRequest, v1test.PingResponse](
 		doer,
 		baseURL,
-		"cross.v1test", // protobuf package
-		"CrossService", // protobuf service
-		"Ping",         // protobuf method
+		"cross.v1test.CrossService/Ping",
 		opts...,
 	)
 	if err != nil {
@@ -77,9 +75,7 @@ func NewCrossServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.Client
 	failFunc, err := rerpc.NewClientFunc[v1test.FailRequest, v1test.FailResponse](
 		doer,
 		baseURL,
-		"cross.v1test", // protobuf package
-		"CrossService", // protobuf service
-		"Fail",         // protobuf method
+		"cross.v1test.CrossService/Fail",
 		opts...,
 	)
 	if err != nil {
@@ -89,9 +85,7 @@ func NewCrossServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.Client
 		doer,
 		rerpc.StreamTypeClient,
 		baseURL,
-		"cross.v1test", // protobuf package
-		"CrossService", // protobuf service
-		"Sum",          // protobuf method
+		"cross.v1test.CrossService/Sum",
 		opts...,
 	)
 	if err != nil {
@@ -101,9 +95,7 @@ func NewCrossServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.Client
 		doer,
 		rerpc.StreamTypeServer,
 		baseURL,
-		"cross.v1test", // protobuf package
-		"CrossService", // protobuf service
-		"CountUp",      // protobuf method
+		"cross.v1test.CrossService/CountUp",
 		opts...,
 	)
 	if err != nil {
@@ -113,9 +105,7 @@ func NewCrossServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.Client
 		doer,
 		rerpc.StreamTypeBidirectional,
 		baseURL,
-		"cross.v1test", // protobuf package
-		"CrossService", // protobuf service
-		"CumSum",       // protobuf method
+		"cross.v1test.CrossService/CumSum",
 		opts...,
 	)
 	if err != nil {
@@ -248,9 +238,8 @@ func NewFullCrossService(svc FullCrossServiceServer, opts ...rerpc.HandlerOption
 	}, opts...)
 
 	ping, err := rerpc.NewUnaryHandler(
-		"cross.v1test", // protobuf package
-		"CrossService", // protobuf service
-		"Ping",         // protobuf method
+		"cross.v1test.CrossService/Ping", // procedure name
+		"cross.v1test.CrossService",      // reflection name
 		svc.Ping,
 		opts...,
 	)
@@ -260,9 +249,8 @@ func NewFullCrossService(svc FullCrossServiceServer, opts ...rerpc.HandlerOption
 	handlers = append(handlers, *ping)
 
 	fail, err := rerpc.NewUnaryHandler(
-		"cross.v1test", // protobuf package
-		"CrossService", // protobuf service
-		"Fail",         // protobuf method
+		"cross.v1test.CrossService/Fail", // procedure name
+		"cross.v1test.CrossService",      // reflection name
 		svc.Fail,
 		opts...,
 	)
@@ -273,9 +261,8 @@ func NewFullCrossService(svc FullCrossServiceServer, opts ...rerpc.HandlerOption
 
 	sum, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeClient,
-		"cross.v1test", // protobuf package
-		"CrossService", // protobuf service
-		"Sum",          // protobuf method
+		"cross.v1test.CrossService/Sum", // procedure name
+		"cross.v1test.CrossService",     // reflection name
 		func(ctx context.Context, sender rerpc.Sender, receiver rerpc.Receiver) {
 			typed := handlerstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 			err := svc.Sum(ctx, typed)
@@ -301,9 +288,8 @@ func NewFullCrossService(svc FullCrossServiceServer, opts ...rerpc.HandlerOption
 
 	countUp, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeServer,
-		"cross.v1test", // protobuf package
-		"CrossService", // protobuf service
-		"CountUp",      // protobuf method
+		"cross.v1test.CrossService/CountUp", // procedure name
+		"cross.v1test.CrossService",         // reflection name
 		func(ctx context.Context, sender rerpc.Sender, receiver rerpc.Receiver) {
 			typed := handlerstream.NewServer[v1test.CountUpResponse](sender)
 			req, err := rerpc.ReceiveRequest[v1test.CountUpRequest](receiver)
@@ -338,9 +324,8 @@ func NewFullCrossService(svc FullCrossServiceServer, opts ...rerpc.HandlerOption
 
 	cumSum, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeBidirectional,
-		"cross.v1test", // protobuf package
-		"CrossService", // protobuf service
-		"CumSum",       // protobuf method
+		"cross.v1test.CrossService/CumSum", // procedure name
+		"cross.v1test.CrossService",        // reflection name
 		func(ctx context.Context, sender rerpc.Sender, receiver rerpc.Receiver) {
 			typed := handlerstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 			err := svc.CumSum(ctx, typed)

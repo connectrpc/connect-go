@@ -2,7 +2,6 @@ package rerpc
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/rerpc/rerpc/codec"
@@ -19,9 +18,7 @@ type Doer interface {
 }
 
 type clientCfg struct {
-	Package           string
-	Service           string
-	Method            string
+	Procedure         string
 	MaxResponseBytes  int64
 	Interceptor       Interceptor
 	Compressors       map[string]compress.Compressor
@@ -86,13 +83,11 @@ func (o *useCompressorOption) applyToClient(cfg *clientCfg) {
 func NewClientStream(
 	doer Doer,
 	stype StreamType,
-	baseURL, pkg, service, method string,
+	baseURL, procedure string,
 	opts ...ClientOption,
 ) (StreamFunc, error) {
 	cfg := clientCfg{
-		Package: pkg,
-		Service: service,
-		Method:  method,
+		Procedure: procedure,
 		Compressors: map[string]compress.Compressor{
 			"gzip": compress.NewGzip(),
 		},
@@ -107,10 +102,9 @@ func NewClientStream(
 		return nil, err
 	}
 	compressors := newROCompressors(cfg.Compressors)
-	procedure := fmt.Sprintf("%s.%s/%s", cfg.Package, cfg.Service, cfg.Method)
 	spec := Specification{
 		Type:      stype,
-		Procedure: procedure,
+		Procedure: cfg.Procedure,
 		IsClient:  true,
 	}
 	sf := StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
@@ -145,13 +139,11 @@ func NewClientStream(
 // internal/ping/v1test package.
 func NewClientFunc[Req, Res any](
 	doer Doer,
-	baseURL, pkg, service, method string,
+	baseURL, procedure string,
 	opts ...ClientOption,
 ) (func(context.Context, *Request[Req]) (*Response[Res], error), error) {
 	cfg := clientCfg{
-		Package: pkg,
-		Service: service,
-		Method:  method,
+		Procedure: procedure,
 		Compressors: map[string]compress.Compressor{
 			"gzip": compress.NewGzip(),
 		},
@@ -163,10 +155,9 @@ func NewClientFunc[Req, Res any](
 		return nil, err
 	}
 	compressors := newROCompressors(cfg.Compressors)
-	procedure := fmt.Sprintf("%s.%s/%s", cfg.Package, cfg.Service, cfg.Method)
 	spec := Specification{
 		Type:      StreamTypeUnary,
-		Procedure: procedure,
+		Procedure: cfg.Procedure,
 		IsClient:  true,
 	}
 	send := Func(func(ctx context.Context, msg AnyRequest) (AnyResponse, error) {

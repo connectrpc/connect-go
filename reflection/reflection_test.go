@@ -46,7 +46,7 @@ func TestReflection(t *testing.T) {
 	](
 		server.Client(),
 		server.URL,
-		"grpc.reflection.v1alpha", "ServerReflection", "ServerReflectionInfo",
+		"grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
 		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
 	)
 	assert.Nil(t, err, "client construction error")

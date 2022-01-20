@@ -93,9 +93,7 @@ func NewHealthClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption
 	checkFunc, err := rerpc.NewClientFunc[v1.HealthCheckRequest, v1.HealthCheckResponse](
 		doer,
 		baseURL,
-		"internal.health.v1", // protobuf package
-		"Health",             // protobuf service
-		"Check",              // protobuf method
+		"internal.health.v1.Health/Check",
 		opts...,
 	)
 	if err != nil {
@@ -105,9 +103,7 @@ func NewHealthClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption
 		doer,
 		rerpc.StreamTypeServer,
 		baseURL,
-		"internal.health.v1", // protobuf package
-		"Health",             // protobuf service
-		"Watch",              // protobuf method
+		"internal.health.v1.Health/Watch",
 		opts...,
 	)
 	if err != nil {
@@ -226,9 +222,8 @@ func NewFullHealth(svc FullHealthServer, opts ...rerpc.HandlerOption) *rerpc.Ser
 	}, opts...)
 
 	check, err := rerpc.NewUnaryHandler(
-		"internal.health.v1", // protobuf package
-		"Health",             // protobuf service
-		"Check",              // protobuf method
+		"internal.health.v1.Health/Check", // procedure name
+		"internal.health.v1.Health",       // reflection name
 		svc.Check,
 		opts...,
 	)
@@ -239,9 +234,8 @@ func NewFullHealth(svc FullHealthServer, opts ...rerpc.HandlerOption) *rerpc.Ser
 
 	watch, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeServer,
-		"internal.health.v1", // protobuf package
-		"Health",             // protobuf service
-		"Watch",              // protobuf method
+		"internal.health.v1.Health/Watch", // procedure name
+		"internal.health.v1.Health",       // reflection name
 		func(ctx context.Context, sender rerpc.Sender, receiver rerpc.Receiver) {
 			typed := handlerstream.NewServer[v1.HealthCheckResponse](sender)
 			req, err := rerpc.ReceiveRequest[v1.HealthCheckRequest](receiver)
