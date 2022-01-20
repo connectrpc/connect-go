@@ -44,12 +44,15 @@ type Registrar interface {
 // https://github.com/grpc/grpc/blob/master/doc/server-reflection.md, and
 // https://github.com/fullstorydev/grpcurl.
 func NewService(reg Registrar, opts ...rerpc.HandlerOption) *rerpc.Service {
-	const pkg = "grpc.reflection.v1alpha"
+	const (
+		prefix      = "internal.reflection.v1alpha1."
+		replacement = "grpc.reflection.v1alpha."
+	)
 	opts = append([]rerpc.HandlerOption{
 		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
 		rerpc.Codec(protobuf.NameJSON, protobuf.NewJSON()),
 	}, opts...)
-	opts = append(opts, rerpc.OverrideProtobufPackage(pkg))
+	opts = append(opts, rerpc.ReplaceProcedurePrefix(prefix, replacement))
 	return reflectionrpc.NewFullServerReflection(
 		&server{reg: reg},
 		opts...,
