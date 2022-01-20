@@ -66,9 +66,7 @@ func NewServerReflectionClient(baseURL string, doer rerpc.Doer, opts ...rerpc.Cl
 		doer,
 		rerpc.StreamTypeBidirectional,
 		baseURL,
-		"internal.reflection.v1alpha1", // protobuf package
-		"ServerReflection",             // protobuf service
-		"ServerReflectionInfo",         // protobuf method
+		"internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo",
 		opts...,
 	)
 	if err != nil {
@@ -134,9 +132,8 @@ func NewFullServerReflection(svc FullServerReflectionServer, opts ...rerpc.Handl
 
 	serverReflectionInfo, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeBidirectional,
-		"internal.reflection.v1alpha1", // protobuf package
-		"ServerReflection",             // protobuf service
-		"ServerReflectionInfo",         // protobuf method
+		"internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo", // procedure name
+		"internal.reflection.v1alpha1.ServerReflection",                      // reflection name
 		func(ctx context.Context, sender rerpc.Sender, receiver rerpc.Receiver) {
 			typed := handlerstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
 			err := svc.ServerReflectionInfo(ctx, typed)

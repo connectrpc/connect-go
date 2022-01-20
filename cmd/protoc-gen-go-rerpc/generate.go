@@ -218,6 +218,19 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named b
 	return method.GoName + serverSignatureParams(g, method, named, full)
 }
 
+func procedureName(method *protogen.Method) string {
+	return fmt.Sprintf(
+		"%s.%s/%s",
+		method.Parent.Desc.ParentFile().Package(),
+		method.Parent.Desc.Name(),
+		method.Desc.Name(),
+	)
+}
+
+func reflectionName(service *protogen.Service) string {
+	return fmt.Sprintf("%s.%s", service.Desc.ParentFile().Package(), service.Desc.Name())
+}
+
 func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names) {
 	// Client struct.
 	clientOption := rerpcPackage.Ident("ClientOption")
@@ -261,18 +274,14 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 				g.P(rerpcPackage.Ident("StreamTypeServer"), ",")
 			}
 			g.P("baseURL,")
-			g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
-			g.P(`"`, service.Desc.Name(), `", // protobuf service`)
-			g.P(`"`, method.Desc.Name(), `", // protobuf method`)
+			g.P(`"`, procedureName(method), `",`)
 			g.P("opts...,")
 			g.P(")")
 		} else {
 			g.P(unexport(method.GoName), "Func, err := ", rerpcPackage.Ident("NewClientFunc"), "[", method.Input.GoIdent, ", ", method.Output.GoIdent, "](")
 			g.P("doer,")
 			g.P("baseURL,")
-			g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
-			g.P(`"`, service.Desc.Name(), `", // protobuf service`)
-			g.P(`"`, method.Desc.Name(), `", // protobuf method`)
+			g.P(`"`, procedureName(method), `",`)
 			g.P("opts...,")
 			g.P(")")
 		}
@@ -515,9 +524,8 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 			} else {
 				g.P(rerpcPackage.Ident("StreamTypeClient"), ",")
 			}
-			g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
-			g.P(`"`, service.Desc.Name(), `", // protobuf service`)
-			g.P(`"`, method.Desc.Name(), `", // protobuf method`)
+			g.P(`"`, procedureName(method), `", // procedure name`)
+			g.P(`"`, reflectionName(service), `", // reflection name`)
 			g.P("func(ctx ", contextContext, ", sender ", rerpcPackage.Ident("Sender"),
 				", receiver ", rerpcPackage.Ident("Receiver"), ") {")
 			if method.Desc.IsStreamingServer() && method.Desc.IsStreamingClient() {
@@ -566,9 +574,8 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 			g.P(")")
 		} else {
 			g.P(hname, ", err := ", rerpcPackage.Ident("NewUnaryHandler"), "(")
-			g.P(`"`, service.Desc.ParentFile().Package(), `", // protobuf package`)
-			g.P(`"`, service.Desc.Name(), `", // protobuf service`)
-			g.P(`"`, method.Desc.Name(), `", // protobuf method`)
+			g.P(`"`, procedureName(method), `", // procedure name`)
+			g.P(`"`, reflectionName(service), `", // reflection name`)
 			g.P("svc.", method.GoName, ",")
 			g.P("opts...,")
 			g.P(")")

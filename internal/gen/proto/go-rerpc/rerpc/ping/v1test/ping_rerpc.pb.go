@@ -67,9 +67,7 @@ func NewPingServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientO
 	pingFunc, err := rerpc.NewClientFunc[v1test.PingRequest, v1test.PingResponse](
 		doer,
 		baseURL,
-		"rerpc.ping.v1test", // protobuf package
-		"PingService",       // protobuf service
-		"Ping",              // protobuf method
+		"rerpc.ping.v1test.PingService/Ping",
 		opts...,
 	)
 	if err != nil {
@@ -78,9 +76,7 @@ func NewPingServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientO
 	failFunc, err := rerpc.NewClientFunc[v1test.FailRequest, v1test.FailResponse](
 		doer,
 		baseURL,
-		"rerpc.ping.v1test", // protobuf package
-		"PingService",       // protobuf service
-		"Fail",              // protobuf method
+		"rerpc.ping.v1test.PingService/Fail",
 		opts...,
 	)
 	if err != nil {
@@ -90,9 +86,7 @@ func NewPingServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientO
 		doer,
 		rerpc.StreamTypeClient,
 		baseURL,
-		"rerpc.ping.v1test", // protobuf package
-		"PingService",       // protobuf service
-		"Sum",               // protobuf method
+		"rerpc.ping.v1test.PingService/Sum",
 		opts...,
 	)
 	if err != nil {
@@ -102,9 +96,7 @@ func NewPingServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientO
 		doer,
 		rerpc.StreamTypeServer,
 		baseURL,
-		"rerpc.ping.v1test", // protobuf package
-		"PingService",       // protobuf service
-		"CountUp",           // protobuf method
+		"rerpc.ping.v1test.PingService/CountUp",
 		opts...,
 	)
 	if err != nil {
@@ -114,9 +106,7 @@ func NewPingServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientO
 		doer,
 		rerpc.StreamTypeBidirectional,
 		baseURL,
-		"rerpc.ping.v1test", // protobuf package
-		"PingService",       // protobuf service
-		"CumSum",            // protobuf method
+		"rerpc.ping.v1test.PingService/CumSum",
 		opts...,
 	)
 	if err != nil {
@@ -250,9 +240,8 @@ func NewFullPingService(svc FullPingServiceServer, opts ...rerpc.HandlerOption) 
 	}, opts...)
 
 	ping, err := rerpc.NewUnaryHandler(
-		"rerpc.ping.v1test", // protobuf package
-		"PingService",       // protobuf service
-		"Ping",              // protobuf method
+		"rerpc.ping.v1test.PingService/Ping", // procedure name
+		"rerpc.ping.v1test.PingService",      // reflection name
 		svc.Ping,
 		opts...,
 	)
@@ -262,9 +251,8 @@ func NewFullPingService(svc FullPingServiceServer, opts ...rerpc.HandlerOption) 
 	handlers = append(handlers, *ping)
 
 	fail, err := rerpc.NewUnaryHandler(
-		"rerpc.ping.v1test", // protobuf package
-		"PingService",       // protobuf service
-		"Fail",              // protobuf method
+		"rerpc.ping.v1test.PingService/Fail", // procedure name
+		"rerpc.ping.v1test.PingService",      // reflection name
 		svc.Fail,
 		opts...,
 	)
@@ -275,9 +263,8 @@ func NewFullPingService(svc FullPingServiceServer, opts ...rerpc.HandlerOption) 
 
 	sum, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeClient,
-		"rerpc.ping.v1test", // protobuf package
-		"PingService",       // protobuf service
-		"Sum",               // protobuf method
+		"rerpc.ping.v1test.PingService/Sum", // procedure name
+		"rerpc.ping.v1test.PingService",     // reflection name
 		func(ctx context.Context, sender rerpc.Sender, receiver rerpc.Receiver) {
 			typed := handlerstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 			err := svc.Sum(ctx, typed)
@@ -303,9 +290,8 @@ func NewFullPingService(svc FullPingServiceServer, opts ...rerpc.HandlerOption) 
 
 	countUp, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeServer,
-		"rerpc.ping.v1test", // protobuf package
-		"PingService",       // protobuf service
-		"CountUp",           // protobuf method
+		"rerpc.ping.v1test.PingService/CountUp", // procedure name
+		"rerpc.ping.v1test.PingService",         // reflection name
 		func(ctx context.Context, sender rerpc.Sender, receiver rerpc.Receiver) {
 			typed := handlerstream.NewServer[v1test.CountUpResponse](sender)
 			req, err := rerpc.ReceiveRequest[v1test.CountUpRequest](receiver)
@@ -340,9 +326,8 @@ func NewFullPingService(svc FullPingServiceServer, opts ...rerpc.HandlerOption) 
 
 	cumSum, err := rerpc.NewStreamingHandler(
 		rerpc.StreamTypeBidirectional,
-		"rerpc.ping.v1test", // protobuf package
-		"PingService",       // protobuf service
-		"CumSum",            // protobuf method
+		"rerpc.ping.v1test.PingService/CumSum", // procedure name
+		"rerpc.ping.v1test.PingService",        // reflection name
 		func(ctx context.Context, sender rerpc.Sender, receiver rerpc.Receiver) {
 			typed := handlerstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 			err := svc.CumSum(ctx, typed)

@@ -97,7 +97,7 @@ func NewService(
 ) *rerpc.Service {
 	return healthrpc.NewFullHealth(
 		&server{check: checker},
-		append(opts, rerpc.OverrideProtobufPackage("grpc.health.v1"))...,
+		append(opts, rerpc.ReplaceProcedurePrefix("internal.", "grpc."))...,
 	)
 }
 
@@ -122,7 +122,7 @@ func NewClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) (*Cl
 	c, err := healthrpc.NewHealthClient(
 		baseURL,
 		doer,
-		append(opts, rerpc.OverrideProtobufPackage("grpc.health.v1"))...,
+		append(opts, rerpc.ReplaceProcedurePrefix("internal.", "grpc."))...,
 	)
 	if err != nil {
 		return nil, err
