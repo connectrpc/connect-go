@@ -4,8 +4,5 @@ package rerpc
 type Specification struct {
 	Type      StreamType
 	Procedure string // e.g., "acme.foo.v1.FooService/Bar"
-
-	// Exactly one of IsClient and IsServer will be true.
-	IsClient bool
-	IsServer bool
+	IsClient  bool   // otherwise we're in a handler
 }

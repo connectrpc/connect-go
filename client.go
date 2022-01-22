@@ -9,8 +9,6 @@ import (
 	"github.com/rerpc/rerpc/compress"
 )
 
-var teTrailersSlice = []string{"trailers"}
-
 // Doer is the transport-level interface reRPC expects HTTP clients to
 // implement. The standard library's http.Client implements Doer.
 type Doer interface {
@@ -18,6 +16,7 @@ type Doer interface {
 }
 
 type clientCfg struct {
+	Protocol          protocol
 	Procedure         string
 	MaxResponseBytes  int64
 	Interceptor       Interceptor
@@ -91,9 +90,7 @@ func NewClientStream(
 		Compressors: map[string]compress.Compressor{
 			"gzip": compress.NewGzip(),
 		},
-		// NB, defaulting RequestCompressor to identity is required by
-		// https://github.com/grpc/grpc/blob/master/doc/compression.md - see test
-		// case 6.
+		Protocol: &grpc{},
 	}
 	for _, opt := range opts {
 		opt.applyToClient(&cfg)
@@ -101,33 +98,43 @@ func NewClientStream(
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	compressors := newROCompressors(cfg.Compressors)
 	spec := Specification{
 		Type:      stype,
 		Procedure: cfg.Procedure,
 		IsClient:  true,
 	}
+	pclient, err := cfg.Protocol.NewClient(&protocolClientParams{
+		Spec:             spec,
+		CompressorName:   cfg.RequestCompressor,
+		Compressors:      newROCompressors(cfg.Compressors),
+		CodecName:        cfg.CodecName,
+		Codec:            cfg.Codec,
+		Protobuf:         cfg.Protobuf(),
+		MaxResponseBytes: cfg.MaxResponseBytes,
+		Doer:             doer,
+		BaseURL:          baseURL,
+	})
+	if err != nil {
+		return nil, Wrap(CodeUnknown, err)
+	}
+	// If the protocol can't construct a stream, capture the error here.
+	var streamConstructionError error
 	sf := StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
-		header := Header{raw: make(http.Header, 8)}
-		addGRPCClientHeaders(header, cfg.CodecName, compressors.Names(), cfg.RequestCompressor)
-		sender, receiver := newClientStream(
-			ctx,
-			doer,
-			baseURL,
-			spec,
-			header,
-			cfg.MaxResponseBytes,
-			cfg.Codec,
-			cfg.Protobuf(),
-			compressors.Get(cfg.RequestCompressor),
-			compressors,
-		)
+		header := make(http.Header, 8) // arbitrary power of two, avoid immediate resizing
+		pclient.WriteRequestHeader(header)
+		sender, receiver, err := pclient.NewStream(ctx, Header{raw: header})
+		if err != nil {
+			streamConstructionError = err
+			return ctx,
+				newNopSender(spec, Header{raw: header}),
+				newNopReceiver(spec, Header{raw: make(http.Header)})
+		}
 		return ctx, sender, receiver
 	})
 	if ic := cfg.Interceptor; ic != nil {
 		sf = ic.WrapStream(sf)
 	}
-	return sf, nil
+	return sf, streamConstructionError
 }
 
 // NewClientFunc returns a strongly-typed function to call a unary remote
@@ -147,6 +154,7 @@ func NewClientFunc[Req, Res any](
 		Compressors: map[string]compress.Compressor{
 			"gzip": compress.NewGzip(),
 		},
+		Protocol: &grpc{},
 	}
 	for _, opt := range opts {
 		opt.applyToClient(&cfg)
@@ -154,25 +162,30 @@ func NewClientFunc[Req, Res any](
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	compressors := newROCompressors(cfg.Compressors)
 	spec := Specification{
 		Type:      StreamTypeUnary,
 		Procedure: cfg.Procedure,
 		IsClient:  true,
 	}
+	pclient, err := cfg.Protocol.NewClient(&protocolClientParams{
+		Spec:             spec,
+		CompressorName:   cfg.RequestCompressor,
+		Compressors:      newROCompressors(cfg.Compressors),
+		CodecName:        cfg.CodecName,
+		Codec:            cfg.Codec,
+		Protobuf:         cfg.Protobuf(),
+		MaxResponseBytes: cfg.MaxResponseBytes,
+		Doer:             doer,
+		BaseURL:          baseURL,
+	})
+	if err != nil {
+		return nil, Wrap(CodeUnknown, err)
+	}
 	send := Func(func(ctx context.Context, msg AnyRequest) (AnyResponse, error) {
-		sender, receiver := newClientStream(
-			ctx,
-			doer,
-			baseURL,
-			spec,
-			msg.Header(),
-			cfg.MaxResponseBytes,
-			cfg.Codec,
-			cfg.Protobuf(),
-			compressors.Get(cfg.RequestCompressor),
-			compressors,
-		)
+		sender, receiver, err := pclient.NewStream(ctx, msg.Header())
+		if err != nil {
+			return nil, err
+		}
 		if err := sender.Send(msg.Any()); err != nil {
 			_ = sender.Close(err)
 			_ = receiver.Close()
@@ -189,26 +202,15 @@ func NewClientFunc[Req, Res any](
 		}
 		return res, receiver.Close()
 	})
-	// To make the specification and RPC headers visible to the full interceptor
-	// chain (as though they were supplied by the caller), we'll add them in the
-	// outermost interceptor.
-	preparer := func(next Func) Func {
-		return func(ctx context.Context, req AnyRequest) (AnyResponse, error) {
-			typed, ok := req.(*Request[Req])
-			if !ok {
-				return nil, Errorf(CodeInternal, "unexpected client request type %T", req)
-			}
-			typed.spec = spec
-			addGRPCClientHeaders(req.Header(), cfg.CodecName, compressors.Names(), cfg.RequestCompressor)
-			return next(ctx, typed)
-		}
+	if ic := cfg.Interceptor; ic != nil {
+		send = ic.Wrap(send)
 	}
-	wrapped := NewChain(
-		UnaryInterceptorFunc(preparer),
-		cfg.Interceptor,
-	).Wrap(send)
 	return func(ctx context.Context, msg *Request[Req]) (*Response[Res], error) {
-		res, err := wrapped(ctx, msg)
+		// To make the specification and RPC headers visible to the full interceptor
+		// chain (as though they were supplied by the caller), we'll add them here.
+		msg.spec = spec
+		pclient.WriteRequestHeader(msg.Header().raw)
+		res, err := send(ctx, msg)
 		if err != nil {
 			return nil, err
 		}
@@ -218,19 +220,4 @@ func NewClientFunc[Req, Res any](
 		}
 		return typed, nil
 	}, nil
-}
-
-func addGRPCClientHeaders(h Header, codecName, acceptCompression, requestCompressor string) {
-	// We know these header keys are in canonical form, so we can bypass all the
-	// checks in Header.Set. To avoid allocating the same slices over and over,
-	// we use pre-allocated globals for the header values.
-	h.raw["User-Agent"] = []string{userAgent}
-	h.raw["Content-Type"] = []string{contentTypeFromCodecName(codecName)}
-	if requestCompressor != "" && requestCompressor != compress.NameIdentity {
-		h.raw["Grpc-Encoding"] = []string{requestCompressor}
-	}
-	if acceptCompression != "" {
-		h.raw["Grpc-Accept-Encoding"] = []string{acceptCompression}
-	}
-	h.raw["Te"] = teTrailersSlice
 }
