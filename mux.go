@@ -33,7 +33,7 @@ func NewServeMux(fallback http.Handler, services ...*Service) (*http.ServeMux, e
 		}
 		for _, method := range svc.handlers {
 			method := method // don't want ref to loop variable
-			mux.Handle(method.Path(), &method)
+			mux.Handle(method.path(), &method)
 		}
 	}
 	return mux, nil
