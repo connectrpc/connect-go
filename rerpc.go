@@ -1,10 +1,5 @@
 package rerpc
 
-import (
-	"fmt"
-	"runtime"
-)
-
 // Version is the semantic version of the reRPC module.
 const Version = "0.0.1"
 
@@ -28,5 +23,3 @@ const (
 const (
 	SupportsCodeGenV0 = iota
 )
-
-var userAgent = fmt.Sprintf("grpc-go-rerpc/%s (%s)", Version, runtime.Version())
