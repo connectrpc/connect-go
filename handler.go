@@ -4,27 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
 
 	"github.com/rerpc/rerpc/codec"
-	"github.com/rerpc/rerpc/codec/protobuf"
 	"github.com/rerpc/rerpc/compress"
 )
 
-const (
-	typeDefaultGRPC = "application/grpc"
-	typeGRPCPrefix  = typeDefaultGRPC + "+"
-	// gRPC protocol uses "proto" instead of "protobuf"
-	grpcNameProto = "proto"
-)
-
-var (
-	grpcStatusTrailers = []string{"Grpc-Status", "Grpc-Message", "Grpc-Status-Details-Bin"}
-)
-
 type handlerCfg struct {
+	Protocols        []protocol
 	Compressors      map[string]compress.Compressor
 	Codecs           map[string]codec.Codec
 	MaxRequestBytes  int64
@@ -44,6 +31,30 @@ func (c *handlerCfg) Validate() error {
 	return nil
 }
 
+func (c *handlerCfg) spec(stype StreamType) Specification {
+	return Specification{
+		Procedure: c.Procedure,
+		Type:      stype,
+	}
+}
+
+func (c *handlerCfg) protocolHandlers(stype StreamType) ([]protocolHandler, error) {
+	handlers := make([]protocolHandler, 0, len(c.Protocols))
+	for _, p := range c.Protocols {
+		ph, err := p.NewHandler(&protocolHandlerParams{
+			Spec:            c.spec(stype),
+			Codecs:          newROCodecs(c.Codecs),
+			Compressors:     newROCompressors(c.Compressors),
+			MaxRequestBytes: c.MaxRequestBytes,
+		})
+		if err != nil {
+			return nil, err
+		}
+		handlers = append(handlers, ph)
+	}
+	return handlers, nil
+}
+
 // A HandlerOption configures a Handler.
 //
 // In addition to any options grouped in the documentation below, remember that
@@ -60,13 +71,10 @@ type HandlerOption interface {
 // To see an example of how Handler is used in the generated code, see the
 // internal/ping/v1test package.
 type Handler struct {
-	stype StreamType
-	// TODO: pull off the config fields we need rather than keeping this whole
-	// bag.
-	config         handlerCfg
-	implementation func(context.Context, Sender, Receiver)
-	compressors    roCompressors
-	codecs         roCodecs
+	spec             Specification
+	interceptor      Interceptor
+	implementation   func(context.Context, Sender, Receiver)
+	protocolHandlers []protocolHandler
 }
 
 // NewUnaryHandler constructs a Handler. The supplied package, service, and
@@ -84,6 +92,7 @@ func NewUnaryHandler[Req, Res any](
 	cfg := handlerCfg{
 		Procedure:        procedure,
 		RegistrationName: registrationName,
+		Protocols:        []protocol{&grpc{}},
 		Compressors: map[string]compress.Compressor{
 			compress.NameGzip: compress.NewGzip(),
 		},
@@ -147,12 +156,18 @@ func NewUnaryHandler[Req, Res any](
 		}
 		_ = sender.Close(sender.Send(res.Any()))
 	}
+	protocolHandlers, err := cfg.protocolHandlers(StreamTypeUnary)
+	if err != nil {
+		return nil, Wrap(CodeUnknown, err)
+	}
+	// TODO: errors returned from protocol.NewStream aren't visible to unary
+	// interceptors. Handling those errors will be clearer if we make the
+	// implementation function pointer take them as an additional argument.
 	return &Handler{
-		stype:          StreamTypeUnary,
-		config:         cfg,
-		implementation: streamer,
-		compressors:    newROCompressors(cfg.Compressors),
-		codecs:         newROCodecs(cfg.Codecs),
+		spec:             cfg.spec(StreamTypeUnary),
+		interceptor:      nil, // already applied
+		implementation:   streamer,
+		protocolHandlers: protocolHandlers,
 	}, nil
 }
 
@@ -175,7 +190,8 @@ func NewStreamingHandler(
 		Compressors: map[string]compress.Compressor{
 			compress.NameGzip: compress.NewGzip(),
 		},
-		Codecs: make(map[string]codec.Codec),
+		Codecs:    make(map[string]codec.Codec),
+		Protocols: []protocol{&grpc{}},
 	}
 	for _, opt := range opts {
 		opt.applyToHandler(&cfg)
@@ -186,12 +202,15 @@ func NewStreamingHandler(
 	if reg := cfg.Registrar; reg != nil && cfg.RegistrationName != "" {
 		reg.register(cfg.RegistrationName)
 	}
+	protocolHandlers, err := cfg.protocolHandlers(stype)
+	if err != nil {
+		return nil, Wrap(CodeUnknown, err)
+	}
 	return &Handler{
-		stype:          stype,
-		config:         cfg,
-		implementation: implementation,
-		compressors:    newROCompressors(cfg.Compressors),
-		codecs:         newROCodecs(cfg.Codecs),
+		spec:             cfg.spec(stype),
+		interceptor:      cfg.Interceptor,
+		implementation:   implementation,
+		protocolHandlers: protocolHandlers,
 	}, nil
 }
 
@@ -201,174 +220,80 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// EOF: the stream we construct later on already does that, and we only
 	// return early when dealing with misbehaving clients. In those cases, it's
 	// okay if we can't re-use the connection.
-	isBidi := (h.stype & StreamTypeBidirectional) == StreamTypeBidirectional
+	isBidi := (h.spec.Type & StreamTypeBidirectional) == StreamTypeBidirectional
 	if isBidi && r.ProtoMajor < 2 {
-		w.WriteHeader(http.StatusHTTPVersionNotSupported)
-		io.WriteString(w, "bidirectional streaming requires HTTP/2")
+		h.failNegotiation(w, http.StatusHTTPVersionNotSupported)
 		return
 	}
-	if r.Method != http.MethodPost {
+
+	methodHandlers := make([]protocolHandler, 0, len(h.protocolHandlers))
+	for _, ph := range h.protocolHandlers {
+		if ph.ShouldHandleMethod(r.Method) {
+			methodHandlers = append(methodHandlers, ph)
+		}
+	}
+	if len(methodHandlers) == 0 {
 		// grpc-go returns a 500 here, but interoperability with non-gRPC HTTP
 		// clients is better if we return a 405.
-		w.Header().Set("Allow", http.MethodPost)
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		h.failNegotiation(w, http.StatusMethodNotAllowed)
 		return
 	}
-	var clientCodec codec.Codec
+
+	// TODO: for GETs, we should parse the Accept header and offer each handler
+	// each content-type.
 	ctype := r.Header.Get("Content-Type")
-	if codecName := codecFromContentType(ctype); codecName != "" {
-		clientCodec = h.codecs.Get(codecName)
-	}
-	if clientCodec == nil {
-		// grpc-go returns 500, but the spec recommends 415.
-		// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#requests
-		w.Header().Set("Accept-Post", acceptPostValue(h.codecs))
-		w.WriteHeader(http.StatusUnsupportedMediaType)
-		return
-	}
-
-	spec := Specification{
-		Type:      h.stype,
-		Procedure: h.config.Procedure,
-		IsServer:  true,
-	}
-
-	// We need to parse metadata before entering the interceptor stack, but we'd
-	// like to report errors to the client in a format they understand (if
-	// possible). We'll collect any such errors here and use them to
-	// short-circuit early later on.
-	//
-	// NB, future refactorings will need to take care to avoid typed nils here.
-	var failed *Error
-
-	timeout, err := parseTimeout(r.Header.Get("Grpc-Timeout"))
-	if err != nil && err != errNoTimeout {
-		// Errors here indicate that the client sent an invalid timeout header, so
-		// the error text is safe to send back.
-		failed = Wrap(CodeInvalidArgument, err)
-	} else if err == nil {
-		ctx, cancel := context.WithTimeout(r.Context(), timeout)
-		defer cancel()
-		r = r.WithContext(ctx)
-	} // else err == errNoTimeout, nothing to do
-
-	requestCompression := compress.NameIdentity
-	if me := r.Header.Get("Grpc-Encoding"); me != "" && me != compress.NameIdentity {
-		// We default to identity, so we only care if the client sends something
-		// other than the empty string or compress.NameIdentity.
-		if h.compressors.Contains(me) {
-			requestCompression = me
-		} else if failed == nil {
-			// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
-			// should return CodeUnimplemented and specify acceptable compression(s)
-			// (in addition to setting the Grpc-Accept-Encoding header).
-			failed = Errorf(
-				CodeUnimplemented,
-				"unknown compression %q: accepted grpc-encoding values are %v",
-				me, h.compressors.Names(),
-			)
-		}
-	}
-	// Follow https://github.com/grpc/grpc/blob/master/doc/compression.md.
-	// (The grpc-go implementation doesn't read the "grpc-accept-encoding" header
-	// and doesn't support compression method asymmetry.)
-	responseCompression := requestCompression
-	// If we're not already planning to compress the response, check whether the
-	// client requested a compression algorithm we support.
-	if responseCompression == compress.NameIdentity {
-		if mae := r.Header.Get("Grpc-Accept-Encoding"); mae != "" {
-			for _, enc := range strings.FieldsFunc(mae, splitOnCommasAndSpaces) {
-				if h.compressors.Contains(enc) {
-					// We found a mutually supported compression algorithm. Unlike standard
-					// HTTP, there's no preference weighting, so can bail out immediately.
-					responseCompression = enc
-					break
+	for _, ph := range methodHandlers {
+		if ph.ShouldHandleContentType(ctype) {
+			// Most errors returned from ph.NewStream are caused by invalid requests.
+			// For example, the client may have specified an invalid timeout or an
+			// unavailable codec. We'd like those errors to be visible to the
+			// interceptor chain, so we capture them here, decorate the StreamFunc,
+			// and then send the error to the client.
+			var clientVisibleError error
+			sf := StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
+				sender, receiver, err := ph.NewStream(w, r.WithContext(ctx))
+				if err != nil {
+					clientVisibleError = err
 				}
+				// If NewStream errored and the protocol doesn't want the error sent to
+				// the client, sender and/or receiver may be nil. We still want the
+				// error to be seen by interceptors, so we provide no-op Sender and
+				// Receiver implementations.
+				if err != nil && sender == nil {
+					sender = newNopSender(h.spec, Header{raw: w.Header()})
+				}
+				if err != nil && receiver == nil {
+					receiver = newNopReceiver(h.spec, Header{raw: r.Header})
+				}
+				return ctx, sender, receiver
+			})
+			if ic := h.interceptor; ic != nil {
+				sf = ic.WrapStream(sf)
 			}
+			ctx, sender, receiver := sf(r.Context())
+			// TODO: see the TODO in NewUnaryHandler above, this is stream-specific
+			// and should live in NewClientStream.
+			if clientVisibleError != nil {
+				_ = receiver.Close()
+				_ = sender.Close(clientVisibleError)
+				return
+			}
+			h.implementation(ctx, sender, receiver)
+			return
 		}
 	}
-
-	// We should write any remaining headers here, since: (a) the implementation
-	// may write to the body, thereby sending the headers, and (b) interceptors
-	// should be able to see this data.
-	//
-	// Since we know that these header keys are already in canonical form, we can
-	// skip the normalization in Header.Set. To avoid allocating re-allocating
-	// the same slices over and over, we use pre-allocated globals for the header
-	// values.
-	w.Header()["Content-Type"] = []string{ctype}
-	w.Header()["Grpc-Accept-Encoding"] = []string{h.compressors.Names()}
-	w.Header()["Grpc-Encoding"] = []string{responseCompression}
-	// Every gRPC response will have these trailers.
-	w.Header()["Trailer"] = grpcStatusTrailers
-
-	sf := StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
-		sender, receiver := newHandlerStream(
-			spec,
-			w,
-			r,
-			h.config.MaxRequestBytes,
-			clientCodec,
-			h.codecs.Protobuf(), // for errors
-			h.config.Compressors[requestCompression],
-			h.config.Compressors[responseCompression],
-		)
-		return ctx, sender, receiver
-	})
-	if ic := h.config.Interceptor; ic != nil && h.stype != StreamTypeUnary {
-		sf = ic.WrapStream(sf)
-	}
-	ctx, sender, receiver := sf(r.Context())
-	if failed != nil {
-		_ = receiver.Close()
-		_ = sender.Close(failed)
-		return
-	}
-	h.implementation(ctx, sender, receiver)
+	h.failNegotiation(w, http.StatusUnsupportedMediaType)
 }
 
-// Path returns the URL pattern to use when registering this handler. It's used
-// by the generated code.
-func (h *Handler) Path() string {
-	return fmt.Sprintf("/" + h.config.Procedure)
+// Path returns the URL pattern to use when registering this handler.
+func (h *Handler) path() string {
+	return fmt.Sprintf("/" + h.spec.Procedure)
 }
 
-func splitOnCommasAndSpaces(c rune) bool {
-	return c == ',' || c == ' '
-}
-
-func acceptPostValue(codecs roCodecs) string {
-	names := codecs.Names()
-	for i, n := range names {
-		if n == protobuf.NameBinary {
-			n = "proto"
-		}
-		names[i] = "application/grpc+" + n
+func (h *Handler) failNegotiation(w http.ResponseWriter, code int) {
+	// None of the registered protocols is able to serve the request.
+	for _, ph := range h.protocolHandlers {
+		ph.WriteAccept(w.Header())
 	}
-	names = append(names, "application/grpc")
-	return strings.Join(names, ",")
-}
-
-func codecFromContentType(ctype string) string {
-	if ctype == typeDefaultGRPC {
-		// implicitly protobuf
-		return protobuf.NameBinary
-	}
-	if !strings.HasPrefix(ctype, typeGRPCPrefix) {
-		return ""
-	}
-	name := strings.TrimPrefix(ctype, typeGRPCPrefix)
-	if name == grpcNameProto {
-		// normalize to our "protobuf"
-		return protobuf.NameBinary
-	}
-	return name
-}
-
-func contentTypeFromCodecName(n string) string {
-	// translate back to gRPC's "proto"
-	if n == protobuf.NameBinary {
-		n = grpcNameProto
-	}
-	return typeGRPCPrefix + n
+	w.WriteHeader(code)
 }

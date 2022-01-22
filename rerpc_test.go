@@ -336,7 +336,7 @@ func (i *headerIntegrationInterceptor) Wrap(next rerpc.Func) rerpc.Func {
 				req.Header().Set(i.key, i.value),
 				"set custom request header",
 			)
-		} else if spec.IsServer {
+		} else {
 			// Client should have sent both of these headers.
 			assert.Equal(
 				i.tb,
@@ -357,7 +357,7 @@ func (i *headerIntegrationInterceptor) Wrap(next rerpc.Func) rerpc.Func {
 				res.Header().Get(i.key), i.value,
 				"custom header %q from server", assert.Fmt(i.key),
 			)
-		} else if spec.IsServer {
+		} else {
 			// Client will verify that it receives this header.
 			assert.Nil(
 				i.tb,
