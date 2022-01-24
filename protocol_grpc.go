@@ -2,7 +2,9 @@ package rerpc
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/rerpc/rerpc/codec"
@@ -33,6 +35,10 @@ func (g *grpc) NewHandler(params *protocolHandlerParams) (protocolHandler, error
 }
 
 func (g *grpc) NewClient(params *protocolClientParams) (protocolClient, error) {
+	procedureURL := params.BaseURL + "/" + params.Spec.Procedure
+	if _, err := url.ParseRequestURI(procedureURL); err != nil {
+		return nil, Wrap(CodeUnknown, err)
+	}
 	return &grpcClient{
 		spec:             params.Spec,
 		compressorName:   params.CompressorName,
@@ -42,7 +48,7 @@ func (g *grpc) NewClient(params *protocolClientParams) (protocolClient, error) {
 		protobuf:         params.Protobuf,
 		maxResponseBytes: params.MaxResponseBytes,
 		doer:             params.Doer,
-		baseURL:          params.BaseURL,
+		procedureURL:     procedureURL,
 	}, nil
 }
 
@@ -177,7 +183,7 @@ type grpcClient struct {
 	protobuf         codec.Codec
 	maxResponseBytes int64
 	doer             Doer
-	baseURL          string
+	procedureURL     string
 }
 
 func (g *grpcClient) WriteRequestHeader(h http.Header) {
@@ -194,20 +200,38 @@ func (g *grpcClient) WriteRequestHeader(h http.Header) {
 	h["Te"] = []string{"trailers"}
 }
 
-func (g *grpcClient) NewStream(ctx context.Context, h Header) (Sender, Receiver, error) {
-	// TODO: move the code from newClientStream here, since it's not called
-	// anywhere else. It'll be less error-prone to build structs with named
-	// fields instead of calling this huge constructor with positional params.
-	return newClientStream(
-		ctx,
-		g.doer,
-		g.baseURL,
-		g.spec,
-		h,
-		g.maxResponseBytes,
-		g.codec,
-		g.protobuf,
-		g.compressors.Get(g.compressorName),
-		g.compressors,
-	)
+func (g *grpcClient) NewStream(ctx context.Context, h Header) (Sender, Receiver) {
+	// In a typical HTTP/1.1 request, we'd put the body into a bytes.Buffer, hand
+	// the buffer to http.NewRequest, and fire off the request with doer.Do. That
+	// won't work here because we're establishing a stream - we don't even have
+	// all the data we'll eventually send. Instead, we use io.Pipe as the request
+	// body.
+	//
+	// net/http will own the read side of the pipe, and we'll hold onto the write
+	// side. Writes to pw will block until net/http pulls the data from pr and
+	// puts it onto the network - there's no buffer between the two. (The two
+	// sides of the pipe are meant to be used concurrently.) Once the server gets
+	// the first protobuf message that we send, it'll send back headers and start
+	// the response stream.
+	pr, pw := io.Pipe()
+	duplex := &clientStream{
+		ctx:          ctx,
+		doer:         g.doer,
+		url:          g.procedureURL,
+		spec:         g.spec,
+		maxReadBytes: g.maxResponseBytes,
+		codec:        g.codec,
+		protobuf:     g.protobuf,
+		writer:       pw,
+		marshaler: marshaler{
+			w:          pw,
+			compressor: g.compressors.Get(g.compressorName),
+			codec:      g.codec,
+		},
+		header:        h,
+		reader:        pr,
+		compressors:   g.compressors,
+		responseReady: make(chan struct{}),
+	}
+	return &clientSender{duplex}, &clientReceiver{duplex}
 }

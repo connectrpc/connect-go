@@ -10,7 +10,6 @@ import (
 	"github.com/rerpc/rerpc"
 	"github.com/rerpc/rerpc/internal/assert"
 	pingrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/rerpc/ping/v1test"
-	pingpb "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
 )
 
 type assertCalledInterceptor struct {
@@ -32,37 +31,11 @@ func (i *assertCalledInterceptor) WrapStream(next rerpc.StreamFunc) rerpc.Stream
 }
 
 func TestClientStreamErrors(t *testing.T) {
-	var called bool
-	reset := func() {
-		called = false
-	}
-	mux, err := rerpc.NewServeMux(
-		rerpc.NewNotFoundHandler(),
-		pingrpc.NewPingService(pingServer{}),
-	)
-	assert.Nil(t, err, "mux construction error")
-	server := httptest.NewServer(mux)
-	defer server.Close()
-	client, err := pingrpc.NewPingServiceClient(
-		"INVALID_URL",
-		server.Client(),
-		rerpc.Intercept(&assertCalledInterceptor{&called}),
-	)
-	assert.Nil(t, err, "client construction error")
-
-	t.Run("unary", func(t *testing.T) {
-		t.Skip("interceptor is called but shouldn't be")
-		defer reset()
-		_, err := client.Ping(context.Background(), &pingpb.PingRequest{})
-		assert.NotNil(t, err, "expected RPC error")
-		assert.False(t, called, "expected interceptors not to be called")
-	})
-	t.Run("stream", func(t *testing.T) {
-		defer reset()
-		_, err := client.CountUp(context.Background(), &pingpb.CountUpRequest{})
-		assert.NotNil(t, err, "expected RPC error")
-		assert.True(t, called, "expected interceptors not to be called")
-	})
+	_, err := pingrpc.NewPingServiceClient("INVALID_URL", http.DefaultClient)
+	assert.NotNil(t, err, "client construction error")
+	// We don't even get to calling methods on the client, so there's no question
+	// of interceptors running. Once we're calling methods on the client, all
+	// errors are visible to interceptors.
 }
 
 func TestHandlerStreamErrors(t *testing.T) {
