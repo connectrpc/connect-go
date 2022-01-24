@@ -195,7 +195,10 @@ func (g *grpcClient) WriteRequestHeader(h http.Header) {
 }
 
 func (g *grpcClient) NewStream(ctx context.Context, h Header) (Sender, Receiver, error) {
-	sender, receiver := newClientStream(
+	// TODO: move the code from newClientStream here, since it's not called
+	// anywhere else. It'll be less error-prone to build structs with named
+	// fields instead of calling this huge constructor with positional params.
+	return newClientStream(
 		ctx,
 		g.doer,
 		g.baseURL,
@@ -207,5 +210,4 @@ func (g *grpcClient) NewStream(ctx context.Context, h Header) (Sender, Receiver,
 		g.compressors.Get(g.compressorName),
 		g.compressors,
 	)
-	return sender, receiver, nil
 }

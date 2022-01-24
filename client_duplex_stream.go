@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"time"
@@ -86,7 +87,7 @@ func newClientStream(
 	protobuf codec.Codec,
 	requestCompressor compress.Compressor,
 	compressors roCompressors,
-) (*clientSender, *clientReceiver) {
+) (*clientSender, *clientReceiver, error) {
 	// In a typical HTTP/1.1 request, we'd put the body into a bytes.Buffer, hand
 	// the buffer to http.NewRequest, and fire off the request with doer.Do. That
 	// won't work here because we're establishing a stream - we don't even have
@@ -99,11 +100,15 @@ func newClientStream(
 	// sides of the pipe are meant to be used concurrently.) Once the server gets
 	// the first protobuf message that we send, it'll send back headers and start
 	// the response stream.
+	procedureURL := baseURL + "/" + spec.Procedure
+	if _, err := url.Parse(procedureURL); err != nil {
+		return nil, nil, Wrap(CodeUnknown, err)
+	}
 	pr, pw := io.Pipe()
 	duplex := &clientStream{
 		ctx:          ctx,
 		doer:         doer,
-		url:          baseURL + "/" + spec.Procedure,
+		url:          procedureURL,
 		spec:         spec,
 		maxReadBytes: maxReadBytes,
 		codec:        codec,
@@ -119,7 +124,7 @@ func newClientStream(
 		compressors:   compressors,
 		responseReady: make(chan struct{}),
 	}
-	return &clientSender{duplex}, &clientReceiver{duplex}
+	return &clientSender{duplex}, &clientReceiver{duplex}, nil
 }
 
 func (cs *clientStream) Spec() Specification {
