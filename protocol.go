@@ -93,12 +93,8 @@ type protocolClient interface {
 
 	// NewStream constructs a Sender and Receiver for the message exchange.
 	//
-	// Errors returned from this constructor typically occur before making a
-	// request (e.g., the URL is invalid). Any error is returned directly to
-	// users, and is *not* visible to the interceptor stack.
-	//
 	// When constructing a stream for a unary call, implementations may assume
 	// that the sender's Send and Close methods return before the receiver's
 	// Receive or Close methods are called.
-	NewStream(context.Context, Header) (Sender, Receiver, error)
+	NewStream(context.Context, Header) (Sender, Receiver)
 }
