@@ -117,24 +117,16 @@ func NewClientStream(
 	if err != nil {
 		return nil, Wrap(CodeUnknown, err)
 	}
-	// If the protocol can't construct a stream, capture the error here.
-	var streamConstructionError error
 	sf := StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
 		header := make(http.Header, 8) // arbitrary power of two, avoid immediate resizing
 		pclient.WriteRequestHeader(header)
-		sender, receiver, err := pclient.NewStream(ctx, Header{raw: header})
-		if err != nil {
-			streamConstructionError = err
-			return ctx,
-				newNopSender(spec, Header{raw: header}),
-				newNopReceiver(spec, Header{raw: make(http.Header)})
-		}
+		sender, receiver := pclient.NewStream(ctx, Header{raw: header})
 		return ctx, sender, receiver
 	})
 	if ic := cfg.Interceptor; ic != nil {
 		sf = ic.WrapStream(sf)
 	}
-	return sf, streamConstructionError
+	return sf, nil
 }
 
 // NewClientFunc returns a strongly-typed function to call a unary remote
@@ -182,10 +174,7 @@ func NewClientFunc[Req, Res any](
 		return nil, Wrap(CodeUnknown, err)
 	}
 	send := Func(func(ctx context.Context, msg AnyRequest) (AnyResponse, error) {
-		sender, receiver, err := pclient.NewStream(ctx, msg.Header())
-		if err != nil {
-			return nil, err
-		}
+		sender, receiver := pclient.NewStream(ctx, msg.Header())
 		if err := sender.Send(msg.Any()); err != nil {
 			_ = sender.Close(err)
 			_ = receiver.Close()
