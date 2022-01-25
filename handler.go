@@ -21,36 +21,64 @@ type handlerCfg struct {
 	RegistrationName string
 }
 
-func (c *handlerCfg) Validate() error {
+func newHandlerConfiguration(procedure, registrationName string, opts []HandlerOption) (*handlerCfg, *Error) {
+	cfg := handlerCfg{
+		Procedure:        procedure,
+		RegistrationName: registrationName,
+		Protocols:        []protocol{&grpc{}},
+		Compressors: map[string]compress.Compressor{
+			compress.NameGzip: compress.NewGzip(),
+		},
+		Codecs: make(map[string]codec.Codec),
+	}
+	for _, opt := range opts {
+		opt.applyToHandler(&cfg)
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	if reg := cfg.Registrar; reg != nil && cfg.RegistrationName != "" {
+		reg.register(cfg.RegistrationName)
+	}
+	return &cfg, nil
+}
+
+func (c *handlerCfg) Validate() *Error {
 	if _, ok := c.Codecs[""]; ok {
-		return errors.New("can't register codec with an empty name")
+		return Wrap(
+			CodeUnknown,
+			errors.New("can't register codec with an empty name"),
+		)
 	}
 	if _, ok := c.Compressors[""]; ok {
-		return errors.New("can't register compressor with an empty name")
+		return Wrap(
+			CodeUnknown,
+			errors.New("can't register compressor with an empty name"),
+		)
 	}
 	return nil
 }
 
-func (c *handlerCfg) spec(stype StreamType) Specification {
+func (c *handlerCfg) newSpecification(t StreamType) Specification {
 	return Specification{
 		Procedure: c.Procedure,
-		Type:      stype,
+		Type:      t,
 	}
 }
 
-func (c *handlerCfg) newProtocolHandlers(stype StreamType) ([]protocolHandler, error) {
+func (c *handlerCfg) newProtocolHandlers(stype StreamType) ([]protocolHandler, *Error) {
 	handlers := make([]protocolHandler, 0, len(c.Protocols))
 	codecs := newROCodecs(c.Codecs)
 	compressors := newROCompressors(c.Compressors)
 	for _, p := range c.Protocols {
 		ph, err := p.NewHandler(&protocolHandlerParams{
-			Spec:            c.spec(stype),
+			Spec:            c.newSpecification(stype),
 			Codecs:          codecs,
 			Compressors:     compressors,
 			MaxRequestBytes: c.MaxRequestBytes,
 		})
 		if err != nil {
-			return nil, err
+			return nil, Wrap(CodeUnknown, err)
 		}
 		handlers = append(handlers, ph)
 	}
@@ -91,25 +119,10 @@ func NewUnaryHandler[Req, Res any](
 	unary func(context.Context, *Request[Req]) (*Response[Res], error),
 	opts ...HandlerOption,
 ) (*Handler, error) {
-	cfg := handlerCfg{
-		Procedure:        procedure,
-		RegistrationName: registrationName,
-		Protocols:        []protocol{&grpc{}},
-		Compressors: map[string]compress.Compressor{
-			compress.NameGzip: compress.NewGzip(),
-		},
-		Codecs: make(map[string]codec.Codec),
+	cfg, err := newHandlerConfiguration(procedure, registrationName, opts)
+	if err != nil {
+		return nil, err
 	}
-	for _, opt := range opts {
-		opt.applyToHandler(&cfg)
-	}
-	if err := cfg.Validate(); err != nil {
-		return nil, Wrap(CodeInternal, err)
-	}
-	if reg := cfg.Registrar; reg != nil && cfg.RegistrationName != "" {
-		reg.register(cfg.RegistrationName)
-	}
-
 	implementation := func(ctx context.Context, sender Sender, receiver Receiver, clientVisibleError error) {
 		defer receiver.Close()
 
@@ -176,10 +189,10 @@ func NewUnaryHandler[Req, Res any](
 
 	protocolHandlers, err := cfg.newProtocolHandlers(StreamTypeUnary)
 	if err != nil {
-		return nil, Wrap(CodeUnknown, err)
+		return nil, err
 	}
 	return &Handler{
-		spec:             cfg.spec(StreamTypeUnary),
+		spec:             cfg.newSpecification(StreamTypeUnary),
 		interceptor:      nil, // already applied
 		implementation:   implementation,
 		protocolHandlers: protocolHandlers,
@@ -199,30 +212,16 @@ func NewStreamingHandler(
 	implementation func(context.Context, Sender, Receiver),
 	opts ...HandlerOption,
 ) (*Handler, error) {
-	cfg := handlerCfg{
-		Procedure:        procedure,
-		RegistrationName: registrationName,
-		Compressors: map[string]compress.Compressor{
-			compress.NameGzip: compress.NewGzip(),
-		},
-		Codecs:    make(map[string]codec.Codec),
-		Protocols: []protocol{&grpc{}},
-	}
-	for _, opt := range opts {
-		opt.applyToHandler(&cfg)
-	}
-	if err := cfg.Validate(); err != nil {
-		return nil, Wrap(CodeInternal, err)
-	}
-	if reg := cfg.Registrar; reg != nil && cfg.RegistrationName != "" {
-		reg.register(cfg.RegistrationName)
+	cfg, err := newHandlerConfiguration(procedure, registrationName, opts)
+	if err != nil {
+		return nil, err
 	}
 	protocolHandlers, err := cfg.newProtocolHandlers(stype)
 	if err != nil {
-		return nil, Wrap(CodeUnknown, err)
+		return nil, err
 	}
 	return &Handler{
-		spec:        cfg.spec(stype),
+		spec:        cfg.newSpecification(stype),
 		interceptor: cfg.Interceptor,
 		implementation: func(ctx context.Context, s Sender, r Receiver, clientVisibleErr error) {
 			if clientVisibleErr != nil {
