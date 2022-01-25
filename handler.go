@@ -75,7 +75,7 @@ type HandlerOption interface {
 type Handler struct {
 	spec             Specification
 	interceptor      Interceptor
-	implementation   func(context.Context, Sender, Receiver)
+	implementation   func(context.Context, Sender, Receiver, error /* client-visible */)
 	protocolHandlers []protocolHandler
 }
 
@@ -88,7 +88,7 @@ type Handler struct {
 // users won't need to deal with protobuf identifiers directly.
 func NewUnaryHandler[Req, Res any](
 	procedure, registrationName string,
-	implementation func(context.Context, *Request[Req]) (*Response[Res], error),
+	unary func(context.Context, *Request[Req]) (*Response[Res], error),
 	opts ...HandlerOption,
 ) (*Handler, error) {
 	cfg := handlerCfg{
@@ -110,36 +110,51 @@ func NewUnaryHandler[Req, Res any](
 		reg.register(cfg.RegistrationName)
 	}
 
-	untyped := Func(func(ctx context.Context, req AnyRequest) (AnyResponse, error) {
-		typed, ok := req.(*Request[Req])
-		if !ok {
-			return nil, Errorf(CodeInternal, "unexpected handler request type %T", req)
-		}
-		return implementation(ctx, typed)
-	})
-	if ic := cfg.Interceptor; ic != nil {
-		untyped = ic.Wrap(untyped)
-	}
-	streamer := func(ctx context.Context, sender Sender, receiver Receiver) {
+	implementation := func(ctx context.Context, sender Sender, receiver Receiver, clientVisibleError error) {
 		defer receiver.Close()
-		if err := ctx.Err(); err != nil {
-			// TODO: Factor out repeated context error coding.
-			if errors.Is(err, context.Canceled) {
-				_ = sender.Close(Wrap(CodeCanceled, err))
-				return
+
+		var req *Request[Req]
+		if clientVisibleError != nil {
+			// The protocol implementation failed to establish a stream. To make the
+			// resulting error visible to the interceptor stack, we still want to
+			// call the wrapped unary Func. To do that safely, we need a useful
+			// Request struct. (Note that we are *not* actually calling the
+			// handler's implementation.)
+			req, _ = ReceiveRequest[Req](newNopReceiver(receiver.Spec(), receiver.Header()))
+		} else {
+			var err error
+			req, err = ReceiveRequest[Req](receiver)
+			if err != nil {
+				// Interceptors should see this error too.
+				clientVisibleError = err
 			}
-			if errors.Is(err, context.DeadlineExceeded) {
-				_ = sender.Close(Wrap(CodeDeadlineExceeded, err))
-				return
+		}
+
+		untyped := Func(func(ctx context.Context, req AnyRequest) (AnyResponse, error) {
+			if clientVisibleError != nil {
+				// We've already encountered an error, short-circuit before calling the
+				// handler's implementation.
+				return nil, clientVisibleError
 			}
-			_ = sender.Close(err) // unreachable per context docs
-			return
+			if err := ctx.Err(); err != nil {
+				// TODO: Factor out repeated context error coding.
+				if errors.Is(err, context.Canceled) {
+					return nil, Wrap(CodeCanceled, err)
+				}
+				if errors.Is(err, context.DeadlineExceeded) {
+					return nil, Wrap(CodeDeadlineExceeded, err)
+				}
+			}
+			typed, ok := req.(*Request[Req])
+			if !ok {
+				return nil, Errorf(CodeInternal, "unexpected handler request type %T", req)
+			}
+			return unary(ctx, typed)
+		})
+		if ic := cfg.Interceptor; ic != nil {
+			untyped = ic.Wrap(untyped)
 		}
-		req, err := ReceiveRequest[Req](receiver)
-		if err != nil {
-			_ = sender.Close(err)
-			return
-		}
+
 		res, err := untyped(ctx, req)
 		if err != nil {
 			if _, ok := AsError(err); !ok {
@@ -158,17 +173,15 @@ func NewUnaryHandler[Req, Res any](
 		}
 		_ = sender.Close(sender.Send(res.Any()))
 	}
+
 	protocolHandlers, err := cfg.newProtocolHandlers(StreamTypeUnary)
 	if err != nil {
 		return nil, Wrap(CodeUnknown, err)
 	}
-	// TODO: errors returned from protocol.NewStream aren't visible to unary
-	// interceptors. Handling those errors will be clearer if we make the
-	// implementation function pointer take them as an additional argument.
 	return &Handler{
 		spec:             cfg.spec(StreamTypeUnary),
 		interceptor:      nil, // already applied
-		implementation:   streamer,
+		implementation:   implementation,
 		protocolHandlers: protocolHandlers,
 	}, nil
 }
@@ -209,9 +222,16 @@ func NewStreamingHandler(
 		return nil, Wrap(CodeUnknown, err)
 	}
 	return &Handler{
-		spec:             cfg.spec(stype),
-		interceptor:      cfg.Interceptor,
-		implementation:   implementation,
+		spec:        cfg.spec(stype),
+		interceptor: cfg.Interceptor,
+		implementation: func(ctx context.Context, s Sender, r Receiver, clientVisibleErr error) {
+			if clientVisibleErr != nil {
+				_ = r.Close()
+				_ = s.Close(clientVisibleErr)
+				return
+			}
+			implementation(ctx, s, r)
+		},
 		protocolHandlers: protocolHandlers,
 	}, nil
 }
@@ -275,14 +295,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			sf = ic.WrapStream(sf)
 		}
 		ctx, sender, receiver := sf(r.Context())
-		// TODO: see the TODO in NewUnaryHandler above, this is stream-specific
-		// and should live in NewClientStream.
-		if clientVisibleError != nil {
-			_ = receiver.Close()
-			_ = sender.Close(clientVisibleError)
-			return
-		}
-		h.implementation(ctx, sender, receiver)
+		h.implementation(ctx, sender, receiver, clientVisibleError)
 		return
 	}
 	h.failNegotiation(w, http.StatusUnsupportedMediaType)
