@@ -26,6 +26,23 @@ type clientCfg struct {
 	RequestCompressor string
 }
 
+func newClientConfiguration(procedure string, opts []ClientOption) (*clientCfg, *Error) {
+	cfg := clientCfg{
+		Procedure: procedure,
+		Compressors: map[string]compress.Compressor{
+			"gzip": compress.NewGzip(),
+		},
+		Protocol: &grpc{},
+	}
+	for _, opt := range opts {
+		opt.applyToClient(&cfg)
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
 func (c *clientCfg) Validate() *Error {
 	if c.Codec == nil || c.CodecName == "" {
 		return Errorf(CodeUnknown, "no codec configured")
@@ -43,6 +60,14 @@ func (c *clientCfg) Protobuf() codec.Codec {
 		return c.Codec
 	}
 	return protobuf.NewBinary()
+}
+
+func (c *clientCfg) newSpecification(t StreamType) Specification {
+	return Specification{
+		Type:      t,
+		Procedure: c.Procedure,
+		IsClient:  true,
+	}
 }
 
 // A ClientOption configures a reRPC client.
@@ -85,26 +110,12 @@ func NewClientStream(
 	baseURL, procedure string,
 	opts ...ClientOption,
 ) (StreamFunc, error) {
-	cfg := clientCfg{
-		Procedure: procedure,
-		Compressors: map[string]compress.Compressor{
-			"gzip": compress.NewGzip(),
-		},
-		Protocol: &grpc{},
-	}
-	for _, opt := range opts {
-		opt.applyToClient(&cfg)
-	}
-	if err := cfg.Validate(); err != nil {
+	cfg, err := newClientConfiguration(procedure, opts)
+	if err != nil {
 		return nil, err
 	}
-	spec := Specification{
-		Type:      stype,
-		Procedure: cfg.Procedure,
-		IsClient:  true,
-	}
-	pclient, err := cfg.Protocol.NewClient(&protocolClientParams{
-		Spec:             spec,
+	pclient, perr := cfg.Protocol.NewClient(&protocolClientParams{
+		Spec:             cfg.newSpecification(stype),
 		CompressorName:   cfg.RequestCompressor,
 		Compressors:      newROCompressors(cfg.Compressors),
 		CodecName:        cfg.CodecName,
@@ -114,8 +125,8 @@ func NewClientStream(
 		Doer:             doer,
 		BaseURL:          baseURL,
 	})
-	if err != nil {
-		return nil, Wrap(CodeUnknown, err)
+	if perr != nil {
+		return nil, Wrap(CodeUnknown, perr)
 	}
 	sf := StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
 		header := make(http.Header, 8) // arbitrary power of two, avoid immediate resizing
@@ -141,25 +152,12 @@ func NewClientFunc[Req, Res any](
 	baseURL, procedure string,
 	opts ...ClientOption,
 ) (func(context.Context, *Request[Req]) (*Response[Res], error), error) {
-	cfg := clientCfg{
-		Procedure: procedure,
-		Compressors: map[string]compress.Compressor{
-			"gzip": compress.NewGzip(),
-		},
-		Protocol: &grpc{},
-	}
-	for _, opt := range opts {
-		opt.applyToClient(&cfg)
-	}
-	if err := cfg.Validate(); err != nil {
+	cfg, err := newClientConfiguration(procedure, opts)
+	if err != nil {
 		return nil, err
 	}
-	spec := Specification{
-		Type:      StreamTypeUnary,
-		Procedure: cfg.Procedure,
-		IsClient:  true,
-	}
-	pclient, err := cfg.Protocol.NewClient(&protocolClientParams{
+	spec := cfg.newSpecification(StreamTypeUnary)
+	pclient, perr := cfg.Protocol.NewClient(&protocolClientParams{
 		Spec:             spec,
 		CompressorName:   cfg.RequestCompressor,
 		Compressors:      newROCompressors(cfg.Compressors),
@@ -170,8 +168,8 @@ func NewClientFunc[Req, Res any](
 		Doer:             doer,
 		BaseURL:          baseURL,
 	})
-	if err != nil {
-		return nil, Wrap(CodeUnknown, err)
+	if perr != nil {
+		return nil, Wrap(CodeUnknown, perr)
 	}
 	send := Func(func(ctx context.Context, msg AnyRequest) (AnyResponse, error) {
 		sender, receiver := pclient.NewStream(ctx, msg.Header())
