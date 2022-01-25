@@ -59,7 +59,6 @@ func TestHandlerStreamErrors(t *testing.T) {
 	defer server.Close()
 
 	t.Run("unary", func(t *testing.T) {
-		t.Skip("fails with current code")
 		defer reset()
 		request, err := http.NewRequest(
 			http.MethodPost,
