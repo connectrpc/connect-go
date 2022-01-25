@@ -38,13 +38,15 @@ func (c *handlerCfg) spec(stype StreamType) Specification {
 	}
 }
 
-func (c *handlerCfg) protocolHandlers(stype StreamType) ([]protocolHandler, error) {
+func (c *handlerCfg) newProtocolHandlers(stype StreamType) ([]protocolHandler, error) {
 	handlers := make([]protocolHandler, 0, len(c.Protocols))
+	codecs := newROCodecs(c.Codecs)
+	compressors := newROCompressors(c.Compressors)
 	for _, p := range c.Protocols {
 		ph, err := p.NewHandler(&protocolHandlerParams{
 			Spec:            c.spec(stype),
-			Codecs:          newROCodecs(c.Codecs),
-			Compressors:     newROCompressors(c.Compressors),
+			Codecs:          codecs,
+			Compressors:     compressors,
 			MaxRequestBytes: c.MaxRequestBytes,
 		})
 		if err != nil {
@@ -156,7 +158,7 @@ func NewUnaryHandler[Req, Res any](
 		}
 		_ = sender.Close(sender.Send(res.Any()))
 	}
-	protocolHandlers, err := cfg.protocolHandlers(StreamTypeUnary)
+	protocolHandlers, err := cfg.newProtocolHandlers(StreamTypeUnary)
 	if err != nil {
 		return nil, Wrap(CodeUnknown, err)
 	}
@@ -202,7 +204,7 @@ func NewStreamingHandler(
 	if reg := cfg.Registrar; reg != nil && cfg.RegistrationName != "" {
 		reg.register(cfg.RegistrationName)
 	}
-	protocolHandlers, err := cfg.protocolHandlers(stype)
+	protocolHandlers, err := cfg.newProtocolHandlers(stype)
 	if err != nil {
 		return nil, Wrap(CodeUnknown, err)
 	}
@@ -243,44 +245,45 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// each content-type.
 	ctype := r.Header.Get("Content-Type")
 	for _, ph := range methodHandlers {
-		if ph.ShouldHandleContentType(ctype) {
-			// Most errors returned from ph.NewStream are caused by invalid requests.
-			// For example, the client may have specified an invalid timeout or an
-			// unavailable codec. We'd like those errors to be visible to the
-			// interceptor chain, so we capture them here, decorate the StreamFunc,
-			// and then send the error to the client.
-			var clientVisibleError error
-			sf := StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
-				sender, receiver, err := ph.NewStream(w, r.WithContext(ctx))
-				if err != nil {
-					clientVisibleError = err
-				}
-				// If NewStream errored and the protocol doesn't want the error sent to
-				// the client, sender and/or receiver may be nil. We still want the
-				// error to be seen by interceptors, so we provide no-op Sender and
-				// Receiver implementations.
-				if err != nil && sender == nil {
-					sender = newNopSender(h.spec, Header{raw: w.Header()})
-				}
-				if err != nil && receiver == nil {
-					receiver = newNopReceiver(h.spec, Header{raw: r.Header})
-				}
-				return ctx, sender, receiver
-			})
-			if ic := h.interceptor; ic != nil {
-				sf = ic.WrapStream(sf)
+		if !ph.ShouldHandleContentType(ctype) {
+			continue
+		}
+		// Most errors returned from ph.NewStream are caused by invalid requests.
+		// For example, the client may have specified an invalid timeout or an
+		// unavailable codec. We'd like those errors to be visible to the
+		// interceptor chain, so we capture them here, decorate the StreamFunc,
+		// and then send the error to the client.
+		var clientVisibleError error
+		sf := StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
+			sender, receiver, err := ph.NewStream(w, r.WithContext(ctx))
+			if err != nil {
+				clientVisibleError = err
 			}
-			ctx, sender, receiver := sf(r.Context())
-			// TODO: see the TODO in NewUnaryHandler above, this is stream-specific
-			// and should live in NewClientStream.
-			if clientVisibleError != nil {
-				_ = receiver.Close()
-				_ = sender.Close(clientVisibleError)
-				return
+			// If NewStream errored and the protocol doesn't want the error sent to
+			// the client, sender and/or receiver may be nil. We still want the
+			// error to be seen by interceptors, so we provide no-op Sender and
+			// Receiver implementations.
+			if err != nil && sender == nil {
+				sender = newNopSender(h.spec, Header{raw: w.Header()})
 			}
-			h.implementation(ctx, sender, receiver)
+			if err != nil && receiver == nil {
+				receiver = newNopReceiver(h.spec, Header{raw: r.Header})
+			}
+			return ctx, sender, receiver
+		})
+		if ic := h.interceptor; ic != nil {
+			sf = ic.WrapStream(sf)
+		}
+		ctx, sender, receiver := sf(r.Context())
+		// TODO: see the TODO in NewUnaryHandler above, this is stream-specific
+		// and should live in NewClientStream.
+		if clientVisibleError != nil {
+			_ = receiver.Close()
+			_ = sender.Close(clientVisibleError)
 			return
 		}
+		h.implementation(ctx, sender, receiver)
+		return
 	}
 	h.failNegotiation(w, http.StatusUnsupportedMediaType)
 }
