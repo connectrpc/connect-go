@@ -80,7 +80,7 @@ func (f UnaryInterceptorFunc) WrapContext(ctx context.Context) context.Context {
 	return ctx
 }
 
-// WrapStream implements Interceptor with a no-op.
+// WrapSender implements Interceptor with a no-op.
 func (f UnaryInterceptorFunc) WrapSender(_ context.Context, s Sender) Sender {
 	return s
 }
