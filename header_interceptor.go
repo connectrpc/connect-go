@@ -56,9 +56,9 @@ func (h *HeaderInterceptor) WrapContext(ctx context.Context) context.Context {
 // response-inspecting function.
 func (h *HeaderInterceptor) WrapSender(ctx context.Context, sender Sender) Sender {
 	if sender.Spec().IsClient {
-		return &headerMutatingSender{Sender: sender, mutate: h.inspectRequestHeader}
+		return &headerInspectingSender{Sender: sender, inspect: h.inspectRequestHeader}
 	}
-	return &headerMutatingSender{Sender: sender, mutate: h.inspectResponseHeader}
+	return &headerInspectingSender{Sender: sender, inspect: h.inspectResponseHeader}
 }
 
 // WrapReceiver implements Interceptor. Depending on whether it's operating on a
@@ -66,36 +66,36 @@ func (h *HeaderInterceptor) WrapSender(ctx context.Context, sender Sender) Sende
 // request-inspecting function.
 func (h *HeaderInterceptor) WrapReceiver(ctx context.Context, receiver Receiver) Receiver {
 	if receiver.Spec().IsClient {
-		return &headerMutatingReceiver{Receiver: receiver, mutate: h.inspectResponseHeader}
+		return &headerInspectingReceiver{Receiver: receiver, inspect: h.inspectResponseHeader}
 	}
-	return &headerMutatingReceiver{Receiver: receiver, mutate: h.inspectRequestHeader}
+	return &headerInspectingReceiver{Receiver: receiver, inspect: h.inspectRequestHeader}
 }
 
-type headerMutatingSender struct {
+type headerInspectingSender struct {
 	Sender
 
-	called bool // senders don't need to be thread-safe
-	mutate func(Specification, Header)
+	called  bool // senders don't need to be thread-safe
+	inspect func(Specification, Header)
 }
 
-func (s *headerMutatingSender) Send(m any) error {
+func (s *headerInspectingSender) Send(m any) error {
 	if !s.called {
-		s.mutate(s.Spec(), s.Header())
+		s.inspect(s.Spec(), s.Header())
 		s.called = true
 	}
 	return s.Sender.Send(m)
 }
 
-type headerMutatingReceiver struct {
+type headerInspectingReceiver struct {
 	Receiver
 
-	called bool // receivers don't need to be thread-safe
-	mutate func(Specification, Header)
+	called  bool // receivers don't need to be thread-safe
+	inspect func(Specification, Header)
 }
 
-func (r *headerMutatingReceiver) Receive(m any) error {
+func (r *headerInspectingReceiver) Receive(m any) error {
 	if !r.called {
-		r.mutate(r.Spec(), r.Header())
+		r.inspect(r.Spec(), r.Header())
 		r.called = true
 	}
 	if err := r.Receiver.Receive(m); err != nil {
