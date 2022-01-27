@@ -267,33 +267,31 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !ph.ShouldHandleContentType(ctype) {
 			continue
 		}
+		ctx := r.Context()
+		if ic := h.interceptor; ic != nil {
+			ctx = ic.WrapContext(ctx)
+		}
 		// Most errors returned from ph.NewStream are caused by invalid requests.
 		// For example, the client may have specified an invalid timeout or an
 		// unavailable codec. We'd like those errors to be visible to the
-		// interceptor chain, so we capture them here, decorate the StreamFunc,
-		// and then send the error to the client.
-		var clientVisibleError error
-		sf := StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
-			sender, receiver, err := ph.NewStream(w, r.WithContext(ctx))
-			if err != nil {
-				clientVisibleError = err
-			}
-			// If NewStream errored and the protocol doesn't want the error sent to
-			// the client, sender and/or receiver may be nil. We still want the
-			// error to be seen by interceptors, so we provide no-op Sender and
-			// Receiver implementations.
-			if err != nil && sender == nil {
-				sender = newNopSender(h.spec, Header{raw: w.Header()})
-			}
-			if err != nil && receiver == nil {
-				receiver = newNopReceiver(h.spec, Header{raw: r.Header})
-			}
-			return ctx, sender, receiver
-		})
-		if ic := h.interceptor; ic != nil {
-			sf = ic.WrapStream(sf)
+		// interceptor chain, so we're going to capture them here and pass them to
+		// the implementation.
+		sender, receiver, clientVisibleError := ph.NewStream(w, r.WithContext(ctx))
+		// If NewStream errored and the protocol doesn't want the error sent to
+		// the client, sender and/or receiver may be nil. We still want the
+		// error to be seen by interceptors, so we provide no-op Sender and
+		// Receiver implementations.
+		if clientVisibleError != nil && sender == nil {
+			sender = newNopSender(h.spec, Header{raw: w.Header()})
 		}
-		ctx, sender, receiver := sf(r.Context())
+		if clientVisibleError != nil && receiver == nil {
+			receiver = newNopReceiver(h.spec, Header{raw: r.Header})
+		}
+		if ic := h.interceptor; ic != nil {
+			// Unary interceptors were handled in NewUnaryHandler.
+			sender = ic.WrapSender(ctx, sender)
+			receiver = ic.WrapReceiver(ctx, receiver)
+		}
 		h.implementation(ctx, sender, receiver, clientVisibleError)
 		return
 	}

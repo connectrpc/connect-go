@@ -137,7 +137,7 @@ func (c *HealthClient) Full() FullHealthClient {
 
 type fullHealthClient struct {
 	check func(context.Context, *rerpc.Request[v1.HealthCheckRequest]) (*rerpc.Response[v1.HealthCheckResponse], error)
-	watch rerpc.StreamFunc
+	watch func(context.Context) (rerpc.Sender, rerpc.Receiver)
 }
 
 var _ FullHealthClient = (*fullHealthClient)(nil)
@@ -149,7 +149,7 @@ func (c *fullHealthClient) Check(ctx context.Context, req *rerpc.Request[v1.Heal
 
 // Watch calls internal.health.v1.Health.Watch.
 func (c *fullHealthClient) Watch(ctx context.Context, req *rerpc.Request[v1.HealthCheckRequest]) (*clientstream.Server[v1.HealthCheckResponse], error) {
-	_, sender, receiver := c.watch(ctx)
+	sender, receiver := c.watch(ctx)
 	if err := sender.Send(req.Any()); err != nil {
 		_ = sender.Close(err)
 		_ = receiver.Close()
