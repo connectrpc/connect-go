@@ -38,7 +38,7 @@ func ExampleInterceptor() {
 	// calling rerpc.ping.v1test.PingService/Ping
 }
 
-func ExampleChain() {
+func ExampleInterceptors() {
 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 	outer := rerpc.UnaryInterceptorFunc(func(next rerpc.Func) rerpc.Func {
 		return rerpc.Func(func(ctx context.Context, req rerpc.AnyRequest) (rerpc.AnyResponse, error) {
