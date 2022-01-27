@@ -26,7 +26,7 @@ var _ Sender = (*clientSender)(nil)
 func (cs *clientSender) Send(m any) error      { return cs.stream.Send(m) }
 func (cs *clientSender) Close(err error) error { return cs.stream.CloseSend(err) }
 func (cs *clientSender) Spec() Specification   { return cs.stream.Spec() }
-func (cs *clientSender) Header() Header        { return cs.stream.Header() }
+func (cs *clientSender) Header() http.Header   { return cs.stream.Header() }
 
 // See clientStream below: the send and receive sides of client streams are
 // tightly interconnected, so it's simpler to implement the Receiver interface
@@ -40,7 +40,7 @@ var _ Receiver = (*clientReceiver)(nil)
 func (cr *clientReceiver) Receive(m any) error { return cr.stream.Receive(m) }
 func (cr *clientReceiver) Close() error        { return cr.stream.CloseReceive() }
 func (cr *clientReceiver) Spec() Specification { return cr.stream.Spec() }
-func (cr *clientReceiver) Header() Header      { return cr.stream.ReceivedHeader() }
+func (cr *clientReceiver) Header() http.Header { return cr.stream.ReceivedHeader() }
 
 // clientStream represents a bidirectional exchange of protobuf messages
 // between the client and server. The request body is the stream from client to
@@ -62,7 +62,7 @@ type clientStream struct {
 	prepareOnce sync.Once
 	writer      *io.PipeWriter
 	marshaler   marshaler
-	header      Header
+	header      http.Header
 
 	// receive goroutine
 	reader        *io.PipeReader
@@ -79,7 +79,7 @@ func (cs *clientStream) Spec() Specification {
 	return cs.spec
 }
 
-func (cs *clientStream) Header() Header {
+func (cs *clientStream) Header() http.Header {
 	return cs.header
 }
 
@@ -186,9 +186,9 @@ func (cs *clientStream) CloseReceive() error {
 	return nil
 }
 
-func (cs *clientStream) ReceivedHeader() Header {
+func (cs *clientStream) ReceivedHeader() http.Header {
 	<-cs.responseReady
-	return Header{raw: cs.response.Header}
+	return cs.response.Header
 }
 
 func (cs *clientStream) makeRequest(prepared chan struct{}) {
@@ -201,7 +201,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 		if enc, err := encodeTimeout(untilDeadline); err == nil {
 			// Tests verify that the error in encodeTimeout is unreachable, so we
 			// should be safe without observability for the error case.
-			cs.header.raw["Grpc-Timeout"] = []string{enc}
+			cs.header["Grpc-Timeout"] = []string{enc}
 		}
 	}
 
@@ -211,7 +211,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 		close(prepared)
 		return
 	}
-	req.Header = cs.header.raw
+	req.Header = cs.header
 
 	// Before we send off a request, check if we're already out of time.
 	if err := cs.ctx.Err(); err != nil {
@@ -321,7 +321,7 @@ func extractError(protobuf codec.Codec, h http.Header) *Error {
 
 	detailsBinaryEncoded := h.Get("Grpc-Status-Details-Bin")
 	if len(detailsBinaryEncoded) > 0 {
-		detailsBinary, err := decodeBinaryHeader(detailsBinaryEncoded)
+		detailsBinary, err := DecodeBinaryHeader(detailsBinaryEncoded)
 		if err != nil {
 			return Errorf(CodeUnknown, "server returned invalid grpc-error-details-bin trailer: %w", err)
 		}

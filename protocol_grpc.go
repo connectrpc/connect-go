@@ -200,7 +200,7 @@ func (g *grpcClient) WriteRequestHeader(h http.Header) {
 	h["Te"] = []string{"trailers"}
 }
 
-func (g *grpcClient) NewStream(ctx context.Context, h Header) (Sender, Receiver) {
+func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Receiver) {
 	// In a typical HTTP/1.1 request, we'd put the body into a bytes.Buffer, hand
 	// the buffer to http.NewRequest, and fire off the request with doer.Do. That
 	// won't work here because we're establishing a stream - we don't even have
