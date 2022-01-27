@@ -322,9 +322,11 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	g.P()
 
 	g.P("type ", names.FullClientImpl, " struct {")
+	typeSender := rerpcPackage.Ident("Sender")
+	typeReceiver := rerpcPackage.Ident("Receiver")
 	for _, method := range service.Methods {
 		if method.Desc.IsStreamingServer() || method.Desc.IsStreamingClient() {
-			g.P(unexport(method.GoName), " ", rerpcPackage.Ident("StreamFunc"))
+			g.P(unexport(method.GoName), " func(", contextContext, ") (", typeSender, ", ", typeReceiver, ")")
 		} else {
 			g.P(unexport(method.GoName), " func", serverSignatureParams(g, method, false /* named */, true /* full */))
 		}
@@ -374,7 +376,7 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *
 	}
 
 	if isStreamingClient || isStreamingServer {
-		g.P("_, sender, receiver := c.", unexport(method.GoName), "(ctx)")
+		g.P("sender, receiver := c.", unexport(method.GoName), "(ctx)")
 		if !isStreamingClient && isStreamingServer {
 			// server streaming, we need to send the request.
 			g.P("if err := sender.Send(req.Any()); err != nil {")

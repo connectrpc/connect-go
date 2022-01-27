@@ -18,11 +18,16 @@ func (sc *shortCircuit) Wrap(next rerpc.Func) rerpc.Func {
 	})
 }
 
-func (sc *shortCircuit) WrapStream(next rerpc.StreamFunc) rerpc.StreamFunc {
-	return rerpc.StreamFunc(func(ctx context.Context) (context.Context, rerpc.Sender, rerpc.Receiver) {
-		ctx, s, r := next(ctx)
-		return ctx, &errSender{Sender: s, err: sc.err}, &errReceiver{Receiver: r, err: sc.err}
-	})
+func (sc *shortCircuit) WrapContext(ctx context.Context) context.Context {
+	return ctx
+}
+
+func (sc *shortCircuit) WrapSender(_ context.Context, s rerpc.Sender) rerpc.Sender {
+	return &errSender{Sender: s, err: sc.err}
+}
+
+func (sc *shortCircuit) WrapReceiver(_ context.Context, r rerpc.Receiver) rerpc.Receiver {
+	return &errReceiver{Receiver: r, err: sc.err}
 }
 
 // ShortCircuit builds an interceptor that doesn't call the wrapped RPC at all.

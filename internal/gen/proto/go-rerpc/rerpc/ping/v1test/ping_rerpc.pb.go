@@ -9,13 +9,12 @@ package pingv1test
 import (
 	context "context"
 	errors "errors"
-	strings "strings"
-
 	rerpc "github.com/rerpc/rerpc"
 	clientstream "github.com/rerpc/rerpc/clientstream"
 	protobuf "github.com/rerpc/rerpc/codec/protobuf"
 	handlerstream "github.com/rerpc/rerpc/handlerstream"
 	v1test "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
+	strings "strings"
 )
 
 // This is a compile-time assertion to ensure that this generated file and the
@@ -164,9 +163,9 @@ func (c *PingServiceClient) Full() FullPingServiceClient {
 type fullPingServiceClient struct {
 	ping    func(context.Context, *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error)
 	fail    func(context.Context, *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error)
-	sum     rerpc.StreamFunc
-	countUp rerpc.StreamFunc
-	cumSum  rerpc.StreamFunc
+	sum     func(context.Context) (rerpc.Sender, rerpc.Receiver)
+	countUp func(context.Context) (rerpc.Sender, rerpc.Receiver)
+	cumSum  func(context.Context) (rerpc.Sender, rerpc.Receiver)
 }
 
 var _ FullPingServiceClient = (*fullPingServiceClient)(nil)
@@ -183,13 +182,13 @@ func (c *fullPingServiceClient) Fail(ctx context.Context, req *rerpc.Request[v1t
 
 // Sum calls rerpc.ping.v1test.PingService.Sum.
 func (c *fullPingServiceClient) Sum(ctx context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse] {
-	_, sender, receiver := c.sum(ctx)
+	sender, receiver := c.sum(ctx)
 	return clientstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 }
 
 // CountUp calls rerpc.ping.v1test.PingService.CountUp.
 func (c *fullPingServiceClient) CountUp(ctx context.Context, req *rerpc.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
-	_, sender, receiver := c.countUp(ctx)
+	sender, receiver := c.countUp(ctx)
 	if err := sender.Send(req.Any()); err != nil {
 		_ = sender.Close(err)
 		_ = receiver.Close()
@@ -204,7 +203,7 @@ func (c *fullPingServiceClient) CountUp(ctx context.Context, req *rerpc.Request[
 
 // CumSum calls rerpc.ping.v1test.PingService.CumSum.
 func (c *fullPingServiceClient) CumSum(ctx context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
-	_, sender, receiver := c.cumSum(ctx)
+	sender, receiver := c.cumSum(ctx)
 	return clientstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 }
 
