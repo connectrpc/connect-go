@@ -96,14 +96,14 @@ func (o *useCompressorOption) applyToClient(cfg *clientCfg) {
 	cfg.RequestCompressor = o.Name
 }
 
-// NewClientStream returns the context and StreamFunc required to call a
-// streaming remote procedure. (To call a unary procedure, use NewClientFunc
-// instead.)
+// NewClientStream returns a stream constructor for a client-, server-, or
+// bidirectional streaming remote procedure. (To call a unary procedure, use
+// NewClientFunc instead.)
 //
 // It's the interface between the reRPC library and the client code generated
 // by protoc-gen-go-rerpc; most users won't ever need to deal with it directly.
 // To see an example of how NewClientStream is used in the generated code, see the
-// internal/ping/v1test package.
+// internal/gen/proto/go-rerpc/rerpc/ping/v1test package.
 func NewClientStream(
 	doer Doer,
 	stype StreamType,
