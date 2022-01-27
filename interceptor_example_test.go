@@ -26,7 +26,7 @@ func ExampleInterceptor() {
 	client, err := pingrpc.NewPingServiceClient(
 		"https://invalid-test-url",
 		http.DefaultClient,
-		rerpc.Intercept(rerpc.NewChain(logProcedure, short)),
+		rerpc.Interceptors(logProcedure, short),
 	)
 	if err != nil {
 		logger.Print("Error: ", err)
@@ -62,7 +62,7 @@ func ExampleChain() {
 	client, err := pingrpc.NewPingServiceClient(
 		"https://invalid-test-url",
 		http.DefaultClient,
-		rerpc.Intercept(rerpc.NewChain(outer, inner, short)),
+		rerpc.Interceptors(outer, inner, short),
 	)
 	if err != nil {
 		logger.Print("Error: ", err)

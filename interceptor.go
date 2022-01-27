@@ -91,61 +91,18 @@ func (f UnaryInterceptorFunc) WrapReceiver(_ context.Context, r Receiver) Receiv
 }
 
 // A Chain composes multiple interceptors into one.
-type Chain struct {
+type chain struct {
 	interceptors []Interceptor
 }
 
-var _ Interceptor = (*Chain)(nil)
+var _ Interceptor = (*chain)(nil)
 
 // NewChain composes multiple interceptors into one.
-//
-// Unary interceptors compose like an onion. The first interceptor provided is
-// the outermost layer of the onion: it acts first on the context and request,
-// and last on the response and error.
-//
-// Stream interceptors also behave like an onion: the first interceptor
-// provided is the first to wrap the context and is the outermost wrapper for
-// the (Sender, Receiver) pair. It's the first to see sent messages and the
-// last to see received messages.
-//
-// Applied to client and handler, NewChain(A, B, ..., Y, Z) produces:
-//
-//        client.Send()     client.Receive()
-//              |                 ^
-//              v                 |
-//           A ---               --- A
-//           B ---               --- B
-//             ...               ...
-//           Y ---               --- Y
-//           Z ---               --- Z
-//              |                 ^
-//              v                 |
-//           network            network
-//              |                 ^
-//              v                 |
-//           A ---               --- A
-//           B ---               --- B
-//             ...               ...
-//           Y ---               --- Y
-//           Z ---               --- Z
-//              |                 ^
-//              v                 |
-//       handler.Receive() handler.Send()
-//              |                 ^
-//              |                 |
-//              -> handler logic --
-//
-// Note that in clients, the Sender handles the request message(s) and the
-// Receiver handles the response message(s). For handlers, it's the reverse.
-// Depending on your interceptor's logic, you may need to wrap one side of the
-// stream on the clients and the other side on handlers. See the implementation
-// of HeaderInterceptor for an example.
-func NewChain(interceptors ...Interceptor) *Chain {
-	return &Chain{interceptors}
+func newChain(interceptors []Interceptor) *chain {
+	return &chain{interceptors}
 }
 
-// Wrap implements Interceptor.
-func (c *Chain) Wrap(next Func) Func {
+func (c *chain) Wrap(next Func) Func {
 	// We need to wrap in reverse order to have the first interceptor from
 	// the slice act first.
 	for i := len(c.interceptors) - 1; i >= 0; i-- {
@@ -156,8 +113,7 @@ func (c *Chain) Wrap(next Func) Func {
 	return next
 }
 
-// WrapContext implements Interceptor.
-func (c *Chain) WrapContext(ctx context.Context) context.Context {
+func (c *chain) WrapContext(ctx context.Context) context.Context {
 	for i := len(c.interceptors) - 1; i >= 0; i-- {
 		if interceptor := c.interceptors[i]; interceptor != nil {
 			ctx = interceptor.WrapContext(ctx)
@@ -166,8 +122,7 @@ func (c *Chain) WrapContext(ctx context.Context) context.Context {
 	return ctx
 }
 
-// WrapSender implements Interceptor.
-func (c *Chain) WrapSender(ctx context.Context, sender Sender) Sender {
+func (c *chain) WrapSender(ctx context.Context, sender Sender) Sender {
 	// When we're wrapping senders on the handler side, we need to wrap in the
 	// opposite order.
 	if sender.Spec().IsClient {
@@ -186,8 +141,7 @@ func (c *Chain) WrapSender(ctx context.Context, sender Sender) Sender {
 	return sender
 }
 
-// WrapReceiver implements Interceptor.
-func (c *Chain) WrapReceiver(ctx context.Context, receiver Receiver) Receiver {
+func (c *chain) WrapReceiver(ctx context.Context, receiver Receiver) Receiver {
 	for i := len(c.interceptors) - 1; i >= 0; i-- {
 		if interceptor := c.interceptors[i]; interceptor != nil {
 			receiver = interceptor.WrapReceiver(ctx, receiver)
