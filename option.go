@@ -165,20 +165,76 @@ func (o *compressorOption) apply(m map[string]compress.Compressor) {
 }
 
 type interceptOption struct {
-	interceptor Interceptor
+	interceptors []Interceptor
 }
 
-// Intercept configures a client or handler to use the supplied Interceptor.
-// Note that this Option replaces any previously-configured Interceptor - to
-// compose Interceptors, use a Chain.
-func Intercept(interceptor Interceptor) Option {
-	return &interceptOption{interceptor}
+// Interceptors configures a client or handler's interceptor stack. Repeated
+// Interceptors options are applied in order, so
+//
+//   Interceptors(A) + Interceptors(B, C) == Interceptors(A, B, C)
+//
+// Unary interceptors compose like an onion. The first interceptor provided is
+// the outermost layer of the onion: it acts first on the context and request,
+// and last on the response and error.
+//
+// Stream interceptors also behave like an onion: the first interceptor
+// provided is the first to wrap the context and is the outermost wrapper for
+// the (Sender, Receiver) pair. It's the first to see sent messages and the
+// last to see received messages.
+//
+// Applied to client and handler, Interceptors(A, B, ..., Y, Z) produces:
+//
+//        client.Send()     client.Receive()
+//              |                 ^
+//              v                 |
+//           A ---               --- A
+//           B ---               --- B
+//             ...               ...
+//           Y ---               --- Y
+//           Z ---               --- Z
+//              |                 ^
+//              v                 |
+//           network            network
+//              |                 ^
+//              v                 |
+//           A ---               --- A
+//           B ---               --- B
+//             ...               ...
+//           Y ---               --- Y
+//           Z ---               --- Z
+//              |                 ^
+//              v                 |
+//       handler.Receive() handler.Send()
+//              |                 ^
+//              |                 |
+//              -> handler logic --
+//
+// Note that in clients, the Sender handles the request message(s) and the
+// Receiver handles the response message(s). For handlers, it's the reverse.
+// Depending on your interceptor's logic, you may need to wrap one side of the
+// stream on the clients and the other side on handlers. See the implementation
+// of HeaderInterceptor for an example.
+func Interceptors(interceptors ...Interceptor) Option {
+	return &interceptOption{interceptors}
 }
 
 func (o *interceptOption) applyToClient(cfg *clientCfg) {
-	cfg.Interceptor = o.interceptor
+	cfg.Interceptor = o.chainWith(cfg.Interceptor)
 }
 
 func (o *interceptOption) applyToHandler(cfg *handlerCfg) {
-	cfg.Interceptor = o.interceptor
+	cfg.Interceptor = o.chainWith(cfg.Interceptor)
+}
+
+func (o *interceptOption) chainWith(current Interceptor) Interceptor {
+	if len(o.interceptors) == 0 {
+		return current
+	}
+	if current == nil && len(o.interceptors) == 1 {
+		return o.interceptors[0]
+	}
+	if current == nil && len(o.interceptors) > 1 {
+		return newChain(o.interceptors)
+	}
+	return newChain(append([]Interceptor{current}, o.interceptors...))
 }
