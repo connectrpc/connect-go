@@ -162,9 +162,9 @@ func (c *CrossServiceClient) Full() FullCrossServiceClient {
 type fullCrossServiceClient struct {
 	ping    func(context.Context, *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error)
 	fail    func(context.Context, *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error)
-	sum     rerpc.StreamFunc
-	countUp rerpc.StreamFunc
-	cumSum  rerpc.StreamFunc
+	sum     func(context.Context) (rerpc.Sender, rerpc.Receiver)
+	countUp func(context.Context) (rerpc.Sender, rerpc.Receiver)
+	cumSum  func(context.Context) (rerpc.Sender, rerpc.Receiver)
 }
 
 var _ FullCrossServiceClient = (*fullCrossServiceClient)(nil)
@@ -181,13 +181,13 @@ func (c *fullCrossServiceClient) Fail(ctx context.Context, req *rerpc.Request[v1
 
 // Sum calls cross.v1test.CrossService.Sum.
 func (c *fullCrossServiceClient) Sum(ctx context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse] {
-	_, sender, receiver := c.sum(ctx)
+	sender, receiver := c.sum(ctx)
 	return clientstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 }
 
 // CountUp calls cross.v1test.CrossService.CountUp.
 func (c *fullCrossServiceClient) CountUp(ctx context.Context, req *rerpc.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
-	_, sender, receiver := c.countUp(ctx)
+	sender, receiver := c.countUp(ctx)
 	if err := sender.Send(req.Any()); err != nil {
 		_ = sender.Close(err)
 		_ = receiver.Close()
@@ -202,7 +202,7 @@ func (c *fullCrossServiceClient) CountUp(ctx context.Context, req *rerpc.Request
 
 // CumSum calls cross.v1test.CrossService.CumSum.
 func (c *fullCrossServiceClient) CumSum(ctx context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
-	_, sender, receiver := c.cumSum(ctx)
+	sender, receiver := c.cumSum(ctx)
 	return clientstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 }
 
