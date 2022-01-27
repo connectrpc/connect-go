@@ -93,8 +93,9 @@ type protocolClient interface {
 
 	// NewStream constructs a Sender and Receiver for the message exchange.
 	//
-	// When constructing a stream for a unary call, implementations may assume
-	// that the sender's Send and Close methods return before the receiver's
-	// Receive or Close methods are called.
-	NewStream(context.Context, Header) (Sender, Receiver)
+	// Implementations should assume that the supplied HTTP headers have already
+	// been populated by WriteRequestHeader. When constructing a stream for a
+	// unary call, implementations may assume that the sender's Send and Close
+	// methods return before the receiver's Receive or Close methods are called.
+	NewStream(context.Context, http.Header) (Sender, Receiver)
 }

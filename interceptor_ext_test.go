@@ -102,8 +102,8 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	// Helper function: returns a function that asserts that there's some value
 	// set for header "expect", and adds a value for header "add".
 	newInspector := func(expect, add string) func(rerpc.Specification,
-		rerpc.Header) {
-		return func(spec rerpc.Specification, h rerpc.Header) {
+		http.Header) {
+		return func(spec rerpc.Specification, h http.Header) {
 			if expect != "" {
 				assert.NotZero(
 					t,
@@ -117,7 +117,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	}
 	// Helper function: asserts that there's a value present for header keys
 	// "one", "two", "three", and "four".
-	assertAllPresent := func(spec rerpc.Specification, h rerpc.Header) {
+	assertAllPresent := func(spec rerpc.Specification, h http.Header) {
 		for _, k := range []string{"one", "two", "three", "four"} {
 			assert.NotZero(
 				t,
@@ -142,7 +142,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	clientOnion := rerpc.Interceptors(
 		rerpc.NewHeaderInterceptor(
 			// 1 (start). request: should see protocol-related headers
-			func(_ rerpc.Specification, h rerpc.Header) {
+			func(_ rerpc.Specification, h http.Header) {
 				assert.NotZero(t, h.Get("Grpc-Accept-Encoding"), "grpc-accept-encoding missing")
 			},
 			// 12 (end). response: check "one"-"four"

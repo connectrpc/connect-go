@@ -2,12 +2,13 @@ package rerpc
 
 import (
 	"context"
+	"net/http"
 )
 
 type AnyRequest interface {
 	Any() any
 	Spec() Specification
-	Header() Header
+	Header() http.Header
 
 	// Only internal implementations, so we can add methods without breaking
 	// backward compatibility.
@@ -16,7 +17,7 @@ type AnyRequest interface {
 
 type AnyResponse interface {
 	Any() any
-	Header() Header
+	Header() http.Header
 
 	// Only internal implementations, so we can add methods without breaking
 	// backward compatibility.

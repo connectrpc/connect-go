@@ -2,7 +2,11 @@
 // point of view.
 package handlerstream
 
-import "github.com/rerpc/rerpc"
+import (
+	"net/http"
+
+	"github.com/rerpc/rerpc"
+)
 
 // Client is the server's view of a client streaming RPC.
 type Client[Req, Res any] struct {
@@ -16,7 +20,7 @@ func NewClient[Req, Res any](s rerpc.Sender, r rerpc.Receiver) *Client[Req, Res]
 }
 
 // ReceivedHeader returns the headers received from the client.
-func (c *Client[Req, Res]) ReceivedHeader() rerpc.Header {
+func (c *Client[Req, Res]) ReceivedHeader() http.Header {
 	return c.receiver.Header()
 }
 
@@ -36,7 +40,10 @@ func (c *Client[Req, Res]) SendAndClose(msg *rerpc.Response[Res]) error {
 	if err := c.receiver.Close(); err != nil {
 		return err
 	}
-	c.sender.Header().Merge(msg.Header())
+	sendHeader := c.sender.Header()
+	for k, v := range msg.Header() {
+		sendHeader[k] = append(sendHeader[k], v...)
+	}
 	return c.sender.Send(msg.Msg)
 }
 
@@ -52,7 +59,7 @@ func NewServer[Res any](s rerpc.Sender) *Server[Res] {
 
 // Header returns the response headers. Headers are sent with the first call to
 // Send.
-func (s *Server[Res]) Header() rerpc.Header {
+func (s *Server[Res]) Header() http.Header {
 	return s.sender.Header()
 }
 
@@ -74,7 +81,7 @@ func NewBidirectional[Req, Res any](s rerpc.Sender, r rerpc.Receiver) *Bidirecti
 }
 
 // ReceivedHeader returns the headers received from the client.
-func (b *Bidirectional[Req, Res]) ReceivedHeader() rerpc.Header {
+func (b *Bidirectional[Req, Res]) ReceivedHeader() http.Header {
 	return b.receiver.Header()
 }
 
@@ -90,7 +97,7 @@ func (b *Bidirectional[Req, Res]) Receive() (*Req, error) {
 
 // Header returns the response headers. Headers are sent with the first call to
 // Send.
-func (b *Bidirectional[Req, Res]) Header() rerpc.Header {
+func (b *Bidirectional[Req, Res]) Header() http.Header {
 	return b.sender.Header()
 }
 

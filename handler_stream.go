@@ -80,8 +80,8 @@ func (hs *handlerSender) Spec() Specification {
 	return hs.spec
 }
 
-func (hs *handlerSender) Header() Header {
-	return Header{raw: hs.writer.Header()}
+func (hs *handlerSender) Header() http.Header {
+	return hs.writer.Header()
 }
 
 func (hs *handlerSender) sendErrorGRPC(err error) error {
@@ -101,7 +101,7 @@ func (hs *handlerSender) sendErrorGRPC(err error) error {
 	}
 	hs.writer.Header().Set("Grpc-Status", code)
 	hs.writer.Header().Set("Grpc-Message", percentEncode(s.Message))
-	hs.writer.Header().Set("Grpc-Status-Details-Bin", encodeBinaryHeader(bin))
+	hs.writer.Header().Set("Grpc-Status-Details-Bin", EncodeBinaryHeader(bin))
 	return nil
 }
 
@@ -147,8 +147,8 @@ func (hr *handlerReceiver) Spec() Specification {
 	return hr.spec
 }
 
-func (hr *handlerReceiver) Header() Header {
-	return Header{raw: hr.request.Header}
+func (hr *handlerReceiver) Header() http.Header {
+	return hr.request.Header
 }
 
 func statusFromError(err error) *statuspb.Status {
