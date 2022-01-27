@@ -109,13 +109,14 @@ func NewClientStream(
 	stype StreamType,
 	baseURL, procedure string,
 	opts ...ClientOption,
-) (StreamFunc, error) {
+) (func(context.Context) (Sender, Receiver), error) {
 	cfg, err := newClientConfiguration(procedure, opts)
 	if err != nil {
 		return nil, err
 	}
+	spec := cfg.newSpecification(stype)
 	pclient, perr := cfg.Protocol.NewClient(&protocolClientParams{
-		Spec:             cfg.newSpecification(stype),
+		Spec:             spec,
 		CompressorName:   cfg.RequestCompressor,
 		Compressors:      newROCompressors(cfg.Compressors),
 		CodecName:        cfg.CodecName,
@@ -128,16 +129,19 @@ func NewClientStream(
 	if perr != nil {
 		return nil, Wrap(CodeUnknown, perr)
 	}
-	sf := StreamFunc(func(ctx context.Context) (context.Context, Sender, Receiver) {
-		header := make(http.Header, 8) // arbitrary power of two, avoid immediate resizing
-		pclient.WriteRequestHeader(header)
-		sender, receiver := pclient.NewStream(ctx, Header{raw: header})
-		return ctx, sender, receiver
-	})
-	if ic := cfg.Interceptor; ic != nil {
-		sf = ic.WrapStream(sf)
-	}
-	return sf, nil
+	return func(ctx context.Context) (Sender, Receiver) {
+		if ic := cfg.Interceptor; ic != nil {
+			ctx = ic.WrapContext(ctx)
+		}
+		h := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
+		pclient.WriteRequestHeader(h)
+		sender, receiver := pclient.NewStream(ctx, Header{raw: h})
+		if ic := cfg.Interceptor; ic != nil {
+			sender = ic.WrapSender(ctx, sender)
+			receiver = ic.WrapReceiver(ctx, receiver)
+		}
+		return sender, receiver
+	}, nil
 }
 
 // NewClientFunc returns a strongly-typed function to call a unary remote

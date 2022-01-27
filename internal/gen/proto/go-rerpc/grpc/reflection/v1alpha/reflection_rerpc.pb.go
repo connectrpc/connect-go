@@ -90,7 +90,7 @@ func (c *ServerReflectionClient) Full() FullServerReflectionClient {
 }
 
 type fullServerReflectionClient struct {
-	serverReflectionInfo rerpc.StreamFunc
+	serverReflectionInfo func(context.Context) (rerpc.Sender, rerpc.Receiver)
 }
 
 var _ FullServerReflectionClient = (*fullServerReflectionClient)(nil)
@@ -98,7 +98,7 @@ var _ FullServerReflectionClient = (*fullServerReflectionClient)(nil)
 // ServerReflectionInfo calls
 // internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo.
 func (c *fullServerReflectionClient) ServerReflectionInfo(ctx context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
-	_, sender, receiver := c.serverReflectionInfo(ctx)
+	sender, receiver := c.serverReflectionInfo(ctx)
 	return clientstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
 }
 
