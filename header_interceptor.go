@@ -2,14 +2,15 @@ package rerpc
 
 import (
 	"context"
+	"net/http"
 )
 
 // HeaderInterceptor makes it easier to write interceptors that inspect or
 // mutate HTTP headers. It applies the same logic to unary and streaming
 // procedures, wrapping the send or receive side of the stream as appropriate.
 type HeaderInterceptor struct {
-	inspectRequestHeader  func(Specification, Header)
-	inspectResponseHeader func(Specification, Header)
+	inspectRequestHeader  func(Specification, http.Header)
+	inspectResponseHeader func(Specification, http.Header)
 }
 
 var _ Interceptor = (*HeaderInterceptor)(nil)
@@ -17,18 +18,18 @@ var _ Interceptor = (*HeaderInterceptor)(nil)
 // NewHeaderInterceptor constructs a HeaderInterceptor. Nil function pointers
 // are treated as no-ops.
 func NewHeaderInterceptor(
-	inspectRequestHeader func(Specification, Header),
-	inspectResponseHeader func(Specification, Header),
+	inspectRequestHeader func(Specification, http.Header),
+	inspectResponseHeader func(Specification, http.Header),
 ) *HeaderInterceptor {
 	h := HeaderInterceptor{
 		inspectRequestHeader:  inspectRequestHeader,
 		inspectResponseHeader: inspectResponseHeader,
 	}
 	if h.inspectRequestHeader == nil {
-		h.inspectRequestHeader = func(_ Specification, _ Header) {}
+		h.inspectRequestHeader = func(_ Specification, _ http.Header) {}
 	}
 	if h.inspectResponseHeader == nil {
-		h.inspectResponseHeader = func(_ Specification, _ Header) {}
+		h.inspectResponseHeader = func(_ Specification, _ http.Header) {}
 	}
 	return &h
 }
@@ -75,7 +76,7 @@ type headerInspectingSender struct {
 	Sender
 
 	called  bool // senders don't need to be thread-safe
-	inspect func(Specification, Header)
+	inspect func(Specification, http.Header)
 }
 
 func (s *headerInspectingSender) Send(m any) error {
@@ -90,7 +91,7 @@ type headerInspectingReceiver struct {
 	Receiver
 
 	called  bool // receivers don't need to be thread-safe
-	inspect func(Specification, Header)
+	inspect func(Specification, http.Header)
 }
 
 func (r *headerInspectingReceiver) Receive(m any) error {

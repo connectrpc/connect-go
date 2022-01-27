@@ -14,8 +14,8 @@ import (
 
 func TestBinaryEncodingQuick(t *testing.T) {
 	roundtrip := func(bs []byte) bool {
-		encoded := encodeBinaryHeader(bs)
-		decoded, err := decodeBinaryHeader(encoded)
+		encoded := EncodeBinaryHeader(bs)
+		decoded, err := DecodeBinaryHeader(encoded)
 		if err != nil {
 			t.Fatalf("decode error: %v", err)
 		}
@@ -73,20 +73,9 @@ func TestIsValidHeaderKey(t *testing.T) {
 		{":path", false},
 		{":foo", false},
 
-		// Reserved
-		{"Accept", false},
-		{"Accept-Encoding", false},
-		{"Accept-Post", false},
-		{"Access-Control-Allow-Origin", false},
-		{"Allow", false},
-		{"Content-Encoding", false},
-		{"Content-Type", false},
-		{"Origin", false},
-		{"Te", false},
-		{"Grpc-Foo", false},
-		{"Rerpc-Foo", false},
-
 		// Available
+		{"Accept-Post", true},
+		{"Grpc-Foo", true},
 		{"Content-Length", true},
 		{"Transfer-Encoding", true},
 		{"Grpcfoo", true},
@@ -154,66 +143,19 @@ func TestIsValidHeaderValue(t *testing.T) {
 	}
 }
 
-func TestHeaderWrappers(t *testing.T) {
-	res, resV := "Content-Encoding", "gzip"
-	unres, unresV := "Foo-Id", "barbaz"
-	raw := http.Header{
-		res:   []string{resV},
-		unres: []string{unresV},
-	}
-	h := Header{raw: raw}
-
-	assert.Equal(t, h.Get(res), resV, "get reserved header")
-	assert.Equal(t, h.Get(unres), unresV, "get unreserved header")
-
-	vals := h.Values(res)
-	assert.Equal(t, vals, []string{resV}, "values reserved header")
-	vals[0] = "mutation should be safe"
-	assert.Equal(t, h.Values(res), []string{resV}, "values after mutating returned slice")
-
-	assert.Equal(t, h.Clone(), raw, "clone")
-
-	assert.NotNil(t, h.Set(res, "foo"), "set reserved key")
-	assert.NotNil(t, h.Add(res, "foo"), "add reserved key")
-	assert.NotNil(t, h.Del(res), "delete reserved key")
-
-	const k, v1, v2 = "Foo-Timeout", "one", "two"
-	assert.Nil(t, h.Set(k, v1), "set unreserved key")
-	assert.NotNil(t, h.Set(k, v1+"\x00"), "set unreserved key to invalid value")
-	assert.Equal(t, h.Get(k), v1, "get mutated unreserved key")
-	assert.Nil(t, h.Add(k, v2), "add unreserved key")
-	assert.NotNil(t, h.Add(k, v2+"\x00"), "add unreserved key and invalid value")
-	assert.Equal(t, h.Values(k), []string{v1, v2}, "values mutated unreserved key")
-	assert.Nil(t, h.Del(k), "delete unreserved key")
-	assert.Zero(t, h.Get(k), "get deleted key")
-
-	const binary = "foo bar baz"
-	assert.Nil(t, h.SetBinary(k, []byte(binary)), "set binary header")
-	encoded := raw.Get(k + "-Bin")
-	assert.NotZero(t, encoded, "base64-encoded value")
-	assert.NotEqual(t, encoded, binary, "base64-encoded value")
-	decoded, err := h.GetBinary(k)
-	assert.Nil(t, err, "decode binary header")
-	assert.Equal(t, string(decoded), binary, "round-trip binary header")
-
-	missing, err := h.GetBinary("Missing-Key")
-	assert.Nil(t, err, "get missing binary header")
-	assert.Zero(t, len(missing), "expected zero-len byte slice for missing binary header")
-}
-
 func TestHeaderMerge(t *testing.T) {
-	h := Header{raw: http.Header{
+	h := http.Header{
 		"Foo": []string{"one"},
-	}}
-	h.Merge(Header{raw: http.Header{
+	}
+	mergeHeaders(h, http.Header{
 		"Foo": []string{"two"},
 		"Bar": []string{"one"},
 		"Baz": nil,
-	}})
+	})
 	expect := http.Header{
 		"Foo": []string{"one", "two"},
 		"Bar": []string{"one"},
 		"Baz": nil,
 	}
-	assert.Equal(t, h.raw, expect, "merge result")
+	assert.Equal(t, h, expect, "merge result")
 }

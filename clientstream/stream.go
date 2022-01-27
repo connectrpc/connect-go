@@ -2,7 +2,11 @@
 // point of view.
 package clientstream
 
-import "github.com/rerpc/rerpc"
+import (
+	"net/http"
+
+	"github.com/rerpc/rerpc"
+)
 
 // Client is the client's view of a client streaming RPC.
 type Client[Req, Res any] struct {
@@ -17,7 +21,7 @@ func NewClient[Req, Res any](s rerpc.Sender, r rerpc.Receiver) *Client[Req, Res]
 
 // Header returns the request headers. Headers are sent to the server with the
 // first call to Send.
-func (c *Client[Req, Res]) Header() rerpc.Header {
+func (c *Client[Req, Res]) Header() http.Header {
 	return c.sender.Header()
 }
 
@@ -66,7 +70,7 @@ func (s *Server[Res]) Receive() (*Res, error) {
 
 // ReceivedHeader returns the headers received from the server. It blocks until
 // the first call to Receive returns.
-func (s *Server[Res]) ReceivedHeader() rerpc.Header {
+func (s *Server[Res]) ReceivedHeader() http.Header {
 	return s.receiver.Header()
 }
 
@@ -88,7 +92,7 @@ func NewBidirectional[Req, Res any](s rerpc.Sender, r rerpc.Receiver) *Bidirecti
 
 // Header returns the request headers. Headers are sent with the first call to
 // Send.
-func (b *Bidirectional[Req, Res]) Header() rerpc.Header {
+func (b *Bidirectional[Req, Res]) Header() http.Header {
 	return b.sender.Header()
 }
 
@@ -120,6 +124,6 @@ func (b *Bidirectional[Req, Res]) CloseReceive() error {
 
 // ReceivedHeader returns the headers received from the server. It blocks until
 // the first call to Receive returns.
-func (b *Bidirectional[Req, Res]) ReceivedHeader() rerpc.Header {
+func (b *Bidirectional[Req, Res]) ReceivedHeader() http.Header {
 	return b.receiver.Header()
 }
