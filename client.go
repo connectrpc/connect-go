@@ -135,7 +135,7 @@ func NewClientStream(
 		}
 		h := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
 		pclient.WriteRequestHeader(h)
-		sender, receiver := pclient.NewStream(ctx, Header{raw: h})
+		sender, receiver := pclient.NewStream(ctx, h)
 		if ic := cfg.Interceptor; ic != nil {
 			sender = ic.WrapSender(ctx, sender)
 			receiver = ic.WrapReceiver(ctx, receiver)
@@ -200,7 +200,7 @@ func NewClientFunc[Req, Res any](
 		// To make the specification and RPC headers visible to the full interceptor
 		// chain (as though they were supplied by the caller), we'll add them here.
 		msg.spec = spec
-		pclient.WriteRequestHeader(msg.Header().raw)
+		pclient.WriteRequestHeader(msg.Header())
 		res, err := send(ctx, msg)
 		if err != nil {
 			return nil, err

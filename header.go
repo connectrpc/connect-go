@@ -5,32 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/textproto"
 	"strconv"
-	"strings"
 	"unicode/utf8"
 )
 
-// IsValidHeaderKey checks whether the supplied key is reserved for use by
-// reRPC, gRPC, or Twirp. Keys are canonicalized using
-// textproto.CanonicalMIMEHeaderKey before checking. Unreserved headers are
-// available for use by applications, but exercise caution: setting widely-used
-// HTTP headers (e.g., Transfer-Encoding, Content-Length) may break your
-// application in unexpected and difficult-to-debug ways.
+// IsValidHeaderKey checks whether the supplied key uses a safe subset of
+// ASCII. (The HTTP specification doesn't define the encoding of headers, so
+// non-ASCII values may be interpreted unexpectedly by other servers, clients,
+// or proxies.) This function is purely advisory.
 //
-// The signature of IsValidHeaderKey obeys semantic versioning, but the list of
-// reserved headers may expand in minor releases to keep up with the evolution
-// of the gRPC and Twirp protocols. To minimize the chance of breakage,
-// applications should namespace their headers with a consistent prefix (e.g.,
-// "Google-Cloud-").
+// reRPC uses the same safe ASCII subset for keys as gRPC: a-z, A-Z, 0-9, "-"
+// (hyphen-minus), "_" (underscore), and "." (period).
 //
-// Currently, the following keys are reserved: Accept, Accept-Encoding,
-// Accept-Post, Allow, Content-Encoding, Content-Type, Te, and Trailer. Empty
-// keys, or keys prefixed with ":", "Grpc-", "Rerpc-", and "Twirp-" are also
-// reserved.
+// Keep in mind that setting headers meaningful to the underlying protocols may
+// break your application in unexpected or difficult-to-debug ways. For
+// example, you probably shouldn't set Transfer-Encoding or
+// Grpc-Accept-Encoding unless you definitely want the accompanying semantics.
 //
-// Unreserved keys may only contain the following ASCII characters:
-// a-z, A-Z, 0-9, "-" (hyphen-minus), "_" (underscore), and "." (period).
+// If you'd like to be conservative, namespace your headers with an
+// organization-specific prefix (e.g., "BufBuild-").
 func IsValidHeaderKey(key string) error {
 	if key == "" {
 		return errors.New("empty header key")
@@ -43,50 +36,44 @@ func IsValidHeaderKey(key string) error {
 			('A' <= c && c <= 'Z') ||
 			('0' <= c && c <= '9') ||
 			c == '-' || c == '_' || c == '.') {
-
 			return fmt.Errorf("%q contains non-ASCII or reserved characters", key)
 		}
 	}
-	canonical := textproto.CanonicalMIMEHeaderKey(key)
-	switch canonical {
-	case "Accept", "Accept-Encoding", "Accept-Post",
-		"Allow",
-		"Content-Encoding", "Content-Type",
-		"Origin", "Te", "Trailer":
-		return fmt.Errorf("%q is a reserved header", key)
-	}
-	switch {
-	case strings.HasPrefix(canonical, "Access-Control"):
-		// Don't let handlers muck with CORS.
-		return fmt.Errorf("%q is a reserved header", key)
-	case strings.HasPrefix(canonical, "Grpc-"):
-		return fmt.Errorf("%q is reserved for the gRPC protocol", key)
-	case strings.HasPrefix(canonical, "Rerpc-"):
-		return fmt.Errorf("%q is reserved for future use by reRPC", key)
-	default:
-		return nil
-	}
+	return nil
 }
 
-// IsValidHeaderValue checks whether the supplied string is a valid header
-// value. The gRPC wire protocol is more restrictive than plain HTTP, so only
-// space and printable ASCII is allowed.
+// IsValidHeaderValue checks whether the supplied string uses a safe subset of
+// ASCII. (The HTTP specification doesn't define the encoding of headers, so
+// non-ASCII values may be interpreted unexpectedly by other servers, clients,
+// or proxies.) This function is purely advisory.
+//
+// reRPC uses the same safe ASCII subset for values as gRPC: only space and
+// printable ASCII is allowed. Use EncodeBinaryHeader and DecodeBinaryHeader to
+// send raw bytes.
 func IsValidHeaderValue(v string) error {
 	for i := range v {
 		c := v[i]
-		if c < 0x20 || c > 0x7E { // hex makes matching the spec easier
+		if c < 0x20 || c > 0x7E { // hex makes matching the gRPC spec easier
 			return fmt.Errorf("%q isn't a valid header value: index %d is neither space nor printable ASCII", v, i)
 		}
 	}
 	return nil
 }
 
-func encodeBinaryHeader(data []byte) string {
-	// Implementations should emit unpadded values.
+// EncodeBinaryHeader base64-encodes the data. It always emits unpadded values.
+//
+// For interoperability with Google's gRPC implementations, binary headers
+// should have keys ending in "-Bin".
+func EncodeBinaryHeader(data []byte) string {
 	return base64.RawStdEncoding.EncodeToString(data)
 }
 
-func decodeBinaryHeader(data string) ([]byte, error) {
+// DecodeBinaryHeader base64-decodes the data. It can decode padded or unpadded
+// values.
+//
+// Binary headers sent by Google's gRPC implementations always have keys ending
+// in "-Bin".
+func DecodeBinaryHeader(data string) ([]byte, error) {
 	if len(data)%4 != 0 {
 		// Data definitely isn't padded.
 		return base64.RawStdEncoding.DecodeString(data)
@@ -167,143 +154,8 @@ func percentDecodeSlow(encoded string, offset int) string {
 	return out.String()
 }
 
-// Header provides access to HTTP headers and trailers. It's very similar to
-// net/http's Header, but automatically validates with IsValidHeaderKey and
-// IsValidHeaderValue.
-//
-// The zero value of Header is safe to use.
-type Header struct {
-	raw http.Header
-}
-
-// Get returns the first value associated with the given key. Like the standard
-// library's http.Header, keys are case-insensitive and canonicalized with
-// textproto.CanonicalMIMEHeaderKey.
-func (h Header) Get(key string) string {
-	if h.raw == nil {
-		return ""
-	}
-	return h.raw.Get(key)
-}
-
-// GetBinary is similar to Get, but for binary values encoded according to the
-// gRPC specification. Briefly, binary headers have keys ending in "-Bin" and
-// base64-encoded values. GetBinary automatically appends the "-Bin" suffix to
-// the supplied key and base64-decodes the value.
-//
-// For details on gRPC's treatment of binary headers, see
-// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md.
-func (h Header) GetBinary(key string) ([]byte, error) {
-	if h.raw == nil {
-		return nil, nil
-	}
-	return decodeBinaryHeader(h.raw.Get(key + "-Bin"))
-}
-
-// Values returns all values associated with the given key. Like the standard
-// library's http.Header, keys are case-insensitive and canonicalized with
-// textproto.CanonicalMIMEHeaderKey.
-//
-// Unlike the standard library's http.Header.Values, the returned slice is a
-// copy.
-func (h Header) Values(key string) []string {
-	if h.raw == nil {
-		return nil
-	}
-	mutable := h.raw.Values(key)
-	// http.Header does *not* return a copy, but we need to prevent mutation.
-	return append(make([]string, 0, len(mutable)), mutable...)
-}
-
-// Clone returns a copy of the underlying HTTP headers, including all reserved
-// keys.
-func (h Header) Clone() http.Header {
-	if h.raw == nil {
-		return make(http.Header)
-	}
-	return h.raw.Clone()
-}
-
-// Set the value associated with the given key, overwriting any existing
-// values. Like the standard library's http.Header, keys are case-insensitive
-// and canonicalized with textproto.CanonicalMIMEHeaderKey.
-//
-// Attempting to set an invalid key (as defined by IsValidHeaderKey) or value
-// (as defined by IsValidHeaderValue) returns an error. See IsValidHeaderKey
-// for backward compatibility guarantees.
-func (h Header) Set(key, value string) error {
-	if err := IsValidHeaderKey(key); err != nil {
-		return err
-	}
-	if err := IsValidHeaderValue(value); err != nil {
-		return err
-	}
-	if h.raw == nil {
-		h.raw = make(http.Header)
-	}
-	h.raw.Set(key, value)
-	return nil
-}
-
-// SetBinary is similar to Set, but for binary values encoded according to the
-// gRPC specification. Briefly, binary headers have keys ending in "-Bin" and
-// base64-encoded values. Like grpc-go, SetBinary automatically appends the
-// "-Bin" suffix to the supplied key and base64-encodes the value.
-//
-// For details on gRPC's treatment of binary headers, see
-// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md.
-func (h Header) SetBinary(key string, value []byte) error {
-	key = key + "-Bin"
-	if err := IsValidHeaderKey(key); err != nil {
-		return err
-	}
-	if h.raw == nil {
-		h.raw = make(http.Header)
-	}
-	h.raw.Set(key, encodeBinaryHeader(value))
-	return nil
-}
-
-// Add a key-value pair to the header, appending to any existing values
-// associated with the key. Like the standard library's http.Header, keys are
-// case-insensitive and canonicalized with textproto.CanonicalMIMEHeaderKey.
-//
-// Attempting to add to an invalid key (as defined by IsValidHeaderKey) or
-// supplying an invalid value (as defined by IsValidHeaderValue) returns an
-// error. See IsValidHeaderKey for backward compatibility guarantees.
-func (h Header) Add(key, value string) error {
-	if err := IsValidHeaderKey(key); err != nil {
-		return err
-	}
-	if err := IsValidHeaderValue(value); err != nil {
-		return err
-	}
-	if h.raw == nil {
-		h.raw = make(http.Header)
-	}
-	h.raw.Add(key, value)
-	return nil
-}
-
-// Del deletes all values associated with the key. Like the standard library's
-// http.Header, keys are case-insensitive and canonicalized with
-// textproto.CanonicalMIMEHeaderKey.
-//
-// Attempting delete an invalid key (as defined by IsValidHeaderKey) returns an
-// error. See IsValidHeaderKey for backward compatibility guarantees.
-func (h Header) Del(key string) error {
-	if err := IsValidHeaderKey(key); err != nil {
-		return err
-	}
-	if h.raw != nil {
-		h.raw.Del(key)
-	}
-	return nil
-}
-
-// Merge the contents of another Header into the receiver.
-func (h Header) Merge(from Header) {
-	for k, vals := range from.raw {
-		h.raw[k] = append(h.raw[k], vals...)
+func mergeHeaders(into, from http.Header) {
+	for k, vals := range from {
+		into[k] = append(into[k], vals...)
 	}
 }
