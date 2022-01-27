@@ -9,14 +9,14 @@ type Request[Req any] struct {
 	Msg *Req
 
 	spec Specification
-	hdr  Header
+	hdr  http.Header
 }
 
 // NewRequest constructs a Request.
 func NewRequest[Req any](msg *Req) *Request[Req] {
 	return &Request[Req]{
 		Msg: msg,
-		hdr: Header{raw: make(http.Header)},
+		hdr: make(http.Header),
 	}
 }
 
@@ -47,7 +47,7 @@ func (r *Request[_]) Spec() Specification {
 }
 
 // Header returns the HTTP headers for this request.
-func (r *Request[_]) Header() Header {
+func (r *Request[_]) Header() http.Header {
 	return r.hdr
 }
 
@@ -58,14 +58,14 @@ func (r *Request[_]) internalOnly() {}
 type Response[Res any] struct {
 	Msg *Res
 
-	hdr Header
+	hdr http.Header
 }
 
 // NewResponse constructs a Response.
 func NewResponse[Res any](msg *Res) *Response[Res] {
 	return &Response[Res]{
 		Msg: msg,
-		hdr: Header{raw: make(http.Header)},
+		hdr: make(http.Header),
 	}
 }
 
@@ -90,7 +90,7 @@ func (r *Response[_]) Any() any {
 }
 
 // Header returns the HTTP headers for this response.
-func (r *Response[_]) Header() Header {
+func (r *Response[_]) Header() http.Header {
 	return r.hdr
 }
 
@@ -103,7 +103,7 @@ type Sender interface {
 	Close(error) error
 
 	Spec() Specification
-	Header() Header
+	Header() http.Header
 }
 
 // Receiver is the readable side of a bidirectional stream of messages.
@@ -112,24 +112,24 @@ type Receiver interface {
 	Close() error
 
 	Spec() Specification
-	Header() Header
+	Header() http.Header
 }
 
 type nopSender struct {
 	spec   Specification
-	header Header
+	header http.Header
 }
 
 var _ Sender = (*nopSender)(nil)
 
-func newNopSender(spec Specification, header Header) *nopSender {
+func newNopSender(spec Specification, header http.Header) *nopSender {
 	return &nopSender{
 		spec:   spec,
 		header: header,
 	}
 }
 
-func (n *nopSender) Header() Header {
+func (n *nopSender) Header() http.Header {
 	return n.header
 }
 
@@ -147,12 +147,12 @@ func (n *nopSender) Close(_ error) error {
 
 type nopReceiver struct {
 	spec   Specification
-	header Header
+	header http.Header
 }
 
 var _ Receiver = (*nopReceiver)(nil)
 
-func newNopReceiver(spec Specification, header Header) *nopReceiver {
+func newNopReceiver(spec Specification, header http.Header) *nopReceiver {
 	return &nopReceiver{
 		spec:   spec,
 		header: header,
@@ -163,7 +163,7 @@ func (n *nopReceiver) Spec() Specification {
 	return n.spec
 }
 
-func (n *nopReceiver) Header() Header {
+func (n *nopReceiver) Header() http.Header {
 	return n.header
 }
 
