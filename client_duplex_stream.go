@@ -40,7 +40,7 @@ var _ Receiver = (*clientReceiver)(nil)
 func (cr *clientReceiver) Receive(m any) error { return cr.stream.Receive(m) }
 func (cr *clientReceiver) Close() error        { return cr.stream.CloseReceive() }
 func (cr *clientReceiver) Spec() Specification { return cr.stream.Spec() }
-func (cr *clientReceiver) Header() http.Header { return cr.stream.ReceivedHeader() }
+func (cr *clientReceiver) Header() http.Header { return cr.stream.ResponseHeader() }
 
 // clientStream represents a bidirectional exchange of protobuf messages
 // between the client and server. The request body is the stream from client to
@@ -186,7 +186,7 @@ func (cs *clientStream) CloseReceive() error {
 	return nil
 }
 
-func (cs *clientStream) ReceivedHeader() http.Header {
+func (cs *clientStream) ResponseHeader() http.Header {
 	<-cs.responseReady
 	return cs.response.Header
 }
