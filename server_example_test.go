@@ -61,7 +61,7 @@ func Example() {
 		Handler:        mux,
 		ReadTimeout:    2500 * time.Millisecond,
 		WriteTimeout:   5 * time.Second,
-		MaxHeaderBytes: rerpc.MaxHeaderBytes,
+		MaxHeaderBytes: 8 * 1024, // 8KiB, gRPC's recommendation
 	}
 	// You could also use golang.org/x/net/http2/h2c to serve gRPC requests
 	// without TLS.
