@@ -47,7 +47,7 @@ func ExampleClient() {
 	client, err := pingrpc.NewPingServiceClient(
 		"http://invalid-test-url",
 		doer,
-		rerpc.Interceptors(short),
+		rerpc.Intercept(short),
 	)
 	if err != nil {
 		logger.Print("Error: ", err)
