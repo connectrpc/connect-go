@@ -33,9 +33,8 @@ type Compressor interface {
 	PutWriter(io.WriteCloser)
 }
 
-// GzipCompressor uses the standard library's compress/gzip to implement
-// Compressor.
-type GzipCompressor struct {
+// Gzip uses the standard library's compress/gzip to implement Compressor.
+type Gzip struct {
 	min     int
 	readers sync.Pool
 	writers sync.Pool
@@ -44,8 +43,8 @@ type GzipCompressor struct {
 // NewGzip creates a new GzipCompressor. The compressor uses the standard
 // library's gzip package with the default compression level, and it doesn't
 // compress messages smaller than 1kb.
-func NewGzip() *GzipCompressor {
-	return &GzipCompressor{
+func NewGzip() *Gzip {
+	return &Gzip{
 		min: oneKiB,
 		readers: sync.Pool{
 			New: func() any {
@@ -62,16 +61,16 @@ func NewGzip() *GzipCompressor {
 	}
 }
 
-func (g *GzipCompressor) ShouldCompress(bs []byte) bool {
+func (g *Gzip) ShouldCompress(bs []byte) bool {
 	return len(bs) > g.min
 }
 
-func (g *GzipCompressor) GetReader(r io.Reader) (io.ReadCloser, error) {
+func (g *Gzip) GetReader(r io.Reader) (io.ReadCloser, error) {
 	gr := g.readers.Get().(*gzip.Reader)
 	return gr, gr.Reset(r)
 }
 
-func (g *GzipCompressor) PutReader(r io.ReadCloser) {
+func (g *Gzip) PutReader(r io.ReadCloser) {
 	gr, ok := r.(*gzip.Reader)
 	if !ok {
 		return
@@ -83,13 +82,13 @@ func (g *GzipCompressor) PutReader(r io.ReadCloser) {
 	g.readers.Put(gr)
 }
 
-func (g *GzipCompressor) GetWriter(w io.Writer) io.WriteCloser {
+func (g *Gzip) GetWriter(w io.Writer) io.WriteCloser {
 	gw := g.writers.Get().(*gzip.Writer)
 	gw.Reset(w)
 	return gw
 }
 
-func (g *GzipCompressor) PutWriter(w io.WriteCloser) {
+func (g *Gzip) PutWriter(w io.WriteCloser) {
 	gw, ok := w.(*gzip.Writer)
 	if !ok {
 		return
