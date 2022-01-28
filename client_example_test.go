@@ -32,7 +32,7 @@ func ExampleClient() {
 			// idle connections per host.
 			MaxIdleConnsPerHost:    16,
 			IdleConnTimeout:        90 * time.Second,
-			MaxResponseHeaderBytes: rerpc.MaxHeaderBytes,
+			MaxResponseHeaderBytes: 8 * 1024, // 8 KiB, gRPC's recommended setting
 		},
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			// Don't follow any redirects.
