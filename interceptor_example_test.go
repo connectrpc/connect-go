@@ -26,7 +26,7 @@ func ExampleInterceptor() {
 	client, err := pingrpc.NewPingServiceClient(
 		"https://invalid-test-url",
 		http.DefaultClient,
-		rerpc.Interceptors(logProcedure, short),
+		rerpc.Intercept(logProcedure, short),
 	)
 	if err != nil {
 		logger.Print("Error: ", err)
@@ -38,7 +38,7 @@ func ExampleInterceptor() {
 	// calling rerpc.ping.v1test.PingService/Ping
 }
 
-func ExampleInterceptors() {
+func ExampleIntercept() {
 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 	outer := rerpc.UnaryInterceptorFunc(func(next rerpc.Func) rerpc.Func {
 		return rerpc.Func(func(ctx context.Context, req rerpc.AnyRequest) (rerpc.AnyResponse, error) {
@@ -62,7 +62,7 @@ func ExampleInterceptors() {
 	client, err := pingrpc.NewPingServiceClient(
 		"https://invalid-test-url",
 		http.DefaultClient,
-		rerpc.Interceptors(outer, inner, short),
+		rerpc.Intercept(outer, inner, short),
 	)
 	if err != nil {
 		logger.Print("Error: ", err)
