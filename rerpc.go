@@ -3,10 +3,6 @@ package rerpc
 // Version is the semantic version of the reRPC module.
 const Version = "0.0.1"
 
-// MaxHeaderBytes is 8KiB, gRPC's recommended maximum header size. To enforce
-// this limit, set MaxHeaderBytes on your http.Server.
-const MaxHeaderBytes = 1024 * 8
-
 // StreamType describes whether the client, server, neither, or both is
 // streaming.
 type StreamType uint8
