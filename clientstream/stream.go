@@ -68,9 +68,9 @@ func (s *Server[Res]) Receive() (*Res, error) {
 	return &res, nil
 }
 
-// ReceivedHeader returns the headers received from the server. It blocks until
+// ResponseHeader returns the headers received from the server. It blocks until
 // the first call to Receive returns.
-func (s *Server[Res]) ReceivedHeader() http.Header {
+func (s *Server[Res]) ResponseHeader() http.Header {
 	return s.receiver.Header()
 }
 
@@ -122,8 +122,8 @@ func (b *Bidirectional[Req, Res]) CloseReceive() error {
 	return b.receiver.Close()
 }
 
-// ReceivedHeader returns the headers received from the server. It blocks until
+// ResponseHeader returns the headers received from the server. It blocks until
 // the first call to Receive returns.
-func (b *Bidirectional[Req, Res]) ReceivedHeader() http.Header {
+func (b *Bidirectional[Req, Res]) ResponseHeader() http.Header {
 	return b.receiver.Header()
 }
