@@ -59,7 +59,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 		rerpc.NewNotFoundHandler(),
 		pingrpc.NewPingService(
 			pingServer{},
-			rerpc.Interceptors(&assertCalledInterceptor{&called}),
+			rerpc.Intercept(&assertCalledInterceptor{&called}),
 		),
 	)
 	assert.Nil(t, err, "mux construction error")
@@ -139,7 +139,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	//
 	// The request and response sides of this onion are numbered to make the
 	// intended order clear.
-	clientOnion := rerpc.Interceptors(
+	clientOnion := rerpc.Intercept(
 		rerpc.NewHeaderInterceptor(
 			// 1 (start). request: should see protocol-related headers
 			func(_ rerpc.Specification, h http.Header) {
@@ -157,7 +157,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 			newInspector("two", "three"), // 10. response: check "two", add "three"
 		),
 	)
-	handlerOnion := rerpc.Interceptors(
+	handlerOnion := rerpc.Intercept(
 		rerpc.NewHeaderInterceptor(
 			newInspector("two", "three"), // 4. request: check "two", add "three"
 			newInspector("one", "two"),   // 9. response: check "one", add "two"
