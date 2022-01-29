@@ -9,13 +9,12 @@ package pingv1test
 import (
 	context "context"
 	errors "errors"
-	strings "strings"
-
 	rerpc "github.com/rerpc/rerpc"
 	clientstream "github.com/rerpc/rerpc/clientstream"
 	protobuf "github.com/rerpc/rerpc/codec/protobuf"
 	handlerstream "github.com/rerpc/rerpc/handlerstream"
 	v1test "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
+	strings "strings"
 )
 
 // This is a compile-time assertion to ensure that this generated file and the
