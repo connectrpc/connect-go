@@ -57,9 +57,9 @@ func NewServer[Res any](s rerpc.Sender) *Server[Res] {
 	return &Server[Res]{sender: s}
 }
 
-// Header returns the response headers. Headers are sent with the first call to
-// Send.
-func (s *Server[Res]) Header() http.Header {
+// ResponseHeader returns the response headers. Headers are sent with the first
+// call to Send.
+func (s *Server[Res]) ResponseHeader() http.Header {
 	return s.sender.Header()
 }
 
@@ -95,9 +95,9 @@ func (b *Bidirectional[Req, Res]) Receive() (*Req, error) {
 	return &req, nil
 }
 
-// Header returns the response headers. Headers are sent with the first call to
-// Send.
-func (b *Bidirectional[Req, Res]) Header() http.Header {
+// ResponseHeader returns the response headers. Headers are sent with the first
+// call to Send.
+func (b *Bidirectional[Req, Res]) ResponseHeader() http.Header {
 	return b.sender.Header()
 }
 
