@@ -65,6 +65,7 @@ func IsValidHeaderValue(v string) error {
 // For interoperability with Google's gRPC implementations, binary headers
 // should have keys ending in "-Bin".
 func EncodeBinaryHeader(data []byte) string {
+	// gRPC specification says that implementations should emit unpadded values.
 	return base64.RawStdEncoding.EncodeToString(data)
 }
 
