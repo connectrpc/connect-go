@@ -51,10 +51,12 @@ func NewChecker(reg Registrar) func(context.Context, string) (Status, error) {
 }
 
 type server struct {
-	healthrpc.UnimplementedHealthServer
+	healthrpc.UnimplementedHealth
 
 	check func(context.Context, string) (Status, error)
 }
+
+var _ healthrpc.Health = (*server)(nil)
 
 func (s *server) Check(ctx context.Context, req *rerpc.Request[healthpb.HealthCheckRequest]) (*rerpc.Response[healthpb.HealthCheckResponse], error) {
 	status, err := s.check(ctx, req.Msg.Service)
@@ -95,7 +97,7 @@ func NewService(
 	checker func(context.Context, string) (Status, error),
 	opts ...rerpc.HandlerOption,
 ) *rerpc.Service {
-	return healthrpc.NewFullHealth(
+	return healthrpc.NewHealth(
 		&server{check: checker},
 		append(opts, rerpc.ReplaceProcedurePrefix("internal.", "grpc."))...,
 	)
