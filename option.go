@@ -123,7 +123,7 @@ type compressorOption struct {
 	Compressor compress.Compressor
 }
 
-// Compress configures client and server compression strategies.
+// Compressor configures client and server compression strategies.
 //
 // For handlers, it registers a compression algorithm. Clients may send
 // messages compressed with that algorithm and/or request compressed responses.
@@ -168,10 +168,10 @@ type interceptOption struct {
 	interceptors []Interceptor
 }
 
-// Intercept configures a client or handler's interceptor stack. Repeated
-// Intercept options are applied in order, so
+// Interceptors configures a client or handler's interceptor stack. Repeated
+// Interceptors options are applied in order, so
 //
-//   Intercept(A) + Intercept(B, C) == Intercept(A, B, C)
+//   Interceptors(A) + Interceptors(B, C) == Interceptors(A, B, C)
 //
 // Unary interceptors compose like an onion. The first interceptor provided is
 // the outermost layer of the onion: it acts first on the context and request,
@@ -182,7 +182,7 @@ type interceptOption struct {
 // the (Sender, Receiver) pair. It's the first to see sent messages and the
 // last to see received messages.
 //
-// Applied to client and handler, Intercept(A, B, ..., Y, Z) produces:
+// Applied to client and handler, Interceptors(A, B, ..., Y, Z) produces:
 //
 //        client.Send()     client.Receive()
 //              |                 ^
@@ -214,7 +214,7 @@ type interceptOption struct {
 // Depending on your interceptor's logic, you may need to wrap one side of the
 // stream on the clients and the other side on handlers. See the implementation
 // of HeaderInterceptor for an example.
-func Intercept(interceptors ...Interceptor) Option {
+func Interceptors(interceptors ...Interceptor) Option {
 	return &interceptOption{interceptors}
 }
 
