@@ -25,13 +25,13 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials" // register gzip compressor
-	"google.golang.org/grpc/encoding/gzip"
+	grpcgzip "google.golang.org/grpc/encoding/gzip"
 	grpb "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/rerpc/rerpc"
-	"github.com/rerpc/rerpc/compress"
+	rerpcgzip "github.com/rerpc/rerpc/compress/gzip"
 	"github.com/rerpc/rerpc/handlerstream"
 	"github.com/rerpc/rerpc/internal/assert"
 	crossrpc "github.com/rerpc/rerpc/internal/crosstest/gen/proto/go-rerpc/cross/v1test"
@@ -449,7 +449,7 @@ func TestReRPCServer(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(
 				server.URL,
 				server.Client(),
-				rerpc.UseCompressor(compress.NameGzip),
+				rerpc.UseCompressor(rerpcgzip.Name),
 			)
 			assert.Nil(t, err, "client construction error")
 			testWithReRPCClient(t, client)
@@ -474,7 +474,7 @@ func TestReRPCServer(t *testing.T) {
 			testWithGRPCClient(t, client)
 		})
 		t.Run("gzip", func(t *testing.T) {
-			testWithGRPCClient(t, client, grpc.UseCompressor(gzip.Name))
+			testWithGRPCClient(t, client, grpc.UseCompressor(grpcgzip.Name))
 		})
 		t.Run("reflection", func(t *testing.T) {
 			client := grpcreflect.NewClient(context.Background(), grpb.NewServerReflectionClient(gconn))
@@ -530,7 +530,7 @@ func TestReRPCServerH2C(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(
 				server.URL,
 				hclient,
-				rerpc.UseCompressor(compress.NameGzip),
+				rerpc.UseCompressor(rerpcgzip.Name),
 			)
 			assert.Nil(t, err, "client construction error")
 			testWithReRPCClient(t, client)
@@ -547,7 +547,7 @@ func TestReRPCServerH2C(t *testing.T) {
 			testWithGRPCClient(t, client)
 		})
 		t.Run("gzip", func(t *testing.T) {
-			testWithGRPCClient(t, client, grpc.UseCompressor(gzip.Name))
+			testWithGRPCClient(t, client, grpc.UseCompressor(grpcgzip.Name))
 		})
 	})
 }
@@ -579,7 +579,7 @@ func TestGRPCServer(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(
 				url,
 				hclient,
-				rerpc.UseCompressor(compress.NameGzip),
+				rerpc.UseCompressor(rerpcgzip.Name),
 			)
 			assert.Nil(t, err, "client construction error")
 			testWithReRPCClient(t, client)
@@ -596,7 +596,7 @@ func TestGRPCServer(t *testing.T) {
 			testWithGRPCClient(t, client)
 		})
 		t.Run("gzip", func(t *testing.T) {
-			testWithGRPCClient(t, client, grpc.UseCompressor(gzip.Name))
+			testWithGRPCClient(t, client, grpc.UseCompressor(grpcgzip.Name))
 		})
 	})
 }

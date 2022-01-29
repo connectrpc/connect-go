@@ -8,6 +8,7 @@ import (
 
 	"github.com/rerpc/rerpc/codec"
 	"github.com/rerpc/rerpc/compress"
+	"github.com/rerpc/rerpc/compress/gzip"
 )
 
 type handlerCfg struct {
@@ -27,7 +28,7 @@ func newHandlerConfiguration(procedure, registrationName string, opts []HandlerO
 		RegistrationName: registrationName,
 		Protocols:        []protocol{&grpc{}},
 		Compressors: map[string]compress.Compressor{
-			compress.NameGzip: compress.NewGzip(),
+			gzip.Name: gzip.New(),
 		},
 		Codecs: make(map[string]codec.Codec),
 	}
