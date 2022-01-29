@@ -17,14 +17,14 @@ import (
 )
 
 type pingServer struct {
-	pingrpc.UnimplementedPingServiceServer
+	pingrpc.UnimplementedPingService
 }
 
 func TestReflection(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	mux, err := rerpc.NewServeMux(
 		rerpc.NewNotFoundHandler(),
-		pingrpc.NewFullPingService(pingServer{}, reg),
+		pingrpc.NewPingService(pingServer{}, reg),
 		health.NewService(health.NewChecker(reg)),
 		reflection.NewService(reg),
 	)

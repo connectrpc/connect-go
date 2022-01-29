@@ -15,7 +15,7 @@ import (
 // ExamplePingServer implements some trivial business logic. The protobuf
 // definition for this API is in internal/ping/v1test/ping.proto.
 type ExamplePingServer struct {
-	pingrpc.UnimplementedPingServiceServer
+	pingrpc.UnimplementedPingService
 }
 
 // Ping implements pingpb.PingServiceReRPC.

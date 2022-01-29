@@ -25,19 +25,22 @@ import (
 // compiled into your binary.
 const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 
-// SimpleServerReflectionClient is a client for the
+// WrappedServerReflectionClient is a client for the
 // internal.reflection.v1alpha1.ServerReflection service.
-type SimpleServerReflectionClient interface {
+//
+// It's a simplified wrapper around the full-featured API of
+// UnwrappedServerReflectionClient.
+type WrappedServerReflectionClient interface {
 	// The reflection service is structured as a bidirectional stream, ensuring
 	// all related requests go to a single server.
 	ServerReflectionInfo(context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]
 }
 
-// FullServerReflectionClient is a client for the
+// UnwrappedServerReflectionClient is a client for the
 // internal.reflection.v1alpha1.ServerReflection service. It's more complex than
-// SimpleServerReflectionClient, but it gives callers more fine-grained control
+// WrappedServerReflectionClient, but it gives callers more fine-grained control
 // (e.g., sending and receiving headers).
-type FullServerReflectionClient interface {
+type UnwrappedServerReflectionClient interface {
 	// The reflection service is structured as a bidirectional stream, ensuring
 	// all related requests go to a single server.
 	ServerReflectionInfo(context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]
@@ -46,10 +49,10 @@ type FullServerReflectionClient interface {
 // ServerReflectionClient is a client for the
 // internal.reflection.v1alpha1.ServerReflection service.
 type ServerReflectionClient struct {
-	client fullServerReflectionClient
+	client unwrappedServerReflectionClient
 }
 
-var _ SimpleServerReflectionClient = (*ServerReflectionClient)(nil)
+var _ WrappedServerReflectionClient = (*ServerReflectionClient)(nil)
 
 // NewServerReflectionClient constructs a client for the
 // internal.reflection.v1alpha1.ServerReflection service. By default, it uses
@@ -72,7 +75,7 @@ func NewServerReflectionClient(baseURL string, doer rerpc.Doer, opts ...rerpc.Cl
 	if err != nil {
 		return nil, err
 	}
-	return &ServerReflectionClient{client: fullServerReflectionClient{
+	return &ServerReflectionClient{client: unwrappedServerReflectionClient{
 		serverReflectionInfo: serverReflectionInfoFunc,
 	}}, nil
 }
@@ -83,47 +86,47 @@ func (c *ServerReflectionClient) ServerReflectionInfo(ctx context.Context) *clie
 	return c.client.ServerReflectionInfo(ctx)
 }
 
-// Full exposes the underlying generic client. Use it if you need finer control
-// (e.g., sending and receiving headers).
-func (c *ServerReflectionClient) Full() FullServerReflectionClient {
+// Unwrap exposes the underlying generic client. Use it if you need finer
+// control (e.g., sending and receiving headers).
+func (c *ServerReflectionClient) Unwrap() UnwrappedServerReflectionClient {
 	return &c.client
 }
 
-type fullServerReflectionClient struct {
+type unwrappedServerReflectionClient struct {
 	serverReflectionInfo func(context.Context) (rerpc.Sender, rerpc.Receiver)
 }
 
-var _ FullServerReflectionClient = (*fullServerReflectionClient)(nil)
+var _ UnwrappedServerReflectionClient = (*unwrappedServerReflectionClient)(nil)
 
 // ServerReflectionInfo calls
 // internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo.
-func (c *fullServerReflectionClient) ServerReflectionInfo(ctx context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
+func (c *unwrappedServerReflectionClient) ServerReflectionInfo(ctx context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
 	sender, receiver := c.serverReflectionInfo(ctx)
 	return clientstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
 }
 
-// FullServerReflectionServer is a server for the
+// ServerReflection is an implementation of the
 // internal.reflection.v1alpha1.ServerReflection service.
-type FullServerReflectionServer interface {
-	// The reflection service is structured as a bidirectional stream, ensuring
-	// all related requests go to a single server.
-	ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error
-}
-
-// SimpleServerReflectionServer is a server for the
-// internal.reflection.v1alpha1.ServerReflection service. It's a simpler
-// interface than FullServerReflectionServer but doesn't provide header access.
-type SimpleServerReflectionServer interface {
-	// The reflection service is structured as a bidirectional stream, ensuring
-	// all related requests go to a single server.
-	ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error
-}
-
-// NewFullServerReflection wraps each method on the service implementation in a
-// rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
 //
-// By default, handlers support the binary protobuf and JSON codecs.
-func NewFullServerReflection(svc FullServerReflectionServer, opts ...rerpc.HandlerOption) *rerpc.Service {
+// When writing your code, you can always implement the complete
+// ServerReflection interface. However, if you don't need to work with headers,
+// you can instead implement a simpler version of any or all of the unary
+// methods. Where available, the simplified signatures are listed in comments.
+//
+// NewServerReflection first tries to find the simplified version of each
+// method, then falls back to the more complex version. If neither is
+// implemented, rerpc.NewServeMux will return an error.
+type ServerReflection interface {
+	// The reflection service is structured as a bidirectional stream, ensuring
+	// all related requests go to a single server.
+	ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error
+}
+
+// newUnwrappedServerReflection wraps the service implementation in a
+// rerpc.Service, which can then be passed to rerpc.NewServeMux.
+//
+// By default, services support the binary protobuf and JSON codecs.
+func newUnwrappedServerReflection(svc ServerReflection, opts ...rerpc.HandlerOption) *rerpc.Service {
 	handlers := make([]rerpc.Handler, 0, 1)
 	opts = append([]rerpc.HandlerOption{
 		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
@@ -168,18 +171,19 @@ func (s *pluggableServerReflectionServer) ServerReflectionInfo(ctx context.Conte
 	return s.serverReflectionInfo(ctx, stream)
 }
 
-// NewServerReflection wraps each method on the service implementation in a
-// rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
+// NewServerReflection wraps the service implementation in a rerpc.Service,
+// ready for use with rerpc.NewServeMux. By default, services support the binary
+// protobuf and JSON codecs.
 //
-// Unlike NewFullServerReflection, it allows the service to mix and match the
-// signatures of FullServerReflectionServer and SimpleServerReflectionServer.
-// For each method, it first tries to find a SimpleServerReflectionServer-style
+// The service implementation may mix and match the signatures of
+// ServerReflection and the simplified signatures described in its comments. For
+// each method, NewServerReflection first tries to find a simplified
 // implementation. If a simple implementation isn't available, it falls back to
-// the more complex FullServerReflectionServer-style implementation. If neither
-// is available, it returns an error.
+// the more complex implementation. If neither is available, rerpc.NewServeMux
+// will return an error.
 //
 // Taken together, this approach lets implementations embed
-// UnimplementedServerReflectionServer and implement each method using whichever
+// UnimplementedServerReflection and implement each method using whichever
 // signature is most convenient.
 func NewServerReflection(svc any, opts ...rerpc.HandlerOption) *rerpc.Service {
 	var impl pluggableServerReflectionServer
@@ -193,15 +197,14 @@ func NewServerReflection(svc any, opts ...rerpc.HandlerOption) *rerpc.Service {
 		return rerpc.NewService(nil, errors.New("no ServerReflectionInfo implementation found"))
 	}
 
-	return NewFullServerReflection(&impl, opts...)
+	return newUnwrappedServerReflection(&impl, opts...)
 }
 
-var _ FullServerReflectionServer = (*UnimplementedServerReflectionServer)(nil) // verify interface implementation
+var _ ServerReflection = (*UnimplementedServerReflection)(nil) // verify interface implementation
 
-// UnimplementedServerReflectionServer returns CodeUnimplemented from all
-// methods.
-type UnimplementedServerReflectionServer struct{}
+// UnimplementedServerReflection returns CodeUnimplemented from all methods.
+type UnimplementedServerReflection struct{}
 
-func (UnimplementedServerReflectionServer) ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error {
+func (UnimplementedServerReflection) ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo isn't implemented")
 }
