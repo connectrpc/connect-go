@@ -26,7 +26,7 @@ import (
 func BenchmarkReRPC(b *testing.B) {
 	mux, err := rerpc.NewServeMux(
 		rerpc.NewNotFoundHandler(),
-		crossrpc.NewFullCrossService(crossServerReRPC{}),
+		crossrpc.NewCrossService(crossServerReRPC{}),
 	)
 	assert.Nil(b, err, "mux construction error")
 	server := httptest.NewUnstartedServer(mux)

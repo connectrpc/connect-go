@@ -17,7 +17,7 @@ func TestHealth(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	mux, err := rerpc.NewServeMux(
 		rerpc.NewNotFoundHandler(),
-		pingrpc.NewFullPingService(pingrpc.UnimplementedPingServiceServer{}, reg),
+		pingrpc.NewPingService(pingrpc.UnimplementedPingService{}, reg),
 		health.NewService(health.NewChecker(reg)),
 	)
 	assert.Nil(t, err, "mux construction error")

@@ -107,8 +107,7 @@ type names struct {
 	FullClientImpl     string
 	ClientExposeMethod string
 
-	FullServer                 string
-	SimpleServer               string
+	Server                     string
 	UnimplementedServer        string
 	FullHandlerConstructor     string
 	AdaptiveServerImpl         string
@@ -120,17 +119,16 @@ func newNames(service *protogen.Service) names {
 	return names{
 		Base: base,
 
-		SimpleClient:       fmt.Sprintf("Simple%sClient", base),
-		FullClient:         fmt.Sprintf("Full%sClient", base),
+		SimpleClient:       fmt.Sprintf("Wrapped%sClient", base),
+		FullClient:         fmt.Sprintf("Unwrapped%sClient", base),
 		ClientConstructor:  fmt.Sprintf("New%sClient", base),
 		SimpleClientImpl:   fmt.Sprintf("%sClient", base),
-		FullClientImpl:     fmt.Sprintf("full%sClient", base),
-		ClientExposeMethod: "Full",
+		FullClientImpl:     fmt.Sprintf("unwrapped%sClient", base),
+		ClientExposeMethod: "Unwrap",
 
-		SimpleServer:               fmt.Sprintf("Simple%sServer", base),
-		FullServer:                 fmt.Sprintf("Full%sServer", base),
-		UnimplementedServer:        fmt.Sprintf("Unimplemented%sServer", base),
-		FullHandlerConstructor:     fmt.Sprintf("NewFull%s", base),
+		Server:                     base,
+		UnimplementedServer:        fmt.Sprintf("Unimplemented%s", base),
+		FullHandlerConstructor:     fmt.Sprintf("newUnwrapped%s", base),
 		AdaptiveServerImpl:         fmt.Sprintf("pluggable%sServer", base),
 		AdaptiveHandlerConstructor: fmt.Sprintf("New%s", base),
 	}
@@ -161,6 +159,8 @@ func clientInterface(g *protogen.GeneratedFile, service *protogen.Service, names
 		name = names.SimpleClient
 		comment(g, name, " is a client for the ", service.Desc.FullName(),
 			" service.")
+		g.P("//")
+		comment(g, "It's a simplified wrapper around the full-featured API of ", names.FullClient, ".")
 	}
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
@@ -315,7 +315,7 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		comment(g, "Because there's a \"", names.ClientExposeMethod,
 			"\" method defined on this service, this function has an awkward name.")
 	} else {
-		g.P("func (c *", names.SimpleClientImpl, ") Full() ", names.FullClient, "{")
+		g.P("func (c *", names.SimpleClientImpl, ") ", names.ClientExposeMethod, "() ", names.FullClient, "{")
 		g.P("return &c.client")
 		g.P("}")
 	}
@@ -379,7 +379,7 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *
 		g.P("sender, receiver := c.", unexport(method.GoName), "(ctx)")
 		if !isStreamingClient && isStreamingServer {
 			// server streaming, we need to send the request.
-			g.P("if err := sender.Send(req.Any()); err != nil {")
+			g.P("if err := sender.Send(req.Msg); err != nil {")
 			g.P("_ = sender.Close(err)")
 			g.P("_ = receiver.Close()")
 			g.P("return nil, err")
@@ -407,32 +407,35 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *
 }
 
 func serverInterface(g *protogen.GeneratedFile, service *protogen.Service, names names) {
-	comment(g, names.FullServer, " is a server for the ", service.Desc.FullName(), " service.")
+	comment(g, names.Server, " is an implementation of the ", service.Desc.FullName(), " service.")
+	g.P("//")
+	comment(g, "When writing your code, you can always implement the ",
+		"complete ", names.Server, " interface. However, if you don't need to work with ",
+		"headers, you can instead implement a simpler version of any or all of the ",
+		"unary methods. Where available, the simplified signatures are listed in comments.")
+	g.P("//")
+	comment(g, names.AdaptiveHandlerConstructor, " first tries to find the simplified ",
+		"version of each method, then falls back to the more complex version. If neither is ",
+		"implemented, rerpc.NewServeMux will return an error.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
 	}
-	g.Annotate(names.FullServer, service.Location)
-	g.P("type ", names.FullServer, " interface {")
+	g.Annotate(names.Server, service.Location)
+	g.P("type ", names.Server, " interface {")
 	for _, method := range service.Methods {
-		g.Annotate(names.FullServer+"."+method.GoName, method.Location)
+		isUnary := !method.Desc.IsStreamingClient() && !method.Desc.IsStreamingServer()
+		if isUnary {
+			// TODO: I'm certain that we're propagating method.Comments.Leading
+			// incorrectly here.
+			g.P("// Can also be implemented in a simplified form: ")
+			g.P("// ", serverSignature(g, method, false /* full */))
+		}
+		g.Annotate(names.Server+"."+method.GoName, method.Location)
 		g.P(method.Comments.Leading, serverSignature(g, method, true /* full */))
-	}
-	g.P("}")
-	g.P()
-
-	comment(g, names.SimpleServer, " is a server for the ", service.Desc.FullName(),
-		" service. It's a simpler interface than ", names.FullServer,
-		" but doesn't provide header access.")
-	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
-		g.P("//")
-		deprecated(g)
-	}
-	g.Annotate(names.SimpleServer, service.Location)
-	g.P("type ", names.SimpleServer, " interface {")
-	for _, method := range service.Methods {
-		g.Annotate(names.SimpleServer+"."+method.GoName, method.Location)
-		g.P(method.Comments.Leading, serverSignature(g, method, false /* full */))
+		if isUnary {
+			g.P("")
+		}
 	}
 	g.P("}")
 	g.P()
@@ -497,16 +500,16 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 }
 
 func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, names names) {
-	comment(g, names.FullHandlerConstructor, " wraps each method on the service implementation",
-		" in a rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.")
+	comment(g, names.FullHandlerConstructor, " wraps the service implementation in a rerpc.Service,",
+		" which can then be passed to rerpc.NewServeMux.")
 	g.P("//")
-	comment(g, "By default, handlers support the binary protobuf and JSON codecs.")
+	comment(g, "By default, services support the binary protobuf and JSON codecs.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
 	}
 	handlerOption := rerpcPackage.Ident("HandlerOption")
-	g.P("func ", names.FullHandlerConstructor, "(svc ", names.FullServer, ", opts ...", handlerOption,
+	g.P("func ", names.FullHandlerConstructor, "(svc ", names.Server, ", opts ...", handlerOption,
 		") *", rerpcPackage.Ident("Service"), " {")
 	g.P("handlers := make([]", rerpcPackage.Ident("Handler"), ", 0, ", len(service.Methods), ")")
 	g.P("opts = append([]", handlerOption, "{")
@@ -594,7 +597,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 }
 
 func unimplementedServerImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names) {
-	g.P("var _ ", names.FullServer, " = (*", names.UnimplementedServer, ")(nil) // verify interface implementation")
+	g.P("var _ ", names.Server, " = (*", names.UnimplementedServer, ")(nil) // verify interface implementation")
 	g.P()
 	comment(g, names.UnimplementedServer, " returns CodeUnimplemented from all methods.")
 	g.P("type ", names.UnimplementedServer, " struct {}")
@@ -639,16 +642,16 @@ func adaptiveServerImplementation(g *protogen.GeneratedFile, service *protogen.S
 }
 
 func adaptiveServerConstructor(g *protogen.GeneratedFile, service *protogen.Service, names names) {
-	comment(g, names.AdaptiveHandlerConstructor, " wraps each method on the service implementation",
-		" in a rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.")
+	comment(g, names.AdaptiveHandlerConstructor, " wraps the service implementation in a ",
+		"rerpc.Service, ready for use with rerpc.NewServeMux. By default, services support the ",
+		"binary protobuf and JSON codecs.")
 	g.P("//")
-	comment(g, "Unlike ", names.FullHandlerConstructor,
-		", it allows the service to mix and match the signatures of ",
-		names.FullServer, " and ", names.SimpleServer,
-		". For each method, it first tries to find a ", names.SimpleServer,
-		"-style implementation. If a simple implementation isn't ",
-		"available, it falls back to the more complex ", names.FullServer,
-		"-style implementation. If neither is available, it returns an error.")
+	comment(g, "The service implementation may mix and match the signatures of ",
+		names.Server, " and the simplified signatures described in its comments. ",
+		"For each method, ", names.AdaptiveHandlerConstructor, " first tries to find a ",
+		"simplified implementation. If a simple implementation isn't ",
+		"available, it falls back to the more complex implementation. If neither is ",
+		"available, rerpc.NewServeMux will return an error.")
 	g.P("//")
 	comment(g, "Taken together, this approach lets implementations embed ",
 		names.UnimplementedServer, " and implement each method using whichever signature ",

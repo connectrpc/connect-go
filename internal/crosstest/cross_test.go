@@ -54,7 +54,7 @@ func newClientH2C() *http.Client {
 }
 
 type crossServerReRPC struct {
-	crossrpc.UnimplementedCrossServiceServer
+	crossrpc.UnimplementedCrossService
 }
 
 func (c crossServerReRPC) Ping(ctx context.Context, req *rerpc.Request[crosspb.PingRequest]) (*rerpc.Response[crosspb.PingResponse], error) {
@@ -435,7 +435,7 @@ func TestReRPCServer(t *testing.T) {
 	reg := rerpc.NewRegistrar()
 	mux, err := rerpc.NewServeMux(
 		rerpc.NewNotFoundHandler(),
-		crossrpc.NewFullCrossService(crossServerReRPC{}, reg),
+		crossrpc.NewCrossService(crossServerReRPC{}, reg),
 		reflection.NewService(reg),
 	)
 	assert.Nil(t, err, "mux construction error")
@@ -513,7 +513,7 @@ func TestReRPCServer(t *testing.T) {
 func TestReRPCServerH2C(t *testing.T) {
 	mux, err := rerpc.NewServeMux(
 		rerpc.NewNotFoundHandler(),
-		crossrpc.NewFullCrossService(crossServerReRPC{}),
+		crossrpc.NewCrossService(crossServerReRPC{}),
 	)
 	assert.Nil(t, err, "mux construction error")
 	server := httptest.NewServer(h2c.NewHandler(mux, &http2.Server{}))
