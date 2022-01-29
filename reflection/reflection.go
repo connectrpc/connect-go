@@ -53,17 +53,19 @@ func NewService(reg Registrar, opts ...rerpc.HandlerOption) *rerpc.Service {
 		rerpc.Codec(protobuf.NameJSON, protobuf.NewJSON()),
 	}, opts...)
 	opts = append(opts, rerpc.ReplaceProcedurePrefix(prefix, replacement))
-	return reflectionrpc.NewFullServerReflection(
+	return reflectionrpc.NewServerReflection(
 		&server{reg: reg},
 		opts...,
 	)
 }
 
 type server struct {
-	reflectionrpc.UnimplementedServerReflectionServer
+	reflectionrpc.UnimplementedServerReflection
 
 	reg Registrar
 }
+
+var _ reflectionrpc.ServerReflection = (*server)(nil)
 
 func (rs *server) ServerReflectionInfo(
 	ctx context.Context,

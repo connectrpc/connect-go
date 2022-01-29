@@ -25,8 +25,11 @@ import (
 // compiled into your binary.
 const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 
-// SimpleHealthClient is a client for the internal.health.v1.Health service.
-type SimpleHealthClient interface {
+// WrappedHealthClient is a client for the internal.health.v1.Health service.
+//
+// It's a simplified wrapper around the full-featured API of
+// UnwrappedHealthClient.
+type WrappedHealthClient interface {
 	// If the requested service is unknown, the call will fail with status
 	// NOT_FOUND.
 	Check(context.Context, *v1.HealthCheckRequest) (*v1.HealthCheckResponse, error)
@@ -48,10 +51,10 @@ type SimpleHealthClient interface {
 	Watch(context.Context, *v1.HealthCheckRequest) (*clientstream.Server[v1.HealthCheckResponse], error)
 }
 
-// FullHealthClient is a client for the internal.health.v1.Health service. It's
-// more complex than SimpleHealthClient, but it gives callers more fine-grained
-// control (e.g., sending and receiving headers).
-type FullHealthClient interface {
+// UnwrappedHealthClient is a client for the internal.health.v1.Health service.
+// It's more complex than WrappedHealthClient, but it gives callers more
+// fine-grained control (e.g., sending and receiving headers).
+type UnwrappedHealthClient interface {
 	// If the requested service is unknown, the call will fail with status
 	// NOT_FOUND.
 	Check(context.Context, *rerpc.Request[v1.HealthCheckRequest]) (*rerpc.Response[v1.HealthCheckResponse], error)
@@ -75,10 +78,10 @@ type FullHealthClient interface {
 
 // HealthClient is a client for the internal.health.v1.Health service.
 type HealthClient struct {
-	client fullHealthClient
+	client unwrappedHealthClient
 }
 
-var _ SimpleHealthClient = (*HealthClient)(nil)
+var _ WrappedHealthClient = (*HealthClient)(nil)
 
 // NewHealthClient constructs a client for the internal.health.v1.Health
 // service. By default, it uses the binary protobuf codec.
@@ -109,7 +112,7 @@ func NewHealthClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption
 	if err != nil {
 		return nil, err
 	}
-	return &HealthClient{client: fullHealthClient{
+	return &HealthClient{client: unwrappedHealthClient{
 		check: checkFunc,
 		watch: watchFunc,
 	}}, nil
@@ -129,28 +132,28 @@ func (c *HealthClient) Watch(ctx context.Context, req *v1.HealthCheckRequest) (*
 	return c.client.Watch(ctx, rerpc.NewRequest(req))
 }
 
-// Full exposes the underlying generic client. Use it if you need finer control
-// (e.g., sending and receiving headers).
-func (c *HealthClient) Full() FullHealthClient {
+// Unwrap exposes the underlying generic client. Use it if you need finer
+// control (e.g., sending and receiving headers).
+func (c *HealthClient) Unwrap() UnwrappedHealthClient {
 	return &c.client
 }
 
-type fullHealthClient struct {
+type unwrappedHealthClient struct {
 	check func(context.Context, *rerpc.Request[v1.HealthCheckRequest]) (*rerpc.Response[v1.HealthCheckResponse], error)
 	watch func(context.Context) (rerpc.Sender, rerpc.Receiver)
 }
 
-var _ FullHealthClient = (*fullHealthClient)(nil)
+var _ UnwrappedHealthClient = (*unwrappedHealthClient)(nil)
 
 // Check calls internal.health.v1.Health.Check.
-func (c *fullHealthClient) Check(ctx context.Context, req *rerpc.Request[v1.HealthCheckRequest]) (*rerpc.Response[v1.HealthCheckResponse], error) {
+func (c *unwrappedHealthClient) Check(ctx context.Context, req *rerpc.Request[v1.HealthCheckRequest]) (*rerpc.Response[v1.HealthCheckResponse], error) {
 	return c.check(ctx, req)
 }
 
 // Watch calls internal.health.v1.Health.Watch.
-func (c *fullHealthClient) Watch(ctx context.Context, req *rerpc.Request[v1.HealthCheckRequest]) (*clientstream.Server[v1.HealthCheckResponse], error) {
+func (c *unwrappedHealthClient) Watch(ctx context.Context, req *rerpc.Request[v1.HealthCheckRequest]) (*clientstream.Server[v1.HealthCheckResponse], error) {
 	sender, receiver := c.watch(ctx)
-	if err := sender.Send(req.Any()); err != nil {
+	if err := sender.Send(req.Msg); err != nil {
 		_ = sender.Close(err)
 		_ = receiver.Close()
 		return nil, err
@@ -162,11 +165,23 @@ func (c *fullHealthClient) Watch(ctx context.Context, req *rerpc.Request[v1.Heal
 	return clientstream.NewServer[v1.HealthCheckResponse](receiver), nil
 }
 
-// FullHealthServer is a server for the internal.health.v1.Health service.
-type FullHealthServer interface {
+// Health is an implementation of the internal.health.v1.Health service.
+//
+// When writing your code, you can always implement the complete Health
+// interface. However, if you don't need to work with headers, you can instead
+// implement a simpler version of any or all of the unary methods. Where
+// available, the simplified signatures are listed in comments.
+//
+// NewHealth first tries to find the simplified version of each method, then
+// falls back to the more complex version. If neither is implemented,
+// rerpc.NewServeMux will return an error.
+type Health interface {
+	// Can also be implemented in a simplified form:
+	// Check(context.Context, *v1.HealthCheckRequest) (*v1.HealthCheckResponse, error)
 	// If the requested service is unknown, the call will fail with status
 	// NOT_FOUND.
 	Check(context.Context, *rerpc.Request[v1.HealthCheckRequest]) (*rerpc.Response[v1.HealthCheckResponse], error)
+
 	// Performs a watch for the serving status of the requested service.
 	// The server will immediately send back a message indicating the current
 	// serving status.  It will then subsequently send a new message whenever
@@ -185,36 +200,11 @@ type FullHealthServer interface {
 	Watch(context.Context, *rerpc.Request[v1.HealthCheckRequest], *handlerstream.Server[v1.HealthCheckResponse]) error
 }
 
-// SimpleHealthServer is a server for the internal.health.v1.Health service.
-// It's a simpler interface than FullHealthServer but doesn't provide header
-// access.
-type SimpleHealthServer interface {
-	// If the requested service is unknown, the call will fail with status
-	// NOT_FOUND.
-	Check(context.Context, *v1.HealthCheckRequest) (*v1.HealthCheckResponse, error)
-	// Performs a watch for the serving status of the requested service.
-	// The server will immediately send back a message indicating the current
-	// serving status.  It will then subsequently send a new message whenever
-	// the service's serving status changes.
-	//
-	// If the requested service is unknown when the call is received, the
-	// server will send a message setting the serving status to
-	// SERVICE_UNKNOWN but will *not* terminate the call.  If at some
-	// future point, the serving status of the service becomes known, the
-	// server will send a new message with the service's serving status.
-	//
-	// If the call terminates with status UNIMPLEMENTED, then clients
-	// should assume this method is not supported and should not retry the
-	// call.  If the call terminates with any other status (including OK),
-	// clients should retry the call with appropriate exponential backoff.
-	Watch(context.Context, *v1.HealthCheckRequest, *handlerstream.Server[v1.HealthCheckResponse]) error
-}
-
-// NewFullHealth wraps each method on the service implementation in a
-// rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
+// newUnwrappedHealth wraps the service implementation in a rerpc.Service, which
+// can then be passed to rerpc.NewServeMux.
 //
-// By default, handlers support the binary protobuf and JSON codecs.
-func NewFullHealth(svc FullHealthServer, opts ...rerpc.HandlerOption) *rerpc.Service {
+// By default, services support the binary protobuf and JSON codecs.
+func newUnwrappedHealth(svc Health, opts ...rerpc.HandlerOption) *rerpc.Service {
 	handlers := make([]rerpc.Handler, 0, 2)
 	opts = append([]rerpc.HandlerOption{
 		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
@@ -284,18 +274,18 @@ func (s *pluggableHealthServer) Watch(ctx context.Context, req *rerpc.Request[v1
 	return s.watch(ctx, req, stream)
 }
 
-// NewHealth wraps each method on the service implementation in a rerpc.Handler.
-// The returned slice can be passed to rerpc.NewServeMux.
+// NewHealth wraps the service implementation in a rerpc.Service, ready for use
+// with rerpc.NewServeMux. By default, services support the binary protobuf and
+// JSON codecs.
 //
-// Unlike NewFullHealth, it allows the service to mix and match the signatures
-// of FullHealthServer and SimpleHealthServer. For each method, it first tries
-// to find a SimpleHealthServer-style implementation. If a simple implementation
-// isn't available, it falls back to the more complex FullHealthServer-style
-// implementation. If neither is available, it returns an error.
+// The service implementation may mix and match the signatures of Health and the
+// simplified signatures described in its comments. For each method, NewHealth
+// first tries to find a simplified implementation. If a simple implementation
+// isn't available, it falls back to the more complex implementation. If neither
+// is available, rerpc.NewServeMux will return an error.
 //
-// Taken together, this approach lets implementations embed
-// UnimplementedHealthServer and implement each method using whichever signature
-// is most convenient.
+// Taken together, this approach lets implementations embed UnimplementedHealth
+// and implement each method using whichever signature is most convenient.
 func NewHealth(svc any, opts ...rerpc.HandlerOption) *rerpc.Service {
 	var impl pluggableHealthServer
 
@@ -333,18 +323,18 @@ func NewHealth(svc any, opts ...rerpc.HandlerOption) *rerpc.Service {
 		return rerpc.NewService(nil, errors.New("no Watch implementation found"))
 	}
 
-	return NewFullHealth(&impl, opts...)
+	return newUnwrappedHealth(&impl, opts...)
 }
 
-var _ FullHealthServer = (*UnimplementedHealthServer)(nil) // verify interface implementation
+var _ Health = (*UnimplementedHealth)(nil) // verify interface implementation
 
-// UnimplementedHealthServer returns CodeUnimplemented from all methods.
-type UnimplementedHealthServer struct{}
+// UnimplementedHealth returns CodeUnimplemented from all methods.
+type UnimplementedHealth struct{}
 
-func (UnimplementedHealthServer) Check(context.Context, *rerpc.Request[v1.HealthCheckRequest]) (*rerpc.Response[v1.HealthCheckResponse], error) {
+func (UnimplementedHealth) Check(context.Context, *rerpc.Request[v1.HealthCheckRequest]) (*rerpc.Response[v1.HealthCheckResponse], error) {
 	return nil, rerpc.Errorf(rerpc.CodeUnimplemented, "internal.health.v1.Health.Check isn't implemented")
 }
 
-func (UnimplementedHealthServer) Watch(context.Context, *rerpc.Request[v1.HealthCheckRequest], *handlerstream.Server[v1.HealthCheckResponse]) error {
+func (UnimplementedHealth) Watch(context.Context, *rerpc.Request[v1.HealthCheckRequest], *handlerstream.Server[v1.HealthCheckResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "internal.health.v1.Health.Watch isn't implemented")
 }

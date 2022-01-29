@@ -9,12 +9,13 @@ package pingv1test
 import (
 	context "context"
 	errors "errors"
+	strings "strings"
+
 	rerpc "github.com/rerpc/rerpc"
 	clientstream "github.com/rerpc/rerpc/clientstream"
 	protobuf "github.com/rerpc/rerpc/codec/protobuf"
 	handlerstream "github.com/rerpc/rerpc/handlerstream"
 	v1test "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
-	strings "strings"
 )
 
 // This is a compile-time assertion to ensure that this generated file and the
@@ -25,9 +26,12 @@ import (
 // compiled into your binary.
 const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 
-// SimplePingServiceClient is a client for the rerpc.ping.v1test.PingService
+// WrappedPingServiceClient is a client for the rerpc.ping.v1test.PingService
 // service.
-type SimplePingServiceClient interface {
+//
+// It's a simplified wrapper around the full-featured API of
+// UnwrappedPingServiceClient.
+type WrappedPingServiceClient interface {
 	Ping(context.Context, *v1test.PingRequest) (*v1test.PingResponse, error)
 	Fail(context.Context, *v1test.FailRequest) (*v1test.FailResponse, error)
 	Sum(context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse]
@@ -35,10 +39,10 @@ type SimplePingServiceClient interface {
 	CumSum(context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]
 }
 
-// FullPingServiceClient is a client for the rerpc.ping.v1test.PingService
-// service. It's more complex than SimplePingServiceClient, but it gives callers
-// more fine-grained control (e.g., sending and receiving headers).
-type FullPingServiceClient interface {
+// UnwrappedPingServiceClient is a client for the rerpc.ping.v1test.PingService
+// service. It's more complex than WrappedPingServiceClient, but it gives
+// callers more fine-grained control (e.g., sending and receiving headers).
+type UnwrappedPingServiceClient interface {
 	Ping(context.Context, *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error)
 	Fail(context.Context, *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error)
 	Sum(context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse]
@@ -48,10 +52,10 @@ type FullPingServiceClient interface {
 
 // PingServiceClient is a client for the rerpc.ping.v1test.PingService service.
 type PingServiceClient struct {
-	client fullPingServiceClient
+	client unwrappedPingServiceClient
 }
 
-var _ SimplePingServiceClient = (*PingServiceClient)(nil)
+var _ WrappedPingServiceClient = (*PingServiceClient)(nil)
 
 // NewPingServiceClient constructs a client for the
 // rerpc.ping.v1test.PingService service. By default, it uses the binary
@@ -112,7 +116,7 @@ func NewPingServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientO
 	if err != nil {
 		return nil, err
 	}
-	return &PingServiceClient{client: fullPingServiceClient{
+	return &PingServiceClient{client: unwrappedPingServiceClient{
 		ping:    pingFunc,
 		fail:    failFunc,
 		sum:     sumFunc,
@@ -154,13 +158,13 @@ func (c *PingServiceClient) CumSum(ctx context.Context) *clientstream.Bidirectio
 	return c.client.CumSum(ctx)
 }
 
-// Full exposes the underlying generic client. Use it if you need finer control
-// (e.g., sending and receiving headers).
-func (c *PingServiceClient) Full() FullPingServiceClient {
+// Unwrap exposes the underlying generic client. Use it if you need finer
+// control (e.g., sending and receiving headers).
+func (c *PingServiceClient) Unwrap() UnwrappedPingServiceClient {
 	return &c.client
 }
 
-type fullPingServiceClient struct {
+type unwrappedPingServiceClient struct {
 	ping    func(context.Context, *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error)
 	fail    func(context.Context, *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error)
 	sum     func(context.Context) (rerpc.Sender, rerpc.Receiver)
@@ -168,28 +172,28 @@ type fullPingServiceClient struct {
 	cumSum  func(context.Context) (rerpc.Sender, rerpc.Receiver)
 }
 
-var _ FullPingServiceClient = (*fullPingServiceClient)(nil)
+var _ UnwrappedPingServiceClient = (*unwrappedPingServiceClient)(nil)
 
 // Ping calls rerpc.ping.v1test.PingService.Ping.
-func (c *fullPingServiceClient) Ping(ctx context.Context, req *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error) {
+func (c *unwrappedPingServiceClient) Ping(ctx context.Context, req *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error) {
 	return c.ping(ctx, req)
 }
 
 // Fail calls rerpc.ping.v1test.PingService.Fail.
-func (c *fullPingServiceClient) Fail(ctx context.Context, req *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error) {
+func (c *unwrappedPingServiceClient) Fail(ctx context.Context, req *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error) {
 	return c.fail(ctx, req)
 }
 
 // Sum calls rerpc.ping.v1test.PingService.Sum.
-func (c *fullPingServiceClient) Sum(ctx context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse] {
+func (c *unwrappedPingServiceClient) Sum(ctx context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse] {
 	sender, receiver := c.sum(ctx)
 	return clientstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 }
 
 // CountUp calls rerpc.ping.v1test.PingService.CountUp.
-func (c *fullPingServiceClient) CountUp(ctx context.Context, req *rerpc.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
+func (c *unwrappedPingServiceClient) CountUp(ctx context.Context, req *rerpc.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
 	sender, receiver := c.countUp(ctx)
-	if err := sender.Send(req.Any()); err != nil {
+	if err := sender.Send(req.Msg); err != nil {
 		_ = sender.Close(err)
 		_ = receiver.Close()
 		return nil, err
@@ -202,37 +206,41 @@ func (c *fullPingServiceClient) CountUp(ctx context.Context, req *rerpc.Request[
 }
 
 // CumSum calls rerpc.ping.v1test.PingService.CumSum.
-func (c *fullPingServiceClient) CumSum(ctx context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
+func (c *unwrappedPingServiceClient) CumSum(ctx context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
 	sender, receiver := c.cumSum(ctx)
 	return clientstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 }
 
-// FullPingServiceServer is a server for the rerpc.ping.v1test.PingService
+// PingService is an implementation of the rerpc.ping.v1test.PingService
 // service.
-type FullPingServiceServer interface {
+//
+// When writing your code, you can always implement the complete PingService
+// interface. However, if you don't need to work with headers, you can instead
+// implement a simpler version of any or all of the unary methods. Where
+// available, the simplified signatures are listed in comments.
+//
+// NewPingService first tries to find the simplified version of each method,
+// then falls back to the more complex version. If neither is implemented,
+// rerpc.NewServeMux will return an error.
+type PingService interface {
+	// Can also be implemented in a simplified form:
+	// Ping(context.Context, *v1test.PingRequest) (*v1test.PingResponse, error)
 	Ping(context.Context, *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error)
+
+	// Can also be implemented in a simplified form:
+	// Fail(context.Context, *v1test.FailRequest) (*v1test.FailResponse, error)
 	Fail(context.Context, *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error)
+
 	Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error
 	CountUp(context.Context, *rerpc.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error
 	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
 
-// SimplePingServiceServer is a server for the rerpc.ping.v1test.PingService
-// service. It's a simpler interface than FullPingServiceServer but doesn't
-// provide header access.
-type SimplePingServiceServer interface {
-	Ping(context.Context, *v1test.PingRequest) (*v1test.PingResponse, error)
-	Fail(context.Context, *v1test.FailRequest) (*v1test.FailResponse, error)
-	Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error
-	CountUp(context.Context, *v1test.CountUpRequest, *handlerstream.Server[v1test.CountUpResponse]) error
-	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
-}
-
-// NewFullPingService wraps each method on the service implementation in a
-// rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
+// newUnwrappedPingService wraps the service implementation in a rerpc.Service,
+// which can then be passed to rerpc.NewServeMux.
 //
-// By default, handlers support the binary protobuf and JSON codecs.
-func NewFullPingService(svc FullPingServiceServer, opts ...rerpc.HandlerOption) *rerpc.Service {
+// By default, services support the binary protobuf and JSON codecs.
+func newUnwrappedPingService(svc PingService, opts ...rerpc.HandlerOption) *rerpc.Service {
 	handlers := make([]rerpc.Handler, 0, 5)
 	opts = append([]rerpc.HandlerOption{
 		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
@@ -382,19 +390,20 @@ func (s *pluggablePingServiceServer) CumSum(ctx context.Context, stream *handler
 	return s.cumSum(ctx, stream)
 }
 
-// NewPingService wraps each method on the service implementation in a
-// rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
+// NewPingService wraps the service implementation in a rerpc.Service, ready for
+// use with rerpc.NewServeMux. By default, services support the binary protobuf
+// and JSON codecs.
 //
-// Unlike NewFullPingService, it allows the service to mix and match the
-// signatures of FullPingServiceServer and SimplePingServiceServer. For each
-// method, it first tries to find a SimplePingServiceServer-style
-// implementation. If a simple implementation isn't available, it falls back to
-// the more complex FullPingServiceServer-style implementation. If neither is
-// available, it returns an error.
+// The service implementation may mix and match the signatures of PingService
+// and the simplified signatures described in its comments. For each method,
+// NewPingService first tries to find a simplified implementation. If a simple
+// implementation isn't available, it falls back to the more complex
+// implementation. If neither is available, rerpc.NewServeMux will return an
+// error.
 //
 // Taken together, this approach lets implementations embed
-// UnimplementedPingServiceServer and implement each method using whichever
-// signature is most convenient.
+// UnimplementedPingService and implement each method using whichever signature
+// is most convenient.
 func NewPingService(svc any, opts ...rerpc.HandlerOption) *rerpc.Service {
 	var impl pluggablePingServiceServer
 
@@ -469,30 +478,30 @@ func NewPingService(svc any, opts ...rerpc.HandlerOption) *rerpc.Service {
 		return rerpc.NewService(nil, errors.New("no CumSum implementation found"))
 	}
 
-	return NewFullPingService(&impl, opts...)
+	return newUnwrappedPingService(&impl, opts...)
 }
 
-var _ FullPingServiceServer = (*UnimplementedPingServiceServer)(nil) // verify interface implementation
+var _ PingService = (*UnimplementedPingService)(nil) // verify interface implementation
 
-// UnimplementedPingServiceServer returns CodeUnimplemented from all methods.
-type UnimplementedPingServiceServer struct{}
+// UnimplementedPingService returns CodeUnimplemented from all methods.
+type UnimplementedPingService struct{}
 
-func (UnimplementedPingServiceServer) Ping(context.Context, *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error) {
+func (UnimplementedPingService) Ping(context.Context, *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error) {
 	return nil, rerpc.Errorf(rerpc.CodeUnimplemented, "rerpc.ping.v1test.PingService.Ping isn't implemented")
 }
 
-func (UnimplementedPingServiceServer) Fail(context.Context, *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error) {
+func (UnimplementedPingService) Fail(context.Context, *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error) {
 	return nil, rerpc.Errorf(rerpc.CodeUnimplemented, "rerpc.ping.v1test.PingService.Fail isn't implemented")
 }
 
-func (UnimplementedPingServiceServer) Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error {
+func (UnimplementedPingService) Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "rerpc.ping.v1test.PingService.Sum isn't implemented")
 }
 
-func (UnimplementedPingServiceServer) CountUp(context.Context, *rerpc.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error {
+func (UnimplementedPingService) CountUp(context.Context, *rerpc.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "rerpc.ping.v1test.PingService.CountUp isn't implemented")
 }
 
-func (UnimplementedPingServiceServer) CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error {
+func (UnimplementedPingService) CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "rerpc.ping.v1test.PingService.CumSum isn't implemented")
 }

@@ -25,9 +25,12 @@ import (
 // compiled into your binary.
 const _ = rerpc.SupportsCodeGenV0 // requires reRPC v0.0.1 or later
 
-// SimpleCrossServiceClient is a client for the cross.v1test.CrossService
+// WrappedCrossServiceClient is a client for the cross.v1test.CrossService
 // service.
-type SimpleCrossServiceClient interface {
+//
+// It's a simplified wrapper around the full-featured API of
+// UnwrappedCrossServiceClient.
+type WrappedCrossServiceClient interface {
 	Ping(context.Context, *v1test.PingRequest) (*v1test.PingResponse, error)
 	Fail(context.Context, *v1test.FailRequest) (*v1test.FailResponse, error)
 	Sum(context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse]
@@ -35,10 +38,10 @@ type SimpleCrossServiceClient interface {
 	CumSum(context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]
 }
 
-// FullCrossServiceClient is a client for the cross.v1test.CrossService service.
-// It's more complex than SimpleCrossServiceClient, but it gives callers more
-// fine-grained control (e.g., sending and receiving headers).
-type FullCrossServiceClient interface {
+// UnwrappedCrossServiceClient is a client for the cross.v1test.CrossService
+// service. It's more complex than WrappedCrossServiceClient, but it gives
+// callers more fine-grained control (e.g., sending and receiving headers).
+type UnwrappedCrossServiceClient interface {
 	Ping(context.Context, *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error)
 	Fail(context.Context, *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error)
 	Sum(context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse]
@@ -48,10 +51,10 @@ type FullCrossServiceClient interface {
 
 // CrossServiceClient is a client for the cross.v1test.CrossService service.
 type CrossServiceClient struct {
-	client fullCrossServiceClient
+	client unwrappedCrossServiceClient
 }
 
-var _ SimpleCrossServiceClient = (*CrossServiceClient)(nil)
+var _ WrappedCrossServiceClient = (*CrossServiceClient)(nil)
 
 // NewCrossServiceClient constructs a client for the cross.v1test.CrossService
 // service. By default, it uses the binary protobuf codec.
@@ -111,7 +114,7 @@ func NewCrossServiceClient(baseURL string, doer rerpc.Doer, opts ...rerpc.Client
 	if err != nil {
 		return nil, err
 	}
-	return &CrossServiceClient{client: fullCrossServiceClient{
+	return &CrossServiceClient{client: unwrappedCrossServiceClient{
 		ping:    pingFunc,
 		fail:    failFunc,
 		sum:     sumFunc,
@@ -153,13 +156,13 @@ func (c *CrossServiceClient) CumSum(ctx context.Context) *clientstream.Bidirecti
 	return c.client.CumSum(ctx)
 }
 
-// Full exposes the underlying generic client. Use it if you need finer control
-// (e.g., sending and receiving headers).
-func (c *CrossServiceClient) Full() FullCrossServiceClient {
+// Unwrap exposes the underlying generic client. Use it if you need finer
+// control (e.g., sending and receiving headers).
+func (c *CrossServiceClient) Unwrap() UnwrappedCrossServiceClient {
 	return &c.client
 }
 
-type fullCrossServiceClient struct {
+type unwrappedCrossServiceClient struct {
 	ping    func(context.Context, *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error)
 	fail    func(context.Context, *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error)
 	sum     func(context.Context) (rerpc.Sender, rerpc.Receiver)
@@ -167,28 +170,28 @@ type fullCrossServiceClient struct {
 	cumSum  func(context.Context) (rerpc.Sender, rerpc.Receiver)
 }
 
-var _ FullCrossServiceClient = (*fullCrossServiceClient)(nil)
+var _ UnwrappedCrossServiceClient = (*unwrappedCrossServiceClient)(nil)
 
 // Ping calls cross.v1test.CrossService.Ping.
-func (c *fullCrossServiceClient) Ping(ctx context.Context, req *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error) {
+func (c *unwrappedCrossServiceClient) Ping(ctx context.Context, req *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error) {
 	return c.ping(ctx, req)
 }
 
 // Fail calls cross.v1test.CrossService.Fail.
-func (c *fullCrossServiceClient) Fail(ctx context.Context, req *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error) {
+func (c *unwrappedCrossServiceClient) Fail(ctx context.Context, req *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error) {
 	return c.fail(ctx, req)
 }
 
 // Sum calls cross.v1test.CrossService.Sum.
-func (c *fullCrossServiceClient) Sum(ctx context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse] {
+func (c *unwrappedCrossServiceClient) Sum(ctx context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse] {
 	sender, receiver := c.sum(ctx)
 	return clientstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 }
 
 // CountUp calls cross.v1test.CrossService.CountUp.
-func (c *fullCrossServiceClient) CountUp(ctx context.Context, req *rerpc.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
+func (c *unwrappedCrossServiceClient) CountUp(ctx context.Context, req *rerpc.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
 	sender, receiver := c.countUp(ctx)
-	if err := sender.Send(req.Any()); err != nil {
+	if err := sender.Send(req.Msg); err != nil {
 		_ = sender.Close(err)
 		_ = receiver.Close()
 		return nil, err
@@ -201,36 +204,40 @@ func (c *fullCrossServiceClient) CountUp(ctx context.Context, req *rerpc.Request
 }
 
 // CumSum calls cross.v1test.CrossService.CumSum.
-func (c *fullCrossServiceClient) CumSum(ctx context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
+func (c *unwrappedCrossServiceClient) CumSum(ctx context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
 	sender, receiver := c.cumSum(ctx)
 	return clientstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 }
 
-// FullCrossServiceServer is a server for the cross.v1test.CrossService service.
-type FullCrossServiceServer interface {
+// CrossService is an implementation of the cross.v1test.CrossService service.
+//
+// When writing your code, you can always implement the complete CrossService
+// interface. However, if you don't need to work with headers, you can instead
+// implement a simpler version of any or all of the unary methods. Where
+// available, the simplified signatures are listed in comments.
+//
+// NewCrossService first tries to find the simplified version of each method,
+// then falls back to the more complex version. If neither is implemented,
+// rerpc.NewServeMux will return an error.
+type CrossService interface {
+	// Can also be implemented in a simplified form:
+	// Ping(context.Context, *v1test.PingRequest) (*v1test.PingResponse, error)
 	Ping(context.Context, *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error)
+
+	// Can also be implemented in a simplified form:
+	// Fail(context.Context, *v1test.FailRequest) (*v1test.FailResponse, error)
 	Fail(context.Context, *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error)
+
 	Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error
 	CountUp(context.Context, *rerpc.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error
 	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
 
-// SimpleCrossServiceServer is a server for the cross.v1test.CrossService
-// service. It's a simpler interface than FullCrossServiceServer but doesn't
-// provide header access.
-type SimpleCrossServiceServer interface {
-	Ping(context.Context, *v1test.PingRequest) (*v1test.PingResponse, error)
-	Fail(context.Context, *v1test.FailRequest) (*v1test.FailResponse, error)
-	Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error
-	CountUp(context.Context, *v1test.CountUpRequest, *handlerstream.Server[v1test.CountUpResponse]) error
-	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
-}
-
-// NewFullCrossService wraps each method on the service implementation in a
-// rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
+// newUnwrappedCrossService wraps the service implementation in a rerpc.Service,
+// which can then be passed to rerpc.NewServeMux.
 //
-// By default, handlers support the binary protobuf and JSON codecs.
-func NewFullCrossService(svc FullCrossServiceServer, opts ...rerpc.HandlerOption) *rerpc.Service {
+// By default, services support the binary protobuf and JSON codecs.
+func newUnwrappedCrossService(svc CrossService, opts ...rerpc.HandlerOption) *rerpc.Service {
 	handlers := make([]rerpc.Handler, 0, 5)
 	opts = append([]rerpc.HandlerOption{
 		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
@@ -380,19 +387,20 @@ func (s *pluggableCrossServiceServer) CumSum(ctx context.Context, stream *handle
 	return s.cumSum(ctx, stream)
 }
 
-// NewCrossService wraps each method on the service implementation in a
-// rerpc.Handler. The returned slice can be passed to rerpc.NewServeMux.
+// NewCrossService wraps the service implementation in a rerpc.Service, ready
+// for use with rerpc.NewServeMux. By default, services support the binary
+// protobuf and JSON codecs.
 //
-// Unlike NewFullCrossService, it allows the service to mix and match the
-// signatures of FullCrossServiceServer and SimpleCrossServiceServer. For each
-// method, it first tries to find a SimpleCrossServiceServer-style
-// implementation. If a simple implementation isn't available, it falls back to
-// the more complex FullCrossServiceServer-style implementation. If neither is
-// available, it returns an error.
+// The service implementation may mix and match the signatures of CrossService
+// and the simplified signatures described in its comments. For each method,
+// NewCrossService first tries to find a simplified implementation. If a simple
+// implementation isn't available, it falls back to the more complex
+// implementation. If neither is available, rerpc.NewServeMux will return an
+// error.
 //
 // Taken together, this approach lets implementations embed
-// UnimplementedCrossServiceServer and implement each method using whichever
-// signature is most convenient.
+// UnimplementedCrossService and implement each method using whichever signature
+// is most convenient.
 func NewCrossService(svc any, opts ...rerpc.HandlerOption) *rerpc.Service {
 	var impl pluggableCrossServiceServer
 
@@ -467,30 +475,30 @@ func NewCrossService(svc any, opts ...rerpc.HandlerOption) *rerpc.Service {
 		return rerpc.NewService(nil, errors.New("no CumSum implementation found"))
 	}
 
-	return NewFullCrossService(&impl, opts...)
+	return newUnwrappedCrossService(&impl, opts...)
 }
 
-var _ FullCrossServiceServer = (*UnimplementedCrossServiceServer)(nil) // verify interface implementation
+var _ CrossService = (*UnimplementedCrossService)(nil) // verify interface implementation
 
-// UnimplementedCrossServiceServer returns CodeUnimplemented from all methods.
-type UnimplementedCrossServiceServer struct{}
+// UnimplementedCrossService returns CodeUnimplemented from all methods.
+type UnimplementedCrossService struct{}
 
-func (UnimplementedCrossServiceServer) Ping(context.Context, *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error) {
+func (UnimplementedCrossService) Ping(context.Context, *rerpc.Request[v1test.PingRequest]) (*rerpc.Response[v1test.PingResponse], error) {
 	return nil, rerpc.Errorf(rerpc.CodeUnimplemented, "cross.v1test.CrossService.Ping isn't implemented")
 }
 
-func (UnimplementedCrossServiceServer) Fail(context.Context, *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error) {
+func (UnimplementedCrossService) Fail(context.Context, *rerpc.Request[v1test.FailRequest]) (*rerpc.Response[v1test.FailResponse], error) {
 	return nil, rerpc.Errorf(rerpc.CodeUnimplemented, "cross.v1test.CrossService.Fail isn't implemented")
 }
 
-func (UnimplementedCrossServiceServer) Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error {
+func (UnimplementedCrossService) Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "cross.v1test.CrossService.Sum isn't implemented")
 }
 
-func (UnimplementedCrossServiceServer) CountUp(context.Context, *rerpc.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error {
+func (UnimplementedCrossService) CountUp(context.Context, *rerpc.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "cross.v1test.CrossService.CountUp isn't implemented")
 }
 
-func (UnimplementedCrossServiceServer) CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error {
+func (UnimplementedCrossService) CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error {
 	return rerpc.Errorf(rerpc.CodeUnimplemented, "cross.v1test.CrossService.CumSum isn't implemented")
 }
