@@ -5,8 +5,24 @@ import (
 	"fmt"
 
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
+
+// An ErrorDetail is a protobuf message attached to an *Error. Error details
+// are sent over the network to clients, which can then work with
+// strongly-typed data rather than trying to parse a complex error message.
+//
+// The ErrorDetail interface is implemented by protobuf's Any type, provided in
+// Go by the google.golang.org/protobuf/types/known/anypb package. The
+// google.golang.org/genproto/googleapis/rpc/errdetails package contains a
+// variety of protobuf messages commonly used as error details.
+type ErrorDetail interface {
+	proto.Message
+
+	MessageIs(proto.Message) bool
+	MessageName() protoreflect.FullName
+	UnmarshalTo(proto.Message) error
+}
 
 // An Error captures three pieces of information: a Code, a human-readable
 // message, and an optional collection of arbitrary protobuf messages called
@@ -34,7 +50,7 @@ import (
 type Error struct {
 	code    Code
 	err     error
-	details []*anypb.Any
+	details []ErrorDetail
 }
 
 // Wrap annotates any error with a status code. If the code is CodeOK, the
@@ -60,7 +76,7 @@ func AsError(err error) (*Error, bool) {
 }
 
 func (e *Error) Error() string {
-	text := fmt.Sprintf("%v", e.err)
+	text := e.err.Error()
 	if text == "" {
 		return e.code.String()
 	}
@@ -81,41 +97,14 @@ func (e *Error) Code() Code {
 	return e.code
 }
 
-// Details returns a deep copy of the error's details.
-func (e *Error) Details() []*anypb.Any {
-	if len(e.details) == 0 {
-		return nil
-	}
-	ds := make([]*anypb.Any, len(e.details))
-	for i, d := range e.details {
-		ds[i] = proto.Clone(d).(*anypb.Any)
-	}
-	return ds
+// Details returns the error's details.
+func (e *Error) Details() []ErrorDetail {
+	return e.details
 }
 
 // AddDetail appends a message to the error's details.
-func (e *Error) AddDetail(m proto.Message) error {
-	if d, ok := m.(*anypb.Any); ok {
-		e.details = append(e.details, proto.Clone(d).(*anypb.Any))
-		return nil
-	}
-	detail, err := anypb.New(m)
-	if err != nil {
-		return fmt.Errorf("can't add message to error details: %w", err)
-	}
-	e.details = append(e.details, detail)
-	return nil
-}
-
-// SetDetails overwrites the error's details.
-func (e *Error) SetDetails(details ...proto.Message) error {
-	e.details = make([]*anypb.Any, 0, len(details))
-	for _, d := range details {
-		if err := e.AddDetail(d); err != nil {
-			return err
-		}
-	}
-	return nil
+func (e *Error) AddDetail(d ErrorDetail) {
+	e.details = append(e.details, d)
 }
 
 // CodeOf returns the error's status code if it is or wraps a *rerpc.Error,

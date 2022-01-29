@@ -323,13 +323,15 @@ func extractError(protobuf codec.Codec, h http.Header) *Error {
 	if len(detailsBinaryEncoded) > 0 {
 		detailsBinary, err := DecodeBinaryHeader(detailsBinaryEncoded)
 		if err != nil {
-			return Errorf(CodeUnknown, "server returned invalid grpc-error-details-bin trailer: %w", err)
+			return Errorf(CodeUnknown, "server returned invalid grpc-status-details-bin trailer: %w", err)
 		}
 		var status statuspb.Status
 		if err := protobuf.Unmarshal(detailsBinary, &status); err != nil {
 			return Errorf(CodeUnknown, "server returned invalid protobuf for error details: %w", err)
 		}
-		ret.details = status.Details
+		for _, d := range status.Details {
+			ret.details = append(ret.details, d)
+		}
 		// Prefer the protobuf-encoded data to the headers (grpc-go does this too).
 		ret.code = Code(status.Code)
 		ret.err = errors.New(status.Message)
