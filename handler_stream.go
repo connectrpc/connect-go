@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/rerpc/rerpc/codec"
 	"github.com/rerpc/rerpc/compress"
@@ -91,7 +92,10 @@ func (hs *handlerSender) sendErrorGRPC(err error) error {
 		hs.writer.Header().Set("Grpc-Status-Details-Bin", "")
 		return nil
 	}
-	s := statusFromError(err)
+	s, statusError := statusFromError(err)
+	if statusError != nil {
+		return statusError
+	}
 	code := strconv.Itoa(int(s.Code))
 	bin, err := hs.protobuf.Marshal(s)
 	if err != nil {
@@ -151,19 +155,37 @@ func (hr *handlerReceiver) Header() http.Header {
 	return hr.request.Header
 }
 
-func statusFromError(err error) *statuspb.Status {
+func statusFromError(err error) (*statuspb.Status, *Error) {
 	s := &statuspb.Status{
 		Code:    int32(CodeUnknown),
 		Message: err.Error(),
 	}
 	if re, ok := AsError(err); ok {
 		s.Code = int32(re.Code())
-		s.Details = re.Details()
+		for _, d := range re.details {
+			// If the detail is already a protobuf Any, we're golden.
+			if anyProtoDetail, ok := d.(*anypb.Any); ok {
+				s.Details = append(s.Details, anyProtoDetail)
+				continue
+			}
+			// Otherwise, we convert it to an Any.
+			// TODO: Should we also attempt to delegate this to the detail by
+			// attempting an upcast to interface{ ToAny() *anypb.Any }?
+			anyProtoDetail, err := anypb.New(d)
+			if err != nil {
+				return nil, Errorf(
+					CodeInternal,
+					"can't create an *anypb.Any from %v (type %T): %v",
+					d, d, err,
+				)
+			}
+			s.Details = append(s.Details, anyProtoDetail)
+		}
 		if e := re.Unwrap(); e != nil {
 			s.Message = e.Error() // don't repeat code
 		}
 	}
-	return s
+	return s, nil
 }
 
 func discard(r io.Reader) {
