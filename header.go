@@ -2,63 +2,11 @@ package rerpc
 
 import (
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"unicode/utf8"
 )
-
-// IsValidHeaderKey checks whether the supplied key uses a safe subset of
-// ASCII. (The HTTP specification doesn't define the encoding of headers, so
-// non-ASCII values may be interpreted unexpectedly by other servers, clients,
-// or proxies.) This function is purely advisory.
-//
-// reRPC uses the same safe ASCII subset for keys as gRPC: a-z, A-Z, 0-9, "-"
-// (hyphen-minus), "_" (underscore), and "." (period).
-//
-// Keep in mind that setting headers meaningful to the underlying protocols may
-// break your application in unexpected or difficult-to-debug ways. For
-// example, you probably shouldn't set Transfer-Encoding or
-// Grpc-Accept-Encoding unless you definitely want the accompanying semantics.
-//
-// If you'd like to be conservative, namespace your headers with an
-// organization-specific prefix (e.g., "BufBuild-").
-func IsValidHeaderKey(key string) error {
-	if key == "" {
-		return errors.New("empty header key")
-	}
-	if key[0] == ':' {
-		return fmt.Errorf("%q is a reserved HTTP2 pseudo-header", key)
-	}
-	for _, c := range key {
-		if !(('a' <= c && c <= 'z') ||
-			('A' <= c && c <= 'Z') ||
-			('0' <= c && c <= '9') ||
-			c == '-' || c == '_' || c == '.') {
-			return fmt.Errorf("%q contains non-ASCII or reserved characters", key)
-		}
-	}
-	return nil
-}
-
-// IsValidHeaderValue checks whether the supplied string uses a safe subset of
-// ASCII. (The HTTP specification doesn't define the encoding of headers, so
-// non-ASCII values may be interpreted unexpectedly by other servers, clients,
-// or proxies.) This function is purely advisory.
-//
-// reRPC uses the same safe ASCII subset for values as gRPC: only space and
-// printable ASCII is allowed. Use EncodeBinaryHeader and DecodeBinaryHeader to
-// send raw bytes.
-func IsValidHeaderValue(v string) error {
-	for i := range v {
-		c := v[i]
-		if c < 0x20 || c > 0x7E { // hex makes matching the gRPC spec easier
-			return fmt.Errorf("%q isn't a valid header value: index %d is neither space nor printable ASCII", v, i)
-		}
-	}
-	return nil
-}
 
 // EncodeBinaryHeader base64-encodes the data. It always emits unpadded values.
 //
