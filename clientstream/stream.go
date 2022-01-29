@@ -19,9 +19,9 @@ func NewClient[Req, Res any](s rerpc.Sender, r rerpc.Receiver) *Client[Req, Res]
 	return &Client[Req, Res]{sender: s, receiver: r}
 }
 
-// Header returns the request headers. Headers are sent to the server with the
+// RequestHeader returns the request headers. Headers are sent to the server with the
 // first call to Send.
-func (c *Client[Req, Res]) Header() http.Header {
+func (c *Client[Req, Res]) RequestHeader() http.Header {
 	return c.sender.Header()
 }
 
@@ -90,9 +90,9 @@ func NewBidirectional[Req, Res any](s rerpc.Sender, r rerpc.Receiver) *Bidirecti
 	return &Bidirectional[Req, Res]{sender: s, receiver: r}
 }
 
-// Header returns the request headers. Headers are sent with the first call to
-// Send.
-func (b *Bidirectional[Req, Res]) Header() http.Header {
+// RequestHeader returns the request headers. Headers are sent with the first
+// call to Send.
+func (b *Bidirectional[Req, Res]) RequestHeader() http.Header {
 	return b.sender.Header()
 }
 
