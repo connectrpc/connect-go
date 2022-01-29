@@ -7,6 +7,7 @@ import (
 	"github.com/rerpc/rerpc/codec"
 	"github.com/rerpc/rerpc/codec/protobuf"
 	"github.com/rerpc/rerpc/compress"
+	"github.com/rerpc/rerpc/compress/gzip"
 )
 
 // Doer is the transport-level interface reRPC expects HTTP clients to
@@ -30,7 +31,7 @@ func newClientConfiguration(procedure string, opts []ClientOption) (*clientCfg, 
 	cfg := clientCfg{
 		Procedure: procedure,
 		Compressors: map[string]compress.Compressor{
-			"gzip": compress.NewGzip(),
+			gzip.Name: gzip.New(),
 		},
 		Protocol: &grpc{},
 	}
