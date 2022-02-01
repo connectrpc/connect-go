@@ -1,4 +1,4 @@
-package rerpc
+package connect
 
 import (
 	"bytes"

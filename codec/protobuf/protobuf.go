@@ -8,14 +8,14 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/rerpc/rerpc/codec"
+	"github.com/bufconnect/connect/codec"
 )
 
 const (
-	// NameBinary is the name reRPC uses for the protocol buffer language's binary
-	// encoding.
+	// NameBinary is the name connect uses for the protocol buffer language's
+	// binary encoding.
 	NameBinary = "protobuf"
-	// NameJSON is the name reRPC uses for JavaScript Object Notation.
+	// NameJSON is the name connect uses for JavaScript Object Notation.
 	NameJSON = "json"
 )
 

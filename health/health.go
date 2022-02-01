@@ -4,16 +4,16 @@ package health
 import (
 	"context"
 
-	"github.com/rerpc/rerpc"
-	"github.com/rerpc/rerpc/handlerstream"
-	healthrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/grpc/health/v1"
-	healthpb "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/health/v1"
+	"github.com/bufconnect/connect"
+	"github.com/bufconnect/connect/handlerstream"
+	healthrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/grpc/health/v1"
+	healthpb "github.com/bufconnect/connect/internal/gen/proto/go/grpc/health/v1"
 )
 
 // Status describes the health of a service.
 //
 // These correspond to the ServingStatus enum in gRPC's health.proto. Because
-// reRPC doesn't support watching health, SERVICE_UNKNOWN isn't exposed here.
+// connect doesn't support watching health, SERVICE_UNKNOWN isn't exposed here.
 //
 // For details, see the protobuf schema:
 // https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto.
@@ -28,7 +28,7 @@ const (
 // A Registrar checks whether a fully-qualified protobuf service name (e.g.,
 // "acme.ping.v1.PingService") has been registered.
 //
-// A *rerpc.Registrar satisfies this interface.
+// A *connect.Registrar satisfies this interface.
 type Registrar interface {
 	IsRegistered(string) bool
 }
@@ -46,7 +46,7 @@ func NewChecker(reg Registrar) func(context.Context, string) (Status, error) {
 		if reg.IsRegistered(service) {
 			return StatusServing, nil
 		}
-		return StatusUnknown, rerpc.Errorf(rerpc.CodeNotFound, "unknown service %s", service)
+		return StatusUnknown, connect.Errorf(connect.CodeNotFound, "unknown service %s", service)
 	}
 }
 
@@ -58,22 +58,22 @@ type server struct {
 
 var _ healthrpc.Health = (*server)(nil)
 
-func (s *server) Check(ctx context.Context, req *rerpc.Request[healthpb.HealthCheckRequest]) (*rerpc.Response[healthpb.HealthCheckResponse], error) {
+func (s *server) Check(ctx context.Context, req *connect.Request[healthpb.HealthCheckRequest]) (*connect.Response[healthpb.HealthCheckResponse], error) {
 	status, err := s.check(ctx, req.Msg.Service)
 	if err != nil {
 		return nil, err
 	}
-	return rerpc.NewResponse(&healthpb.HealthCheckResponse{
+	return connect.NewResponse(&healthpb.HealthCheckResponse{
 		Status: healthpb.HealthCheckResponse_ServingStatus(status),
 	}), nil
 }
 
 func (s *server) Watch(
 	_ context.Context,
-	_ *rerpc.Request[healthpb.HealthCheckRequest],
+	_ *connect.Request[healthpb.HealthCheckRequest],
 	_ *handlerstream.Server[healthpb.HealthCheckResponse],
 ) error {
-	return rerpc.Errorf(rerpc.CodeUnimplemented, "reRPC doesn't support watching health state")
+	return connect.Errorf(connect.CodeUnimplemented, "connect doesn't support watching health state")
 }
 
 // NewService wraps the supplied function to build HTTP handlers for gRPC's
@@ -83,23 +83,23 @@ func (s *server) Watch(
 // The supplied health-checking function must: (1) return StatusUnknown,
 // StatusServing, or StatusNotServing; (2) return the health status of the
 // whole process when called with an empty string; (3) return a
-// rerpc.CodeNotFound error when called with an unknown service; and (4) be
+// connect.CodeNotFound error when called with an unknown service; and (4) be
 // safe to call concurrently. The function returned by NewChecker satisfies all
 // these requirements.
 //
 // Note that the returned service only supports the unary Check method, not the
-// streaming Watch. As suggested in gRPC's health schema, reRPC returns
-// rerpc.CodeUnimplemented for the Watch method. For more details on gRPC's
+// streaming Watch. As suggested in gRPC's health schema, connect returns
+// connect.CodeUnimplemented for the Watch method. For more details on gRPC's
 // health checking protocol, see
 // https://github.com/grpc/grpc/blob/master/doc/health-checking.md and
 // https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto.
 func NewService(
 	checker func(context.Context, string) (Status, error),
-	opts ...rerpc.HandlerOption,
-) *rerpc.Service {
+	opts ...connect.HandlerOption,
+) *connect.Service {
 	return healthrpc.NewHealth(
 		&server{check: checker},
-		append(opts, rerpc.ReplaceProcedurePrefix("internal.", "grpc."))...,
+		append(opts, connect.ReplaceProcedurePrefix("internal.", "grpc."))...,
 	)
 }
 
@@ -120,11 +120,11 @@ type Client struct {
 }
 
 // NewClient constructs a Client.
-func NewClient(baseURL string, doer rerpc.Doer, opts ...rerpc.ClientOption) (*Client, error) {
+func NewClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (*Client, error) {
 	c, err := healthrpc.NewHealthClient(
 		baseURL,
 		doer,
-		append(opts, rerpc.ReplaceProcedurePrefix("internal.", "grpc."))...,
+		append(opts, connect.ReplaceProcedurePrefix("internal.", "grpc."))...,
 	)
 	if err != nil {
 		return nil, err

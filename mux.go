@@ -1,10 +1,10 @@
-package rerpc
+package connect
 
 import (
 	"net/http"
 )
 
-// A Service bundles the output of reRPC's generated handler constructors,
+// A Service bundles the output of connect's generated handler constructors,
 // which return a slice of Handlers and an error.
 type Service struct {
 	handlers []Handler
@@ -16,9 +16,9 @@ func NewService(handlers []Handler, err error) *Service {
 	return &Service{handlers: handlers, err: err}
 }
 
-// NewServeMux mounts reRPC handlers on a mux. The signature is designed to
-// work with with reRPC's generated code, where server-side constructors return
-// *Service.
+// NewServeMux mounts connect handlers on a mux. The signature is designed to
+// work with with connect's generated code, where server-side constructors
+// return *Service.
 //
 // Requests that don't match the paths for any of the supplied services are
 // handled by the fallback handler. For a simple fallback, see

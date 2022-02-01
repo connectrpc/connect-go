@@ -1,11 +1,11 @@
-package rerpc
+package connect
 
 import (
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/rerpc/rerpc/internal/assert"
+	"github.com/bufconnect/connect/internal/assert"
 )
 
 func TestCodeMarshaling(t *testing.T) {

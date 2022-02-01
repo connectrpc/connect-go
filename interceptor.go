@@ -1,4 +1,4 @@
-package rerpc
+package connect
 
 import (
 	"context"
@@ -44,7 +44,7 @@ type Interceptor interface {
 
 	// WrapContext, WrapSender, and WrapReceiver work together to add logic to
 	// streaming procedures. Stream interceptors work in phases. First, each
-	// interceptor may wrap the request context. Then, the reRPC runtime
+	// interceptor may wrap the request context. Then, the connect runtime
 	// constructs a (Sender, Receiver) pair. Finally, each interceptor may wrap
 	// the Sender and/or Receiver. For example, the flow within a Handler looks
 	// like this:

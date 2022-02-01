@@ -16,17 +16,17 @@ import (
 	"google.golang.org/grpc"
 	grpcgzip "google.golang.org/grpc/encoding/gzip"
 
-	"github.com/rerpc/rerpc"
-	rerpcgzip "github.com/rerpc/rerpc/compress/gzip"
-	"github.com/rerpc/rerpc/internal/assert"
-	crossrpc "github.com/rerpc/rerpc/internal/crosstest/gen/proto/go-rerpc/cross/v1test"
-	crosspb "github.com/rerpc/rerpc/internal/crosstest/gen/proto/go/cross/v1test"
+	"github.com/bufconnect/connect"
+	connectgzip "github.com/bufconnect/connect/compress/gzip"
+	"github.com/bufconnect/connect/internal/assert"
+	crossrpc "github.com/bufconnect/connect/internal/crosstest/gen/proto/go-connect/cross/v1test"
+	crosspb "github.com/bufconnect/connect/internal/crosstest/gen/proto/go/cross/v1test"
 )
 
-func BenchmarkReRPC(b *testing.B) {
-	mux, err := rerpc.NewServeMux(
-		rerpc.NewNotFoundHandler(),
-		crossrpc.NewCrossService(crossServerReRPC{}),
+func BenchmarkConnect(b *testing.B) {
+	mux, err := connect.NewServeMux(
+		connect.NewNotFoundHandler(),
+		crossrpc.NewCrossService(crossServerConnect{}),
 	)
 	assert.Nil(b, err, "mux construction error")
 	server := httptest.NewUnstartedServer(mux)
@@ -42,7 +42,7 @@ func BenchmarkReRPC(b *testing.B) {
 	client, err := crossrpc.NewCrossServiceClient(
 		server.URL,
 		server.Client(),
-		rerpc.UseCompressor(rerpcgzip.Name),
+		connect.UseCompressor(connectgzip.Name),
 	)
 	assert.Nil(b, err, "client construction error")
 	b.ResetTimer()

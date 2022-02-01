@@ -1,8 +1,8 @@
-package rerpc
+package connect
 
 import (
-	"github.com/rerpc/rerpc/codec"
-	"github.com/rerpc/rerpc/codec/protobuf"
+	"github.com/bufconnect/connect/codec"
+	"github.com/bufconnect/connect/codec/protobuf"
 )
 
 // roCodecs is a read-only interface to a map of named codecs.

@@ -1,9 +1,9 @@
-package rerpc
+package connect
 
 import (
 	"strings"
 
-	"github.com/rerpc/rerpc/compress"
+	"github.com/bufconnect/connect/compress"
 )
 
 // roCompressors is a read-only interface to a map of named compressors.

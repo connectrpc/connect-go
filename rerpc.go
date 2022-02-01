@@ -1,6 +1,6 @@
-package rerpc
+package connect
 
-// Version is the semantic version of the reRPC module.
+// Version is the semantic version of the connect module.
 const Version = "0.0.1"
 
 // StreamType describes whether the client, server, neither, or both is
@@ -14,7 +14,7 @@ const (
 	StreamTypeBidirectional            = StreamTypeClient | StreamTypeServer
 )
 
-// These constants are used in compile-time handshakes with reRPC's generated
+// These constants are used in compile-time handshakes with connect's generated
 // code.
 const (
 	SupportsCodeGenV0 = iota
