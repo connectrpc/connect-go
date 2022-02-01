@@ -1,14 +1,14 @@
 syntax = "proto3";
 
-// This package is intended for internal use by reRPC, and provides no backward
-// compatibility guarantees whatsoever.
+// This package is intended for internal use by connect, and provides no
+// backward compatibility guarantees whatsoever.
 //
 // The types here must remain wire-compatible with the types in
 // grpc.health.v1:
 //   https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto
 package internal.health.v1;
 
-option go_package = "github.com/rerpc/rerpc/internal/healthpb/v1;healthpb";
+option go_package = "github.com/bufconnect/connect/internal/gen/proto/go/grpc/health/v1;healthpb";
 
 message HealthCheckRequest {
   string service = 1;

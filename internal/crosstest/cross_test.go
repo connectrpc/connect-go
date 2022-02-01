@@ -30,13 +30,13 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/rerpc/rerpc"
-	rerpcgzip "github.com/rerpc/rerpc/compress/gzip"
-	"github.com/rerpc/rerpc/handlerstream"
-	"github.com/rerpc/rerpc/internal/assert"
-	crossrpc "github.com/rerpc/rerpc/internal/crosstest/gen/proto/go-rerpc/cross/v1test"
-	crosspb "github.com/rerpc/rerpc/internal/crosstest/gen/proto/go/cross/v1test"
-	"github.com/rerpc/rerpc/reflection"
+	"github.com/bufconnect/connect"
+	connectgzip "github.com/bufconnect/connect/compress/gzip"
+	"github.com/bufconnect/connect/handlerstream"
+	"github.com/bufconnect/connect/internal/assert"
+	crossrpc "github.com/bufconnect/connect/internal/crosstest/gen/proto/go-connect/cross/v1test"
+	crosspb "github.com/bufconnect/connect/internal/crosstest/gen/proto/go/cross/v1test"
+	"github.com/bufconnect/connect/reflection"
 )
 
 const errMsg = "soirée 🎉" // readable non-ASCII
@@ -53,25 +53,25 @@ func newClientH2C() *http.Client {
 	}
 }
 
-type crossServerReRPC struct {
+type crossServerConnect struct {
 	crossrpc.UnimplementedCrossService
 }
 
-func (c crossServerReRPC) Ping(ctx context.Context, req *rerpc.Request[crosspb.PingRequest]) (*rerpc.Response[crosspb.PingResponse], error) {
+func (c crossServerConnect) Ping(ctx context.Context, req *connect.Request[crosspb.PingRequest]) (*connect.Response[crosspb.PingResponse], error) {
 	if err := req.Msg.Sleep.CheckValid(); req.Msg.Sleep != nil && err != nil {
-		return nil, rerpc.Wrap(rerpc.CodeInvalidArgument, err)
+		return nil, connect.Wrap(connect.CodeInvalidArgument, err)
 	}
 	if d := req.Msg.Sleep.AsDuration(); d > 0 {
 		time.Sleep(d)
 	}
-	return rerpc.NewResponse(&crosspb.PingResponse{Number: req.Msg.Number}), nil
+	return connect.NewResponse(&crosspb.PingResponse{Number: req.Msg.Number}), nil
 }
 
-func (c crossServerReRPC) Fail(ctx context.Context, req *rerpc.Request[crosspb.FailRequest]) (*rerpc.Response[crosspb.FailResponse], error) {
-	return nil, rerpc.Errorf(rerpc.CodeResourceExhausted, errMsg)
+func (c crossServerConnect) Fail(ctx context.Context, req *connect.Request[crosspb.FailRequest]) (*connect.Response[crosspb.FailResponse], error) {
+	return nil, connect.Errorf(connect.CodeResourceExhausted, errMsg)
 }
 
-func (c crossServerReRPC) Sum(
+func (c crossServerConnect) Sum(
 	ctx context.Context,
 	stream *handlerstream.Client[crosspb.SumRequest, crosspb.SumResponse],
 ) error {
@@ -82,7 +82,7 @@ func (c crossServerReRPC) Sum(
 		}
 		msg, err := stream.Receive()
 		if errors.Is(err, io.EOF) {
-			return stream.SendAndClose(rerpc.NewResponse(&crosspb.SumResponse{
+			return stream.SendAndClose(connect.NewResponse(&crosspb.SumResponse{
 				Sum: sum,
 			}))
 		} else if err != nil {
@@ -92,14 +92,14 @@ func (c crossServerReRPC) Sum(
 	}
 }
 
-func (c crossServerReRPC) CountUp(
+func (c crossServerConnect) CountUp(
 	ctx context.Context,
-	req *rerpc.Request[crosspb.CountUpRequest],
+	req *connect.Request[crosspb.CountUpRequest],
 	stream *handlerstream.Server[crosspb.CountUpResponse],
 ) error {
 	if req.Msg.Number <= 0 {
-		return rerpc.Errorf(
-			rerpc.CodeInvalidArgument,
+		return connect.Errorf(
+			connect.CodeInvalidArgument,
 			"number must be positive: got %v", req.Msg.Number,
 		)
 	}
@@ -114,7 +114,7 @@ func (c crossServerReRPC) CountUp(
 	return nil
 }
 
-func (c crossServerReRPC) CumSum(
+func (c crossServerConnect) CumSum(
 	ctx context.Context,
 	stream *handlerstream.Bidirectional[crosspb.CumSumRequest, crosspb.CumSumResponse],
 ) error {
@@ -214,15 +214,15 @@ func assertErrorGRPC(t testing.TB, err error, msg string) *status.Status {
 	return s
 }
 
-func assertErrorReRPC(t testing.TB, err error, msg string) *rerpc.Error {
+func asserErrorConnect(t testing.TB, err error, msg string) *connect.Error {
 	t.Helper()
 	assert.NotNil(t, err, msg)
-	rerr, ok := rerpc.AsError(err)
-	assert.True(t, ok, "conversion to *rerpc.Error")
+	rerr, ok := connect.AsError(err)
+	assert.True(t, ok, "conversion to *connect.Error")
 	return rerr
 }
 
-func testWithReRPCClient(t *testing.T, client *crossrpc.CrossServiceClient) {
+func testWithConnectClient(t *testing.T, client *crossrpc.CrossServiceClient) {
 	t.Run("ping", func(t *testing.T) {
 		num := rand.Int63()
 		req := &crosspb.PingRequest{Number: num}
@@ -232,11 +232,11 @@ func testWithReRPCClient(t *testing.T, client *crossrpc.CrossServiceClient) {
 		assert.Equal(t, res, expect, "ping response")
 	})
 	t.Run("errors", func(t *testing.T) {
-		req := &crosspb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)}
+		req := &crosspb.FailRequest{Code: int32(connect.CodeResourceExhausted)}
 		res, err := client.Fail(context.Background(), req)
 		assert.Nil(t, res, "fail RPC response")
-		rerr := assertErrorReRPC(t, err, "fail RPC error")
-		assert.Equal(t, rerr.Code(), rerpc.CodeResourceExhausted, "error code")
+		rerr := asserErrorConnect(t, err, "fail RPC error")
+		assert.Equal(t, rerr.Code(), connect.CodeResourceExhausted, "error code")
 		assert.Equal(t, rerr.Error(), "ResourceExhausted: "+errMsg, "error message")
 		assert.Zero(t, rerr.Details(), "error details")
 	})
@@ -244,8 +244,8 @@ func testWithReRPCClient(t *testing.T, client *crossrpc.CrossServiceClient) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		cancel()
 		_, err := client.Ping(ctx, &crosspb.PingRequest{})
-		rerr := assertErrorReRPC(t, err, "error after canceling context")
-		assert.Equal(t, rerr.Code(), rerpc.CodeCanceled, "error code")
+		rerr := asserErrorConnect(t, err, "error after canceling context")
+		assert.Equal(t, rerr.Code(), connect.CodeCanceled, "error code")
 		assert.Equal(t, rerr.Error(), "Canceled: context canceled", "error message")
 	})
 	t.Run("exceed_deadline", func(t *testing.T) {
@@ -253,8 +253,8 @@ func testWithReRPCClient(t *testing.T, client *crossrpc.CrossServiceClient) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 		_, err := client.Ping(ctx, req)
-		rerr := assertErrorReRPC(t, err, "deadline exceeded error")
-		assert.Equal(t, rerr.Code(), rerpc.CodeDeadlineExceeded, "error code")
+		rerr := asserErrorConnect(t, err, "deadline exceeded error")
+		assert.Equal(t, rerr.Code(), connect.CodeDeadlineExceeded, "error code")
 		assert.ErrorIs(t, rerr, context.DeadlineExceeded, "error unwraps to context.DeadlineExceeded")
 	})
 	t.Run("sum", func(t *testing.T) {
@@ -335,7 +335,7 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrossServiceClient, opts ..
 		assert.Equal(t, res, expect, "ping response")
 	})
 	t.Run("errors", func(t *testing.T) {
-		req := &crosspb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)}
+		req := &crosspb.FailRequest{Code: int32(connect.CodeResourceExhausted)}
 		_, err := client.Fail(context.Background(), req, opts...)
 		s := assertErrorGRPC(t, err, "fail RPC error")
 		assert.Equal(t, s.Code(), codes.ResourceExhausted, "error code")
@@ -350,7 +350,7 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrossServiceClient, opts ..
 		s := assertErrorGRPC(t, err, "error after canceling context")
 		assert.Equal(t, s.Code(), codes.Canceled, "error code")
 		// Generally bad practice to assert error messages we don't own, but
-		// we'll want to keep rerpc's message in sync with grpc-go's.
+		// we'll want to keep connect's message in sync with grpc-go's.
 		assert.Equal(t, s.Message(), "context canceled", "error message")
 	})
 	t.Run("exceed_deadline", func(t *testing.T) {
@@ -361,7 +361,7 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrossServiceClient, opts ..
 		s := assertErrorGRPC(t, err, "deadline exceeded error")
 		assert.Equal(t, s.Code(), codes.DeadlineExceeded, "error code")
 		// Generally bad practice to assert error messages we don't own, but
-		// we'll want to keep rerpc's message in sync with grpc-go's.
+		// we'll want to keep connect's message in sync with grpc-go's.
 		assert.Equal(t, s.Message(), "context deadline exceeded", "error message")
 	})
 	t.Run("sum", func(t *testing.T) {
@@ -431,11 +431,11 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrossServiceClient, opts ..
 	})
 }
 
-func TestReRPCServer(t *testing.T) {
-	reg := rerpc.NewRegistrar()
-	mux, err := rerpc.NewServeMux(
-		rerpc.NewNotFoundHandler(),
-		crossrpc.NewCrossService(crossServerReRPC{}, reg),
+func TestConnectServer(t *testing.T) {
+	reg := connect.NewRegistrar()
+	mux, err := connect.NewServeMux(
+		connect.NewNotFoundHandler(),
+		crossrpc.NewCrossService(crossServerConnect{}, reg),
 		reflection.NewService(reg),
 	)
 	assert.Nil(t, err, "mux construction error")
@@ -444,20 +444,20 @@ func TestReRPCServer(t *testing.T) {
 	server.StartTLS()
 	defer server.Close()
 
-	t.Run("rerpc_client", func(t *testing.T) {
+	t.Run("connect_client", func(t *testing.T) {
 		t.Run("gzip", func(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(
 				server.URL,
 				server.Client(),
-				rerpc.UseCompressor(rerpcgzip.Name),
+				connect.UseCompressor(connectgzip.Name),
 			)
 			assert.Nil(t, err, "client construction error")
-			testWithReRPCClient(t, client)
+			testWithConnectClient(t, client)
 		})
 		t.Run("identity", func(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(server.URL, server.Client())
 			assert.Nil(t, err, "client construction error")
-			testWithReRPCClient(t, client)
+			testWithConnectClient(t, client)
 		})
 	})
 	t.Run("grpc_client", func(t *testing.T) {
@@ -510,30 +510,30 @@ func TestReRPCServer(t *testing.T) {
 	})
 }
 
-func TestReRPCServerH2C(t *testing.T) {
-	mux, err := rerpc.NewServeMux(
-		rerpc.NewNotFoundHandler(),
-		crossrpc.NewCrossService(crossServerReRPC{}),
+func TestConnectServerH2C(t *testing.T) {
+	mux, err := connect.NewServeMux(
+		connect.NewNotFoundHandler(),
+		crossrpc.NewCrossService(crossServerConnect{}),
 	)
 	assert.Nil(t, err, "mux construction error")
 	server := httptest.NewServer(h2c.NewHandler(mux, &http2.Server{}))
 	defer server.Close()
 
-	t.Run("rerpc_client", func(t *testing.T) {
+	t.Run("connect_client", func(t *testing.T) {
 		hclient := newClientH2C()
 		t.Run("identity", func(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(server.URL, hclient)
 			assert.Nil(t, err, "client construction error")
-			testWithReRPCClient(t, client)
+			testWithConnectClient(t, client)
 		})
 		t.Run("gzip", func(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(
 				server.URL,
 				hclient,
-				rerpc.UseCompressor(rerpcgzip.Name),
+				connect.UseCompressor(connectgzip.Name),
 			)
 			assert.Nil(t, err, "client construction error")
-			testWithReRPCClient(t, client)
+			testWithConnectClient(t, client)
 		})
 	})
 	t.Run("grpc_client", func(t *testing.T) {
@@ -567,22 +567,22 @@ func TestGRPCServer(t *testing.T) {
 	defer wg.Wait()
 	defer server.GracefulStop()
 
-	t.Run("rerpc_client", func(t *testing.T) {
+	t.Run("connect_client", func(t *testing.T) {
 		hclient := newClientH2C()
 		url := "http://" + lis.Addr().String()
 		t.Run("identity", func(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(url, hclient)
 			assert.Nil(t, err, "client construction error")
-			testWithReRPCClient(t, client)
+			testWithConnectClient(t, client)
 		})
 		t.Run("gzip", func(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(
 				url,
 				hclient,
-				rerpc.UseCompressor(rerpcgzip.Name),
+				connect.UseCompressor(connectgzip.Name),
 			)
 			assert.Nil(t, err, "client construction error")
-			testWithReRPCClient(t, client)
+			testWithConnectClient(t, client)
 		})
 	})
 	t.Run("grpc_client", func(t *testing.T) {

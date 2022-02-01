@@ -1,4 +1,4 @@
-package rerpc
+package connect
 
 import (
 	"context"
@@ -7,9 +7,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/rerpc/rerpc/codec"
-	"github.com/rerpc/rerpc/codec/protobuf"
-	"github.com/rerpc/rerpc/compress"
+	"github.com/bufconnect/connect/codec"
+	"github.com/bufconnect/connect/codec/protobuf"
+	"github.com/bufconnect/connect/compress"
 )
 
 type grpc struct{}

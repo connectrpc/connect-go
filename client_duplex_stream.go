@@ -1,4 +1,4 @@
-package rerpc
+package connect
 
 import (
 	"context"
@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rerpc/rerpc/codec"
-	"github.com/rerpc/rerpc/compress"
-	statuspb "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/status/v1"
+	"github.com/bufconnect/connect/codec"
+	"github.com/bufconnect/connect/compress"
+	statuspb "github.com/bufconnect/connect/internal/gen/proto/go/grpc/status/v1"
 )
 
 // See clientStream below: the send and receive sides of client streams are
@@ -47,7 +47,7 @@ func (cr *clientReceiver) Header() http.Header { return cr.stream.ResponseHeader
 // server, and the response body is the reverse.
 //
 // The way we do this with net/http is very different from the typical HTTP/1.1
-// request/response code. Since this is the most complex code in reRPC, it has
+// request/response code. Since this is the most complex code in connect, it has
 // many more comments than usual.
 type clientStream struct {
 	ctx          context.Context
@@ -130,7 +130,7 @@ func (cs *clientStream) CloseSend(_ error) error {
 	// server-side streams. Clients can't send an error when they stop sending
 	// data, so we just ignore it.)
 	//
-	// Because reRPC also supports some RPC types over HTTP/1.1, we need to be
+	// Because connect also supports some RPC types over HTTP/1.1, we need to be
 	// careful how we expose this method to users. HTTP/1.1 doesn't support
 	// bidirectional streaming - the send stream (aka request body) must be
 	// closed before we start waiting on the response or we'll just block

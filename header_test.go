@@ -1,4 +1,4 @@
-package rerpc
+package connect
 
 import (
 	"bytes"
@@ -7,7 +7,7 @@ import (
 	"testing/quick"
 	"unicode/utf8"
 
-	"github.com/rerpc/rerpc/internal/assert"
+	"github.com/bufconnect/connect/internal/assert"
 )
 
 func TestBinaryEncodingQuick(t *testing.T) {

@@ -1,10 +1,10 @@
-package rerpctest
+package connecttest
 
 import (
 	"net/http"
 	"testing"
 
-	"github.com/rerpc/rerpc/internal/assert"
+	"github.com/bufconnect/connect/internal/assert"
 )
 
 func TestServer(t *testing.T) {

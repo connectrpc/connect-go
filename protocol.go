@@ -1,17 +1,17 @@
-package rerpc
+package connect
 
 import (
 	"context"
 	"net/http"
 
-	"github.com/rerpc/rerpc/codec"
+	"github.com/bufconnect/connect/codec"
 )
 
 // A Protocol defines the HTTP semantics to use when sending and receiving
 // messages. It ties together codecs, compressors, and net/http to produce
 // Senders and Receivers.
 //
-// For example, reRPC supports the gRPC protocol using this abstraction. Among
+// For example, connect supports the gRPC protocol using this abstraction. Among
 // many other things, the protocol implementation is responsible for
 // translating timeouts from Go contexts to HTTP and vice versa. For gRPC, it
 // converts timeouts to and from strings (e.g., 10*time.Second <-> "10S"), and

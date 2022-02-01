@@ -1,4 +1,4 @@
-package rerpc_test
+package connect_test
 
 import (
 	"context"
@@ -7,18 +7,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rerpc/rerpc"
-	"github.com/rerpc/rerpc/internal/assert"
-	pingrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/rerpc/ping/v1test"
-	pingpb "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
+	"github.com/bufconnect/connect"
+	"github.com/bufconnect/connect/internal/assert"
+	pingrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/connect/ping/v1test"
+	pingpb "github.com/bufconnect/connect/internal/gen/proto/go/connect/ping/v1test"
 )
 
 type assertCalledInterceptor struct {
 	called *bool
 }
 
-func (i *assertCalledInterceptor) Wrap(next rerpc.Func) rerpc.Func {
-	return rerpc.Func(func(ctx context.Context, req rerpc.AnyRequest) (rerpc.AnyResponse, error) {
+func (i *assertCalledInterceptor) Wrap(next connect.Func) connect.Func {
+	return connect.Func(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 		*i.called = true
 		return next(ctx, req)
 	})
@@ -28,12 +28,12 @@ func (i *assertCalledInterceptor) WrapContext(ctx context.Context) context.Conte
 	return ctx
 }
 
-func (i *assertCalledInterceptor) WrapSender(_ context.Context, s rerpc.Sender) rerpc.Sender {
+func (i *assertCalledInterceptor) WrapSender(_ context.Context, s connect.Sender) connect.Sender {
 	*i.called = true
 	return s
 }
 
-func (i *assertCalledInterceptor) WrapReceiver(_ context.Context, r rerpc.Receiver) rerpc.Receiver {
+func (i *assertCalledInterceptor) WrapReceiver(_ context.Context, r connect.Receiver) connect.Receiver {
 	*i.called = true
 	return r
 }
@@ -55,11 +55,11 @@ func TestHandlerStreamErrors(t *testing.T) {
 	reset := func() {
 		called = false
 	}
-	mux, err := rerpc.NewServeMux(
-		rerpc.NewNotFoundHandler(),
+	mux, err := connect.NewServeMux(
+		connect.NewNotFoundHandler(),
 		pingrpc.NewPingService(
 			pingServer{},
-			rerpc.Interceptors(&assertCalledInterceptor{&called}),
+			connect.Interceptors(&assertCalledInterceptor{&called}),
 		),
 	)
 	assert.Nil(t, err, "mux construction error")
@@ -70,7 +70,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 		defer reset()
 		request, err := http.NewRequest(
 			http.MethodPost,
-			server.URL+"/rerpc.ping.v1test.PingService/Ping",
+			server.URL+"/connect.ping.v1test.PingService/Ping",
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err, "error constructing request")
@@ -85,7 +85,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 		defer reset()
 		request, err := http.NewRequest(
 			http.MethodPost,
-			server.URL+"/rerpc.ping.v1test.PingService/CountUp",
+			server.URL+"/connect.ping.v1test.PingService/CountUp",
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err, "error constructing request")
@@ -101,9 +101,9 @@ func TestHandlerStreamErrors(t *testing.T) {
 func TestOnionOrderingEndToEnd(t *testing.T) {
 	// Helper function: returns a function that asserts that there's some value
 	// set for header "expect", and adds a value for header "add".
-	newInspector := func(expect, add string) func(rerpc.Specification,
+	newInspector := func(expect, add string) func(connect.Specification,
 		http.Header) {
-		return func(spec rerpc.Specification, h http.Header) {
+		return func(spec connect.Specification, h http.Header) {
 			if expect != "" {
 				assert.NotZero(
 					t,
@@ -117,7 +117,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	}
 	// Helper function: asserts that there's a value present for header keys
 	// "one", "two", "three", and "four".
-	assertAllPresent := func(spec rerpc.Specification, h http.Header) {
+	assertAllPresent := func(spec connect.Specification, h http.Header) {
 		for _, k := range []string{"one", "two", "three", "four"} {
 			assert.NotZero(
 				t,
@@ -139,41 +139,41 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	//
 	// The request and response sides of this onion are numbered to make the
 	// intended order clear.
-	clientOnion := rerpc.Interceptors(
-		rerpc.NewHeaderInterceptor(
+	clientOnion := connect.Interceptors(
+		connect.NewHeaderInterceptor(
 			// 1 (start). request: should see protocol-related headers
-			func(_ rerpc.Specification, h http.Header) {
+			func(_ connect.Specification, h http.Header) {
 				assert.NotZero(t, h.Get("Grpc-Accept-Encoding"), "grpc-accept-encoding missing")
 			},
 			// 12 (end). response: check "one"-"four"
 			assertAllPresent,
 		),
-		rerpc.NewHeaderInterceptor(
+		connect.NewHeaderInterceptor(
 			newInspector("", "one"),       // 2. request: add header "one"
 			newInspector("three", "four"), // 11. response: check "three", add "four"
 		),
-		rerpc.NewHeaderInterceptor(
+		connect.NewHeaderInterceptor(
 			newInspector("one", "two"),   // 3. request: check "one", add "two"
 			newInspector("two", "three"), // 10. response: check "two", add "three"
 		),
 	)
-	handlerOnion := rerpc.Interceptors(
-		rerpc.NewHeaderInterceptor(
+	handlerOnion := connect.Interceptors(
+		connect.NewHeaderInterceptor(
 			newInspector("two", "three"), // 4. request: check "two", add "three"
 			newInspector("one", "two"),   // 9. response: check "one", add "two"
 		),
-		rerpc.NewHeaderInterceptor(
+		connect.NewHeaderInterceptor(
 			newInspector("three", "four"), // 5. request: check "three", add "four"
 			newInspector("", "one"),       // 8. response: add "one"
 		),
-		rerpc.NewHeaderInterceptor(
+		connect.NewHeaderInterceptor(
 			assertAllPresent, // 6. request: check "one"-"four"
 			nil,              // 7. response: no-op
 		),
 	)
 
-	mux, err := rerpc.NewServeMux(
-		rerpc.NewNotFoundHandler(),
+	mux, err := connect.NewServeMux(
+		connect.NewNotFoundHandler(),
 		pingrpc.NewPingService(
 			pingServer{},
 			handlerOnion,

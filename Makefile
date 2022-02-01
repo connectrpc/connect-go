@@ -38,7 +38,7 @@ lint: lintpb bin/gofmt bin/goimports bin/staticcheck ## Lint Go and protobuf
 	@echo "Checking with gofmt..."
 	@test -z "$$(./bin/gofmt -s -l . | tee /dev/stderr)"
 	@echo "Checking with goimports..."
-	@test -z "$$(./bin/goimports -local github.com/rerpc/rerpc -l $(HANDWRITTEN) | tee /dev/stderr)"
+	@test -z "$$(./bin/goimports -local github.com/bufconnect/connect -l $(HANDWRITTEN) | tee /dev/stderr)"
 	@echo "Checking with go vet..."
 	@$(GO) vet ./...
 	@echo "Checking with staticcheck..."
@@ -48,7 +48,7 @@ lint: lintpb bin/gofmt bin/goimports bin/staticcheck ## Lint Go and protobuf
 .PHONY: lintfix
 lintfix: bin/gofmt bin/goimports ## Automatically fix some lint errors
 	@./bin/gofmt -s -w .
-	@./bin/goimports -local github.com/rerpc/rerpc -w $(HANDWRITTEN)
+	@./bin/goimports -local github.com/bufconnect/connect -w $(HANDWRITTEN)
 
 .PHONY: lintpb
 lintpb: bin/buf proto/buf.yaml internal/crosstest/proto/buf.yaml $(PROTOBUFS)
@@ -66,7 +66,7 @@ cover.out: gen $(HANDWRITTEN)
 .PHONY: gen
 gen: .faux.pb ## Regenerate code
 
-.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go bin/protoc-gen-go-grpc bin/protoc-gen-go-rerpc buf.work.yaml buf.gen.yaml proto/buf.yaml internal/crosstest/buf.work.yaml internal/crosstest/buf.gen.yaml internal/crosstest/proto/buf.yaml
+.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go bin/protoc-gen-go-grpc bin/protoc-gen-go-connect buf.work.yaml buf.gen.yaml proto/buf.yaml internal/crosstest/buf.work.yaml internal/crosstest/buf.gen.yaml internal/crosstest/proto/buf.yaml
 	./bin/buf generate
 	cd internal/crosstest && ../../bin/buf generate
 	touch $(@)
@@ -77,8 +77,8 @@ bin/protoc-gen-go: internal/crosstest/go.mod
 bin/protoc-gen-go-grpc: internal/crosstest/go.mod
 	cd internal/crosstest && GOBIN=$(PWD)/bin $(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc
 
-bin/protoc-gen-go-rerpc: $(shell ls cmd/protoc-gen-go-rerpc/*.go) go.mod
-	$(GO) build -o $(@) ./cmd/protoc-gen-go-rerpc
+bin/protoc-gen-go-connect: $(shell ls cmd/protoc-gen-go-connect/*.go) go.mod
+	$(GO) build -o $(@) ./cmd/protoc-gen-go-connect
 
 bin/buf: internal/crosstest/go.mod
 	cd internal/crosstest && GOBIN=$(PWD)/bin $(GO) install github.com/bufbuild/buf/cmd/buf

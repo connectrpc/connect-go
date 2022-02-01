@@ -1,24 +1,24 @@
-package rerpc_test
+package connect_test
 
 import (
 	"context"
 	"net/http"
 	"time"
 
-	"github.com/rerpc/rerpc"
-	"github.com/rerpc/rerpc/health"
-	pingrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/rerpc/ping/v1test"
-	pingpb "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
-	"github.com/rerpc/rerpc/reflection"
+	"github.com/bufconnect/connect"
+	"github.com/bufconnect/connect/health"
+	pingrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/connect/ping/v1test"
+	pingpb "github.com/bufconnect/connect/internal/gen/proto/go/connect/ping/v1test"
+	"github.com/bufconnect/connect/reflection"
 )
 
 // ExamplePingServer implements some trivial business logic. The protobuf
-// definition for this API is in internal/ping/v1test/ping.proto.
+// definition for this API is in proto/connect/ping/v1test/ping.proto.
 type ExamplePingServer struct {
 	pingrpc.UnimplementedPingService
 }
 
-// Ping implements pingpb.PingServiceReRPC.
+// Ping implements pingrpc.PingService.
 func (*ExamplePingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingpb.PingResponse, error) {
 	return &pingpb.PingResponse{
 		Number: req.Number,
@@ -30,16 +30,16 @@ func Example() {
 	// The business logic here is trivial, but the rest of the example is meant
 	// to be somewhat realistic. This server has basic timeouts configured, and
 	// it also exposes gRPC's server reflection and health check APIs.
-	ping := &ExamplePingServer{}             // our business logic
-	reg := rerpc.NewRegistrar()              // for gRPC reflection
-	checker := health.NewChecker(reg)        // basic health checks
-	limit := rerpc.ReadMaxBytes(1024 * 1024) // limit request size
+	ping := &ExamplePingServer{}               // our business logic
+	reg := connect.NewRegistrar()              // for gRPC reflection
+	checker := health.NewChecker(reg)          // basic health checks
+	limit := connect.ReadMaxBytes(1024 * 1024) // limit request size
 
 	// NewServeMux returns a plain net/http *ServeMux. Since a mux is an
-	// http.Handler, reRPC works with any Go HTTP middleware (e.g., net/http's
+	// http.Handler, connect works with any Go HTTP middleware (e.g., net/http's
 	// StripPrefix).
-	mux, err := rerpc.NewServeMux(
-		rerpc.NewNotFoundHandler(),               // fallback handler
+	mux, err := connect.NewServeMux(
+		connect.NewNotFoundHandler(),             // fallback handler
 		pingrpc.NewPingService(ping, reg, limit), // business logic
 		reflection.NewService(reg),               // server reflection
 		health.NewService(checker),               // health checks
@@ -50,7 +50,7 @@ func Example() {
 
 	// Timeouts, connection handling, TLS configuration, and other low-level
 	// transport details are handled by net/http. Everything you already know (or
-	// anything you learn) about hardening net/http Servers applies to reRPC
+	// anything you learn) about hardening net/http Servers applies to connect
 	// too. Keep in mind that any timeouts you set will also apply to streaming
 	// RPCs!
 	//

@@ -1,4 +1,4 @@
-package rerpc_test
+package connect_test
 
 import (
 	"context"
@@ -10,15 +10,15 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/rerpc/rerpc"
-	"github.com/rerpc/rerpc/codec/protobuf"
-	"github.com/rerpc/rerpc/compress/gzip"
-	"github.com/rerpc/rerpc/handlerstream"
-	"github.com/rerpc/rerpc/health"
-	"github.com/rerpc/rerpc/internal/assert"
-	pingrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/rerpc/ping/v1test"
-	pingpb "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
-	"github.com/rerpc/rerpc/reflection"
+	"github.com/bufconnect/connect"
+	"github.com/bufconnect/connect/codec/protobuf"
+	"github.com/bufconnect/connect/compress/gzip"
+	"github.com/bufconnect/connect/handlerstream"
+	"github.com/bufconnect/connect/health"
+	"github.com/bufconnect/connect/internal/assert"
+	pingrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/connect/ping/v1test"
+	pingpb "github.com/bufconnect/connect/internal/gen/proto/go/connect/ping/v1test"
+	"github.com/bufconnect/connect/reflection"
 )
 
 const errMsg = "oh no"
@@ -35,7 +35,7 @@ func (p pingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingpb.
 }
 
 func (p pingServer) Fail(ctx context.Context, req *pingpb.FailRequest) (*pingpb.FailResponse, error) {
-	return nil, rerpc.Errorf(rerpc.Code(req.Code), errMsg)
+	return nil, connect.Errorf(connect.Code(req.Code), errMsg)
 }
 
 func (p pingServer) Sum(
@@ -49,7 +49,7 @@ func (p pingServer) Sum(
 		}
 		msg, err := stream.Receive()
 		if errors.Is(err, io.EOF) {
-			return stream.SendAndClose(rerpc.NewResponse(&pingpb.SumResponse{
+			return stream.SendAndClose(connect.NewResponse(&pingpb.SumResponse{
 				Sum: sum,
 			}))
 		} else if err != nil {
@@ -65,7 +65,7 @@ func (p pingServer) CountUp(
 	stream *handlerstream.Server[pingpb.CountUpResponse],
 ) error {
 	if req.Number <= 0 {
-		return rerpc.Errorf(rerpc.CodeInvalidArgument, "number must be positive: got %v", req.Number)
+		return connect.Errorf(connect.CodeInvalidArgument, "number must be positive: got %v", req.Number)
 	}
 	for i := int64(1); i <= req.Number; i++ {
 		if err := ctx.Err(); err != nil {
@@ -102,9 +102,9 @@ func (p pingServer) CumSum(
 
 func TestServerProtoGRPC(t *testing.T) {
 	const errMsg = "oh no"
-	reg := rerpc.NewRegistrar()
-	mux, err := rerpc.NewServeMux(
-		rerpc.NewNotFoundHandler(),
+	reg := connect.NewRegistrar()
+	mux, err := connect.NewServeMux(
+		connect.NewNotFoundHandler(),
 		pingrpc.NewPingService(pingServer{}, reg),
 		health.NewService(health.NewChecker(reg)),
 		reflection.NewService(reg),
@@ -215,15 +215,15 @@ func TestServerProtoGRPC(t *testing.T) {
 	}
 	testErrors := func(t *testing.T, client *pingrpc.PingServiceClient) {
 		t.Run("errors", func(t *testing.T) {
-			req := pingpb.FailRequest{Code: int32(rerpc.CodeResourceExhausted)}
+			req := pingpb.FailRequest{Code: int32(connect.CodeResourceExhausted)}
 			res, err := client.Fail(context.Background(), &req)
 			assert.Nil(t, res, "fail RPC response")
 			assert.NotNil(t, err, "fail RPC error")
-			rerr, ok := rerpc.AsError(err)
-			assert.True(t, ok, "conversion to *rerpc.Error")
-			assert.Equal(t, rerr.Code(), rerpc.CodeResourceExhausted, "error code")
-			assert.Equal(t, rerr.Error(), "ResourceExhausted: "+errMsg, "error message")
-			assert.Zero(t, rerr.Details(), "error details")
+			cerr, ok := connect.AsError(err)
+			assert.True(t, ok, "conversion to *connect.Error")
+			assert.Equal(t, cerr.Code(), connect.CodeResourceExhausted, "error code")
+			assert.Equal(t, cerr.Error(), "ResourceExhausted: "+errMsg, "error message")
+			assert.Zero(t, cerr.Details(), "error details")
 		})
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) {
@@ -240,7 +240,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			client, err := pingrpc.NewPingServiceClient(
 				server.URL,
 				server.Client(),
-				rerpc.UseCompressor(gzip.Name),
+				connect.UseCompressor(gzip.Name),
 			)
 			assert.Nil(t, err, "client construction error")
 			testPing(t, client)
@@ -253,8 +253,8 @@ func TestServerProtoGRPC(t *testing.T) {
 			client, err := pingrpc.NewPingServiceClient(
 				server.URL,
 				server.Client(),
-				rerpc.Codec(protobuf.NameJSON, protobuf.NewJSON()),
-				rerpc.UseCompressor(gzip.Name),
+				connect.Codec(protobuf.NameJSON, protobuf.NewJSON()),
+				connect.UseCompressor(gzip.Name),
 			)
 			assert.Nil(t, err, "client construction error")
 			testPing(t, client)
@@ -282,10 +282,10 @@ func TestServerProtoGRPC(t *testing.T) {
 type pluggablePingServer struct {
 	pingrpc.UnimplementedPingService
 
-	ping func(context.Context, *rerpc.Request[pingpb.PingRequest]) (*rerpc.Response[pingpb.PingResponse], error)
+	ping func(context.Context, *connect.Request[pingpb.PingRequest]) (*connect.Response[pingpb.PingResponse], error)
 }
 
-func (p *pluggablePingServer) Ping(ctx context.Context, req *rerpc.Request[pingpb.PingRequest]) (*rerpc.Response[pingpb.PingResponse], error) {
+func (p *pluggablePingServer) Ping(ctx context.Context, req *connect.Request[pingpb.PingRequest]) (*connect.Response[pingpb.PingResponse], error) {
 	return p.ping(ctx, req)
 }
 
@@ -294,15 +294,15 @@ func TestHeaderBasic(t *testing.T) {
 	const cval, hval = "client value", "handler value"
 
 	srv := &pluggablePingServer{
-		ping: func(ctx context.Context, req *rerpc.Request[pingpb.PingRequest]) (*rerpc.Response[pingpb.PingResponse], error) {
+		ping: func(ctx context.Context, req *connect.Request[pingpb.PingRequest]) (*connect.Response[pingpb.PingResponse], error) {
 			assert.Equal(t, req.Header().Get(key), cval, "expected handler to receive headers")
-			res := rerpc.NewResponse(&pingpb.PingResponse{})
+			res := connect.NewResponse(&pingpb.PingResponse{})
 			res.Header().Set(key, hval)
 			return res, nil
 		},
 	}
-	mux, err := rerpc.NewServeMux(
-		rerpc.NewNotFoundHandler(),
+	mux, err := connect.NewServeMux(
+		connect.NewNotFoundHandler(),
 		pingrpc.NewPingService(srv),
 	)
 	assert.Nil(t, err, "mux construction error")
@@ -310,7 +310,7 @@ func TestHeaderBasic(t *testing.T) {
 	defer server.Close()
 	client, err := pingrpc.NewPingServiceClient(server.URL, server.Client())
 	assert.Nil(t, err, "client construction error")
-	req := rerpc.NewRequest(&pingpb.PingRequest{})
+	req := connect.NewRequest(&pingpb.PingRequest{})
 	req.Header().Set(key, cval)
 	res, err := client.Unwrap().Ping(context.Background(), req)
 	assert.Nil(t, err, "error making request")

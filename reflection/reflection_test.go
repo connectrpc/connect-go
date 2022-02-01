@@ -6,14 +6,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/rerpc/rerpc"
-	"github.com/rerpc/rerpc/codec/protobuf"
-	"github.com/rerpc/rerpc/health"
-	"github.com/rerpc/rerpc/internal/assert"
-	pingrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/rerpc/ping/v1test"
-	reflectionpb "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/reflection/v1alpha"
-	pingpb "github.com/rerpc/rerpc/internal/gen/proto/go/rerpc/ping/v1test"
-	"github.com/rerpc/rerpc/reflection"
+	"github.com/bufconnect/connect"
+	"github.com/bufconnect/connect/codec/protobuf"
+	"github.com/bufconnect/connect/health"
+	"github.com/bufconnect/connect/internal/assert"
+	pingrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/connect/ping/v1test"
+	pingpb "github.com/bufconnect/connect/internal/gen/proto/go/connect/ping/v1test"
+	reflectionpb "github.com/bufconnect/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
+	"github.com/bufconnect/connect/reflection"
 )
 
 type pingServer struct {
@@ -21,9 +21,9 @@ type pingServer struct {
 }
 
 func TestReflection(t *testing.T) {
-	reg := rerpc.NewRegistrar()
-	mux, err := rerpc.NewServeMux(
-		rerpc.NewNotFoundHandler(),
+	reg := connect.NewRegistrar()
+	mux, err := connect.NewServeMux(
+		connect.NewNotFoundHandler(),
 		pingrpc.NewPingService(pingServer{}, reg),
 		health.NewService(health.NewChecker(reg)),
 		reflection.NewService(reg),
@@ -37,21 +37,21 @@ func TestReflection(t *testing.T) {
 
 	pingRequestFQN := string((&pingpb.PingRequest{}).ProtoReflect().Descriptor().FullName())
 	assert.Equal(t, reg.Services(), []string{
-		"rerpc.ping.v1test.PingService",
+		"connect.ping.v1test.PingService",
 	}, "services registered in memory")
 
-	detailed, err := rerpc.NewClientFunc[
+	detailed, err := connect.NewClientFunc[
 		reflectionpb.ServerReflectionRequest,
 		reflectionpb.ServerReflectionResponse,
 	](
 		server.Client(),
 		server.URL,
 		"grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
-		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
+		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
 	)
 	assert.Nil(t, err, "client construction error")
 	call := func(req *reflectionpb.ServerReflectionRequest) (*reflectionpb.ServerReflectionResponse, error) {
-		res, err := detailed(context.Background(), rerpc.NewRequest(req))
+		res, err := detailed(context.Background(), connect.NewRequest(req))
 		if err != nil {
 			return nil, err
 		}
@@ -73,7 +73,7 @@ func TestReflection(t *testing.T) {
 			MessageResponse: &reflectionpb.ServerReflectionResponse_ListServicesResponse{
 				ListServicesResponse: &reflectionpb.ListServiceResponse{
 					Service: []*reflectionpb.ServiceResponse{
-						{Name: "rerpc.ping.v1test.PingService"},
+						{Name: "connect.ping.v1test.PingService"},
 					},
 				},
 			},
@@ -84,7 +84,7 @@ func TestReflection(t *testing.T) {
 		req := &reflectionpb.ServerReflectionRequest{
 			Host: "some-host",
 			MessageRequest: &reflectionpb.ServerReflectionRequest_FileByFilename{
-				FileByFilename: "rerpc/ping/v1test/ping.proto",
+				FileByFilename: "connect/ping/v1test/ping.proto",
 			},
 		}
 		res, err := call(req)
@@ -132,7 +132,7 @@ func TestReflection(t *testing.T) {
 		assert.Nil(t, err, "reflection RPC error")
 		msgerr := res.GetErrorResponse()
 		assert.NotNil(t, msgerr, "error in response proto")
-		assert.Equal(t, msgerr.ErrorCode, int32(rerpc.CodeNotFound), "error code")
+		assert.Equal(t, msgerr.ErrorCode, int32(connect.CodeNotFound), "error code")
 		assert.NotZero(t, msgerr.ErrorMessage, "error message")
 	})
 	t.Run("all_extension_numbers_of_type", func(t *testing.T) {
