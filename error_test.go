@@ -1,4 +1,4 @@
-package rerpc
+package connect
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/rerpc/rerpc/internal/assert"
+	"github.com/bufconnect/connect/internal/assert"
 )
 
 func TestErrorCodeOK(t *testing.T) {
@@ -29,9 +29,9 @@ func TestErrorFormatting(t *testing.T) {
 
 func TestErrorCode(t *testing.T) {
 	err := fmt.Errorf("another: %w", Errorf(CodeUnavailable, "foo"))
-	rerr, ok := AsError(err)
-	assert.True(t, ok, "extract rerpc error")
-	assert.Equal(t, rerr.Code(), CodeUnavailable, "extracted code")
+	cerr, ok := AsError(err)
+	assert.True(t, ok, "extract connect error")
+	assert.Equal(t, cerr.Code(), CodeUnavailable, "extracted code")
 }
 
 func TestCodeOf(t *testing.T) {

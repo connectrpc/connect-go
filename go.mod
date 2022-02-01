@@ -1,4 +1,4 @@
-module github.com/rerpc/rerpc
+module github.com/bufconnect/connect
 
 go 1.18
 

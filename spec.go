@@ -1,4 +1,4 @@
-package rerpc
+package connect
 
 // Specification is a description of a client call or a handler invocation.
 type Specification struct {

@@ -5,17 +5,17 @@ package handlerstream
 import (
 	"net/http"
 
-	"github.com/rerpc/rerpc"
+	"github.com/bufconnect/connect"
 )
 
 // Client is the server's view of a client streaming RPC.
 type Client[Req, Res any] struct {
-	sender   rerpc.Sender
-	receiver rerpc.Receiver
+	sender   connect.Sender
+	receiver connect.Receiver
 }
 
 // NewClient constructs a Client.
-func NewClient[Req, Res any](s rerpc.Sender, r rerpc.Receiver) *Client[Req, Res] {
+func NewClient[Req, Res any](s connect.Sender, r connect.Receiver) *Client[Req, Res] {
 	return &Client[Req, Res]{sender: s, receiver: r}
 }
 
@@ -36,7 +36,7 @@ func (c *Client[Req, Res]) Receive() (*Req, error) {
 
 // SendAndClose closes the receive side of the stream, then sends a response
 // back to the client.
-func (c *Client[Req, Res]) SendAndClose(msg *rerpc.Response[Res]) error {
+func (c *Client[Req, Res]) SendAndClose(msg *connect.Response[Res]) error {
 	if err := c.receiver.Close(); err != nil {
 		return err
 	}
@@ -49,11 +49,11 @@ func (c *Client[Req, Res]) SendAndClose(msg *rerpc.Response[Res]) error {
 
 // Server is the server's view of a server streaming RPC.
 type Server[Res any] struct {
-	sender rerpc.Sender
+	sender connect.Sender
 }
 
 // NewServer constructs a Server.
-func NewServer[Res any](s rerpc.Sender) *Server[Res] {
+func NewServer[Res any](s connect.Sender) *Server[Res] {
 	return &Server[Res]{sender: s}
 }
 
@@ -71,12 +71,12 @@ func (s *Server[Res]) Send(msg *Res) error {
 
 // Bidirectional is the server's view of a bidirectional streaming RPC.
 type Bidirectional[Req, Res any] struct {
-	sender   rerpc.Sender
-	receiver rerpc.Receiver
+	sender   connect.Sender
+	receiver connect.Receiver
 }
 
 // NewBidirectional constructs a Bidirectional.
-func NewBidirectional[Req, Res any](s rerpc.Sender, r rerpc.Receiver) *Bidirectional[Req, Res] {
+func NewBidirectional[Req, Res any](s connect.Sender, r connect.Receiver) *Bidirectional[Req, Res] {
 	return &Bidirectional[Req, Res]{sender: s, receiver: r}
 }
 

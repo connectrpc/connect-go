@@ -1,16 +1,16 @@
-package rerpc
+package connect
 
 import (
 	"context"
 	"net/http"
 
-	"github.com/rerpc/rerpc/codec"
-	"github.com/rerpc/rerpc/codec/protobuf"
-	"github.com/rerpc/rerpc/compress"
-	"github.com/rerpc/rerpc/compress/gzip"
+	"github.com/bufconnect/connect/codec"
+	"github.com/bufconnect/connect/codec/protobuf"
+	"github.com/bufconnect/connect/compress"
+	"github.com/bufconnect/connect/compress/gzip"
 )
 
-// Doer is the transport-level interface reRPC expects HTTP clients to
+// Doer is the transport-level interface connect expects HTTP clients to
 // implement. The standard library's http.Client implements Doer.
 type Doer interface {
 	Do(*http.Request) (*http.Response, error)
@@ -71,7 +71,7 @@ func (c *clientCfg) newSpecification(t StreamType) Specification {
 	}
 }
 
-// A ClientOption configures a reRPC client.
+// A ClientOption configures a connect client.
 //
 // In addition to any options grouped in the documentation below, remember that
 // Options are also valid ClientOptions.
@@ -101,10 +101,10 @@ func (o *useCompressorOption) applyToClient(cfg *clientCfg) {
 // bidirectional streaming remote procedure. (To call a unary procedure, use
 // NewClientFunc instead.)
 //
-// It's the interface between the reRPC library and the client code generated
-// by protoc-gen-go-rerpc; most users won't ever need to deal with it directly.
+// It's the interface between the connect library and the client code generated
+// by protoc-gen-go-connect; most users won't ever need to deal with it directly.
 // To see an example of how NewClientStream is used in the generated code, see the
-// internal/gen/proto/go-rerpc/rerpc/ping/v1test package.
+// internal/gen/proto/go-connect/connect/ping/v1test package.
 func NewClientStream(
 	doer Doer,
 	stype StreamType,
@@ -148,10 +148,10 @@ func NewClientStream(
 // NewClientFunc returns a strongly-typed function to call a unary remote
 // procedure. (To call a streaming procedure, use NewClientStream instead.)
 //
-// It's the interface between the reRPC library and the client code generated
-// by protoc-gen-go-rerpc; most users won't ever need to deal with it directly.
+// It's the interface between the connect library and the client code generated
+// by protoc-gen-go-connect; most users won't ever need to deal with it directly.
 // To see an example of how NewClientFunc is used in the generated code, see the
-// internal/ping/v1test package.
+// internal/gen/proto/go-connect/connect/ping/v1test package.
 func NewClientFunc[Req, Res any](
 	doer Doer,
 	baseURL, procedure string,

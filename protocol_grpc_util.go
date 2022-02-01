@@ -1,11 +1,11 @@
-package rerpc
+package connect
 
 import (
 	"fmt"
 	"runtime"
 	"strings"
 
-	"github.com/rerpc/rerpc/codec/protobuf"
+	"github.com/bufconnect/connect/codec/protobuf"
 )
 
 const (
@@ -15,7 +15,7 @@ const (
 	grpcNameProto = "proto"
 )
 
-var userAgent = []string{fmt.Sprintf("grpc-go-rerpc/%s (%s)", Version, runtime.Version())}
+var userAgent = []string{fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())}
 
 func isCommaOrSpace(c rune) bool {
 	return c == ',' || c == ' '

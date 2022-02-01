@@ -2,7 +2,7 @@ version: v1
 managed:
   enabled: true
   go_package_prefix:
-    default: github.com/rerpc/rerpc/internal/crosstest/gen/proto/go
+    default: github.com/bufconnect/connect/internal/crosstest/gen/proto/go
 plugins:
   - name: go
     out: gen/proto/go
@@ -12,9 +12,9 @@ plugins:
     out: gen/proto/go
     opt: paths=source_relative
     path: ../../bin/protoc-gen-go-grpc
-  - name: go-rerpc
-    out: gen/proto/go-rerpc
+  - name: go-connect
+    out: gen/proto/go-connect
     opt:
       - paths=source_relative
       - external_go_types=true
-    path: ../../bin/protoc-gen-go-rerpc
+    path: ../../bin/protoc-gen-go-connect

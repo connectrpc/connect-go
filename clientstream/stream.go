@@ -5,17 +5,17 @@ package clientstream
 import (
 	"net/http"
 
-	"github.com/rerpc/rerpc"
+	"github.com/bufconnect/connect"
 )
 
 // Client is the client's view of a client streaming RPC.
 type Client[Req, Res any] struct {
-	sender   rerpc.Sender
-	receiver rerpc.Receiver
+	sender   connect.Sender
+	receiver connect.Receiver
 }
 
 // NewClient constructs a Client.
-func NewClient[Req, Res any](s rerpc.Sender, r rerpc.Receiver) *Client[Req, Res] {
+func NewClient[Req, Res any](s connect.Sender, r connect.Receiver) *Client[Req, Res] {
 	return &Client[Req, Res]{sender: s, receiver: r}
 }
 
@@ -33,11 +33,11 @@ func (c *Client[Req, Res]) Send(msg *Req) error {
 
 // CloseAndReceive closes the send side of the stream and waits for the
 // response.
-func (c *Client[Req, Res]) CloseAndReceive() (*rerpc.Response[Res], error) {
+func (c *Client[Req, Res]) CloseAndReceive() (*connect.Response[Res], error) {
 	if err := c.sender.Close(nil); err != nil {
 		return nil, err
 	}
-	res, err := rerpc.ReceiveResponse[Res](c.receiver)
+	res, err := connect.ReceiveResponse[Res](c.receiver)
 	if err != nil {
 		_ = c.receiver.Close()
 		return nil, err
@@ -50,11 +50,11 @@ func (c *Client[Req, Res]) CloseAndReceive() (*rerpc.Response[Res], error) {
 
 // Server is the client's view of a server streaming RPC.
 type Server[Res any] struct {
-	receiver rerpc.Receiver
+	receiver connect.Receiver
 }
 
 // NewServer constructs a Server.
-func NewServer[Res any](r rerpc.Receiver) *Server[Res] {
+func NewServer[Res any](r connect.Receiver) *Server[Res] {
 	return &Server[Res]{receiver: r}
 }
 
@@ -81,12 +81,12 @@ func (s *Server[Res]) Close() error {
 
 // Bidirectional is the client's view of a bidirectional streaming RPC.
 type Bidirectional[Req, Res any] struct {
-	sender   rerpc.Sender
-	receiver rerpc.Receiver
+	sender   connect.Sender
+	receiver connect.Receiver
 }
 
 // NewBidirectional constructs a Bidirectional.
-func NewBidirectional[Req, Res any](s rerpc.Sender, r rerpc.Receiver) *Bidirectional[Req, Res] {
+func NewBidirectional[Req, Res any](s connect.Sender, r connect.Receiver) *Bidirectional[Req, Res] {
 	return &Bidirectional[Req, Res]{sender: s, receiver: r}
 }
 
