@@ -1,4 +1,4 @@
-package rerpc
+package connect
 
 import (
 	"io"
@@ -8,9 +8,9 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/rerpc/rerpc/codec"
-	"github.com/rerpc/rerpc/compress"
-	statuspb "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/status/v1"
+	"github.com/bufconnect/connect/codec"
+	"github.com/bufconnect/connect/compress"
+	statuspb "github.com/bufconnect/connect/internal/gen/proto/go/grpc/status/v1"
 )
 
 // Thankfully, the handler stream is much simpler than the client. net/http

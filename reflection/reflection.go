@@ -15,17 +15,17 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
-	"github.com/rerpc/rerpc"
-	"github.com/rerpc/rerpc/codec/protobuf"
-	"github.com/rerpc/rerpc/handlerstream"
-	reflectionrpc "github.com/rerpc/rerpc/internal/gen/proto/go-rerpc/grpc/reflection/v1alpha"
-	rpb "github.com/rerpc/rerpc/internal/gen/proto/go/grpc/reflection/v1alpha"
+	"github.com/bufconnect/connect"
+	"github.com/bufconnect/connect/codec/protobuf"
+	"github.com/bufconnect/connect/handlerstream"
+	reflectionrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/grpc/reflection/v1alpha"
+	rpb "github.com/bufconnect/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
 )
 
 // Registrar lists all registered protobuf services. The returned names must be
 // fully qualified (e.g., "acme.foo.v1.FooService").
 //
-// A *rerpc.Registrar implements this interface.
+// A *connect.Registrar implements this interface.
 type Registrar interface {
 	Services() []string // returns fully-qualified protobuf services names
 }
@@ -43,16 +43,16 @@ type Registrar interface {
 // https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md,
 // https://github.com/grpc/grpc/blob/master/doc/server-reflection.md, and
 // https://github.com/fullstorydev/grpcurl.
-func NewService(reg Registrar, opts ...rerpc.HandlerOption) *rerpc.Service {
+func NewService(reg Registrar, opts ...connect.HandlerOption) *connect.Service {
 	const (
 		prefix      = "internal.reflection.v1alpha1."
 		replacement = "grpc.reflection.v1alpha."
 	)
-	opts = append([]rerpc.HandlerOption{
-		rerpc.Codec(protobuf.NameBinary, protobuf.NewBinary()),
-		rerpc.Codec(protobuf.NameJSON, protobuf.NewJSON()),
+	opts = append([]connect.HandlerOption{
+		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
+		connect.Codec(protobuf.NameJSON, protobuf.NewJSON()),
 	}, opts...)
-	opts = append(opts, rerpc.ReplaceProcedurePrefix(prefix, replacement))
+	opts = append(opts, connect.ReplaceProcedurePrefix(prefix, replacement))
 	return reflectionrpc.NewServerReflection(
 		&server{reg: reg},
 		opts...,
@@ -96,7 +96,7 @@ func (rs *server) ServerReflectionInfo(
 			if err != nil {
 				res.MessageResponse = &rpb.ServerReflectionResponse_ErrorResponse{
 					ErrorResponse: &rpb.ErrorResponse{
-						ErrorCode:    int32(rerpc.CodeNotFound),
+						ErrorCode:    int32(connect.CodeNotFound),
 						ErrorMessage: err.Error(),
 					},
 				}
@@ -110,7 +110,7 @@ func (rs *server) ServerReflectionInfo(
 			if err != nil {
 				res.MessageResponse = &rpb.ServerReflectionResponse_ErrorResponse{
 					ErrorResponse: &rpb.ErrorResponse{
-						ErrorCode:    int32(rerpc.CodeNotFound),
+						ErrorCode:    int32(connect.CodeNotFound),
 						ErrorMessage: err.Error(),
 					},
 				}
@@ -126,7 +126,7 @@ func (rs *server) ServerReflectionInfo(
 			if err != nil {
 				res.MessageResponse = &rpb.ServerReflectionResponse_ErrorResponse{
 					ErrorResponse: &rpb.ErrorResponse{
-						ErrorCode:    int32(rerpc.CodeNotFound),
+						ErrorCode:    int32(connect.CodeNotFound),
 						ErrorMessage: err.Error(),
 					},
 				}
@@ -140,7 +140,7 @@ func (rs *server) ServerReflectionInfo(
 			if err != nil {
 				res.MessageResponse = &rpb.ServerReflectionResponse_ErrorResponse{
 					ErrorResponse: &rpb.ErrorResponse{
-						ErrorCode:    int32(rerpc.CodeNotFound),
+						ErrorCode:    int32(connect.CodeNotFound),
 						ErrorMessage: err.Error(),
 					},
 				}
@@ -166,7 +166,7 @@ func (rs *server) ServerReflectionInfo(
 				},
 			}
 		default:
-			return rerpc.Errorf(rerpc.CodeInvalidArgument, "invalid MessageRequest: %v", req.MessageRequest)
+			return connect.Errorf(connect.CodeInvalidArgument, "invalid MessageRequest: %v", req.MessageRequest)
 		}
 		if err := stream.Send(res); err != nil {
 			return err

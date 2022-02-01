@@ -1,4 +1,4 @@
-package rerpc
+package connect
 
 import (
 	"math"
@@ -6,7 +6,7 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/rerpc/rerpc/internal/assert"
+	"github.com/bufconnect/connect/internal/assert"
 )
 
 func TestParseTimeout(t *testing.T) {

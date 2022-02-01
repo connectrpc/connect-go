@@ -1,4 +1,4 @@
-module github.com/rerpc/rerpc/internal/crosstest
+module github.com/bufconnect/connect/internal/crosstest
 
 go 1.18
 
@@ -7,7 +7,7 @@ require (
 	github.com/fullstorydev/grpcurl v1.8.2
 	github.com/golang/protobuf v1.5.2
 	github.com/jhump/protoreflect v1.10.1
-	github.com/rerpc/rerpc v0.0.0-20210731172712-57d99a145c97
+	github.com/bufconnect/connect v0.0.0-20210731172712-57d99a145c97
 	golang.org/x/net v0.0.0-20220111093109-d55c255bac03
 	google.golang.org/grpc v1.43.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.2.0
@@ -45,4 +45,4 @@ require (
 	honnef.co/go/tools v0.2.2 // indirect
 )
 
-replace github.com/rerpc/rerpc => ../..
+replace github.com/bufconnect/connect => ../..

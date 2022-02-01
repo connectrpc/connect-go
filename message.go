@@ -1,4 +1,4 @@
-package rerpc
+package connect
 
 import (
 	"bytes"
@@ -6,8 +6,8 @@ import (
 	"errors"
 	"io"
 
-	"github.com/rerpc/rerpc/codec"
-	"github.com/rerpc/rerpc/compress"
+	"github.com/bufconnect/connect/codec"
+	"github.com/bufconnect/connect/compress"
 )
 
 var (

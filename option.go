@@ -1,10 +1,10 @@
-package rerpc
+package connect
 
 import (
 	"strings"
 
-	"github.com/rerpc/rerpc/codec"
-	"github.com/rerpc/rerpc/compress"
+	"github.com/bufconnect/connect/codec"
+	"github.com/bufconnect/connect/compress"
 )
 
 // Option implements both ClientOption and HandlerOption, so it can be applied
@@ -25,7 +25,7 @@ type replaceProcedurePrefixOption struct {
 // service name, and the method name. This option replaces a prefix of the
 // procedure name with another static string. Using this option is usually a
 // bad idea, but it's occasionally necessary to prevent protobuf package
-// collisions. (For example, reRPC uses this option to serve the health and
+// collisions. (For example, connect uses this option to serve the health and
 // reflection APIs without generating runtime conflicts with grpc-go.)
 //
 // ReplaceProcedurePrefix doesn't change the data exposed by the reflection
@@ -89,14 +89,14 @@ type codecOption struct {
 //
 // Typically, generated code automatically supplies this option with the
 // appropriate codec(s). For example, handlers generated from protobuf schemas
-// using protoc-gen-go-rerpc automatically register binary and JSON codecs.
+// using protoc-gen-go-connect automatically register binary and JSON codecs.
 // Users with more specialized needs may override the default codecs by
 // registering a new codec under the same name.
 //
 // Handlers may have multiple codecs registered, and use whichever the client
 // chooses. Clients may only have a single codec.
 //
-// When registering protocol buffer codecs, take care to use reRPC's
+// When registering protocol buffer codecs, take care to use connect's
 // protobuf.NameBinary ("protobuf") rather than "proto".
 func Codec(name string, c codec.Codec) Option {
 	return &codecOption{

@@ -1,4 +1,4 @@
-package rerpc
+package connect
 
 import (
 	"errors"
@@ -27,15 +27,15 @@ type ErrorDetail interface {
 // An Error captures three pieces of information: a Code, a human-readable
 // message, and an optional collection of arbitrary protobuf messages called
 // "details" (more on those below). Servers send the code, message, and details
-// over the wire to clients. reRPC's Error wraps a standard Go error, using the
-// underlying error's Error() string as the message. Take care not to leak
+// over the wire to clients. Connect's Error wraps a standard Go error, using
+// the underlying error's Error() string as the message. Take care not to leak
 // sensitive information from public APIs!
 //
 // Protobuf service implementations and Interceptors should return Errors
 // (using the Wrap or Errorf functions) rather than plain Go errors. If service
-// implementations or Interceptors instead return a plain Go error, reRPC will
+// implementations or Interceptors instead return a plain Go error, connect will
 // use AsError to find an Error to send over the wire. If no Error can be
-// found, reRPC will use CodeUnknown and the returned error's message.
+// found, connect will use CodeUnknown and the returned error's message.
 //
 // Error codes and messages are explained in the gRPC documentation linked
 // below. Unfortunately, error details were introduced before gRPC adopted a
@@ -68,7 +68,7 @@ func Errorf(c Code, template string, args ...any) *Error {
 	return Wrap(c, fmt.Errorf(template, args...))
 }
 
-// AsError uses errors.As to unwrap any error and look for a reRPC *Error.
+// AsError uses errors.As to unwrap any error and look for a connect *Error.
 func AsError(err error) (*Error, bool) {
 	var re *Error
 	ok := errors.As(err, &re)
@@ -107,7 +107,7 @@ func (e *Error) AddDetail(d ErrorDetail) {
 	e.details = append(e.details, d)
 }
 
-// CodeOf returns the error's status code if it is or wraps a *rerpc.Error,
+// CodeOf returns the error's status code if it is or wraps a *connect.Error,
 // CodeOK if the error is nil, and CodeUnknown otherwise.
 func CodeOf(err error) Code {
 	if err == nil {

@@ -1,6 +1,6 @@
-// Package rerpctest contains testing utilities for reRPC, including a
+// Package connecttest contains testing utilities for connect, including a
 // replacement for httptest.Server.
-package rerpctest
+package connecttest
 
 import (
 	"context"
