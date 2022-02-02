@@ -34,8 +34,8 @@ func (m *marshaler) Marshal(msg any) *Error {
 		}
 		return nil
 	}
-	data := getBuffer()
-	defer putBuffer(data)
+	// OPT: easy opportunity to pool buffers
+	data := bytes.NewBuffer(make([]byte, 0, len(raw)))
 	cw := m.compressor.GetWriter(data)
 	defer m.compressor.PutWriter(cw)
 
@@ -119,11 +119,8 @@ func (u *unmarshaler) Unmarshal(msg any) *Error {
 	} else if u.max > 0 && int64(size) > u.max {
 		return Errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", size, u.max)
 	}
-	buf := getBuffer()
-	defer putBuffer(buf)
-
-	buf.Grow(size)
-	raw := buf.Bytes()[0:size]
+	// OPT: easy opportunity to pool buffers and grab the underlying byte slice
+	raw := make([]byte, size)
 	if size > 0 {
 		// At layer 7, we don't know exactly what's happening down in L4. Large
 		// length-prefixed messages may arrive in chunks, so we may need to read
@@ -162,8 +159,8 @@ func (u *unmarshaler) Unmarshal(msg any) *Error {
 		}
 		defer u.compressor.PutReader(cr)
 		defer cr.Close()
-		decompressed := getBuffer()
-		defer putBuffer(decompressed)
+		// OPT: easy opportunity to pool buffers
+		decompressed := bytes.NewBuffer(make([]byte, 0, len(raw)))
 		if _, err := decompressed.ReadFrom(cr); err != nil {
 			return Errorf(CodeInvalidArgument, "can't decompress gzipped data: %w", err)
 		}
