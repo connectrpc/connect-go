@@ -10,6 +10,7 @@
 # supported CodeQL languages.
 #
 name: "CodeQL"
+# TODO: Re-enable when CodeQL supports Go 1.18.
 
 on:
   push:
