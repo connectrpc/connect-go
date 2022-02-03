@@ -12,7 +12,6 @@ import (
 )
 
 type handlerCfg struct {
-	Protocols        []protocol
 	Compressors      map[string]compress.Compressor
 	Codecs           map[string]codec.Codec
 	MaxRequestBytes  int64
@@ -20,17 +19,20 @@ type handlerCfg struct {
 	Interceptor      Interceptor
 	Procedure        string
 	RegistrationName string
+	HandleGRPC       bool
+	HandleGRPCWeb    bool
 }
 
 func newHandlerConfiguration(procedure, registrationName string, opts []HandlerOption) (*handlerCfg, *Error) {
 	cfg := handlerCfg{
 		Procedure:        procedure,
 		RegistrationName: registrationName,
-		Protocols:        []protocol{&grpc{}},
 		Compressors: map[string]compress.Compressor{
 			gzip.Name: gzip.New(),
 		},
-		Codecs: make(map[string]codec.Codec),
+		Codecs:        make(map[string]codec.Codec),
+		HandleGRPC:    true,
+		HandleGRPCWeb: true,
 	}
 	for _, opt := range opts {
 		opt.applyToHandler(&cfg)
@@ -68,10 +70,17 @@ func (c *handlerCfg) newSpecification(t StreamType) Specification {
 }
 
 func (c *handlerCfg) newProtocolHandlers(stype StreamType) ([]protocolHandler, *Error) {
-	handlers := make([]protocolHandler, 0, len(c.Protocols))
+	var protocols []protocol
+	if c.HandleGRPC {
+		protocols = append(protocols, &grpc{web: false})
+	}
+	if c.HandleGRPCWeb {
+		protocols = append(protocols, &grpc{web: true})
+	}
+	handlers := make([]protocolHandler, 0, len(protocols))
 	codecs := newROCodecs(c.Codecs)
 	compressors := newROCompressors(c.Compressors)
-	for _, p := range c.Protocols {
+	for _, p := range protocols {
 		ph, err := p.NewHandler(&protocolHandlerParams{
 			Spec:            c.newSpecification(stype),
 			Codecs:          codecs,
@@ -92,6 +101,21 @@ func (c *handlerCfg) newProtocolHandlers(stype StreamType) ([]protocolHandler, *
 // Registrars and Options are also valid HandlerOptions.
 type HandlerOption interface {
 	applyToHandler(*handlerCfg)
+}
+
+type handleGRPCWebOption struct {
+	enable bool
+}
+
+// HandleGRPCWeb enables or disables support for the gRPC-Web protocol. By
+// default, gRPC-Web is enabled. Note that handlers always support the standard
+// HTTP/2 gRPC protocol.
+func HandleGRPCWeb(enable bool) HandlerOption {
+	return &handleGRPCWebOption{enable}
+}
+
+func (o *handleGRPCWebOption) applyToHandler(c *handlerCfg) {
+	c.HandleGRPCWeb = o.enable
 }
 
 // A Handler is the server-side implementation of a single RPC defined by a

@@ -3,7 +3,6 @@ package connect
 import (
 	"io"
 	"net/http"
-	"strconv"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -18,6 +17,7 @@ import (
 // need to worry about concurrency.
 func newHandlerStream(
 	spec Specification,
+	web bool,
 	w http.ResponseWriter,
 	r *http.Request,
 	maxReadBytes int64,
@@ -28,6 +28,7 @@ func newHandlerStream(
 ) (*handlerSender, *handlerReceiver) {
 	sender := &handlerSender{
 		spec: spec,
+		web:  web,
 		marshaler: marshaler{
 			w:          w,
 			compressor: responseCompressor,
@@ -51,6 +52,7 @@ func newHandlerStream(
 
 type handlerSender struct {
 	spec      Specification
+	web       bool
 	marshaler marshaler
 	protobuf  codec.Codec // for errors
 	writer    http.ResponseWriter
@@ -74,7 +76,17 @@ func (hs *handlerSender) Send(m any) error {
 
 func (hs *handlerSender) Close(err error) error {
 	defer hs.flush()
-	return hs.sendErrorGRPC(err)
+	if !hs.web {
+		return grpcErrorToTrailer(hs.writer.Header(), hs.protobuf, err)
+	}
+	trailer := make(http.Header, 3)
+	if trailerErr := grpcErrorToTrailer(trailer, hs.protobuf, err); trailerErr != nil {
+		return trailerErr
+	}
+	if marshalErr := hs.marshaler.MarshalWebTrailers(trailer); marshalErr != nil {
+		return marshalErr
+	}
+	return nil
 }
 
 func (hs *handlerSender) Spec() Specification {
@@ -83,30 +95,6 @@ func (hs *handlerSender) Spec() Specification {
 
 func (hs *handlerSender) Header() http.Header {
 	return hs.writer.Header()
-}
-
-func (hs *handlerSender) sendErrorGRPC(err error) error {
-	if CodeOf(err) == CodeOK { // safe for nil errors
-		hs.writer.Header().Set("Grpc-Status", strconv.Itoa(int(CodeOK)))
-		hs.writer.Header().Set("Grpc-Message", "")
-		hs.writer.Header().Set("Grpc-Status-Details-Bin", "")
-		return nil
-	}
-	s, statusError := statusFromError(err)
-	if statusError != nil {
-		return statusError
-	}
-	code := strconv.Itoa(int(s.Code))
-	bin, err := hs.protobuf.Marshal(s)
-	if err != nil {
-		hs.writer.Header().Set("Grpc-Status", strconv.Itoa(int(CodeInternal)))
-		hs.writer.Header().Set("Grpc-Message", percentEncode("error marshaling protobuf status with code "+code))
-		return Errorf(CodeInternal, "couldn't marshal protobuf status: %w", err)
-	}
-	hs.writer.Header().Set("Grpc-Status", code)
-	hs.writer.Header().Set("Grpc-Message", percentEncode(s.Message))
-	hs.writer.Header().Set("Grpc-Status-Details-Bin", EncodeBinaryHeader(bin))
-	return nil
 }
 
 func (hs *handlerSender) flush() {
