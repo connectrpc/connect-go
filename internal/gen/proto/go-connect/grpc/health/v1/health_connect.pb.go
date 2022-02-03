@@ -176,10 +176,11 @@ func (c *unwrappedHealthClient) Watch(ctx context.Context, req *connect.Request[
 // falls back to the more complex version. If neither is implemented,
 // connect.NewServeMux will return an error.
 type Health interface {
-	// Can also be implemented in a simplified form:
-	// Check(context.Context, *v1.HealthCheckRequest) (*v1.HealthCheckResponse, error)
 	// If the requested service is unknown, the call will fail with status
 	// NOT_FOUND.
+	//
+	// Can also be implemented in a simplified form:
+	// Check(context.Context, *v1.HealthCheckRequest) (*v1.HealthCheckResponse, error)
 	Check(context.Context, *connect.Request[v1.HealthCheckRequest]) (*connect.Response[v1.HealthCheckResponse], error)
 
 	// Performs a watch for the serving status of the requested service.
