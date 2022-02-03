@@ -97,6 +97,20 @@ func (o *useCompressorOption) applyToClient(cfg *clientCfg) {
 	cfg.RequestCompressor = o.Name
 }
 
+type useProtocolOption struct {
+	Protocol protocol
+}
+
+// UseGRPCWeb configures the client to use the gRPC-Web protocol, rather than
+// the default HTTP/2 gRPC variant.
+func UseGRPCWeb() ClientOption {
+	return &useProtocolOption{Protocol: &grpc{web: true}}
+}
+
+func (o *useProtocolOption) applyToClient(c *clientCfg) {
+	c.Protocol = o.Protocol
+}
+
 // NewClientStream returns a stream constructor for a client-, server-, or
 // bidirectional streaming remote procedure. (To call a unary procedure, use
 // NewClientFunc instead.)

@@ -227,41 +227,38 @@ func TestServerProtoGRPC(t *testing.T) {
 		})
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) {
-		t.Run("identity", func(t *testing.T) {
-			client, err := pingrpc.NewPingServiceClient(server.URL, server.Client())
+		run := func(t *testing.T, opts ...connect.ClientOption) {
+			client, err := pingrpc.NewPingServiceClient(server.URL, server.Client(), opts...)
 			assert.Nil(t, err, "client construction error")
 			testPing(t, client)
 			testSum(t, client)
 			testCountUp(t, client)
 			testCumSum(t, client, bidi)
 			testErrors(t, client)
+		}
+		t.Run("identity", func(t *testing.T) {
+			run(t)
 		})
 		t.Run("gzip", func(t *testing.T) {
-			client, err := pingrpc.NewPingServiceClient(
-				server.URL,
-				server.Client(),
-				connect.UseCompressor(gzip.Name),
-			)
-			assert.Nil(t, err, "client construction error")
-			testPing(t, client)
-			testSum(t, client)
-			testCountUp(t, client)
-			testCumSum(t, client, bidi)
-			testErrors(t, client)
+			run(t, connect.UseCompressor(gzip.Name))
 		})
 		t.Run("json_gzip", func(t *testing.T) {
-			client, err := pingrpc.NewPingServiceClient(
-				server.URL,
-				server.Client(),
+			run(
+				t,
 				connect.Codec(protobuf.NameJSON, protobuf.NewJSON()),
 				connect.UseCompressor(gzip.Name),
 			)
-			assert.Nil(t, err, "client construction error")
-			testPing(t, client)
-			testSum(t, client)
-			testCountUp(t, client)
-			testCumSum(t, client, bidi)
-			testErrors(t, client)
+		})
+		t.Run("web", func(t *testing.T) {
+			run(t, connect.UseGRPCWeb())
+		})
+		t.Run("web_json_gzip", func(t *testing.T) {
+			run(
+				t,
+				connect.UseGRPCWeb(),
+				connect.Codec(protobuf.NameJSON, protobuf.NewJSON()),
+				connect.UseCompressor(gzip.Name),
+			)
 		})
 	}
 
