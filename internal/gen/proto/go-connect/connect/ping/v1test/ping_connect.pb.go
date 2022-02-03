@@ -255,7 +255,8 @@ type PingService interface {
 // newUnwrappedPingService wraps the service implementation in a
 // connect.Service, which can then be passed to connect.NewServeMux.
 //
-// By default, services support the binary protobuf and JSON codecs.
+// By default, services support the gRPC and gRPC-Web protocols with the binary
+// protobuf and JSON codecs.
 func newUnwrappedPingService(svc PingService, opts ...connect.HandlerOption) *connect.Service {
 	handlers := make([]connect.Handler, 0, 5)
 	opts = append([]connect.HandlerOption{
@@ -407,8 +408,8 @@ func (s *pluggablePingServiceServer) CumSum(ctx context.Context, stream *handler
 }
 
 // NewPingService wraps the service implementation in a connect.Service, ready
-// for use with connect.NewServeMux. By default, services support the binary
-// protobuf and JSON codecs.
+// for use with connect.NewServeMux. By default, services support the gRPC and
+// gRPC-Web protocols with the binary protobuf and JSON codecs.
 //
 // The service implementation may mix and match the signatures of PingService
 // and the simplified signatures described in its comments. For each method,
