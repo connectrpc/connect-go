@@ -489,7 +489,8 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 	wrap(g, names.FullHandlerConstructor, " wraps the service implementation in a connect.Service,",
 		" which can then be passed to connect.NewServeMux.")
 	g.P("//")
-	wrap(g, "By default, services support the binary protobuf and JSON codecs.")
+	wrap(g, "By default, services support the gRPC and gRPC-Web protocols with ",
+		"the binary protobuf and JSON codecs.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
@@ -630,7 +631,7 @@ func adaptiveServerImplementation(g *protogen.GeneratedFile, service *protogen.S
 func adaptiveServerConstructor(g *protogen.GeneratedFile, service *protogen.Service, names names) {
 	wrap(g, names.AdaptiveHandlerConstructor, " wraps the service implementation in a ",
 		"connect.Service, ready for use with connect.NewServeMux. By default, services support the ",
-		"binary protobuf and JSON codecs.")
+		"gRPC and gRPC-Web protocols with the binary protobuf and JSON codecs.")
 	g.P("//")
 	wrap(g, "The service implementation may mix and match the signatures of ",
 		names.Server, " and the simplified signatures described in its comments. ",

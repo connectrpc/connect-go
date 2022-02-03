@@ -234,7 +234,8 @@ type CrossService interface {
 // newUnwrappedCrossService wraps the service implementation in a
 // connect.Service, which can then be passed to connect.NewServeMux.
 //
-// By default, services support the binary protobuf and JSON codecs.
+// By default, services support the gRPC and gRPC-Web protocols with the binary
+// protobuf and JSON codecs.
 func newUnwrappedCrossService(svc CrossService, opts ...connect.HandlerOption) *connect.Service {
 	handlers := make([]connect.Handler, 0, 5)
 	opts = append([]connect.HandlerOption{
@@ -386,8 +387,8 @@ func (s *pluggableCrossServiceServer) CumSum(ctx context.Context, stream *handle
 }
 
 // NewCrossService wraps the service implementation in a connect.Service, ready
-// for use with connect.NewServeMux. By default, services support the binary
-// protobuf and JSON codecs.
+// for use with connect.NewServeMux. By default, services support the gRPC and
+// gRPC-Web protocols with the binary protobuf and JSON codecs.
 //
 // The service implementation may mix and match the signatures of CrossService
 // and the simplified signatures described in its comments. For each method,
