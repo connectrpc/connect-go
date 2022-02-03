@@ -22,7 +22,7 @@ var (
 	sizeZeroPrefix    = make([]byte, 4)
 	errGotWebTrailers = Errorf(
 		CodeUnknown,
-		"end of stream: got gRPC-Web trailers instead of response message: %w",
+		"end of message stream, next block of data is gRPC-Web trailers: %w",
 		// User code checks for end of stream with errors.Is(err, io.EOF).
 		io.EOF,
 	)
@@ -86,6 +86,9 @@ func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
 
 func (m *marshaler) writeGRPCPrefix(compressed, trailer bool, size int) *Error {
 	prefixes := [5]byte{}
+	// The first byte of the prefix is a set of bitwise flags. The least
+	// significant bit indicates that the message is compressed, and the most
+	// significant bit indicates that it's a block of gRPC-Web trailers.
 	if compressed {
 		prefixes[0] = flagLPMCompressed
 	}
@@ -114,26 +117,36 @@ type unmarshaler struct {
 
 func (u *unmarshaler) Unmarshal(msg any) *Error {
 	// Each length-prefixed message starts with 5 bytes of metadata: a one-byte
-	// unsigned integer indicating whether the payload is compressed, and a
-	// four-byte unsigned integer indicating the message length.
+	// unsigned integer used as a set of bitwise flags, and a four-byte unsigned
+	// integer indicating the message length.
 	prefixes := make([]byte, 5)
 	n, err := u.r.Read(prefixes)
-	if (err == nil || errors.Is(err, io.EOF)) && n == 5 && bytes.Equal(prefixes[1:5], sizeZeroPrefix) {
-		// Successfully read prefix and expect no additional data, so there's
-		// nothing left to do - the zero value of the msg is correct.
+	if (err == nil || errors.Is(err, io.EOF)) &&
+		n == 5 &&
+		(prefixes[0]&flagLPMTrailer != flagLPMTrailer) &&
+		bytes.Equal(prefixes[1:5], sizeZeroPrefix) {
+		// Successfully read prefix, LPM isn't a trailers block, and expect no
+		// additional data, so there's nothing left to do - the zero value of the
+		// msg is correct.
 		return nil
+	} else if err != nil && errors.Is(err, io.EOF) && n == 0 {
+		// Clean EOFs are expected, but we need to propagate them to the user so
+		// that they know that the stream has ended. We shouldn't add any alarming
+		// text about protocol errors, though.
+		return Wrap(CodeUnknown, err)
 	} else if err != nil || n < 5 {
-		// Even an EOF is unacceptable here, since we always need a message.
+		// Something else has gone wrong - the stream didn't end cleanly.
 		return Errorf(
 			CodeInvalidArgument,
-			"gRPC protocol error: missing length-prefixed message metadata: %w", err,
+			"gRPC protocol error: incomplete length-prefixed message prefix: %w", err,
 		)
 	}
 
+	// The first byte of the prefix is a set of bitwise flags.
 	flags := uint8(prefixes[0])
-	// LPM is compressed if the least significant bit is set.
+	// The least significant bit is the flag for compression.
 	compressed := (flags&flagLPMCompressed == flagLPMCompressed)
-	// gRPC-Web uses the most significant bit to indicate that the LPM contains trailers.
+	// The most significant bit is the flag for gRPC-Web trailers.
 	isWebTrailer := u.web && (flags&flagLPMTrailer == flagLPMTrailer)
 	// We could check to make sure that the remaining bits are zero, but any
 	// non-zero bits are likely flags from a future protocol revision. In a sane
@@ -179,7 +192,7 @@ func (u *unmarshaler) Unmarshal(msg any) *Error {
 		)
 	}
 
-	if compressed {
+	if size > 0 && compressed {
 		cr, err := u.compressor.GetReader(bytes.NewReader(raw))
 		if err != nil {
 			return Errorf(CodeInvalidArgument, "can't decompress gzipped data: %w", err)
