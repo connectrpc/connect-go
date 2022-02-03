@@ -8,29 +8,21 @@ import (
 	"strings"
 
 	"github.com/bufconnect/connect/codec"
-	"github.com/bufconnect/connect/codec/protobuf"
 	"github.com/bufconnect/connect/compress"
 )
 
-type grpc struct{}
+type grpc struct {
+	web bool
+}
 
 func (g *grpc) NewHandler(params *protocolHandlerParams) (protocolHandler, error) {
-	codecNames := params.Codecs.Names()
-	ctypes := make([]string, 0, len(codecNames)+1) // protobuf counts twice
-	for _, n := range codecNames {
-		if n == protobuf.NameBinary {
-			ctypes = append(ctypes, typeDefaultGRPC, typeGRPCPrefix+grpcNameProto)
-			continue
-		}
-		ctypes = append(ctypes, typeGRPCPrefix+n)
-	}
-	accept := strings.Join(ctypes, ", ")
 	return &grpcHandler{
 		spec:            params.Spec,
+		web:             g.web,
 		codecs:          params.Codecs,
 		compressors:     params.Compressors,
 		maxRequestBytes: params.MaxRequestBytes,
-		accept:          accept,
+		accept:          acceptPostValue(g.web, params.Codecs),
 	}, nil
 }
 
@@ -41,6 +33,7 @@ func (g *grpc) NewClient(params *protocolClientParams) (protocolClient, error) {
 	}
 	return &grpcClient{
 		spec:             params.Spec,
+		web:              g.web,
 		compressorName:   params.CompressorName,
 		compressors:      params.Compressors,
 		codecName:        params.CodecName,
@@ -54,6 +47,7 @@ func (g *grpc) NewClient(params *protocolClientParams) (protocolClient, error) {
 
 type grpcHandler struct {
 	spec            Specification
+	web             bool
 	codecs          roCodecs
 	compressors     roCompressors
 	maxRequestBytes int64
@@ -65,7 +59,7 @@ func (g *grpcHandler) ShouldHandleMethod(method string) bool {
 }
 
 func (g *grpcHandler) ShouldHandleContentType(ctype string) bool {
-	codecName := codecFromContentType(ctype)
+	codecName := codecFromContentType(g.web, ctype)
 	if codecName == "" {
 		return false // not a gRPC content-type
 	}
@@ -86,7 +80,7 @@ func (g *grpcHandler) WriteAccept(h http.Header) {
 }
 
 func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender, Receiver, error) {
-	codecName := codecFromContentType(r.Header.Get("Content-Type"))
+	codecName := codecFromContentType(g.web, r.Header.Get("Content-Type"))
 	// ShouldHandleContentType guarantees that this is non-nil
 	clientCodec := g.codecs.Get(codecName)
 
@@ -153,11 +147,15 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	w.Header()["Content-Type"] = []string{r.Header.Get("Content-Type")}
 	w.Header()["Grpc-Accept-Encoding"] = []string{g.compressors.Names()}
 	w.Header()["Grpc-Encoding"] = []string{responseCompression}
-	// Every gRPC response will have these trailers.
-	w.Header()["Trailer"] = []string{"Grpc-Status", "Grpc-Message", "Grpc-Status-Details-Bin"}
+	if !g.web {
+		// Every standard gRPC response will have these trailers, but gRPC-Web
+		// doesn't use HTTP trailers.
+		w.Header()["Trailer"] = []string{"Grpc-Status", "Grpc-Message", "Grpc-Status-Details-Bin"}
+	}
 
 	sender, receiver := newHandlerStream(
 		g.spec,
+		g.web,
 		w,
 		r,
 		g.maxRequestBytes,
@@ -176,6 +174,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 
 type grpcClient struct {
 	spec             Specification
+	web              bool
 	compressorName   string
 	compressors      roCompressors
 	codecName        string
@@ -190,14 +189,17 @@ func (g *grpcClient) WriteRequestHeader(h http.Header) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
 	h["User-Agent"] = userAgent
-	h["Content-Type"] = []string{contentTypeFromCodecName(g.codecName)}
+	h["Content-Type"] = []string{contentTypeFromCodecName(g.web, g.codecName)}
 	if g.compressorName != "" && g.compressorName != compress.NameIdentity {
 		h["Grpc-Encoding"] = []string{g.compressorName}
 	}
 	if acceptCompression := g.compressors.Names(); acceptCompression != "" {
 		h["Grpc-Accept-Encoding"] = []string{acceptCompression}
 	}
-	h["Te"] = []string{"trailers"}
+	if !g.web {
+		// No HTTP trailers in gRPC-Web.
+		h["Te"] = []string{"trailers"}
+	}
 }
 
 func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Receiver) {
@@ -229,6 +231,7 @@ func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Rece
 			codec:      g.codec,
 		},
 		header:        h,
+		web:           g.web,
 		reader:        pr,
 		compressors:   g.compressors,
 		responseReady: make(chan struct{}),

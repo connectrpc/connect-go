@@ -65,6 +65,7 @@ type clientStream struct {
 	header      http.Header
 
 	// receive goroutine
+	web           bool
 	reader        *io.PipeReader
 	response      *http.Response
 	responseReady chan struct{}
@@ -160,7 +161,11 @@ func (cs *clientStream) Receive(msg any) error {
 		// If we can't read this LPM, see if the server sent an explicit error in
 		// trailers. First, we need to read the body to EOF.
 		discard(cs.response.Body)
-		if serverErr := extractError(cs.protobuf, cs.response.Trailer); serverErr != nil {
+		trailer := cs.response.Trailer
+		if errors.Is(err, errGotWebTrailers) {
+			trailer = cs.unmarshaler.WebTrailer()
+		}
+		if serverErr := extractError(cs.protobuf, trailer); serverErr != nil {
 			cs.setResponseError(serverErr)
 			return serverErr
 		}
@@ -282,6 +287,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 		max:        cs.maxReadBytes,
 		codec:      cs.codec,
 		compressor: cs.compressors.Get(compression),
+		web:        cs.web,
 	}
 }
 
