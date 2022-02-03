@@ -41,8 +41,9 @@ lint: lintpb bin/gofmt bin/goimports bin/staticcheck ## Lint Go and protobuf
 	@test -z "$$(./bin/goimports -local github.com/bufconnect/connect -l $(HANDWRITTEN) | tee /dev/stderr)"
 	@echo "Checking with go vet..."
 	@$(GO) vet ./...
-	@echo "Checking with staticcheck..."
-	@# TODO: re-enable when staticcheck supports Go 1.18
+	@# TODO: re-enable when staticcheck supports type parameters
+	@#echo "Checking with staticcheck..."
+	@# See https://github.com/dominikh/go-tools/issues/1166
 	@#bin/staticcheck -checks "inherit,ST1020,ST1021,ST1022" ./...
 
 .PHONY: lintfix
