@@ -44,9 +44,14 @@ message CumSumResponse {
 }
 
 service PingService {
+    // Ping sends a ping to the server to determine if it's reachable.
     rpc Ping(PingRequest) returns (PingResponse) {}
+    // Fail always fails.
     rpc Fail(FailRequest) returns (FailResponse) {}
+    // Sum calculates the sum of the numbers sent on the stream.
     rpc Sum(stream SumRequest) returns (SumResponse) {}
+    // CountUp returns a stream of the numbers up to the given request.
     rpc CountUp(CountUpRequest) returns (stream CountUpResponse) {}
+    // CumSum determines the cumulative sum of all the numbers sent on the stream.
     rpc CumSum(stream CumSumRequest) returns (stream CumSumResponse) {}
 }

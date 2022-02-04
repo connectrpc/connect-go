@@ -182,7 +182,6 @@ type Health interface {
 	// Can also be implemented in a simplified form:
 	// Check(context.Context, *v1.HealthCheckRequest) (*v1.HealthCheckResponse, error)
 	Check(context.Context, *connect.Request[v1.HealthCheckRequest]) (*connect.Response[v1.HealthCheckResponse], error)
-
 	// Performs a watch for the serving status of the requested service.
 	// The server will immediately send back a message indicating the current
 	// serving status.  It will then subsequently send a new message whenever
