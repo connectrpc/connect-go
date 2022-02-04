@@ -418,19 +418,13 @@ func serverInterface(g *protogen.GeneratedFile, service *protogen.Service, names
 	g.Annotate(names.Server, service.Location)
 	g.P("type ", names.Server, " interface {")
 	for _, method := range service.Methods {
-		// TODO(doria): extend the leading comments method
-		isUnary := !method.Desc.IsStreamingClient() && !method.Desc.IsStreamingServer()
 		serverInterfaceMethodLeadingComments(
 			g,
 			method,
-			isUnary,
 			method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated(),
 		)
 		g.Annotate(names.Server+"."+method.GoName, method.Location)
 		g.P(serverSignature(g, method, true /* full */))
-		if isUnary {
-			g.P("")
-		}
 	}
 	g.P("}")
 	g.P()
@@ -719,7 +713,8 @@ func leadingComments(g *protogen.GeneratedFile, comments protogen.Comments, isDe
 	}
 }
 
-func serverInterfaceMethodLeadingComments(g *protogen.GeneratedFile, method *protogen.Method, isUnary bool, isDeprecated bool) {
+func serverInterfaceMethodLeadingComments(g *protogen.GeneratedFile, method *protogen.Method, isDeprecated bool) {
+	isUnary := !method.Desc.IsStreamingClient() && !method.Desc.IsStreamingServer()
 	if method.Comments.Leading.String() != "" {
 		g.P(strings.TrimSpace(method.Comments.Leading.String()))
 	}
