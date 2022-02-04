@@ -223,11 +223,9 @@ type CrossService interface {
 	// Can also be implemented in a simplified form:
 	// Ping(context.Context, *v1test.PingRequest) (*v1test.PingResponse, error)
 	Ping(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error)
-
 	// Can also be implemented in a simplified form:
 	// Fail(context.Context, *v1test.FailRequest) (*v1test.FailResponse, error)
 	Fail(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error)
-
 	Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error
 	CountUp(context.Context, *connect.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error
 	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error

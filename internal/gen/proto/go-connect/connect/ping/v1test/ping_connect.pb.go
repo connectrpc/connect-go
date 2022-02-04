@@ -31,10 +31,15 @@ const _ = connect.SupportsCodeGenV0 // requires connect v0.0.1 or later
 // It's a simplified wrapper around the full-featured API of
 // UnwrappedPingServiceClient.
 type WrappedPingServiceClient interface {
+	// Ping sends a ping to the server to determine if it's reachable.
 	Ping(context.Context, *v1test.PingRequest) (*v1test.PingResponse, error)
+	// Fail always fails.
 	Fail(context.Context, *v1test.FailRequest) (*v1test.FailResponse, error)
+	// Sum calculates the sum of the numbers sent on the stream.
 	Sum(context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse]
+	// CountUp returns a stream of the numbers up to the given request.
 	CountUp(context.Context, *v1test.CountUpRequest) (*clientstream.Server[v1test.CountUpResponse], error)
+	// CumSum determines the cumulative sum of all the numbers sent on the stream.
 	CumSum(context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]
 }
 
@@ -43,10 +48,15 @@ type WrappedPingServiceClient interface {
 // WrappedPingServiceClient, but it gives callers more fine-grained control
 // (e.g., sending and receiving headers).
 type UnwrappedPingServiceClient interface {
+	// Ping sends a ping to the server to determine if it's reachable.
 	Ping(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error)
+	// Fail always fails.
 	Fail(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error)
+	// Sum calculates the sum of the numbers sent on the stream.
 	Sum(context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse]
+	// CountUp returns a stream of the numbers up to the given request.
 	CountUp(context.Context, *connect.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error)
+	// CumSum determines the cumulative sum of all the numbers sent on the stream.
 	CumSum(context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]
 }
 
@@ -224,16 +234,21 @@ func (c *unwrappedPingServiceClient) CumSum(ctx context.Context) *clientstream.B
 // then falls back to the more complex version. If neither is implemented,
 // connect.NewServeMux will return an error.
 type PingService interface {
+	// Ping sends a ping to the server to determine if it's reachable.
+	//
 	// Can also be implemented in a simplified form:
 	// Ping(context.Context, *v1test.PingRequest) (*v1test.PingResponse, error)
 	Ping(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error)
-
+	// Fail always fails.
+	//
 	// Can also be implemented in a simplified form:
 	// Fail(context.Context, *v1test.FailRequest) (*v1test.FailResponse, error)
 	Fail(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error)
-
+	// Sum calculates the sum of the numbers sent on the stream.
 	Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error
+	// CountUp returns a stream of the numbers up to the given request.
 	CountUp(context.Context, *connect.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error
+	// CumSum determines the cumulative sum of all the numbers sent on the stream.
 	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
 

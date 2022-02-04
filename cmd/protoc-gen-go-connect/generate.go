@@ -31,10 +31,6 @@ var (
 	errorsIs                = errorsPackage.Ident("Is")
 )
 
-func deprecated(g *protogen.GeneratedFile) {
-	comment(g, "// Deprecated: do not use.")
-}
-
 func generate(gen *protogen.Plugin, file *protogen.File, separatePackage bool) *protogen.GeneratedFile {
 	if len(file.Services) == 0 {
 		return nil
@@ -68,7 +64,7 @@ func preamble(gen *protogen.Plugin, file *protogen.File, g *protogen.GeneratedFi
 	g.P("// - protoc-gen-go-connect v", connect.Version)
 	g.P("// - protoc              ", protocVersion(gen))
 	if file.Proto.GetOptions().GetDeprecated() {
-		comment(g, file.Desc.Path(), " is a deprecated file.")
+		wrap(g, file.Desc.Path(), " is a deprecated file.")
 	} else {
 		g.P("// source: ", file.Desc.Path())
 	}
@@ -88,7 +84,7 @@ func content(file *protogen.File, g *protogen.GeneratedFile) {
 }
 
 func handshake(g *protogen.GeneratedFile) {
-	comment(g, "This is a compile-time assertion to ensure that this generated file ",
+	wrap(g, "This is a compile-time assertion to ensure that this generated file ",
 		"and the connect package are compatible. If you get a compiler error that this constant ",
 		"isn't defined, this code was generated with a version of connect newer than the one ",
 		"compiled into your binary. You can fix the problem by either regenerating this code ",
@@ -152,15 +148,15 @@ func clientInterface(g *protogen.GeneratedFile, service *protogen.Service, names
 	var name string
 	if full {
 		name = names.FullClient
-		comment(g, name, " is a client for the ", service.Desc.FullName(), " service. ",
+		wrap(g, name, " is a client for the ", service.Desc.FullName(), " service. ",
 			"It's more complex than ", names.SimpleClient, ", but it gives callers more ",
 			"fine-grained control (e.g., sending and receiving headers).")
 	} else {
 		name = names.SimpleClient
-		comment(g, name, " is a client for the ", service.Desc.FullName(),
+		wrap(g, name, " is a client for the ", service.Desc.FullName(),
 			" service.")
 		g.P("//")
-		comment(g, "It's a simplified wrapper around the full-featured API of ", names.FullClient, ".")
+		wrap(g, "It's a simplified wrapper around the full-featured API of ", names.FullClient, ".")
 	}
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
@@ -170,16 +166,14 @@ func clientInterface(g *protogen.GeneratedFile, service *protogen.Service, names
 	g.P("type ", name, " interface {")
 	for _, method := range service.Methods {
 		g.Annotate(name+"."+method.GoName, method.Location)
-		g.P(method.Comments.Leading, clientSignature(g, method, false /* named */, full))
+		leadingComments(g, method.Comments.Leading, method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated())
+		g.P(clientSignature(g, method, false /* named */, full))
 	}
 	g.P("}")
 	g.P()
 }
 
 func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named bool, full bool) string {
-	if method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated() {
-		deprecated(g)
-	}
 	reqName := "req"
 	ctxName := "ctx"
 	if !named {
@@ -234,7 +228,7 @@ func reflectionName(service *protogen.Service) string {
 func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names) {
 	// Client struct.
 	clientOption := connectPackage.Ident("ClientOption")
-	comment(g, names.SimpleClientImpl, " is a client for the ", service.Desc.FullName(), " service.")
+	wrap(g, names.SimpleClientImpl, " is a client for the ", service.Desc.FullName(), " service.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
@@ -246,10 +240,10 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	g.P("var _ ", names.SimpleClient, " = (*", names.SimpleClientImpl, ")(nil)")
 
 	// Client constructor.
-	comment(g, names.ClientConstructor, " constructs a client for the ", service.Desc.FullName(),
+	wrap(g, names.ClientConstructor, " constructs a client for the ", service.Desc.FullName(),
 		" service. By default, it uses the binary protobuf codec.")
 	g.P("//")
-	comment(g, "The URL supplied here should be the base URL for the gRPC server ",
+	wrap(g, "The URL supplied here should be the base URL for the gRPC server ",
 		"(e.g., https://api.acme.com or https://acme.com/grpc).")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
@@ -308,11 +302,11 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	if hasFullMethod {
 		exposeMethod += "_"
 	}
-	comment(g, exposeMethod, " exposes the underlying generic client. Use it if you need",
+	wrap(g, exposeMethod, " exposes the underlying generic client. Use it if you need",
 		" finer control (e.g., sending and receiving headers).")
 	if hasFullMethod {
 		g.P("//")
-		comment(g, "Because there's a \"", names.ClientExposeMethod,
+		wrap(g, "Because there's a \"", names.ClientExposeMethod,
 			"\" method defined on this service, this function has an awkward name.")
 	} else {
 		g.P("func (c *", names.SimpleClientImpl, ") ", names.ClientExposeMethod, "() ", names.FullClient, "{")
@@ -347,7 +341,7 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *
 	}
 	isStreamingClient := method.Desc.IsStreamingClient()
 	isStreamingServer := method.Desc.IsStreamingServer()
-	comment(g, method.GoName, " calls ", method.Desc.FullName(), ".")
+	wrap(g, method.GoName, " calls ", method.Desc.FullName(), ".")
 	if method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
@@ -407,14 +401,14 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *
 }
 
 func serverInterface(g *protogen.GeneratedFile, service *protogen.Service, names names) {
-	comment(g, names.Server, " is an implementation of the ", service.Desc.FullName(), " service.")
+	wrap(g, names.Server, " is an implementation of the ", service.Desc.FullName(), " service.")
 	g.P("//")
-	comment(g, "When writing your code, you can always implement the ",
+	wrap(g, "When writing your code, you can always implement the ",
 		"complete ", names.Server, " interface. However, if you don't need to work with ",
 		"headers, you can instead implement a simpler version of any or all of the ",
 		"unary methods. Where available, the simplified signatures are listed in comments.")
 	g.P("//")
-	comment(g, names.AdaptiveHandlerConstructor, " first tries to find the simplified ",
+	wrap(g, names.AdaptiveHandlerConstructor, " first tries to find the simplified ",
 		"version of each method, then falls back to the more complex version. If neither is ",
 		"implemented, connect.NewServeMux will return an error.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
@@ -424,27 +418,19 @@ func serverInterface(g *protogen.GeneratedFile, service *protogen.Service, names
 	g.Annotate(names.Server, service.Location)
 	g.P("type ", names.Server, " interface {")
 	for _, method := range service.Methods {
-		isUnary := !method.Desc.IsStreamingClient() && !method.Desc.IsStreamingServer()
-		if isUnary {
-			// TODO: I'm certain that we're propagating method.Comments.Leading
-			// incorrectly here.
-			g.P("// Can also be implemented in a simplified form: ")
-			g.P("// ", serverSignature(g, method, false /* full */))
-		}
+		serverInterfaceMethodLeadingComments(
+			g,
+			method,
+			method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated(),
+		)
 		g.Annotate(names.Server+"."+method.GoName, method.Location)
-		g.P(method.Comments.Leading, serverSignature(g, method, true /* full */))
-		if isUnary {
-			g.P("")
-		}
+		g.P(serverSignature(g, method, true /* full */))
 	}
 	g.P("}")
 	g.P()
 }
 
 func serverSignature(g *protogen.GeneratedFile, method *protogen.Method, full bool) string {
-	if method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated() {
-		deprecated(g)
-	}
 	return method.GoName + serverSignatureParams(g, method, false /* named */, full)
 }
 
@@ -500,10 +486,10 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 }
 
 func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, names names) {
-	comment(g, names.FullHandlerConstructor, " wraps the service implementation in a connect.Service,",
+	wrap(g, names.FullHandlerConstructor, " wraps the service implementation in a connect.Service,",
 		" which can then be passed to connect.NewServeMux.")
 	g.P("//")
-	comment(g, "By default, services support the binary protobuf and JSON codecs.")
+	wrap(g, "By default, services support the binary protobuf and JSON codecs.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
@@ -599,7 +585,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 func unimplementedServerImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names) {
 	g.P("var _ ", names.Server, " = (*", names.UnimplementedServer, ")(nil) // verify interface implementation")
 	g.P()
-	comment(g, names.UnimplementedServer, " returns CodeUnimplemented from all methods.")
+	wrap(g, names.UnimplementedServer, " returns CodeUnimplemented from all methods.")
 	g.P("type ", names.UnimplementedServer, " struct {}")
 	g.P()
 	for _, method := range service.Methods {
@@ -642,18 +628,18 @@ func adaptiveServerImplementation(g *protogen.GeneratedFile, service *protogen.S
 }
 
 func adaptiveServerConstructor(g *protogen.GeneratedFile, service *protogen.Service, names names) {
-	comment(g, names.AdaptiveHandlerConstructor, " wraps the service implementation in a ",
+	wrap(g, names.AdaptiveHandlerConstructor, " wraps the service implementation in a ",
 		"connect.Service, ready for use with connect.NewServeMux. By default, services support the ",
 		"binary protobuf and JSON codecs.")
 	g.P("//")
-	comment(g, "The service implementation may mix and match the signatures of ",
+	wrap(g, "The service implementation may mix and match the signatures of ",
 		names.Server, " and the simplified signatures described in its comments. ",
 		"For each method, ", names.AdaptiveHandlerConstructor, " first tries to find a ",
 		"simplified implementation. If a simple implementation isn't ",
 		"available, it falls back to the more complex implementation. If neither is ",
 		"available, connect.NewServeMux will return an error.")
 	g.P("//")
-	comment(g, "Taken together, this approach lets implementations embed ",
+	wrap(g, "Taken together, this approach lets implementations embed ",
 		names.UnimplementedServer, " and implement each method using whichever signature ",
 		"is most convenient.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
@@ -666,7 +652,7 @@ func adaptiveServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 	g.P()
 	for _, method := range service.Methods {
 		fnamer := unexport(method.GoName) + "er"
-		comment(g, "Find an implementation of ", method.Desc.Name())
+		wrap(g, "Find an implementation of ", method.Desc.Name())
 		if method.Desc.IsStreamingClient() {
 			// client and bidi streaming: no simpler signature available, so we just
 			// look for the full version.
@@ -710,3 +696,39 @@ func adaptiveServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 }
 
 func unexport(s string) string { return strings.ToLower(s[:1]) + s[1:] }
+
+func deprecated(g *protogen.GeneratedFile) {
+	g.P("// Deprecated: do not use.")
+}
+
+func leadingComments(g *protogen.GeneratedFile, comments protogen.Comments, isDeprecated bool) {
+	if comments.String() != "" {
+		g.P(strings.TrimSpace(comments.String()))
+	}
+	if isDeprecated {
+		if comments.String() != "" {
+			g.P("//")
+		}
+		deprecated(g)
+	}
+}
+
+func serverInterfaceMethodLeadingComments(g *protogen.GeneratedFile, method *protogen.Method, isDeprecated bool) {
+	isUnary := !method.Desc.IsStreamingClient() && !method.Desc.IsStreamingServer()
+	if method.Comments.Leading.String() != "" {
+		g.P(strings.TrimSpace(method.Comments.Leading.String()))
+	}
+	if isUnary {
+		if method.Comments.Leading.String() != "" {
+			g.P("//")
+		}
+		g.P("// Can also be implemented in a simplified form: ")
+		g.P("// ", serverSignature(g, method, false /* full */))
+	}
+	if isDeprecated {
+		if method.Comments.Leading.String() != "" || isUnary {
+			g.P("//")
+		}
+		deprecated(g)
+	}
+}
