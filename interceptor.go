@@ -35,8 +35,6 @@ type Func func(context.Context, AnyRequest) (AnyResponse, error)
 // may replace the context, mutate the request, mutate the response, handle the
 // returned error, retry, recover from panics, emit logs and metrics, or do
 // nearly anything else.
-//
-// See Chain for an example of interceptor use.
 type Interceptor interface {
 	// Wrap adds logic to a unary procedure. The returned Func must be safe to
 	// call concurrently.
