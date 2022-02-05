@@ -113,8 +113,8 @@ func CodeOf(err error) Code {
 	if err == nil {
 		return CodeOK
 	}
-	if rerr, ok := AsError(err); ok {
-		return rerr.Code()
+	if cerr, ok := AsError(err); ok {
+		return cerr.Code()
 	}
 	return CodeUnknown
 }
