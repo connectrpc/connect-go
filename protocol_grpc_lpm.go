@@ -76,8 +76,8 @@ func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
 		return err // already enriched
 	}
 	if _, err := io.Copy(m.w, data); err != nil {
-		if rerr, ok := AsError(err); ok {
-			return rerr
+		if cerr, ok := AsError(err); ok {
+			return cerr
 		}
 		return Errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
 	}
@@ -97,8 +97,8 @@ func (m *marshaler) writeGRPCPrefix(compressed, trailer bool, size int) *Error {
 	}
 	binary.BigEndian.PutUint32(prefixes[1:5], uint32(size))
 	if _, err := m.w.Write(prefixes[:]); err != nil {
-		if rerr, ok := AsError(err); ok {
-			return rerr
+		if cerr, ok := AsError(err); ok {
+			return cerr
 		}
 		return Errorf(CodeUnknown, "couldn't write prefix of length-prefixed message: %w", err)
 	}
