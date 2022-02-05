@@ -34,6 +34,15 @@ func ReceiveRequest[Req any](r Receiver) (*Request[Req], error) {
 	}, nil
 }
 
+func receiveRequestMetadata[Req any](r Receiver) *Request[Req] {
+	var msg Req
+	return &Request[Req]{
+		Msg:  &msg,
+		spec: r.Spec(),
+		hdr:  r.Header(),
+	}
+}
+
 // Any returns the concrete request message as an empty interface, so that
 // *Request implements the AnyRequest interface. It should only be used in
 // interceptors.
