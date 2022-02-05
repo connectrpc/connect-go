@@ -38,7 +38,8 @@ func TestAssertions(t *testing.T) {
 	})
 
 	t.Run("zero", func(t *testing.T) {
-		Zero(t, nil, "")
+		var n *int
+		Zero(t, n, "")
 		var pair Pair
 		Zero(t, pair, "")
 		var null *Pair

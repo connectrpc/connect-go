@@ -73,7 +73,7 @@ func Diff() Option {
 }
 
 // Equal asserts that two values are equal.
-func Equal(t testing.TB, got, want any, msg string, opts ...Option) bool {
+func Equal[T any](t testing.TB, got, want T, msg string, opts ...Option) bool {
 	t.Helper()
 	params := newParams(got, want, msg, opts...)
 	if cmp.Equal(got, want, params.cmpOpts...) {
@@ -84,7 +84,7 @@ func Equal(t testing.TB, got, want any, msg string, opts ...Option) bool {
 }
 
 // NotEqual asserts that two values aren't equal.
-func NotEqual(t testing.TB, got, want any, msg string, opts ...Option) bool {
+func NotEqual[T any](t testing.TB, got, want T, msg string, opts ...Option) bool {
 	t.Helper()
 	params := newParams(got, want, msg, opts...)
 	if !cmp.Equal(got, want, params.cmpOpts...) {
@@ -117,12 +117,9 @@ func NotNil(t testing.TB, got any, msg string, opts ...Option) bool {
 }
 
 // Zero asserts that the value is its type's zero value.
-func Zero(t testing.TB, got any, msg string, opts ...Option) bool {
+func Zero[T any](t testing.TB, got T, msg string, opts ...Option) bool {
 	t.Helper()
-	if got == nil {
-		return true
-	}
-	want := makeZero(got)
+	var want T
 	params := newParams(got, want, msg, opts...)
 	if cmp.Equal(got, want, params.cmpOpts...) {
 		return true
@@ -132,16 +129,13 @@ func Zero(t testing.TB, got any, msg string, opts ...Option) bool {
 }
 
 // NotZero asserts that the value is non-zero.
-func NotZero(t testing.TB, got any, msg string, opts ...Option) bool {
+func NotZero[T any](t testing.TB, got T, msg string, opts ...Option) bool {
 	t.Helper()
-	if got != nil {
-		want := makeZero(got)
-		params := newParams(got, want, msg, opts...)
-		if !cmp.Equal(got, want, params.cmpOpts...) {
-			return true
-		}
+	var want T
+	params := newParams(got, want, msg, opts...)
+	if !cmp.Equal(got, want, params.cmpOpts...) {
+		return true
 	}
-	params := newParams(got, nil, msg, opts...)
 	report(t, params, fmt.Sprintf("assert.NotZero (type %T)", got), false /* showWant */)
 	return false
 }
@@ -242,9 +236,4 @@ func isNil(got any) bool {
 	default:
 		return false
 	}
-}
-
-func makeZero(i any) any {
-	typ := reflect.TypeOf(i)
-	return reflect.Zero(typ).Interface()
 }
