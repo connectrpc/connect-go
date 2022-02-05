@@ -158,13 +158,15 @@ func NewUnaryHandler[Req, Res any](
 			// call the wrapped unary Func. To do that safely, we need a useful
 			// Request struct. (Note that we are *not* actually calling the
 			// handler's implementation.)
-			req, _ = ReceiveRequest[Req](newNopReceiver(receiver.Spec(), receiver.Header()))
+			req = receiveRequestMetadata[Req](receiver)
 		} else {
 			var err error
 			req, err = ReceiveRequest[Req](receiver)
 			if err != nil {
-				// Interceptors should see this error too.
+				// Interceptors should see this error too. Just as above, they need a
+				// useful Request.
 				clientVisibleError = err
+				req = receiveRequestMetadata[Req](receiver)
 			}
 		}
 
