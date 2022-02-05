@@ -214,12 +214,12 @@ func assertErrorGRPC(t testing.TB, err error, msg string) *status.Status {
 	return s
 }
 
-func asserErrorConnect(t testing.TB, err error, msg string) *connect.Error {
+func assertErrorConnect(t testing.TB, err error, msg string) *connect.Error {
 	t.Helper()
 	assert.NotNil(t, err, msg)
-	rerr, ok := connect.AsError(err)
+	cerr, ok := connect.AsError(err)
 	assert.True(t, ok, "conversion to *connect.Error")
-	return rerr
+	return cerr
 }
 
 func testWithConnectClient(t *testing.T, client *crossrpc.CrossServiceClient) {
@@ -235,27 +235,27 @@ func testWithConnectClient(t *testing.T, client *crossrpc.CrossServiceClient) {
 		req := &crosspb.FailRequest{Code: int32(connect.CodeResourceExhausted)}
 		res, err := client.Fail(context.Background(), req)
 		assert.Nil(t, res, "fail RPC response")
-		rerr := asserErrorConnect(t, err, "fail RPC error")
-		assert.Equal(t, rerr.Code(), connect.CodeResourceExhausted, "error code")
-		assert.Equal(t, rerr.Error(), "ResourceExhausted: "+errMsg, "error message")
-		assert.Zero(t, rerr.Details(), "error details")
+		cerr := assertErrorConnect(t, err, "fail RPC error")
+		assert.Equal(t, cerr.Code(), connect.CodeResourceExhausted, "error code")
+		assert.Equal(t, cerr.Error(), "ResourceExhausted: "+errMsg, "error message")
+		assert.Zero(t, cerr.Details(), "error details")
 	})
 	t.Run("cancel", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		cancel()
 		_, err := client.Ping(ctx, &crosspb.PingRequest{})
-		rerr := asserErrorConnect(t, err, "error after canceling context")
-		assert.Equal(t, rerr.Code(), connect.CodeCanceled, "error code")
-		assert.Equal(t, rerr.Error(), "Canceled: context canceled", "error message")
+		cerr := assertErrorConnect(t, err, "error after canceling context")
+		assert.Equal(t, cerr.Code(), connect.CodeCanceled, "error code")
+		assert.Equal(t, cerr.Error(), "Canceled: context canceled", "error message")
 	})
 	t.Run("exceed_deadline", func(t *testing.T) {
 		req := &crosspb.PingRequest{Sleep: durationpb.New(time.Second)}
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 		_, err := client.Ping(ctx, req)
-		rerr := asserErrorConnect(t, err, "deadline exceeded error")
-		assert.Equal(t, rerr.Code(), connect.CodeDeadlineExceeded, "error code")
-		assert.ErrorIs(t, rerr, context.DeadlineExceeded, "error unwraps to context.DeadlineExceeded")
+		cerr := assertErrorConnect(t, err, "deadline exceeded error")
+		assert.Equal(t, cerr.Code(), connect.CodeDeadlineExceeded, "error code")
+		assert.ErrorIs(t, cerr, context.DeadlineExceeded, "error unwraps to context.DeadlineExceeded")
 	})
 	t.Run("sum", func(t *testing.T) {
 		const upTo = 10
