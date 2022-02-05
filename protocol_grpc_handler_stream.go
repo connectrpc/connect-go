@@ -127,8 +127,8 @@ func (hr *handlerReceiver) Receive(m any) error {
 func (hr *handlerReceiver) Close() error {
 	discard(hr.request.Body)
 	if err := hr.request.Body.Close(); err != nil {
-		if rerr, ok := AsError(err); ok {
-			return rerr
+		if cerr, ok := AsError(err); ok {
+			return cerr
 		}
 		return Wrap(CodeUnknown, err)
 	}

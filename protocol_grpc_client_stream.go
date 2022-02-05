@@ -139,8 +139,8 @@ func (cs *clientStream) CloseSend(_ error) error {
 	// code for unary, client streaming, and server streaming RPCs must call
 	// CloseSend automatically rather than requiring the user to do it.
 	if err := cs.writer.Close(); err != nil {
-		if rerr, ok := AsError(err); ok {
-			return rerr
+		if cerr, ok := AsError(err); ok {
+			return cerr
 		}
 		return Wrap(CodeUnknown, err)
 	}
