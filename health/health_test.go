@@ -46,9 +46,9 @@ func TestHealth(t *testing.T) {
 	t.Run("unknown", func(t *testing.T) {
 		_, err := client.Check(context.Background(), &health.CheckRequest{Service: unknown})
 		assert.NotNil(t, err, "rpc error")
-		rerr, ok := connect.AsError(err)
+		cerr, ok := connect.AsError(err)
 		assert.True(t, ok, "convert to connect error")
-		assert.Equal(t, rerr.Code(), connect.CodeNotFound, "error code")
+		assert.Equal(t, cerr.Code(), connect.CodeNotFound, "error code")
 	})
 	t.Run("watch", func(t *testing.T) {
 		client, err := healthrpc.NewHealthClient(
@@ -65,8 +65,8 @@ func TestHealth(t *testing.T) {
 		defer stream.Close()
 		_, err = stream.Receive()
 		assert.NotNil(t, err, "receive err")
-		rerr, ok := connect.AsError(err)
+		cerr, ok := connect.AsError(err)
 		assert.True(t, ok, "convert to connect error")
-		assert.Equal(t, rerr.Code(), connect.CodeUnimplemented, "error code")
+		assert.Equal(t, cerr.Code(), connect.CodeUnimplemented, "error code")
 	})
 }
