@@ -1,6 +1,7 @@
 package connect
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -117,4 +118,35 @@ func CodeOf(err error) Code {
 		return cerr.Code()
 	}
 	return CodeUnknown
+}
+
+// wrapIfUncoded ensures that all errors are wrapped. It leaves already-wrapped
+// errors unchanged, uses wrapIfContextError to apply codes to context.Canceled
+// and context.DeadlineExceeded, and falls back to wrapping other errors with
+// CodeUnknown.
+func wrapIfUncoded(err error) error {
+	if err == nil {
+		return nil
+	}
+	maybeCodedErr := wrapIfContextError(err)
+	if _, ok := AsError(maybeCodedErr); ok {
+		return maybeCodedErr
+	}
+	return Wrap(CodeUnknown, maybeCodedErr)
+}
+
+// wrapIfContextError applies CodeCanceled or CodeDeadlineExceeded to Go's
+// context.Canceled and context.DeadlineExceeded errors, but only if they
+// haven't already been wrapped.
+func wrapIfContextError(err error) error {
+	if _, ok := AsError(err); ok {
+		return err
+	}
+	if errors.Is(err, context.Canceled) {
+		return Wrap(CodeCanceled, err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return Wrap(CodeDeadlineExceeded, err)
+	}
+	return err
 }

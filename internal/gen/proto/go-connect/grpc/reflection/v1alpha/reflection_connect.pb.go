@@ -142,16 +142,6 @@ func newUnwrappedServerReflection(svc ServerReflection, opts ...connect.HandlerO
 			typed := handlerstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
 			err := svc.ServerReflectionInfo(ctx, typed)
 			_ = receiver.Close()
-			if err != nil {
-				if _, ok := connect.AsError(err); !ok {
-					if errors.Is(err, context.Canceled) {
-						err = connect.Wrap(connect.CodeCanceled, err)
-					}
-					if errors.Is(err, context.DeadlineExceeded) {
-						err = connect.Wrap(connect.CodeDeadlineExceeded, err)
-					}
-				}
-			}
 			_ = sender.Close(err)
 		},
 		opts...,

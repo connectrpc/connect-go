@@ -220,14 +220,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 
 	// Before we send off a request, check if we're already out of time.
 	if err := cs.ctx.Err(); err != nil {
-		code := CodeUnknown
-		if errors.Is(err, context.Canceled) {
-			code = CodeCanceled
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			code = CodeDeadlineExceeded
-		}
-		cs.setResponseError(Wrap(code, err))
+		cs.setResponseError(err)
 		close(prepared)
 		return
 	}
@@ -239,14 +232,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 	// establish the receive side of the stream.
 	res, err := cs.doer.Do(req)
 	if err != nil {
-		code := CodeUnknown
-		if errors.Is(err, context.Canceled) {
-			code = CodeCanceled
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			code = CodeDeadlineExceeded
-		}
-		cs.setResponseError(Wrap(code, err))
+		cs.setResponseError(err)
 		return
 	}
 
@@ -292,6 +278,11 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 }
 
 func (cs *clientStream) setResponseError(err error) {
+	// Normally, we can rely on our built-in middleware to add codes to
+	// context-related errors. However, errors set here are exposed on the
+	// io.Writer end of the pipe, where they'll likely be miscoded if they're not
+	// already wrapped.
+	err = wrapIfContextError(err)
 	cs.responseErrMu.Lock()
 	cs.responseErr = err
 	cs.responseErrMu.Unlock()
