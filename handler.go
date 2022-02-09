@@ -177,13 +177,7 @@ func NewUnaryHandler[Req, Res any](
 				return nil, clientVisibleError
 			}
 			if err := ctx.Err(); err != nil {
-				// TODO: Factor out repeated context error coding.
-				if errors.Is(err, context.Canceled) {
-					return nil, Wrap(CodeCanceled, err)
-				}
-				if errors.Is(err, context.DeadlineExceeded) {
-					return nil, Wrap(CodeDeadlineExceeded, err)
-				}
+				return nil, err
 			}
 			typed, ok := req.(*Request[Req])
 			if !ok {
@@ -197,14 +191,6 @@ func NewUnaryHandler[Req, Res any](
 
 		res, err := untyped(ctx, req)
 		if err != nil {
-			if _, ok := AsError(err); !ok {
-				if errors.Is(err, context.Canceled) {
-					err = Wrap(CodeCanceled, err)
-				}
-				if errors.Is(err, context.DeadlineExceeded) {
-					err = Wrap(CodeDeadlineExceeded, err)
-				}
-			}
 			_ = sender.Close(err)
 			return
 		}
