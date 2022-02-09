@@ -153,7 +153,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 		w.Header()["Trailer"] = []string{"Grpc-Status", "Grpc-Message", "Grpc-Status-Details-Bin"}
 	}
 
-	sender, receiver := newHandlerStream(
+	sender, receiver := g.wrapStream(newHandlerStream(
 		g.spec,
 		g.web,
 		w,
@@ -163,7 +163,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 		g.codecs.Protobuf(), // for errors
 		g.compressors.Get(requestCompression),
 		g.compressors.Get(responseCompression),
-	)
+	))
 	// We can't return failed as-is: a nil *Error is non-nil when returned as an
 	// error interface.
 	if failed != nil {
@@ -172,17 +172,31 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	return sender, receiver, nil
 }
 
+func (g *grpcHandler) wrapStream(sender Sender, receiver Receiver) (Sender, Receiver) {
+	wrappedSender := &errorTranslatingSender{
+		Sender:   sender,
+		toWire:   wrapIfContextError,
+		fromWire: wrapIfUncoded,
+	}
+	wrappedReceiver := &errorTranslatingReceiver{
+		Receiver: receiver,
+		fromWire: wrapIfUncoded,
+	}
+	return wrappedSender, wrappedReceiver
+}
+
 type grpcClient struct {
-	spec             Specification
-	web              bool
-	compressorName   string
-	compressors      roCompressors
-	codecName        string
-	codec            codec.Codec
-	protobuf         codec.Codec
-	maxResponseBytes int64
-	doer             Doer
-	procedureURL     string
+	spec                 Specification
+	web                  bool
+	compressorName       string
+	compressors          roCompressors
+	codecName            string
+	codec                codec.Codec
+	protobuf             codec.Codec
+	maxResponseBytes     int64
+	doer                 Doer
+	procedureURL         string
+	wrapErrorInterceptor Interceptor
 }
 
 func (g *grpcClient) WriteRequestHeader(h http.Header) {
@@ -236,5 +250,18 @@ func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Rece
 		compressors:   g.compressors,
 		responseReady: make(chan struct{}),
 	}
-	return &clientSender{duplex}, &clientReceiver{duplex}
+	return g.wrapStream(&clientSender{duplex}, &clientReceiver{duplex})
+}
+
+func (g *grpcClient) wrapStream(sender Sender, receiver Receiver) (Sender, Receiver) {
+	wrappedSender := &errorTranslatingSender{
+		Sender:   sender,
+		toWire:   func(err error) error { return err }, // no-op
+		fromWire: wrapIfUncoded,
+	}
+	wrappedReceiver := &errorTranslatingReceiver{
+		Receiver: receiver,
+		fromWire: wrapIfUncoded,
+	}
+	return wrappedSender, wrappedReceiver
 }

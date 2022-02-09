@@ -107,6 +107,10 @@ func (r *Response[_]) Header() http.Header {
 func (r *Response[_]) internalOnly() {}
 
 // Sender is the writable side of a bidirectional stream of messages.
+//
+// Sender implementations provided by this module guarantee that all returned
+// errors are *Errors, with codes. Similarly, Close automatically adds the
+// appropriate codes when passed context.DeadlineExceeded or context.Canceled.
 type Sender interface {
 	Send(any) error
 	Close(error) error
@@ -116,6 +120,9 @@ type Sender interface {
 }
 
 // Receiver is the readable side of a bidirectional stream of messages.
+//
+// Receiver implementations provided by this module guarantee that all returned
+// errors are *Errors, with codes.
 type Receiver interface {
 	Receive(any) error
 	Close() error
