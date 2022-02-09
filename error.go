@@ -20,7 +20,6 @@ import (
 type ErrorDetail interface {
 	proto.Message
 
-	MessageIs(proto.Message) bool
 	MessageName() protoreflect.FullName
 	UnmarshalTo(proto.Message) error
 }
