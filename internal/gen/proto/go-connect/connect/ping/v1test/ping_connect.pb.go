@@ -294,16 +294,6 @@ func newUnwrappedPingService(svc PingService, opts ...connect.HandlerOption) *co
 			typed := handlerstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 			err := svc.Sum(ctx, typed)
 			_ = receiver.Close()
-			if err != nil {
-				if _, ok := connect.AsError(err); !ok {
-					if errors.Is(err, context.Canceled) {
-						err = connect.Wrap(connect.CodeCanceled, err)
-					}
-					if errors.Is(err, context.DeadlineExceeded) {
-						err = connect.Wrap(connect.CodeDeadlineExceeded, err)
-					}
-				}
-			}
 			_ = sender.Close(err)
 		},
 		opts...,
@@ -330,16 +320,6 @@ func newUnwrappedPingService(svc PingService, opts ...connect.HandlerOption) *co
 				return
 			}
 			err = svc.CountUp(ctx, req, typed)
-			if err != nil {
-				if _, ok := connect.AsError(err); !ok {
-					if errors.Is(err, context.Canceled) {
-						err = connect.Wrap(connect.CodeCanceled, err)
-					}
-					if errors.Is(err, context.DeadlineExceeded) {
-						err = connect.Wrap(connect.CodeDeadlineExceeded, err)
-					}
-				}
-			}
 			_ = sender.Close(err)
 		},
 		opts...,
@@ -357,16 +337,6 @@ func newUnwrappedPingService(svc PingService, opts ...connect.HandlerOption) *co
 			typed := handlerstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 			err := svc.CumSum(ctx, typed)
 			_ = receiver.Close()
-			if err != nil {
-				if _, ok := connect.AsError(err); !ok {
-					if errors.Is(err, context.Canceled) {
-						err = connect.Wrap(connect.CodeCanceled, err)
-					}
-					if errors.Is(err, context.DeadlineExceeded) {
-						err = connect.Wrap(connect.CodeDeadlineExceeded, err)
-					}
-				}
-			}
 			_ = sender.Close(err)
 		},
 		opts...,

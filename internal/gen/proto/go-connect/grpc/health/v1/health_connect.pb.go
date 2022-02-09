@@ -240,16 +240,6 @@ func newUnwrappedHealth(svc Health, opts ...connect.HandlerOption) *connect.Serv
 				return
 			}
 			err = svc.Watch(ctx, req, typed)
-			if err != nil {
-				if _, ok := connect.AsError(err); !ok {
-					if errors.Is(err, context.Canceled) {
-						err = connect.Wrap(connect.CodeCanceled, err)
-					}
-					if errors.Is(err, context.DeadlineExceeded) {
-						err = connect.Wrap(connect.CodeDeadlineExceeded, err)
-					}
-				}
-			}
 			_ = sender.Close(err)
 		},
 		opts...,
