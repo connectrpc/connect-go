@@ -8,13 +8,12 @@ package pingv1test
 
 import (
 	context "context"
-	strings "strings"
-
 	connect "github.com/bufconnect/connect"
 	clientstream "github.com/bufconnect/connect/clientstream"
 	protobuf "github.com/bufconnect/connect/codec/protobuf"
 	handlerstream "github.com/bufconnect/connect/handlerstream"
 	v1test "github.com/bufconnect/connect/internal/gen/proto/go/connect/ping/v1test"
+	strings "strings"
 )
 
 // This is a compile-time assertion to ensure that this generated file and the
@@ -169,12 +168,12 @@ type PingServiceHandler interface {
 	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
 
-// NewPingServiceHandler wraps the service implementation in a connect.Service,
-// which can then be passed to connect.NewServeMux.
+// WithPingServiceHandler wraps the service implementation in a
+// connect.MuxOption, which can then be passed to connect.NewServeMux.
 //
 // By default, services support the gRPC and gRPC-Web protocols with the binary
 // protobuf and JSON codecs.
-func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption) *connect.Service {
+func WithPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption) connect.MuxOption {
 	handlers := make([]connect.Handler, 0, 5)
 	opts = append([]connect.HandlerOption{
 		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
@@ -188,7 +187,7 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption
 		opts...,
 	)
 	if err != nil {
-		return connect.NewService(nil, err)
+		return connect.WithHandlers(nil, err)
 	}
 	handlers = append(handlers, *ping)
 
@@ -199,7 +198,7 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption
 		opts...,
 	)
 	if err != nil {
-		return connect.NewService(nil, err)
+		return connect.WithHandlers(nil, err)
 	}
 	handlers = append(handlers, *fail)
 
@@ -216,7 +215,7 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption
 		opts...,
 	)
 	if err != nil {
-		return connect.NewService(nil, err)
+		return connect.WithHandlers(nil, err)
 	}
 	handlers = append(handlers, *sum)
 
@@ -242,7 +241,7 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption
 		opts...,
 	)
 	if err != nil {
-		return connect.NewService(nil, err)
+		return connect.WithHandlers(nil, err)
 	}
 	handlers = append(handlers, *countUp)
 
@@ -259,11 +258,11 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption
 		opts...,
 	)
 	if err != nil {
-		return connect.NewService(nil, err)
+		return connect.WithHandlers(nil, err)
 	}
 	handlers = append(handlers, *cumSum)
 
-	return connect.NewService(handlers, nil)
+	return connect.WithHandlers(handlers, nil)
 }
 
 // UnimplementedPingServiceHandler returns CodeUnimplemented from all methods.

@@ -25,8 +25,7 @@ import (
 
 func BenchmarkConnect(b *testing.B) {
 	mux, err := connect.NewServeMux(
-		connect.NewNotFoundHandler(),
-		crossrpc.NewCrossServiceHandler(crossServerConnect{}),
+		crossrpc.WithCrossServiceHandler(crossServerConnect{}),
 	)
 	assert.Nil(b, err, "mux construction error")
 	server := httptest.NewUnstartedServer(mux)

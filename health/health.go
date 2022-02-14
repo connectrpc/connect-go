@@ -76,7 +76,7 @@ func (s *server) Watch(
 	return connect.Errorf(connect.CodeUnimplemented, "connect doesn't support watching health state")
 }
 
-// NewService wraps the supplied function to build HTTP handlers for gRPC's
+// WithHandler wraps the supplied function to build HTTP handlers for gRPC's
 // health-checking API. The health-checking function will be called with a
 // fully-qualified protobuf service name (e.g., "acme.ping.v1.PingService").
 //
@@ -93,11 +93,11 @@ func (s *server) Watch(
 // health checking protocol, see
 // https://github.com/grpc/grpc/blob/master/doc/health-checking.md and
 // https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto.
-func NewService(
+func WithHandler(
 	checker func(context.Context, string) (Status, error),
 	opts ...connect.HandlerOption,
-) *connect.Service {
-	return healthrpc.NewHealthHandler(
+) connect.MuxOption {
+	return healthrpc.WithHealthHandler(
 		&server{check: checker},
 		append(opts, connect.ReplaceProcedurePrefix("internal.", "grpc."))...,
 	)
