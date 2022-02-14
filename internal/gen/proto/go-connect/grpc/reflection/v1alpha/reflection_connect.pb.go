@@ -8,7 +8,6 @@ package reflectionv1alpha1
 
 import (
 	context "context"
-	errors "errors"
 	connect "github.com/bufconnect/connect"
 	clientstream "github.com/bufconnect/connect/clientstream"
 	protobuf "github.com/bufconnect/connect/codec/protobuf"
@@ -25,34 +24,13 @@ import (
 // the connect version compiled into your binary.
 const _ = connect.SupportsCodeGenV0 // requires connect v0.0.1 or later
 
-// WrappedServerReflectionClient is a client for the
-// internal.reflection.v1alpha1.ServerReflection service.
-//
-// It's a simplified wrapper around the full-featured API of
-// UnwrappedServerReflectionClient.
-type WrappedServerReflectionClient interface {
-	// The reflection service is structured as a bidirectional stream, ensuring
-	// all related requests go to a single server.
-	ServerReflectionInfo(context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]
-}
-
-// UnwrappedServerReflectionClient is a client for the
-// internal.reflection.v1alpha1.ServerReflection service. It's more complex than
-// WrappedServerReflectionClient, but it gives callers more fine-grained control
-// (e.g., sending and receiving headers).
-type UnwrappedServerReflectionClient interface {
-	// The reflection service is structured as a bidirectional stream, ensuring
-	// all related requests go to a single server.
-	ServerReflectionInfo(context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]
-}
-
 // ServerReflectionClient is a client for the
 // internal.reflection.v1alpha1.ServerReflection service.
-type ServerReflectionClient struct {
-	client unwrappedServerReflectionClient
+type ServerReflectionClient interface {
+	// The reflection service is structured as a bidirectional stream, ensuring
+	// all related requests go to a single server.
+	ServerReflectionInfo(context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]
 }
-
-var _ WrappedServerReflectionClient = (*ServerReflectionClient)(nil)
 
 // NewServerReflectionClient constructs a client for the
 // internal.reflection.v1alpha1.ServerReflection service. By default, it uses
@@ -60,12 +38,16 @@ var _ WrappedServerReflectionClient = (*ServerReflectionClient)(nil)
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
 // https://api.acme.com or https://acme.com/grpc).
-func NewServerReflectionClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (*ServerReflectionClient, error) {
+func NewServerReflectionClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (ServerReflectionClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
 		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
 	}, opts...)
-	serverReflectionInfoFunc, err := connect.NewClientStream(
+	var (
+		client serverReflectionClient
+		err    error
+	)
+	client.serverReflectionInfo, err = connect.NewClientStream(
 		doer,
 		connect.StreamTypeBidirectional,
 		baseURL,
@@ -75,59 +57,37 @@ func NewServerReflectionClient(baseURL string, doer connect.Doer, opts ...connec
 	if err != nil {
 		return nil, err
 	}
-	return &ServerReflectionClient{client: unwrappedServerReflectionClient{
-		serverReflectionInfo: serverReflectionInfoFunc,
-	}}, nil
+	return &client, nil
 }
 
-// ServerReflectionInfo calls
-// internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo.
-func (c *ServerReflectionClient) ServerReflectionInfo(ctx context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
-	return c.client.ServerReflectionInfo(ctx)
-}
-
-// Unwrap exposes the underlying generic client. Use it if you need finer
-// control (e.g., sending and receiving headers).
-func (c *ServerReflectionClient) Unwrap() UnwrappedServerReflectionClient {
-	return &c.client
-}
-
-type unwrappedServerReflectionClient struct {
+// serverReflectionClient implements ServerReflectionClient.
+type serverReflectionClient struct {
 	serverReflectionInfo func(context.Context) (connect.Sender, connect.Receiver)
 }
 
-var _ UnwrappedServerReflectionClient = (*unwrappedServerReflectionClient)(nil)
+var _ ServerReflectionClient = (*serverReflectionClient)(nil) // verify interface implementation
 
 // ServerReflectionInfo calls
 // internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo.
-func (c *unwrappedServerReflectionClient) ServerReflectionInfo(ctx context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
+func (c *serverReflectionClient) ServerReflectionInfo(ctx context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
 	sender, receiver := c.serverReflectionInfo(ctx)
 	return clientstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
 }
 
-// ServerReflection is an implementation of the
+// ServerReflectionHandler is an implementation of the
 // internal.reflection.v1alpha1.ServerReflection service.
-//
-// When writing your code, you can always implement the complete
-// ServerReflection interface. However, if you don't need to work with headers,
-// you can instead implement a simpler version of any or all of the unary
-// methods. Where available, the simplified signatures are listed in comments.
-//
-// NewServerReflection first tries to find the simplified version of each
-// method, then falls back to the more complex version. If neither is
-// implemented, connect.NewServeMux will return an error.
-type ServerReflection interface {
+type ServerReflectionHandler interface {
 	// The reflection service is structured as a bidirectional stream, ensuring
 	// all related requests go to a single server.
 	ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error
 }
 
-// newUnwrappedServerReflection wraps the service implementation in a
+// NewServerReflectionHandler wraps the service implementation in a
 // connect.Service, which can then be passed to connect.NewServeMux.
 //
 // By default, services support the gRPC and gRPC-Web protocols with the binary
 // protobuf and JSON codecs.
-func newUnwrappedServerReflection(svc ServerReflection, opts ...connect.HandlerOption) *connect.Service {
+func NewServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.HandlerOption) *connect.Service {
 	handlers := make([]connect.Handler, 0, 1)
 	opts = append([]connect.HandlerOption{
 		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
@@ -154,48 +114,12 @@ func newUnwrappedServerReflection(svc ServerReflection, opts ...connect.HandlerO
 	return connect.NewService(handlers, nil)
 }
 
-type pluggableServerReflectionServer struct {
-	serverReflectionInfo func(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error
-}
+// UnimplementedServerReflectionHandler returns CodeUnimplemented from all
+// methods.
+type UnimplementedServerReflectionHandler struct{}
 
-func (s *pluggableServerReflectionServer) ServerReflectionInfo(ctx context.Context, stream *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error {
-	return s.serverReflectionInfo(ctx, stream)
-}
+var _ ServerReflectionHandler = (*UnimplementedServerReflectionHandler)(nil) // verify interface implementation
 
-// NewServerReflection wraps the service implementation in a connect.Service,
-// ready for use with connect.NewServeMux. By default, services support the gRPC
-// and gRPC-Web protocols with the binary protobuf and JSON codecs.
-//
-// The service implementation may mix and match the signatures of
-// ServerReflection and the simplified signatures described in its comments. For
-// each method, NewServerReflection first tries to find a simplified
-// implementation. If a simple implementation isn't available, it falls back to
-// the more complex implementation. If neither is available, connect.NewServeMux
-// will return an error.
-//
-// Taken together, this approach lets implementations embed
-// UnimplementedServerReflection and implement each method using whichever
-// signature is most convenient.
-func NewServerReflection(svc any, opts ...connect.HandlerOption) *connect.Service {
-	var impl pluggableServerReflectionServer
-
-	// Find an implementation of ServerReflectionInfo
-	if serverReflectionInfoer, ok := svc.(interface {
-		ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error
-	}); ok {
-		impl.serverReflectionInfo = serverReflectionInfoer.ServerReflectionInfo
-	} else {
-		return connect.NewService(nil, errors.New("no ServerReflectionInfo implementation found"))
-	}
-
-	return newUnwrappedServerReflection(&impl, opts...)
-}
-
-var _ ServerReflection = (*UnimplementedServerReflection)(nil) // verify interface implementation
-
-// UnimplementedServerReflection returns CodeUnimplemented from all methods.
-type UnimplementedServerReflection struct{}
-
-func (UnimplementedServerReflection) ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error {
+func (UnimplementedServerReflectionHandler) ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error {
 	return connect.Errorf(connect.CodeUnimplemented, "internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo isn't implemented")
 }
