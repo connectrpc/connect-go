@@ -78,8 +78,7 @@ func TestErrorTranslatingInterceptor(t *testing.T) {
 		return err
 	}
 	mux, err := connect.NewServeMux(
-		connect.NewNotFoundHandler(),
-		pingrpc.NewPingServiceHandler(
+		pingrpc.WithPingServiceHandler(
 			&customErrorPingService{},
 			connect.Interceptors(connect.NewErrorInterceptor(toWire, nil /* fromWire */)),
 		),

@@ -116,7 +116,7 @@ func newNames(service *protogen.Service) names {
 		ClientImpl:        fmt.Sprintf("%sClient", unexport(base)),
 
 		Server:              fmt.Sprintf("%sHandler", base),
-		ServerConstructor:   fmt.Sprintf("New%sHandler", base),
+		ServerConstructor:   fmt.Sprintf("With%sHandler", base),
 		UnimplementedServer: fmt.Sprintf("Unimplemented%sHandler", base),
 	}
 }
@@ -384,7 +384,7 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 }
 
 func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, names names) {
-	wrap(g, names.ServerConstructor, " wraps the service implementation in a connect.Service,",
+	wrap(g, names.ServerConstructor, " wraps the service implementation in a connect.MuxOption,",
 		" which can then be passed to connect.NewServeMux.")
 	g.P("//")
 	wrap(g, "By default, services support the gRPC and gRPC-Web protocols with ",
@@ -395,7 +395,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 	}
 	handlerOption := connectPackage.Ident("HandlerOption")
 	g.P("func ", names.ServerConstructor, "(svc ", names.Server, ", opts ...", handlerOption,
-		") *", connectPackage.Ident("Service"), " {")
+		") ", connectPackage.Ident("MuxOption"), " {")
 	g.P("handlers := make([]", connectPackage.Ident("Handler"), ", 0, ", len(service.Methods), ")")
 	g.P("opts = append([]", handlerOption, "{")
 	g.P(connectPackage.Ident("Codec"), "(", connectProtoPackage.Ident("NameBinary"), ", ", connectProtoPackage.Ident("NewBinary"), "()", "),")
@@ -461,12 +461,12 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 			g.P(")")
 		}
 		g.P("if err != nil {")
-		g.P("return ", connectPackage.Ident("NewService"), "(nil, err)")
+		g.P("return ", connectPackage.Ident("WithHandlers"), "(nil, err)")
 		g.P("}")
 		g.P("handlers = append(handlers, *", hname, ")")
 		g.P()
 	}
-	g.P("return ", connectPackage.Ident("NewService"), "(handlers, nil)")
+	g.P("return ", connectPackage.Ident("WithHandlers"), "(handlers, nil)")
 	g.P("}")
 	g.P()
 }

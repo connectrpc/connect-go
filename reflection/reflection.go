@@ -30,8 +30,8 @@ type Registrar interface {
 	Services() []string // returns fully-qualified protobuf services names
 }
 
-// NewService uses the information in the supplied Registrar to construct
-// HTTP handlers for gRPC's server reflection API.
+// WithHandler uses the information in the supplied Registrar to construct HTTP
+// handlers for gRPC's server reflection API.
 //
 // Note that because the reflection API requires bidirectional streaming, the
 // returned handler only supports gRPC over HTTP/2 (i.e., it doesn't support
@@ -43,7 +43,7 @@ type Registrar interface {
 // https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md,
 // https://github.com/grpc/grpc/blob/master/doc/server-reflection.md, and
 // https://github.com/fullstorydev/grpcurl.
-func NewService(reg Registrar, opts ...connect.HandlerOption) *connect.Service {
+func WithHandler(reg Registrar, opts ...connect.HandlerOption) connect.MuxOption {
 	const (
 		prefix      = "internal.reflection.v1alpha1."
 		replacement = "grpc.reflection.v1alpha."
@@ -53,7 +53,7 @@ func NewService(reg Registrar, opts ...connect.HandlerOption) *connect.Service {
 		connect.Codec(protobuf.NameJSON, protobuf.NewJSON()),
 	}, opts...)
 	opts = append(opts, connect.ReplaceProcedurePrefix(prefix, replacement))
-	return reflectionrpc.NewServerReflectionHandler(
+	return reflectionrpc.WithServerReflectionHandler(
 		&server{reg: reg},
 		opts...,
 	)

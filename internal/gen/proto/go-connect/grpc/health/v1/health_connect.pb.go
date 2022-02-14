@@ -134,12 +134,12 @@ type HealthHandler interface {
 	Watch(context.Context, *connect.Request[v1.HealthCheckRequest], *handlerstream.Server[v1.HealthCheckResponse]) error
 }
 
-// NewHealthHandler wraps the service implementation in a connect.Service, which
-// can then be passed to connect.NewServeMux.
+// WithHealthHandler wraps the service implementation in a connect.MuxOption,
+// which can then be passed to connect.NewServeMux.
 //
 // By default, services support the gRPC and gRPC-Web protocols with the binary
 // protobuf and JSON codecs.
-func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) *connect.Service {
+func WithHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) connect.MuxOption {
 	handlers := make([]connect.Handler, 0, 2)
 	opts = append([]connect.HandlerOption{
 		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
@@ -153,7 +153,7 @@ func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) *connect
 		opts...,
 	)
 	if err != nil {
-		return connect.NewService(nil, err)
+		return connect.WithHandlers(nil, err)
 	}
 	handlers = append(handlers, *check)
 
@@ -179,11 +179,11 @@ func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) *connect
 		opts...,
 	)
 	if err != nil {
-		return connect.NewService(nil, err)
+		return connect.WithHandlers(nil, err)
 	}
 	handlers = append(handlers, *watch)
 
-	return connect.NewService(handlers, nil)
+	return connect.WithHandlers(handlers, nil)
 }
 
 // UnimplementedHealthHandler returns CodeUnimplemented from all methods.

@@ -156,12 +156,12 @@ type CrossServiceHandler interface {
 	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
 
-// NewCrossServiceHandler wraps the service implementation in a connect.Service,
-// which can then be passed to connect.NewServeMux.
+// WithCrossServiceHandler wraps the service implementation in a
+// connect.MuxOption, which can then be passed to connect.NewServeMux.
 //
 // By default, services support the gRPC and gRPC-Web protocols with the binary
 // protobuf and JSON codecs.
-func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOption) *connect.Service {
+func WithCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOption) connect.MuxOption {
 	handlers := make([]connect.Handler, 0, 5)
 	opts = append([]connect.HandlerOption{
 		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
@@ -175,7 +175,7 @@ func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpti
 		opts...,
 	)
 	if err != nil {
-		return connect.NewService(nil, err)
+		return connect.WithHandlers(nil, err)
 	}
 	handlers = append(handlers, *ping)
 
@@ -186,7 +186,7 @@ func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpti
 		opts...,
 	)
 	if err != nil {
-		return connect.NewService(nil, err)
+		return connect.WithHandlers(nil, err)
 	}
 	handlers = append(handlers, *fail)
 
@@ -203,7 +203,7 @@ func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpti
 		opts...,
 	)
 	if err != nil {
-		return connect.NewService(nil, err)
+		return connect.WithHandlers(nil, err)
 	}
 	handlers = append(handlers, *sum)
 
@@ -229,7 +229,7 @@ func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpti
 		opts...,
 	)
 	if err != nil {
-		return connect.NewService(nil, err)
+		return connect.WithHandlers(nil, err)
 	}
 	handlers = append(handlers, *countUp)
 
@@ -246,11 +246,11 @@ func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpti
 		opts...,
 	)
 	if err != nil {
-		return connect.NewService(nil, err)
+		return connect.WithHandlers(nil, err)
 	}
 	handlers = append(handlers, *cumSum)
 
-	return connect.NewService(handlers, nil)
+	return connect.WithHandlers(handlers, nil)
 }
 
 // UnimplementedCrossServiceHandler returns CodeUnimplemented from all methods.
