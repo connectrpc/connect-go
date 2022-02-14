@@ -53,12 +53,16 @@ func ExampleClient() {
 		logger.Print("Error: ", err)
 		return
 	}
-	res, err := client.Ping(context.Background(), &pingpb.PingRequest{})
+	res, err := client.Ping(
+		context.Background(),
+		connect.NewRequest(&pingpb.PingRequest{}),
+	)
 	if err != nil {
 		logger.Print("Error: ", err)
 		return
 	}
-	logger.Print("Response:", res)
+	logger.Print("Response headers:", res.Header())
+	logger.Print("Response message:", res.Msg)
 
 	// Output:
 	// Error: Unimplemented: no networking in examples
