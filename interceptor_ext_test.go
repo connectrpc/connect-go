@@ -57,7 +57,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 	}
 	mux, err := connect.NewServeMux(
 		connect.NewNotFoundHandler(),
-		pingrpc.NewPingService(
+		pingrpc.NewPingServiceHandler(
 			pingServer{},
 			connect.Interceptors(&assertCalledInterceptor{&called}),
 		),
@@ -174,7 +174,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 
 	mux, err := connect.NewServeMux(
 		connect.NewNotFoundHandler(),
-		pingrpc.NewPingService(
+		pingrpc.NewPingServiceHandler(
 			pingServer{},
 			handlerOnion,
 		),
@@ -190,9 +190,9 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	)
 	assert.Nil(t, err, "client construction error")
 
-	_, err = client.Ping(context.Background(), &pingpb.PingRequest{Number: 10})
+	_, err = client.Ping(context.Background(), connect.NewRequest(&pingpb.PingRequest{Number: 10}))
 	assert.Nil(t, err, "error calling Ping")
 
-	_, err = client.CountUp(context.Background(), &pingpb.CountUpRequest{Number: 10})
+	_, err = client.CountUp(context.Background(), connect.NewRequest(&pingpb.CountUpRequest{Number: 10}))
 	assert.Nil(t, err, "error calling CountUp")
 }

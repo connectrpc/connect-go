@@ -51,12 +51,12 @@ func NewChecker(reg Registrar) func(context.Context, string) (Status, error) {
 }
 
 type server struct {
-	healthrpc.UnimplementedHealth
+	healthrpc.UnimplementedHealthHandler
 
 	check func(context.Context, string) (Status, error)
 }
 
-var _ healthrpc.Health = (*server)(nil)
+var _ healthrpc.HealthHandler = (*server)(nil)
 
 func (s *server) Check(ctx context.Context, req *connect.Request[healthpb.HealthCheckRequest]) (*connect.Response[healthpb.HealthCheckResponse], error) {
 	status, err := s.check(ctx, req.Msg.Service)
@@ -97,7 +97,7 @@ func NewService(
 	checker func(context.Context, string) (Status, error),
 	opts ...connect.HandlerOption,
 ) *connect.Service {
-	return healthrpc.NewHealth(
+	return healthrpc.NewHealthHandler(
 		&server{check: checker},
 		append(opts, connect.ReplaceProcedurePrefix("internal.", "grpc."))...,
 	)
@@ -116,7 +116,7 @@ type CheckResponse struct {
 
 // A Client for any gRPC-compatible health service.
 type Client struct {
-	health *healthrpc.HealthClient
+	health healthrpc.HealthClient
 }
 
 // NewClient constructs a Client.
@@ -134,9 +134,12 @@ func NewClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) 
 
 // Check the health of a service.
 func (c *Client) Check(ctx context.Context, req *CheckRequest) (*CheckResponse, error) {
-	res, err := c.health.Check(ctx, &healthpb.HealthCheckRequest{Service: req.Service})
+	res, err := c.health.Check(
+		ctx,
+		connect.NewRequest(&healthpb.HealthCheckRequest{Service: req.Service}),
+	)
 	if err != nil {
 		return nil, err
 	}
-	return &CheckResponse{Status: Status(res.Status)}, nil
+	return &CheckResponse{Status: Status(res.Msg.Status)}, nil
 }

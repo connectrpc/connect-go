@@ -15,15 +15,19 @@ import (
 // ExamplePingServer implements some trivial business logic. The protobuf
 // definition for this API is in proto/connect/ping/v1test/ping.proto.
 type ExamplePingServer struct {
-	pingrpc.UnimplementedPingService
+	pingrpc.UnimplementedPingServiceHandler
 }
 
 // Ping implements pingrpc.PingService.
-func (*ExamplePingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingpb.PingResponse, error) {
-	return &pingpb.PingResponse{
-		Number: req.Number,
-		Msg:    req.Msg,
-	}, nil
+func (*ExamplePingServer) Ping(
+	ctx context.Context,
+	req *connect.Request[pingpb.PingRequest],
+) (*connect.Response[pingpb.PingResponse], error) {
+	pingRequest := req.Msg
+	return connect.NewResponse(&pingpb.PingResponse{
+		Number: pingRequest.Number,
+		Msg:    pingRequest.Msg,
+	}), nil
 }
 
 func Example() {
@@ -39,10 +43,10 @@ func Example() {
 	// http.Handler, connect works with any Go HTTP middleware (e.g., net/http's
 	// StripPrefix).
 	mux, err := connect.NewServeMux(
-		connect.NewNotFoundHandler(),             // fallback handler
-		pingrpc.NewPingService(ping, reg, limit), // business logic
-		reflection.NewService(reg),               // server reflection
-		health.NewService(checker),               // health checks
+		connect.NewNotFoundHandler(),                    // fallback handler
+		pingrpc.NewPingServiceHandler(ping, reg, limit), // business logic
+		reflection.NewService(reg),                      // server reflection
+		health.NewService(checker),                      // health checks
 	)
 	if err != nil {
 		panic(err)

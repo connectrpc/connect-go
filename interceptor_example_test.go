@@ -32,7 +32,7 @@ func ExampleInterceptor() {
 		logger.Print("Error: ", err)
 		return
 	}
-	client.Ping(context.Background(), &pingpb.PingRequest{})
+	client.Ping(context.Background(), connect.NewRequest(&pingpb.PingRequest{}))
 
 	// Output:
 	// calling connect.ping.v1test.PingService/Ping
@@ -68,7 +68,7 @@ func ExampleInterceptors() {
 		logger.Print("Error: ", err)
 		return
 	}
-	client.Ping(context.Background(), &pingpb.PingRequest{})
+	client.Ping(context.Background(), connect.NewRequest(&pingpb.PingRequest{}))
 
 	// Output:
 	// outer interceptor: before call

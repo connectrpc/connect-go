@@ -16,15 +16,14 @@ import (
 	"github.com/bufconnect/connect/reflection"
 )
 
-type pingServer struct {
-	pingrpc.UnimplementedPingService
-}
-
 func TestReflection(t *testing.T) {
 	reg := connect.NewRegistrar()
 	mux, err := connect.NewServeMux(
 		connect.NewNotFoundHandler(),
-		pingrpc.NewPingService(pingServer{}, reg),
+		pingrpc.NewPingServiceHandler(
+			pingrpc.UnimplementedPingServiceHandler{},
+			reg,
+		),
 		health.NewService(health.NewChecker(reg)),
 		reflection.NewService(reg),
 	)

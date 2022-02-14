@@ -26,7 +26,7 @@ import (
 func BenchmarkConnect(b *testing.B) {
 	mux, err := connect.NewServeMux(
 		connect.NewNotFoundHandler(),
-		crossrpc.NewCrossService(crossServerConnect{}),
+		crossrpc.NewCrossServiceHandler(crossServerConnect{}),
 	)
 	assert.Nil(b, err, "mux construction error")
 	server := httptest.NewUnstartedServer(mux)
@@ -50,7 +50,10 @@ func BenchmarkConnect(b *testing.B) {
 	b.Run("unary", func(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				_, _ = client.Ping(context.Background(), &crosspb.PingRequest{Number: 42})
+				_, _ = client.Ping(
+					context.Background(),
+					connect.NewRequest(&crosspb.PingRequest{Number: 42}),
+				)
 			}
 		})
 	})
