@@ -19,13 +19,12 @@ import (
 func TestReflection(t *testing.T) {
 	reg := connect.NewRegistrar()
 	mux, err := connect.NewServeMux(
-		connect.NewNotFoundHandler(),
-		pingrpc.NewPingServiceHandler(
+		pingrpc.WithPingServiceHandler(
 			pingrpc.UnimplementedPingServiceHandler{},
 			reg,
 		),
-		health.NewService(health.NewChecker(reg)),
-		reflection.NewService(reg),
+		health.WithHandler(health.NewChecker(reg)),
+		reflection.WithHandler(reg),
 	)
 	assert.Nil(t, err, "mux construction error")
 
