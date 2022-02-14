@@ -16,13 +16,13 @@ import (
 )
 
 type customErrorPingService struct {
-	pingrpc.UnimplementedPingService
+	pingrpc.UnimplementedPingServiceHandler
 }
 
 func (s *customErrorPingService) Fail(
 	ctx context.Context,
-	_ *pingpb.FailRequest,
-) (*pingpb.FailResponse, error) {
+	_ *connect.Request[pingpb.FailRequest],
+) (*connect.Response[pingpb.FailResponse], error) {
 	return nil, newLocationError("some_file.go", 42)
 }
 
@@ -79,7 +79,7 @@ func TestErrorTranslatingInterceptor(t *testing.T) {
 	}
 	mux, err := connect.NewServeMux(
 		connect.NewNotFoundHandler(),
-		pingrpc.NewPingService(
+		pingrpc.NewPingServiceHandler(
 			&customErrorPingService{},
 			connect.Interceptors(connect.NewErrorInterceptor(toWire, nil /* fromWire */)),
 		),
@@ -92,7 +92,7 @@ func TestErrorTranslatingInterceptor(t *testing.T) {
 		connect.Interceptors(connect.NewErrorInterceptor(nil /* toWire */, fromWire)),
 	)
 	assert.Nil(t, err, "client construction error")
-	_, err = client.Fail(context.Background(), &pingpb.FailRequest{})
+	_, err = client.Fail(context.Background(), connect.NewRequest(&pingpb.FailRequest{}))
 	assert.NotNil(t, err, "client-visible error")
 	lerr, ok := err.(*locationError)
 	assert.True(t, ok, "convert to custom error type")

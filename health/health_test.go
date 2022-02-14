@@ -17,7 +17,10 @@ func TestHealth(t *testing.T) {
 	reg := connect.NewRegistrar()
 	mux, err := connect.NewServeMux(
 		connect.NewNotFoundHandler(),
-		pingrpc.NewPingService(pingrpc.UnimplementedPingService{}, reg),
+		pingrpc.NewPingServiceHandler(
+			pingrpc.UnimplementedPingServiceHandler{},
+			reg,
+		),
 		health.NewService(health.NewChecker(reg)),
 	)
 	assert.Nil(t, err, "mux construction error")
@@ -59,7 +62,7 @@ func TestHealth(t *testing.T) {
 		assert.Nil(t, err, "client construction error")
 		stream, err := client.Watch(
 			context.Background(),
-			&healthpb.HealthCheckRequest{Service: pingFQN},
+			connect.NewRequest(&healthpb.HealthCheckRequest{Service: pingFQN}),
 		)
 		assert.Nil(t, err, "rpc error")
 		defer stream.Close()

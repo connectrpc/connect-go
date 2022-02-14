@@ -54,7 +54,7 @@ func newClientH2C() *http.Client {
 }
 
 type crossServerConnect struct {
-	crossrpc.UnimplementedCrossService
+	crossrpc.UnimplementedCrossServiceHandler
 }
 
 func (c crossServerConnect) Ping(ctx context.Context, req *connect.Request[crosspb.PingRequest]) (*connect.Response[crosspb.PingResponse], error) {
@@ -222,18 +222,18 @@ func assertErrorConnect(t testing.TB, err error, msg string) *connect.Error {
 	return cerr
 }
 
-func testWithConnectClient(t *testing.T, client *crossrpc.CrossServiceClient) {
+func testWithConnectClient(t *testing.T, client crossrpc.CrossServiceClient) {
 	t.Run("ping", func(t *testing.T) {
 		num := rand.Int63()
 		req := &crosspb.PingRequest{Number: num}
 		expect := &crosspb.PingResponse{Number: num}
-		res, err := client.Ping(context.Background(), req)
+		res, err := client.Ping(context.Background(), connect.NewRequest(req))
 		assert.Nil(t, err, "ping error")
-		assert.Equal(t, res, expect, "ping response")
+		assert.Equal(t, res.Msg, expect, "ping response")
 	})
 	t.Run("errors", func(t *testing.T) {
 		req := &crosspb.FailRequest{Code: int32(connect.CodeResourceExhausted)}
-		res, err := client.Fail(context.Background(), req)
+		res, err := client.Fail(context.Background(), connect.NewRequest(req))
 		assert.Nil(t, res, "fail RPC response")
 		cerr := assertErrorConnect(t, err, "fail RPC error")
 		assert.Equal(t, cerr.Code(), connect.CodeResourceExhausted, "error code")
@@ -243,7 +243,7 @@ func testWithConnectClient(t *testing.T, client *crossrpc.CrossServiceClient) {
 	t.Run("cancel", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		cancel()
-		_, err := client.Ping(ctx, &crosspb.PingRequest{})
+		_, err := client.Ping(ctx, connect.NewRequest(&crosspb.PingRequest{}))
 		cerr := assertErrorConnect(t, err, "error after canceling context")
 		assert.Equal(t, cerr.Code(), connect.CodeCanceled, "error code")
 		assert.Equal(t, cerr.Error(), "Canceled: context canceled", "error message")
@@ -252,7 +252,7 @@ func testWithConnectClient(t *testing.T, client *crossrpc.CrossServiceClient) {
 		req := &crosspb.PingRequest{Sleep: durationpb.New(time.Second)}
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		_, err := client.Ping(ctx, req)
+		_, err := client.Ping(ctx, connect.NewRequest(req))
 		cerr := assertErrorConnect(t, err, "deadline exceeded error")
 		assert.Equal(t, cerr.Code(), connect.CodeDeadlineExceeded, "error code")
 		assert.ErrorIs(t, cerr, context.DeadlineExceeded, "error unwraps to context.DeadlineExceeded")
@@ -278,7 +278,7 @@ func testWithConnectClient(t *testing.T, client *crossrpc.CrossServiceClient) {
 		}
 		stream, err := client.CountUp(
 			context.Background(),
-			&crosspb.CountUpRequest{Number: n},
+			connect.NewRequest(&crosspb.CountUpRequest{Number: n}),
 		)
 		assert.Nil(t, err, "send error")
 		for {
@@ -435,7 +435,7 @@ func TestConnectServer(t *testing.T) {
 	reg := connect.NewRegistrar()
 	mux, err := connect.NewServeMux(
 		connect.NewNotFoundHandler(),
-		crossrpc.NewCrossService(crossServerConnect{}, reg),
+		crossrpc.NewCrossServiceHandler(crossServerConnect{}, reg),
 		reflection.NewService(reg),
 	)
 	assert.Nil(t, err, "mux construction error")
@@ -513,7 +513,7 @@ func TestConnectServer(t *testing.T) {
 func TestConnectServerH2C(t *testing.T) {
 	mux, err := connect.NewServeMux(
 		connect.NewNotFoundHandler(),
-		crossrpc.NewCrossService(crossServerConnect{}),
+		crossrpc.NewCrossServiceHandler(crossServerConnect{}),
 	)
 	assert.Nil(t, err, "mux construction error")
 	server := httptest.NewServer(h2c.NewHandler(mux, &http2.Server{}))
