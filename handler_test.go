@@ -18,7 +18,7 @@ func TestHandlerReadMaxBytes(t *testing.T) {
 	const readMaxBytes = 32
 	ping, err := connect.NewServeMux(
 		connect.NewNotFoundHandler(),
-		pingrpc.NewPingService(
+		pingrpc.NewPingServiceHandler(
 			&ExamplePingServer{},
 			connect.ReadMaxBytes(readMaxBytes),
 		),
@@ -37,7 +37,7 @@ func TestHandlerReadMaxBytes(t *testing.T) {
 	assert.Nil(t, err, "marshal request")
 	assert.Equal(t, len(probeBytes), readMaxBytes+1, "probe size")
 
-	_, err = client.Ping(context.Background(), req)
+	_, err = client.Ping(context.Background(), connect.NewRequest(req))
 
 	assert.NotNil(t, err, "ping error")
 	assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument, "error code")

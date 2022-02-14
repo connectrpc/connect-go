@@ -8,7 +8,6 @@ package crossv1test
 
 import (
 	context "context"
-	errors "errors"
 	connect "github.com/bufconnect/connect"
 	clientstream "github.com/bufconnect/connect/clientstream"
 	protobuf "github.com/bufconnect/connect/codec/protobuf"
@@ -25,23 +24,8 @@ import (
 // the connect version compiled into your binary.
 const _ = connect.SupportsCodeGenV0 // requires connect v0.0.1 or later
 
-// WrappedCrossServiceClient is a client for the cross.v1test.CrossService
-// service.
-//
-// It's a simplified wrapper around the full-featured API of
-// UnwrappedCrossServiceClient.
-type WrappedCrossServiceClient interface {
-	Ping(context.Context, *v1test.PingRequest) (*v1test.PingResponse, error)
-	Fail(context.Context, *v1test.FailRequest) (*v1test.FailResponse, error)
-	Sum(context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse]
-	CountUp(context.Context, *v1test.CountUpRequest) (*clientstream.Server[v1test.CountUpResponse], error)
-	CumSum(context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]
-}
-
-// UnwrappedCrossServiceClient is a client for the cross.v1test.CrossService
-// service. It's more complex than WrappedCrossServiceClient, but it gives
-// callers more fine-grained control (e.g., sending and receiving headers).
-type UnwrappedCrossServiceClient interface {
+// CrossServiceClient is a client for the cross.v1test.CrossService service.
+type CrossServiceClient interface {
 	Ping(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error)
 	Fail(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error)
 	Sum(context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse]
@@ -49,24 +33,21 @@ type UnwrappedCrossServiceClient interface {
 	CumSum(context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]
 }
 
-// CrossServiceClient is a client for the cross.v1test.CrossService service.
-type CrossServiceClient struct {
-	client unwrappedCrossServiceClient
-}
-
-var _ WrappedCrossServiceClient = (*CrossServiceClient)(nil)
-
 // NewCrossServiceClient constructs a client for the cross.v1test.CrossService
 // service. By default, it uses the binary protobuf codec.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g.,
 // https://api.acme.com or https://acme.com/grpc).
-func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (*CrossServiceClient, error) {
+func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (CrossServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
 		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
 	}, opts...)
-	pingFunc, err := connect.NewClientFunc[v1test.PingRequest, v1test.PingResponse](
+	var (
+		client crossServiceClient
+		err    error
+	)
+	client.ping, err = connect.NewClientFunc[v1test.PingRequest, v1test.PingResponse](
 		doer,
 		baseURL,
 		"cross.v1test.CrossService/Ping",
@@ -75,7 +56,7 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 	if err != nil {
 		return nil, err
 	}
-	failFunc, err := connect.NewClientFunc[v1test.FailRequest, v1test.FailResponse](
+	client.fail, err = connect.NewClientFunc[v1test.FailRequest, v1test.FailResponse](
 		doer,
 		baseURL,
 		"cross.v1test.CrossService/Fail",
@@ -84,7 +65,7 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 	if err != nil {
 		return nil, err
 	}
-	sumFunc, err := connect.NewClientStream(
+	client.sum, err = connect.NewClientStream(
 		doer,
 		connect.StreamTypeClient,
 		baseURL,
@@ -94,7 +75,7 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 	if err != nil {
 		return nil, err
 	}
-	countUpFunc, err := connect.NewClientStream(
+	client.countUp, err = connect.NewClientStream(
 		doer,
 		connect.StreamTypeServer,
 		baseURL,
@@ -104,7 +85,7 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 	if err != nil {
 		return nil, err
 	}
-	cumSumFunc, err := connect.NewClientStream(
+	client.cumSum, err = connect.NewClientStream(
 		doer,
 		connect.StreamTypeBidirectional,
 		baseURL,
@@ -114,55 +95,11 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 	if err != nil {
 		return nil, err
 	}
-	return &CrossServiceClient{client: unwrappedCrossServiceClient{
-		ping:    pingFunc,
-		fail:    failFunc,
-		sum:     sumFunc,
-		countUp: countUpFunc,
-		cumSum:  cumSumFunc,
-	}}, nil
+	return &client, nil
 }
 
-// Ping calls cross.v1test.CrossService.Ping.
-func (c *CrossServiceClient) Ping(ctx context.Context, req *v1test.PingRequest) (*v1test.PingResponse, error) {
-	res, err := c.client.Ping(ctx, connect.NewRequest(req))
-	if err != nil {
-		return nil, err
-	}
-	return res.Msg, nil
-}
-
-// Fail calls cross.v1test.CrossService.Fail.
-func (c *CrossServiceClient) Fail(ctx context.Context, req *v1test.FailRequest) (*v1test.FailResponse, error) {
-	res, err := c.client.Fail(ctx, connect.NewRequest(req))
-	if err != nil {
-		return nil, err
-	}
-	return res.Msg, nil
-}
-
-// Sum calls cross.v1test.CrossService.Sum.
-func (c *CrossServiceClient) Sum(ctx context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse] {
-	return c.client.Sum(ctx)
-}
-
-// CountUp calls cross.v1test.CrossService.CountUp.
-func (c *CrossServiceClient) CountUp(ctx context.Context, req *v1test.CountUpRequest) (*clientstream.Server[v1test.CountUpResponse], error) {
-	return c.client.CountUp(ctx, connect.NewRequest(req))
-}
-
-// CumSum calls cross.v1test.CrossService.CumSum.
-func (c *CrossServiceClient) CumSum(ctx context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
-	return c.client.CumSum(ctx)
-}
-
-// Unwrap exposes the underlying generic client. Use it if you need finer
-// control (e.g., sending and receiving headers).
-func (c *CrossServiceClient) Unwrap() UnwrappedCrossServiceClient {
-	return &c.client
-}
-
-type unwrappedCrossServiceClient struct {
+// crossServiceClient implements CrossServiceClient.
+type crossServiceClient struct {
 	ping    func(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error)
 	fail    func(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error)
 	sum     func(context.Context) (connect.Sender, connect.Receiver)
@@ -170,26 +107,26 @@ type unwrappedCrossServiceClient struct {
 	cumSum  func(context.Context) (connect.Sender, connect.Receiver)
 }
 
-var _ UnwrappedCrossServiceClient = (*unwrappedCrossServiceClient)(nil)
+var _ CrossServiceClient = (*crossServiceClient)(nil) // verify interface implementation
 
 // Ping calls cross.v1test.CrossService.Ping.
-func (c *unwrappedCrossServiceClient) Ping(ctx context.Context, req *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error) {
+func (c *crossServiceClient) Ping(ctx context.Context, req *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error) {
 	return c.ping(ctx, req)
 }
 
 // Fail calls cross.v1test.CrossService.Fail.
-func (c *unwrappedCrossServiceClient) Fail(ctx context.Context, req *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error) {
+func (c *crossServiceClient) Fail(ctx context.Context, req *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error) {
 	return c.fail(ctx, req)
 }
 
 // Sum calls cross.v1test.CrossService.Sum.
-func (c *unwrappedCrossServiceClient) Sum(ctx context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse] {
+func (c *crossServiceClient) Sum(ctx context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse] {
 	sender, receiver := c.sum(ctx)
 	return clientstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 }
 
 // CountUp calls cross.v1test.CrossService.CountUp.
-func (c *unwrappedCrossServiceClient) CountUp(ctx context.Context, req *connect.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
+func (c *crossServiceClient) CountUp(ctx context.Context, req *connect.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
 	sender, receiver := c.countUp(ctx)
 	if err := sender.Send(req.Msg); err != nil {
 		_ = sender.Close(err)
@@ -204,39 +141,27 @@ func (c *unwrappedCrossServiceClient) CountUp(ctx context.Context, req *connect.
 }
 
 // CumSum calls cross.v1test.CrossService.CumSum.
-func (c *unwrappedCrossServiceClient) CumSum(ctx context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
+func (c *crossServiceClient) CumSum(ctx context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
 	sender, receiver := c.cumSum(ctx)
 	return clientstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 }
 
-// CrossService is an implementation of the cross.v1test.CrossService service.
-//
-// When writing your code, you can always implement the complete CrossService
-// interface. However, if you don't need to work with headers, you can instead
-// implement a simpler version of any or all of the unary methods. Where
-// available, the simplified signatures are listed in comments.
-//
-// NewCrossService first tries to find the simplified version of each method,
-// then falls back to the more complex version. If neither is implemented,
-// connect.NewServeMux will return an error.
-type CrossService interface {
-	// Can also be implemented in a simplified form:
-	// Ping(context.Context, *v1test.PingRequest) (*v1test.PingResponse, error)
+// CrossServiceHandler is an implementation of the cross.v1test.CrossService
+// service.
+type CrossServiceHandler interface {
 	Ping(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error)
-	// Can also be implemented in a simplified form:
-	// Fail(context.Context, *v1test.FailRequest) (*v1test.FailResponse, error)
 	Fail(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error)
 	Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error
 	CountUp(context.Context, *connect.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error
 	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
 
-// newUnwrappedCrossService wraps the service implementation in a
-// connect.Service, which can then be passed to connect.NewServeMux.
+// NewCrossServiceHandler wraps the service implementation in a connect.Service,
+// which can then be passed to connect.NewServeMux.
 //
 // By default, services support the gRPC and gRPC-Web protocols with the binary
 // protobuf and JSON codecs.
-func newUnwrappedCrossService(svc CrossService, opts ...connect.HandlerOption) *connect.Service {
+func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOption) *connect.Service {
 	handlers := make([]connect.Handler, 0, 5)
 	opts = append([]connect.HandlerOption{
 		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
@@ -328,146 +253,27 @@ func newUnwrappedCrossService(svc CrossService, opts ...connect.HandlerOption) *
 	return connect.NewService(handlers, nil)
 }
 
-type pluggableCrossServiceServer struct {
-	ping    func(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error)
-	fail    func(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error)
-	sum     func(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error
-	countUp func(context.Context, *connect.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error
-	cumSum  func(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
-}
+// UnimplementedCrossServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedCrossServiceHandler struct{}
 
-func (s *pluggableCrossServiceServer) Ping(ctx context.Context, req *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error) {
-	return s.ping(ctx, req)
-}
+var _ CrossServiceHandler = (*UnimplementedCrossServiceHandler)(nil) // verify interface implementation
 
-func (s *pluggableCrossServiceServer) Fail(ctx context.Context, req *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error) {
-	return s.fail(ctx, req)
-}
-
-func (s *pluggableCrossServiceServer) Sum(ctx context.Context, stream *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error {
-	return s.sum(ctx, stream)
-}
-
-func (s *pluggableCrossServiceServer) CountUp(ctx context.Context, req *connect.Request[v1test.CountUpRequest], stream *handlerstream.Server[v1test.CountUpResponse]) error {
-	return s.countUp(ctx, req, stream)
-}
-
-func (s *pluggableCrossServiceServer) CumSum(ctx context.Context, stream *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error {
-	return s.cumSum(ctx, stream)
-}
-
-// NewCrossService wraps the service implementation in a connect.Service, ready
-// for use with connect.NewServeMux. By default, services support the gRPC and
-// gRPC-Web protocols with the binary protobuf and JSON codecs.
-//
-// The service implementation may mix and match the signatures of CrossService
-// and the simplified signatures described in its comments. For each method,
-// NewCrossService first tries to find a simplified implementation. If a simple
-// implementation isn't available, it falls back to the more complex
-// implementation. If neither is available, connect.NewServeMux will return an
-// error.
-//
-// Taken together, this approach lets implementations embed
-// UnimplementedCrossService and implement each method using whichever signature
-// is most convenient.
-func NewCrossService(svc any, opts ...connect.HandlerOption) *connect.Service {
-	var impl pluggableCrossServiceServer
-
-	// Find an implementation of Ping
-	if pinger, ok := svc.(interface {
-		Ping(context.Context, *v1test.PingRequest) (*v1test.PingResponse, error)
-	}); ok {
-		impl.ping = func(ctx context.Context, req *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error) {
-			res, err := pinger.Ping(ctx, req.Msg)
-			if err != nil {
-				return nil, err
-			}
-			return connect.NewResponse(res), nil
-		}
-	} else if pinger, ok := svc.(interface {
-		Ping(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error)
-	}); ok {
-		impl.ping = pinger.Ping
-	} else {
-		return connect.NewService(nil, errors.New("no Ping implementation found"))
-	}
-
-	// Find an implementation of Fail
-	if failer, ok := svc.(interface {
-		Fail(context.Context, *v1test.FailRequest) (*v1test.FailResponse, error)
-	}); ok {
-		impl.fail = func(ctx context.Context, req *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error) {
-			res, err := failer.Fail(ctx, req.Msg)
-			if err != nil {
-				return nil, err
-			}
-			return connect.NewResponse(res), nil
-		}
-	} else if failer, ok := svc.(interface {
-		Fail(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error)
-	}); ok {
-		impl.fail = failer.Fail
-	} else {
-		return connect.NewService(nil, errors.New("no Fail implementation found"))
-	}
-
-	// Find an implementation of Sum
-	if sumer, ok := svc.(interface {
-		Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error
-	}); ok {
-		impl.sum = sumer.Sum
-	} else {
-		return connect.NewService(nil, errors.New("no Sum implementation found"))
-	}
-
-	// Find an implementation of CountUp
-	if countUper, ok := svc.(interface {
-		CountUp(context.Context, *v1test.CountUpRequest, *handlerstream.Server[v1test.CountUpResponse]) error
-	}); ok {
-		impl.countUp = func(ctx context.Context, req *connect.Request[v1test.CountUpRequest], stream *handlerstream.Server[v1test.CountUpResponse]) error {
-			return countUper.CountUp(ctx, req.Msg, stream)
-		}
-	} else if countUper, ok := svc.(interface {
-		CountUp(context.Context, *connect.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error
-	}); ok {
-		impl.countUp = countUper.CountUp
-	} else {
-		return connect.NewService(nil, errors.New("no CountUp implementation found"))
-	}
-
-	// Find an implementation of CumSum
-	if cumSumer, ok := svc.(interface {
-		CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
-	}); ok {
-		impl.cumSum = cumSumer.CumSum
-	} else {
-		return connect.NewService(nil, errors.New("no CumSum implementation found"))
-	}
-
-	return newUnwrappedCrossService(&impl, opts...)
-}
-
-var _ CrossService = (*UnimplementedCrossService)(nil) // verify interface implementation
-
-// UnimplementedCrossService returns CodeUnimplemented from all methods.
-type UnimplementedCrossService struct{}
-
-func (UnimplementedCrossService) Ping(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error) {
+func (UnimplementedCrossServiceHandler) Ping(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error) {
 	return nil, connect.Errorf(connect.CodeUnimplemented, "cross.v1test.CrossService.Ping isn't implemented")
 }
 
-func (UnimplementedCrossService) Fail(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error) {
+func (UnimplementedCrossServiceHandler) Fail(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error) {
 	return nil, connect.Errorf(connect.CodeUnimplemented, "cross.v1test.CrossService.Fail isn't implemented")
 }
 
-func (UnimplementedCrossService) Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error {
+func (UnimplementedCrossServiceHandler) Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error {
 	return connect.Errorf(connect.CodeUnimplemented, "cross.v1test.CrossService.Sum isn't implemented")
 }
 
-func (UnimplementedCrossService) CountUp(context.Context, *connect.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error {
+func (UnimplementedCrossServiceHandler) CountUp(context.Context, *connect.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error {
 	return connect.Errorf(connect.CodeUnimplemented, "cross.v1test.CrossService.CountUp isn't implemented")
 }
 
-func (UnimplementedCrossService) CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error {
+func (UnimplementedCrossServiceHandler) CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error {
 	return connect.Errorf(connect.CodeUnimplemented, "cross.v1test.CrossService.CumSum isn't implemented")
 }
