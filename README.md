@@ -43,17 +43,20 @@ import (
 )
 
 type PingServer struct {
-  pingrpc.UnimplementedPingService // returns errors from all methods
+  pingrpc.UnimplementedPingServiceHandler // returns errors from all methods
 }
 
-func (ps *PingServer) Ping(ctx context.Context, req *pingpb.PingRequest) (*pingpb.PingResponse, error) {
-  return &pingpb.PingResponse{Number: 42}, nil
+func (ps *PingServer) Ping(
+  ctx context.Context,
+  req *connect.Request[pingpb.PingRequest]) (*connect.Response[pingpb.PingResponse], error) {
+  return connect.NewRequest(&pingpb.PingResponse{
+    Number: 42,
+  }), nil
 }
 
 func main() {
   mux, err := connect.NewServeMux(
-    connect.NewNotFoundHandler(),         // fallback
-    pingpb.NewPingService(&PingServer{}), // our logic
+    pingpb.WithPingServiceHandler(&PingServer{}), // our logic
   )
   if err != nil {
     panic(err)

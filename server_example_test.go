@@ -43,10 +43,9 @@ func Example() {
 	// http.Handler, connect works with any Go HTTP middleware (e.g., net/http's
 	// StripPrefix).
 	mux, err := connect.NewServeMux(
-		connect.NewNotFoundHandler(),                    // fallback handler
-		pingrpc.NewPingServiceHandler(ping, reg, limit), // business logic
-		reflection.NewService(reg),                      // server reflection
-		health.NewService(checker),                      // health checks
+		pingrpc.WithPingServiceHandler(ping, reg, limit), // business logic
+		reflection.WithHandler(reg),                      // server reflection
+		health.WithHandler(checker),                      // health checks
 	)
 	if err != nil {
 		panic(err)

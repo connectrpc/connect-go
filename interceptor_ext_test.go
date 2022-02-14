@@ -56,8 +56,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 		called = false
 	}
 	mux, err := connect.NewServeMux(
-		connect.NewNotFoundHandler(),
-		pingrpc.NewPingServiceHandler(
+		pingrpc.WithPingServiceHandler(
 			pingServer{},
 			connect.Interceptors(&assertCalledInterceptor{&called}),
 		),
@@ -173,8 +172,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	)
 
 	mux, err := connect.NewServeMux(
-		connect.NewNotFoundHandler(),
-		pingrpc.NewPingServiceHandler(
+		pingrpc.WithPingServiceHandler(
 			pingServer{},
 			handlerOnion,
 		),

@@ -16,12 +16,11 @@ import (
 func TestHealth(t *testing.T) {
 	reg := connect.NewRegistrar()
 	mux, err := connect.NewServeMux(
-		connect.NewNotFoundHandler(),
-		pingrpc.NewPingServiceHandler(
+		pingrpc.WithPingServiceHandler(
 			pingrpc.UnimplementedPingServiceHandler{},
 			reg,
 		),
-		health.NewService(health.NewChecker(reg)),
+		health.WithHandler(health.NewChecker(reg)),
 	)
 	assert.Nil(t, err, "mux construction error")
 	server := httptest.NewUnstartedServer(mux)

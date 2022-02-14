@@ -104,10 +104,9 @@ func TestServerProtoGRPC(t *testing.T) {
 	const errMsg = "oh no"
 	reg := connect.NewRegistrar()
 	mux, err := connect.NewServeMux(
-		connect.NewNotFoundHandler(),
-		pingrpc.NewPingServiceHandler(pingServer{}, reg),
-		health.NewService(health.NewChecker(reg)),
-		reflection.NewService(reg),
+		pingrpc.WithPingServiceHandler(pingServer{}, reg),
+		health.WithHandler(health.NewChecker(reg)),
+		reflection.WithHandler(reg),
 	)
 	assert.Nil(t, err, "mux construction error")
 
@@ -303,8 +302,7 @@ func TestHeaderBasic(t *testing.T) {
 		},
 	}
 	mux, err := connect.NewServeMux(
-		connect.NewNotFoundHandler(),
-		pingrpc.NewPingServiceHandler(srv),
+		pingrpc.WithPingServiceHandler(srv),
 	)
 	assert.Nil(t, err, "mux construction error")
 	server := httptest.NewServer(mux)

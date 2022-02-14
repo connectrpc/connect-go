@@ -17,8 +17,7 @@ import (
 func TestHandlerReadMaxBytes(t *testing.T) {
 	const readMaxBytes = 32
 	ping, err := connect.NewServeMux(
-		connect.NewNotFoundHandler(),
-		pingrpc.NewPingServiceHandler(
+		pingrpc.WithPingServiceHandler(
 			&ExamplePingServer{},
 			connect.ReadMaxBytes(readMaxBytes),
 		),

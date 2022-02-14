@@ -434,9 +434,8 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrossServiceClient, opts ..
 func TestConnectServer(t *testing.T) {
 	reg := connect.NewRegistrar()
 	mux, err := connect.NewServeMux(
-		connect.NewNotFoundHandler(),
-		crossrpc.NewCrossServiceHandler(crossServerConnect{}, reg),
-		reflection.NewService(reg),
+		crossrpc.WithCrossServiceHandler(crossServerConnect{}, reg),
+		reflection.WithHandler(reg),
 	)
 	assert.Nil(t, err, "mux construction error")
 	server := httptest.NewUnstartedServer(mux)
@@ -512,8 +511,7 @@ func TestConnectServer(t *testing.T) {
 
 func TestConnectServerH2C(t *testing.T) {
 	mux, err := connect.NewServeMux(
-		connect.NewNotFoundHandler(),
-		crossrpc.NewCrossServiceHandler(crossServerConnect{}),
+		crossrpc.WithCrossServiceHandler(crossServerConnect{}),
 	)
 	assert.Nil(t, err, "mux construction error")
 	server := httptest.NewServer(h2c.NewHandler(mux, &http2.Server{}))

@@ -82,12 +82,12 @@ type ServerReflectionHandler interface {
 	ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error
 }
 
-// NewServerReflectionHandler wraps the service implementation in a
-// connect.Service, which can then be passed to connect.NewServeMux.
+// WithServerReflectionHandler wraps the service implementation in a
+// connect.MuxOption, which can then be passed to connect.NewServeMux.
 //
 // By default, services support the gRPC and gRPC-Web protocols with the binary
 // protobuf and JSON codecs.
-func NewServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.HandlerOption) *connect.Service {
+func WithServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.HandlerOption) connect.MuxOption {
 	handlers := make([]connect.Handler, 0, 1)
 	opts = append([]connect.HandlerOption{
 		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
@@ -107,11 +107,11 @@ func NewServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.Han
 		opts...,
 	)
 	if err != nil {
-		return connect.NewService(nil, err)
+		return connect.WithHandlers(nil, err)
 	}
 	handlers = append(handlers, *serverReflectionInfo)
 
-	return connect.NewService(handlers, nil)
+	return connect.WithHandlers(handlers, nil)
 }
 
 // UnimplementedServerReflectionHandler returns CodeUnimplemented from all
