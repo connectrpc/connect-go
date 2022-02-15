@@ -12,5 +12,4 @@ plugins:
     out: internal/gen/proto/go-connect
     opt:
       - paths=source_relative
-      - external_go_types=true
     path: ./bin/protoc-gen-go-connect
