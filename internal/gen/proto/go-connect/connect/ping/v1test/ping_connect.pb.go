@@ -22,7 +22,7 @@ import (
 // newer than the one compiled into your binary. You can fix the problem by
 // either regenerating this code with an older version of connect or updating
 // the connect version compiled into your binary.
-const _ = connect.SupportsCodeGenV0 // requires connect v0.0.1 or later
+const _ = connect.IsAtLeastVersion0_0_1
 
 // PingServiceClient is a client for the connect.ping.v1test.PingService
 // service.

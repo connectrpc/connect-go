@@ -17,5 +17,5 @@ const (
 // These constants are used in compile-time handshakes with connect's generated
 // code.
 const (
-	SupportsCodeGenV0 = iota
+	IsAtLeastVersion0_0_1 = true
 )

@@ -86,7 +86,7 @@ func handshake(g *protogen.GeneratedFile) {
 		"isn't defined, this code was generated with a version of connect newer than the one ",
 		"compiled into your binary. You can fix the problem by either regenerating this code ",
 		"with an older version of connect or updating the connect version compiled into your binary.")
-	g.P("const _ = ", connectPackage.Ident("SupportsCodeGenV0"), " // requires connect v0.0.1 or later")
+	g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion0_0_1"))
 	g.P()
 }
 
