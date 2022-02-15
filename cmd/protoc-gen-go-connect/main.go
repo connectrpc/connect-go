@@ -33,24 +33,26 @@ func main() {
 	}
 
 	var flags flag.FlagSet
-	// By default, behave like the gRPC and Twirp plugins and generate code in
-	// the same package as protoc-gen-go's output (typically determined by the
-	// "go_package" file option).
+	// By default, generate our code into a separate package from protoc-gen-go's
+	// output (typically determined by the "go_package" file option). In this
+	// mode, connect's generated code imports message types from the base
+	// package. This lets us safely generate code with short names, since we
+	// don't need to worry about collisions with gRPC, Twirp, or whatever other
+	// plugins the user might run.
 	//
-	// Setting this flag generates our code into a separate package, importing
-	// message types from the base package. This escape hatch lets us generate
-	// code with shorter names, since we don't need to worry about collisions
-	// with gRPC, Twirp, or whatever other plugins the user might run.
-	externalGoTypes := flags.Bool(
-		"external_go_types",
+	// When this flag is set, behave like the gRPC and Twirp plugins and generate
+	// code in the same package as the basic message types. This increases the
+	// likelihood of compile-time name collisions.
+	colocateGoTypes := flags.Bool(
+		"colocate_go_types",
 		false,
-		"Generate RPC code in a separate package from the basic Go types.",
+		"Generate RPC code in the same package as the basic Go types.",
 	)
 	protogen.Options{ParamFunc: flags.Set}.Run(func(gen *protogen.Plugin) error {
 		gen.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL)
 		for _, f := range gen.Files {
 			if f.Generate {
-				generate(gen, f, *externalGoTypes)
+				generate(gen, f, *colocateGoTypes)
 			}
 		}
 		return nil
