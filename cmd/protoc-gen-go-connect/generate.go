@@ -31,15 +31,12 @@ var (
 	errorsIs                = errorsPackage.Ident("Is")
 )
 
-func generate(gen *protogen.Plugin, file *protogen.File, samePackage bool) *protogen.GeneratedFile {
+func generate(gen *protogen.Plugin, file *protogen.File) *protogen.GeneratedFile {
 	if len(file.Services) == 0 {
 		return nil
 	}
 	filename := file.GeneratedFilenamePrefix + "_connect.pb.go"
 	var path protogen.GoImportPath
-	if samePackage {
-		path = file.GoImportPath
-	}
 	g := gen.NewGeneratedFile(filename, path)
 	preamble(gen, file, g)
 	content(file, g)
