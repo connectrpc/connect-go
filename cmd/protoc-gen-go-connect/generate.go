@@ -20,6 +20,7 @@ const (
 
 	connectPackage      = protogen.GoImportPath("github.com/bufconnect/connect")
 	connectProtoPackage = protogen.GoImportPath("github.com/bufconnect/connect/codec/protobuf")
+	connectGzipPackage  = protogen.GoImportPath("github.com/bufconnect/connect/compress/gzip")
 	cstreamPackage      = protogen.GoImportPath("github.com/bufconnect/connect/clientstream")
 	hstreamPackage      = protogen.GoImportPath("github.com/bufconnect/connect/handlerstream")
 )
@@ -395,8 +396,11 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		") ", connectPackage.Ident("MuxOption"), " {")
 	g.P("handlers := make([]", connectPackage.Ident("Handler"), ", 0, ", len(service.Methods), ")")
 	g.P("opts = append([]", handlerOption, "{")
+	g.P(connectPackage.Ident("HandleGRPC"), "(true),")
+	g.P(connectPackage.Ident("HandleGRPCWeb"), "(true),")
 	g.P(connectPackage.Ident("Codec"), "(", connectProtoPackage.Ident("NameBinary"), ", ", connectProtoPackage.Ident("NewBinary"), "()", "),")
 	g.P(connectPackage.Ident("Codec"), "(", connectProtoPackage.Ident("NameJSON"), ", ", connectProtoPackage.Ident("NewJSON"), "()", "),")
+	g.P(connectPackage.Ident("Compressor"), "(", connectGzipPackage.Ident("Name"), ", ", connectGzipPackage.Ident("New"), "()", "),")
 	g.P("}, opts...)")
 	g.P()
 	for _, method := range service.Methods {

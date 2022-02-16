@@ -11,6 +11,7 @@ import (
 	connect "github.com/bufconnect/connect"
 	clientstream "github.com/bufconnect/connect/clientstream"
 	protobuf "github.com/bufconnect/connect/codec/protobuf"
+	gzip "github.com/bufconnect/connect/compress/gzip"
 	handlerstream "github.com/bufconnect/connect/handlerstream"
 	v1test "github.com/bufconnect/connect/internal/crosstest/gen/proto/go/cross/v1test"
 	strings "strings"
@@ -164,8 +165,11 @@ type CrossServiceHandler interface {
 func WithCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOption) connect.MuxOption {
 	handlers := make([]connect.Handler, 0, 5)
 	opts = append([]connect.HandlerOption{
+		connect.HandleGRPC(true),
+		connect.HandleGRPCWeb(true),
 		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
 		connect.Codec(protobuf.NameJSON, protobuf.NewJSON()),
+		connect.Compressor(gzip.Name, gzip.New()),
 	}, opts...)
 
 	ping, err := connect.NewUnaryHandler(

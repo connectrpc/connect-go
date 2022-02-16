@@ -43,7 +43,7 @@ func (o *replaceProcedurePrefixOption) applyToClient(cfg *clientConfiguration) {
 	cfg.Procedure = o.transform(cfg.Procedure)
 }
 
-func (o *replaceProcedurePrefixOption) applyToHandler(cfg *handlerCfg) {
+func (o *replaceProcedurePrefixOption) applyToHandler(cfg *handlerConfiguration) {
 	cfg.Procedure = o.transform(cfg.Procedure)
 	cfg.RegistrationName = "" // disable reflection
 }
@@ -76,7 +76,7 @@ func (o *readMaxBytes) applyToClient(cfg *clientConfiguration) {
 	cfg.MaxResponseBytes = o.Max
 }
 
-func (o *readMaxBytes) applyToHandler(cfg *handlerCfg) {
+func (o *readMaxBytes) applyToHandler(cfg *handlerConfiguration) {
 	cfg.MaxRequestBytes = o.Max
 }
 
@@ -110,7 +110,7 @@ func (o *codecOption) applyToClient(cfg *clientConfiguration) {
 	cfg.CodecName = o.Name
 }
 
-func (o *codecOption) applyToHandler(cfg *handlerCfg) {
+func (o *codecOption) applyToHandler(cfg *handlerConfiguration) {
 	if o.Codec == nil {
 		delete(cfg.Codecs, o.Name)
 		return
@@ -152,7 +152,7 @@ func (o *compressorOption) applyToClient(cfg *clientConfiguration) {
 	o.apply(cfg.Compressors)
 }
 
-func (o *compressorOption) applyToHandler(cfg *handlerCfg) {
+func (o *compressorOption) applyToHandler(cfg *handlerConfiguration) {
 	o.apply(cfg.Compressors)
 }
 
@@ -222,7 +222,7 @@ func (o *interceptOption) applyToClient(cfg *clientConfiguration) {
 	cfg.Interceptor = o.chainWith(cfg.Interceptor)
 }
 
-func (o *interceptOption) applyToHandler(cfg *handlerCfg) {
+func (o *interceptOption) applyToHandler(cfg *handlerConfiguration) {
 	cfg.Interceptor = o.chainWith(cfg.Interceptor)
 }
 

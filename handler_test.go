@@ -16,7 +16,7 @@ import (
 
 func TestHandlerReadMaxBytes(t *testing.T) {
 	const readMaxBytes = 32
-	ping, err := connect.NewServeMux(
+	mux, err := connect.NewServeMux(
 		pingrpc.WithPingServiceHandler(
 			&ExamplePingServer{},
 			connect.ReadMaxBytes(readMaxBytes),
@@ -24,7 +24,7 @@ func TestHandlerReadMaxBytes(t *testing.T) {
 	)
 	assert.Nil(t, err, "mux construction error")
 
-	server := httptest.NewServer(ping)
+	server := httptest.NewServer(mux)
 	defer server.Close()
 	client, err := pingrpc.NewPingServiceClient(server.URL, server.Client())
 	assert.Nil(t, err, "client construction error")
@@ -40,9 +40,11 @@ func TestHandlerReadMaxBytes(t *testing.T) {
 
 	assert.NotNil(t, err, "ping error")
 	assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument, "error code")
+	const expect = "larger than configured max"
 	assert.True(
 		t,
-		strings.Contains(err.Error(), "larger than configured max"),
-		`error msg contains "larger than configured max"`,
+		strings.Contains(err.Error(), expect),
+		"error msg %q contains %q",
+		assert.Fmt(err.Error(), expect),
 	)
 }

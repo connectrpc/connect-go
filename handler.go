@@ -8,10 +8,9 @@ import (
 
 	"github.com/bufconnect/connect/codec"
 	"github.com/bufconnect/connect/compress"
-	"github.com/bufconnect/connect/compress/gzip"
 )
 
-type handlerCfg struct {
+type handlerConfiguration struct {
 	Compressors      map[string]compress.Compressor
 	Codecs           map[string]codec.Codec
 	MaxRequestBytes  int64
@@ -23,30 +22,26 @@ type handlerCfg struct {
 	HandleGRPCWeb    bool
 }
 
-func newHandlerConfiguration(procedure, registrationName string, opts []HandlerOption) (*handlerCfg, *Error) {
-	cfg := handlerCfg{
+func newHandlerConfiguration(procedure, registrationName string, options []HandlerOption) (*handlerConfiguration, *Error) {
+	config := handlerConfiguration{
 		Procedure:        procedure,
 		RegistrationName: registrationName,
-		Compressors: map[string]compress.Compressor{
-			gzip.Name: gzip.New(),
-		},
-		Codecs:        make(map[string]codec.Codec),
-		HandleGRPC:    true,
-		HandleGRPCWeb: true,
+		Compressors:      make(map[string]compress.Compressor),
+		Codecs:           make(map[string]codec.Codec),
 	}
-	for _, opt := range opts {
-		opt.applyToHandler(&cfg)
+	for _, opt := range options {
+		opt.applyToHandler(&config)
 	}
-	if err := cfg.Validate(); err != nil {
+	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	if reg := cfg.Registrar; reg != nil && cfg.RegistrationName != "" {
-		reg.register(cfg.RegistrationName)
+	if reg := config.Registrar; reg != nil && config.RegistrationName != "" {
+		reg.register(config.RegistrationName)
 	}
-	return &cfg, nil
+	return &config, nil
 }
 
-func (c *handlerCfg) Validate() *Error {
+func (c *handlerConfiguration) Validate() *Error {
 	if _, ok := c.Codecs[""]; ok {
 		return Wrap(
 			CodeUnknown,
@@ -59,17 +54,23 @@ func (c *handlerCfg) Validate() *Error {
 			errors.New("can't register compressor with an empty name"),
 		)
 	}
+	if !(c.HandleGRPC || c.HandleGRPCWeb) {
+		return Wrap(
+			CodeUnknown,
+			errors.New("handlers must support at least one protocol"),
+		)
+	}
 	return nil
 }
 
-func (c *handlerCfg) newSpecification(t StreamType) Specification {
+func (c *handlerConfiguration) newSpecification(streamType StreamType) Specification {
 	return Specification{
 		Procedure: c.Procedure,
-		Type:      t,
+		Type:      streamType,
 	}
 }
 
-func (c *handlerCfg) newProtocolHandlers(stype StreamType) ([]protocolHandler, *Error) {
+func (c *handlerConfiguration) newProtocolHandlers(streamType StreamType) ([]protocolHandler, *Error) {
 	var protocols []protocol
 	if c.HandleGRPC {
 		protocols = append(protocols, &grpc{web: false})
@@ -80,9 +81,9 @@ func (c *handlerCfg) newProtocolHandlers(stype StreamType) ([]protocolHandler, *
 	handlers := make([]protocolHandler, 0, len(protocols))
 	codecs := newReadOnlyCodecs(c.Codecs)
 	compressors := newReadOnlyCompressors(c.Compressors)
-	for _, p := range protocols {
-		ph, err := p.NewHandler(&protocolHandlerParams{
-			Spec:            c.newSpecification(stype),
+	for _, protocol := range protocols {
+		protocolHandler, err := protocol.NewHandler(&protocolHandlerParams{
+			Spec:            c.newSpecification(streamType),
 			Codecs:          codecs,
 			Compressors:     compressors,
 			MaxRequestBytes: c.MaxRequestBytes,
@@ -90,7 +91,7 @@ func (c *handlerCfg) newProtocolHandlers(stype StreamType) ([]protocolHandler, *
 		if err != nil {
 			return nil, Wrap(CodeUnknown, err)
 		}
-		handlers = append(handlers, ph)
+		handlers = append(handlers, protocolHandler)
 	}
 	return handlers, nil
 }
@@ -100,7 +101,7 @@ func (c *handlerCfg) newProtocolHandlers(stype StreamType) ([]protocolHandler, *
 // In addition to any options grouped in the documentation below, remember that
 // Registrars and Options are also valid HandlerOptions.
 type HandlerOption interface {
-	applyToHandler(*handlerCfg)
+	applyToHandler(*handlerConfiguration)
 }
 
 type handleGRPCWebOption struct {
@@ -108,14 +109,27 @@ type handleGRPCWebOption struct {
 }
 
 // HandleGRPCWeb enables or disables support for the gRPC-Web protocol. By
-// default, gRPC-Web is enabled. Note that handlers always support the standard
-// HTTP/2 gRPC protocol.
+// default, code generated with protoc-gen-go-connect enables gRPC-Web.
 func HandleGRPCWeb(enable bool) HandlerOption {
 	return &handleGRPCWebOption{enable}
 }
 
-func (o *handleGRPCWebOption) applyToHandler(c *handlerCfg) {
+func (o *handleGRPCWebOption) applyToHandler(c *handlerConfiguration) {
 	c.HandleGRPCWeb = o.enable
+}
+
+type handleGRPCOption struct {
+	enable bool
+}
+
+// HandleGRPC enables or disables support for the HTTP/2 gRPC protocol. By
+// default, code generated with protoc-gen-go-connect enables gRPC.
+func HandleGRPC(enable bool) HandlerOption {
+	return &handleGRPCOption{enable}
+}
+
+func (o *handleGRPCOption) applyToHandler(c *handlerConfiguration) {
+	c.HandleGRPC = o.enable
 }
 
 // A Handler is the server-side implementation of a single RPC defined by a
@@ -132,45 +146,43 @@ type Handler struct {
 	protocolHandlers []protocolHandler
 }
 
-// NewUnaryHandler constructs a Handler. The supplied package, service, and
-// method names must be protobuf identifiers. For example, a handler for the
-// URL "/acme.foo.v1.FooService/Bar" would have package "acme.foo.v1", service
-// "FooService", and method "Bar".
+// NewUnaryHandler constructs a Handler for a request-response procedure.
 //
-// Remember that NewUnaryHandler is usually called from generated code - most
-// users won't need to deal with protobuf identifiers directly.
+// NewUnaryHandler is usually called from generated code - most users won't
+// need to produce fully-qualified procedure and registration names by hand.
 func NewUnaryHandler[Req, Res any](
 	procedure, registrationName string,
 	unary func(context.Context, *Request[Req]) (*Response[Res], error),
-	opts ...HandlerOption,
+	options ...HandlerOption,
 ) (*Handler, error) {
-	cfg, err := newHandlerConfiguration(procedure, registrationName, opts)
+	config, err := newHandlerConfiguration(procedure, registrationName, options)
 	if err != nil {
 		return nil, err
 	}
+	// Given a (possibly failed) stream, how should we call the unary function?
 	implementation := func(ctx context.Context, sender Sender, receiver Receiver, clientVisibleError error) {
 		defer receiver.Close()
 
-		var req *Request[Req]
+		var request *Request[Req]
 		if clientVisibleError != nil {
 			// The protocol implementation failed to establish a stream. To make the
 			// resulting error visible to the interceptor stack, we still want to
 			// call the wrapped unary Func. To do that safely, we need a useful
-			// Request struct. (Note that we are *not* actually calling the
-			// handler's implementation.)
-			req = receiveRequestMetadata[Req](receiver)
+			// Request struct. (Note that we do *not* actually calling the handler's
+			// implementation.)
+			request = receiveRequestMetadata[Req](receiver)
 		} else {
 			var err error
-			req, err = ReceiveRequest[Req](receiver)
+			request, err = ReceiveRequest[Req](receiver)
 			if err != nil {
 				// Interceptors should see this error too. Just as above, they need a
 				// useful Request.
 				clientVisibleError = err
-				req = receiveRequestMetadata[Req](receiver)
+				request = receiveRequestMetadata[Req](receiver)
 			}
 		}
 
-		untyped := Func(func(ctx context.Context, req AnyRequest) (AnyResponse, error) {
+		untyped := Func(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
 			if clientVisibleError != nil {
 				// We've already encountered an error, short-circuit before calling the
 				// handler's implementation.
@@ -179,68 +191,65 @@ func NewUnaryHandler[Req, Res any](
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			typed, ok := req.(*Request[Req])
+			typed, ok := request.(*Request[Req])
 			if !ok {
-				return nil, Errorf(CodeInternal, "unexpected handler request type %T", req)
+				return nil, Errorf(CodeInternal, "unexpected handler request type %T", request)
 			}
 			return unary(ctx, typed)
 		})
-		if ic := cfg.Interceptor; ic != nil {
+		if ic := config.Interceptor; ic != nil {
 			untyped = ic.Wrap(untyped)
 		}
 
-		res, err := untyped(ctx, req)
+		response, err := untyped(ctx, request)
 		if err != nil {
 			_ = sender.Close(err)
 			return
 		}
-		mergeHeaders(sender.Header(), res.Header())
-		_ = sender.Close(sender.Send(res.Any()))
+		mergeHeaders(sender.Header(), response.Header())
+		_ = sender.Close(sender.Send(response.Any()))
 	}
 
-	protocolHandlers, err := cfg.newProtocolHandlers(StreamTypeUnary)
+	protocolHandlers, err := config.newProtocolHandlers(StreamTypeUnary)
 	if err != nil {
 		return nil, err
 	}
 	return &Handler{
-		spec:             cfg.newSpecification(StreamTypeUnary),
+		spec:             config.newSpecification(StreamTypeUnary),
 		interceptor:      nil, // already applied
 		implementation:   implementation,
 		protocolHandlers: protocolHandlers,
 	}, nil
 }
 
-// NewStreamingHandler constructs a Handler. The supplied package, service, and
-// method names must be protobuf identifiers. For example, a handler for the
-// URL "/acme.foo.v1.FooService/Bar" would have package "acme.foo.v1", service
-// "FooService", and method "Bar".
+// NewStreamingHandler constructs a Handler for a streaming procedure.
 //
-// Remember that NewStreamingHandler is usually called from generated code -
-// most users won't need to deal with protobuf identifiers directly.
+// NewStreamingHandler is usually called from generated code - most users won't
+// need to produce fully-qualified procedure and registration names by hand.
 func NewStreamingHandler(
-	stype StreamType,
+	streamType StreamType,
 	procedure, registrationName string,
 	implementation func(context.Context, Sender, Receiver),
-	opts ...HandlerOption,
+	options ...HandlerOption,
 ) (*Handler, error) {
-	cfg, err := newHandlerConfiguration(procedure, registrationName, opts)
+	config, err := newHandlerConfiguration(procedure, registrationName, options)
 	if err != nil {
 		return nil, err
 	}
-	protocolHandlers, err := cfg.newProtocolHandlers(stype)
+	protocolHandlers, err := config.newProtocolHandlers(streamType)
 	if err != nil {
 		return nil, err
 	}
 	return &Handler{
-		spec:        cfg.newSpecification(stype),
-		interceptor: cfg.Interceptor,
-		implementation: func(ctx context.Context, s Sender, r Receiver, clientVisibleErr error) {
+		spec:        config.newSpecification(streamType),
+		interceptor: config.Interceptor,
+		implementation: func(ctx context.Context, sender Sender, receiver Receiver, clientVisibleErr error) {
 			if clientVisibleErr != nil {
-				_ = r.Close()
-				_ = s.Close(clientVisibleErr)
+				_ = receiver.Close()
+				_ = sender.Close(clientVisibleErr)
 				return
 			}
-			implementation(ctx, s, r)
+			implementation(ctx, sender, receiver)
 		},
 		protocolHandlers: protocolHandlers,
 	}, nil
@@ -259,9 +268,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	methodHandlers := make([]protocolHandler, 0, len(h.protocolHandlers))
-	for _, ph := range h.protocolHandlers {
-		if ph.ShouldHandleMethod(r.Method) {
-			methodHandlers = append(methodHandlers, ph)
+	for _, protocolHandler := range h.protocolHandlers {
+		if protocolHandler.ShouldHandleMethod(r.Method) {
+			methodHandlers = append(methodHandlers, protocolHandler)
 		}
 	}
 	if len(methodHandlers) == 0 {
@@ -273,21 +282,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// TODO: for GETs, we should parse the Accept header and offer each handler
 	// each content-type.
-	ctype := r.Header.Get("Content-Type")
-	for _, ph := range methodHandlers {
-		if !ph.ShouldHandleContentType(ctype) {
+	contentType := r.Header.Get("Content-Type")
+	for _, protocolHandler := range methodHandlers {
+		if !protocolHandler.ShouldHandleContentType(contentType) {
 			continue
 		}
 		ctx := r.Context()
 		if ic := h.interceptor; ic != nil {
 			ctx = ic.WrapContext(ctx)
 		}
-		// Most errors returned from ph.NewStream are caused by invalid requests.
-		// For example, the client may have specified an invalid timeout or an
-		// unavailable codec. We'd like those errors to be visible to the
-		// interceptor chain, so we're going to capture them here and pass them to
-		// the implementation.
-		sender, receiver, clientVisibleError := ph.NewStream(w, r.WithContext(ctx))
+		// Most errors returned from protocolHandler.NewStream are caused by
+		// invalid requests. For example, the client may have specified an invalid
+		// timeout or an unavailable codec. We'd like those errors to be visible to
+		// the interceptor chain, so we're going to capture them here and pass them
+		// to the implementation.
+		sender, receiver, clientVisibleError := protocolHandler.NewStream(w, r.WithContext(ctx))
 		// If NewStream errored and the protocol doesn't want the error sent to
 		// the client, sender and/or receiver may be nil. We still want the
 		// error to be seen by interceptors, so we provide no-op Sender and

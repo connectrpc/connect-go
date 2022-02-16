@@ -51,6 +51,6 @@ func (r *Registrar) register(name string) {
 	r.mu.Unlock()
 }
 
-func (r *Registrar) applyToHandler(cfg *handlerCfg) {
+func (r *Registrar) applyToHandler(cfg *handlerConfiguration) {
 	cfg.Registrar = r
 }
