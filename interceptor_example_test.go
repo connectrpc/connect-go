@@ -2,9 +2,7 @@ package connect_test
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"net/http"
 	"os"
 
 	"github.com/bufconnect/connect"
@@ -14,58 +12,59 @@ import (
 
 func ExampleInterceptor() {
 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
-	logProcedure := connect.UnaryInterceptorFunc(func(next connect.Func) connect.Func {
+
+	loggingInterceptor := connect.UnaryInterceptorFunc(func(next connect.Func) connect.Func {
 		return connect.Func(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			fmt.Println("calling", req.Spec().Procedure)
-			return next(ctx, req)
+			logger.Println("calling:", req.Spec().Procedure)
+			logger.Println("request:", req.Any())
+			res, err := next(ctx, req)
+			logger.Println("response:", res.Any())
+			return res, err
 		})
 	})
-	// This interceptor prevents the client from making network requests in
-	// examples. Leave it out in real code!
-	short := ShortCircuit(connect.Errorf(connect.CodeUnimplemented, "no networking in examples"))
+
 	client, err := pingrpc.NewPingServiceClient(
-		"https://invalid-test-url",
-		http.DefaultClient,
-		connect.Interceptors(logProcedure, short),
+		examplePingServer.URL(),
+		examplePingServer.Client(),
+		connect.Interceptors(loggingInterceptor),
 	)
 	if err != nil {
-		logger.Print("Error: ", err)
+		logger.Println("error:", err)
 		return
 	}
-	client.Ping(context.Background(), connect.NewRequest(&pingpb.PingRequest{}))
+	client.Ping(context.Background(), connect.NewRequest(&pingpb.PingRequest{Number: 42}))
 
 	// Output:
-	// calling connect.ping.v1test.PingService/Ping
+	// calling: connect.ping.v1test.PingService/Ping
+	// request: number:42
+	// response: number:42
 }
 
 func ExampleInterceptors() {
 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 	outer := connect.UnaryInterceptorFunc(func(next connect.Func) connect.Func {
 		return connect.Func(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			fmt.Println("outer interceptor: before call")
+			logger.Println("outer interceptor: before call")
 			res, err := next(ctx, req)
-			fmt.Println("outer interceptor: after call")
+			logger.Println("outer interceptor: after call")
 			return res, err
 		})
 	})
 	inner := connect.UnaryInterceptorFunc(func(next connect.Func) connect.Func {
 		return connect.Func(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			fmt.Println("inner interceptor: before call")
+			logger.Println("inner interceptor: before call")
 			res, err := next(ctx, req)
-			fmt.Println("inner interceptor: after call")
+			logger.Println("inner interceptor: after call")
 			return res, err
 		})
 	})
-	// This interceptor prevents the client from making network requests in
-	// examples. Leave it out in real code!
-	short := ShortCircuit(connect.Errorf(connect.CodeUnimplemented, "no networking in examples"))
 	client, err := pingrpc.NewPingServiceClient(
-		"https://invalid-test-url",
-		http.DefaultClient,
-		connect.Interceptors(outer, inner, short),
+		examplePingServer.URL(),
+		examplePingServer.Client(),
+		connect.Interceptors(outer, inner),
 	)
 	if err != nil {
-		logger.Print("Error: ", err)
+		logger.Println("error:", err)
 		return
 	}
 	client.Ping(context.Background(), connect.NewRequest(&pingpb.PingRequest{}))
