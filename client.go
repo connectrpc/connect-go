@@ -10,12 +10,6 @@ import (
 	"github.com/bufconnect/connect/compress/gzip"
 )
 
-// Doer is the transport-level interface connect expects HTTP clients to
-// implement. The standard library's http.Client implements Doer.
-type Doer interface {
-	Do(*http.Request) (*http.Response, error)
-}
-
 type clientCfg struct {
 	Protocol          protocol
 	Procedure         string
