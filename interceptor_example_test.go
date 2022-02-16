@@ -40,7 +40,7 @@ func ExampleInterceptor() {
 	// response: number:42
 }
 
-func ExampleInterceptors() {
+func ExampleWithInterceptors() {
 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 	outer := connect.UnaryInterceptorFunc(func(next connect.Func) connect.Func {
 		return connect.Func(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
