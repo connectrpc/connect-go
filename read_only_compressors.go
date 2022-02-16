@@ -6,26 +6,26 @@ import (
 	"github.com/bufconnect/connect/compress"
 )
 
-// roCompressors is a read-only interface to a map of named compressors.
-type roCompressors interface {
+// readOnlyCompressors is a read-only interface to a map of named compressors.
+type readOnlyCompressors interface {
 	Get(string) compress.Compressor
 	Contains(string) bool
 	Names() string
 }
 
 type compressorMap struct {
-	m     map[string]compress.Compressor
-	names string
+	compressors map[string]compress.Compressor
+	names       string
 }
 
-func newROCompressors(m map[string]compress.Compressor) *compressorMap {
-	known := make([]string, 0, len(m))
-	for name := range m {
+func newReadOnlyCompressors(compressors map[string]compress.Compressor) *compressorMap {
+	known := make([]string, 0, len(compressors))
+	for name := range compressors {
 		known = append(known, name)
 	}
 	return &compressorMap{
-		m:     m,
-		names: strings.Join(known, ","),
+		compressors: compressors,
+		names:       strings.Join(known, ","),
 	}
 }
 
@@ -33,11 +33,11 @@ func (m *compressorMap) Get(name string) compress.Compressor {
 	if name == "" || name == compress.NameIdentity {
 		return nil
 	}
-	return m.m[name]
+	return m.compressors[name]
 }
 
 func (m *compressorMap) Contains(name string) bool {
-	_, ok := m.m[name]
+	_, ok := m.compressors[name]
 	return ok
 }
 

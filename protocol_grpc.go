@@ -49,7 +49,7 @@ type grpcHandler struct {
 	spec            Specification
 	web             bool
 	codecs          readOnlyCodecs
-	compressors     roCompressors
+	compressors     readOnlyCompressors
 	maxRequestBytes int64
 	accept          string
 }
@@ -189,7 +189,7 @@ type grpcClient struct {
 	spec                 Specification
 	web                  bool
 	compressorName       string
-	compressors          roCompressors
+	compressors          readOnlyCompressors
 	codecName            string
 	codec                codec.Codec
 	protobuf             codec.Codec

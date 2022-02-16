@@ -31,7 +31,7 @@ type protocol interface {
 type protocolHandlerParams struct {
 	Spec            Specification
 	Codecs          readOnlyCodecs
-	Compressors     roCompressors
+	Compressors     readOnlyCompressors
 	MaxRequestBytes int64
 }
 
@@ -73,7 +73,7 @@ type protocolHandler interface {
 type protocolClientParams struct {
 	Spec             Specification
 	CompressorName   string
-	Compressors      roCompressors
+	Compressors      readOnlyCompressors
 	CodecName        string
 	Codec            codec.Codec
 	MaxResponseBytes int64

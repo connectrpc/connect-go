@@ -127,7 +127,7 @@ func NewClientStream(
 	pclient, perr := cfg.Protocol.NewClient(&protocolClientParams{
 		Spec:             spec,
 		CompressorName:   cfg.RequestCompressor,
-		Compressors:      newROCompressors(cfg.Compressors),
+		Compressors:      newReadOnlyCompressors(cfg.Compressors),
 		CodecName:        cfg.CodecName,
 		Codec:            cfg.Codec,
 		Protobuf:         cfg.Protobuf(),
@@ -173,7 +173,7 @@ func NewClientFunc[Req, Res any](
 	pclient, perr := cfg.Protocol.NewClient(&protocolClientParams{
 		Spec:             spec,
 		CompressorName:   cfg.RequestCompressor,
-		Compressors:      newROCompressors(cfg.Compressors),
+		Compressors:      newReadOnlyCompressors(cfg.Compressors),
 		CodecName:        cfg.CodecName,
 		Codec:            cfg.Codec,
 		Protobuf:         cfg.Protobuf(),

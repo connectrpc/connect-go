@@ -70,7 +70,7 @@ type clientStream struct {
 	response      *http.Response
 	responseReady chan struct{}
 	unmarshaler   unmarshaler
-	compressors   roCompressors
+	compressors   readOnlyCompressors
 
 	responseErrMu sync.Mutex
 	responseErr   error

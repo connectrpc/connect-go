@@ -79,7 +79,7 @@ func (c *handlerCfg) newProtocolHandlers(stype StreamType) ([]protocolHandler, *
 	}
 	handlers := make([]protocolHandler, 0, len(protocols))
 	codecs := newReadOnlyCodecs(c.Codecs)
-	compressors := newROCompressors(c.Compressors)
+	compressors := newReadOnlyCompressors(c.Compressors)
 	for _, p := range protocols {
 		ph, err := p.NewHandler(&protocolHandlerParams{
 			Spec:            c.newSpecification(stype),
