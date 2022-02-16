@@ -238,7 +238,7 @@ func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Rece
 		protobuf:     g.protobuf,
 		writer:       pipeWriter,
 		marshaler: marshaler{
-			w:          pipeWriter,
+			writer:     pipeWriter,
 			compressor: g.compressors.Get(g.compressorName),
 			codec:      g.codec,
 		},

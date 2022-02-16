@@ -271,7 +271,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	// probably a message waiting in the stream.
 	cs.response = res
 	cs.unmarshaler = unmarshaler{
-		r:          res.Body,
+		reader:     res.Body,
 		max:        cs.maxReadBytes,
 		codec:      cs.codec,
 		compressor: cs.compressors.Get(compression),

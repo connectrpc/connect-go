@@ -25,7 +25,7 @@ func newHandlerStream(
 		spec: spec,
 		web:  web,
 		marshaler: marshaler{
-			w:          w,
+			writer:     w,
 			compressor: responseCompressor,
 			codec:      codec,
 		},
@@ -35,7 +35,7 @@ func newHandlerStream(
 	receiver := &handlerReceiver{
 		spec: spec,
 		unmarshaler: unmarshaler{
-			r:          r.Body,
+			reader:     r.Body,
 			max:        maxReadBytes,
 			compressor: requestCompressor,
 			codec:      codec,
