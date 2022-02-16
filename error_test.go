@@ -7,31 +7,33 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bufconnect/connect/internal/assert"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
-
-	"github.com/bufconnect/connect/internal/assert"
 )
 
 func TestErrorCodeOK(t *testing.T) {
-	// Must use == rather than assert.Equal to avoid being fooled by
-	// typed nils.
-	assert.True(t, Wrap(CodeOK, errors.New("ok")) == nil, "wrap code ok")
-	assert.True(t, Errorf(CodeOK, "ok") == nil, "errorf code ok")
+	assert.Nil(t, Wrap(CodeOK, errors.New("ok")), "wrap code ok")
+	assert.Nil(t, Errorf(CodeOK, "ok"), "errorf code ok")
 }
 
 func TestErrorFormatting(t *testing.T) {
-	assert.Equal(t, Errorf(CodeUnavailable, "").Error(), CodeUnavailable.String(), "no message")
-	text := Errorf(CodeUnavailable, "foo").Error()
-	assert.True(t, strings.Contains(text, CodeUnavailable.String()), "error text should include code")
-	assert.True(t, strings.Contains(text, "foo"), "error text should include message")
+	assert.Equal(
+		t,
+		Errorf(CodeUnavailable, "").Error(),
+		CodeUnavailable.String(),
+		"no message",
+	)
+	got := Errorf(CodeUnavailable, "foo").Error()
+	assert.True(t, strings.Contains(got, CodeUnavailable.String()), "error text should include code")
+	assert.True(t, strings.Contains(got, "foo"), "error text should include message")
 }
 
 func TestErrorCode(t *testing.T) {
 	err := fmt.Errorf("another: %w", Errorf(CodeUnavailable, "foo"))
-	cerr, ok := AsError(err)
+	connectErr, ok := AsError(err)
 	assert.True(t, ok, "extract connect error")
-	assert.Equal(t, cerr.Code(), CodeUnavailable, "extracted code")
+	assert.Equal(t, connectErr.Code(), CodeUnavailable, "extracted code")
 }
 
 func TestCodeOf(t *testing.T) {
@@ -44,8 +46,8 @@ func TestErrorDetails(t *testing.T) {
 	second := durationpb.New(time.Second)
 	detail, err := anypb.New(second)
 	assert.Nil(t, err, "create anypb.Any")
-	cerr := Errorf(CodeUnknown, "details")
-	assert.Zero(t, cerr.Details(), "fresh error")
-	cerr.AddDetail(detail)
-	assert.Equal(t, cerr.Details(), []ErrorDetail{detail}, "retrieve details")
+	connectErr := Errorf(CodeUnknown, "error with details")
+	assert.Zero(t, connectErr.Details(), "details before adding")
+	connectErr.AddDetail(detail)
+	assert.Equal(t, connectErr.Details(), []ErrorDetail{detail}, "details after adding")
 }

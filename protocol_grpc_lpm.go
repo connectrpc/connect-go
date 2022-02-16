@@ -29,13 +29,13 @@ var (
 )
 
 type marshaler struct {
-	w          io.Writer
+	writer     io.Writer
 	compressor compress.Compressor
 	codec      codec.Codec
 }
 
-func (m *marshaler) Marshal(msg any) *Error {
-	raw, err := m.codec.Marshal(msg)
+func (m *marshaler) Marshal(message any) *Error {
+	raw, err := m.codec.Marshal(message)
 	if err != nil {
 		return Errorf(CodeInternal, "couldn't marshal message: %w", err)
 	}
@@ -56,28 +56,28 @@ func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
 		if err := m.writeGRPCPrefix(false /* compressed */, trailer, len(message)); err != nil {
 			return err // already enriched
 		}
-		if _, err := m.w.Write(message); err != nil {
+		if _, err := m.writer.Write(message); err != nil {
 			return Errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
 		}
 		return nil
 	}
 	// OPT: easy opportunity to pool buffers
 	data := bytes.NewBuffer(make([]byte, 0, len(message)))
-	cw := m.compressor.GetWriter(data)
-	defer m.compressor.PutWriter(cw)
+	compressingWriter := m.compressor.GetWriter(data)
+	defer m.compressor.PutWriter(compressingWriter)
 
-	if _, err := cw.Write(message); err != nil { // returns uncompressed size, which isn't useful
+	if _, err := compressingWriter.Write(message); err != nil { // returns uncompressed size, which isn't useful
 		return Errorf(CodeInternal, "couldn't compress data: %w", err)
 	}
-	if err := cw.Close(); err != nil {
+	if err := compressingWriter.Close(); err != nil {
 		return Errorf(CodeInternal, "couldn't close compressing writer: %w", err)
 	}
 	if err := m.writeGRPCPrefix(true /* compressed */, trailer, data.Len()); err != nil {
 		return err // already enriched
 	}
-	if _, err := io.Copy(m.w, data); err != nil {
-		if cerr, ok := AsError(err); ok {
-			return cerr
+	if _, err := io.Copy(m.writer, data); err != nil {
+		if connectErr, ok := AsError(err); ok {
+			return connectErr
 		}
 		return Errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
 	}
@@ -96,9 +96,9 @@ func (m *marshaler) writeGRPCPrefix(compressed, trailer bool, size int) *Error {
 		prefixes[0] = prefixes[0] | flagLPMTrailer
 	}
 	binary.BigEndian.PutUint32(prefixes[1:5], uint32(size))
-	if _, err := m.w.Write(prefixes[:]); err != nil {
-		if cerr, ok := AsError(err); ok {
-			return cerr
+	if _, err := m.writer.Write(prefixes[:]); err != nil {
+		if connectErr, ok := AsError(err); ok {
+			return connectErr
 		}
 		return Errorf(CodeUnknown, "couldn't write prefix of length-prefixed message: %w", err)
 	}
@@ -106,7 +106,7 @@ func (m *marshaler) writeGRPCPrefix(compressed, trailer bool, size int) *Error {
 }
 
 type unmarshaler struct {
-	r          io.Reader
+	reader     io.Reader
 	max        int64
 	codec      codec.Codec
 	compressor compress.Compressor
@@ -115,12 +115,12 @@ type unmarshaler struct {
 	webTrailer http.Header
 }
 
-func (u *unmarshaler) Unmarshal(msg any) *Error {
+func (u *unmarshaler) Unmarshal(message any) *Error {
 	// Each length-prefixed message starts with 5 bytes of metadata: a one-byte
 	// unsigned integer used as a set of bitwise flags, and a four-byte unsigned
 	// integer indicating the message length.
 	prefixes := make([]byte, 5)
-	n, err := u.r.Read(prefixes)
+	n, err := u.reader.Read(prefixes)
 	if (err == nil || errors.Is(err, io.EOF)) &&
 		n == 5 &&
 		(prefixes[0]&flagLPMTrailer != flagLPMTrailer) &&
@@ -130,9 +130,9 @@ func (u *unmarshaler) Unmarshal(msg any) *Error {
 		// msg is correct.
 		return nil
 	} else if err != nil && errors.Is(err, io.EOF) && n == 0 {
-		// Clean EOFs are expected, but we need to propagate them to the user so
-		// that they know that the stream has ended. We shouldn't add any alarming
-		// text about protocol errors, though.
+		// The stream ended cleanly. That's expected, but we need to propagate them
+		// to the user so that they know that the stream has ended. We shouldn't
+		// add any alarming text about protocol errors, though.
 		return Wrap(CodeUnknown, err)
 	} else if err != nil || n < 5 {
 		// Something else has gone wrong - the stream didn't end cleanly.
@@ -168,12 +168,13 @@ func (u *unmarshaler) Unmarshal(msg any) *Error {
 		// forever if the LPM is malformed.
 		remaining := size
 		for remaining > 0 {
-			n, err = u.r.Read(raw[size-remaining : size])
+			n, err = u.reader.Read(raw[size-remaining : size])
 			if err != nil && !errors.Is(err, io.EOF) {
 				return Errorf(CodeUnknown, "error reading length-prefixed message data: %w", err)
 			}
 			if errors.Is(err, io.EOF) && n == 0 {
-				// Message is likely malformed, stop waiting around.
+				// We've gotten zero-length chunk of data. Message is likely malformed,
+				// don't wait for additional chunks.
 				return Errorf(
 					CodeInvalidArgument,
 					"gRPC protocol error: promised %d bytes in length-prefixed message, got %d bytes",
@@ -193,16 +194,16 @@ func (u *unmarshaler) Unmarshal(msg any) *Error {
 	}
 
 	if size > 0 && compressed {
-		cr, err := u.compressor.GetReader(bytes.NewReader(raw))
+		decompressingReader, err := u.compressor.GetReader(bytes.NewReader(raw))
 		if err != nil {
-			return Errorf(CodeInvalidArgument, "can't decompress gzipped data: %w", err)
+			return Errorf(CodeInvalidArgument, "can't decompress: %w", err)
 		}
-		defer u.compressor.PutReader(cr)
-		defer cr.Close()
+		defer u.compressor.PutReader(decompressingReader)
+		defer decompressingReader.Close()
 		// OPT: easy opportunity to pool buffers
 		decompressed := bytes.NewBuffer(make([]byte, 0, len(raw)))
-		if _, err := decompressed.ReadFrom(cr); err != nil {
-			return Errorf(CodeInvalidArgument, "can't decompress gzipped data: %w", err)
+		if _, err := decompressed.ReadFrom(decompressingReader); err != nil {
+			return Errorf(CodeInvalidArgument, "can't decompress: %w", err)
 		}
 		raw = decompressed.Bytes()
 	}
@@ -227,8 +228,8 @@ func (u *unmarshaler) Unmarshal(msg any) *Error {
 		return errGotWebTrailers
 	}
 
-	if err := u.codec.Unmarshal(raw, msg); err != nil {
-		return Errorf(CodeInvalidArgument, "can't unmarshal into %T: %w", msg, err)
+	if err := u.codec.Unmarshal(raw, message); err != nil {
+		return Errorf(CodeInvalidArgument, "can't unmarshal into %T: %w", message, err)
 	}
 
 	return nil

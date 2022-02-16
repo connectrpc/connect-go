@@ -28,14 +28,14 @@ func (i *assertCalledInterceptor) WrapContext(ctx context.Context) context.Conte
 	return ctx
 }
 
-func (i *assertCalledInterceptor) WrapSender(_ context.Context, s connect.Sender) connect.Sender {
+func (i *assertCalledInterceptor) WrapSender(_ context.Context, sender connect.Sender) connect.Sender {
 	*i.called = true
-	return s
+	return sender
 }
 
-func (i *assertCalledInterceptor) WrapReceiver(_ context.Context, r connect.Receiver) connect.Receiver {
+func (i *assertCalledInterceptor) WrapReceiver(_ context.Context, receiver connect.Receiver) connect.Receiver {
 	*i.called = true
-	return r
+	return receiver
 }
 
 func TestClientStreamErrors(t *testing.T) {
@@ -58,7 +58,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 	mux, err := connect.NewServeMux(
 		pingrpc.WithPingServiceHandler(
 			pingServer{},
-			connect.Interceptors(&assertCalledInterceptor{&called}),
+			connect.WithInterceptors(&assertCalledInterceptor{&called}),
 		),
 	)
 	assert.Nil(t, err, "mux construction error")
@@ -100,8 +100,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 func TestOnionOrderingEndToEnd(t *testing.T) {
 	// Helper function: returns a function that asserts that there's some value
 	// set for header "expect", and adds a value for header "add".
-	newInspector := func(expect, add string) func(connect.Specification,
-		http.Header) {
+	newInspector := func(expect, add string) func(connect.Specification, http.Header) {
 		return func(spec connect.Specification, h http.Header) {
 			if expect != "" {
 				assert.NotZero(
@@ -138,7 +137,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	//
 	// The request and response sides of this onion are numbered to make the
 	// intended order clear.
-	clientOnion := connect.Interceptors(
+	clientOnion := connect.WithInterceptors(
 		connect.NewHeaderInterceptor(
 			// 1 (start). request: should see protocol-related headers
 			func(_ connect.Specification, h http.Header) {
@@ -156,7 +155,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 			newInspector("two", "three"), // 10. response: check "two", add "three"
 		),
 	)
-	handlerOnion := connect.Interceptors(
+	handlerOnion := connect.WithInterceptors(
 		connect.NewHeaderInterceptor(
 			newInspector("two", "three"), // 4. request: check "two", add "three"
 			newInspector("one", "two"),   // 9. response: check "one", add "two"

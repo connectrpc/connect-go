@@ -5,82 +5,40 @@ package protobuf
 import (
 	"fmt"
 
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
-
 	"github.com/bufconnect/connect/codec"
+	"google.golang.org/protobuf/proto"
 )
 
-const (
-	// NameBinary is the name connect uses for the protocol buffer language's
-	// binary encoding.
-	NameBinary = "protobuf"
-	// NameJSON is the name connect uses for JavaScript Object Notation.
-	NameJSON = "json"
-)
+// Name is the name connect uses for the protocol buffer language's binary
+// encoding.
+const Name = "protobuf"
 
-// Binary marshals protobuf structs to and from binary.
-type Binary struct{}
+// Codec marshals protobuf structs to and from binary.
+type Codec struct{}
 
-var _ codec.Codec = (*Binary)(nil)
+var _ codec.Codec = (*Codec)(nil)
 
 // NewBinary constructs a Binary protobuf codec.
-func NewBinary() *Binary {
-	return &Binary{}
+func New() *Codec {
+	return &Codec{}
 }
 
 // Marshal implements codec.Codec.
-func (b *Binary) Marshal(m any) ([]byte, error) {
-	pm, ok := m.(proto.Message)
+func (c *Codec) Marshal(message any) ([]byte, error) {
+	protoMessage, ok := message.(proto.Message)
 	if !ok {
-		return nil, errNotProtobuf(m)
+		return nil, errNotProtobuf(message)
 	}
-	return proto.Marshal(pm)
+	return proto.Marshal(protoMessage)
 }
 
 // Unmarshal implements codec.Codec.
-func (b *Binary) Unmarshal(bs []byte, m any) error {
-	pm, ok := m.(proto.Message)
+func (c *Codec) Unmarshal(bs []byte, message any) error {
+	protoMessage, ok := message.(proto.Message)
 	if !ok {
-		return errNotProtobuf(m)
+		return errNotProtobuf(message)
 	}
-	return proto.Unmarshal(bs, pm)
-}
-
-// JSON marshals protobuf to and from JSON using the mapping defined by the
-// protocol buffer specification.
-type JSON struct {
-	marshalOptions   protojson.MarshalOptions
-	unmarshalOptions protojson.UnmarshalOptions
-}
-
-// NewJSON constructs a JSON protobuf codec.
-//
-// It uses the default mapping specified by the protocol buffer specification:
-// fields are named using lowerCamelCase, zero values are omitted, missing
-// required fields are errors, enums are emitted as strings, etc.
-func NewJSON() *JSON {
-	return &JSON{}
-}
-
-var _ codec.Codec = (*JSON)(nil)
-
-// Marshal implements codec.Codec.
-func (j *JSON) Marshal(m any) ([]byte, error) {
-	pm, ok := m.(proto.Message)
-	if !ok {
-		return nil, errNotProtobuf(m)
-	}
-	return j.marshalOptions.Marshal(pm)
-}
-
-// Unmarshal implements codec.Codec.
-func (j *JSON) Unmarshal(bs []byte, m any) error {
-	pm, ok := m.(proto.Message)
-	if !ok {
-		return errNotProtobuf(m)
-	}
-	return j.unmarshalOptions.Unmarshal(bs, pm)
+	return proto.Unmarshal(bs, protoMessage)
 }
 
 func errNotProtobuf(m any) error {

@@ -17,23 +17,23 @@ import (
 // It's intended to be a preconfigured, faster alternative to the standard
 // library's httptest.Server.
 type Server struct {
-	srv *httptest.Server
-	lis *memoryListener
+	server   *httptest.Server
+	listener *memoryListener
 }
 
 // NewServer constructs and starts a Server.
-func NewServer(h http.Handler) *Server {
+func NewServer(handler http.Handler) *Server {
 	lis := &memoryListener{
 		conns:  make(chan net.Conn),
 		closed: make(chan struct{}),
 	}
-	srv := httptest.NewUnstartedServer(h)
-	srv.Listener = lis
-	srv.EnableHTTP2 = true
-	srv.StartTLS()
+	server := httptest.NewUnstartedServer(handler)
+	server.Listener = lis
+	server.EnableHTTP2 = true
+	server.StartTLS()
 	return &Server{
-		srv: srv,
-		lis: lis,
+		server:   server,
+		listener: lis,
 	}
 }
 
@@ -42,23 +42,23 @@ func NewServer(h http.Handler) *Server {
 // compression is disabled. It closes its idle connections when the server is
 // closed.
 func (s *Server) Client() *http.Client {
-	c := s.srv.Client()
-	if tr, ok := c.Transport.(*http.Transport); ok {
-		tr.DialContext = s.lis.DialContext
-		tr.DisableCompression = true
+	client := s.server.Client()
+	if transport, ok := client.Transport.(*http.Transport); ok {
+		transport.DialContext = s.listener.DialContext
+		transport.DisableCompression = true
 	}
-	return c
+	return client
 }
 
 // URL is the server's URL.
 func (s *Server) URL() string {
-	return s.srv.URL
+	return s.server.URL
 }
 
 // Close shuts down the server, blocking until all outstanding requests have
 // completed.
 func (s *Server) Close() {
-	s.srv.Close()
+	s.server.Close()
 }
 
 type memoryListener struct {
@@ -70,8 +70,8 @@ type memoryListener struct {
 // Accept implements net.Listener.
 func (l *memoryListener) Accept() (net.Conn, error) {
 	select {
-	case c := <-l.conns:
-		return c, nil
+	case conn := <-l.conns:
+		return conn, nil
 	case <-l.closed:
 		return nil, errors.New("listener closed")
 	}

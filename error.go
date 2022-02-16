@@ -9,14 +9,15 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// An ErrorDetail is a protobuf message attached to an *Error. Error details
-// are sent over the network to clients, which can then work with
+// An ErrorDetail is a self-describing protobuf message attached to an *Error.
+// Error details are sent over the network to clients, which can then work with
 // strongly-typed data rather than trying to parse a complex error message.
 //
 // The ErrorDetail interface is implemented by protobuf's Any type, provided in
 // Go by the google.golang.org/protobuf/types/known/anypb package. The
 // google.golang.org/genproto/googleapis/rpc/errdetails package contains a
-// variety of protobuf messages commonly used as error details.
+// variety of protobuf messages commonly wrapped in anypb.Any and used as error
+// details.
 type ErrorDetail interface {
 	proto.Message
 
@@ -41,8 +42,8 @@ type ErrorDetail interface {
 // below. Unfortunately, error details were introduced before gRPC adopted a
 // formal proposal process, so they're not clearly documented anywhere and
 // may differ slightly between implementations. Roughly, they're an optional
-// mechanism for servers, middleware, and proxies to send strongly-typed errors
-// and localized messages to clients.
+// mechanism for servers, middleware, and proxies to attach strongly-typed data
+// to the error code and message.
 //
 // See https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md and
 // https://github.com/grpc/grpc/blob/master/doc/statuscodes.md for further
@@ -113,8 +114,8 @@ func CodeOf(err error) Code {
 	if err == nil {
 		return CodeOK
 	}
-	if cerr, ok := AsError(err); ok {
-		return cerr.Code()
+	if connectErr, ok := AsError(err); ok {
+		return connectErr.Code()
 	}
 	return CodeUnknown
 }

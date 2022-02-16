@@ -21,11 +21,12 @@ func ExampleClient() {
 	//
 	// Of course, you can skip this configuration and use http.DefaultClient for
 	// quick proof-of-concept code.
-	doer := &http.Client{
+	httpClient := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
 			Proxy: nil,
-			// connect handles compression negotiation.
+			// connect handles compression on a per-message basis, so it's a waste to
+			// compress the whole response body.
 			DisableCompression: true,
 			MaxIdleConns:       128,
 			// RPC clients tend to make many requests to few hosts, so allow more
@@ -39,31 +40,31 @@ func ExampleClient() {
 			return http.ErrUseLastResponse
 		},
 	}
-
-	// This interceptor stops the client from making HTTP requests in examples.
-	// Leave it out in real code!
-	short := ShortCircuit(connect.Errorf(connect.CodeUnimplemented, "no networking in examples"))
+	// Unfortunately, pkg.go.dev can't run examples that actually use the
+	// network. To keep this example runnable, we'll use an HTTP server and
+	// client that communicate over in-memory pipes. Don't do this in production!
+	httpClient = examplePingServer.Client()
 
 	client, err := pingrpc.NewPingServiceClient(
-		"http://invalid-test-url",
-		doer,
-		connect.Interceptors(short),
+		examplePingServer.URL(),
+		httpClient,
 	)
 	if err != nil {
-		logger.Print("Error: ", err)
+		logger.Println("error:", err)
 		return
 	}
 	res, err := client.Ping(
 		context.Background(),
-		connect.NewRequest(&pingpb.PingRequest{}),
+		connect.NewRequest(&pingpb.PingRequest{Number: 42}),
 	)
 	if err != nil {
-		logger.Print("Error: ", err)
+		logger.Println("error:", err)
 		return
 	}
-	logger.Print("Response headers:", res.Header())
-	logger.Print("Response message:", res.Msg)
+	logger.Println("response content-type:", res.Header().Get("Content-Type"))
+	logger.Println("response message:", res.Msg)
 
 	// Output:
-	// Error: Unimplemented: no networking in examples
+	// response content-type: application/grpc+proto
+	// response message: number:42
 }

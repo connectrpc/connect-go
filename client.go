@@ -7,16 +7,9 @@ import (
 	"github.com/bufconnect/connect/codec"
 	"github.com/bufconnect/connect/codec/protobuf"
 	"github.com/bufconnect/connect/compress"
-	"github.com/bufconnect/connect/compress/gzip"
 )
 
-// Doer is the transport-level interface connect expects HTTP clients to
-// implement. The standard library's http.Client implements Doer.
-type Doer interface {
-	Do(*http.Request) (*http.Response, error)
-}
-
-type clientCfg struct {
+type clientConfiguration struct {
 	Protocol          protocol
 	Procedure         string
 	MaxResponseBytes  int64
@@ -27,24 +20,21 @@ type clientCfg struct {
 	RequestCompressor string
 }
 
-func newClientConfiguration(procedure string, opts []ClientOption) (*clientCfg, *Error) {
-	cfg := clientCfg{
-		Procedure: procedure,
-		Compressors: map[string]compress.Compressor{
-			gzip.Name: gzip.New(),
-		},
-		Protocol: &grpc{},
+func newClientConfiguration(procedure string, options []ClientOption) (*clientConfiguration, *Error) {
+	config := clientConfiguration{
+		Procedure:   procedure,
+		Compressors: make(map[string]compress.Compressor),
 	}
-	for _, opt := range opts {
-		opt.applyToClient(&cfg)
+	for _, opt := range options {
+		opt.applyToClient(&config)
 	}
-	if err := cfg.Validate(); err != nil {
+	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	return &cfg, nil
+	return &config, nil
 }
 
-func (c *clientCfg) Validate() *Error {
+func (c *clientConfiguration) Validate() *Error {
 	if c.Codec == nil || c.CodecName == "" {
 		return Errorf(CodeUnknown, "no codec configured")
 	}
@@ -53,17 +43,20 @@ func (c *clientCfg) Validate() *Error {
 			return Errorf(CodeUnknown, "no registered compressor for %q", c.RequestCompressor)
 		}
 	}
+	if c.Protocol == nil {
+		return Errorf(CodeUnknown, "no protocol configured")
+	}
 	return nil
 }
 
-func (c *clientCfg) Protobuf() codec.Codec {
-	if c.CodecName == protobuf.NameBinary {
+func (c *clientConfiguration) Protobuf() codec.Codec {
+	if c.CodecName == protobuf.Name {
 		return c.Codec
 	}
-	return protobuf.NewBinary()
+	return protobuf.New()
 }
 
-func (c *clientCfg) newSpecification(t StreamType) Specification {
+func (c *clientConfiguration) newSpecification(t StreamType) Specification {
 	return Specification{
 		Type:      t,
 		Procedure: c.Procedure,
@@ -76,39 +69,29 @@ func (c *clientCfg) newSpecification(t StreamType) Specification {
 // In addition to any options grouped in the documentation below, remember that
 // Options are also valid ClientOptions.
 type ClientOption interface {
-	applyToClient(*clientCfg)
+	applyToClient(*clientConfiguration)
 }
 
-type useCompressorOption struct {
+type requestCompressorOption struct {
 	Name string
 }
 
-// UseCompressor configures the client to use the specified algorithm to
-// compress request messages. If the algorithm has not been registered using
-// Compressor, the request message is sent uncompressed.
+// WithRequestCompressor configures the client to use the specified algorithm
+// to compress request messages. If the algorithm has not been registered using
+// WithCompressor, the generated client constructor will return an error.
 //
 // Because some servers don't support compression, clients default to sending
 // uncompressed requests.
-func UseCompressor(name string) ClientOption {
-	return &useCompressorOption{Name: name}
+func WithRequestCompressor(name string) ClientOption {
+	return &requestCompressorOption{Name: name}
 }
 
-func (o *useCompressorOption) applyToClient(cfg *clientCfg) {
-	cfg.RequestCompressor = o.Name
+func (o *requestCompressorOption) applyToClient(config *clientConfiguration) {
+	config.RequestCompressor = o.Name
 }
 
 type useProtocolOption struct {
 	Protocol protocol
-}
-
-// UseGRPCWeb configures the client to use the gRPC-Web protocol, rather than
-// the default HTTP/2 gRPC variant.
-func UseGRPCWeb() ClientOption {
-	return &useProtocolOption{Protocol: &grpc{web: true}}
-}
-
-func (o *useProtocolOption) applyToClient(c *clientCfg) {
-	c.Protocol = o.Protocol
 }
 
 // NewClientStream returns a stream constructor for a client-, server-, or
@@ -123,35 +106,34 @@ func NewClientStream(
 	doer Doer,
 	stype StreamType,
 	baseURL, procedure string,
-	opts ...ClientOption,
+	options ...ClientOption,
 ) (func(context.Context) (Sender, Receiver), error) {
-	cfg, err := newClientConfiguration(procedure, opts)
+	config, err := newClientConfiguration(procedure, options)
 	if err != nil {
 		return nil, err
 	}
-	spec := cfg.newSpecification(stype)
-	pclient, perr := cfg.Protocol.NewClient(&protocolClientParams{
-		Spec:             spec,
-		CompressorName:   cfg.RequestCompressor,
-		Compressors:      newROCompressors(cfg.Compressors),
-		CodecName:        cfg.CodecName,
-		Codec:            cfg.Codec,
-		Protobuf:         cfg.Protobuf(),
-		MaxResponseBytes: cfg.MaxResponseBytes,
+	protocolClient, protocolErr := config.Protocol.NewClient(&protocolClientParams{
+		Spec:             config.newSpecification(stype),
+		CompressorName:   config.RequestCompressor,
+		Compressors:      newReadOnlyCompressors(config.Compressors),
+		CodecName:        config.CodecName,
+		Codec:            config.Codec,
+		Protobuf:         config.Protobuf(),
+		MaxResponseBytes: config.MaxResponseBytes,
 		Doer:             doer,
 		BaseURL:          baseURL,
 	})
-	if perr != nil {
-		return nil, Wrap(CodeUnknown, perr)
+	if protocolErr != nil {
+		return nil, Wrap(CodeUnknown, protocolErr)
 	}
 	return func(ctx context.Context) (Sender, Receiver) {
-		if ic := cfg.Interceptor; ic != nil {
+		if ic := config.Interceptor; ic != nil {
 			ctx = ic.WrapContext(ctx)
 		}
-		h := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
-		pclient.WriteRequestHeader(h)
-		sender, receiver := pclient.NewStream(ctx, h)
-		if ic := cfg.Interceptor; ic != nil {
+		header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
+		protocolClient.WriteRequestHeader(header)
+		sender, receiver := protocolClient.NewStream(ctx, header)
+		if ic := config.Interceptor; ic != nil {
 			sender = ic.WrapSender(ctx, sender)
 			receiver = ic.WrapReceiver(ctx, receiver)
 		}
@@ -169,30 +151,30 @@ func NewClientStream(
 func NewClientFunc[Req, Res any](
 	doer Doer,
 	baseURL, procedure string,
-	opts ...ClientOption,
+	options ...ClientOption,
 ) (func(context.Context, *Request[Req]) (*Response[Res], error), error) {
-	cfg, err := newClientConfiguration(procedure, opts)
+	config, err := newClientConfiguration(procedure, options)
 	if err != nil {
 		return nil, err
 	}
-	spec := cfg.newSpecification(StreamTypeUnary)
-	pclient, perr := cfg.Protocol.NewClient(&protocolClientParams{
+	spec := config.newSpecification(StreamTypeUnary)
+	protocolClient, protocolErr := config.Protocol.NewClient(&protocolClientParams{
 		Spec:             spec,
-		CompressorName:   cfg.RequestCompressor,
-		Compressors:      newROCompressors(cfg.Compressors),
-		CodecName:        cfg.CodecName,
-		Codec:            cfg.Codec,
-		Protobuf:         cfg.Protobuf(),
-		MaxResponseBytes: cfg.MaxResponseBytes,
+		CompressorName:   config.RequestCompressor,
+		Compressors:      newReadOnlyCompressors(config.Compressors),
+		CodecName:        config.CodecName,
+		Codec:            config.Codec,
+		Protobuf:         config.Protobuf(),
+		MaxResponseBytes: config.MaxResponseBytes,
 		Doer:             doer,
 		BaseURL:          baseURL,
 	})
-	if perr != nil {
-		return nil, Wrap(CodeUnknown, perr)
+	if protocolErr != nil {
+		return nil, Wrap(CodeUnknown, protocolErr)
 	}
-	send := Func(func(ctx context.Context, msg AnyRequest) (AnyResponse, error) {
-		sender, receiver := pclient.NewStream(ctx, msg.Header())
-		if err := sender.Send(msg.Any()); err != nil {
+	send := Func(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
+		sender, receiver := protocolClient.NewStream(ctx, request.Header())
+		if err := sender.Send(request.Any()); err != nil {
 			_ = sender.Close(err)
 			_ = receiver.Close()
 			return nil, err
@@ -201,28 +183,28 @@ func NewClientFunc[Req, Res any](
 			_ = receiver.Close()
 			return nil, err
 		}
-		res, err := ReceiveResponse[Res](receiver)
+		response, err := ReceiveResponse[Res](receiver)
 		if err != nil {
 			_ = receiver.Close()
 			return nil, err
 		}
-		return res, receiver.Close()
+		return response, receiver.Close()
 	})
-	if ic := cfg.Interceptor; ic != nil {
+	if ic := config.Interceptor; ic != nil {
 		send = ic.Wrap(send)
 	}
-	return func(ctx context.Context, msg *Request[Req]) (*Response[Res], error) {
+	return func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
 		// To make the specification and RPC headers visible to the full interceptor
 		// chain (as though they were supplied by the caller), we'll add them here.
-		msg.spec = spec
-		pclient.WriteRequestHeader(msg.Header())
-		res, err := send(ctx, msg)
+		request.spec = spec
+		protocolClient.WriteRequestHeader(request.Header())
+		response, err := send(ctx, request)
 		if err != nil {
 			return nil, err
 		}
-		typed, ok := res.(*Response[Res])
+		typed, ok := response.(*Response[Res])
 		if !ok {
-			return nil, Errorf(CodeInternal, "unexpected client response type %T", res)
+			return nil, Errorf(CodeInternal, "unexpected client response type %T", response)
 		}
 		return typed, nil
 	}, nil
