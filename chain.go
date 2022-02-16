@@ -37,8 +37,6 @@ func (c *chain) WrapContext(ctx context.Context) context.Context {
 }
 
 func (c *chain) WrapSender(ctx context.Context, sender Sender) Sender {
-	// When we're wrapping senders on the handler side, we need to wrap in the
-	// opposite order.
 	if sender.Spec().IsClient {
 		for i := len(c.interceptors) - 1; i >= 0; i-- {
 			if interceptor := c.interceptors[i]; interceptor != nil {
@@ -47,6 +45,8 @@ func (c *chain) WrapSender(ctx context.Context, sender Sender) Sender {
 		}
 		return sender
 	}
+	// When we're wrapping senders on the handler side, we need to wrap in the
+	// opposite order. See TestOnionOrderingEndToEnd.
 	for i := 0; i < len(c.interceptors); i++ {
 		if interceptor := c.interceptors[i]; interceptor != nil {
 			sender = interceptor.WrapSender(ctx, sender)
