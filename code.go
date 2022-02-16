@@ -2,73 +2,8 @@ package connect
 
 import (
 	"fmt"
-	"net/http"
 	"strconv"
 )
-
-var (
-	strToCode = map[string]Code{
-		"OK":                  CodeOK,
-		"CANCELLED":           CodeCanceled, // specification uses British spelling
-		"UNKNOWN":             CodeUnknown,
-		"INVALID_ARGUMENT":    CodeInvalidArgument,
-		"DEADLINE_EXCEEDED":   CodeDeadlineExceeded,
-		"NOT_FOUND":           CodeNotFound,
-		"ALREADY_EXISTS":      CodeAlreadyExists,
-		"PERMISSION_DENIED":   CodePermissionDenied,
-		"RESOURCE_EXHAUSTED":  CodeResourceExhausted,
-		"FAILED_PRECONDITION": CodeFailedPrecondition,
-		"ABORTED":             CodeAborted,
-		"OUT_OF_RANGE":        CodeOutOfRange,
-		"UNIMPLEMENTED":       CodeUnimplemented,
-		"INTERNAL":            CodeInternal,
-		"UNAVAILABLE":         CodeUnavailable,
-		"DATA_LOSS":           CodeDataLoss,
-		"UNAUTHENTICATED":     CodeUnauthenticated,
-	}
-	grpcToHTTP = map[Code]int{
-		// Codes are numbers rather than net/http constants to make copying from
-		// the specification easy.
-		CodeOK:                 200,
-		CodeCanceled:           499,
-		CodeUnknown:            500,
-		CodeInvalidArgument:    400,
-		CodeDeadlineExceeded:   504,
-		CodeNotFound:           404,
-		CodeAlreadyExists:      409,
-		CodePermissionDenied:   403,
-		CodeResourceExhausted:  429,
-		CodeFailedPrecondition: 400,
-		CodeAborted:            409,
-		CodeOutOfRange:         400,
-		CodeUnimplemented:      501,
-		CodeInternal:           500,
-		CodeUnavailable:        503,
-		CodeDataLoss:           500,
-		CodeUnauthenticated:    401,
-	}
-	// From https://github.com/grpc/grpc/blob/master/doc/http-grpc-status-mapping.md.
-	// Note that these are not the inverse of the previous mapping.
-	httpToGRPC = map[int]Code{
-		400: CodeInternal,
-		401: CodeUnauthenticated,
-		403: CodePermissionDenied,
-		404: CodeUnimplemented,
-		429: CodeUnavailable,
-		502: CodeUnavailable,
-		503: CodeUnavailable,
-		504: CodeUnavailable,
-		// all other HTTP status codes map to CodeUnknown
-	}
-)
-
-// A Code is one of gRPC's canonical status codes. There are no user-defined
-// codes, so only the codes enumerated below are valid.
-//
-// See the specification at
-// https://github.com/grpc/grpc/blob/master/doc/statuscodes.md for detailed
-// descriptions of each code and example usage.
-type Code uint32
 
 const (
 	CodeOK                 Code = 0  // success
@@ -93,6 +28,49 @@ const (
 	maxCode Code = CodeUnauthenticated
 )
 
+var (
+	stringToCode = map[string]Code{
+		"OK":                  CodeOK,
+		"CANCELLED":           CodeCanceled, // specification uses British spelling
+		"UNKNOWN":             CodeUnknown,
+		"INVALID_ARGUMENT":    CodeInvalidArgument,
+		"DEADLINE_EXCEEDED":   CodeDeadlineExceeded,
+		"NOT_FOUND":           CodeNotFound,
+		"ALREADY_EXISTS":      CodeAlreadyExists,
+		"PERMISSION_DENIED":   CodePermissionDenied,
+		"RESOURCE_EXHAUSTED":  CodeResourceExhausted,
+		"FAILED_PRECONDITION": CodeFailedPrecondition,
+		"ABORTED":             CodeAborted,
+		"OUT_OF_RANGE":        CodeOutOfRange,
+		"UNIMPLEMENTED":       CodeUnimplemented,
+		"INTERNAL":            CodeInternal,
+		"UNAVAILABLE":         CodeUnavailable,
+		"DATA_LOSS":           CodeDataLoss,
+		"UNAUTHENTICATED":     CodeUnauthenticated,
+	}
+	// From https://github.com/grpc/grpc/blob/master/doc/http-grpc-status-mapping.md.
+	// Note that this is not just the inverse of the gRPC-to-HTTP mapping.
+	httpToCode = map[int]Code{
+		400: CodeInternal,
+		401: CodeUnauthenticated,
+		403: CodePermissionDenied,
+		404: CodeUnimplemented,
+		429: CodeUnavailable,
+		502: CodeUnavailable,
+		503: CodeUnavailable,
+		504: CodeUnavailable,
+		// all other HTTP status codes map to CodeUnknown
+	}
+)
+
+// A Code is one of gRPC's canonical status codes. There are no user-defined
+// codes, so only the codes enumerated below are valid.
+//
+// See the specification at
+// https://github.com/grpc/grpc/blob/master/doc/statuscodes.md for detailed
+// descriptions of each code and example usage.
+type Code uint32
+
 // MarshalText implements encoding.TextMarshaler. Codes are marshaled in their
 // numeric representations.
 func (c Code) MarshalText() ([]byte, error) {
@@ -107,7 +85,7 @@ func (c Code) MarshalText() ([]byte, error) {
 // the gRPC specification. Note that the specification uses the British
 // "CANCELLED" for CodeCanceled.
 func (c *Code) UnmarshalText(b []byte) error {
-	if n, ok := strToCode[string(b)]; ok {
+	if n, ok := stringToCode[string(b)]; ok {
 		*c = n
 		return nil
 	}
@@ -121,14 +99,6 @@ func (c *Code) UnmarshalText(b []byte) error {
 	}
 	*c = code
 	return nil
-}
-
-func (c Code) http() int {
-	if c < minCode || c > maxCode {
-		// Code is invalid, which is definitely a 500.
-		return http.StatusInternalServerError
-	}
-	return grpcToHTTP[c]
 }
 
 func (c Code) String() string {

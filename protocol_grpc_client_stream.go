@@ -238,7 +238,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 
 	if res.StatusCode != http.StatusOK {
 		code := CodeUnknown
-		if c, ok := httpToGRPC[res.StatusCode]; ok {
+		if c, ok := httpToCode[res.StatusCode]; ok {
 			code = c
 		}
 		cs.setResponseError(Errorf(code, "HTTP status %v", res.Status))
