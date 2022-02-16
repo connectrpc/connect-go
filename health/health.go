@@ -89,8 +89,9 @@ func (s *server) Watch(
 //
 // Note that the returned service only supports the unary Check method, not the
 // streaming Watch. As suggested in gRPC's health schema, connect returns
-// connect.CodeUnimplemented for the Watch method. For more details on gRPC's
-// health checking protocol, see
+// connect.CodeUnimplemented for the Watch method.
+//
+// For more details on gRPC's health checking protocol, see
 // https://github.com/grpc/grpc/blob/master/doc/health-checking.md and
 // https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto.
 func WithHandler(
@@ -120,16 +121,16 @@ type Client struct {
 }
 
 // NewClient constructs a Client.
-func NewClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (*Client, error) {
-	c, err := healthrpc.NewHealthClient(
+func NewClient(baseURL string, doer connect.Doer, options ...connect.ClientOption) (*Client, error) {
+	client, err := healthrpc.NewHealthClient(
 		baseURL,
 		doer,
-		append(opts, connect.WithReplaceProcedurePrefix("internal.", "grpc."))...,
+		append(options, connect.WithReplaceProcedurePrefix("internal.", "grpc."))...,
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &Client{c}, nil
+	return &Client{client}, nil
 }
 
 // Check the health of a service.
