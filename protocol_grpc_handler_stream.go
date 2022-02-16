@@ -3,8 +3,6 @@ package connect
 import (
 	"net/http"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/bufconnect/connect/codec"
 	"github.com/bufconnect/connect/compress"
 )
@@ -19,7 +17,7 @@ func newHandlerStream(
 	r *http.Request,
 	maxReadBytes int64,
 	codec codec.Codec,
-	protobuf codec.Codec,
+	protobuf codec.Codec, // for errors
 	requestCompressor compress.Compressor,
 	responseCompressor compress.Compressor,
 ) (*handlerSender, *handlerReceiver) {
@@ -57,15 +55,10 @@ type handlerSender struct {
 
 var _ Sender = (*handlerSender)(nil)
 
-func (hs *handlerSender) Send(m any) error {
-	// TODO: update this when codec is pluggable
-	msg, ok := m.(proto.Message)
-	if !ok {
-		return Errorf(CodeInternal, "expected proto.Message, got %T", m)
-	}
+func (hs *handlerSender) Send(message any) error {
 	defer hs.flush()
-	if err := hs.marshaler.Marshal(msg); err != nil {
-		return err
+	if err := hs.marshaler.Marshal(message); err != nil {
+		return err // already coded
 	}
 	// don't return typed nils
 	return nil
@@ -108,13 +101,8 @@ type handlerReceiver struct {
 
 var _ Receiver = (*handlerReceiver)(nil)
 
-func (hr *handlerReceiver) Receive(m any) error {
-	// TODO: update this when codec is pluggable
-	msg, ok := m.(proto.Message)
-	if !ok {
-		return Errorf(CodeInternal, "expected proto.Message, got %T", m)
-	}
-	if err := hr.unmarshaler.Unmarshal(msg); err != nil {
+func (hr *handlerReceiver) Receive(message any) error {
+	if err := hr.unmarshaler.Unmarshal(message); err != nil {
 		return err // already coded
 	}
 	// don't return typed nils
@@ -124,8 +112,8 @@ func (hr *handlerReceiver) Receive(m any) error {
 func (hr *handlerReceiver) Close() error {
 	discard(hr.request.Body)
 	if err := hr.request.Body.Close(); err != nil {
-		if cerr, ok := AsError(err); ok {
-			return cerr
+		if connectErr, ok := AsError(err); ok {
+			return connectErr
 		}
 		return Wrap(CodeUnknown, err)
 	}
