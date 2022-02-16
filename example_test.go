@@ -18,15 +18,14 @@ type ExamplePingServer struct {
 	pingrpc.UnimplementedPingServiceHandler
 }
 
-// Ping implements pingrpc.PingService.
+// Ping implements pingrpc.PingServiceHandler.
 func (*ExamplePingServer) Ping(
-	ctx context.Context,
+	_ context.Context,
 	req *connect.Request[pingpb.PingRequest],
 ) (*connect.Response[pingpb.PingResponse], error) {
-	pingRequest := req.Msg
 	return connect.NewResponse(&pingpb.PingResponse{
-		Number: pingRequest.Number,
-		Msg:    pingRequest.Msg,
+		Number: req.Msg.Number,
+		Msg:    req.Msg.Msg,
 	}), nil
 }
 
