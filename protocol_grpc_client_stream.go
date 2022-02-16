@@ -255,7 +255,7 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 			CodeInternal,
 			"unknown compression %q: accepted grpc-encoding values are %v",
 			compression,
-			cs.compressors.Names(),
+			cs.compressors.CommaSeparatedNames(),
 		))
 		return
 	}

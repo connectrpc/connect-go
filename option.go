@@ -263,7 +263,7 @@ func (o *enableGRPCWebOption) applyToClient(config *clientConfiguration) {
 	if !o.enable {
 		return
 	}
-	config.Protocol = &grpc{web: true}
+	config.Protocol = &protocolGRPC{web: true}
 }
 
 type enableGRPCOption struct {
@@ -289,5 +289,5 @@ func (o *enableGRPCOption) applyToClient(config *clientConfiguration) {
 	if !o.enable {
 		return
 	}
-	config.Protocol = &grpc{web: false}
+	config.Protocol = &protocolGRPC{web: false}
 }

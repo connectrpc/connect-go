@@ -73,10 +73,10 @@ func (c *handlerConfiguration) newSpecification(streamType StreamType) Specifica
 func (c *handlerConfiguration) newProtocolHandlers(streamType StreamType) ([]protocolHandler, *Error) {
 	var protocols []protocol
 	if c.HandleGRPC {
-		protocols = append(protocols, &grpc{web: false})
+		protocols = append(protocols, &protocolGRPC{web: false})
 	}
 	if c.HandleGRPCWeb {
-		protocols = append(protocols, &grpc{web: true})
+		protocols = append(protocols, &protocolGRPC{web: true})
 	}
 	handlers := make([]protocolHandler, 0, len(protocols))
 	codecs := newReadOnlyCodecs(c.Codecs)

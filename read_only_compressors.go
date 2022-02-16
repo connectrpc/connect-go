@@ -10,7 +10,8 @@ import (
 type readOnlyCompressors interface {
 	Get(string) compress.Compressor
 	Contains(string) bool
-	Names() string
+	// Wordy, but clarifies how this is different from readOnlyCodecs.Names().
+	CommaSeparatedNames() string
 }
 
 type compressorMap struct {
@@ -41,6 +42,6 @@ func (m *compressorMap) Contains(name string) bool {
 	return ok
 }
 
-func (m *compressorMap) Names() string {
+func (m *compressorMap) CommaSeparatedNames() string {
 	return m.names
 }

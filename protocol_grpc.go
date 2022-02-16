@@ -11,11 +11,12 @@ import (
 	"github.com/bufconnect/connect/compress"
 )
 
-type grpc struct {
+type protocolGRPC struct {
 	web bool
 }
 
-func (g *grpc) NewHandler(params *protocolHandlerParams) (protocolHandler, error) {
+// NewHandler implements protocol, so it must return an interface.
+func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) (protocolHandler, error) {
 	return &grpcHandler{
 		spec:            params.Spec,
 		web:             g.web,
@@ -26,7 +27,8 @@ func (g *grpc) NewHandler(params *protocolHandlerParams) (protocolHandler, error
 	}, nil
 }
 
-func (g *grpc) NewClient(params *protocolClientParams) (protocolClient, error) {
+// NewClient implements protocol, so it must return an interface.
+func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, error) {
 	procedureURL := params.BaseURL + "/" + params.Spec.Procedure
 	if _, err := url.ParseRequestURI(procedureURL); err != nil {
 		return nil, Wrap(CodeUnknown, err)
@@ -58,25 +60,17 @@ func (g *grpcHandler) ShouldHandleMethod(method string) bool {
 	return method == http.MethodPost
 }
 
-func (g *grpcHandler) ShouldHandleContentType(ctype string) bool {
-	codecName := codecFromContentType(g.web, ctype)
+func (g *grpcHandler) ShouldHandleContentType(contentType string) bool {
+	codecName := codecFromContentType(g.web, contentType)
 	if codecName == "" {
 		return false // not a gRPC content-type
 	}
 	return g.codecs.Get(codecName) != nil
 }
 
-func (g *grpcHandler) WriteAccept(h http.Header) {
-	if prev := h.Get("Allow"); prev != "" {
-		h.Set("Allow", prev+", "+http.MethodPost)
-	} else {
-		h.Set("Allow", http.MethodPost)
-	}
-	if prev := h.Get("Accept-Post"); prev != "" {
-		h.Set("Accept-Post", prev+", "+g.accept)
-	} else {
-		h.Set("Accept-Post", g.accept)
-	}
+func (g *grpcHandler) WriteAccept(header http.Header) {
+	addCommaSeparatedHeader(header, "Allow", http.MethodPost)
+	addCommaSeparatedHeader(header, "Accept-Post", g.accept)
 }
 
 func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender, Receiver, error) {
@@ -102,11 +96,11 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	} // else err == errNoTimeout, nothing to do
 
 	requestCompression := compress.NameIdentity
-	if me := r.Header.Get("Grpc-Encoding"); me != "" && me != compress.NameIdentity {
+	if msgEncoding := r.Header.Get("Grpc-Encoding"); msgEncoding != "" && msgEncoding != compress.NameIdentity {
 		// We default to identity, so we only care if the client sends something
 		// other than the empty string or compress.NameIdentity.
-		if g.compressors.Contains(me) {
-			requestCompression = me
+		if g.compressors.Contains(msgEncoding) {
+			requestCompression = msgEncoding
 		} else if failed == nil {
 			// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
 			// should return CodeUnimplemented and specify acceptable compression(s)
@@ -114,23 +108,24 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 			failed = Errorf(
 				CodeUnimplemented,
 				"unknown compression %q: accepted grpc-encoding values are %v",
-				me, g.compressors.Names(),
+				msgEncoding, g.compressors.CommaSeparatedNames(),
 			)
 		}
 	}
-	// Follow https://github.com/grpc/grpc/blob/master/doc/compression.md.
-	// (The grpc-go implementation doesn't read the "grpc-accept-encoding" header
-	// and doesn't support compression method asymmetry.)
+	// Support asymmetric compression, following
+	// https://github.com/grpc/grpc/blob/master/doc/compression.md. (The grpc-go
+	// implementation doesn't read the "grpc-accept-encoding" header and doesn't
+	// support asymmetry.)
 	responseCompression := requestCompression
 	// If we're not already planning to compress the response, check whether the
 	// client requested a compression algorithm we support.
 	if responseCompression == compress.NameIdentity {
-		if mae := r.Header.Get("Grpc-Accept-Encoding"); mae != "" {
-			for _, enc := range strings.FieldsFunc(mae, isCommaOrSpace) {
-				if g.compressors.Contains(enc) {
+		if acceptEncoding := r.Header.Get("Grpc-Accept-Encoding"); acceptEncoding != "" {
+			for _, name := range strings.FieldsFunc(acceptEncoding, isCommaOrSpace) {
+				if g.compressors.Contains(name) {
 					// We found a mutually supported compression algorithm. Unlike standard
 					// HTTP, there's no preference weighting, so can bail out immediately.
-					responseCompression = enc
+					responseCompression = name
 					break
 				}
 			}
@@ -145,7 +140,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	// Since we know that these header keys are already in canonical form, we can
 	// skip the normalization in Header.Set.
 	w.Header()["Content-Type"] = []string{r.Header.Get("Content-Type")}
-	w.Header()["Grpc-Accept-Encoding"] = []string{g.compressors.Names()}
+	w.Header()["Grpc-Accept-Encoding"] = []string{g.compressors.CommaSeparatedNames()}
 	w.Header()["Grpc-Encoding"] = []string{responseCompression}
 	if !g.web {
 		// Every standard gRPC response will have these trailers, but gRPC-Web
@@ -172,6 +167,9 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	return sender, receiver, nil
 }
 
+// wrapStream ensures that we (1) automatically code context-related errors
+// correctly when writing them to the network, and (2) return *Errors from all
+// exported APIs.
 func (g *grpcHandler) wrapStream(sender Sender, receiver Receiver) (Sender, Receiver) {
 	wrappedSender := &errorTranslatingSender{
 		Sender:   sender,
@@ -199,20 +197,20 @@ type grpcClient struct {
 	wrapErrorInterceptor Interceptor
 }
 
-func (g *grpcClient) WriteRequestHeader(h http.Header) {
+func (g *grpcClient) WriteRequestHeader(header http.Header) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
-	h["User-Agent"] = userAgent
-	h["Content-Type"] = []string{contentTypeFromCodecName(g.web, g.codecName)}
+	header["User-Agent"] = userAgent
+	header["Content-Type"] = []string{contentTypeFromCodecName(g.web, g.codecName)}
 	if g.compressorName != "" && g.compressorName != compress.NameIdentity {
-		h["Grpc-Encoding"] = []string{g.compressorName}
+		header["Grpc-Encoding"] = []string{g.compressorName}
 	}
-	if acceptCompression := g.compressors.Names(); acceptCompression != "" {
-		h["Grpc-Accept-Encoding"] = []string{acceptCompression}
+	if acceptCompression := g.compressors.CommaSeparatedNames(); acceptCompression != "" {
+		header["Grpc-Accept-Encoding"] = []string{acceptCompression}
 	}
 	if !g.web {
 		// No HTTP trailers in gRPC-Web.
-		h["Te"] = []string{"trailers"}
+		header["Te"] = []string{"trailers"}
 	}
 }
 
@@ -224,12 +222,12 @@ func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Rece
 	// body.
 	//
 	// net/http will own the read side of the pipe, and we'll hold onto the write
-	// side. Writes to pw will block until net/http pulls the data from pr and
+	// side. Writes to pipeWriter will block until net/http pulls the data from pipeReader and
 	// puts it onto the network - there's no buffer between the two. (The two
 	// sides of the pipe are meant to be used concurrently.) Once the server gets
 	// the first protobuf message that we send, it'll send back headers and start
 	// the response stream.
-	pr, pw := io.Pipe()
+	pipeReader, pipeWriter := io.Pipe()
 	duplex := &clientStream{
 		ctx:          ctx,
 		doer:         g.doer,
@@ -238,21 +236,22 @@ func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Rece
 		maxReadBytes: g.maxResponseBytes,
 		codec:        g.codec,
 		protobuf:     g.protobuf,
-		writer:       pw,
+		writer:       pipeWriter,
 		marshaler: marshaler{
-			w:          pw,
+			w:          pipeWriter,
 			compressor: g.compressors.Get(g.compressorName),
 			codec:      g.codec,
 		},
 		header:        h,
 		web:           g.web,
-		reader:        pr,
+		reader:        pipeReader,
 		compressors:   g.compressors,
 		responseReady: make(chan struct{}),
 	}
 	return g.wrapStream(&clientSender{duplex}, &clientReceiver{duplex})
 }
 
+// wrapStream ensures that we always return *Errors from public APIs.
 func (g *grpcClient) wrapStream(sender Sender, receiver Receiver) (Sender, Receiver) {
 	wrappedSender := &errorTranslatingSender{
 		Sender:   sender,
