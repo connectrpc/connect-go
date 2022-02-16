@@ -15,7 +15,7 @@ import (
 // many other things, the protocol implementation is responsible for
 // translating timeouts from Go contexts to HTTP and vice versa. For gRPC, it
 // converts timeouts to and from strings (e.g., 10*time.Second <-> "10S"), and
-// puts those strings into the "grpc-timeout" HTTP header. Other protocols
+// puts those strings into the "Grpc-Timeout" HTTP header. Other protocols
 // might encode durations differently, put them into a different HTTP header,
 // or ignore them entirely.
 type protocol interface {
@@ -39,7 +39,7 @@ type protocolHandlerParams struct {
 // multiple protocols, codecs, and compressors.
 type protocolHandler interface {
 	// ShouldHandleMethod and ShouldHandleContentType check whether the protocol
-	// can serve requests with a given HTTP method and content-type. NewStream
+	// can serve requests with a given HTTP method and Content-Type. NewStream
 	// may assume that any checks in ShouldHandleMethod and
 	// ShouldHandleContentType have passed.
 	ShouldHandleMethod(string) bool
@@ -95,7 +95,7 @@ type protocolClient interface {
 	//
 	// Implementations should assume that the supplied HTTP headers have already
 	// been populated by WriteRequestHeader. When constructing a stream for a
-	// unary call, implementations may assume that the sender's Send and Close
-	// methods return before the receiver's Receive or Close methods are called.
+	// unary call, implementations may assume that the Sender's Send and Close
+	// methods return before the Receiver's Receive or Close methods are called.
 	NewStream(context.Context, http.Header) (Sender, Receiver)
 }
