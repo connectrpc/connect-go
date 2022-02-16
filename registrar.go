@@ -27,8 +27,8 @@ func (r *Registrar) Services() []string {
 	defer r.mu.RUnlock()
 
 	names := make([]string, 0, len(r.services))
-	for n := range r.services {
-		names = append(names, n)
+	for name := range r.services {
+		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names
