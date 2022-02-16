@@ -448,7 +448,7 @@ func TestConnectServer(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(
 				server.URL,
 				server.Client(),
-				connect.UseCompressor(connectgzip.Name),
+				connect.WithRequestCompressor(connectgzip.Name),
 			)
 			assert.Nil(t, err, "client construction error")
 			testWithConnectClient(t, client)
@@ -528,7 +528,7 @@ func TestConnectServerH2C(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(
 				server.URL,
 				hclient,
-				connect.UseCompressor(connectgzip.Name),
+				connect.WithRequestCompressor(connectgzip.Name),
 			)
 			assert.Nil(t, err, "client construction error")
 			testWithConnectClient(t, client)
@@ -577,7 +577,7 @@ func TestGRPCServer(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(
 				url,
 				hclient,
-				connect.UseCompressor(connectgzip.Name),
+				connect.WithRequestCompressor(connectgzip.Name),
 			)
 			assert.Nil(t, err, "client construction error")
 			testWithConnectClient(t, client)

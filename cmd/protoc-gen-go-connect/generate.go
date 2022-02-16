@@ -20,6 +20,8 @@ const (
 
 	connectPackage      = protogen.GoImportPath("github.com/bufconnect/connect")
 	connectProtoPackage = protogen.GoImportPath("github.com/bufconnect/connect/codec/protobuf")
+	connectJSONPackage  = protogen.GoImportPath("github.com/bufconnect/connect/codec/protojson")
+	connectGzipPackage  = protogen.GoImportPath("github.com/bufconnect/connect/compress/gzip")
 	cstreamPackage      = protogen.GoImportPath("github.com/bufconnect/connect/clientstream")
 	hstreamPackage      = protogen.GoImportPath("github.com/bufconnect/connect/handlerstream")
 )
@@ -86,7 +88,7 @@ func handshake(g *protogen.GeneratedFile) {
 		"isn't defined, this code was generated with a version of connect newer than the one ",
 		"compiled into your binary. You can fix the problem by either regenerating this code ",
 		"with an older version of connect or updating the connect version compiled into your binary.")
-	g.P("const _ = ", connectPackage.Ident("SupportsCodeGenV0"), " // requires connect v0.0.1 or later")
+	g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion0_0_1"))
 	g.P()
 }
 
@@ -210,8 +212,11 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		", opts ...", clientOption, ") (", names.Client, ", error) {")
 	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
 	g.P("opts = append([]", clientOption, "{")
-	g.P(connectPackage.Ident("Codec"), "(", connectProtoPackage.Ident("NameBinary"), ", ",
-		connectProtoPackage.Ident("NewBinary"), "()),")
+	g.P(connectPackage.Ident("WithGRPC"), "(true),")
+	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("Name"), ", ",
+		connectProtoPackage.Ident("New"), "()),")
+	g.P(connectPackage.Ident("WithCompressor"), "(", connectGzipPackage.Ident("Name"), ", ",
+		connectGzipPackage.Ident("New"), "()),")
 	g.P("}, opts...)")
 	g.P("var (")
 	g.P("client ", names.ClientImpl)
@@ -395,8 +400,11 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		") ", connectPackage.Ident("MuxOption"), " {")
 	g.P("handlers := make([]", connectPackage.Ident("Handler"), ", 0, ", len(service.Methods), ")")
 	g.P("opts = append([]", handlerOption, "{")
-	g.P(connectPackage.Ident("Codec"), "(", connectProtoPackage.Ident("NameBinary"), ", ", connectProtoPackage.Ident("NewBinary"), "()", "),")
-	g.P(connectPackage.Ident("Codec"), "(", connectProtoPackage.Ident("NameJSON"), ", ", connectProtoPackage.Ident("NewJSON"), "()", "),")
+	g.P(connectPackage.Ident("WithGRPC"), "(true),")
+	g.P(connectPackage.Ident("WithGRPCWeb"), "(true),")
+	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("Name"), ", ", connectProtoPackage.Ident("New"), "()", "),")
+	g.P(connectPackage.Ident("WithCodec"), "(", connectJSONPackage.Ident("Name"), ", ", connectJSONPackage.Ident("New"), "()", "),")
+	g.P(connectPackage.Ident("WithCompressor"), "(", connectGzipPackage.Ident("Name"), ", ", connectGzipPackage.Ident("New"), "()", "),")
 	g.P("}, opts...)")
 	g.P()
 	for _, method := range service.Methods {

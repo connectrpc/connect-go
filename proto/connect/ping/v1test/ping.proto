@@ -4,12 +4,12 @@ package connect.ping.v1test;
 
 message PingRequest {
     int64 number = 1;
-    string msg = 2;
+    string text = 2;
 }
 
 message PingResponse {
     int64 number = 1;
-    string msg = 2;
+    string text = 2;
 }
 
 message FailRequest {

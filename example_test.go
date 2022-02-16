@@ -18,15 +18,14 @@ type ExamplePingServer struct {
 	pingrpc.UnimplementedPingServiceHandler
 }
 
-// Ping implements pingrpc.PingService.
+// Ping implements pingrpc.PingServiceHandler.
 func (*ExamplePingServer) Ping(
-	ctx context.Context,
+	_ context.Context,
 	req *connect.Request[pingpb.PingRequest],
 ) (*connect.Response[pingpb.PingResponse], error) {
-	pingRequest := req.Msg
 	return connect.NewResponse(&pingpb.PingResponse{
-		Number: pingRequest.Number,
-		Msg:    pingRequest.Msg,
+		Number: req.Msg.Number,
+		Text:   req.Msg.Text,
 	}), nil
 }
 
@@ -34,10 +33,10 @@ func Example() {
 	// The business logic here is trivial, but the rest of the example is meant
 	// to be somewhat realistic. This server has basic timeouts configured, and
 	// it also exposes gRPC's server reflection and health check APIs.
-	ping := &ExamplePingServer{}               // our business logic
-	reg := connect.NewRegistrar()              // for gRPC reflection
-	checker := health.NewChecker(reg)          // basic health checks
-	limit := connect.ReadMaxBytes(1024 * 1024) // limit request size
+	ping := &ExamplePingServer{}                   // our business logic
+	reg := connect.NewRegistrar()                  // for gRPC reflection
+	checker := health.NewChecker(reg)              // basic health checks
+	limit := connect.WithReadMaxBytes(1024 * 1024) // limit request size
 
 	// NewServeMux returns a plain net/http *ServeMux. Since a mux is an
 	// http.Handler, connect works with any Go HTTP middleware (e.g., net/http's
