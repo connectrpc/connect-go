@@ -39,7 +39,7 @@ func ReplaceProcedurePrefix(prefix, replacement string) Option {
 	}
 }
 
-func (o *replaceProcedurePrefixOption) applyToClient(cfg *clientCfg) {
+func (o *replaceProcedurePrefixOption) applyToClient(cfg *clientConfiguration) {
 	cfg.Procedure = o.transform(cfg.Procedure)
 }
 
@@ -72,7 +72,7 @@ func ReadMaxBytes(n int64) Option {
 	return &readMaxBytes{n}
 }
 
-func (o *readMaxBytes) applyToClient(cfg *clientCfg) {
+func (o *readMaxBytes) applyToClient(cfg *clientConfiguration) {
 	cfg.MaxResponseBytes = o.Max
 }
 
@@ -105,7 +105,7 @@ func Codec(name string, c codec.Codec) Option {
 	}
 }
 
-func (o *codecOption) applyToClient(cfg *clientCfg) {
+func (o *codecOption) applyToClient(cfg *clientConfiguration) {
 	cfg.Codec = o.Codec
 	cfg.CodecName = o.Name
 }
@@ -148,7 +148,7 @@ func Compressor(name string, c compress.Compressor) Option {
 	}
 }
 
-func (o *compressorOption) applyToClient(cfg *clientCfg) {
+func (o *compressorOption) applyToClient(cfg *clientConfiguration) {
 	o.apply(cfg.Compressors)
 }
 
@@ -218,7 +218,7 @@ func Interceptors(interceptors ...Interceptor) Option {
 	return &interceptOption{interceptors}
 }
 
-func (o *interceptOption) applyToClient(cfg *clientCfg) {
+func (o *interceptOption) applyToClient(cfg *clientConfiguration) {
 	cfg.Interceptor = o.chainWith(cfg.Interceptor)
 }
 
