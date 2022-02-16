@@ -78,7 +78,7 @@ func (c *handlerCfg) newProtocolHandlers(stype StreamType) ([]protocolHandler, *
 		protocols = append(protocols, &grpc{web: true})
 	}
 	handlers := make([]protocolHandler, 0, len(protocols))
-	codecs := newROCodecs(c.Codecs)
+	codecs := newReadOnlyCodecs(c.Codecs)
 	compressors := newROCompressors(c.Compressors)
 	for _, p := range protocols {
 		ph, err := p.NewHandler(&protocolHandlerParams{

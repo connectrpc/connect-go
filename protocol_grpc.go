@@ -48,7 +48,7 @@ func (g *grpc) NewClient(params *protocolClientParams) (protocolClient, error) {
 type grpcHandler struct {
 	spec            Specification
 	web             bool
-	codecs          roCodecs
+	codecs          readOnlyCodecs
 	compressors     roCompressors
 	maxRequestBytes int64
 	accept          string

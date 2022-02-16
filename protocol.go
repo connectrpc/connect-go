@@ -30,7 +30,7 @@ type protocol interface {
 // been added.
 type protocolHandlerParams struct {
 	Spec            Specification
-	Codecs          roCodecs
+	Codecs          readOnlyCodecs
 	Compressors     roCompressors
 	MaxRequestBytes int64
 }

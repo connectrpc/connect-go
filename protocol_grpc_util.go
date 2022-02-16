@@ -26,7 +26,7 @@ func isCommaOrSpace(c rune) bool {
 	return c == ',' || c == ' '
 }
 
-func acceptPostValue(web bool, codecs roCodecs) string {
+func acceptPostValue(web bool, codecs readOnlyCodecs) string {
 	bare, prefix := typeDefaultGRPC, typeDefaultGRPCPrefix
 	if web {
 		bare, prefix = typeWebGRPC, typeWebGRPCPrefix
