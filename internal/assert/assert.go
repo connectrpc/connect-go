@@ -141,7 +141,7 @@ func NotZero[T any](t testing.TB, got T, msg string, opts ...Option) bool {
 }
 
 // Match asserts that the value matches a regexp.
-func Match(t testing.TB, got, want string, msg string, opts ...Option) bool {
+func Match(t testing.TB, got, want, msg string, opts ...Option) bool {
 	t.Helper()
 	re, err := regexp.Compile(want)
 	if err != nil {
