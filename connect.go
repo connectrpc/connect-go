@@ -55,15 +55,15 @@ type Receiver interface {
 type Request[Req any] struct {
 	Msg *Req
 
-	spec Specification
-	hdr  http.Header
+	spec   Specification
+	header http.Header
 }
 
 // NewRequest constructs a Request.
 func NewRequest[Req any](msg *Req) *Request[Req] {
 	return &Request[Req]{
-		Msg: msg,
-		hdr: make(http.Header),
+		Msg:    msg,
+		header: make(http.Header),
 	}
 }
 
@@ -75,18 +75,17 @@ func ReceiveRequest[Req any](r Receiver) (*Request[Req], error) {
 		return nil, err
 	}
 	return &Request[Req]{
-		Msg:  &msg,
-		spec: r.Spec(),
-		hdr:  r.Header(),
+		Msg:    &msg,
+		spec:   r.Spec(),
+		header: r.Header(),
 	}, nil
 }
 
 func receiveRequestMetadata[Req any](r Receiver) *Request[Req] {
-	var msg Req
 	return &Request[Req]{
-		Msg:  &msg,
-		spec: r.Spec(),
-		hdr:  r.Header(),
+		Msg:    new(Req),
+		spec:   r.Spec(),
+		header: r.Header(),
 	}
 }
 
@@ -103,7 +102,7 @@ func (r *Request[_]) Spec() Specification {
 
 // Header returns the HTTP headers for this request.
 func (r *Request[_]) Header() http.Header {
-	return r.hdr
+	return r.header
 }
 
 // internalOnly implements AnyRequest.
@@ -113,14 +112,14 @@ func (r *Request[_]) internalOnly() {}
 type Response[Res any] struct {
 	Msg *Res
 
-	hdr http.Header
+	header http.Header
 }
 
 // NewResponse constructs a Response.
 func NewResponse[Res any](msg *Res) *Response[Res] {
 	return &Response[Res]{
-		Msg: msg,
-		hdr: make(http.Header),
+		Msg:    msg,
+		header: make(http.Header),
 	}
 }
 
@@ -132,8 +131,8 @@ func ReceiveResponse[Res any](r Receiver) (*Response[Res], error) {
 		return nil, err
 	}
 	return &Response[Res]{
-		Msg: &msg,
-		hdr: r.Header(),
+		Msg:    &msg,
+		header: r.Header(),
 	}, nil
 }
 
@@ -146,7 +145,7 @@ func (r *Response[_]) Any() any {
 
 // Header returns the HTTP headers for this response.
 func (r *Response[_]) Header() http.Header {
-	return r.hdr
+	return r.header
 }
 
 // internalOnly implements AnyResponse.
