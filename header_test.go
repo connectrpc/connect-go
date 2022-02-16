@@ -15,36 +15,37 @@ func TestBinaryEncodingQuick(t *testing.T) {
 		encoded := EncodeBinaryHeader(bs)
 		decoded, err := DecodeBinaryHeader(encoded)
 		if err != nil {
+			// We want to abort immediately. Don't use our assert package.
 			t.Fatalf("decode error: %v", err)
 		}
 		return bytes.Equal(decoded, bs)
 	}
-	if err := quick.Check(roundtrip, nil); err != nil {
+	if err := quick.Check(roundtrip, nil /* config */); err != nil {
 		t.Error(err)
 	}
 }
 
 func TestPercentEncodingQuick(t *testing.T) {
-	roundtrip := func(s string) bool {
-		if !utf8.ValidString(s) {
+	roundtrip := func(input string) bool {
+		if !utf8.ValidString(input) {
 			return true
 		}
-		encoded := percentEncode(s)
+		encoded := percentEncode(input)
 		decoded := percentDecode(encoded)
-		return decoded == s
+		return decoded == input
 	}
-	if err := quick.Check(roundtrip, nil); err != nil {
+	if err := quick.Check(roundtrip, nil /* config */); err != nil {
 		t.Error(err)
 	}
 }
 
 func TestPercentEncoding(t *testing.T) {
-	roundtrip := func(s string) {
-		assert.True(t, utf8.ValidString(s), "input invalid UTF-8")
-		encoded := percentEncode(s)
-		t.Logf("%q encoded as %q", s, encoded)
+	roundtrip := func(input string) {
+		assert.True(t, utf8.ValidString(input), "input invalid UTF-8")
+		encoded := percentEncode(input)
+		t.Logf("%q encoded as %q", input, encoded)
 		decoded := percentDecode(encoded)
-		assert.Equal(t, decoded, s, "roundtrip corrupted string")
+		assert.Equal(t, decoded, input, "roundtrip corrupted string")
 	}
 
 	roundtrip("foo")
@@ -54,10 +55,10 @@ func TestPercentEncoding(t *testing.T) {
 }
 
 func TestHeaderMerge(t *testing.T) {
-	h := http.Header{
+	header := http.Header{
 		"Foo": []string{"one"},
 	}
-	mergeHeaders(h, http.Header{
+	mergeHeaders(header, http.Header{
 		"Foo": []string{"two"},
 		"Bar": []string{"one"},
 		"Baz": nil,
@@ -67,5 +68,5 @@ func TestHeaderMerge(t *testing.T) {
 		"Bar": []string{"one"},
 		"Baz": nil,
 	}
-	assert.Equal(t, h, expect, "merge result")
+	assert.Equal(t, header, expect, "merge result")
 }

@@ -11,6 +11,8 @@ import (
 	connect "github.com/bufconnect/connect"
 	clientstream "github.com/bufconnect/connect/clientstream"
 	protobuf "github.com/bufconnect/connect/codec/protobuf"
+	protojson "github.com/bufconnect/connect/codec/protojson"
+	gzip "github.com/bufconnect/connect/compress/gzip"
 	handlerstream "github.com/bufconnect/connect/handlerstream"
 	v1test "github.com/bufconnect/connect/internal/gen/proto/go/connect/ping/v1test"
 	strings "strings"
@@ -22,7 +24,7 @@ import (
 // newer than the one compiled into your binary. You can fix the problem by
 // either regenerating this code with an older version of connect or updating
 // the connect version compiled into your binary.
-const _ = connect.SupportsCodeGenV0 // requires connect v0.0.1 or later
+const _ = connect.IsAtLeastVersion0_0_1
 
 // PingServiceClient is a client for the connect.ping.v1test.PingService
 // service.
@@ -48,7 +50,9 @@ type PingServiceClient interface {
 func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (PingServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
-		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
+		connect.WithGRPC(true),
+		connect.WithCodec(protobuf.Name, protobuf.New()),
+		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 	var (
 		client pingServiceClient
@@ -176,8 +180,11 @@ type PingServiceHandler interface {
 func WithPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption) connect.MuxOption {
 	handlers := make([]connect.Handler, 0, 5)
 	opts = append([]connect.HandlerOption{
-		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
-		connect.Codec(protobuf.NameJSON, protobuf.NewJSON()),
+		connect.WithGRPC(true),
+		connect.WithGRPCWeb(true),
+		connect.WithCodec(protobuf.Name, protobuf.New()),
+		connect.WithCodec(protojson.Name, protojson.New()),
+		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 
 	ping, err := connect.NewUnaryHandler(

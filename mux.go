@@ -63,9 +63,9 @@ func (o *withFallbackOption) apply(config *muxConfiguration) {
 }
 
 // NewServeMux mounts connect handlers on a mux.
-func NewServeMux(opts ...MuxOption) (*http.ServeMux, error) {
+func NewServeMux(options ...MuxOption) (*http.ServeMux, error) {
 	config := &muxConfiguration{fallback: newNotFoundHandler()}
-	for _, opt := range opts {
+	for _, opt := range options {
 		opt.apply(config)
 	}
 	if config.err != nil {
@@ -78,4 +78,14 @@ func NewServeMux(opts ...MuxOption) (*http.ServeMux, error) {
 		mux.Handle(handler.path(), &handler)
 	}
 	return mux, nil
+}
+
+// newNotFoundHandler returns an HTTP handler that always responds with a 404.
+// It's useful as a simple fallback handler in calls to NewServeMux.
+func newNotFoundHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		discard(r.Body)
+		r.Body.Close()
+		w.WriteHeader(http.StatusNotFound)
+	})
 }

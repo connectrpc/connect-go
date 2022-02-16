@@ -41,7 +41,7 @@ func BenchmarkConnect(b *testing.B) {
 	client, err := crossrpc.NewCrossServiceClient(
 		server.URL,
 		server.Client(),
-		connect.UseCompressor(connectgzip.Name),
+		connect.WithRequestCompressor(connectgzip.Name),
 	)
 	assert.Nil(b, err, "client construction error")
 	b.ResetTimer()

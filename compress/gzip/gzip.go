@@ -2,7 +2,7 @@ package gzip
 
 import (
 	"bytes"
-	stdgzip "compress/gzip"
+	"compress/gzip"
 	_ "embed"
 	"io"
 	"sync"
@@ -35,12 +35,12 @@ func New() *Compressor {
 			New: func() any {
 				// We don't want to use gzip.NewReader, because it requires a source of
 				// valid gzipped bytes.
-				return &stdgzip.Reader{}
+				return &gzip.Reader{}
 			},
 		},
 		writers: sync.Pool{
 			New: func() any {
-				return stdgzip.NewWriter(io.Discard)
+				return gzip.NewWriter(io.Discard)
 			},
 		},
 	}
@@ -51,36 +51,42 @@ func (c *Compressor) ShouldCompress(bs []byte) bool {
 }
 
 func (c *Compressor) GetReader(r io.Reader) (io.ReadCloser, error) {
-	gr := c.readers.Get().(*stdgzip.Reader)
-	return gr, gr.Reset(r)
+	gzipReader, ok := c.readers.Get().(*gzip.Reader)
+	if !ok {
+		return gzip.NewReader(r)
+	}
+	return gzipReader, gzipReader.Reset(r)
 }
 
 func (c *Compressor) PutReader(r io.ReadCloser) {
-	gr, ok := r.(*stdgzip.Reader)
+	gzipReader, ok := r.(*gzip.Reader)
 	if !ok {
 		return
 	}
-	if err := gr.Close(); err != nil { // close if we haven't already
+	if err := gzipReader.Close(); err != nil { // close if we haven't already
 		return
 	}
-	gr.Reset(bytes.NewReader(emptyGzipBytes)) // don't keep references
-	c.readers.Put(gr)
+	gzipReader.Reset(bytes.NewReader(emptyGzipBytes)) // don't keep references
+	c.readers.Put(gzipReader)
 }
 
 func (c *Compressor) GetWriter(w io.Writer) io.WriteCloser {
-	gw := c.writers.Get().(*stdgzip.Writer)
-	gw.Reset(w)
-	return gw
+	gzipWriter, ok := c.writers.Get().(*gzip.Writer)
+	if !ok {
+		return gzip.NewWriter(w)
+	}
+	gzipWriter.Reset(w)
+	return gzipWriter
 }
 
 func (c *Compressor) PutWriter(w io.WriteCloser) {
-	gw, ok := w.(*stdgzip.Writer)
+	gzipWriter, ok := w.(*gzip.Writer)
 	if !ok {
 		return
 	}
-	if err := gw.Close(); err != nil { // close if we haven't already
+	if err := gzipWriter.Close(); err != nil { // close if we haven't already
 		return
 	}
-	gw.Reset(io.Discard) // don't keep references
-	c.writers.Put(gw)
+	gzipWriter.Reset(io.Discard) // don't keep references
+	c.writers.Put(gzipWriter)
 }

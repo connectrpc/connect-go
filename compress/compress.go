@@ -1,7 +1,6 @@
 package compress
 
 import (
-	_ "embed"
 	"io"
 )
 

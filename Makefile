@@ -38,7 +38,7 @@ lint: lintpb bin/gofmt bin/goimports bin/staticcheck ## Lint Go and protobuf
 	@echo "Checking with gofmt..."
 	@test -z "$$(./bin/gofmt -s -l . | tee /dev/stderr)"
 	@echo "Checking with goimports..."
-	@test -z "$$(./bin/goimports -local github.com/bufconnect/connect -l $(HANDWRITTEN) | tee /dev/stderr)"
+	@test -z "$$(./bin/goimports -l $(HANDWRITTEN) | tee /dev/stderr)"
 	@echo "Checking with go vet..."
 	@$(GO) vet ./...
 	@# TODO: re-enable when staticcheck supports type parameters

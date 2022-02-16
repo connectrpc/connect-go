@@ -104,6 +104,16 @@ func percentDecodeSlow(encoded string, offset int) string {
 	return out.String()
 }
 
+// addCommaSeparatedHeader is a helper to produce headers like
+// {"Allow": "GET, POST"}.
+func addCommaSeparatedHeader(header http.Header, key, value string) {
+	if prev := header.Get(key); prev != "" {
+		header.Set(key, prev+", "+value)
+	} else {
+		header.Set(key, value)
+	}
+}
+
 func mergeHeaders(into, from http.Header) {
 	for k, vals := range from {
 		into[k] = append(into[k], vals...)
