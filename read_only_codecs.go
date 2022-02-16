@@ -32,10 +32,10 @@ func (m *codecMap) Get(name string) codec.Codec {
 // marshaling protobuf structs to binary even if the RPC procedures were
 // generated from a different IDL.
 func (m *codecMap) Protobuf() codec.Codec {
-	if pb, ok := m.codecs[protobuf.NameBinary]; ok {
+	if pb, ok := m.codecs[protobuf.Name]; ok {
 		return pb
 	}
-	return protobuf.NewBinary()
+	return protobuf.New()
 }
 
 // Names returns a copy of the registered codec names. The returned slice is

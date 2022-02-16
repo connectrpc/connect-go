@@ -36,12 +36,12 @@ func acceptPostValue(web bool, codecs readOnlyCodecs) string {
 	}
 	names := codecs.Names()
 	for i, name := range names {
-		if name == protobuf.NameBinary {
+		if name == protobuf.Name {
 			name = grpcNameProto
 		}
 		names[i] = prefix + name
 	}
-	if codecs.Get(protobuf.NameBinary) != nil {
+	if codecs.Get(protobuf.Name) != nil {
 		names = append(names, bare)
 	}
 	return strings.Join(names, ",")
@@ -50,7 +50,7 @@ func acceptPostValue(web bool, codecs readOnlyCodecs) string {
 func codecFromContentType(web bool, contentType string) string {
 	if (!web && contentType == typeDefaultGRPC) || (web && contentType == typeWebGRPC) {
 		// implicitly protobuf
-		return protobuf.NameBinary
+		return protobuf.Name
 	}
 	prefix := typeDefaultGRPCPrefix
 	if web {
@@ -62,14 +62,14 @@ func codecFromContentType(web bool, contentType string) string {
 	name := strings.TrimPrefix(contentType, prefix)
 	if name == grpcNameProto {
 		// normalize to our "protobuf"
-		return protobuf.NameBinary
+		return protobuf.Name
 	}
 	return name
 }
 
 func contentTypeFromCodecName(web bool, name string) string {
 	// translate back to gRPC's "proto"
-	if name == protobuf.NameBinary {
+	if name == protobuf.Name {
 		name = grpcNameProto
 	}
 	if web {

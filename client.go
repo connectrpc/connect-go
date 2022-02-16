@@ -50,10 +50,10 @@ func (c *clientConfiguration) Validate() *Error {
 }
 
 func (c *clientConfiguration) Protobuf() codec.Codec {
-	if c.CodecName == protobuf.NameBinary {
+	if c.CodecName == protobuf.Name {
 		return c.Codec
 	}
-	return protobuf.NewBinary()
+	return protobuf.New()
 }
 
 func (c *clientConfiguration) newSpecification(t StreamType) Specification {

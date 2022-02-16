@@ -20,6 +20,7 @@ const (
 
 	connectPackage      = protogen.GoImportPath("github.com/bufconnect/connect")
 	connectProtoPackage = protogen.GoImportPath("github.com/bufconnect/connect/codec/protobuf")
+	connectJSONPackage  = protogen.GoImportPath("github.com/bufconnect/connect/codec/protojson")
 	connectGzipPackage  = protogen.GoImportPath("github.com/bufconnect/connect/compress/gzip")
 	cstreamPackage      = protogen.GoImportPath("github.com/bufconnect/connect/clientstream")
 	hstreamPackage      = protogen.GoImportPath("github.com/bufconnect/connect/handlerstream")
@@ -212,8 +213,8 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
 	g.P("opts = append([]", clientOption, "{")
 	g.P(connectPackage.Ident("WithGRPC"), "(true),")
-	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("NameBinary"), ", ",
-		connectProtoPackage.Ident("NewBinary"), "()),")
+	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("Name"), ", ",
+		connectProtoPackage.Ident("New"), "()),")
 	g.P(connectPackage.Ident("WithCompressor"), "(", connectGzipPackage.Ident("Name"), ", ",
 		connectGzipPackage.Ident("New"), "()),")
 	g.P("}, opts...)")
@@ -401,8 +402,8 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 	g.P("opts = append([]", handlerOption, "{")
 	g.P(connectPackage.Ident("WithGRPC"), "(true),")
 	g.P(connectPackage.Ident("WithGRPCWeb"), "(true),")
-	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("NameBinary"), ", ", connectProtoPackage.Ident("NewBinary"), "()", "),")
-	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("NameJSON"), ", ", connectProtoPackage.Ident("NewJSON"), "()", "),")
+	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("Name"), ", ", connectProtoPackage.Ident("New"), "()", "),")
+	g.P(connectPackage.Ident("WithCodec"), "(", connectJSONPackage.Ident("Name"), ", ", connectJSONPackage.Ident("New"), "()", "),")
 	g.P(connectPackage.Ident("WithCompressor"), "(", connectGzipPackage.Ident("Name"), ", ", connectGzipPackage.Ident("New"), "()", "),")
 	g.P("}, opts...)")
 	g.P()

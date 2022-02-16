@@ -11,6 +11,7 @@ import (
 	connect "github.com/bufconnect/connect"
 	clientstream "github.com/bufconnect/connect/clientstream"
 	protobuf "github.com/bufconnect/connect/codec/protobuf"
+	protojson "github.com/bufconnect/connect/codec/protojson"
 	gzip "github.com/bufconnect/connect/compress/gzip"
 	handlerstream "github.com/bufconnect/connect/handlerstream"
 	v1test "github.com/bufconnect/connect/internal/gen/proto/go/connect/ping/v1test"
@@ -50,7 +51,7 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
 		connect.WithGRPC(true),
-		connect.WithCodec(protobuf.NameBinary, protobuf.NewBinary()),
+		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 	var (
@@ -181,8 +182,8 @@ func WithPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOptio
 	opts = append([]connect.HandlerOption{
 		connect.WithGRPC(true),
 		connect.WithGRPCWeb(true),
-		connect.WithCodec(protobuf.NameBinary, protobuf.NewBinary()),
-		connect.WithCodec(protobuf.NameJSON, protobuf.NewJSON()),
+		connect.WithCodec(protobuf.Name, protobuf.New()),
+		connect.WithCodec(protojson.Name, protojson.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 
