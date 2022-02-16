@@ -58,14 +58,17 @@ func parseTimeout(timeout string) (time.Duration, error) {
 	return time.Duration(num) * unit, nil
 }
 
-func encodeTimeout(t time.Duration) (string, error) {
-	if t <= 0 {
+func encodeTimeout(timeout time.Duration) (string, error) {
+	if timeout <= 0 {
 		return "0n", nil
 	}
 	for _, pair := range timeoutUnits {
-		if digits := strconv.FormatInt(int64(t/pair.size), 10 /* base */); len(digits) < maxTimeoutChars {
+		digits := strconv.FormatInt(int64(timeout/pair.size), 10 /* base */)
+		if len(digits) < maxTimeoutChars {
 			return digits + string(pair.char), nil
 		}
 	}
-	return "", errNoTimeout // shouldn't reach here
+	// The max time.Duration is smaller than the maximum expressible gRPC
+	// timeout, so we shouldn't ever reach this case.
+	return "", errNoTimeout
 }
