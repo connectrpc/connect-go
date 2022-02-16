@@ -14,11 +14,11 @@ import (
 	statuspb "github.com/bufconnect/connect/internal/gen/proto/go/grpc/status/v1"
 )
 
-// See clientStream below: the send and receive sides of client streams are
-// tightly interconnected, so it's simpler to implement the Sender interface
-// as a facade over a full-duplex stream.
+// See duplexClientStream below: the send and receive sides of client streams
+// are tightly interconnected, so it's simpler to implement the Sender
+// interface as a facade over a full-duplex stream.
 type clientSender struct {
-	stream *clientStream
+	stream *duplexClientStream
 }
 
 var _ Sender = (*clientSender)(nil)
@@ -28,11 +28,11 @@ func (cs *clientSender) Close(err error) error { return cs.stream.CloseSend(err)
 func (cs *clientSender) Spec() Specification   { return cs.stream.Spec() }
 func (cs *clientSender) Header() http.Header   { return cs.stream.Header() }
 
-// See clientStream below: the send and receive sides of client streams are
-// tightly interconnected, so it's simpler to implement the Receiver interface
-// as a facade over a full-duplex stream.
+// See duplexClientStream below: the send and receive sides of client streams
+// are tightly interconnected, so it's simpler to implement the Receiver
+// interface as a facade over a full-duplex stream.
 type clientReceiver struct {
-	stream *clientStream
+	stream *duplexClientStream
 }
 
 var _ Receiver = (*clientReceiver)(nil)
@@ -42,14 +42,14 @@ func (cr *clientReceiver) Close() error        { return cr.stream.CloseReceive()
 func (cr *clientReceiver) Spec() Specification { return cr.stream.Spec() }
 func (cr *clientReceiver) Header() http.Header { return cr.stream.ResponseHeader() }
 
-// clientStream represents a bidirectional exchange of protobuf messages
-// between the client and server. The request body is the stream from client to
-// server, and the response body is the reverse.
+// duplexClientStream is a bidirectional exchange of protobuf messages between
+// the client and server. The request body is the stream from client to server,
+// and the response body is the reverse.
 //
 // The way we do this with net/http is very different from the typical HTTP/1.1
 // request/response code. Since this is the most complex code in connect, it has
 // many more comments than usual.
-type clientStream struct {
+type duplexClientStream struct {
 	ctx          context.Context
 	doer         Doer
 	url          string
@@ -58,7 +58,8 @@ type clientStream struct {
 	codec        codec.Codec
 	protobuf     codec.Codec // for errors
 
-	// send
+	// send: guarded by prepareOnce because we can't initialize this state until
+	// the first call to Send.
 	prepareOnce sync.Once
 	writer      *io.PipeWriter
 	marshaler   marshaler
@@ -76,23 +77,22 @@ type clientStream struct {
 	responseErr   error
 }
 
-func (cs *clientStream) Spec() Specification {
+func (cs *duplexClientStream) Spec() Specification {
 	return cs.spec
 }
 
-func (cs *clientStream) Header() http.Header {
+func (cs *duplexClientStream) Header() http.Header {
 	return cs.header
 }
 
-func (cs *clientStream) Send(msg any) error {
+func (cs *duplexClientStream) Send(message any) error {
 	// stream.makeRequest hands the read side of the pipe off to net/http and
 	// waits to establish the response stream. There's a small class of errors we
-	// can catch without even sending data over the network, though, so we don't
-	// want to start writing to the stream until we're sure that we're actually
-	// waiting on the server. This makes user-visible behavior more predictable:
-	// for example, if they've configured the server's base URL as
-	// "hwws://acme.com", they'll always get an invalid URL error on their first
-	// attempt to send.
+	// can catch before writing to the request body, so we don't want to start
+	// writing to the stream until we're sure that we're actually waiting on the
+	// server. This makes user-visible behavior more predictable: for example, if
+	// they've configured the server's base URL as "hwws://acme.com", they'll
+	// always get an invalid URL error on their first attempt to send.
 	cs.prepareOnce.Do(func() {
 		requestPrepared := make(chan struct{})
 		go cs.makeRequest(requestPrepared)
@@ -101,7 +101,7 @@ func (cs *clientStream) Send(msg any) error {
 	// Calling Marshal writes data to the send stream. It's safe to do this while
 	// makeRequest is running, because we're writing to our side of the pipe
 	// (which is safe to do while net/http reads from the other side).
-	if err := cs.marshaler.Marshal(msg); err != nil {
+	if err := cs.marshaler.Marshal(message); err != nil {
 		if errors.Is(err, io.ErrClosedPipe) {
 			// net/http closed the request body, so it's sure that we can't send more
 			// data. In these cases, we expect a response from the server. Wait for
@@ -124,7 +124,7 @@ func (cs *clientStream) Send(msg any) error {
 	return nil
 }
 
-func (cs *clientStream) CloseSend(_ error) error {
+func (cs *duplexClientStream) CloseSend(_ error) error {
 	// The user calls CloseSend to indicate that they're done sending data. All
 	// we do here is close the write side of the pipe, so it's safe to do this
 	// while makeRequest is running. (This method takes an error to accommodate
@@ -139,15 +139,15 @@ func (cs *clientStream) CloseSend(_ error) error {
 	// code for unary, client streaming, and server streaming RPCs must call
 	// CloseSend automatically rather than requiring the user to do it.
 	if err := cs.writer.Close(); err != nil {
-		if cerr, ok := AsError(err); ok {
-			return cerr
+		if connectErr, ok := AsError(err); ok {
+			return connectErr
 		}
 		return Wrap(CodeUnknown, err)
 	}
 	return nil
 }
 
-func (cs *clientStream) Receive(msg any) error {
+func (cs *duplexClientStream) Receive(message any) error {
 	// First, we wait until we've gotten the response headers and established the
 	// server-to-client side of the stream.
 	<-cs.responseReady
@@ -156,7 +156,7 @@ func (cs *clientStream) Receive(msg any) error {
 		return err
 	}
 	// Consume one message from the response stream.
-	err := cs.unmarshaler.Unmarshal(msg)
+	err := cs.unmarshaler.Unmarshal(message)
 	if err != nil {
 		// If we can't read this LPM, see if the server sent an explicit error in
 		// trailers. First, we need to read the body to EOF.
@@ -166,6 +166,9 @@ func (cs *clientStream) Receive(msg any) error {
 			trailer = cs.unmarshaler.WebTrailer()
 		}
 		if serverErr := extractError(cs.protobuf, trailer); serverErr != nil {
+			// This is expected from a protocol perspective, but receiving trailers
+			// means that we're _not_ getting a message. For users to realize that
+			// the stream has ended, Receive must return an error.
 			cs.setResponseError(serverErr)
 			return serverErr
 		}
@@ -179,7 +182,7 @@ func (cs *clientStream) Receive(msg any) error {
 	return nil
 }
 
-func (cs *clientStream) CloseReceive() error {
+func (cs *duplexClientStream) CloseReceive() error {
 	<-cs.responseReady
 	if cs.response == nil {
 		return nil
@@ -191,22 +194,21 @@ func (cs *clientStream) CloseReceive() error {
 	return nil
 }
 
-func (cs *clientStream) ResponseHeader() http.Header {
+func (cs *duplexClientStream) ResponseHeader() http.Header {
 	<-cs.responseReady
 	return cs.response.Header
 }
 
-func (cs *clientStream) makeRequest(prepared chan struct{}) {
+func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	// This runs concurrently with Send and CloseSend. Receive and CloseReceive
 	// wait on cs.responseReady, so we can't race with them.
 	defer close(cs.responseReady)
 
 	if deadline, ok := cs.ctx.Deadline(); ok {
-		untilDeadline := time.Until(deadline)
-		if enc, err := encodeTimeout(untilDeadline); err == nil {
+		if encodedDeadline, err := encodeTimeout(time.Until(deadline)); err == nil {
 			// Tests verify that the error in encodeTimeout is unreachable, so we
 			// should be safe without observability for the error case.
-			cs.header["Grpc-Timeout"] = []string{enc}
+			cs.header["Grpc-Timeout"] = []string{encodedDeadline}
 		}
 	}
 
@@ -277,15 +279,19 @@ func (cs *clientStream) makeRequest(prepared chan struct{}) {
 	}
 }
 
-func (cs *clientStream) setResponseError(err error) {
+func (cs *duplexClientStream) setResponseError(err error) {
 	// Normally, we can rely on our built-in middleware to add codes to
 	// context-related errors. However, errors set here are exposed on the
 	// io.Writer end of the pipe, where they'll likely be miscoded if they're not
 	// already wrapped.
 	err = wrapIfContextError(err)
+
 	cs.responseErrMu.Lock()
 	cs.responseErr = err
+	// The next call (reader.CloseWithError) also needs to acquire an internal
+	// lock, so we want to scope responseErrMu's usage narrowly and avoid defer.
 	cs.responseErrMu.Unlock()
+
 	// The write end of the pipe will now return this error too. It's safe to
 	// call this method more than once and/or concurrently (calls after the first
 	// are no-ops), so it's okay for us to call this even though net/http
@@ -293,7 +299,7 @@ func (cs *clientStream) setResponseError(err error) {
 	cs.reader.CloseWithError(err)
 }
 
-func (cs *clientStream) getResponseError() error {
+func (cs *duplexClientStream) getResponseError() error {
 	cs.responseErrMu.Lock()
 	defer cs.responseErrMu.Unlock()
 	return cs.responseErr
@@ -314,7 +320,7 @@ func extractError(protobuf codec.Codec, h http.Header) *Error {
 		return Errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
 	}
 	message := percentDecode(h.Get("Grpc-Message"))
-	ret := Wrap(Code(code), errors.New(message))
+	retErr := Wrap(Code(code), errors.New(message))
 
 	detailsBinaryEncoded := h.Get("Grpc-Status-Details-Bin")
 	if len(detailsBinaryEncoded) > 0 {
@@ -327,12 +333,12 @@ func extractError(protobuf codec.Codec, h http.Header) *Error {
 			return Errorf(CodeUnknown, "server returned invalid protobuf for error details: %w", err)
 		}
 		for _, d := range status.Details {
-			ret.details = append(ret.details, d)
+			retErr.details = append(retErr.details, d)
 		}
 		// Prefer the protobuf-encoded data to the headers (grpc-go does this too).
-		ret.code = Code(status.Code)
-		ret.err = errors.New(status.Message)
+		retErr.code = Code(status.Code)
+		retErr.err = errors.New(status.Message)
 	}
 
-	return ret
+	return retErr
 }

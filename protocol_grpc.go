@@ -228,7 +228,7 @@ func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Rece
 	// the first protobuf message that we send, it'll send back headers and start
 	// the response stream.
 	pipeReader, pipeWriter := io.Pipe()
-	duplex := &clientStream{
+	duplex := &duplexClientStream{
 		ctx:          ctx,
 		doer:         g.doer,
 		url:          g.procedureURL,
