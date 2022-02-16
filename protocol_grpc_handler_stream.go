@@ -1,15 +1,12 @@
 package connect
 
 import (
-	"io"
 	"net/http"
 
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/bufconnect/connect/codec"
 	"github.com/bufconnect/connect/compress"
-	statuspb "github.com/bufconnect/connect/internal/gen/proto/go/grpc/status/v1"
 )
 
 // Thankfully, the handler stream is much simpler than the client. net/http
@@ -141,48 +138,4 @@ func (hr *handlerReceiver) Spec() Specification {
 
 func (hr *handlerReceiver) Header() http.Header {
 	return hr.request.Header
-}
-
-func statusFromError(err error) (*statuspb.Status, *Error) {
-	s := &statuspb.Status{
-		Code:    int32(CodeUnknown),
-		Message: err.Error(),
-	}
-	if re, ok := AsError(err); ok {
-		s.Code = int32(re.Code())
-		for _, d := range re.details {
-			// If the detail is already a protobuf Any, we're golden.
-			if anyProtoDetail, ok := d.(*anypb.Any); ok {
-				s.Details = append(s.Details, anyProtoDetail)
-				continue
-			}
-			// Otherwise, we convert it to an Any.
-			// TODO: Should we also attempt to delegate this to the detail by
-			// attempting an upcast to interface{ ToAny() *anypb.Any }?
-			anyProtoDetail, err := anypb.New(d)
-			if err != nil {
-				return nil, Errorf(
-					CodeInternal,
-					"can't create an *anypb.Any from %v (type %T): %v",
-					d, d, err,
-				)
-			}
-			s.Details = append(s.Details, anyProtoDetail)
-		}
-		if e := re.Unwrap(); e != nil {
-			s.Message = e.Error() // don't repeat code
-		}
-	}
-	return s, nil
-}
-
-func discard(r io.Reader) {
-	if lr, ok := r.(*io.LimitedReader); ok {
-		io.Copy(io.Discard, lr)
-		return
-	}
-	// We don't want to get stuck throwing data away forever, so limit how much
-	// we're willing to do here: at most, we'll copy 4 MiB.
-	lr := &io.LimitedReader{R: r, N: 1024 * 1024 * 4}
-	io.Copy(io.Discard, lr)
 }
