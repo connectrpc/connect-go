@@ -6,13 +6,12 @@ import (
 	"fmt"
 	"testing"
 
-	"google.golang.org/protobuf/types/known/anypb"
-
 	"github.com/bufconnect/connect"
 	"github.com/bufconnect/connect/connecttest"
 	"github.com/bufconnect/connect/internal/assert"
 	pingrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/connect/ping/v1test"
 	pingpb "github.com/bufconnect/connect/internal/gen/proto/go/connect/ping/v1test"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 type customErrorPingService struct {

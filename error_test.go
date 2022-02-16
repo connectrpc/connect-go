@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bufconnect/connect/internal/assert"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
-
-	"github.com/bufconnect/connect/internal/assert"
 )
 
 func TestErrorCodeOK(t *testing.T) {

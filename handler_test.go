@@ -6,12 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/bufconnect/connect"
 	"github.com/bufconnect/connect/internal/assert"
 	pingrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/connect/ping/v1test"
 	pingpb "github.com/bufconnect/connect/internal/gen/proto/go/connect/ping/v1test"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestHandlerReadMaxBytes(t *testing.T) {
