@@ -19,33 +19,34 @@ type replaceProcedurePrefixOption struct {
 	replacement string
 }
 
-// ReplaceProcedurePrefix changes the URL used to call a procedure. Typically,
-// generated code sets the procedure name: for example, a protobuf procedure's
-// name and URL is composed from the fully-qualified protobuf package name, the
-// service name, and the method name. This option replaces a prefix of the
-// procedure name with another static string. Using this option is usually a
-// bad idea, but it's occasionally necessary to prevent protobuf package
-// collisions. (For example, connect uses this option to serve the health and
-// reflection APIs without generating runtime conflicts with grpc-go.)
+// WithReplaceProcedurePrefix changes the URL used to call a procedure.
+// Typically, generated code sets the procedure name: for example, a protobuf
+// procedure's name and URL is composed from the fully-qualified protobuf
+// package name, the service name, and the method name. This option replaces a
+// prefix of the procedure name with another static string. Using this option
+// is usually a bad idea, but it's occasionally necessary to prevent protobuf
+// package collisions. (For example, connect uses this option to serve the
+// health and reflection APIs without generating runtime conflicts with
+// grpc-go.)
 //
-// ReplaceProcedurePrefix doesn't change the data exposed by the reflection
+// WithReplaceProcedurePrefix doesn't change the data exposed by the reflection
 // API. To prevent inconsistencies between the reflection data and the actual
 // service URL, using this option disables reflection for the modified service
 // (though other services can still be introspected).
-func ReplaceProcedurePrefix(prefix, replacement string) Option {
+func WithReplaceProcedurePrefix(prefix, replacement string) Option {
 	return &replaceProcedurePrefixOption{
 		prefix:      prefix,
 		replacement: replacement,
 	}
 }
 
-func (o *replaceProcedurePrefixOption) applyToClient(cfg *clientConfiguration) {
-	cfg.Procedure = o.transform(cfg.Procedure)
+func (o *replaceProcedurePrefixOption) applyToClient(config *clientConfiguration) {
+	config.Procedure = o.transform(config.Procedure)
 }
 
-func (o *replaceProcedurePrefixOption) applyToHandler(cfg *handlerConfiguration) {
-	cfg.Procedure = o.transform(cfg.Procedure)
-	cfg.RegistrationName = "" // disable reflection
+func (o *replaceProcedurePrefixOption) applyToHandler(config *handlerConfiguration) {
+	config.Procedure = o.transform(config.Procedure)
+	config.RegistrationName = "" // disable reflection
 }
 
 func (o *replaceProcedurePrefixOption) transform(name string) string {
@@ -55,29 +56,29 @@ func (o *replaceProcedurePrefixOption) transform(name string) string {
 	return o.replacement + strings.TrimPrefix(name, o.prefix)
 }
 
-type readMaxBytes struct {
+type readMaxBytesOption struct {
 	Max int64
 }
 
-// ReadMaxBytes limits the performance impact of pathologically large messages
-// sent by the other party. For handlers, ReadMaxBytes limits the size of
-// message that the client can send. For clients, ReadMaxBytes limits the size
-// of message that the server can respond with. Limits are applied before
+// WithReadMaxBytes limits the performance impact of pathologically large
+// messages sent by the other party. For handlers, WithReadMaxBytes limits the size
+// of message that the client can send. For clients, WithReadMaxBytes limits the
+// size of message that the server can respond with. Limits are applied before
 // decompression and apply to each protobuf message, not to the stream as a
 // whole.
 //
-// Setting ReadMaxBytes to zero allows any message size. Both clients and
+// Setting WithReadMaxBytes to zero allows any message size. Both clients and
 // handlers default to allowing any request size.
-func ReadMaxBytes(n int64) Option {
-	return &readMaxBytes{n}
+func WithReadMaxBytes(n int64) Option {
+	return &readMaxBytesOption{n}
 }
 
-func (o *readMaxBytes) applyToClient(cfg *clientConfiguration) {
-	cfg.MaxResponseBytes = o.Max
+func (o *readMaxBytesOption) applyToClient(config *clientConfiguration) {
+	config.MaxResponseBytes = o.Max
 }
 
-func (o *readMaxBytes) applyToHandler(cfg *handlerConfiguration) {
-	cfg.MaxRequestBytes = o.Max
+func (o *readMaxBytesOption) applyToHandler(config *handlerConfiguration) {
+	config.MaxRequestBytes = o.Max
 }
 
 type codecOption struct {
@@ -85,7 +86,7 @@ type codecOption struct {
 	Codec codec.Codec
 }
 
-// Codec registers a serialization method with a client or handler.
+// WithCodec registers a serialization method with a client or handler.
 //
 // Typically, generated code automatically supplies this option with the
 // appropriate codec(s). For example, handlers generated from protobuf schemas
@@ -98,24 +99,24 @@ type codecOption struct {
 //
 // When registering protocol buffer codecs, take care to use connect's
 // protobuf.NameBinary ("protobuf") rather than "proto".
-func Codec(name string, c codec.Codec) Option {
+func WithCodec(name string, c codec.Codec) Option {
 	return &codecOption{
 		Name:  name,
 		Codec: c,
 	}
 }
 
-func (o *codecOption) applyToClient(cfg *clientConfiguration) {
-	cfg.Codec = o.Codec
-	cfg.CodecName = o.Name
+func (o *codecOption) applyToClient(config *clientConfiguration) {
+	config.Codec = o.Codec
+	config.CodecName = o.Name
 }
 
-func (o *codecOption) applyToHandler(cfg *handlerConfiguration) {
+func (o *codecOption) applyToHandler(config *handlerConfiguration) {
 	if o.Codec == nil {
-		delete(cfg.Codecs, o.Name)
+		delete(config.Codecs, o.Name)
 		return
 	}
-	cfg.Codecs[o.Name] = o.Codec
+	config.Codecs[o.Name] = o.Codec
 }
 
 type compressorOption struct {
@@ -123,37 +124,37 @@ type compressorOption struct {
 	Compressor compress.Compressor
 }
 
-// Compressor configures client and server compression strategies.
+// WithCompressor configures client and server compression strategies.
 //
 // For handlers, it registers a compression algorithm. Clients may send
 // messages compressed with that algorithm and/or request compressed responses.
-// By default, handlers support gzip (using the standard library), compressing
-// response messages if the client supports it and the uncompressed message is
-// >1KiB.
+// By default, handlers generated by protoc-gen-go-connect support gzip (using
+// the standard library), compressing response messages if the client supports
+// it and the uncompressed message is >1KiB.
 //
 // For clients, registering compressors serves two purposes. First, the client
-// asks servers to compress responses using one of the registered algorithms.
-// (Note that gRPC's compression negotiation is complex, but most of Google's
-// gRPC server implementations won't compress responses unless the request is
-// compressed.) Second, it makes all the registered algorithms available for
-// use with UseCompressor. Note that actually compressing requests requires
-// using both Compressor and UseCompressor.
+// asks servers to compress responses using any of the registered algorithms.
+// (gRPC's compression negotiation is complex, but most of Google's gRPC server
+// implementations won't compress responses unless the request is compressed.)
+// Second, it makes all the registered algorithms available for use with
+// WithRequestCompressor. Note that actually compressing requests requires
+// using both WithCompressor and WithRequestCompressor.
 //
 // To remove a previously-registered compressor, re-register the same name with
 // a nil compressor.
-func Compressor(name string, c compress.Compressor) Option {
+func WithCompressor(name string, c compress.Compressor) Option {
 	return &compressorOption{
 		Name:       name,
 		Compressor: c,
 	}
 }
 
-func (o *compressorOption) applyToClient(cfg *clientConfiguration) {
-	o.apply(cfg.Compressors)
+func (o *compressorOption) applyToClient(config *clientConfiguration) {
+	o.apply(config.Compressors)
 }
 
-func (o *compressorOption) applyToHandler(cfg *handlerConfiguration) {
-	o.apply(cfg.Compressors)
+func (o *compressorOption) applyToHandler(config *handlerConfiguration) {
+	o.apply(config.Compressors)
 }
 
 func (o *compressorOption) apply(m map[string]compress.Compressor) {
@@ -168,10 +169,10 @@ type interceptOption struct {
 	interceptors []Interceptor
 }
 
-// Interceptors configures a client or handler's interceptor stack. Repeated
-// Interceptors options are applied in order, so
+// WithInterceptors configures a client or handler's interceptor stack. Repeated
+// WithInterceptors options are applied in order, so
 //
-//   Interceptors(A) + Interceptors(B, C) == Interceptors(A, B, C)
+//   WithInterceptors(A) + WithInterceptors(B, C) == WithInterceptors(A, B, C)
 //
 // Unary interceptors compose like an onion. The first interceptor provided is
 // the outermost layer of the onion: it acts first on the context and request,
@@ -182,7 +183,7 @@ type interceptOption struct {
 // the (Sender, Receiver) pair. It's the first to see sent messages and the
 // last to see received messages.
 //
-// Applied to client and handler, Interceptors(A, B, ..., Y, Z) produces:
+// Applied to client and handler, WithInterceptors(A, B, ..., Y, Z) produces:
 //
 //        client.Send()     client.Receive()
 //              |                 ^
@@ -214,16 +215,16 @@ type interceptOption struct {
 // Depending on your interceptor's logic, you may need to wrap one side of the
 // stream on the clients and the other side on handlers. See the implementation
 // of HeaderInterceptor for an example.
-func Interceptors(interceptors ...Interceptor) Option {
+func WithInterceptors(interceptors ...Interceptor) Option {
 	return &interceptOption{interceptors}
 }
 
-func (o *interceptOption) applyToClient(cfg *clientConfiguration) {
-	cfg.Interceptor = o.chainWith(cfg.Interceptor)
+func (o *interceptOption) applyToClient(config *clientConfiguration) {
+	config.Interceptor = o.chainWith(config.Interceptor)
 }
 
-func (o *interceptOption) applyToHandler(cfg *handlerConfiguration) {
-	cfg.Interceptor = o.chainWith(cfg.Interceptor)
+func (o *interceptOption) applyToHandler(config *handlerConfiguration) {
+	config.Interceptor = o.chainWith(config.Interceptor)
 }
 
 func (o *interceptOption) chainWith(current Interceptor) Interceptor {
@@ -237,4 +238,56 @@ func (o *interceptOption) chainWith(current Interceptor) Interceptor {
 		return newChain(o.interceptors)
 	}
 	return newChain(append([]Interceptor{current}, o.interceptors...))
+}
+
+type enableGRPCWebOption struct {
+	enable bool
+}
+
+// WithGRPCWeb enables or disables support for the gRPC-Web protocol.
+//
+// Handlers can support multiple protocols, and handlers generated by
+// protoc-gen-go-connect support gRPC-Web by default.
+//
+// Clients can use only one protocol, and protoc-gen-go-connect generates
+// handlers that use the HTTP/2 gRPC protocol by default (not gRPC-Web).
+func WithGRPCWeb(enable bool) Option {
+	return &enableGRPCWebOption{enable}
+}
+
+func (o *enableGRPCWebOption) applyToHandler(config *handlerConfiguration) {
+	config.HandleGRPCWeb = o.enable
+}
+
+func (o *enableGRPCWebOption) applyToClient(config *clientConfiguration) {
+	if !o.enable {
+		return
+	}
+	config.Protocol = &grpc{web: true}
+}
+
+type enableGRPCOption struct {
+	enable bool
+}
+
+// WithGRPC enables or disables support for the HTTP/2 gRPC protocol.
+//
+// Handlers can support multiple protocols. Handlers generated by
+// protoc-gen-go-connect support the HTTP/2 gRPC protocol by default.
+//
+// Clients can use only one protocol. Clients generated by
+// protoc-gen-go-connect use the HTTP/2 gRPC protocol by default.
+func WithGRPC(enable bool) Option {
+	return &enableGRPCOption{enable}
+}
+
+func (o *enableGRPCOption) applyToHandler(c *handlerConfiguration) {
+	c.HandleGRPC = o.enable
+}
+
+func (o *enableGRPCOption) applyToClient(config *clientConfiguration) {
+	if !o.enable {
+		return
+	}
+	config.Protocol = &grpc{web: false}
 }

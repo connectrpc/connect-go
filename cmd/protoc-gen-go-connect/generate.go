@@ -211,8 +211,11 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		", opts ...", clientOption, ") (", names.Client, ", error) {")
 	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
 	g.P("opts = append([]", clientOption, "{")
-	g.P(connectPackage.Ident("Codec"), "(", connectProtoPackage.Ident("NameBinary"), ", ",
+	g.P(connectPackage.Ident("WithGRPC"), "(true),")
+	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("NameBinary"), ", ",
 		connectProtoPackage.Ident("NewBinary"), "()),")
+	g.P(connectPackage.Ident("WithCompressor"), "(", connectGzipPackage.Ident("Name"), ", ",
+		connectGzipPackage.Ident("New"), "()),")
 	g.P("}, opts...)")
 	g.P("var (")
 	g.P("client ", names.ClientImpl)
@@ -396,11 +399,11 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		") ", connectPackage.Ident("MuxOption"), " {")
 	g.P("handlers := make([]", connectPackage.Ident("Handler"), ", 0, ", len(service.Methods), ")")
 	g.P("opts = append([]", handlerOption, "{")
-	g.P(connectPackage.Ident("HandleGRPC"), "(true),")
-	g.P(connectPackage.Ident("HandleGRPCWeb"), "(true),")
-	g.P(connectPackage.Ident("Codec"), "(", connectProtoPackage.Ident("NameBinary"), ", ", connectProtoPackage.Ident("NewBinary"), "()", "),")
-	g.P(connectPackage.Ident("Codec"), "(", connectProtoPackage.Ident("NameJSON"), ", ", connectProtoPackage.Ident("NewJSON"), "()", "),")
-	g.P(connectPackage.Ident("Compressor"), "(", connectGzipPackage.Ident("Name"), ", ", connectGzipPackage.Ident("New"), "()", "),")
+	g.P(connectPackage.Ident("WithGRPC"), "(true),")
+	g.P(connectPackage.Ident("WithGRPCWeb"), "(true),")
+	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("NameBinary"), ", ", connectProtoPackage.Ident("NewBinary"), "()", "),")
+	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("NameJSON"), ", ", connectProtoPackage.Ident("NewJSON"), "()", "),")
+	g.P(connectPackage.Ident("WithCompressor"), "(", connectGzipPackage.Ident("Name"), ", ", connectGzipPackage.Ident("New"), "()", "),")
 	g.P("}, opts...)")
 	g.P()
 	for _, method := range service.Methods {

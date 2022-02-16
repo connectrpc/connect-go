@@ -56,7 +56,7 @@ func TestHealth(t *testing.T) {
 		client, err := healthrpc.NewHealthClient(
 			server.URL,
 			server.Client(),
-			connect.ReplaceProcedurePrefix("internal.", "grpc."),
+			connect.WithReplaceProcedurePrefix("internal.", "grpc."),
 		)
 		assert.Nil(t, err, "client construction error")
 		stream, err := client.Watch(

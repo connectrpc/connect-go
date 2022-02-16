@@ -58,7 +58,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 	mux, err := connect.NewServeMux(
 		pingrpc.WithPingServiceHandler(
 			pingServer{},
-			connect.Interceptors(&assertCalledInterceptor{&called}),
+			connect.WithInterceptors(&assertCalledInterceptor{&called}),
 		),
 	)
 	assert.Nil(t, err, "mux construction error")
@@ -137,7 +137,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	//
 	// The request and response sides of this onion are numbered to make the
 	// intended order clear.
-	clientOnion := connect.Interceptors(
+	clientOnion := connect.WithInterceptors(
 		connect.NewHeaderInterceptor(
 			// 1 (start). request: should see protocol-related headers
 			func(_ connect.Specification, h http.Header) {
@@ -155,7 +155,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 			newInspector("two", "three"), // 10. response: check "two", add "three"
 		),
 	)
-	handlerOnion := connect.Interceptors(
+	handlerOnion := connect.WithInterceptors(
 		connect.NewHeaderInterceptor(
 			newInspector("two", "three"), // 4. request: check "two", add "three"
 			newInspector("one", "two"),   // 9. response: check "one", add "two"

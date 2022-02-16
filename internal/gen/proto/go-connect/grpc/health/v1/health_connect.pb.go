@@ -56,7 +56,9 @@ type HealthClient interface {
 func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (HealthClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
-		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
+		connect.WithGRPC(true),
+		connect.WithCodec(protobuf.NameBinary, protobuf.NewBinary()),
+		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 	var (
 		client healthClient
@@ -143,11 +145,11 @@ type HealthHandler interface {
 func WithHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) connect.MuxOption {
 	handlers := make([]connect.Handler, 0, 2)
 	opts = append([]connect.HandlerOption{
-		connect.HandleGRPC(true),
-		connect.HandleGRPCWeb(true),
-		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
-		connect.Codec(protobuf.NameJSON, protobuf.NewJSON()),
-		connect.Compressor(gzip.Name, gzip.New()),
+		connect.WithGRPC(true),
+		connect.WithGRPCWeb(true),
+		connect.WithCodec(protobuf.NameBinary, protobuf.NewBinary()),
+		connect.WithCodec(protobuf.NameJSON, protobuf.NewJSON()),
+		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 
 	check, err := connect.NewUnaryHandler(

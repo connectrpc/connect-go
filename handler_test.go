@@ -19,7 +19,7 @@ func TestHandlerReadMaxBytes(t *testing.T) {
 	mux, err := connect.NewServeMux(
 		pingrpc.WithPingServiceHandler(
 			&ExamplePingServer{},
-			connect.ReadMaxBytes(readMaxBytes),
+			connect.WithReadMaxBytes(readMaxBytes),
 		),
 	)
 	assert.Nil(t, err, "mux construction error")

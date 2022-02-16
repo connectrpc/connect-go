@@ -26,7 +26,7 @@ func ExampleInterceptor() {
 	client, err := pingrpc.NewPingServiceClient(
 		examplePingServer.URL(),
 		examplePingServer.Client(),
-		connect.Interceptors(loggingInterceptor),
+		connect.WithInterceptors(loggingInterceptor),
 	)
 	if err != nil {
 		logger.Println("error:", err)
@@ -61,7 +61,7 @@ func ExampleInterceptors() {
 	client, err := pingrpc.NewPingServiceClient(
 		examplePingServer.URL(),
 		examplePingServer.Client(),
-		connect.Interceptors(outer, inner),
+		connect.WithInterceptors(outer, inner),
 	)
 	if err != nil {
 		logger.Println("error:", err)

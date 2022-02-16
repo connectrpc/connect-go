@@ -7,7 +7,6 @@ import (
 	"github.com/bufconnect/connect/codec"
 	"github.com/bufconnect/connect/codec/protobuf"
 	"github.com/bufconnect/connect/compress"
-	"github.com/bufconnect/connect/compress/gzip"
 )
 
 type clientConfiguration struct {
@@ -23,11 +22,8 @@ type clientConfiguration struct {
 
 func newClientConfiguration(procedure string, options []ClientOption) (*clientConfiguration, *Error) {
 	config := clientConfiguration{
-		Procedure: procedure,
-		Compressors: map[string]compress.Compressor{
-			gzip.Name: gzip.New(),
-		},
-		Protocol: &grpc{},
+		Procedure:   procedure,
+		Compressors: make(map[string]compress.Compressor),
 	}
 	for _, opt := range options {
 		opt.applyToClient(&config)
@@ -46,6 +42,9 @@ func (c *clientConfiguration) Validate() *Error {
 		if _, ok := c.Compressors[c.RequestCompressor]; !ok {
 			return Errorf(CodeUnknown, "no registered compressor for %q", c.RequestCompressor)
 		}
+	}
+	if c.Protocol == nil {
+		return Errorf(CodeUnknown, "no protocol configured")
 	}
 	return nil
 }
@@ -73,36 +72,26 @@ type ClientOption interface {
 	applyToClient(*clientConfiguration)
 }
 
-type useCompressorOption struct {
+type requestCompressorOption struct {
 	Name string
 }
 
-// UseCompressor configures the client to use the specified algorithm to
-// compress request messages. If the algorithm has not been registered using
-// Compressor, the request message is sent uncompressed.
+// WithRequestCompressor configures the client to use the specified algorithm
+// to compress request messages. If the algorithm has not been registered using
+// WithCompressor, the generated client constructor will return an error.
 //
 // Because some servers don't support compression, clients default to sending
 // uncompressed requests.
-func UseCompressor(name string) ClientOption {
-	return &useCompressorOption{Name: name}
+func WithRequestCompressor(name string) ClientOption {
+	return &requestCompressorOption{Name: name}
 }
 
-func (o *useCompressorOption) applyToClient(config *clientConfiguration) {
+func (o *requestCompressorOption) applyToClient(config *clientConfiguration) {
 	config.RequestCompressor = o.Name
 }
 
 type useProtocolOption struct {
 	Protocol protocol
-}
-
-// UseGRPCWeb configures the client to use the gRPC-Web protocol, rather than
-// the default HTTP/2 gRPC variant.
-func UseGRPCWeb() ClientOption {
-	return &useProtocolOption{Protocol: &grpc{web: true}}
-}
-
-func (o *useProtocolOption) applyToClient(config *clientConfiguration) {
-	config.Protocol = o.Protocol
 }
 
 // NewClientStream returns a stream constructor for a client-, server-, or

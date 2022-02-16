@@ -16,7 +16,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/bufconnect/connect"
-	"github.com/bufconnect/connect/codec/protobuf"
 	"github.com/bufconnect/connect/handlerstream"
 	reflectionrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/grpc/reflection/v1alpha"
 	rpb "github.com/bufconnect/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
@@ -48,11 +47,7 @@ func WithHandler(reg Registrar, opts ...connect.HandlerOption) connect.MuxOption
 		prefix      = "internal.reflection.v1alpha1."
 		replacement = "grpc.reflection.v1alpha."
 	)
-	opts = append([]connect.HandlerOption{
-		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
-		connect.Codec(protobuf.NameJSON, protobuf.NewJSON()),
-	}, opts...)
-	opts = append(opts, connect.ReplaceProcedurePrefix(prefix, replacement))
+	opts = append(opts, connect.WithReplaceProcedurePrefix(prefix, replacement))
 	return reflectionrpc.WithServerReflectionHandler(
 		&server{reg: reg},
 		opts...,

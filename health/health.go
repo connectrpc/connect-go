@@ -99,7 +99,7 @@ func WithHandler(
 ) connect.MuxOption {
 	return healthrpc.WithHealthHandler(
 		&server{check: checker},
-		append(opts, connect.ReplaceProcedurePrefix("internal.", "grpc."))...,
+		append(opts, connect.WithReplaceProcedurePrefix("internal.", "grpc."))...,
 	)
 }
 
@@ -124,7 +124,7 @@ func NewClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) 
 	c, err := healthrpc.NewHealthClient(
 		baseURL,
 		doer,
-		append(opts, connect.ReplaceProcedurePrefix("internal.", "grpc."))...,
+		append(opts, connect.WithReplaceProcedurePrefix("internal.", "grpc."))...,
 	)
 	if err != nil {
 		return nil, err

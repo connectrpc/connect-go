@@ -42,7 +42,9 @@ type ServerReflectionClient interface {
 func NewServerReflectionClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (ServerReflectionClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
-		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
+		connect.WithGRPC(true),
+		connect.WithCodec(protobuf.NameBinary, protobuf.NewBinary()),
+		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 	var (
 		client serverReflectionClient
@@ -91,11 +93,11 @@ type ServerReflectionHandler interface {
 func WithServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.HandlerOption) connect.MuxOption {
 	handlers := make([]connect.Handler, 0, 1)
 	opts = append([]connect.HandlerOption{
-		connect.HandleGRPC(true),
-		connect.HandleGRPCWeb(true),
-		connect.Codec(protobuf.NameBinary, protobuf.NewBinary()),
-		connect.Codec(protobuf.NameJSON, protobuf.NewJSON()),
-		connect.Compressor(gzip.Name, gzip.New()),
+		connect.WithGRPC(true),
+		connect.WithGRPCWeb(true),
+		connect.WithCodec(protobuf.NameBinary, protobuf.NewBinary()),
+		connect.WithCodec(protobuf.NameJSON, protobuf.NewJSON()),
+		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 
 	serverReflectionInfo, err := connect.NewStreamingHandler(

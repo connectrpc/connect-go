@@ -80,7 +80,7 @@ func TestErrorTranslatingInterceptor(t *testing.T) {
 	mux, err := connect.NewServeMux(
 		pingrpc.WithPingServiceHandler(
 			&customErrorPingService{},
-			connect.Interceptors(connect.NewErrorInterceptor(toWire, nil /* fromWire */)),
+			connect.WithInterceptors(connect.NewErrorInterceptor(toWire, nil /* fromWire */)),
 		),
 	)
 	assert.Nil(t, err, "serve mux error")
@@ -88,7 +88,7 @@ func TestErrorTranslatingInterceptor(t *testing.T) {
 	client, err := pingrpc.NewPingServiceClient(
 		server.URL(),
 		server.Client(),
-		connect.Interceptors(connect.NewErrorInterceptor(nil /* toWire */, fromWire)),
+		connect.WithInterceptors(connect.NewErrorInterceptor(nil /* toWire */, fromWire)),
 	)
 	assert.Nil(t, err, "client construction error")
 	_, err = client.Fail(context.Background(), connect.NewRequest(&pingpb.FailRequest{}))
