@@ -21,11 +21,12 @@ func ExampleClient() {
 	//
 	// Of course, you can skip this configuration and use http.DefaultClient for
 	// quick proof-of-concept code.
-	doer := &http.Client{
+	httpClient := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
 			Proxy: nil,
-			// connect handles compression negotiation.
+			// connect handles compression on a per-message basis, so it's a waste to
+			// compress the whole response body.
 			DisableCompression: true,
 			MaxIdleConns:       128,
 			// RPC clients tend to make many requests to few hosts, so allow more
@@ -46,7 +47,7 @@ func ExampleClient() {
 
 	client, err := pingrpc.NewPingServiceClient(
 		"http://invalid-test-url",
-		doer,
+		httpClient,
 		connect.Interceptors(short),
 	)
 	if err != nil {
