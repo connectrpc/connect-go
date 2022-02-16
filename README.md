@@ -49,7 +49,7 @@ type PingServer struct {
 func (ps *PingServer) Ping(
   ctx context.Context,
   req *connect.Request[pingpb.PingRequest]) (*connect.Response[pingpb.PingResponse], error) {
-  return connect.NewRequest(&pingpb.PingResponse{
+  return connect.NewResponse(&pingpb.PingResponse{
     Number: 42,
   }), nil
 }
@@ -59,7 +59,8 @@ func main() {
     pingpb.WithPingServiceHandler(&PingServer{}), // our logic
   )
   if err != nil {
-    panic(err)
+    log.Println(err)
+    os.Exit(1)
   }
   http.ListenAndServe(
     ":8081",
