@@ -20,7 +20,7 @@ type customErrorPingService struct {
 }
 
 func (s *customErrorPingService) Fail(
-	ctx context.Context,
+	_ context.Context,
 	_ *connect.Request[pingpb.FailRequest],
 ) (*connect.Response[pingpb.FailResponse], error) {
 	return nil, newLocationError("some_file.go", 42)
@@ -41,36 +41,36 @@ func newLocationError(file string, line int64) *locationError {
 	}
 }
 
-func (p *locationError) Error() string {
-	return "eep"
+func (e *locationError) Error() string {
+	return "oh no:" + e.Location()
 }
 
-func (p *locationError) Location() string {
-	return fmt.Sprintf("%s:%d", p.ping.Msg, p.ping.Number)
+func (e *locationError) Location() string {
+	return fmt.Sprintf("%s:%d", e.ping.Msg, e.ping.Number)
 }
 
 func TestErrorTranslatingInterceptor(t *testing.T) {
 	toWire := func(err error) error {
-		if cerr, ok := connect.AsError(err); ok {
-			return cerr
+		if connectErr, ok := connect.AsError(err); ok {
+			return connectErr
 		}
 		var loc *locationError
 		if ok := errors.As(err, &loc); !ok {
 			return err
 		}
-		cerr := connect.Wrap(connect.CodeAborted, err)
+		connectErr := connect.Wrap(connect.CodeAborted, err)
 		detail, err := anypb.New(&loc.ping)
 		assert.Nil(t, err, "create proto.Any")
-		cerr.AddDetail(detail)
-		return cerr
+		connectErr.AddDetail(detail)
+		return connectErr
 	}
 	fromWire := func(err error) error {
-		cerr, ok := connect.AsError(err)
-		if !ok || cerr.Code() != connect.CodeAborted {
+		connectErr, ok := connect.AsError(err)
+		if !ok || connectErr.Code() != connect.CodeAborted {
 			return err
 		}
 		ping := &pingpb.PingRequest{}
-		for _, d := range cerr.Details() {
+		for _, d := range connectErr.Details() {
 			if d.UnmarshalTo(ping) == nil {
 				return newLocationError(ping.Msg, ping.Number)
 			}
