@@ -28,14 +28,14 @@ func (i *assertCalledInterceptor) WrapContext(ctx context.Context) context.Conte
 	return ctx
 }
 
-func (i *assertCalledInterceptor) WrapSender(_ context.Context, s connect.Sender) connect.Sender {
+func (i *assertCalledInterceptor) WrapSender(_ context.Context, sender connect.Sender) connect.Sender {
 	*i.called = true
-	return s
+	return sender
 }
 
-func (i *assertCalledInterceptor) WrapReceiver(_ context.Context, r connect.Receiver) connect.Receiver {
+func (i *assertCalledInterceptor) WrapReceiver(_ context.Context, receiver connect.Receiver) connect.Receiver {
 	*i.called = true
-	return r
+	return receiver
 }
 
 func TestClientStreamErrors(t *testing.T) {
@@ -100,8 +100,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 func TestOnionOrderingEndToEnd(t *testing.T) {
 	// Helper function: returns a function that asserts that there's some value
 	// set for header "expect", and adds a value for header "add".
-	newInspector := func(expect, add string) func(connect.Specification,
-		http.Header) {
+	newInspector := func(expect, add string) func(connect.Specification, http.Header) {
 		return func(spec connect.Specification, h http.Header) {
 			if expect != "" {
 				assert.NotZero(
