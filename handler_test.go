@@ -29,7 +29,7 @@ func TestHandlerReadMaxBytes(t *testing.T) {
 	assert.Nil(t, err, "client construction error")
 
 	padding := "padding                      "
-	req := &pingpb.PingRequest{Number: 42, Msg: padding}
+	req := &pingpb.PingRequest{Number: 42, Text: padding}
 	// Ensure that the probe is actually too big.
 	probeBytes, err := proto.Marshal(req)
 	assert.Nil(t, err, "marshal request")

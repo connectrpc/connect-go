@@ -25,7 +25,7 @@ func (*ExamplePingServer) Ping(
 ) (*connect.Response[pingpb.PingResponse], error) {
 	return connect.NewResponse(&pingpb.PingResponse{
 		Number: req.Msg.Number,
-		Msg:    req.Msg.Msg,
+		Text:   req.Msg.Text,
 	}), nil
 }
 

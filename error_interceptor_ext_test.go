@@ -34,7 +34,7 @@ type locationError struct {
 func newLocationError(file string, line int64) *locationError {
 	return &locationError{
 		ping: pingpb.PingRequest{
-			Msg:    file,
+			Text:   file,
 			Number: line,
 		},
 	}
@@ -45,7 +45,7 @@ func (e *locationError) Error() string {
 }
 
 func (e *locationError) Location() string {
-	return fmt.Sprintf("%s:%d", e.ping.Msg, e.ping.Number)
+	return fmt.Sprintf("%s:%d", e.ping.Text, e.ping.Number)
 }
 
 func TestErrorTranslatingInterceptor(t *testing.T) {
@@ -71,7 +71,7 @@ func TestErrorTranslatingInterceptor(t *testing.T) {
 		ping := &pingpb.PingRequest{}
 		for _, d := range connectErr.Details() {
 			if d.UnmarshalTo(ping) == nil {
-				return newLocationError(ping.Msg, ping.Number)
+				return newLocationError(ping.Text, ping.Number)
 			}
 		}
 		return err

@@ -30,7 +30,7 @@ type pingServer struct {
 func (p pingServer) Ping(ctx context.Context, req *connect.Request[pingpb.PingRequest]) (*connect.Response[pingpb.PingResponse], error) {
 	return connect.NewResponse(&pingpb.PingResponse{
 		Number: req.Msg.Number,
-		Msg:    req.Msg.Msg,
+		Text:   req.Msg.Text,
 	}), nil
 }
 
@@ -123,10 +123,10 @@ func TestServerProtoGRPC(t *testing.T) {
 			// packets, ensuring that we're managing HTTP readers and writers
 			// correctly.
 			hellos := strings.Repeat("hello", 1024*1024) // ~5mb
-			req := connect.NewRequest(&pingpb.PingRequest{Msg: hellos})
+			req := connect.NewRequest(&pingpb.PingRequest{Text: hellos})
 			res, err := client.Ping(context.Background(), req)
 			assert.Nil(t, err, "ping error")
-			assert.Equal(t, res.Msg.Msg, hellos, "ping response")
+			assert.Equal(t, res.Msg.Text, hellos, "ping response")
 		})
 	}
 	testSum := func(t *testing.T, client pingrpc.PingServiceClient) {
