@@ -5,21 +5,27 @@ import (
 )
 
 type nopSender struct {
-	spec   Specification
-	header http.Header
+	spec    Specification
+	header  http.Header
+	trailer http.Header
 }
 
 var _ Sender = (*nopSender)(nil)
 
-func newNopSender(spec Specification, header http.Header) *nopSender {
+func newNopSender(spec Specification, header, trailer http.Header) *nopSender {
 	return &nopSender{
-		spec:   spec,
-		header: header,
+		spec:    spec,
+		header:  header,
+		trailer: trailer,
 	}
 }
 
 func (n *nopSender) Header() http.Header {
 	return n.header
+}
+
+func (n *nopSender) Trailer() http.Header {
+	return n.trailer
 }
 
 func (n *nopSender) Spec() Specification {
@@ -35,16 +41,18 @@ func (n *nopSender) Close(_ error) error {
 }
 
 type nopReceiver struct {
-	spec   Specification
-	header http.Header
+	spec    Specification
+	header  http.Header
+	trailer http.Header
 }
 
 var _ Receiver = (*nopReceiver)(nil)
 
-func newNopReceiver(spec Specification, header http.Header) *nopReceiver {
+func newNopReceiver(spec Specification, header, trailer http.Header) *nopReceiver {
 	return &nopReceiver{
-		spec:   spec,
-		header: header,
+		spec:    spec,
+		header:  header,
+		trailer: trailer,
 	}
 }
 
@@ -54,6 +62,10 @@ func (n *nopReceiver) Spec() Specification {
 
 func (n *nopReceiver) Header() http.Header {
 	return n.header
+}
+
+func (n *nopReceiver) Trailer() http.Header {
+	return n.trailer
 }
 
 func (n *nopReceiver) Receive(_ any) error {

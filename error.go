@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -52,6 +53,8 @@ type Error struct {
 	code    Code
 	err     error
 	details []ErrorDetail
+	header  http.Header
+	trailer http.Header
 }
 
 // Wrap annotates any error with a status code. If the code is CodeOK, the
@@ -106,6 +109,37 @@ func (e *Error) Details() []ErrorDetail {
 // AddDetail appends a message to the error's details.
 func (e *Error) AddDetail(d ErrorDetail) {
 	e.details = append(e.details, d)
+}
+
+// Header allows the error to carry additional metadata as HTTP headers.
+//
+// Unary and client streaming handlers may set headers freely. Server streaming
+// and bidirectional streaming handlers should use them only if no messages
+// have been sent to the client; when returning errors after sending one or
+// more messages, any headers are ignored.
+//
+// When clients receive errors, Header returns the HTTP response headers.
+func (e *Error) Header() http.Header {
+	if e.header == nil {
+		e.header = make(http.Header)
+	}
+	return e.header
+}
+
+// Trailer allows the error to carry additional metadata as end-of-stream
+// trailers. The RPC protocol in use determines whether the trailers are
+// written to the network as HTTP trailers or a protocol-specific block of
+// metadata.
+//
+// Unary and streaming handlers may always attach custom trailers to errors.
+//
+// When clients receive errors, Trailer returns the union of the HTTP response
+// trailers and protocol-specific trailers (if any).
+func (e *Error) Trailer() http.Header {
+	if e.trailer == nil {
+		e.trailer = make(http.Header)
+	}
+	return e.trailer
 }
 
 // CodeOf returns the error's status code if it is or wraps a *connect.Error,

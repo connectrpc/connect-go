@@ -295,6 +295,12 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *
 		g.P("sender, receiver := c.", unexport(method.GoName), "(ctx)")
 		if !isStreamingClient && isStreamingServer {
 			// server streaming, we need to send the request.
+			g.P("for key, values := range req.Header() {")
+			g.P("sender.Header()[key] = append(sender.Header()[key], values...)")
+			g.P("}")
+			g.P("for key, values := range req.Trailer() {")
+			g.P("sender.Trailer()[key] = append(sender.Trailer()[key], values...)")
+			g.P("}")
 			g.P("if err := sender.Send(req.Msg); err != nil {")
 			g.P("_ = sender.Close(err)")
 			g.P("_ = receiver.Close()")

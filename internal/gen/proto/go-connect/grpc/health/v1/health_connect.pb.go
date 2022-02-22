@@ -103,6 +103,12 @@ func (c *healthClient) Check(ctx context.Context, req *connect.Request[v1.Health
 // Watch calls internal.health.v1.Health.Watch.
 func (c *healthClient) Watch(ctx context.Context, req *connect.Request[v1.HealthCheckRequest]) (*clientstream.Server[v1.HealthCheckResponse], error) {
 	sender, receiver := c.watch(ctx)
+	for key, values := range req.Header() {
+		sender.Header()[key] = append(sender.Header()[key], values...)
+	}
+	for key, values := range req.Trailer() {
+		sender.Trailer()[key] = append(sender.Trailer()[key], values...)
+	}
 	if err := sender.Send(req.Msg); err != nil {
 		_ = sender.Close(err)
 		_ = receiver.Close()

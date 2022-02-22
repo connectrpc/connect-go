@@ -162,6 +162,10 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	// We can't return failed as-is: a nil *Error is non-nil when returned as an
 	// error interface.
 	if failed != nil {
+		// Negotiation failed, so we can't establish a stream. To make the
+		// request's HTTP trailers visible to interceptors, we should try to read
+		// the body to EOF.
+		discard(r.Body)
 		return sender, receiver, failed
 	}
 	return sender, receiver, nil
@@ -243,6 +247,7 @@ func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Rece
 			codec:      g.codec,
 		},
 		header:        h,
+		trailer:       make(http.Header),
 		web:           g.web,
 		reader:        pipeReader,
 		compressors:   g.compressors,

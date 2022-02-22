@@ -79,6 +79,9 @@ func contentTypeFromCodecName(web bool, name string) string {
 }
 
 func grpcErrorToTrailer(trailer http.Header, protobuf codec.Codec, err error) error {
+	if connectErr, ok := AsError(err); ok && len(connectErr.trailer) > 0 {
+		mergeHeaders(trailer, connectErr.trailer)
+	}
 	if CodeOf(err) == CodeOK { // safe for nil errors
 		trailer.Set("Grpc-Status", strconv.Itoa(int(CodeOK)))
 		trailer.Set("Grpc-Message", "")

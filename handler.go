@@ -179,6 +179,7 @@ func NewUnaryHandler[Req, Res any](
 			return
 		}
 		mergeHeaders(sender.Header(), response.Header())
+		mergeHeaders(sender.Trailer(), response.Trailer())
 		_ = sender.Close(sender.Send(response.Any()))
 	}
 
@@ -274,10 +275,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// error to be seen by interceptors, so we provide no-op Sender and
 		// Receiver implementations.
 		if clientVisibleError != nil && sender == nil {
-			sender = newNopSender(h.spec, w.Header())
+			sender = newNopSender(h.spec, w.Header(), make(http.Header))
 		}
 		if clientVisibleError != nil && receiver == nil {
-			receiver = newNopReceiver(h.spec, r.Header)
+			receiver = newNopReceiver(h.spec, r.Header, r.Trailer)
 		}
 		if ic := h.interceptor; ic != nil {
 			// Unary interceptors were handled in NewUnaryHandler.
