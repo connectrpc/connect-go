@@ -309,8 +309,8 @@ func (cs *duplexClientStream) getResponseError() error {
 // binary protobuf format, even if the messages in the request/response stream
 // use a different codec. Consequently, this function needs a protobuf codec to
 // unmarshal error information in the headers.
-func extractError(protobuf codec.Codec, h http.Header) *Error {
-	codeHeader := h.Get("Grpc-Status")
+func extractError(protobuf codec.Codec, trailer http.Header) *Error {
+	codeHeader := trailer.Get("Grpc-Status")
 	if codeHeader == "" || codeHeader == "0" {
 		return nil
 	}
@@ -319,10 +319,11 @@ func extractError(protobuf codec.Codec, h http.Header) *Error {
 	if err != nil {
 		return Errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
 	}
-	message := percentDecode(h.Get("Grpc-Message"))
+	message := percentDecode(trailer.Get("Grpc-Message"))
 	retErr := Wrap(Code(code), errors.New(message))
+	retErr.trailer = trailer
 
-	detailsBinaryEncoded := h.Get("Grpc-Status-Details-Bin")
+	detailsBinaryEncoded := trailer.Get("Grpc-Status-Details-Bin")
 	if len(detailsBinaryEncoded) > 0 {
 		detailsBinary, err := DecodeBinaryHeader(detailsBinaryEncoded)
 		if err != nil {
