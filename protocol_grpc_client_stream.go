@@ -264,11 +264,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	}
 
 	if res.StatusCode != http.StatusOK {
-		code := CodeUnknown
-		if c, ok := httpToCode[res.StatusCode]; ok {
-			code = c
-		}
-		cs.setResponseError(Errorf(code, "HTTP status %v", res.Status))
+		cs.setResponseError(Errorf(httpToCode(res.StatusCode), "HTTP status %v", res.Status))
 		return
 	}
 	compression := res.Header.Get("Grpc-Encoding")
