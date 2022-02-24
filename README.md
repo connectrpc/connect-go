@@ -21,6 +21,9 @@ balancing APIs, and no surprises. Everything you already know about `net/http`
 still applies, and any package that works with an `http.Server`, `http.Client`,
 or `http.Handler` also works with connect.
 
+For more on connect, including a walkthrough and a comparison to alternatives,
+see the [docs][].
+
 ## A Small Example
 
 Curious what all this looks like in practice? Here's a small h2c server:
@@ -92,6 +95,7 @@ Within those parameters, connect follows semantic versioning.
 Offered under the [MIT license][license].
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
+[docs]: https://bufconnect.com
 [envoy]: https://www.envoyproxy.io/
 [godoc]: https://pkg.go.dev/github.com/bufbuild/connect
 [go-support-policy]: https://golang.org/doc/devel/release#policy
