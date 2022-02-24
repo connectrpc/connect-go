@@ -7,7 +7,7 @@ import (
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/types/descriptorpb"
 
-	"github.com/bufconnect/connect"
+	"github.com/bufbuild/connect"
 )
 
 const (
@@ -18,12 +18,12 @@ const (
 
 	protoPackage = protogen.GoImportPath("google.golang.org/protobuf/proto")
 
-	connectPackage      = protogen.GoImportPath("github.com/bufconnect/connect")
-	connectProtoPackage = protogen.GoImportPath("github.com/bufconnect/connect/codec/protobuf")
-	connectJSONPackage  = protogen.GoImportPath("github.com/bufconnect/connect/codec/protojson")
-	connectGzipPackage  = protogen.GoImportPath("github.com/bufconnect/connect/compress/gzip")
-	cstreamPackage      = protogen.GoImportPath("github.com/bufconnect/connect/clientstream")
-	hstreamPackage      = protogen.GoImportPath("github.com/bufconnect/connect/handlerstream")
+	connectPackage      = protogen.GoImportPath("github.com/bufbuild/connect")
+	connectProtoPackage = protogen.GoImportPath("github.com/bufbuild/connect/codec/protobuf")
+	connectJSONPackage  = protogen.GoImportPath("github.com/bufbuild/connect/codec/protojson")
+	connectGzipPackage  = protogen.GoImportPath("github.com/bufbuild/connect/compress/gzip")
+	cstreamPackage      = protogen.GoImportPath("github.com/bufbuild/connect/clientstream")
+	hstreamPackage      = protogen.GoImportPath("github.com/bufbuild/connect/handlerstream")
 )
 
 var (

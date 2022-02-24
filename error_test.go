@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bufconnect/connect/internal/assert"
+	"github.com/bufbuild/connect/internal/assert"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 )

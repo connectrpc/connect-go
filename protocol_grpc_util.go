@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/bufconnect/connect/codec"
-	"github.com/bufconnect/connect/codec/protobuf"
-	statuspb "github.com/bufconnect/connect/internal/gen/proto/go/grpc/status/v1"
+	"github.com/bufbuild/connect/codec"
+	"github.com/bufbuild/connect/codec/protobuf"
+	statuspb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/status/v1"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 

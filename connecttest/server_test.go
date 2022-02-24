@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/bufconnect/connect/internal/assert"
+	"github.com/bufbuild/connect/internal/assert"
 )
 
 func TestServer(t *testing.T) {

@@ -49,7 +49,7 @@ lint: lintpb bin/gofmt bin/goimports bin/staticcheck ## Lint Go and protobuf
 .PHONY: lintfix
 lintfix: bin/gofmt bin/goimports ## Automatically fix some lint errors
 	@./bin/gofmt -s -w .
-	@./bin/goimports -local github.com/bufconnect/connect -w $(HANDWRITTEN)
+	@./bin/goimports -local github.com/bufbuild/connect -w $(HANDWRITTEN)
 
 .PHONY: lintpb
 lintpb: bin/buf proto/buf.yaml internal/crosstest/proto/buf.yaml $(PROTOBUFS)

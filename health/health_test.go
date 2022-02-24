@@ -5,12 +5,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/bufconnect/connect"
-	"github.com/bufconnect/connect/health"
-	"github.com/bufconnect/connect/internal/assert"
-	pingrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/connect/ping/v1test"
-	healthrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/grpc/health/v1"
-	healthpb "github.com/bufconnect/connect/internal/gen/proto/go/grpc/health/v1"
+	"github.com/bufbuild/connect"
+	"github.com/bufbuild/connect/health"
+	"github.com/bufbuild/connect/internal/assert"
+	pingrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/connect/ping/v1test"
+	healthrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/grpc/health/v1"
+	healthpb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/health/v1"
 )
 
 func TestHealth(t *testing.T) {

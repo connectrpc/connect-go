@@ -8,13 +8,13 @@ package reflectionv1alpha1
 
 import (
 	context "context"
-	connect "github.com/bufconnect/connect"
-	clientstream "github.com/bufconnect/connect/clientstream"
-	protobuf "github.com/bufconnect/connect/codec/protobuf"
-	protojson "github.com/bufconnect/connect/codec/protojson"
-	gzip "github.com/bufconnect/connect/compress/gzip"
-	handlerstream "github.com/bufconnect/connect/handlerstream"
-	v1alpha "github.com/bufconnect/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
+	connect "github.com/bufbuild/connect"
+	clientstream "github.com/bufbuild/connect/clientstream"
+	protobuf "github.com/bufbuild/connect/codec/protobuf"
+	protojson "github.com/bufbuild/connect/codec/protojson"
+	gzip "github.com/bufbuild/connect/compress/gzip"
+	handlerstream "github.com/bufbuild/connect/handlerstream"
+	v1alpha "github.com/bufbuild/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
 	strings "strings"
 )
 

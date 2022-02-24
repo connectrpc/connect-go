@@ -7,9 +7,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/bufconnect/connect"
-	pingrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/connect/ping/v1test"
-	pingpb "github.com/bufconnect/connect/internal/gen/proto/go/connect/ping/v1test"
+	"github.com/bufbuild/connect"
+	pingrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/connect/ping/v1test"
+	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
 )
 
 func ExampleClient() {
