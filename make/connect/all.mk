@@ -30,7 +30,7 @@ include make/go/dep_protoc_gen_go_grpc.mk
 
 BENCH ?= .
 
-bufgeneratedeps:: $(BUF) $(PROTOC_GEN_GO) $(PROTOC_GEN_GRPC_GO) installprotoc-gen-go-connect
+bufgeneratedeps:: $(BUF) $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC) installprotoc-gen-go-connect
 
 .PHONY: bufgeneratecleango
 bufgeneratecleango:
