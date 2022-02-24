@@ -118,10 +118,8 @@ type Handler struct {
 	protocolHandlers []protocolHandler
 }
 
-// NewUnaryHandler constructs a Handler for a request-response procedure.
-//
-// NewUnaryHandler is usually called from generated code - most users won't
-// need to produce fully-qualified procedure and registration names by hand.
+// NewUnaryHandler constructs a Handler for a request-response procedure. It's
+// used in generated code, so most users won't need to call it directly.
 func NewUnaryHandler[Req, Res any](
 	procedure, registrationName string,
 	unary func(context.Context, *Request[Req]) (*Response[Res], error),
@@ -195,13 +193,11 @@ func NewUnaryHandler[Req, Res any](
 	}, nil
 }
 
-// NewStreamingHandler constructs a Handler for a streaming procedure.
-//
-// NewStreamingHandler is usually called from generated code - most users won't
-// need to produce fully-qualified procedure and registration names by hand.
-func NewStreamingHandler(
-	streamType StreamType,
+// NewStreamHandler constructs a Handler for a streaming procedure. It's
+// used in generated code, so most users won't need to call it directly.
+func NewStreamHandler(
 	procedure, registrationName string,
+	streamType StreamType,
 	implementation func(context.Context, Sender, Receiver),
 	options ...HandlerOption,
 ) (*Handler, error) {

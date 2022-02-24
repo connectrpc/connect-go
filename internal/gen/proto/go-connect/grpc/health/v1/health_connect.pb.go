@@ -171,10 +171,10 @@ func WithHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) connect
 	}
 	handlers = append(handlers, *check)
 
-	watch, err := connect.NewStreamingHandler(
-		connect.StreamTypeServer,
+	watch, err := connect.NewStreamHandler(
 		"internal.health.v1.Health/Watch", // procedure name
 		"internal.health.v1.Health",       // reflection name
+		connect.StreamTypeServer,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
 			typed := handlerstream.NewServer[v1.HealthCheckResponse](sender)
 			req, err := connect.ReceiveRequest[v1.HealthCheckRequest](receiver)

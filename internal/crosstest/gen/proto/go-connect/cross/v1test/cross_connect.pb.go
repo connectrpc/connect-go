@@ -204,10 +204,10 @@ func WithCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpt
 	}
 	handlers = append(handlers, *fail)
 
-	sum, err := connect.NewStreamingHandler(
-		connect.StreamTypeClient,
+	sum, err := connect.NewStreamHandler(
 		"cross.v1test.CrossService/Sum", // procedure name
 		"cross.v1test.CrossService",     // reflection name
+		connect.StreamTypeClient,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
 			typed := handlerstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 			err := svc.Sum(ctx, typed)
@@ -221,10 +221,10 @@ func WithCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpt
 	}
 	handlers = append(handlers, *sum)
 
-	countUp, err := connect.NewStreamingHandler(
-		connect.StreamTypeServer,
+	countUp, err := connect.NewStreamHandler(
 		"cross.v1test.CrossService/CountUp", // procedure name
 		"cross.v1test.CrossService",         // reflection name
+		connect.StreamTypeServer,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
 			typed := handlerstream.NewServer[v1test.CountUpResponse](sender)
 			req, err := connect.ReceiveRequest[v1test.CountUpRequest](receiver)
@@ -247,10 +247,10 @@ func WithCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpt
 	}
 	handlers = append(handlers, *countUp)
 
-	cumSum, err := connect.NewStreamingHandler(
-		connect.StreamTypeBidirectional,
+	cumSum, err := connect.NewStreamHandler(
 		"cross.v1test.CrossService/CumSum", // procedure name
 		"cross.v1test.CrossService",        // reflection name
+		connect.StreamTypeBidirectional,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
 			typed := handlerstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 			err := svc.CumSum(ctx, typed)

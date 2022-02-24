@@ -417,7 +417,9 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		hname := unexport(string(method.Desc.Name()))
 
 		if method.Desc.IsStreamingServer() || method.Desc.IsStreamingClient() {
-			g.P(hname, ", err := ", connectPackage.Ident("NewStreamingHandler"), "(")
+			g.P(hname, ", err := ", connectPackage.Ident("NewStreamHandler"), "(")
+			g.P(`"`, procedureName(method), `", // procedure name`)
+			g.P(`"`, reflectionName(service), `", // reflection name`)
 			if method.Desc.IsStreamingServer() && method.Desc.IsStreamingClient() {
 				g.P(connectPackage.Ident("StreamTypeBidirectional"), ",")
 			} else if method.Desc.IsStreamingServer() {
@@ -425,8 +427,6 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 			} else {
 				g.P(connectPackage.Ident("StreamTypeClient"), ",")
 			}
-			g.P(`"`, procedureName(method), `", // procedure name`)
-			g.P(`"`, reflectionName(service), `", // reflection name`)
 			g.P("func(ctx ", contextContext, ", sender ", connectPackage.Ident("Sender"),
 				", receiver ", connectPackage.Ident("Receiver"), ") {")
 			if method.Desc.IsStreamingServer() && method.Desc.IsStreamingClient() {

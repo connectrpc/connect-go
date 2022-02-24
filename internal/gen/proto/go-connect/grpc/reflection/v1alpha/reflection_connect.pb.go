@@ -102,10 +102,10 @@ func WithServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.Ha
 		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 
-	serverReflectionInfo, err := connect.NewStreamingHandler(
-		connect.StreamTypeBidirectional,
+	serverReflectionInfo, err := connect.NewStreamHandler(
 		"internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo", // procedure name
 		"internal.reflection.v1alpha1.ServerReflection",                      // reflection name
+		connect.StreamTypeBidirectional,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
 			typed := handlerstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
 			err := svc.ServerReflectionInfo(ctx, typed)
