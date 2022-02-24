@@ -8,6 +8,7 @@ package reflectionv1alpha1
 
 import (
 	context "context"
+	errors "errors"
 	connect "github.com/bufbuild/connect"
 	clientstream "github.com/bufbuild/connect/clientstream"
 	protobuf "github.com/bufbuild/connect/codec/protobuf"
@@ -128,5 +129,5 @@ type UnimplementedServerReflectionHandler struct{}
 var _ ServerReflectionHandler = (*UnimplementedServerReflectionHandler)(nil) // verify interface implementation
 
 func (UnimplementedServerReflectionHandler) ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error {
-	return connect.Errorf(connect.CodeUnimplemented, "internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo isn't implemented")
+	return connect.NewError(connect.CodeUnimplemented, errors.New("internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo isn't implemented"))
 }

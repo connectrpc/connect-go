@@ -20,7 +20,7 @@ const (
 
 var (
 	sizeZeroPrefix    = make([]byte, 4)
-	errGotWebTrailers = Errorf(
+	errGotWebTrailers = errorf(
 		CodeUnknown,
 		"end of message stream, next block of data is gRPC-Web trailers: %w",
 		// User code checks for end of stream with errors.Is(err, io.EOF).
@@ -37,7 +37,7 @@ type marshaler struct {
 func (m *marshaler) Marshal(message any) *Error {
 	raw, err := m.codec.Marshal(message)
 	if err != nil {
-		return Errorf(CodeInternal, "couldn't marshal message: %w", err)
+		return errorf(CodeInternal, "couldn't marshal message: %w", err)
 	}
 	return m.writeLPM(false /* trailer */, raw)
 }
@@ -46,7 +46,7 @@ func (m *marshaler) MarshalWebTrailers(trailer http.Header) *Error {
 	// OPT: easy opportunity to pool buffers
 	raw := bytes.NewBuffer(nil)
 	if err := trailer.Write(raw); err != nil {
-		return Errorf(CodeInternal, "couldn't format trailers: %w", err)
+		return errorf(CodeInternal, "couldn't format trailers: %w", err)
 	}
 	return m.writeLPM(true /* trailer */, raw.Bytes())
 }
@@ -57,7 +57,7 @@ func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
 			return err // already enriched
 		}
 		if _, err := m.writer.Write(message); err != nil {
-			return Errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
+			return errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
 		}
 		return nil
 	}
@@ -67,19 +67,19 @@ func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
 	defer m.compressor.PutWriter(compressingWriter)
 
 	if _, err := compressingWriter.Write(message); err != nil { // returns uncompressed size, which isn't useful
-		return Errorf(CodeInternal, "couldn't compress data: %w", err)
+		return errorf(CodeInternal, "couldn't compress data: %w", err)
 	}
 	if err := compressingWriter.Close(); err != nil {
-		return Errorf(CodeInternal, "couldn't close compressing writer: %w", err)
+		return errorf(CodeInternal, "couldn't close compressing writer: %w", err)
 	}
 	if err := m.writeGRPCPrefix(true /* compressed */, trailer, data.Len()); err != nil {
 		return err // already enriched
 	}
 	if _, err := io.Copy(m.writer, data); err != nil {
-		if connectErr, ok := AsError(err); ok {
+		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
-		return Errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
+		return errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
 	}
 	return nil
 }
@@ -97,10 +97,10 @@ func (m *marshaler) writeGRPCPrefix(compressed, trailer bool, size int) *Error {
 	}
 	binary.BigEndian.PutUint32(prefixes[1:5], uint32(size))
 	if _, err := m.writer.Write(prefixes[:]); err != nil {
-		if connectErr, ok := AsError(err); ok {
+		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
-		return Errorf(CodeUnknown, "couldn't write prefix of length-prefixed message: %w", err)
+		return errorf(CodeUnknown, "couldn't write prefix of length-prefixed message: %w", err)
 	}
 	return nil
 }
@@ -133,10 +133,10 @@ func (u *unmarshaler) Unmarshal(message any) *Error {
 		// The stream ended cleanly. That's expected, but we need to propagate them
 		// to the user so that they know that the stream has ended. We shouldn't
 		// add any alarming text about protocol errors, though.
-		return Wrap(CodeUnknown, err)
+		return NewError(CodeUnknown, err)
 	} else if err != nil || n < 5 {
 		// Something else has gone wrong - the stream didn't end cleanly.
-		return Errorf(
+		return errorf(
 			CodeInvalidArgument,
 			"gRPC protocol error: incomplete length-prefixed message prefix: %w", err,
 		)
@@ -155,9 +155,9 @@ func (u *unmarshaler) Unmarshal(message any) *Error {
 
 	size := int(binary.BigEndian.Uint32(prefixes[1:5]))
 	if size < 0 {
-		return Errorf(CodeInvalidArgument, "message size %d overflowed uint32", size)
+		return errorf(CodeInvalidArgument, "message size %d overflowed uint32", size)
 	} else if u.max > 0 && int64(size) > u.max {
-		return Errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", size, u.max)
+		return errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", size, u.max)
 	}
 	// OPT: easy opportunity to pool buffers and grab the underlying byte slice
 	raw := make([]byte, size)
@@ -170,12 +170,12 @@ func (u *unmarshaler) Unmarshal(message any) *Error {
 		for remaining > 0 {
 			n, err = u.reader.Read(raw[size-remaining : size])
 			if err != nil && !errors.Is(err, io.EOF) {
-				return Errorf(CodeUnknown, "error reading length-prefixed message data: %w", err)
+				return errorf(CodeUnknown, "error reading length-prefixed message data: %w", err)
 			}
 			if errors.Is(err, io.EOF) && n == 0 {
 				// We've gotten zero-length chunk of data. Message is likely malformed,
 				// don't wait for additional chunks.
-				return Errorf(
+				return errorf(
 					CodeInvalidArgument,
 					"gRPC protocol error: promised %d bytes in length-prefixed message, got %d bytes",
 					size,
@@ -187,7 +187,7 @@ func (u *unmarshaler) Unmarshal(message any) *Error {
 	}
 
 	if compressed && u.compressor == nil {
-		return Errorf(
+		return errorf(
 			CodeInvalidArgument,
 			"gRPC protocol error: sent compressed message without Grpc-Encoding header",
 		)
@@ -196,14 +196,14 @@ func (u *unmarshaler) Unmarshal(message any) *Error {
 	if size > 0 && compressed {
 		decompressingReader, err := u.compressor.GetReader(bytes.NewReader(raw))
 		if err != nil {
-			return Errorf(CodeInvalidArgument, "can't decompress: %w", err)
+			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
 		}
 		defer u.compressor.PutReader(decompressingReader)
 		defer decompressingReader.Close()
 		// OPT: easy opportunity to pool buffers
 		decompressed := bytes.NewBuffer(make([]byte, 0, len(raw)))
 		if _, err := decompressed.ReadFrom(decompressingReader); err != nil {
-			return Errorf(CodeInvalidArgument, "can't decompress: %w", err)
+			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
 		}
 		raw = decompressed.Bytes()
 	}
@@ -217,7 +217,7 @@ func (u *unmarshaler) Unmarshal(message any) *Error {
 		mimeReader := textproto.NewReader(bufferedReader)
 		mimeHeader, err := mimeReader.ReadMIMEHeader()
 		if err != nil {
-			return Errorf(
+			return errorf(
 				CodeInvalidArgument,
 				"gRPC-Web protocol error: received invalid trailers %q: %w",
 				string(raw),
@@ -229,7 +229,7 @@ func (u *unmarshaler) Unmarshal(message any) *Error {
 	}
 
 	if err := u.codec.Unmarshal(raw, message); err != nil {
-		return Errorf(CodeInvalidArgument, "can't unmarshal into %T: %w", message, err)
+		return errorf(CodeInvalidArgument, "can't unmarshal into %T: %w", message, err)
 	}
 
 	return nil

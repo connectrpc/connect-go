@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"net"
@@ -59,7 +60,7 @@ type crossServerConnect struct {
 
 func (c crossServerConnect) Ping(ctx context.Context, req *connect.Request[crosspb.PingRequest]) (*connect.Response[crosspb.PingResponse], error) {
 	if err := req.Msg.Sleep.CheckValid(); req.Msg.Sleep != nil && err != nil {
-		return nil, connect.Wrap(connect.CodeInvalidArgument, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	if d := req.Msg.Sleep.AsDuration(); d > 0 {
 		time.Sleep(d)
@@ -68,7 +69,7 @@ func (c crossServerConnect) Ping(ctx context.Context, req *connect.Request[cross
 }
 
 func (c crossServerConnect) Fail(ctx context.Context, req *connect.Request[crosspb.FailRequest]) (*connect.Response[crosspb.FailResponse], error) {
-	return nil, connect.Errorf(connect.CodeResourceExhausted, errMsg)
+	return nil, connect.NewError(connect.CodeResourceExhausted, errors.New(errMsg))
 }
 
 func (c crossServerConnect) Sum(
@@ -98,9 +99,9 @@ func (c crossServerConnect) CountUp(
 	stream *handlerstream.Server[crosspb.CountUpResponse],
 ) error {
 	if req.Msg.Number <= 0 {
-		return connect.Errorf(
+		return connect.NewError(
 			connect.CodeInvalidArgument,
-			"number must be positive: got %v", req.Msg.Number,
+			fmt.Errorf("number must be positive: got %v", req.Msg.Number),
 		)
 	}
 	for i := int64(1); i <= req.Msg.Number; i++ {
@@ -217,9 +218,10 @@ func assertErrorGRPC(t testing.TB, err error, msg string) *status.Status {
 func assertErrorConnect(t testing.TB, err error, msg string) *connect.Error {
 	t.Helper()
 	assert.NotNil(t, err, msg)
-	cerr, ok := connect.AsError(err)
+	var connectErr *connect.Error
+	ok := errors.As(err, &connectErr)
 	assert.True(t, ok, "conversion to *connect.Error")
-	return cerr
+	return connectErr
 }
 
 func testWithConnectClient(t *testing.T, client crossrpc.CrossServiceClient) {

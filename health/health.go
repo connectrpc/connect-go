@@ -3,6 +3,8 @@ package health
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/handlerstream"
@@ -46,7 +48,10 @@ func NewChecker(reg Registrar) func(context.Context, string) (Status, error) {
 		if reg.IsRegistered(service) {
 			return StatusServing, nil
 		}
-		return StatusUnknown, connect.Errorf(connect.CodeNotFound, "unknown service %s", service)
+		return StatusUnknown, connect.NewError(
+			connect.CodeNotFound,
+			fmt.Errorf("unknown service %s", service),
+		)
 	}
 }
 
@@ -73,7 +78,10 @@ func (s *server) Watch(
 	_ *connect.Request[healthpb.HealthCheckRequest],
 	_ *handlerstream.Server[healthpb.HealthCheckResponse],
 ) error {
-	return connect.Errorf(connect.CodeUnimplemented, "connect doesn't support watching health state")
+	return connect.NewError(
+		connect.CodeUnimplemented,
+		errors.New("connect doesn't support watching health state"),
+	)
 }
 
 // WithHandler wraps the supplied function to build HTTP handlers for gRPC's

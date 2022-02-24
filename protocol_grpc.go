@@ -31,7 +31,7 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) (protocolHandle
 func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, error) {
 	procedureURL := params.BaseURL + "/" + params.Spec.Procedure
 	if _, err := url.ParseRequestURI(procedureURL); err != nil {
-		return nil, Wrap(CodeUnknown, err)
+		return nil, NewError(CodeUnknown, err)
 	}
 	return &grpcClient{
 		spec:             params.Spec,
@@ -88,7 +88,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	if err != nil && err != errNoTimeout {
 		// Errors here indicate that the client sent an invalid timeout header, so
 		// the error text is safe to send back.
-		failed = Wrap(CodeInvalidArgument, err)
+		failed = NewError(CodeInvalidArgument, err)
 	} else if err == nil {
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
@@ -105,7 +105,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 			// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
 			// should return CodeUnimplemented and specify acceptable compression(s)
 			// (in addition to setting the Grpc-Accept-Encoding header).
-			failed = Errorf(
+			failed = errorf(
 				CodeUnimplemented,
 				"unknown compression %q: accepted grpc-encoding values are %v",
 				msgEncoding, g.compressors.CommaSeparatedNames(),

@@ -3,6 +3,7 @@ package connect_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
@@ -48,14 +49,13 @@ func expectClientHeaderAndTrailer(check bool, req connect.AnyRequest) error {
 
 func expectMetadata(meta http.Header, metaType, key, value string) error {
 	if got := meta.Get(key); got != value {
-		return connect.Errorf(
-			connect.CodeInvalidArgument,
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
 			"%s %q: got %q, expected %q",
 			metaType,
 			key,
 			got,
 			value,
-		)
+		))
 	}
 	return nil
 }
@@ -83,7 +83,7 @@ func (p pingServer) Fail(ctx context.Context, req *connect.Request[pingpb.FailRe
 	if err := expectClientHeaderAndTrailer(p.checkMetadata, req); err != nil {
 		return nil, err
 	}
-	err := connect.Errorf(connect.Code(req.Msg.Code), errorMessage)
+	err := connect.NewError(connect.Code(req.Msg.Code), errors.New(errorMessage))
 	err.Header().Set(handlerHeader, headerValue)
 	err.Trailer().Set(handlerTrailer, trailerValue)
 	return nil, err
@@ -125,7 +125,10 @@ func (p pingServer) CountUp(
 		return err
 	}
 	if req.Msg.Number <= 0 {
-		return connect.Errorf(connect.CodeInvalidArgument, "number must be positive: got %v", req.Msg.Number)
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
+			"number must be positive: got %v",
+			req.Msg.Number,
+		))
 	}
 	stream.ResponseHeader().Set(handlerHeader, headerValue)
 	stream.ResponseTrailer().Set(handlerTrailer, trailerValue)
@@ -317,7 +320,8 @@ func TestServerProtoGRPC(t *testing.T) {
 			response, err := client.Fail(context.Background(), request)
 			assert.Nil(t, response, "fail RPC response")
 			assert.NotNil(t, err, "fail RPC error")
-			connectErr, ok := connect.AsError(err)
+			var connectErr *connect.Error
+			ok := errors.As(err, &connectErr)
 			assert.True(t, ok, "conversion to *connect.Error")
 			assert.Equal(t, connectErr.Code(), connect.CodeResourceExhausted, "error code")
 			assert.Equal(t, connectErr.Error(), "ResourceExhausted: "+errorMessage, "error message")

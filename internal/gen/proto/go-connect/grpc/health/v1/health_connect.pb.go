@@ -8,6 +8,7 @@ package healthv1
 
 import (
 	context "context"
+	errors "errors"
 	connect "github.com/bufbuild/connect"
 	clientstream "github.com/bufbuild/connect/clientstream"
 	protobuf "github.com/bufbuild/connect/codec/protobuf"
@@ -205,9 +206,9 @@ type UnimplementedHealthHandler struct{}
 var _ HealthHandler = (*UnimplementedHealthHandler)(nil) // verify interface implementation
 
 func (UnimplementedHealthHandler) Check(context.Context, *connect.Request[v1.HealthCheckRequest]) (*connect.Response[v1.HealthCheckResponse], error) {
-	return nil, connect.Errorf(connect.CodeUnimplemented, "internal.health.v1.Health.Check isn't implemented")
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.health.v1.Health.Check isn't implemented"))
 }
 
 func (UnimplementedHealthHandler) Watch(context.Context, *connect.Request[v1.HealthCheckRequest], *handlerstream.Server[v1.HealthCheckResponse]) error {
-	return connect.Errorf(connect.CodeUnimplemented, "internal.health.v1.Health.Watch isn't implemented")
+	return connect.NewError(connect.CodeUnimplemented, errors.New("internal.health.v1.Health.Watch isn't implemented"))
 }

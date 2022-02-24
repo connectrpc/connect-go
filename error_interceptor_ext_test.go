@@ -50,21 +50,23 @@ func (e *locationError) Location() string {
 
 func TestErrorTranslatingInterceptor(t *testing.T) {
 	toWire := func(err error) error {
-		if connectErr, ok := connect.AsError(err); ok {
+		var connectErr *connect.Error
+		if ok := errors.As(err, &connectErr); ok {
 			return connectErr
 		}
 		var loc *locationError
 		if ok := errors.As(err, &loc); !ok {
 			return err
 		}
-		connectErr := connect.Wrap(connect.CodeAborted, err)
+		connectErr = connect.NewError(connect.CodeAborted, err)
 		detail, err := anypb.New(&loc.ping)
 		assert.Nil(t, err, "create proto.Any")
 		connectErr.AddDetail(detail)
 		return connectErr
 	}
 	fromWire := func(err error) error {
-		connectErr, ok := connect.AsError(err)
+		var connectErr *connect.Error
+		ok := errors.As(err, &connectErr)
 		if !ok || connectErr.Code() != connect.CodeAborted {
 			return err
 		}

@@ -43,19 +43,19 @@ func newHandlerConfiguration(procedure, registrationName string, options []Handl
 
 func (c *handlerConfiguration) Validate() *Error {
 	if _, ok := c.Codecs[""]; ok {
-		return Wrap(
+		return NewError(
 			CodeUnknown,
 			errors.New("can't register codec with an empty name"),
 		)
 	}
 	if _, ok := c.Compressors[""]; ok {
-		return Wrap(
+		return NewError(
 			CodeUnknown,
 			errors.New("can't register compressor with an empty name"),
 		)
 	}
 	if !(c.HandleGRPC || c.HandleGRPCWeb) {
-		return Wrap(
+		return NewError(
 			CodeUnknown,
 			errors.New("handlers must support at least one protocol"),
 		)
@@ -89,7 +89,7 @@ func (c *handlerConfiguration) newProtocolHandlers(streamType StreamType) ([]pro
 			MaxRequestBytes: c.MaxRequestBytes,
 		})
 		if err != nil {
-			return nil, Wrap(CodeUnknown, err)
+			return nil, NewError(CodeUnknown, err)
 		}
 		handlers = append(handlers, protocolHandler)
 	}
@@ -165,7 +165,7 @@ func NewUnaryHandler[Req, Res any](
 			}
 			typed, ok := request.(*Request[Req])
 			if !ok {
-				return nil, Errorf(CodeInternal, "unexpected handler request type %T", request)
+				return nil, errorf(CodeInternal, "unexpected handler request type %T", request)
 			}
 			return unary(ctx, typed)
 		})

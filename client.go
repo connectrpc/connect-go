@@ -36,15 +36,15 @@ func newClientConfiguration(procedure string, options []ClientOption) (*clientCo
 
 func (c *clientConfiguration) Validate() *Error {
 	if c.Codec == nil || c.CodecName == "" {
-		return Errorf(CodeUnknown, "no codec configured")
+		return errorf(CodeUnknown, "no codec configured")
 	}
 	if c.RequestCompressor != "" && c.RequestCompressor != compress.NameIdentity {
 		if _, ok := c.Compressors[c.RequestCompressor]; !ok {
-			return Errorf(CodeUnknown, "no registered compressor for %q", c.RequestCompressor)
+			return errorf(CodeUnknown, "no registered compressor for %q", c.RequestCompressor)
 		}
 	}
 	if c.Protocol == nil {
-		return Errorf(CodeUnknown, "no protocol configured")
+		return errorf(CodeUnknown, "no protocol configured")
 	}
 	return nil
 }
@@ -119,7 +119,7 @@ func NewStreamClientImplementation(
 		BaseURL:          baseURL,
 	})
 	if protocolErr != nil {
-		return nil, Wrap(CodeUnknown, protocolErr)
+		return nil, NewError(CodeUnknown, protocolErr)
 	}
 	return func(ctx context.Context) (Sender, Receiver) {
 		if ic := config.Interceptor; ic != nil {
@@ -161,7 +161,7 @@ func NewUnaryClientImplementation[Req, Res any](
 		BaseURL:          baseURL,
 	})
 	if protocolErr != nil {
-		return nil, Wrap(CodeUnknown, protocolErr)
+		return nil, NewError(CodeUnknown, protocolErr)
 	}
 	send := Func(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
 		sender, receiver := protocolClient.NewStream(ctx, request.Header())
@@ -196,7 +196,7 @@ func NewUnaryClientImplementation[Req, Res any](
 		}
 		typed, ok := response.(*Response[Res])
 		if !ok {
-			return nil, Errorf(CodeInternal, "unexpected client response type %T", response)
+			return nil, errorf(CodeInternal, "unexpected client response type %T", response)
 		}
 		return typed, nil
 	}, nil

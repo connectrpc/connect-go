@@ -8,6 +8,7 @@ package pingv1test
 
 import (
 	context "context"
+	errors "errors"
 	connect "github.com/bufbuild/connect"
 	clientstream "github.com/bufbuild/connect/clientstream"
 	protobuf "github.com/bufbuild/connect/codec/protobuf"
@@ -284,21 +285,21 @@ type UnimplementedPingServiceHandler struct{}
 var _ PingServiceHandler = (*UnimplementedPingServiceHandler)(nil) // verify interface implementation
 
 func (UnimplementedPingServiceHandler) Ping(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error) {
-	return nil, connect.Errorf(connect.CodeUnimplemented, "connect.ping.v1test.PingService.Ping isn't implemented")
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.Ping isn't implemented"))
 }
 
 func (UnimplementedPingServiceHandler) Fail(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error) {
-	return nil, connect.Errorf(connect.CodeUnimplemented, "connect.ping.v1test.PingService.Fail isn't implemented")
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.Fail isn't implemented"))
 }
 
 func (UnimplementedPingServiceHandler) Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error {
-	return connect.Errorf(connect.CodeUnimplemented, "connect.ping.v1test.PingService.Sum isn't implemented")
+	return connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.Sum isn't implemented"))
 }
 
 func (UnimplementedPingServiceHandler) CountUp(context.Context, *connect.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error {
-	return connect.Errorf(connect.CodeUnimplemented, "connect.ping.v1test.PingService.CountUp isn't implemented")
+	return connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.CountUp isn't implemented"))
 }
 
 func (UnimplementedPingServiceHandler) CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error {
-	return connect.Errorf(connect.CodeUnimplemented, "connect.ping.v1test.PingService.CumSum isn't implemented")
+	return connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.CumSum isn't implemented"))
 }

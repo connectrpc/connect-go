@@ -138,11 +138,10 @@ func (rs *server) ServerReflectionInfo(
 				ListServicesResponse: &rpb.ListServiceResponse{Service: serviceResponses},
 			}
 		default:
-			return connect.Errorf(
-				connect.CodeInvalidArgument,
+			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
 				"invalid MessageRequest: %v",
 				request.MessageRequest,
-			)
+			))
 		}
 		if err := stream.Send(response); err != nil {
 			return err

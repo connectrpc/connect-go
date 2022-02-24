@@ -491,9 +491,13 @@ func unimplementedServerImplementation(g *protogen.GeneratedFile, service *proto
 	for _, method := range service.Methods {
 		g.P("func (", names.UnimplementedServer, ") ", serverSignature(g, method), "{")
 		if method.Desc.IsStreamingServer() || method.Desc.IsStreamingClient() {
-			g.P("return ", connectPackage.Ident("Errorf"), "(", connectPackage.Ident("CodeUnimplemented"), `, "`, method.Desc.FullName(), ` isn't implemented")`)
+			g.P("return ", connectPackage.Ident("NewError"), "(",
+				connectPackage.Ident("CodeUnimplemented"), ", ", errorsPackage.Ident("New"),
+				`("`, method.Desc.FullName(), ` isn't implemented"))`)
 		} else {
-			g.P("return nil, ", connectPackage.Ident("Errorf"), "(", connectPackage.Ident("CodeUnimplemented"), `, "`, method.Desc.FullName(), ` isn't implemented")`)
+			g.P("return nil, ", connectPackage.Ident("NewError"), "(",
+				connectPackage.Ident("CodeUnimplemented"), ", ", errorsPackage.Ident("New"),
+				`("`, method.Desc.FullName(), ` isn't implemented"))`)
 		}
 		g.P("}")
 		g.P()

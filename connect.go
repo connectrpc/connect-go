@@ -100,9 +100,9 @@ func ReceiveRequest[Req any](receiver Receiver) (*Request[Req], error) {
 	// of in-stream trailers. To ensure that we receive the trailers, try to
 	// read another message from the stream.
 	if err := receiver.Receive(new(Req)); err == nil {
-		return nil, Wrap(CodeUnknown, errors.New("unary stream has multiple messages"))
+		return nil, NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
 	} else if err != nil && !errors.Is(err, io.EOF) {
-		return nil, Wrap(CodeUnknown, err)
+		return nil, NewError(CodeUnknown, err)
 	}
 	return &Request[Req]{
 		Msg:     &msg,
@@ -184,9 +184,9 @@ func ReceiveResponse[Res any](receiver Receiver) (*Response[Res], error) {
 	// of in-stream trailers. To ensure that we receive the trailers, try to
 	// read another message from the stream.
 	if err := receiver.Receive(new(Res)); err == nil {
-		return nil, Wrap(CodeUnknown, errors.New("unary stream has multiple messages"))
+		return nil, NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
 	} else if err != nil && !errors.Is(err, io.EOF) {
-		return nil, Wrap(CodeUnknown, err)
+		return nil, NewError(CodeUnknown, err)
 	}
 	return &Response[Res]{
 		Msg:     &msg,

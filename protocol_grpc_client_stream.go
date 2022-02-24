@@ -152,10 +152,10 @@ func (cs *duplexClientStream) CloseSend(_ error) error {
 		}
 	}
 	if err := cs.writer.Close(); err != nil {
-		if connectErr, ok := AsError(err); ok {
+		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
-		return Wrap(CodeUnknown, err)
+		return NewError(CodeUnknown, err)
 	}
 	return nil
 }
@@ -206,7 +206,7 @@ func (cs *duplexClientStream) CloseReceive() error {
 	}
 	discard(cs.response.Body)
 	if err := cs.response.Body.Close(); err != nil {
-		return Wrap(CodeUnknown, err)
+		return NewError(CodeUnknown, err)
 	}
 	return nil
 }
@@ -236,7 +236,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 
 	req, err := http.NewRequestWithContext(cs.ctx, http.MethodPost, cs.url, cs.reader)
 	if err != nil {
-		cs.setResponseError(Errorf(CodeUnknown, "construct *http.Request: %w", err))
+		cs.setResponseError(errorf(CodeUnknown, "construct *http.Request: %w", err))
 		close(prepared)
 		return
 	}
@@ -264,7 +264,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	}
 
 	if res.StatusCode != http.StatusOK {
-		cs.setResponseError(Errorf(httpToCode(res.StatusCode), "HTTP status %v", res.Status))
+		cs.setResponseError(errorf(httpToCode(res.StatusCode), "HTTP status %v", res.Status))
 		return
 	}
 	compression := res.Header.Get("Grpc-Encoding")
@@ -274,7 +274,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 		// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
 		// should return CodeInternal and specify acceptable compression(s) (in
 		// addition to setting the Grpc-Accept-Encoding header).
-		cs.setResponseError(Errorf(
+		cs.setResponseError(errorf(
 			CodeInternal,
 			"unknown compression %q: accepted grpc-encoding values are %v",
 			compression,
@@ -339,21 +339,21 @@ func extractError(protobuf codec.Codec, trailer http.Header) *Error {
 
 	code, err := strconv.ParseUint(codeHeader, 10 /* base */, 32 /* bitsize */)
 	if err != nil {
-		return Errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
+		return errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
 	}
 	message := percentDecode(trailer.Get("Grpc-Message"))
-	retErr := Wrap(Code(code), errors.New(message))
+	retErr := NewError(Code(code), errors.New(message))
 	retErr.trailer = trailer
 
 	detailsBinaryEncoded := trailer.Get("Grpc-Status-Details-Bin")
 	if len(detailsBinaryEncoded) > 0 {
 		detailsBinary, err := DecodeBinaryHeader(detailsBinaryEncoded)
 		if err != nil {
-			return Errorf(CodeUnknown, "server returned invalid grpc-status-details-bin trailer: %w", err)
+			return errorf(CodeUnknown, "server returned invalid grpc-status-details-bin trailer: %w", err)
 		}
 		var status statuspb.Status
 		if err := protobuf.Unmarshal(detailsBinary, &status); err != nil {
-			return Errorf(CodeUnknown, "server returned invalid protobuf for error details: %w", err)
+			return errorf(CodeUnknown, "server returned invalid protobuf for error details: %w", err)
 		}
 		for _, d := range status.Details {
 			retErr.details = append(retErr.details, d)
