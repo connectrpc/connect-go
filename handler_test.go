@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bufconnect/connect"
-	"github.com/bufconnect/connect/internal/assert"
-	pingrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/connect/ping/v1test"
-	pingpb "github.com/bufconnect/connect/internal/gen/proto/go/connect/ping/v1test"
+	"github.com/bufbuild/connect"
+	"github.com/bufbuild/connect/internal/assert"
+	pingrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/connect/ping/v1test"
+	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
 	"google.golang.org/protobuf/proto"
 )
 

@@ -8,7 +8,7 @@ syntax = "proto3";
 //   https://github.com/grpc/grpc/blob/master/src/proto/grpc/reflection/v1alpha/reflection.proto
 package internal.reflection.v1alpha1;
 
-option go_package = "github.com/bufconnect/connect/internal/gen/proto/go/grpc/status/v1alpha1;reflectionpb";
+option go_package = "github.com/bufbuild/connect/internal/gen/proto/go/grpc/status/v1alpha1;reflectionpb";
 
 service ServerReflection {
   // The reflection service is structured as a bidirectional stream, ensuring
