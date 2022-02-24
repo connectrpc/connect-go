@@ -18,7 +18,11 @@ func ExampleInterceptor() {
 			logger.Println("calling:", req.Spec().Procedure)
 			logger.Println("request:", req.Any())
 			res, err := next(ctx, req)
-			logger.Println("response:", res.Any())
+			if err != nil {
+				logger.Println("error:", err)
+			} else {
+				logger.Println("response:", res.Any())
+			}
 			return res, err
 		})
 	})
