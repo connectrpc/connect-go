@@ -59,9 +59,9 @@ func (c *clientConfiguration) Protobuf() codec.Codec {
 
 func (c *clientConfiguration) newSpecification(t StreamType) Specification {
 	return Specification{
-		Type:      t,
-		Procedure: c.Procedure,
-		IsClient:  true,
+		StreamType: t,
+		Procedure:  c.Procedure,
+		IsClient:   true,
 	}
 }
 
