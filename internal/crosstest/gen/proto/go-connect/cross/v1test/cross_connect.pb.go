@@ -132,6 +132,12 @@ func (c *crossServiceClient) Sum(ctx context.Context) *clientstream.Client[v1tes
 // CountUp calls cross.v1test.CrossService.CountUp.
 func (c *crossServiceClient) CountUp(ctx context.Context, req *connect.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
 	sender, receiver := c.countUp(ctx)
+	for key, values := range req.Header() {
+		sender.Header()[key] = append(sender.Header()[key], values...)
+	}
+	for key, values := range req.Trailer() {
+		sender.Trailer()[key] = append(sender.Trailer()[key], values...)
+	}
 	if err := sender.Send(req.Msg); err != nil {
 		_ = sender.Close(err)
 		_ = receiver.Close()
