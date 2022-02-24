@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"net/textproto"
 
-	"github.com/bufconnect/connect/codec"
-	"github.com/bufconnect/connect/compress"
+	"github.com/bufbuild/connect/codec"
+	"github.com/bufbuild/connect/compress"
 )
 
 const (

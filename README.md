@@ -1,9 +1,9 @@
 connect
 =======
 
-[![Build](https://github.com/bufconnect/connect/actions/workflows/test.yml/badge.svg?event=push)](https://github.com/bufconnect/connect/actions/workflows/test.yml)
-[![Report Card](https://goreportcard.com/badge/github.com/bufconnect/connect)](https://goreportcard.com/report/github.com/bufconnect/connect)
-[![GoDoc](https://pkg.go.dev/badge/github.com/bufconnect/connect.svg)](https://pkg.go.dev/github.com/bufconnect/connect)
+[![Build](https://github.com/bufbuild/connect/actions/workflows/test.yml/badge.svg?event=push)](https://github.com/bufbuild/connect/actions/workflows/test.yml)
+[![Report Card](https://goreportcard.com/badge/github.com/bufbuild/connect)](https://goreportcard.com/report/github.com/bufbuild/connect)
+[![GoDoc](https://pkg.go.dev/badge/github.com/bufbuild/connect.svg)](https://pkg.go.dev/github.com/bufbuild/connect)
 
 Connect is a small framework for building HTTP APIs. You write a short API
 definition file and implement your application logic, and connect generates
@@ -21,9 +21,6 @@ balancing APIs, and no surprises. Everything you already know about `net/http`
 still applies, and any package that works with an `http.Server`, `http.Client`,
 or `http.Handler` also works with connect.
 
-For more on connect, including a walkthrough and a comparison to alternatives,
-see the [docs][].
-
 ## A Small Example
 
 Curious what all this looks like in practice? Here's a small h2c server:
@@ -38,8 +35,8 @@ import (
   "golang.org/x/net/http2/h2c"
 
   // Generated from protobuf schemas.
-  pingrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/connect/ping/v1test"
-  pingpb "github.com/bufconnect/connect/internal/gen/proto/go/connect/ping/v1test"
+  pingrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/connect/ping/v1test"
+  pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
 )
 
 type PingServer struct {
@@ -95,16 +92,15 @@ Within those parameters, connect follows semantic versioning.
 Offered under the [MIT license][license].
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
-[docs]: https://bufconnect.github.io
 [envoy]: https://www.envoyproxy.io/
-[godoc]: https://pkg.go.dev/github.com/bufconnect/connect
+[godoc]: https://pkg.go.dev/github.com/bufbuild/connect
 [go-support-policy]: https://golang.org/doc/devel/release#policy
 [grpc-gateway]: https://grpc-ecosystem.github.io/grpc-gateway/
 [grpc]: https://grpc.io/
 [grpc-implementations]: https://grpc.io/docs/languages/
 [grpcurl]: https://github.com/fullstorydev/grpcurl
-[license]: https://github.com/bufconnect/connect/blob/main/LICENSE.txt
-[prod-client]: https://pkg.go.dev/github.com/bufconnect/connect#example-Client
-[prod-server]: https://pkg.go.dev/github.com/bufconnect/connect#example-package
+[license]: https://github.com/bufbuild/connect/blob/main/LICENSE.txt
+[prod-client]: https://pkg.go.dev/github.com/bufbuild/connect#example-Client
+[prod-server]: https://pkg.go.dev/github.com/bufbuild/connect#example-package
 [proto3]: https://cloud.google.com/apis/design/proto3
 [protobuf]: https://developers.google.com/protocol-buffers

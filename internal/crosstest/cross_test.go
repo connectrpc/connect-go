@@ -30,13 +30,13 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/bufconnect/connect"
-	connectgzip "github.com/bufconnect/connect/compress/gzip"
-	"github.com/bufconnect/connect/handlerstream"
-	"github.com/bufconnect/connect/internal/assert"
-	crossrpc "github.com/bufconnect/connect/internal/crosstest/gen/proto/go-connect/cross/v1test"
-	crosspb "github.com/bufconnect/connect/internal/crosstest/gen/proto/go/cross/v1test"
-	"github.com/bufconnect/connect/reflection"
+	"github.com/bufbuild/connect"
+	connectgzip "github.com/bufbuild/connect/compress/gzip"
+	"github.com/bufbuild/connect/handlerstream"
+	"github.com/bufbuild/connect/internal/assert"
+	crossrpc "github.com/bufbuild/connect/internal/crosstest/gen/proto/go-connect/cross/v1test"
+	crosspb "github.com/bufbuild/connect/internal/crosstest/gen/proto/go/cross/v1test"
+	"github.com/bufbuild/connect/reflection"
 )
 
 const errMsg = "soirée 🎉" // readable non-ASCII

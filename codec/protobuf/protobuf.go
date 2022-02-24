@@ -5,7 +5,7 @@ package protobuf
 import (
 	"fmt"
 
-	"github.com/bufconnect/connect/codec"
+	"github.com/bufbuild/connect/codec"
 	"google.golang.org/protobuf/proto"
 )
 

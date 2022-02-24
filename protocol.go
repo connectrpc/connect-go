@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/bufconnect/connect/codec"
+	"github.com/bufbuild/connect/codec"
 )
 
 // A Protocol defines the HTTP semantics to use when sending and receiving

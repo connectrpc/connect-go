@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/bufconnect/connect/codec"
-	"github.com/bufconnect/connect/compress"
+	"github.com/bufbuild/connect/codec"
+	"github.com/bufbuild/connect/compress"
 )
 
 type handlerConfiguration struct {

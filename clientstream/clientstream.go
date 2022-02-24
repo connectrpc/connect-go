@@ -5,7 +5,7 @@ package clientstream
 import (
 	"net/http"
 
-	"github.com/bufconnect/connect"
+	"github.com/bufbuild/connect"
 )
 
 // Client is the client's view of a client streaming RPC.
