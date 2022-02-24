@@ -44,6 +44,10 @@ func (c *Client[Req, Res]) SendAndClose(msg *connect.Response[Res]) error {
 	for k, v := range msg.Header() {
 		sendHeader[k] = append(sendHeader[k], v...)
 	}
+	sendTrailer := c.sender.Trailer()
+	for k, v := range msg.Trailer() {
+		sendTrailer[k] = append(sendTrailer[k], v...)
+	}
 	return c.sender.Send(msg.Msg)
 }
 
@@ -61,6 +65,12 @@ func NewServer[Res any](s connect.Sender) *Server[Res] {
 // call to Send.
 func (s *Server[Res]) ResponseHeader() http.Header {
 	return s.sender.Header()
+}
+
+// ResponseTrailer returns the response trailers. Handlers may write to the
+// response trailers at any time before returning.
+func (s *Server[Res]) ResponseTrailer() http.Header {
+	return s.sender.Trailer()
 }
 
 // Send a message to the client. The first call to Send also sends the response
@@ -99,6 +109,12 @@ func (b *Bidirectional[Req, Res]) Receive() (*Req, error) {
 // call to Send.
 func (b *Bidirectional[Req, Res]) ResponseHeader() http.Header {
 	return b.sender.Header()
+}
+
+// ResponseTrailer returns the response trailers. Handlers may write to the
+// response trailers at any time before returning.
+func (b *Bidirectional[Req, Res]) ResponseTrailer() http.Header {
+	return b.sender.Trailer()
 }
 
 func (b *Bidirectional[Req, Res]) Send(msg *Res) error {

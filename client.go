@@ -174,6 +174,7 @@ func NewClientFunc[Req, Res any](
 	}
 	send := Func(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
 		sender, receiver := protocolClient.NewStream(ctx, request.Header())
+		mergeHeaders(sender.Trailer(), request.Trailer())
 		if err := sender.Send(request.Any()); err != nil {
 			_ = sender.Close(err)
 			_ = receiver.Close()
