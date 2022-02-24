@@ -71,9 +71,9 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 	}
 	client.sum, err = connect.NewStreamClientImplementation(
 		doer,
-		connect.StreamTypeClient,
 		baseURL,
 		"cross.v1test.CrossService/Sum",
+		connect.StreamTypeClient,
 		opts...,
 	)
 	if err != nil {
@@ -81,9 +81,9 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 	}
 	client.countUp, err = connect.NewStreamClientImplementation(
 		doer,
-		connect.StreamTypeServer,
 		baseURL,
 		"cross.v1test.CrossService/CountUp",
+		connect.StreamTypeServer,
 		opts...,
 	)
 	if err != nil {
@@ -91,9 +91,9 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 	}
 	client.cumSum, err = connect.NewStreamClientImplementation(
 		doer,
-		connect.StreamTypeBidirectional,
 		baseURL,
 		"cross.v1test.CrossService/CumSum",
+		connect.StreamTypeBidirectional,
 		opts...,
 	)
 	if err != nil {

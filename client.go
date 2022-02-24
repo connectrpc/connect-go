@@ -99,8 +99,8 @@ type useProtocolOption struct {
 // client-, server-, or bidirectional streaming remote procedure.
 func NewStreamClientImplementation(
 	doer Doer,
-	stype StreamType,
 	baseURL, procedure string,
+	stype StreamType,
 	options ...ClientOption,
 ) (func(context.Context) (Sender, Receiver), error) {
 	config, err := newClientConfiguration(procedure, options)

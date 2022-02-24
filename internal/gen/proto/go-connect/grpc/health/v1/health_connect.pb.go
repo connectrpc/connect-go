@@ -76,9 +76,9 @@ func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOp
 	}
 	client.watch, err = connect.NewStreamClientImplementation(
 		doer,
-		connect.StreamTypeServer,
 		baseURL,
 		"internal.health.v1.Health/Watch",
+		connect.StreamTypeServer,
 		opts...,
 	)
 	if err != nil {

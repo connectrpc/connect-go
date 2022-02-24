@@ -232,6 +232,8 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 				"(",
 			)
 			g.P("doer,")
+			g.P("baseURL,")
+			g.P(`"`, procedureName(method), `",`)
 			if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
 				g.P(connectPackage.Ident("StreamTypeBidirectional"), ",")
 			} else if method.Desc.IsStreamingClient() {
@@ -239,8 +241,6 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 			} else {
 				g.P(connectPackage.Ident("StreamTypeServer"), ",")
 			}
-			g.P("baseURL,")
-			g.P(`"`, procedureName(method), `",`)
 			g.P("opts...,")
 			g.P(")")
 		} else {

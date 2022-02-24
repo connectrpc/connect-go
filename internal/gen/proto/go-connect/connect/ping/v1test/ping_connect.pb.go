@@ -78,9 +78,9 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 	}
 	client.sum, err = connect.NewStreamClientImplementation(
 		doer,
-		connect.StreamTypeClient,
 		baseURL,
 		"connect.ping.v1test.PingService/Sum",
+		connect.StreamTypeClient,
 		opts...,
 	)
 	if err != nil {
@@ -88,9 +88,9 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 	}
 	client.countUp, err = connect.NewStreamClientImplementation(
 		doer,
-		connect.StreamTypeServer,
 		baseURL,
 		"connect.ping.v1test.PingService/CountUp",
+		connect.StreamTypeServer,
 		opts...,
 	)
 	if err != nil {
@@ -98,9 +98,9 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 	}
 	client.cumSum, err = connect.NewStreamClientImplementation(
 		doer,
-		connect.StreamTypeBidirectional,
 		baseURL,
 		"connect.ping.v1test.PingService/CumSum",
+		connect.StreamTypeBidirectional,
 		opts...,
 	)
 	if err != nil {
