@@ -87,6 +87,7 @@ type codecOption struct {
 }
 
 // WithCodec registers a serialization method with a client or handler.
+// Registering a codec with an empty name is a no-op.
 //
 // Typically, generated code automatically supplies this option with the
 // appropriate codec(s). For example, handlers generated from protobuf schemas
@@ -107,11 +108,17 @@ func WithCodec(name string, c codec.Codec) Option {
 }
 
 func (o *codecOption) applyToClient(config *clientConfiguration) {
+	if o.Name == "" || o.Codec == nil {
+		return
+	}
 	config.Codec = o.Codec
 	config.CodecName = o.Name
 }
 
 func (o *codecOption) applyToHandler(config *handlerConfiguration) {
+	if o.Name == "" {
+		return
+	}
 	if o.Codec == nil {
 		delete(config.Codecs, o.Name)
 		return
@@ -125,6 +132,7 @@ type compressorOption struct {
 }
 
 // WithCompressor configures client and server compression strategies.
+// Registering a compressor with an empty name is a no-op.
 //
 // For handlers, it registers a compression algorithm. Clients may send
 // messages compressed with that algorithm and/or request compressed responses.
@@ -158,6 +166,9 @@ func (o *compressorOption) applyToHandler(config *handlerConfiguration) {
 }
 
 func (o *compressorOption) apply(m map[string]compress.Compressor) {
+	if o.Name == "" {
+		return
+	}
 	if o.Compressor == nil {
 		delete(m, o.Name)
 		return

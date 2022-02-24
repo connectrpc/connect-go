@@ -3,6 +3,7 @@ package health_test
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -16,14 +17,12 @@ import (
 
 func TestHealth(t *testing.T) {
 	reg := connect.NewRegistrar()
-	mux, err := connect.NewServeMux(
-		pingrpc.WithPingServiceHandler(
-			pingrpc.UnimplementedPingServiceHandler{},
-			reg,
-		),
-		health.WithHandler(health.NewChecker(reg)),
-	)
-	assert.Nil(t, err, "mux construction error")
+	mux := http.NewServeMux()
+	mux.Handle(pingrpc.NewPingServiceHandler(
+		pingrpc.UnimplementedPingServiceHandler{},
+		reg,
+	))
+	mux.Handle(health.NewHandler(health.NewChecker(reg)))
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()

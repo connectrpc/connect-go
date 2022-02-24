@@ -12,9 +12,10 @@ import (
 
 const (
 	contextPackage = protogen.GoImportPath("context")
-	httpPackage    = protogen.GoImportPath("net/http")
-	stringsPackage = protogen.GoImportPath("strings")
 	errorsPackage  = protogen.GoImportPath("errors")
+	httpPackage    = protogen.GoImportPath("net/http")
+	pathPackage    = protogen.GoImportPath("path")
+	stringsPackage = protogen.GoImportPath("strings")
 
 	protoPackage = protogen.GoImportPath("google.golang.org/protobuf/proto")
 
@@ -115,7 +116,7 @@ func newNames(service *protogen.Service) names {
 		ClientImpl:        fmt.Sprintf("%sClient", unexport(base)),
 
 		Server:              fmt.Sprintf("%sHandler", base),
-		ServerConstructor:   fmt.Sprintf("With%sHandler", base),
+		ServerConstructor:   fmt.Sprintf("New%sHandler", base),
 		UnimplementedServer: fmt.Sprintf("Unimplemented%sHandler", base),
 	}
 }
@@ -391,10 +392,10 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 }
 
 func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, names names) {
-	wrap(g, names.ServerConstructor, " wraps the service implementation in a connect.MuxOption,",
-		" which can then be passed to connect.NewServeMux.")
+	wrap(g, names.ServerConstructor, " builds an HTTP handler from the service implementation.",
+		" It returns the path on which to mount the handler and the handler itself.")
 	g.P("//")
-	wrap(g, "By default, services support the gRPC and gRPC-Web protocols with ",
+	wrap(g, "By default, handlers support the gRPC and gRPC-Web protocols with ",
 		"the binary protobuf and JSON codecs.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
@@ -402,8 +403,9 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 	}
 	handlerOption := connectPackage.Ident("HandlerOption")
 	g.P("func ", names.ServerConstructor, "(svc ", names.Server, ", opts ...", handlerOption,
-		") ", connectPackage.Ident("MuxOption"), " {")
-	g.P("handlers := make([]", connectPackage.Ident("Handler"), ", 0, ", len(service.Methods), ")")
+		") (string, ", httpPackage.Ident("Handler"), ") {")
+	g.P("var lastHandlerPath string")
+	g.P("mux := ", httpPackage.Ident("NewServeMux"), "()")
 	g.P("opts = append([]", handlerOption, "{")
 	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("Name"), ", ", connectProtoPackage.Ident("New"), "()", "),")
 	g.P(connectPackage.Ident("WithCodec"), "(", connectJSONPackage.Ident("Name"), ", ", connectJSONPackage.Ident("New"), "()", "),")
@@ -414,7 +416,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		hname := unexport(string(method.Desc.Name()))
 
 		if method.Desc.IsStreamingServer() || method.Desc.IsStreamingClient() {
-			g.P(hname, ", err := ", connectPackage.Ident("NewStreamHandler"), "(")
+			g.P(hname, " := ", connectPackage.Ident("NewStreamHandler"), "(")
 			g.P(`"`, procedureName(method), `", // procedure name`)
 			g.P(`"`, reflectionName(service), `", // reflection name`)
 			if method.Desc.IsStreamingServer() && method.Desc.IsStreamingClient() {
@@ -461,20 +463,18 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 			g.P("opts...,")
 			g.P(")")
 		} else {
-			g.P(hname, ", err := ", connectPackage.Ident("NewUnaryHandler"), "(")
+			g.P(hname, " := ", connectPackage.Ident("NewUnaryHandler"), "(")
 			g.P(`"`, procedureName(method), `", // procedure name`)
 			g.P(`"`, reflectionName(service), `", // reflection name`)
 			g.P("svc.", method.GoName, ",")
 			g.P("opts...,")
 			g.P(")")
 		}
-		g.P("if err != nil {")
-		g.P("return ", connectPackage.Ident("WithHandlers"), "(nil, err)")
-		g.P("}")
-		g.P("handlers = append(handlers, *", hname, ")")
+		g.P("mux.Handle(", hname, ".Path(), ", hname, ")")
+		g.P("lastHandlerPath = ", hname, ".Path()")
 		g.P()
 	}
-	g.P("return ", connectPackage.Ident("WithHandlers"), "(handlers, nil)")
+	g.P("return ", pathPackage.Ident("Dir"), `(lastHandlerPath)+"/", mux`)
 	g.P("}")
 	g.P()
 }

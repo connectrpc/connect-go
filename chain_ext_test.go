@@ -155,13 +155,11 @@ func TestHandlerStreamErrors(t *testing.T) {
 	reset := func() {
 		called = false
 	}
-	mux, err := connect.NewServeMux(
-		pingrpc.WithPingServiceHandler(
-			pingServer{},
-			connect.WithInterceptors(&assertCalledInterceptor{&called}),
-		),
-	)
-	assert.Nil(t, err, "mux construction error")
+	mux := http.NewServeMux()
+	mux.Handle(pingrpc.NewPingServiceHandler(
+		pingServer{},
+		connect.WithInterceptors(&assertCalledInterceptor{&called}),
+	))
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
@@ -270,13 +268,11 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 		),
 	)
 
-	mux, err := connect.NewServeMux(
-		pingrpc.WithPingServiceHandler(
-			pingServer{},
-			handlerOnion,
-		),
-	)
-	assert.Nil(t, err, "mux construction error")
+	mux := http.NewServeMux()
+	mux.Handle(pingrpc.NewPingServiceHandler(
+		pingServer{},
+		handlerOnion,
+	))
 	server := httptest.NewServer(mux)
 	defer server.Close()
 

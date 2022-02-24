@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/handlerstream"
@@ -84,7 +85,7 @@ func (s *server) Watch(
 	)
 }
 
-// WithHandler wraps the supplied function to build HTTP handlers for gRPC's
+// NewHandler wraps the supplied function to build HTTP handlers for gRPC's
 // health-checking API. The health-checking function will be called with a
 // fully-qualified protobuf service name (e.g., "acme.ping.v1.PingService").
 //
@@ -102,11 +103,11 @@ func (s *server) Watch(
 // For more details on gRPC's health checking protocol, see
 // https://github.com/grpc/grpc/blob/master/doc/health-checking.md and
 // https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto.
-func WithHandler(
+func NewHandler(
 	checker func(context.Context, string) (Status, error),
 	opts ...connect.HandlerOption,
-) connect.MuxOption {
-	return healthrpc.WithHealthHandler(
+) (string, http.Handler) {
+	return healthrpc.NewHealthHandler(
 		&server{check: checker},
 		append(opts, connect.WithReplaceProcedurePrefix("internal.", "grpc."))...,
 	)

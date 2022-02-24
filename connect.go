@@ -29,9 +29,9 @@ const (
 // implementations do not need to be safe for concurrent use.
 //
 // Sender implementations provided by this module guarantee that all returned
-// errors are *Errors, with codes. The Close method of implementations provided
-// by this package automatically adds the appropriate codes when passed
-// context.DeadlineExceeded or context.Canceled.
+// errors can be cast to *Error using errors.As. The Close method of Sender
+// implementations provided by this package automatically adds the appropriate
+// codes when passed context.DeadlineExceeded or context.Canceled.
 //
 // Like the standard library's http.ResponseWriter, both client- and
 // handler-side Senders write headers to the network with the first call to
@@ -56,7 +56,7 @@ type Sender interface {
 // Receiver implementations do not need to be safe for concurrent use.
 //
 // Receiver implementations provided by this module guarantee that all returned
-// errors are *Errors, with codes.
+// errors can be cast to *Error using errors.As.
 type Receiver interface {
 	Receive(any) error
 	Close() error

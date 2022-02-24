@@ -16,7 +16,7 @@ type protocolGRPC struct {
 }
 
 // NewHandler implements protocol, so it must return an interface.
-func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) (protocolHandler, error) {
+func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler {
 	return &grpcHandler{
 		spec:            params.Spec,
 		web:             g.web,
@@ -24,7 +24,7 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) (protocolHandle
 		compressors:     params.Compressors,
 		maxRequestBytes: params.MaxRequestBytes,
 		accept:          acceptPostValue(g.web, params.Codecs),
-	}, nil
+	}
 }
 
 // NewClient implements protocol, so it must return an interface.

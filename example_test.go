@@ -38,17 +38,13 @@ func Example() {
 	checker := health.NewChecker(reg)              // basic health checks
 	limit := connect.WithReadMaxBytes(1024 * 1024) // limit request size
 
-	// NewServeMux returns a plain net/http *ServeMux. Since a mux is an
-	// http.Handler, connect works with any Go HTTP middleware (e.g., net/http's
+	// The generated code produces plain net/http Handlers, so they're compatible
+	// with most Go HTTP routers and middleware (for example, net/http's
 	// StripPrefix).
-	mux, err := connect.NewServeMux(
-		pingrpc.WithPingServiceHandler(ping, reg, limit), // business logic
-		reflection.WithHandler(reg),                      // server reflection
-		health.WithHandler(checker),                      // health checks
-	)
-	if err != nil {
-		panic(err)
-	}
+	mux := http.NewServeMux()
+	mux.Handle(pingrpc.NewPingServiceHandler(ping, reg, limit)) // business logic
+	mux.Handle(reflection.NewHandler(reg))                      // server reflection
+	mux.Handle(health.NewHandler(checker))                      // health checks
 
 	// Timeouts, connection handling, TLS configuration, and other low-level
 	// transport details are handled by net/http. Everything you already know (or

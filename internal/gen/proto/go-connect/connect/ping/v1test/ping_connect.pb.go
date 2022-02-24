@@ -16,6 +16,8 @@ import (
 	gzip "github.com/bufbuild/connect/compress/gzip"
 	handlerstream "github.com/bufbuild/connect/handlerstream"
 	v1test "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
+	http "net/http"
+	path "path"
 	strings "strings"
 )
 
@@ -178,42 +180,39 @@ type PingServiceHandler interface {
 	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
 
-// WithPingServiceHandler wraps the service implementation in a
-// connect.MuxOption, which can then be passed to connect.NewServeMux.
+// NewPingServiceHandler builds an HTTP handler from the service implementation.
+// It returns the path on which to mount the handler and the handler itself.
 //
-// By default, services support the gRPC and gRPC-Web protocols with the binary
+// By default, handlers support the gRPC and gRPC-Web protocols with the binary
 // protobuf and JSON codecs.
-func WithPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption) connect.MuxOption {
-	handlers := make([]connect.Handler, 0, 5)
+func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	var lastHandlerPath string
+	mux := http.NewServeMux()
 	opts = append([]connect.HandlerOption{
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCodec(protojson.Name, protojson.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 
-	ping, err := connect.NewUnaryHandler(
+	ping := connect.NewUnaryHandler(
 		"connect.ping.v1test.PingService/Ping", // procedure name
 		"connect.ping.v1test.PingService",      // reflection name
 		svc.Ping,
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *ping)
+	mux.Handle(ping.Path(), ping)
+	lastHandlerPath = ping.Path()
 
-	fail, err := connect.NewUnaryHandler(
+	fail := connect.NewUnaryHandler(
 		"connect.ping.v1test.PingService/Fail", // procedure name
 		"connect.ping.v1test.PingService",      // reflection name
 		svc.Fail,
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *fail)
+	mux.Handle(fail.Path(), fail)
+	lastHandlerPath = fail.Path()
 
-	sum, err := connect.NewStreamHandler(
+	sum := connect.NewStreamHandler(
 		"connect.ping.v1test.PingService/Sum", // procedure name
 		"connect.ping.v1test.PingService",     // reflection name
 		connect.StreamTypeClient,
@@ -225,12 +224,10 @@ func WithPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOptio
 		},
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *sum)
+	mux.Handle(sum.Path(), sum)
+	lastHandlerPath = sum.Path()
 
-	countUp, err := connect.NewStreamHandler(
+	countUp := connect.NewStreamHandler(
 		"connect.ping.v1test.PingService/CountUp", // procedure name
 		"connect.ping.v1test.PingService",         // reflection name
 		connect.StreamTypeServer,
@@ -251,12 +248,10 @@ func WithPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOptio
 		},
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *countUp)
+	mux.Handle(countUp.Path(), countUp)
+	lastHandlerPath = countUp.Path()
 
-	cumSum, err := connect.NewStreamHandler(
+	cumSum := connect.NewStreamHandler(
 		"connect.ping.v1test.PingService/CumSum", // procedure name
 		"connect.ping.v1test.PingService",        // reflection name
 		connect.StreamTypeBidirectional,
@@ -268,12 +263,10 @@ func WithPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOptio
 		},
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *cumSum)
+	mux.Handle(cumSum.Path(), cumSum)
+	lastHandlerPath = cumSum.Path()
 
-	return connect.WithHandlers(handlers, nil)
+	return path.Dir(lastHandlerPath) + "/", mux
 }
 
 // UnimplementedPingServiceHandler returns CodeUnimplemented from all methods.

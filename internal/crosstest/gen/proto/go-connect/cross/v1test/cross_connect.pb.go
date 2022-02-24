@@ -16,6 +16,8 @@ import (
 	gzip "github.com/bufbuild/connect/compress/gzip"
 	handlerstream "github.com/bufbuild/connect/handlerstream"
 	v1test "github.com/bufbuild/connect/internal/crosstest/gen/proto/go/cross/v1test"
+	http "net/http"
+	path "path"
 	strings "strings"
 )
 
@@ -166,42 +168,40 @@ type CrossServiceHandler interface {
 	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
 
-// WithCrossServiceHandler wraps the service implementation in a
-// connect.MuxOption, which can then be passed to connect.NewServeMux.
+// NewCrossServiceHandler builds an HTTP handler from the service
+// implementation. It returns the path on which to mount the handler and the
+// handler itself.
 //
-// By default, services support the gRPC and gRPC-Web protocols with the binary
+// By default, handlers support the gRPC and gRPC-Web protocols with the binary
 // protobuf and JSON codecs.
-func WithCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOption) connect.MuxOption {
-	handlers := make([]connect.Handler, 0, 5)
+func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	var lastHandlerPath string
+	mux := http.NewServeMux()
 	opts = append([]connect.HandlerOption{
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCodec(protojson.Name, protojson.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 
-	ping, err := connect.NewUnaryHandler(
+	ping := connect.NewUnaryHandler(
 		"cross.v1test.CrossService/Ping", // procedure name
 		"cross.v1test.CrossService",      // reflection name
 		svc.Ping,
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *ping)
+	mux.Handle(ping.Path(), ping)
+	lastHandlerPath = ping.Path()
 
-	fail, err := connect.NewUnaryHandler(
+	fail := connect.NewUnaryHandler(
 		"cross.v1test.CrossService/Fail", // procedure name
 		"cross.v1test.CrossService",      // reflection name
 		svc.Fail,
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *fail)
+	mux.Handle(fail.Path(), fail)
+	lastHandlerPath = fail.Path()
 
-	sum, err := connect.NewStreamHandler(
+	sum := connect.NewStreamHandler(
 		"cross.v1test.CrossService/Sum", // procedure name
 		"cross.v1test.CrossService",     // reflection name
 		connect.StreamTypeClient,
@@ -213,12 +213,10 @@ func WithCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpt
 		},
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *sum)
+	mux.Handle(sum.Path(), sum)
+	lastHandlerPath = sum.Path()
 
-	countUp, err := connect.NewStreamHandler(
+	countUp := connect.NewStreamHandler(
 		"cross.v1test.CrossService/CountUp", // procedure name
 		"cross.v1test.CrossService",         // reflection name
 		connect.StreamTypeServer,
@@ -239,12 +237,10 @@ func WithCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpt
 		},
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *countUp)
+	mux.Handle(countUp.Path(), countUp)
+	lastHandlerPath = countUp.Path()
 
-	cumSum, err := connect.NewStreamHandler(
+	cumSum := connect.NewStreamHandler(
 		"cross.v1test.CrossService/CumSum", // procedure name
 		"cross.v1test.CrossService",        // reflection name
 		connect.StreamTypeBidirectional,
@@ -256,12 +252,10 @@ func WithCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpt
 		},
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *cumSum)
+	mux.Handle(cumSum.Path(), cumSum)
+	lastHandlerPath = cumSum.Path()
 
-	return connect.WithHandlers(handlers, nil)
+	return path.Dir(lastHandlerPath) + "/", mux
 }
 
 // UnimplementedCrossServiceHandler returns CodeUnimplemented from all methods.

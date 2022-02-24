@@ -24,10 +24,8 @@ import (
 )
 
 func BenchmarkConnect(b *testing.B) {
-	mux, err := connect.NewServeMux(
-		crossrpc.WithCrossServiceHandler(crossServerConnect{}),
-	)
-	assert.Nil(b, err, "mux construction error")
+	mux := http.NewServeMux()
+	mux.Handle(crossrpc.NewCrossServiceHandler(crossServerConnect{}))
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()

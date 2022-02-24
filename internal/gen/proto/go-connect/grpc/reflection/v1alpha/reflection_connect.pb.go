@@ -16,6 +16,8 @@ import (
 	gzip "github.com/bufbuild/connect/compress/gzip"
 	handlerstream "github.com/bufbuild/connect/handlerstream"
 	v1alpha "github.com/bufbuild/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
+	http "net/http"
+	path "path"
 	strings "strings"
 )
 
@@ -86,20 +88,22 @@ type ServerReflectionHandler interface {
 	ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error
 }
 
-// WithServerReflectionHandler wraps the service implementation in a
-// connect.MuxOption, which can then be passed to connect.NewServeMux.
+// NewServerReflectionHandler builds an HTTP handler from the service
+// implementation. It returns the path on which to mount the handler and the
+// handler itself.
 //
-// By default, services support the gRPC and gRPC-Web protocols with the binary
+// By default, handlers support the gRPC and gRPC-Web protocols with the binary
 // protobuf and JSON codecs.
-func WithServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.HandlerOption) connect.MuxOption {
-	handlers := make([]connect.Handler, 0, 1)
+func NewServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	var lastHandlerPath string
+	mux := http.NewServeMux()
 	opts = append([]connect.HandlerOption{
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCodec(protojson.Name, protojson.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 
-	serverReflectionInfo, err := connect.NewStreamHandler(
+	serverReflectionInfo := connect.NewStreamHandler(
 		"internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo", // procedure name
 		"internal.reflection.v1alpha1.ServerReflection",                      // reflection name
 		connect.StreamTypeBidirectional,
@@ -111,12 +115,10 @@ func WithServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.Ha
 		},
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *serverReflectionInfo)
+	mux.Handle(serverReflectionInfo.Path(), serverReflectionInfo)
+	lastHandlerPath = serverReflectionInfo.Path()
 
-	return connect.WithHandlers(handlers, nil)
+	return path.Dir(lastHandlerPath) + "/", mux
 }
 
 // UnimplementedServerReflectionHandler returns CodeUnimplemented from all

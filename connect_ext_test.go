@@ -174,12 +174,13 @@ func (p pingServer) CumSum(
 
 func TestServerProtoGRPC(t *testing.T) {
 	registrar := connect.NewRegistrar()
-	mux, err := connect.NewServeMux(
-		pingrpc.WithPingServiceHandler(pingServer{checkMetadata: true}, registrar),
-		health.WithHandler(health.NewChecker(registrar)),
-		reflection.WithHandler(registrar),
-	)
-	assert.Nil(t, err, "mux construction error")
+	mux := http.NewServeMux()
+	mux.Handle(pingrpc.NewPingServiceHandler(
+		pingServer{checkMetadata: true},
+		registrar,
+	))
+	mux.Handle(health.NewHandler(health.NewChecker(registrar)))
+	mux.Handle(reflection.NewHandler(registrar))
 
 	testPing := func(t *testing.T, client pingrpc.PingServiceClient) {
 		t.Run("ping", func(t *testing.T) {
@@ -418,8 +419,8 @@ func TestHeaderBasic(t *testing.T) {
 			return res, nil
 		},
 	}
-	mux, err := connect.NewServeMux(pingrpc.WithPingServiceHandler(pingServer))
-	assert.Nil(t, err, "mux construction error")
+	mux := http.NewServeMux()
+	mux.Handle(pingrpc.NewPingServiceHandler(pingServer))
 	server := httptest.NewServer(mux)
 	defer server.Close()
 

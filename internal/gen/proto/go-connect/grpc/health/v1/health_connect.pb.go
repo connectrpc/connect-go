@@ -16,6 +16,8 @@ import (
 	gzip "github.com/bufbuild/connect/compress/gzip"
 	handlerstream "github.com/bufbuild/connect/handlerstream"
 	v1 "github.com/bufbuild/connect/internal/gen/proto/go/grpc/health/v1"
+	http "net/http"
+	path "path"
 	strings "strings"
 )
 
@@ -144,31 +146,30 @@ type HealthHandler interface {
 	Watch(context.Context, *connect.Request[v1.HealthCheckRequest], *handlerstream.Server[v1.HealthCheckResponse]) error
 }
 
-// WithHealthHandler wraps the service implementation in a connect.MuxOption,
-// which can then be passed to connect.NewServeMux.
+// NewHealthHandler builds an HTTP handler from the service implementation. It
+// returns the path on which to mount the handler and the handler itself.
 //
-// By default, services support the gRPC and gRPC-Web protocols with the binary
+// By default, handlers support the gRPC and gRPC-Web protocols with the binary
 // protobuf and JSON codecs.
-func WithHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) connect.MuxOption {
-	handlers := make([]connect.Handler, 0, 2)
+func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	var lastHandlerPath string
+	mux := http.NewServeMux()
 	opts = append([]connect.HandlerOption{
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCodec(protojson.Name, protojson.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 
-	check, err := connect.NewUnaryHandler(
+	check := connect.NewUnaryHandler(
 		"internal.health.v1.Health/Check", // procedure name
 		"internal.health.v1.Health",       // reflection name
 		svc.Check,
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *check)
+	mux.Handle(check.Path(), check)
+	lastHandlerPath = check.Path()
 
-	watch, err := connect.NewStreamHandler(
+	watch := connect.NewStreamHandler(
 		"internal.health.v1.Health/Watch", // procedure name
 		"internal.health.v1.Health",       // reflection name
 		connect.StreamTypeServer,
@@ -189,12 +190,10 @@ func WithHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) connect
 		},
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *watch)
+	mux.Handle(watch.Path(), watch)
+	lastHandlerPath = watch.Path()
 
-	return connect.WithHandlers(handlers, nil)
+	return path.Dir(lastHandlerPath) + "/", mux
 }
 
 // UnimplementedHealthHandler returns CodeUnimplemented from all methods.
