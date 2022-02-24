@@ -8,13 +8,13 @@ package healthv1
 
 import (
 	context "context"
-	connect "github.com/bufconnect/connect"
-	clientstream "github.com/bufconnect/connect/clientstream"
-	protobuf "github.com/bufconnect/connect/codec/protobuf"
-	protojson "github.com/bufconnect/connect/codec/protojson"
-	gzip "github.com/bufconnect/connect/compress/gzip"
-	handlerstream "github.com/bufconnect/connect/handlerstream"
-	v1 "github.com/bufconnect/connect/internal/gen/proto/go/grpc/health/v1"
+	connect "github.com/bufbuild/connect"
+	clientstream "github.com/bufbuild/connect/clientstream"
+	protobuf "github.com/bufbuild/connect/codec/protobuf"
+	protojson "github.com/bufbuild/connect/codec/protojson"
+	gzip "github.com/bufbuild/connect/compress/gzip"
+	handlerstream "github.com/bufbuild/connect/handlerstream"
+	v1 "github.com/bufbuild/connect/internal/gen/proto/go/grpc/health/v1"
 	strings "strings"
 )
 

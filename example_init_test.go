@@ -1,9 +1,9 @@
 package connect_test
 
 import (
-	"github.com/bufconnect/connect"
-	"github.com/bufconnect/connect/connecttest"
-	pingrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/connect/ping/v1test"
+	"github.com/bufbuild/connect"
+	"github.com/bufbuild/connect/connecttest"
+	pingrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/connect/ping/v1test"
 )
 
 var examplePingServer *connecttest.Server

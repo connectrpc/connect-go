@@ -16,11 +16,11 @@ import (
 	"google.golang.org/grpc"
 	grpcgzip "google.golang.org/grpc/encoding/gzip"
 
-	"github.com/bufconnect/connect"
-	connectgzip "github.com/bufconnect/connect/compress/gzip"
-	"github.com/bufconnect/connect/internal/assert"
-	crossrpc "github.com/bufconnect/connect/internal/crosstest/gen/proto/go-connect/cross/v1test"
-	crosspb "github.com/bufconnect/connect/internal/crosstest/gen/proto/go/cross/v1test"
+	"github.com/bufbuild/connect"
+	connectgzip "github.com/bufbuild/connect/compress/gzip"
+	"github.com/bufbuild/connect/internal/assert"
+	crossrpc "github.com/bufbuild/connect/internal/crosstest/gen/proto/go-connect/cross/v1test"
+	crosspb "github.com/bufbuild/connect/internal/crosstest/gen/proto/go/cross/v1test"
 )
 
 func BenchmarkConnect(b *testing.B) {

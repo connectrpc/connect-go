@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bufconnect/connect/internal/assert"
+	"github.com/bufbuild/connect/internal/assert"
 )
 
 func TestCodeMarshaling(t *testing.T) {

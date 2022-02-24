@@ -8,13 +8,13 @@ package crossv1test
 
 import (
 	context "context"
-	connect "github.com/bufconnect/connect"
-	clientstream "github.com/bufconnect/connect/clientstream"
-	protobuf "github.com/bufconnect/connect/codec/protobuf"
-	protojson "github.com/bufconnect/connect/codec/protojson"
-	gzip "github.com/bufconnect/connect/compress/gzip"
-	handlerstream "github.com/bufconnect/connect/handlerstream"
-	v1test "github.com/bufconnect/connect/internal/crosstest/gen/proto/go/cross/v1test"
+	connect "github.com/bufbuild/connect"
+	clientstream "github.com/bufbuild/connect/clientstream"
+	protobuf "github.com/bufbuild/connect/codec/protobuf"
+	protojson "github.com/bufbuild/connect/codec/protojson"
+	gzip "github.com/bufbuild/connect/compress/gzip"
+	handlerstream "github.com/bufbuild/connect/handlerstream"
+	v1test "github.com/bufbuild/connect/internal/crosstest/gen/proto/go/cross/v1test"
 	strings "strings"
 )
 

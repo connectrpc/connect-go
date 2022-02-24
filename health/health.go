@@ -4,10 +4,10 @@ package health
 import (
 	"context"
 
-	"github.com/bufconnect/connect"
-	"github.com/bufconnect/connect/handlerstream"
-	healthrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/grpc/health/v1"
-	healthpb "github.com/bufconnect/connect/internal/gen/proto/go/grpc/health/v1"
+	"github.com/bufbuild/connect"
+	"github.com/bufbuild/connect/handlerstream"
+	healthrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/grpc/health/v1"
+	healthpb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/health/v1"
 )
 
 // Status describes the health of a service.
