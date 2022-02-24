@@ -228,7 +228,7 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 				"client.",
 				unexport(method.GoName),
 				", err = ",
-				connectPackage.Ident("NewClientStream"),
+				connectPackage.Ident("NewStreamClientImplementation"),
 				"(",
 			)
 			g.P("doer,")
@@ -244,7 +244,7 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 			g.P("opts...,")
 			g.P(")")
 		} else {
-			g.P("client.", unexport(method.GoName), ", err = ", connectPackage.Ident("NewClientFunc"), "[", method.Input.GoIdent, ", ", method.Output.GoIdent, "](")
+			g.P("client.", unexport(method.GoName), ", err = ", connectPackage.Ident("NewUnaryClientImplementation"), "[", method.Input.GoIdent, ", ", method.Output.GoIdent, "](")
 			g.P("doer,")
 			g.P("baseURL,")
 			g.P(`"`, procedureName(method), `",`)

@@ -65,7 +65,7 @@ func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOp
 		client healthClient
 		err    error
 	)
-	client.check, err = connect.NewClientFunc[v1.HealthCheckRequest, v1.HealthCheckResponse](
+	client.check, err = connect.NewUnaryClientImplementation[v1.HealthCheckRequest, v1.HealthCheckResponse](
 		doer,
 		baseURL,
 		"internal.health.v1.Health/Check",
@@ -74,7 +74,7 @@ func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOp
 	if err != nil {
 		return nil, err
 	}
-	client.watch, err = connect.NewClientStream(
+	client.watch, err = connect.NewStreamClientImplementation(
 		doer,
 		connect.StreamTypeServer,
 		baseURL,

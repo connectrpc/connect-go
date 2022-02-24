@@ -51,7 +51,7 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 		client crossServiceClient
 		err    error
 	)
-	client.ping, err = connect.NewClientFunc[v1test.PingRequest, v1test.PingResponse](
+	client.ping, err = connect.NewUnaryClientImplementation[v1test.PingRequest, v1test.PingResponse](
 		doer,
 		baseURL,
 		"cross.v1test.CrossService/Ping",
@@ -60,7 +60,7 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 	if err != nil {
 		return nil, err
 	}
-	client.fail, err = connect.NewClientFunc[v1test.FailRequest, v1test.FailResponse](
+	client.fail, err = connect.NewUnaryClientImplementation[v1test.FailRequest, v1test.FailResponse](
 		doer,
 		baseURL,
 		"cross.v1test.CrossService/Fail",
@@ -69,7 +69,7 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 	if err != nil {
 		return nil, err
 	}
-	client.sum, err = connect.NewClientStream(
+	client.sum, err = connect.NewStreamClientImplementation(
 		doer,
 		connect.StreamTypeClient,
 		baseURL,
@@ -79,7 +79,7 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 	if err != nil {
 		return nil, err
 	}
-	client.countUp, err = connect.NewClientStream(
+	client.countUp, err = connect.NewStreamClientImplementation(
 		doer,
 		connect.StreamTypeServer,
 		baseURL,
@@ -89,7 +89,7 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 	if err != nil {
 		return nil, err
 	}
-	client.cumSum, err = connect.NewClientStream(
+	client.cumSum, err = connect.NewStreamClientImplementation(
 		doer,
 		connect.StreamTypeBidirectional,
 		baseURL,

@@ -94,15 +94,10 @@ type useProtocolOption struct {
 	Protocol protocol
 }
 
-// NewClientStream returns a stream constructor for a client-, server-, or
-// bidirectional streaming remote procedure. (To call a unary procedure, use
-// NewClientFunc instead.)
-//
-// It's the interface between the connect library and the client code generated
-// by protoc-gen-go-connect; most users won't ever need to deal with it directly.
-// To see an example of how NewClientStream is used in the generated code, see the
-// internal/gen/proto/go-connect/connect/ping/v1test package.
-func NewClientStream(
+// NewStreamClientImplementation is used by generated code - most users will
+// never need to use it directly. It returns a stream constructor for a
+// client-, server-, or bidirectional streaming remote procedure.
+func NewStreamClientImplementation(
 	doer Doer,
 	stype StreamType,
 	baseURL, procedure string,
@@ -141,14 +136,10 @@ func NewClientStream(
 	}, nil
 }
 
-// NewClientFunc returns a strongly-typed function to call a unary remote
-// procedure. (To call a streaming procedure, use NewClientStream instead.)
-//
-// It's the interface between the connect library and the client code generated
-// by protoc-gen-go-connect; most users won't ever need to deal with it directly.
-// To see an example of how NewClientFunc is used in the generated code, see the
-// internal/gen/proto/go-connect/connect/ping/v1test package.
-func NewClientFunc[Req, Res any](
+// NewUnaryClientImplementation is used by generated code - most users will
+// never need to use it directly. It returns a strongly-typed function to call
+// a unary procedure.
+func NewUnaryClientImplementation[Req, Res any](
 	doer Doer,
 	baseURL, procedure string,
 	options ...ClientOption,

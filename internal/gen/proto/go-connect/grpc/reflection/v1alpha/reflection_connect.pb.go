@@ -51,7 +51,7 @@ func NewServerReflectionClient(baseURL string, doer connect.Doer, opts ...connec
 		client serverReflectionClient
 		err    error
 	)
-	client.serverReflectionInfo, err = connect.NewClientStream(
+	client.serverReflectionInfo, err = connect.NewStreamClientImplementation(
 		doer,
 		connect.StreamTypeBidirectional,
 		baseURL,

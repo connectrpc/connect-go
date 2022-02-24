@@ -58,7 +58,7 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 		client pingServiceClient
 		err    error
 	)
-	client.ping, err = connect.NewClientFunc[v1test.PingRequest, v1test.PingResponse](
+	client.ping, err = connect.NewUnaryClientImplementation[v1test.PingRequest, v1test.PingResponse](
 		doer,
 		baseURL,
 		"connect.ping.v1test.PingService/Ping",
@@ -67,7 +67,7 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 	if err != nil {
 		return nil, err
 	}
-	client.fail, err = connect.NewClientFunc[v1test.FailRequest, v1test.FailResponse](
+	client.fail, err = connect.NewUnaryClientImplementation[v1test.FailRequest, v1test.FailResponse](
 		doer,
 		baseURL,
 		"connect.ping.v1test.PingService/Fail",
@@ -76,7 +76,7 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 	if err != nil {
 		return nil, err
 	}
-	client.sum, err = connect.NewClientStream(
+	client.sum, err = connect.NewStreamClientImplementation(
 		doer,
 		connect.StreamTypeClient,
 		baseURL,
@@ -86,7 +86,7 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 	if err != nil {
 		return nil, err
 	}
-	client.countUp, err = connect.NewClientStream(
+	client.countUp, err = connect.NewStreamClientImplementation(
 		doer,
 		connect.StreamTypeServer,
 		baseURL,
@@ -96,7 +96,7 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 	if err != nil {
 		return nil, err
 	}
-	client.cumSum, err = connect.NewClientStream(
+	client.cumSum, err = connect.NewStreamClientImplementation(
 		doer,
 		connect.StreamTypeBidirectional,
 		baseURL,

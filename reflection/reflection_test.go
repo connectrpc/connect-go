@@ -38,7 +38,7 @@ func TestReflection(t *testing.T) {
 		"connect.ping.v1test.PingService",
 	}, "services registered in memory")
 
-	detailed, err := connect.NewClientFunc[
+	detailed, err := connect.NewUnaryClientImplementation[
 		reflectionpb.ServerReflectionRequest,
 		reflectionpb.ServerReflectionResponse,
 	](
