@@ -44,7 +44,6 @@ type CrossServiceClient interface {
 func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (CrossServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
-		connect.WithGRPC(true),
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
@@ -175,8 +174,6 @@ type CrossServiceHandler interface {
 func WithCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOption) connect.MuxOption {
 	handlers := make([]connect.Handler, 0, 5)
 	opts = append([]connect.HandlerOption{
-		connect.WithGRPC(true),
-		connect.WithGRPCWeb(true),
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCodec(protojson.Name, protojson.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),

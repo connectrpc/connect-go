@@ -212,7 +212,6 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		", opts ...", clientOption, ") (", names.Client, ", error) {")
 	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
 	g.P("opts = append([]", clientOption, "{")
-	g.P(connectPackage.Ident("WithGRPC"), "(true),")
 	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("Name"), ", ",
 		connectProtoPackage.Ident("New"), "()),")
 	g.P(connectPackage.Ident("WithCompressor"), "(", connectGzipPackage.Ident("Name"), ", ",
@@ -406,8 +405,6 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		") ", connectPackage.Ident("MuxOption"), " {")
 	g.P("handlers := make([]", connectPackage.Ident("Handler"), ", 0, ", len(service.Methods), ")")
 	g.P("opts = append([]", handlerOption, "{")
-	g.P(connectPackage.Ident("WithGRPC"), "(true),")
-	g.P(connectPackage.Ident("WithGRPCWeb"), "(true),")
 	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("Name"), ", ", connectProtoPackage.Ident("New"), "()", "),")
 	g.P(connectPackage.Ident("WithCodec"), "(", connectJSONPackage.Ident("Name"), ", ", connectJSONPackage.Ident("New"), "()", "),")
 	g.P(connectPackage.Ident("WithCompressor"), "(", connectGzipPackage.Ident("Name"), ", ", connectGzipPackage.Ident("New"), "()", "),")

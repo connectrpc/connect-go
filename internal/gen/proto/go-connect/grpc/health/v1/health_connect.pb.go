@@ -58,7 +58,6 @@ type HealthClient interface {
 func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (HealthClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
-		connect.WithGRPC(true),
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
@@ -153,8 +152,6 @@ type HealthHandler interface {
 func WithHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) connect.MuxOption {
 	handlers := make([]connect.Handler, 0, 2)
 	opts = append([]connect.HandlerOption{
-		connect.WithGRPC(true),
-		connect.WithGRPCWeb(true),
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCodec(protojson.Name, protojson.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),

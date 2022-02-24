@@ -28,6 +28,8 @@ func newHandlerConfiguration(procedure, registrationName string, options []Handl
 		RegistrationName: registrationName,
 		Compressors:      make(map[string]compress.Compressor),
 		Codecs:           make(map[string]codec.Codec),
+		HandleGRPC:       true,
+		HandleGRPCWeb:    true,
 	}
 	for _, opt := range options {
 		opt.applyToHandler(&config)

@@ -44,7 +44,6 @@ type ServerReflectionClient interface {
 func NewServerReflectionClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (ServerReflectionClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
-		connect.WithGRPC(true),
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
@@ -95,8 +94,6 @@ type ServerReflectionHandler interface {
 func WithServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.HandlerOption) connect.MuxOption {
 	handlers := make([]connect.Handler, 0, 1)
 	opts = append([]connect.HandlerOption{
-		connect.WithGRPC(true),
-		connect.WithGRPCWeb(true),
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCodec(protojson.Name, protojson.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),

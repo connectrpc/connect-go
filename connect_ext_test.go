@@ -364,12 +364,12 @@ func TestServerProtoGRPC(t *testing.T) {
 			)
 		})
 		t.Run("web", func(t *testing.T) {
-			run(t, connect.WithGRPCWeb(true))
+			run(t, connect.WithGRPCWeb())
 		})
 		t.Run("web_json_gzip", func(t *testing.T) {
 			run(
 				t,
-				connect.WithGRPCWeb(true),
+				connect.WithGRPCWeb(),
 				connect.WithCodec(protojson.Name, protojson.New()),
 				connect.WithRequestCompressor(gzip.Name),
 			)
