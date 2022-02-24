@@ -213,8 +213,7 @@ type interceptOption struct {
 // Note that in clients, the Sender handles the request message(s) and the
 // Receiver handles the response message(s). For handlers, it's the reverse.
 // Depending on your interceptor's logic, you may need to wrap one side of the
-// stream on the clients and the other side on handlers. See the implementation
-// of HeaderInterceptor for an example.
+// stream on the clients and the other side on handlers.
 func WithInterceptors(interceptors ...Interceptor) Option {
 	return &interceptOption{interceptors}
 }

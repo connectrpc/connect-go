@@ -13,6 +13,108 @@ import (
 	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
 )
 
+// headerInterceptor makes it easier to write interceptors that inspect or
+// mutate HTTP headers. It applies the same logic to unary and streaming
+// procedures, wrapping the send or receive side of the stream as appropriate.
+//
+// It's useful as a testing harness to make sure that we're chaining
+// interceptors in the correct order.
+type headerInterceptor struct {
+	inspectRequestHeader  func(connect.Specification, http.Header)
+	inspectResponseHeader func(connect.Specification, http.Header)
+}
+
+// newHeaderInterceptor constructs a headerInterceptor. Nil function pointers
+// are treated as no-ops.
+func newHeaderInterceptor(
+	inspectRequestHeader func(connect.Specification, http.Header),
+	inspectResponseHeader func(connect.Specification, http.Header),
+) *headerInterceptor {
+	h := headerInterceptor{
+		inspectRequestHeader:  inspectRequestHeader,
+		inspectResponseHeader: inspectResponseHeader,
+	}
+	if h.inspectRequestHeader == nil {
+		h.inspectRequestHeader = func(_ connect.Specification, _ http.Header) {}
+	}
+	if h.inspectResponseHeader == nil {
+		h.inspectResponseHeader = func(_ connect.Specification, _ http.Header) {}
+	}
+	return &h
+}
+
+// Wrap implements Interceptor.
+func (h *headerInterceptor) Wrap(next connect.Func) connect.Func {
+	f := func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		h.inspectRequestHeader(req.Spec(), req.Header())
+		res, err := next(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		h.inspectResponseHeader(req.Spec(), res.Header())
+		return res, nil
+	}
+	return connect.Func(f)
+}
+
+// WrapContext implements Interceptor with a no-op.
+func (h *headerInterceptor) WrapContext(ctx context.Context) context.Context {
+	return ctx
+}
+
+// WrapSender implements Interceptor. Depending on whether it's operating on a
+// client or handler, it wraps the sender with the request- or
+// response-inspecting function.
+func (h *headerInterceptor) WrapSender(ctx context.Context, sender connect.Sender) connect.Sender {
+	if sender.Spec().IsClient {
+		return &headerInspectingSender{Sender: sender, inspect: h.inspectRequestHeader}
+	}
+	return &headerInspectingSender{Sender: sender, inspect: h.inspectResponseHeader}
+}
+
+// WrapReceiver implements Interceptor. Depending on whether it's operating on a
+// client or handler, it wraps the sender with the response- or
+// request-inspecting function.
+func (h *headerInterceptor) WrapReceiver(ctx context.Context, receiver connect.Receiver) connect.Receiver {
+	if receiver.Spec().IsClient {
+		return &headerInspectingReceiver{Receiver: receiver, inspect: h.inspectResponseHeader}
+	}
+	return &headerInspectingReceiver{Receiver: receiver, inspect: h.inspectRequestHeader}
+}
+
+type headerInspectingSender struct {
+	connect.Sender
+
+	called  bool // senders don't need to be thread-safe
+	inspect func(connect.Specification, http.Header)
+}
+
+func (s *headerInspectingSender) Send(m any) error {
+	if !s.called {
+		s.inspect(s.Spec(), s.Header())
+		s.called = true
+	}
+	return s.Sender.Send(m)
+}
+
+type headerInspectingReceiver struct {
+	connect.Receiver
+
+	called  bool // receivers don't need to be thread-safe
+	inspect func(connect.Specification, http.Header)
+}
+
+func (r *headerInspectingReceiver) Receive(m any) error {
+	if !r.called {
+		r.inspect(r.Spec(), r.Header())
+		r.called = true
+	}
+	if err := r.Receiver.Receive(m); err != nil {
+		return err
+	}
+	return nil
+}
+
 type assertCalledInterceptor struct {
 	called *bool
 }
@@ -138,7 +240,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	// The request and response sides of this onion are numbered to make the
 	// intended order clear.
 	clientOnion := connect.WithInterceptors(
-		connect.NewHeaderInterceptor(
+		newHeaderInterceptor(
 			// 1 (start). request: should see protocol-related headers
 			func(_ connect.Specification, h http.Header) {
 				assert.NotZero(t, h.Get("Grpc-Accept-Encoding"), "grpc-accept-encoding missing")
@@ -146,25 +248,25 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 			// 12 (end). response: check "one"-"four"
 			assertAllPresent,
 		),
-		connect.NewHeaderInterceptor(
+		newHeaderInterceptor(
 			newInspector("", "one"),       // 2. request: add header "one"
 			newInspector("three", "four"), // 11. response: check "three", add "four"
 		),
-		connect.NewHeaderInterceptor(
+		newHeaderInterceptor(
 			newInspector("one", "two"),   // 3. request: check "one", add "two"
 			newInspector("two", "three"), // 10. response: check "two", add "three"
 		),
 	)
 	handlerOnion := connect.WithInterceptors(
-		connect.NewHeaderInterceptor(
+		newHeaderInterceptor(
 			newInspector("two", "three"), // 4. request: check "two", add "three"
 			newInspector("one", "two"),   // 9. response: check "one", add "two"
 		),
-		connect.NewHeaderInterceptor(
+		newHeaderInterceptor(
 			newInspector("three", "four"), // 5. request: check "three", add "four"
 			newInspector("", "one"),       // 8. response: add "one"
 		),
-		connect.NewHeaderInterceptor(
+		newHeaderInterceptor(
 			assertAllPresent, // 6. request: check "one"-"four"
 			nil,              // 7. response: no-op
 		),
