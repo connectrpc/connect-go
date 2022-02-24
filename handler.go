@@ -170,7 +170,7 @@ func NewUnaryHandler[Req, Res any](
 			return unary(ctx, typed)
 		})
 		if ic := config.Interceptor; ic != nil {
-			untyped = ic.Wrap(untyped)
+			untyped = ic.WrapUnary(untyped)
 		}
 
 		response, err := untyped(ctx, request)
@@ -260,7 +260,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		ctx := r.Context()
 		if ic := h.interceptor; ic != nil {
-			ctx = ic.WrapContext(ctx)
+			ctx = ic.WrapStreamContext(ctx)
 		}
 		// Most errors returned from protocolHandler.NewStream are caused by
 		// invalid requests. For example, the client may have specified an invalid
@@ -280,8 +280,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if ic := h.interceptor; ic != nil {
 			// Unary interceptors were handled in NewUnaryHandler.
-			sender = ic.WrapSender(ctx, sender)
-			receiver = ic.WrapReceiver(ctx, receiver)
+			sender = ic.WrapStreamSender(ctx, sender)
+			receiver = ic.WrapStreamReceiver(ctx, receiver)
 		}
 		h.implementation(ctx, sender, receiver, clientVisibleError)
 		return

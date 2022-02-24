@@ -43,8 +43,7 @@ func newHeaderInterceptor(
 	return &h
 }
 
-// Wrap implements Interceptor.
-func (h *headerInterceptor) Wrap(next connect.Func) connect.Func {
+func (h *headerInterceptor) WrapUnary(next connect.Func) connect.Func {
 	f := func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 		h.inspectRequestHeader(req.Spec(), req.Header())
 		res, err := next(ctx, req)
@@ -57,25 +56,24 @@ func (h *headerInterceptor) Wrap(next connect.Func) connect.Func {
 	return connect.Func(f)
 }
 
-// WrapContext implements Interceptor with a no-op.
-func (h *headerInterceptor) WrapContext(ctx context.Context) context.Context {
+func (h *headerInterceptor) WrapStreamContext(ctx context.Context) context.Context {
 	return ctx
 }
 
-// WrapSender implements Interceptor. Depending on whether it's operating on a
-// client or handler, it wraps the sender with the request- or
+// WrapStreamSender implements Interceptor. Depending on whether it's operating
+// on a client or handler, it wraps the sender with the request- or
 // response-inspecting function.
-func (h *headerInterceptor) WrapSender(ctx context.Context, sender connect.Sender) connect.Sender {
+func (h *headerInterceptor) WrapStreamSender(ctx context.Context, sender connect.Sender) connect.Sender {
 	if sender.Spec().IsClient {
 		return &headerInspectingSender{Sender: sender, inspect: h.inspectRequestHeader}
 	}
 	return &headerInspectingSender{Sender: sender, inspect: h.inspectResponseHeader}
 }
 
-// WrapReceiver implements Interceptor. Depending on whether it's operating on a
-// client or handler, it wraps the sender with the response- or
+// WrapStreamReceiver implements Interceptor. Depending on whether it's
+// operating on a client or handler, it wraps the sender with the response- or
 // request-inspecting function.
-func (h *headerInterceptor) WrapReceiver(ctx context.Context, receiver connect.Receiver) connect.Receiver {
+func (h *headerInterceptor) WrapStreamReceiver(ctx context.Context, receiver connect.Receiver) connect.Receiver {
 	if receiver.Spec().IsClient {
 		return &headerInspectingReceiver{Receiver: receiver, inspect: h.inspectResponseHeader}
 	}
@@ -119,23 +117,23 @@ type assertCalledInterceptor struct {
 	called *bool
 }
 
-func (i *assertCalledInterceptor) Wrap(next connect.Func) connect.Func {
+func (i *assertCalledInterceptor) WrapUnary(next connect.Func) connect.Func {
 	return connect.Func(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 		*i.called = true
 		return next(ctx, req)
 	})
 }
 
-func (i *assertCalledInterceptor) WrapContext(ctx context.Context) context.Context {
+func (i *assertCalledInterceptor) WrapStreamContext(ctx context.Context) context.Context {
 	return ctx
 }
 
-func (i *assertCalledInterceptor) WrapSender(_ context.Context, sender connect.Sender) connect.Sender {
+func (i *assertCalledInterceptor) WrapStreamSender(_ context.Context, sender connect.Sender) connect.Sender {
 	*i.called = true
 	return sender
 }
 
-func (i *assertCalledInterceptor) WrapReceiver(_ context.Context, receiver connect.Receiver) connect.Receiver {
+func (i *assertCalledInterceptor) WrapStreamReceiver(_ context.Context, receiver connect.Receiver) connect.Receiver {
 	*i.called = true
 	return receiver
 }

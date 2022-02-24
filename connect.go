@@ -268,35 +268,35 @@ type Func func(context.Context, AnyRequest) (AnyResponse, error)
 // returned error, retry, recover from panics, emit logs and metrics, or do
 // nearly anything else.
 type Interceptor interface {
-	// Wrap adds logic to a unary procedure. The returned Func must be safe to
-	// call concurrently.
-	Wrap(Func) Func
+	// WrapUnary adds logic to a unary procedure. The returned Func must be safe
+	// to call concurrently.
+	WrapUnary(Func) Func
 
-	// WrapContext, WrapSender, and WrapReceiver work together to add logic to
-	// streaming procedures. Stream interceptors work in phases. First, each
-	// interceptor may wrap the request context. Then, the connect runtime
-	// constructs a (Sender, Receiver) pair. Finally, each interceptor may wrap
-	// the Sender and/or Receiver. For example, the flow within a Handler looks
-	// like this:
+	// WrapStreamContext, WrapStreamSender, and WrapStreamReceiver work together
+	// to add logic to streaming procedures. Stream interceptors work in phases.
+	// First, each interceptor may wrap the request context. Then, the connect
+	// runtime constructs a (Sender, Receiver) pair. Finally, each interceptor
+	// may wrap the Sender and/or Receiver. For example, the flow within a
+	// Handler looks like this:
 	//
 	//   func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	//     ctx := r.Context()
 	//     if ic := h.interceptor; ic != nil {
-	//       ctx = ic.WrapContext(ctx)
+	//       ctx = ic.WrapStreamContext(ctx)
 	//     }
 	//     sender, receiver := h.newStream(w, r.WithContext(ctx))
 	//     if ic := h.interceptor; ic != nil {
-	//       sender = ic.WrapSender(ctx, sender)
-	//       receiver = ic.WrapReceiver(ctx, receiver)
+	//       sender = ic.WrapStreamSender(ctx, sender)
+	//       receiver = ic.WrapStreamReceiver(ctx, receiver)
 	//     }
 	//     h.serveStream(sender, receiver)
 	//   }
 	//
 	// Sender and Receiver implementations don't need to be safe for concurrent
 	// use.
-	WrapContext(context.Context) context.Context
-	WrapSender(context.Context, Sender) Sender
-	WrapReceiver(context.Context, Receiver) Receiver
+	WrapStreamContext(context.Context) context.Context
+	WrapStreamSender(context.Context, Sender) Sender
+	WrapStreamReceiver(context.Context, Receiver) Receiver
 }
 
 // Doer is the transport-level interface connect expects HTTP clients to

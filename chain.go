@@ -13,53 +13,52 @@ var _ Interceptor = (*chain)(nil)
 
 // NewChain composes multiple interceptors into one.
 func newChain(interceptors []Interceptor) *chain {
-	return &chain{interceptors}
+	// We usually wrap in reverse order to have the first interceptor from
+	// the slice act first. Rather than doing this dance repeatedly, reverse the
+	// interceptor order now.
+	var c chain
+	for i := len(interceptors) - 1; i >= 0; i-- {
+		if interceptor := interceptors[i]; interceptor != nil {
+			c.interceptors = append(c.interceptors, interceptor)
+		}
+	}
+	return &c
 }
 
-func (c *chain) Wrap(next Func) Func {
-	// We need to wrap in reverse order to have the first interceptor from
-	// the slice act first.
-	for i := len(c.interceptors) - 1; i >= 0; i-- {
-		if interceptor := c.interceptors[i]; interceptor != nil {
-			next = interceptor.Wrap(next)
-		}
+func (c *chain) WrapUnary(next Func) Func {
+	for _, interceptor := range c.interceptors {
+		next = interceptor.WrapUnary(next)
 	}
 	return next
 }
 
-func (c *chain) WrapContext(ctx context.Context) context.Context {
-	for i := len(c.interceptors) - 1; i >= 0; i-- {
-		if interceptor := c.interceptors[i]; interceptor != nil {
-			ctx = interceptor.WrapContext(ctx)
-		}
+func (c *chain) WrapStreamContext(ctx context.Context) context.Context {
+	for _, interceptor := range c.interceptors {
+		ctx = interceptor.WrapStreamContext(ctx)
 	}
 	return ctx
 }
 
-func (c *chain) WrapSender(ctx context.Context, sender Sender) Sender {
+func (c *chain) WrapStreamSender(ctx context.Context, sender Sender) Sender {
 	if sender.Spec().IsClient {
-		for i := len(c.interceptors) - 1; i >= 0; i-- {
-			if interceptor := c.interceptors[i]; interceptor != nil {
-				sender = interceptor.WrapSender(ctx, sender)
-			}
+		for _, interceptor := range c.interceptors {
+			sender = interceptor.WrapStreamSender(ctx, sender)
 		}
 		return sender
 	}
 	// When we're wrapping senders on the handler side, we need to wrap in the
 	// opposite order. See TestOnionOrderingEndToEnd.
-	for i := 0; i < len(c.interceptors); i++ {
+	for i := len(c.interceptors) - 1; i >= 0; i-- {
 		if interceptor := c.interceptors[i]; interceptor != nil {
-			sender = interceptor.WrapSender(ctx, sender)
+			sender = interceptor.WrapStreamSender(ctx, sender)
 		}
 	}
 	return sender
 }
 
-func (c *chain) WrapReceiver(ctx context.Context, receiver Receiver) Receiver {
-	for i := len(c.interceptors) - 1; i >= 0; i-- {
-		if interceptor := c.interceptors[i]; interceptor != nil {
-			receiver = interceptor.WrapReceiver(ctx, receiver)
-		}
+func (c *chain) WrapStreamReceiver(ctx context.Context, receiver Receiver) Receiver {
+	for _, interceptor := range c.interceptors {
+		receiver = interceptor.WrapStreamReceiver(ctx, receiver)
 	}
 	return receiver
 }

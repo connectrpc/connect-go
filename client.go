@@ -133,14 +133,14 @@ func NewStreamClientImplementation(
 	}
 	return func(ctx context.Context) (Sender, Receiver) {
 		if ic := config.Interceptor; ic != nil {
-			ctx = ic.WrapContext(ctx)
+			ctx = ic.WrapStreamContext(ctx)
 		}
 		header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
 		protocolClient.WriteRequestHeader(header)
 		sender, receiver := protocolClient.NewStream(ctx, header)
 		if ic := config.Interceptor; ic != nil {
-			sender = ic.WrapSender(ctx, sender)
-			receiver = ic.WrapReceiver(ctx, receiver)
+			sender = ic.WrapStreamSender(ctx, sender)
+			receiver = ic.WrapStreamReceiver(ctx, receiver)
 		}
 		return sender, receiver
 	}, nil
@@ -193,7 +193,7 @@ func NewUnaryClientImplementation[Req, Res any](
 		return response, receiver.Close()
 	})
 	if ic := config.Interceptor; ic != nil {
-		send = ic.Wrap(send)
+		send = ic.WrapUnary(send)
 	}
 	return func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
 		// To make the specification and RPC headers visible to the full interceptor
