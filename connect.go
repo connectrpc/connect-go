@@ -2,6 +2,8 @@ package connect
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 )
 
@@ -97,7 +99,11 @@ func ReceiveRequest[Req any](receiver Receiver) (*Request[Req], error) {
 	// In a well-formed stream, the request message may be followed by a block
 	// of in-stream trailers. To ensure that we receive the trailers, try to
 	// read another message from the stream.
-	_ = receiver.Receive(new(Req))
+	if err := receiver.Receive(new(Req)); err == nil {
+		return nil, Wrap(CodeUnknown, errors.New("unary stream has multiple messages"))
+	} else if err != nil && !errors.Is(err, io.EOF) {
+		return nil, Wrap(CodeUnknown, err)
+	}
 	return &Request[Req]{
 		Msg:     &msg,
 		spec:    receiver.Spec(),
@@ -177,7 +183,11 @@ func ReceiveResponse[Res any](receiver Receiver) (*Response[Res], error) {
 	// In a well-formed stream, the response message may be followed by a block
 	// of in-stream trailers. To ensure that we receive the trailers, try to
 	// read another message from the stream.
-	_ = receiver.Receive(new(Res))
+	if err := receiver.Receive(new(Res)); err == nil {
+		return nil, Wrap(CodeUnknown, errors.New("unary stream has multiple messages"))
+	} else if err != nil && !errors.Is(err, io.EOF) {
+		return nil, Wrap(CodeUnknown, err)
+	}
 	return &Response[Res]{
 		Msg:     &msg,
 		header:  receiver.Header(),
