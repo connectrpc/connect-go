@@ -177,7 +177,7 @@ func TestServerProtoGRPC(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(pingrpc.NewPingServiceHandler(
 		pingServer{checkMetadata: true},
-		registrar,
+		connect.WithRegistrar(registrar),
 	))
 	mux.Handle(health.NewHandler(health.NewChecker(registrar)))
 	mux.Handle(reflection.NewHandler(registrar))

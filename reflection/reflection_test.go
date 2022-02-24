@@ -22,7 +22,7 @@ func TestReflection(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(pingrpc.NewPingServiceHandler(
 		pingrpc.UnimplementedPingServiceHandler{},
-		reg,
+		connect.WithRegistrar(reg),
 	))
 	mux.Handle(health.NewHandler(health.NewChecker(reg)))
 	mux.Handle(reflection.NewHandler(reg))

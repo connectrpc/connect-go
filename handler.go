@@ -71,9 +71,27 @@ func (c *handlerConfiguration) newProtocolHandlers(streamType StreamType) []prot
 // A HandlerOption configures a Handler.
 //
 // In addition to any options grouped in the documentation below, remember that
-// Registrars and Options are also valid HandlerOptions.
+// all Options are also HandlerOptions.
 type HandlerOption interface {
 	applyToHandler(*handlerConfiguration)
+}
+
+type withRegistrarOption struct {
+	registrar *Registrar
+}
+
+var _ HandlerOption = (*withRegistrarOption)(nil)
+
+// WithRegistrar registers the handler with the supplied Registrar. The
+// Registrar can then be used with github.com/bufbuild/reflection to expose
+// type information for all the known services using gRPC's server reflection
+// protocol.
+func WithRegistrar(registrar *Registrar) HandlerOption {
+	return &withRegistrarOption{registrar: registrar}
+}
+
+func (o *withRegistrarOption) applyToHandler(cfg *handlerConfiguration) {
+	cfg.Registrar = o.registrar
 }
 
 // A Handler is the server-side implementation of a single RPC defined by a

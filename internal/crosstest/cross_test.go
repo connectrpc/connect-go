@@ -436,7 +436,10 @@ func testWithGRPCClient(t *testing.T, client crosspb.CrossServiceClient, opts ..
 func TestConnectServer(t *testing.T) {
 	reg := connect.NewRegistrar()
 	mux := http.NewServeMux()
-	mux.Handle(crossrpc.NewCrossServiceHandler(crossServerConnect{}, reg))
+	mux.Handle(crossrpc.NewCrossServiceHandler(
+		crossServerConnect{},
+		connect.WithRegistrar(reg),
+	))
 	mux.Handle(reflection.NewHandler(reg))
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
