@@ -3,7 +3,7 @@ package connect
 import (
 	"strings"
 
-	"github.com/bufconnect/connect/compress"
+	"github.com/bufbuild/connect/compress"
 )
 
 // readOnlyCompressors is a read-only interface to a map of named compressors.

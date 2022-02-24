@@ -15,10 +15,10 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
-	"github.com/bufconnect/connect"
-	"github.com/bufconnect/connect/handlerstream"
-	reflectionrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/grpc/reflection/v1alpha"
-	rpb "github.com/bufconnect/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
+	"github.com/bufbuild/connect"
+	"github.com/bufbuild/connect/handlerstream"
+	reflectionrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/grpc/reflection/v1alpha"
+	rpb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
 )
 
 // Registrar lists all registered protobuf services. The returned names must be

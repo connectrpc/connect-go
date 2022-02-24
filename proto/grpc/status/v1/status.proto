@@ -6,7 +6,7 @@ package grpc.status.v1;
 
 import "google/protobuf/any.proto";
 
-option go_package = "github.com/bufconnect/connect/internal/gen/proto/go/grpc/status/v1;statuspb";
+option go_package = "github.com/bufbuild/connect/internal/gen/proto/go/grpc/status/v1;statuspb";
 
 // See https://cloud.google.com/apis/design/errors.
 //

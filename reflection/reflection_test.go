@@ -6,14 +6,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/bufconnect/connect"
-	"github.com/bufconnect/connect/codec/protobuf"
-	"github.com/bufconnect/connect/health"
-	"github.com/bufconnect/connect/internal/assert"
-	pingrpc "github.com/bufconnect/connect/internal/gen/proto/go-connect/connect/ping/v1test"
-	pingpb "github.com/bufconnect/connect/internal/gen/proto/go/connect/ping/v1test"
-	reflectionpb "github.com/bufconnect/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
-	"github.com/bufconnect/connect/reflection"
+	"github.com/bufbuild/connect"
+	"github.com/bufbuild/connect/codec/protobuf"
+	"github.com/bufbuild/connect/health"
+	"github.com/bufbuild/connect/internal/assert"
+	pingrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/connect/ping/v1test"
+	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
+	reflectionpb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
+	"github.com/bufbuild/connect/reflection"
 )
 
 func TestReflection(t *testing.T) {

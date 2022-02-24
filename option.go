@@ -3,8 +3,8 @@ package connect
 import (
 	"strings"
 
-	"github.com/bufconnect/connect/codec"
-	"github.com/bufconnect/connect/compress"
+	"github.com/bufbuild/connect/codec"
+	"github.com/bufbuild/connect/compress"
 )
 
 // Option implements both ClientOption and HandlerOption, so it can be applied

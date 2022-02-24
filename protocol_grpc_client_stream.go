@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bufconnect/connect/codec"
-	"github.com/bufconnect/connect/compress"
-	statuspb "github.com/bufconnect/connect/internal/gen/proto/go/grpc/status/v1"
+	"github.com/bufbuild/connect/codec"
+	"github.com/bufbuild/connect/compress"
+	statuspb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/status/v1"
 )
 
 // See duplexClientStream below: the send and receive sides of client streams

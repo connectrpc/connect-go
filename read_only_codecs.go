@@ -1,8 +1,8 @@
 package connect
 
 import (
-	"github.com/bufconnect/connect/codec"
-	"github.com/bufconnect/connect/codec/protobuf"
+	"github.com/bufbuild/connect/codec"
+	"github.com/bufbuild/connect/codec/protobuf"
 )
 
 // readOnlyCodecs is a read-only interface to a map of named codecs.
