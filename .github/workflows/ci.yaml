@@ -3,10 +3,8 @@ on: push
 # Prevent writing to the repository using the CI token.
 # Ref: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#permissions
 permissions: read-all
-env:
-  MAKEFLAGS: '-j 2'
 jobs:
-  lint:
+  ci:
     runs-on: ubuntu-20.04
     steps:
       - name: checkout
@@ -22,38 +20,13 @@ jobs:
         uses: actions/cache@v2
         with:
           path: |
-            ~/.cache/buf/${{ runner.os }}/x86_64/bin
-            ~/.cache/buf/${{ runner.os }}/x86_64/go/pkg/mod
-            ~/.cache/buf/${{ runner.os }}/x86_64/include
-            ~/.cache/buf/${{ runner.os }}/x86_64/versions
-          key: ${{ runner.os }}-buf-lint-${{ hashFiles('**/go.sum', 'make/**') }}
+            ~/.cache/connect/${{ runner.os }}/x86_64/bin
+            ~/.cache/connect/${{ runner.os }}/x86_64/go/pkg/mod
+            ~/.cache/connect/${{ runner.os }}/x86_64/include
+            ~/.cache/connect/${{ runner.os }}/x86_64/versions
+          key: ${{ runner.os }}-connect-ci-${{ hashFiles('**/go.sum', 'make/**') }}
           restore-keys: |
-            ${{ runner.os }}-buf-lint-
-      - name: make-lint
+            ${{ runner.os }}-connect-ci-
+      - name: make-ci
         if: success()
-        run: make lint
-  test:
-    runs-on: ubuntu-20.04
-    steps:
-      - name: checkout
-        uses: actions/checkout@v2
-      - name: setup-go
-        if: success()
-        uses: actions/setup-go@v2
-        with:
-          go-version: 1.18rc1
-      - name: cache
-        if: success()
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cache/buf/${{ runner.os }}/x86_64/bin
-            ~/.cache/buf/${{ runner.os }}/x86_64/go/pkg/mod
-            ~/.cache/buf/${{ runner.os }}/x86_64/include
-            ~/.cache/buf/${{ runner.os }}/x86_64/versions
-          key: ${{ runner.os }}-buf-test-${{ hashFiles('**/go.sum', 'make/**') }}
-          restore-keys: |
-            ${{ runner.os }}-buf-test-
-      - name: make-test
-        if: success()
-        run: make test
+        run: make ci
