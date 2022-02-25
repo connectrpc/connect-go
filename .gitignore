@@ -4,5 +4,4 @@
 /cmd/protoc-gen-go-connect/protoc-gen-go-connect
 *.pprof
 *.svg
-/internal/crosstest/crosstest.test
 cover.out
