@@ -1,7 +1,8 @@
 package connect_test
 
 import (
-	"github.com/bufbuild/connect"
+	"net/http"
+
 	"github.com/bufbuild/connect/connecttest"
 	pingrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/connect/ping/v1test"
 )
@@ -17,11 +18,7 @@ func init() {
 	// with this setup code.
 	//
 	// The least-awful option is to set up the server in init().
-	mux, err := connect.NewServeMux(
-		pingrpc.WithPingServiceHandler(pingServer{}),
-	)
-	if err != nil {
-		return
-	}
+	mux := http.NewServeMux()
+	mux.Handle(pingrpc.NewPingServiceHandler(pingServer{}))
 	examplePingServer = connecttest.NewServer(mux)
 }

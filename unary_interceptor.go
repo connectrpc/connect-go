@@ -7,20 +7,20 @@ import "context"
 // streaming RPCs.
 type UnaryInterceptorFunc func(Func) Func
 
-// Wrap implements Interceptor by applying the interceptor function.
-func (f UnaryInterceptorFunc) Wrap(next Func) Func { return f(next) }
+// WrapUnary implements Interceptor by applying the interceptor function.
+func (f UnaryInterceptorFunc) WrapUnary(next Func) Func { return f(next) }
 
-// WrapContext implements Interceptor with a no-op.
-func (f UnaryInterceptorFunc) WrapContext(ctx context.Context) context.Context {
+// WrapStreamContext implements Interceptor with a no-op.
+func (f UnaryInterceptorFunc) WrapStreamContext(ctx context.Context) context.Context {
 	return ctx
 }
 
-// WrapSender implements Interceptor with a no-op.
-func (f UnaryInterceptorFunc) WrapSender(_ context.Context, sender Sender) Sender {
+// WrapStreamSender implements Interceptor with a no-op.
+func (f UnaryInterceptorFunc) WrapStreamSender(_ context.Context, sender Sender) Sender {
 	return sender
 }
 
-// WrapReceiver implements Interceptor with a no-op.
-func (f UnaryInterceptorFunc) WrapReceiver(_ context.Context, receiver Receiver) Receiver {
+// WrapStreamReceiver implements Interceptor with a no-op.
+func (f UnaryInterceptorFunc) WrapStreamReceiver(_ context.Context, receiver Receiver) Receiver {
 	return receiver
 }

@@ -2,6 +2,7 @@ package connect_test
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -15,13 +16,11 @@ import (
 
 func TestHandlerReadMaxBytes(t *testing.T) {
 	const readMaxBytes = 32
-	mux, err := connect.NewServeMux(
-		pingrpc.WithPingServiceHandler(
-			&ExamplePingServer{},
-			connect.WithReadMaxBytes(readMaxBytes),
-		),
-	)
-	assert.Nil(t, err, "mux construction error")
+	mux := http.NewServeMux()
+	mux.Handle(pingrpc.NewPingServiceHandler(
+		&ExamplePingServer{},
+		connect.WithReadMaxBytes(readMaxBytes),
+	))
 
 	server := httptest.NewServer(mux)
 	defer server.Close()

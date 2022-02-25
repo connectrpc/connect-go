@@ -6,13 +6,11 @@ import (
 )
 
 // A Registrar collects information to support gRPC server reflection
-// when building handlers. Registrars are valid HandlerOptions.
+// when building handlers.
 type Registrar struct {
 	mu       sync.RWMutex
 	services map[string]struct{}
 }
-
-var _ HandlerOption = (*Registrar)(nil)
 
 // NewRegistrar constructs an empty Registrar.
 func NewRegistrar() *Registrar {
@@ -49,8 +47,4 @@ func (r *Registrar) register(name string) {
 	r.mu.Lock()
 	r.services[name] = struct{}{}
 	r.mu.Unlock()
-}
-
-func (r *Registrar) applyToHandler(cfg *handlerConfiguration) {
-	cfg.Registrar = r
 }

@@ -29,9 +29,9 @@ const (
 // implementations do not need to be safe for concurrent use.
 //
 // Sender implementations provided by this module guarantee that all returned
-// errors are *Errors, with codes. The Close method of implementations provided
-// by this package automatically adds the appropriate codes when passed
-// context.DeadlineExceeded or context.Canceled.
+// errors can be cast to *Error using errors.As. The Close method of Sender
+// implementations provided by this package automatically adds the appropriate
+// codes when passed context.DeadlineExceeded or context.Canceled.
 //
 // Like the standard library's http.ResponseWriter, both client- and
 // handler-side Senders write headers to the network with the first call to
@@ -56,7 +56,7 @@ type Sender interface {
 // Receiver implementations do not need to be safe for concurrent use.
 //
 // Receiver implementations provided by this module guarantee that all returned
-// errors are *Errors, with codes.
+// errors can be cast to *Error using errors.As.
 type Receiver interface {
 	Receive(any) error
 	Close() error
@@ -100,9 +100,9 @@ func ReceiveRequest[Req any](receiver Receiver) (*Request[Req], error) {
 	// of in-stream trailers. To ensure that we receive the trailers, try to
 	// read another message from the stream.
 	if err := receiver.Receive(new(Req)); err == nil {
-		return nil, Wrap(CodeUnknown, errors.New("unary stream has multiple messages"))
+		return nil, NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
 	} else if err != nil && !errors.Is(err, io.EOF) {
-		return nil, Wrap(CodeUnknown, err)
+		return nil, NewError(CodeUnknown, err)
 	}
 	return &Request[Req]{
 		Msg:     &msg,
@@ -184,9 +184,9 @@ func ReceiveResponse[Res any](receiver Receiver) (*Response[Res], error) {
 	// of in-stream trailers. To ensure that we receive the trailers, try to
 	// read another message from the stream.
 	if err := receiver.Receive(new(Res)); err == nil {
-		return nil, Wrap(CodeUnknown, errors.New("unary stream has multiple messages"))
+		return nil, NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
 	} else if err != nil && !errors.Is(err, io.EOF) {
-		return nil, Wrap(CodeUnknown, err)
+		return nil, NewError(CodeUnknown, err)
 	}
 	return &Response[Res]{
 		Msg:     &msg,
@@ -268,35 +268,35 @@ type Func func(context.Context, AnyRequest) (AnyResponse, error)
 // returned error, retry, recover from panics, emit logs and metrics, or do
 // nearly anything else.
 type Interceptor interface {
-	// Wrap adds logic to a unary procedure. The returned Func must be safe to
-	// call concurrently.
-	Wrap(Func) Func
+	// WrapUnary adds logic to a unary procedure. The returned Func must be safe
+	// to call concurrently.
+	WrapUnary(Func) Func
 
-	// WrapContext, WrapSender, and WrapReceiver work together to add logic to
-	// streaming procedures. Stream interceptors work in phases. First, each
-	// interceptor may wrap the request context. Then, the connect runtime
-	// constructs a (Sender, Receiver) pair. Finally, each interceptor may wrap
-	// the Sender and/or Receiver. For example, the flow within a Handler looks
-	// like this:
+	// WrapStreamContext, WrapStreamSender, and WrapStreamReceiver work together
+	// to add logic to streaming procedures. Stream interceptors work in phases.
+	// First, each interceptor may wrap the request context. Then, the connect
+	// runtime constructs a (Sender, Receiver) pair. Finally, each interceptor
+	// may wrap the Sender and/or Receiver. For example, the flow within a
+	// Handler looks like this:
 	//
 	//   func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	//     ctx := r.Context()
 	//     if ic := h.interceptor; ic != nil {
-	//       ctx = ic.WrapContext(ctx)
+	//       ctx = ic.WrapStreamContext(ctx)
 	//     }
 	//     sender, receiver := h.newStream(w, r.WithContext(ctx))
 	//     if ic := h.interceptor; ic != nil {
-	//       sender = ic.WrapSender(ctx, sender)
-	//       receiver = ic.WrapReceiver(ctx, receiver)
+	//       sender = ic.WrapStreamSender(ctx, sender)
+	//       receiver = ic.WrapStreamReceiver(ctx, receiver)
 	//     }
 	//     h.serveStream(sender, receiver)
 	//   }
 	//
 	// Sender and Receiver implementations don't need to be safe for concurrent
 	// use.
-	WrapContext(context.Context) context.Context
-	WrapSender(context.Context, Sender) Sender
-	WrapReceiver(context.Context, Receiver) Receiver
+	WrapStreamContext(context.Context) context.Context
+	WrapStreamSender(context.Context, Sender) Sender
+	WrapStreamReceiver(context.Context, Receiver) Receiver
 }
 
 // Doer is the transport-level interface connect expects HTTP clients to
@@ -307,7 +307,7 @@ type Doer interface {
 
 // Specification is a description of a client call or a handler invocation.
 type Specification struct {
-	Type      StreamType
-	Procedure string // e.g., "acme.foo.v1.FooService/Bar"
-	IsClient  bool   // otherwise we're in a handler
+	StreamType StreamType
+	Procedure  string // e.g., "acme.foo.v1.FooService/Bar"
+	IsClient   bool   // otherwise we're in a handler
 }

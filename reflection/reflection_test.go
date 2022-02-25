@@ -3,6 +3,7 @@ package reflection_test
 import (
 	"bytes"
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -18,15 +19,13 @@ import (
 
 func TestReflection(t *testing.T) {
 	reg := connect.NewRegistrar()
-	mux, err := connect.NewServeMux(
-		pingrpc.WithPingServiceHandler(
-			pingrpc.UnimplementedPingServiceHandler{},
-			reg,
-		),
-		health.WithHandler(health.NewChecker(reg)),
-		reflection.WithHandler(reg),
-	)
-	assert.Nil(t, err, "mux construction error")
+	mux := http.NewServeMux()
+	mux.Handle(pingrpc.NewPingServiceHandler(
+		pingrpc.UnimplementedPingServiceHandler{},
+		connect.WithRegistrar(reg),
+	))
+	mux.Handle(health.NewHandler(health.NewChecker(reg)))
+	mux.Handle(reflection.NewHandler(reg))
 
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
@@ -38,14 +37,13 @@ func TestReflection(t *testing.T) {
 		"connect.ping.v1test.PingService",
 	}, "services registered in memory")
 
-	detailed, err := connect.NewClientFunc[
+	detailed, err := connect.NewUnaryClientImplementation[
 		reflectionpb.ServerReflectionRequest,
 		reflectionpb.ServerReflectionResponse,
 	](
 		server.Client(),
 		server.URL,
 		"grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
-		connect.WithGRPC(true),
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 	)
 	assert.Nil(t, err, "client construction error")
