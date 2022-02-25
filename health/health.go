@@ -64,19 +64,19 @@ type server struct {
 
 var _ healthrpc.HealthHandler = (*server)(nil)
 
-func (s *server) Check(ctx context.Context, req *connect.Request[healthpb.HealthCheckRequest]) (*connect.Response[healthpb.HealthCheckResponse], error) {
+func (s *server) Check(ctx context.Context, req *connect.Envelope[healthpb.HealthCheckRequest]) (*connect.Envelope[healthpb.HealthCheckResponse], error) {
 	status, err := s.check(ctx, req.Msg.Service)
 	if err != nil {
 		return nil, err
 	}
-	return connect.NewResponse(&healthpb.HealthCheckResponse{
+	return connect.NewEnvelope(&healthpb.HealthCheckResponse{
 		Status: healthpb.HealthCheckResponse_ServingStatus(status),
 	}), nil
 }
 
 func (s *server) Watch(
 	_ context.Context,
-	_ *connect.Request[healthpb.HealthCheckRequest],
+	_ *connect.Envelope[healthpb.HealthCheckRequest],
 	_ *handlerstream.Server[healthpb.HealthCheckResponse],
 ) error {
 	return connect.NewError(
@@ -146,7 +146,7 @@ func NewClient(baseURL string, doer connect.Doer, options ...connect.ClientOptio
 func (c *Client) Check(ctx context.Context, req *CheckRequest) (*CheckResponse, error) {
 	res, err := c.health.Check(
 		ctx,
-		connect.NewRequest(&healthpb.HealthCheckRequest{Service: req.Service}),
+		connect.NewEnvelope(&healthpb.HealthCheckRequest{Service: req.Service}),
 	)
 	if err != nil {
 		return nil, err
