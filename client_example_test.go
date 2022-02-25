@@ -55,7 +55,7 @@ func ExampleClient() {
 	}
 	res, err := client.Ping(
 		context.Background(),
-		connect.NewRequest(&pingpb.PingRequest{Number: 42}),
+		connect.NewEnvelope(&pingpb.PingRequest{Number: 42}),
 	)
 	if err != nil {
 		logger.Println("error:", err)

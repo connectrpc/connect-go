@@ -32,14 +32,14 @@ Curious what all this looks like in practice? Here's a small h2c server:
 package main
 
 import (
+  "log"
   "net/http"
 
+  "github.com/bufbuild/connect"
+  pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
+  pingrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/connect/ping/v1test"
   "golang.org/x/net/http2"
   "golang.org/x/net/http2/h2c"
-  "github.com/bufbuild/connect"
-  // Generated from protobuf schemas.
-  pingrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/connect/ping/v1test"
-  pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
 )
 
 type PingServer struct {
@@ -48,9 +48,15 @@ type PingServer struct {
 
 func (ps *PingServer) Ping(
   ctx context.Context,
-  req *connect.Request[pingpb.PingRequest]) (*connect.Response[pingpb.PingResponse], error) {
+  req *connect.Envelope[pingpb.PingRequest]) (*connect.Envelope[pingpb.PingResponse], error) {
+  // connect.Envelope gives you direct access to headers and trailers.
+  // No context-based nonsense!
   log.Println(req.Header().Get("Some-Header"))
-  res := connect.NewResponse(&pingpb.PingResponse{Number: 42})
+  res := connect.NewEnvelope(&pingpb.PingResponse{
+    // req.Msg is a strongly-typed *pingpb.PingRequest, so
+    // we can access its fields without type assertions.
+    Number: req.Msg.Number,
+  })
   res.Header().Set("Some-Other-Header", "hello!")
   res.Trailer().Set("Some-Trailer", "goodbye!")
   return res, nil
@@ -58,7 +64,9 @@ func (ps *PingServer) Ping(
 
 func main() {
   mux := http.NewServeMux()
-  mux.Handle(pingpb.NewPingServiceHandler(&PingServer{})) // our logic
+  // The generated constructors return a path and a plain net/http
+  // handler.
+  mux.Handle(pingpb.NewPingServiceHandler(&PingServer{}))
   http.ListenAndServe(
     ":8081",
     h2c.NewHandler(mux, &http2.Server{}),

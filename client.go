@@ -152,7 +152,7 @@ func NewUnaryClientImplementation[Req, Res any](
 	doer Doer,
 	baseURL, procedure string,
 	options ...ClientOption,
-) (func(context.Context, *Request[Req]) (*Response[Res], error), error) {
+) (func(context.Context, *Envelope[Req]) (*Envelope[Res], error), error) {
 	config, err := newClientConfiguration(procedure, options)
 	if err != nil {
 		return nil, err
@@ -172,7 +172,7 @@ func NewUnaryClientImplementation[Req, Res any](
 	if protocolErr != nil {
 		return nil, NewError(CodeUnknown, protocolErr)
 	}
-	send := Func(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
+	send := Func(func(ctx context.Context, request AnyEnvelope) (AnyEnvelope, error) {
 		sender, receiver := protocolClient.NewStream(ctx, request.Header())
 		mergeHeaders(sender.Trailer(), request.Trailer())
 		if err := sender.Send(request.Any()); err != nil {
@@ -184,7 +184,7 @@ func NewUnaryClientImplementation[Req, Res any](
 			_ = receiver.Close()
 			return nil, err
 		}
-		response, err := ReceiveResponse[Res](receiver)
+		response, err := ReceiveUnaryEnvelope[Res](receiver)
 		if err != nil {
 			_ = receiver.Close()
 			return nil, err
@@ -194,7 +194,7 @@ func NewUnaryClientImplementation[Req, Res any](
 	if ic := config.Interceptor; ic != nil {
 		send = ic.WrapUnary(send)
 	}
-	return func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
+	return func(ctx context.Context, request *Envelope[Req]) (*Envelope[Res], error) {
 		// To make the specification and RPC headers visible to the full interceptor
 		// chain (as though they were supplied by the caller), we'll add them here.
 		request.spec = spec
@@ -203,7 +203,7 @@ func NewUnaryClientImplementation[Req, Res any](
 		if err != nil {
 			return nil, err
 		}
-		typed, ok := response.(*Response[Res])
+		typed, ok := response.(*Envelope[Res])
 		if !ok {
 			return nil, errorf(CodeInternal, "unexpected client response type %T", response)
 		}

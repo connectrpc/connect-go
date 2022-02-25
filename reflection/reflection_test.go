@@ -48,7 +48,7 @@ func TestReflection(t *testing.T) {
 	)
 	assert.Nil(t, err, "client construction error")
 	call := func(req *reflectionpb.ServerReflectionRequest) (*reflectionpb.ServerReflectionResponse, error) {
-		res, err := detailed(context.Background(), connect.NewRequest(req))
+		res, err := detailed(context.Background(), connect.NewEnvelope(req))
 		if err != nil {
 			return nil, err
 		}
