@@ -33,11 +33,11 @@ func (c *Client[Req, Res]) Send(msg *Req) error {
 
 // CloseAndReceive closes the send side of the stream and waits for the
 // response.
-func (c *Client[Req, Res]) CloseAndReceive() (*connect.Response[Res], error) {
+func (c *Client[Req, Res]) CloseAndReceive() (*connect.Message[Res], error) {
 	if err := c.sender.Close(nil); err != nil {
 		return nil, err
 	}
-	res, err := connect.ReceiveResponse[Res](c.receiver)
+	res, err := connect.ReceiveUnaryMessage[Res](c.receiver)
 	if err != nil {
 		_ = c.receiver.Close()
 		return nil, err

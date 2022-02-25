@@ -49,7 +49,7 @@ func BenchmarkConnect(b *testing.B) {
 			for pb.Next() {
 				_, _ = client.Ping(
 					context.Background(),
-					connect.NewRequest(&crosspb.PingRequest{Number: 42}),
+					connect.NewMessage(&crosspb.PingRequest{Number: 42}),
 				)
 			}
 		})

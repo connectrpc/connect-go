@@ -34,7 +34,7 @@ func TestHandlerReadMaxBytes(t *testing.T) {
 	assert.Nil(t, err, "marshal request")
 	assert.Equal(t, len(probeBytes), readMaxBytes+1, "probe size")
 
-	_, err = client.Ping(context.Background(), connect.NewRequest(req))
+	_, err = client.Ping(context.Background(), connect.NewMessage(req))
 
 	assert.NotNil(t, err, "ping error")
 	assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument, "error code")

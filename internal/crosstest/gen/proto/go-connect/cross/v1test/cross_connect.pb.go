@@ -31,10 +31,10 @@ const _ = connect.IsAtLeastVersion0_0_1
 
 // CrossServiceClient is a client for the cross.v1test.CrossService service.
 type CrossServiceClient interface {
-	Ping(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error)
-	Fail(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error)
+	Ping(context.Context, *connect.Message[v1test.PingRequest]) (*connect.Message[v1test.PingResponse], error)
+	Fail(context.Context, *connect.Message[v1test.FailRequest]) (*connect.Message[v1test.FailResponse], error)
 	Sum(context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse]
-	CountUp(context.Context, *connect.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error)
+	CountUp(context.Context, *connect.Message[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error)
 	CumSum(context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]
 }
 
@@ -106,8 +106,8 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 
 // crossServiceClient implements CrossServiceClient.
 type crossServiceClient struct {
-	ping    func(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error)
-	fail    func(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error)
+	ping    func(context.Context, *connect.Message[v1test.PingRequest]) (*connect.Message[v1test.PingResponse], error)
+	fail    func(context.Context, *connect.Message[v1test.FailRequest]) (*connect.Message[v1test.FailResponse], error)
 	sum     func(context.Context) (connect.Sender, connect.Receiver)
 	countUp func(context.Context) (connect.Sender, connect.Receiver)
 	cumSum  func(context.Context) (connect.Sender, connect.Receiver)
@@ -116,12 +116,12 @@ type crossServiceClient struct {
 var _ CrossServiceClient = (*crossServiceClient)(nil) // verify interface implementation
 
 // Ping calls cross.v1test.CrossService.Ping.
-func (c *crossServiceClient) Ping(ctx context.Context, req *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error) {
+func (c *crossServiceClient) Ping(ctx context.Context, req *connect.Message[v1test.PingRequest]) (*connect.Message[v1test.PingResponse], error) {
 	return c.ping(ctx, req)
 }
 
 // Fail calls cross.v1test.CrossService.Fail.
-func (c *crossServiceClient) Fail(ctx context.Context, req *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error) {
+func (c *crossServiceClient) Fail(ctx context.Context, req *connect.Message[v1test.FailRequest]) (*connect.Message[v1test.FailResponse], error) {
 	return c.fail(ctx, req)
 }
 
@@ -132,7 +132,7 @@ func (c *crossServiceClient) Sum(ctx context.Context) *clientstream.Client[v1tes
 }
 
 // CountUp calls cross.v1test.CrossService.CountUp.
-func (c *crossServiceClient) CountUp(ctx context.Context, req *connect.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
+func (c *crossServiceClient) CountUp(ctx context.Context, req *connect.Message[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
 	sender, receiver := c.countUp(ctx)
 	for key, values := range req.Header() {
 		sender.Header()[key] = append(sender.Header()[key], values...)
@@ -140,7 +140,7 @@ func (c *crossServiceClient) CountUp(ctx context.Context, req *connect.Request[v
 	for key, values := range req.Trailer() {
 		sender.Trailer()[key] = append(sender.Trailer()[key], values...)
 	}
-	if err := sender.Send(req.Msg); err != nil {
+	if err := sender.Send(req.Body); err != nil {
 		_ = sender.Close(err)
 		_ = receiver.Close()
 		return nil, err
@@ -161,10 +161,10 @@ func (c *crossServiceClient) CumSum(ctx context.Context) *clientstream.Bidirecti
 // CrossServiceHandler is an implementation of the cross.v1test.CrossService
 // service.
 type CrossServiceHandler interface {
-	Ping(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error)
-	Fail(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error)
+	Ping(context.Context, *connect.Message[v1test.PingRequest]) (*connect.Message[v1test.PingResponse], error)
+	Fail(context.Context, *connect.Message[v1test.FailRequest]) (*connect.Message[v1test.FailResponse], error)
 	Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error
-	CountUp(context.Context, *connect.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error
+	CountUp(context.Context, *connect.Message[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error
 	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
 
@@ -222,7 +222,7 @@ func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpti
 		connect.StreamTypeServer,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
 			typed := handlerstream.NewServer[v1test.CountUpResponse](sender)
-			req, err := connect.ReceiveRequest[v1test.CountUpRequest](receiver)
+			req, err := connect.ReceiveUnaryMessage[v1test.CountUpRequest](receiver)
 			if err != nil {
 				_ = receiver.Close()
 				_ = sender.Close(err)
@@ -263,11 +263,11 @@ type UnimplementedCrossServiceHandler struct{}
 
 var _ CrossServiceHandler = (*UnimplementedCrossServiceHandler)(nil) // verify interface implementation
 
-func (UnimplementedCrossServiceHandler) Ping(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error) {
+func (UnimplementedCrossServiceHandler) Ping(context.Context, *connect.Message[v1test.PingRequest]) (*connect.Message[v1test.PingResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cross.v1test.CrossService.Ping isn't implemented"))
 }
 
-func (UnimplementedCrossServiceHandler) Fail(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error) {
+func (UnimplementedCrossServiceHandler) Fail(context.Context, *connect.Message[v1test.FailRequest]) (*connect.Message[v1test.FailResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cross.v1test.CrossService.Fail isn't implemented"))
 }
 
@@ -275,7 +275,7 @@ func (UnimplementedCrossServiceHandler) Sum(context.Context, *handlerstream.Clie
 	return connect.NewError(connect.CodeUnimplemented, errors.New("cross.v1test.CrossService.Sum isn't implemented"))
 }
 
-func (UnimplementedCrossServiceHandler) CountUp(context.Context, *connect.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error {
+func (UnimplementedCrossServiceHandler) CountUp(context.Context, *connect.Message[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("cross.v1test.CrossService.CountUp isn't implemented"))
 }
 

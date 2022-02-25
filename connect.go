@@ -68,19 +68,19 @@ type Receiver interface {
 	Trailer() http.Header
 }
 
-// Request is a request message and metadata (including headers).
-type Request[Req any] struct {
-	Msg *Req
+// Message is a request or response message and metadata (including headers).
+type Message[T any] struct {
+	Body *T
 
 	spec    Specification
 	header  http.Header
 	trailer http.Header
 }
 
-// NewRequest constructs a Request.
-func NewRequest[Req any](msg *Req) *Request[Req] {
-	return &Request[Req]{
-		Msg: msg,
+// NewMessage constructs a Message.
+func NewMessage[T any](body *T) *Message[T] {
+	return &Message[T]{
+		Body: body,
 		// Initialize lazily, so users who don't set headers and trailers don't
 		// allocate maps.
 		header:  nil,
@@ -88,33 +88,33 @@ func NewRequest[Req any](msg *Req) *Request[Req] {
 	}
 }
 
-// ReceiveRequest unmarshals a Request from a Receiver, then attaches the
+// ReceiveUnaryMessage unmarshals a Message from a Receiver, then attaches the
 // Receiver's headers and RPC specification. It attempts to consume the
 // Receiver and isn't appropriate when receiving multiple messages.
-func ReceiveRequest[Req any](receiver Receiver) (*Request[Req], error) {
-	var msg Req
+func ReceiveUnaryMessage[T any](receiver Receiver) (*Message[T], error) {
+	var msg T
 	if err := receiver.Receive(&msg); err != nil {
 		return nil, err
 	}
 	// In a well-formed stream, the request message may be followed by a block
 	// of in-stream trailers. To ensure that we receive the trailers, try to
 	// read another message from the stream.
-	if err := receiver.Receive(new(Req)); err == nil {
+	if err := receiver.Receive(new(T)); err == nil {
 		return nil, NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
 	} else if err != nil && !errors.Is(err, io.EOF) {
 		return nil, NewError(CodeUnknown, err)
 	}
-	return &Request[Req]{
-		Msg:     &msg,
+	return &Message[T]{
+		Body:    &msg,
 		spec:    receiver.Spec(),
 		header:  receiver.Header(),
 		trailer: receiver.Trailer(),
 	}, nil
 }
 
-func receiveRequestMetadata[Req any](r Receiver) *Request[Req] {
-	return &Request[Req]{
-		Msg:     new(Req),
+func receiveUnaryMessageMetadata[T any](r Receiver) *Message[T] {
+	return &Message[T]{
+		Body:    new(T),
 		spec:    r.Spec(),
 		header:  r.Header(),
 		trailer: r.Trailer(),
@@ -123,131 +123,45 @@ func receiveRequestMetadata[Req any](r Receiver) *Request[Req] {
 
 // Any returns the concrete request message as an empty interface, so that
 // *Request implements the AnyRequest interface.
-func (r *Request[_]) Any() any {
-	return r.Msg
+func (m *Message[_]) Any() any {
+	return m.Body
 }
 
 // Spec returns the Specification for this RPC.
-func (r *Request[_]) Spec() Specification {
-	return r.spec
+func (m *Message[_]) Spec() Specification {
+	return m.spec
 }
 
 // Header returns the HTTP headers for this request.
-func (r *Request[_]) Header() http.Header {
-	if r.header == nil {
-		r.header = make(http.Header)
+func (m *Message[_]) Header() http.Header {
+	if m.header == nil {
+		m.header = make(http.Header)
 	}
-	return r.header
+	return m.header
 }
 
 // Trailer returns the trailers for this request. Depending on the underlying
 // RPC protocol, trailers may be HTTP trailers, a protocol-specific block of
 // metadata, or the union of the two.
-func (r *Request[_]) Trailer() http.Header {
-	if r.trailer == nil {
-		r.trailer = make(http.Header)
+func (m *Message[_]) Trailer() http.Header {
+	if m.trailer == nil {
+		m.trailer = make(http.Header)
 	}
-	return r.trailer
+	return m.trailer
 }
 
 // internalOnly implements AnyRequest.
-func (r *Request[_]) internalOnly() {}
+func (m *Message[_]) internalOnly() {}
 
-// Response is a response message and metadata.
-type Response[Res any] struct {
-	Msg *Res
-
-	header  http.Header
-	trailer http.Header
-}
-
-// NewResponse constructs a Response.
-func NewResponse[Res any](msg *Res) *Response[Res] {
-	return &Response[Res]{
-		Msg: msg,
-		// Initialize lazily, so users who don't set headers and trailers don't
-		// allocate maps.
-		header:  nil,
-		trailer: nil,
-	}
-}
-
-// ReceiveResponse unmarshals a Response from a Receiver, then attaches the
-// Receiver's headers. It attempts to consume the Receiver and isn't
-// appropriate when receiving multiple messages.
-func ReceiveResponse[Res any](receiver Receiver) (*Response[Res], error) {
-	var msg Res
-	if err := receiver.Receive(&msg); err != nil {
-		return nil, err
-	}
-	// In a well-formed stream, the response message may be followed by a block
-	// of in-stream trailers. To ensure that we receive the trailers, try to
-	// read another message from the stream.
-	if err := receiver.Receive(new(Res)); err == nil {
-		return nil, NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
-	} else if err != nil && !errors.Is(err, io.EOF) {
-		return nil, NewError(CodeUnknown, err)
-	}
-	return &Response[Res]{
-		Msg:     &msg,
-		header:  receiver.Header(),
-		trailer: receiver.Trailer(),
-	}, nil
-}
-
-// Any returns the concrete request message as an empty interface, so that
-// *Response implements the AnyResponse interface. It should only be used in
-// interceptors.
-func (r *Response[_]) Any() any {
-	return r.Msg
-}
-
-// Header returns the HTTP headers for this response.
-func (r *Response[_]) Header() http.Header {
-	if r.header == nil {
-		r.header = make(http.Header)
-	}
-	return r.header
-}
-
-// Trailer returns the trailers for this response. Depending on the underlying
-// RPC protocol, trailers may be HTTP trailers, a protocol-specific block of
-// metadata, or the union of the two.
-func (r *Response[_]) Trailer() http.Header {
-	if r.trailer == nil {
-		r.trailer = make(http.Header)
-	}
-	return r.trailer
-}
-
-// internalOnly implements AnyResponse.
-func (r *Response[_]) internalOnly() {}
-
-// AnyRequest is the common method set of all Requests, regardless of message
-// type. It's used in unary interceptors.
+// AnyMessage is the common method set of all Messages, regardless of type
+// parameter. It's used in unary interceptors.
 //
 // To preserve our ability to add methods to this interface without breaking
 // backward compatibility, only types defined in this package can implement
-// AnyRequest.
-type AnyRequest interface {
+// AnyMessage.
+type AnyMessage interface {
 	Any() any
 	Spec() Specification
-	Header() http.Header
-	Trailer() http.Header
-
-	// Only internal implementations, so we can add methods without breaking
-	// backward compatibility.
-	internalOnly()
-}
-
-// AnyResponse is the common method set of all Responses, regardless of message
-// type. It's used in unary interceptors.
-//
-// To preserve our ability to add methods to this interface without breaking
-// backward compatibility, only types defined in this package can implement
-// AnyResponse.
-type AnyResponse interface {
-	Any() any
 	Header() http.Header
 	Trailer() http.Header
 
@@ -260,7 +174,7 @@ type AnyResponse interface {
 //
 // The type of the request and response struct depend on the codec being used.
 // When using protobuf, they'll always be proto.Message implementations.
-type Func func(context.Context, AnyRequest) (AnyResponse, error)
+type Func func(context.Context, AnyMessage) (AnyMessage, error)
 
 // An Interceptor adds logic to a generated handler or client, like the
 // decorators or middleware you may have seen in other libraries. Interceptors

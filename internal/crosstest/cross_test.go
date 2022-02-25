@@ -58,17 +58,17 @@ type crossServerConnect struct {
 	crossrpc.UnimplementedCrossServiceHandler
 }
 
-func (c crossServerConnect) Ping(ctx context.Context, req *connect.Request[crosspb.PingRequest]) (*connect.Response[crosspb.PingResponse], error) {
-	if err := req.Msg.Sleep.CheckValid(); req.Msg.Sleep != nil && err != nil {
+func (c crossServerConnect) Ping(ctx context.Context, req *connect.Message[crosspb.PingRequest]) (*connect.Message[crosspb.PingResponse], error) {
+	if err := req.Body.Sleep.CheckValid(); req.Body.Sleep != nil && err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	if d := req.Msg.Sleep.AsDuration(); d > 0 {
+	if d := req.Body.Sleep.AsDuration(); d > 0 {
 		time.Sleep(d)
 	}
-	return connect.NewResponse(&crosspb.PingResponse{Number: req.Msg.Number}), nil
+	return connect.NewMessage(&crosspb.PingResponse{Number: req.Body.Number}), nil
 }
 
-func (c crossServerConnect) Fail(ctx context.Context, req *connect.Request[crosspb.FailRequest]) (*connect.Response[crosspb.FailResponse], error) {
+func (c crossServerConnect) Fail(ctx context.Context, req *connect.Message[crosspb.FailRequest]) (*connect.Message[crosspb.FailResponse], error) {
 	return nil, connect.NewError(connect.CodeResourceExhausted, errors.New(errMsg))
 }
 
@@ -83,7 +83,7 @@ func (c crossServerConnect) Sum(
 		}
 		msg, err := stream.Receive()
 		if errors.Is(err, io.EOF) {
-			return stream.SendAndClose(connect.NewResponse(&crosspb.SumResponse{
+			return stream.SendAndClose(connect.NewMessage(&crosspb.SumResponse{
 				Sum: sum,
 			}))
 		} else if err != nil {
@@ -95,16 +95,16 @@ func (c crossServerConnect) Sum(
 
 func (c crossServerConnect) CountUp(
 	ctx context.Context,
-	req *connect.Request[crosspb.CountUpRequest],
+	req *connect.Message[crosspb.CountUpRequest],
 	stream *handlerstream.Server[crosspb.CountUpResponse],
 ) error {
-	if req.Msg.Number <= 0 {
+	if req.Body.Number <= 0 {
 		return connect.NewError(
 			connect.CodeInvalidArgument,
-			fmt.Errorf("number must be positive: got %v", req.Msg.Number),
+			fmt.Errorf("number must be positive: got %v", req.Body.Number),
 		)
 	}
-	for i := int64(1); i <= req.Msg.Number; i++ {
+	for i := int64(1); i <= req.Body.Number; i++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -229,13 +229,13 @@ func testWithConnectClient(t *testing.T, client crossrpc.CrossServiceClient) {
 		num := rand.Int63()
 		req := &crosspb.PingRequest{Number: num}
 		expect := &crosspb.PingResponse{Number: num}
-		res, err := client.Ping(context.Background(), connect.NewRequest(req))
+		res, err := client.Ping(context.Background(), connect.NewMessage(req))
 		assert.Nil(t, err, "ping error")
-		assert.Equal(t, res.Msg, expect, "ping response")
+		assert.Equal(t, res.Body, expect, "ping response")
 	})
 	t.Run("errors", func(t *testing.T) {
 		req := &crosspb.FailRequest{Code: int32(connect.CodeResourceExhausted)}
-		res, err := client.Fail(context.Background(), connect.NewRequest(req))
+		res, err := client.Fail(context.Background(), connect.NewMessage(req))
 		assert.Nil(t, res, "fail RPC response")
 		cerr := assertErrorConnect(t, err, "fail RPC error")
 		assert.Equal(t, cerr.Code(), connect.CodeResourceExhausted, "error code")
@@ -245,7 +245,7 @@ func testWithConnectClient(t *testing.T, client crossrpc.CrossServiceClient) {
 	t.Run("cancel", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		cancel()
-		_, err := client.Ping(ctx, connect.NewRequest(&crosspb.PingRequest{}))
+		_, err := client.Ping(ctx, connect.NewMessage(&crosspb.PingRequest{}))
 		cerr := assertErrorConnect(t, err, "error after canceling context")
 		assert.Equal(t, cerr.Code(), connect.CodeCanceled, "error code")
 		assert.Equal(t, cerr.Error(), "Canceled: context canceled", "error message")
@@ -254,7 +254,7 @@ func testWithConnectClient(t *testing.T, client crossrpc.CrossServiceClient) {
 		req := &crosspb.PingRequest{Sleep: durationpb.New(time.Second)}
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		_, err := client.Ping(ctx, connect.NewRequest(req))
+		_, err := client.Ping(ctx, connect.NewMessage(req))
 		cerr := assertErrorConnect(t, err, "deadline exceeded error")
 		assert.Equal(t, cerr.Code(), connect.CodeDeadlineExceeded, "error code")
 		assert.ErrorIs(t, cerr, context.DeadlineExceeded, "error unwraps to context.DeadlineExceeded")
@@ -269,7 +269,7 @@ func testWithConnectClient(t *testing.T, client crossrpc.CrossServiceClient) {
 		}
 		res, err := stream.CloseAndReceive()
 		assert.Nil(t, err, "CloseAndReceive error")
-		assert.Equal(t, res.Msg, &crosspb.SumResponse{Sum: expect}, "response")
+		assert.Equal(t, res.Body, &crosspb.SumResponse{Sum: expect}, "response")
 	})
 	t.Run("count_up", func(t *testing.T) {
 		const n = 5
@@ -280,7 +280,7 @@ func testWithConnectClient(t *testing.T, client crossrpc.CrossServiceClient) {
 		}
 		stream, err := client.CountUp(
 			context.Background(),
-			connect.NewRequest(&crosspb.CountUpRequest{Number: n}),
+			connect.NewMessage(&crosspb.CountUpRequest{Number: n}),
 		)
 		assert.Nil(t, err, "send error")
 		for {

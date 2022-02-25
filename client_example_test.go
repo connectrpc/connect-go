@@ -55,14 +55,14 @@ func ExampleClient() {
 	}
 	res, err := client.Ping(
 		context.Background(),
-		connect.NewRequest(&pingpb.PingRequest{Number: 42}),
+		connect.NewMessage(&pingpb.PingRequest{Number: 42}),
 	)
 	if err != nil {
 		logger.Println("error:", err)
 		return
 	}
 	logger.Println("response content-type:", res.Header().Get("Content-Type"))
-	logger.Println("response message:", res.Msg)
+	logger.Println("response message:", res.Body)
 
 	// Output:
 	// response content-type: application/grpc+proto
