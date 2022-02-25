@@ -1,3 +1,4 @@
+// I don't love "protobuf" vs "protojson", maybe "protobinary" vs "protojson"? Or not separate packages? The decision here informs compress/gzip as well.
 package protojson
 
 import (

@@ -1,5 +1,6 @@
 // Package protobuf provides default codec.Codec implementations for types
 // generated from protocol buffer schemas.
+// The doc here would indicate that protojson and this would be merged, but I think this doc might be old.
 package protobuf
 
 import (

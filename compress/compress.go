@@ -1,9 +1,11 @@
+// Explain like I'm 2 again why we need this as a separate package.
 package compress
 
 import (
 	"io"
 )
 
+// What is this for? I can just read the code but explaining this would be good. Should this be internal?
 const NameIdentity = "identity"
 
 // A Compressor provides compressing readers and writers. The interface is

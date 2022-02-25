@@ -1,5 +1,7 @@
 // Package connecttest contains testing utilities for connect, including a
 // replacement for httptest.Server.
+// Do we need this? This feels like something that isn't connect-specific and could
+// almost be released as its own mini-library. Will this package be expanded?
 package connecttest
 
 import (

@@ -1,3 +1,4 @@
+// Might want to move this to an internal or internal/testing package.
 syntax = "proto3";
 
 package connect.ping.v1test;

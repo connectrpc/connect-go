@@ -1,5 +1,6 @@
 // Package handlerstream contains typed stream implementations from the server's
 // point of view.
+// See comments on clientstream
 package handlerstream
 
 import (

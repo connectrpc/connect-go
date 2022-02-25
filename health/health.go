@@ -23,6 +23,7 @@ import (
 type Status int32
 
 const (
+	// Godoc consistency re: other PR
 	StatusUnknown    Status = 0 // health state indeterminate
 	StatusServing    Status = 1 // ready to accept requests
 	StatusNotServing Status = 2 // process healthy but service not accepting requests
@@ -32,6 +33,7 @@ const (
 // "acme.ping.v1.PingService") has been registered.
 //
 // A *connect.Registrar satisfies this interface.
+// We're sure we want the separate interface right? Just checking.
 type Registrar interface {
 	IsRegistered(string) bool
 }
@@ -41,6 +43,7 @@ type Registrar interface {
 // concurrently.
 //
 // The returned function can be passed to NewHandler.
+// An example in this Godoc of using this would be great. Also could just not expose any of this and just have a WithHealth() HandlerOption maybe? Don't know if that's a crazy idea.
 func NewChecker(reg Registrar) func(context.Context, string) (Status, error) {
 	return func(_ context.Context, service string) (Status, error) {
 		if service == "" {

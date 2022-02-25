@@ -1,6 +1,8 @@
 // Package reflection offers support for gRPC's server reflection API. If you
 // add reflection support to your gRPC server, many developer tools (including
 // cURL replacements like grpcurl) become much more convenient.
+
+// Same comments in this file as in the health file
 package reflection
 
 import (

@@ -1,5 +1,7 @@
 // Package clientstream contains typed stream implementations from the caller's
 // point of view.
+// Explain to me like I'm 2 again why we need both this and handlerstream, and why we need both at all?
+// If I remember, there's a chicken or egg problem going on here.
 package clientstream
 
 import (

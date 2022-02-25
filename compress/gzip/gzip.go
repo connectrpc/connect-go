@@ -1,3 +1,4 @@
+// Don't love the overlap with stdlib gzip package name, maybe not a separate package, I don't know.
 package gzip
 
 import (
@@ -9,6 +10,7 @@ import (
 )
 
 const (
+	// Explaining how to use this would be good
 	Name = "gzip"
 
 	oneKiB = 1024
