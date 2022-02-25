@@ -109,7 +109,7 @@ type Handler struct {
 // used in generated code.
 func NewUnaryHandler[Req, Res any](
 	procedure, registrationName string,
-	unary func(context.Context, *Message[Req]) (*Message[Res], error),
+	unary func(context.Context, *Envelope[Req]) (*Envelope[Res], error),
 	options ...HandlerOption,
 ) *Handler {
 	config := newHandlerConfiguration(procedure, registrationName, options)
@@ -117,26 +117,26 @@ func NewUnaryHandler[Req, Res any](
 	implementation := func(ctx context.Context, sender Sender, receiver Receiver, clientVisibleError error) {
 		defer receiver.Close()
 
-		var request *Message[Req]
+		var request *Envelope[Req]
 		if clientVisibleError != nil {
 			// The protocol implementation failed to establish a stream. To make the
 			// resulting error visible to the interceptor stack, we still want to
 			// call the wrapped unary Func. To do that safely, we need a useful
 			// Message struct. (Note that we do *not* actually calling the handler's
 			// implementation.)
-			request = receiveUnaryMessageMetadata[Req](receiver)
+			request = receiveUnaryEnvelopeMetadata[Req](receiver)
 		} else {
 			var err error
-			request, err = ReceiveUnaryMessage[Req](receiver)
+			request, err = ReceiveUnaryEnvelope[Req](receiver)
 			if err != nil {
 				// Interceptors should see this error too. Just as above, they need a
 				// useful Message.
 				clientVisibleError = err
-				request = receiveUnaryMessageMetadata[Req](receiver)
+				request = receiveUnaryEnvelopeMetadata[Req](receiver)
 			}
 		}
 
-		untyped := Func(func(ctx context.Context, request AnyMessage) (AnyMessage, error) {
+		untyped := Func(func(ctx context.Context, request AnyEnvelope) (AnyEnvelope, error) {
 			if clientVisibleError != nil {
 				// We've already encountered an error, short-circuit before calling the
 				// handler's implementation.
@@ -145,7 +145,7 @@ func NewUnaryHandler[Req, Res any](
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			typed, ok := request.(*Message[Req])
+			typed, ok := request.(*Envelope[Req])
 			if !ok {
 				return nil, errorf(CodeInternal, "unexpected handler request type %T", request)
 			}

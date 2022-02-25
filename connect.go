@@ -68,30 +68,32 @@ type Receiver interface {
 	Trailer() http.Header
 }
 
-// Message is a request or response message and metadata (including headers).
-type Message[T any] struct {
-	Body *T
+// Envelope is a wrapper around a generated request or response message. It
+// provides access to metadata like headers, trailers, and the RPC
+// specification, as well as strongly-typed access to the message itself.
+type Envelope[T any] struct {
+	Msg *T
 
 	spec    Specification
 	header  http.Header
 	trailer http.Header
 }
 
-// NewMessage constructs a Message.
-func NewMessage[T any](body *T) *Message[T] {
-	return &Message[T]{
-		Body: body,
-		// Initialize lazily, so users who don't set headers and trailers don't
-		// allocate maps.
+// NewEnvelope envelopes a request or response message.
+func NewEnvelope[T any](message *T) *Envelope[T] {
+	return &Envelope[T]{
+		Msg: message,
+		// Initialized lazily so we don't allocate unnecessarily.
 		header:  nil,
 		trailer: nil,
 	}
 }
 
-// ReceiveUnaryMessage unmarshals a Message from a Receiver, then attaches the
-// Receiver's headers and RPC specification. It attempts to consume the
-// Receiver and isn't appropriate when receiving multiple messages.
-func ReceiveUnaryMessage[T any](receiver Receiver) (*Message[T], error) {
+// ReceiveUnaryEnvelope unmarshals a message from a Receiver, then envelopes
+// the message and attaches the Receiver's headers, trailers, and RPC
+// specification. It attempts to consume the Receiver and isn't appropriate
+// when receiving multiple messages.
+func ReceiveUnaryEnvelope[T any](receiver Receiver) (*Envelope[T], error) {
 	var msg T
 	if err := receiver.Receive(&msg); err != nil {
 		return nil, err
@@ -104,17 +106,17 @@ func ReceiveUnaryMessage[T any](receiver Receiver) (*Message[T], error) {
 	} else if err != nil && !errors.Is(err, io.EOF) {
 		return nil, NewError(CodeUnknown, err)
 	}
-	return &Message[T]{
-		Body:    &msg,
+	return &Envelope[T]{
+		Msg:     &msg,
 		spec:    receiver.Spec(),
 		header:  receiver.Header(),
 		trailer: receiver.Trailer(),
 	}, nil
 }
 
-func receiveUnaryMessageMetadata[T any](r Receiver) *Message[T] {
-	return &Message[T]{
-		Body:    new(T),
+func receiveUnaryEnvelopeMetadata[T any](r Receiver) *Envelope[T] {
+	return &Envelope[T]{
+		Msg:     new(T),
 		spec:    r.Spec(),
 		header:  r.Header(),
 		trailer: r.Trailer(),
@@ -123,43 +125,43 @@ func receiveUnaryMessageMetadata[T any](r Receiver) *Message[T] {
 
 // Any returns the concrete request message as an empty interface, so that
 // *Request implements the AnyRequest interface.
-func (m *Message[_]) Any() any {
-	return m.Body
+func (e *Envelope[_]) Any() any {
+	return e.Msg
 }
 
 // Spec returns the Specification for this RPC.
-func (m *Message[_]) Spec() Specification {
-	return m.spec
+func (e *Envelope[_]) Spec() Specification {
+	return e.spec
 }
 
 // Header returns the HTTP headers for this request.
-func (m *Message[_]) Header() http.Header {
-	if m.header == nil {
-		m.header = make(http.Header)
+func (e *Envelope[_]) Header() http.Header {
+	if e.header == nil {
+		e.header = make(http.Header)
 	}
-	return m.header
+	return e.header
 }
 
 // Trailer returns the trailers for this request. Depending on the underlying
 // RPC protocol, trailers may be HTTP trailers, a protocol-specific block of
 // metadata, or the union of the two.
-func (m *Message[_]) Trailer() http.Header {
-	if m.trailer == nil {
-		m.trailer = make(http.Header)
+func (e *Envelope[_]) Trailer() http.Header {
+	if e.trailer == nil {
+		e.trailer = make(http.Header)
 	}
-	return m.trailer
+	return e.trailer
 }
 
-// internalOnly implements AnyRequest.
-func (m *Message[_]) internalOnly() {}
+// internalOnly implements AnyEnvelope.
+func (e *Envelope[_]) internalOnly() {}
 
-// AnyMessage is the common method set of all Messages, regardless of type
+// AnyEnvelope is the common method set of all Envelopes, regardless of type
 // parameter. It's used in unary interceptors.
 //
 // To preserve our ability to add methods to this interface without breaking
 // backward compatibility, only types defined in this package can implement
-// AnyMessage.
-type AnyMessage interface {
+// AnyEnvelope.
+type AnyEnvelope interface {
 	Any() any
 	Spec() Specification
 	Header() http.Header
@@ -174,7 +176,7 @@ type AnyMessage interface {
 //
 // The type of the request and response struct depend on the codec being used.
 // When using protobuf, they'll always be proto.Message implementations.
-type Func func(context.Context, AnyMessage) (AnyMessage, error)
+type Func func(context.Context, AnyEnvelope) (AnyEnvelope, error)
 
 // An Interceptor adds logic to a generated handler or client, like the
 // decorators or middleware you may have seen in other libraries. Interceptors

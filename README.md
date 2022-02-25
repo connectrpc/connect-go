@@ -48,14 +48,14 @@ type PingServer struct {
 
 func (ps *PingServer) Ping(
   ctx context.Context,
-  req *connect.Message[pingpb.PingRequest]) (*connect.Message[pingpb.PingResponse], error) {
-  // connect.Message gives you direct access to headers and trailers.
+  req *connect.Envelope[pingpb.PingRequest]) (*connect.Envelope[pingpb.PingResponse], error) {
+  // connect.Envelope gives you direct access to headers and trailers.
   // No context-based nonsense!
   log.Println(req.Header().Get("Some-Header"))
-  res := connect.NewMessage(&pingpb.PingResponse{
-    // req.Body is a strongly-typed *pingpb.PingRequest, so
+  res := connect.NewEnvelope(&pingpb.PingResponse{
+    // req.Msg is a strongly-typed *pingpb.PingRequest, so
     // we can access its fields without type assertions.
-    Number: req.Body.Number,
+    Number: req.Msg.Number,
   })
   res.Header().Set("Some-Other-Header", "hello!")
   res.Trailer().Set("Some-Trailer", "goodbye!")

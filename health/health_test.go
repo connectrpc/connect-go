@@ -62,7 +62,7 @@ func TestHealth(t *testing.T) {
 		assert.Nil(t, err, "client construction error")
 		stream, err := client.Watch(
 			context.Background(),
-			connect.NewMessage(&healthpb.HealthCheckRequest{Service: pingFQN}),
+			connect.NewEnvelope(&healthpb.HealthCheckRequest{Service: pingFQN}),
 		)
 		assert.Nil(t, err, "rpc error")
 		defer stream.Close()

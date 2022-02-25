@@ -173,7 +173,7 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named b
 	}
 	if method.Desc.IsStreamingServer() {
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextContext) +
-			", " + reqName + " *" + g.QualifiedGoIdent(connectPackage.Ident("Message")) + "[" +
+			", " + reqName + " *" + g.QualifiedGoIdent(connectPackage.Ident("Envelope")) + "[" +
 			g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
 			"(*" + g.QualifiedGoIdent(cstreamPackage.Ident("Server")) +
 			"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
@@ -301,7 +301,7 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *
 			g.P("for key, values := range req.Trailer() {")
 			g.P("sender.Trailer()[key] = append(sender.Trailer()[key], values...)")
 			g.P("}")
-			g.P("if err := sender.Send(req.Body); err != nil {")
+			g.P("if err := sender.Send(req.Msg); err != nil {")
 			g.P("_ = sender.Close(err)")
 			g.P("_ = receiver.Close()")
 			g.P("return nil, err")
@@ -377,7 +377,7 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 	if method.Desc.IsStreamingServer() {
 		// server streaming
 		return "(" + ctxName + g.QualifiedGoIdent(contextContext) +
-			", " + reqName + "*" + g.QualifiedGoIdent(connectPackage.Ident("Message")) + "[" +
+			", " + reqName + "*" + g.QualifiedGoIdent(connectPackage.Ident("Envelope")) + "[" +
 			g.QualifiedGoIdent(method.Input.GoIdent) + "], " +
 			streamName + "*" + g.QualifiedGoIdent(hstreamPackage.Ident("Server")) +
 			"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
@@ -385,9 +385,9 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 	}
 	// unary
 	return "(" + ctxName + g.QualifiedGoIdent(contextContext) +
-		", " + reqName + "*" + g.QualifiedGoIdent(connectPackage.Ident("Message")) + "[" +
+		", " + reqName + "*" + g.QualifiedGoIdent(connectPackage.Ident("Envelope")) + "[" +
 		g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
-		"(*" + g.QualifiedGoIdent(connectPackage.Ident("Message")) + "[" +
+		"(*" + g.QualifiedGoIdent(connectPackage.Ident("Envelope")) + "[" +
 		g.QualifiedGoIdent(method.Output.GoIdent) + "], error)"
 }
 
@@ -442,7 +442,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 					"[", method.Output.GoIdent, "]", "(sender)")
 			}
 			if method.Desc.IsStreamingServer() && !method.Desc.IsStreamingClient() {
-				g.P("req, err := ", connectPackage.Ident("ReceiveUnaryMessage"), "[", method.Input.GoIdent, "]",
+				g.P("req, err := ", connectPackage.Ident("ReceiveUnaryEnvelope"), "[", method.Input.GoIdent, "]",
 					"(receiver)")
 				g.P("if err != nil {")
 				g.P("_ = receiver.Close()")

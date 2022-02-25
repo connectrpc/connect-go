@@ -21,11 +21,11 @@ type ExamplePingServer struct {
 // Ping implements pingrpc.PingServiceHandler.
 func (*ExamplePingServer) Ping(
 	_ context.Context,
-	req *connect.Message[pingpb.PingRequest],
-) (*connect.Message[pingpb.PingResponse], error) {
-	return connect.NewMessage(&pingpb.PingResponse{
-		Number: req.Body.Number,
-		Text:   req.Body.Text,
+	req *connect.Envelope[pingpb.PingRequest],
+) (*connect.Envelope[pingpb.PingResponse], error) {
+	return connect.NewEnvelope(&pingpb.PingResponse{
+		Number: req.Msg.Number,
+		Text:   req.Msg.Text,
 	}), nil
 }
 

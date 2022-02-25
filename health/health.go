@@ -64,19 +64,19 @@ type server struct {
 
 var _ healthrpc.HealthHandler = (*server)(nil)
 
-func (s *server) Check(ctx context.Context, req *connect.Message[healthpb.HealthCheckRequest]) (*connect.Message[healthpb.HealthCheckResponse], error) {
-	status, err := s.check(ctx, req.Body.Service)
+func (s *server) Check(ctx context.Context, req *connect.Envelope[healthpb.HealthCheckRequest]) (*connect.Envelope[healthpb.HealthCheckResponse], error) {
+	status, err := s.check(ctx, req.Msg.Service)
 	if err != nil {
 		return nil, err
 	}
-	return connect.NewMessage(&healthpb.HealthCheckResponse{
+	return connect.NewEnvelope(&healthpb.HealthCheckResponse{
 		Status: healthpb.HealthCheckResponse_ServingStatus(status),
 	}), nil
 }
 
 func (s *server) Watch(
 	_ context.Context,
-	_ *connect.Message[healthpb.HealthCheckRequest],
+	_ *connect.Envelope[healthpb.HealthCheckRequest],
 	_ *handlerstream.Server[healthpb.HealthCheckResponse],
 ) error {
 	return connect.NewError(
@@ -146,10 +146,10 @@ func NewClient(baseURL string, doer connect.Doer, options ...connect.ClientOptio
 func (c *Client) Check(ctx context.Context, req *CheckRequest) (*CheckResponse, error) {
 	res, err := c.health.Check(
 		ctx,
-		connect.NewMessage(&healthpb.HealthCheckRequest{Service: req.Service}),
+		connect.NewEnvelope(&healthpb.HealthCheckRequest{Service: req.Service}),
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &CheckResponse{Status: Status(res.Body.Status)}, nil
+	return &CheckResponse{Status: Status(res.Msg.Status)}, nil
 }

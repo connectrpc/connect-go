@@ -48,11 +48,11 @@ func TestReflection(t *testing.T) {
 	)
 	assert.Nil(t, err, "client construction error")
 	call := func(req *reflectionpb.ServerReflectionRequest) (*reflectionpb.ServerReflectionResponse, error) {
-		res, err := detailed(context.Background(), connect.NewMessage(req))
+		res, err := detailed(context.Background(), connect.NewEnvelope(req))
 		if err != nil {
 			return nil, err
 		}
-		return res.Body, err
+		return res.Msg, err
 	}
 
 	t.Run("list_services", func(t *testing.T) {

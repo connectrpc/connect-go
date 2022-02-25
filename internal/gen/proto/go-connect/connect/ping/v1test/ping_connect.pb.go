@@ -33,13 +33,13 @@ const _ = connect.IsAtLeastVersion0_0_1
 // service.
 type PingServiceClient interface {
 	// Ping sends a ping to the server to determine if it's reachable.
-	Ping(context.Context, *connect.Message[v1test.PingRequest]) (*connect.Message[v1test.PingResponse], error)
+	Ping(context.Context, *connect.Envelope[v1test.PingRequest]) (*connect.Envelope[v1test.PingResponse], error)
 	// Fail always fails.
-	Fail(context.Context, *connect.Message[v1test.FailRequest]) (*connect.Message[v1test.FailResponse], error)
+	Fail(context.Context, *connect.Envelope[v1test.FailRequest]) (*connect.Envelope[v1test.FailResponse], error)
 	// Sum calculates the sum of the numbers sent on the stream.
 	Sum(context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse]
 	// CountUp returns a stream of the numbers up to the given request.
-	CountUp(context.Context, *connect.Message[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error)
+	CountUp(context.Context, *connect.Envelope[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error)
 	// CumSum determines the cumulative sum of all the numbers sent on the stream.
 	CumSum(context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]
 }
@@ -113,8 +113,8 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 
 // pingServiceClient implements PingServiceClient.
 type pingServiceClient struct {
-	ping    func(context.Context, *connect.Message[v1test.PingRequest]) (*connect.Message[v1test.PingResponse], error)
-	fail    func(context.Context, *connect.Message[v1test.FailRequest]) (*connect.Message[v1test.FailResponse], error)
+	ping    func(context.Context, *connect.Envelope[v1test.PingRequest]) (*connect.Envelope[v1test.PingResponse], error)
+	fail    func(context.Context, *connect.Envelope[v1test.FailRequest]) (*connect.Envelope[v1test.FailResponse], error)
 	sum     func(context.Context) (connect.Sender, connect.Receiver)
 	countUp func(context.Context) (connect.Sender, connect.Receiver)
 	cumSum  func(context.Context) (connect.Sender, connect.Receiver)
@@ -123,12 +123,12 @@ type pingServiceClient struct {
 var _ PingServiceClient = (*pingServiceClient)(nil) // verify interface implementation
 
 // Ping calls connect.ping.v1test.PingService.Ping.
-func (c *pingServiceClient) Ping(ctx context.Context, req *connect.Message[v1test.PingRequest]) (*connect.Message[v1test.PingResponse], error) {
+func (c *pingServiceClient) Ping(ctx context.Context, req *connect.Envelope[v1test.PingRequest]) (*connect.Envelope[v1test.PingResponse], error) {
 	return c.ping(ctx, req)
 }
 
 // Fail calls connect.ping.v1test.PingService.Fail.
-func (c *pingServiceClient) Fail(ctx context.Context, req *connect.Message[v1test.FailRequest]) (*connect.Message[v1test.FailResponse], error) {
+func (c *pingServiceClient) Fail(ctx context.Context, req *connect.Envelope[v1test.FailRequest]) (*connect.Envelope[v1test.FailResponse], error) {
 	return c.fail(ctx, req)
 }
 
@@ -139,7 +139,7 @@ func (c *pingServiceClient) Sum(ctx context.Context) *clientstream.Client[v1test
 }
 
 // CountUp calls connect.ping.v1test.PingService.CountUp.
-func (c *pingServiceClient) CountUp(ctx context.Context, req *connect.Message[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
+func (c *pingServiceClient) CountUp(ctx context.Context, req *connect.Envelope[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
 	sender, receiver := c.countUp(ctx)
 	for key, values := range req.Header() {
 		sender.Header()[key] = append(sender.Header()[key], values...)
@@ -147,7 +147,7 @@ func (c *pingServiceClient) CountUp(ctx context.Context, req *connect.Message[v1
 	for key, values := range req.Trailer() {
 		sender.Trailer()[key] = append(sender.Trailer()[key], values...)
 	}
-	if err := sender.Send(req.Body); err != nil {
+	if err := sender.Send(req.Msg); err != nil {
 		_ = sender.Close(err)
 		_ = receiver.Close()
 		return nil, err
@@ -169,13 +169,13 @@ func (c *pingServiceClient) CumSum(ctx context.Context) *clientstream.Bidirectio
 // connect.ping.v1test.PingService service.
 type PingServiceHandler interface {
 	// Ping sends a ping to the server to determine if it's reachable.
-	Ping(context.Context, *connect.Message[v1test.PingRequest]) (*connect.Message[v1test.PingResponse], error)
+	Ping(context.Context, *connect.Envelope[v1test.PingRequest]) (*connect.Envelope[v1test.PingResponse], error)
 	// Fail always fails.
-	Fail(context.Context, *connect.Message[v1test.FailRequest]) (*connect.Message[v1test.FailResponse], error)
+	Fail(context.Context, *connect.Envelope[v1test.FailRequest]) (*connect.Envelope[v1test.FailResponse], error)
 	// Sum calculates the sum of the numbers sent on the stream.
 	Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error
 	// CountUp returns a stream of the numbers up to the given request.
-	CountUp(context.Context, *connect.Message[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error
+	CountUp(context.Context, *connect.Envelope[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error
 	// CumSum determines the cumulative sum of all the numbers sent on the stream.
 	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
@@ -233,7 +233,7 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption
 		connect.StreamTypeServer,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
 			typed := handlerstream.NewServer[v1test.CountUpResponse](sender)
-			req, err := connect.ReceiveUnaryMessage[v1test.CountUpRequest](receiver)
+			req, err := connect.ReceiveUnaryEnvelope[v1test.CountUpRequest](receiver)
 			if err != nil {
 				_ = receiver.Close()
 				_ = sender.Close(err)
@@ -274,11 +274,11 @@ type UnimplementedPingServiceHandler struct{}
 
 var _ PingServiceHandler = (*UnimplementedPingServiceHandler)(nil) // verify interface implementation
 
-func (UnimplementedPingServiceHandler) Ping(context.Context, *connect.Message[v1test.PingRequest]) (*connect.Message[v1test.PingResponse], error) {
+func (UnimplementedPingServiceHandler) Ping(context.Context, *connect.Envelope[v1test.PingRequest]) (*connect.Envelope[v1test.PingResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.Ping isn't implemented"))
 }
 
-func (UnimplementedPingServiceHandler) Fail(context.Context, *connect.Message[v1test.FailRequest]) (*connect.Message[v1test.FailResponse], error) {
+func (UnimplementedPingServiceHandler) Fail(context.Context, *connect.Envelope[v1test.FailRequest]) (*connect.Envelope[v1test.FailResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.Fail isn't implemented"))
 }
 
@@ -286,7 +286,7 @@ func (UnimplementedPingServiceHandler) Sum(context.Context, *handlerstream.Clien
 	return connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.Sum isn't implemented"))
 }
 
-func (UnimplementedPingServiceHandler) CountUp(context.Context, *connect.Message[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error {
+func (UnimplementedPingServiceHandler) CountUp(context.Context, *connect.Envelope[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.CountUp isn't implemented"))
 }
 

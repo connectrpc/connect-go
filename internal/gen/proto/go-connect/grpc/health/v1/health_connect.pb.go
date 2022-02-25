@@ -33,7 +33,7 @@ const _ = connect.IsAtLeastVersion0_0_1
 type HealthClient interface {
 	// If the requested service is unknown, the call will fail with status
 	// NOT_FOUND.
-	Check(context.Context, *connect.Message[v1.HealthCheckRequest]) (*connect.Message[v1.HealthCheckResponse], error)
+	Check(context.Context, *connect.Envelope[v1.HealthCheckRequest]) (*connect.Envelope[v1.HealthCheckResponse], error)
 	// Performs a watch for the serving status of the requested service.
 	// The server will immediately send back a message indicating the current
 	// serving status.  It will then subsequently send a new message whenever
@@ -49,7 +49,7 @@ type HealthClient interface {
 	// should assume this method is not supported and should not retry the
 	// call.  If the call terminates with any other status (including OK),
 	// clients should retry the call with appropriate exponential backoff.
-	Watch(context.Context, *connect.Message[v1.HealthCheckRequest]) (*clientstream.Server[v1.HealthCheckResponse], error)
+	Watch(context.Context, *connect.Envelope[v1.HealthCheckRequest]) (*clientstream.Server[v1.HealthCheckResponse], error)
 }
 
 // NewHealthClient constructs a client for the internal.health.v1.Health
@@ -91,19 +91,19 @@ func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOp
 
 // healthClient implements HealthClient.
 type healthClient struct {
-	check func(context.Context, *connect.Message[v1.HealthCheckRequest]) (*connect.Message[v1.HealthCheckResponse], error)
+	check func(context.Context, *connect.Envelope[v1.HealthCheckRequest]) (*connect.Envelope[v1.HealthCheckResponse], error)
 	watch func(context.Context) (connect.Sender, connect.Receiver)
 }
 
 var _ HealthClient = (*healthClient)(nil) // verify interface implementation
 
 // Check calls internal.health.v1.Health.Check.
-func (c *healthClient) Check(ctx context.Context, req *connect.Message[v1.HealthCheckRequest]) (*connect.Message[v1.HealthCheckResponse], error) {
+func (c *healthClient) Check(ctx context.Context, req *connect.Envelope[v1.HealthCheckRequest]) (*connect.Envelope[v1.HealthCheckResponse], error) {
 	return c.check(ctx, req)
 }
 
 // Watch calls internal.health.v1.Health.Watch.
-func (c *healthClient) Watch(ctx context.Context, req *connect.Message[v1.HealthCheckRequest]) (*clientstream.Server[v1.HealthCheckResponse], error) {
+func (c *healthClient) Watch(ctx context.Context, req *connect.Envelope[v1.HealthCheckRequest]) (*clientstream.Server[v1.HealthCheckResponse], error) {
 	sender, receiver := c.watch(ctx)
 	for key, values := range req.Header() {
 		sender.Header()[key] = append(sender.Header()[key], values...)
@@ -111,7 +111,7 @@ func (c *healthClient) Watch(ctx context.Context, req *connect.Message[v1.Health
 	for key, values := range req.Trailer() {
 		sender.Trailer()[key] = append(sender.Trailer()[key], values...)
 	}
-	if err := sender.Send(req.Body); err != nil {
+	if err := sender.Send(req.Msg); err != nil {
 		_ = sender.Close(err)
 		_ = receiver.Close()
 		return nil, err
@@ -127,7 +127,7 @@ func (c *healthClient) Watch(ctx context.Context, req *connect.Message[v1.Health
 type HealthHandler interface {
 	// If the requested service is unknown, the call will fail with status
 	// NOT_FOUND.
-	Check(context.Context, *connect.Message[v1.HealthCheckRequest]) (*connect.Message[v1.HealthCheckResponse], error)
+	Check(context.Context, *connect.Envelope[v1.HealthCheckRequest]) (*connect.Envelope[v1.HealthCheckResponse], error)
 	// Performs a watch for the serving status of the requested service.
 	// The server will immediately send back a message indicating the current
 	// serving status.  It will then subsequently send a new message whenever
@@ -143,7 +143,7 @@ type HealthHandler interface {
 	// should assume this method is not supported and should not retry the
 	// call.  If the call terminates with any other status (including OK),
 	// clients should retry the call with appropriate exponential backoff.
-	Watch(context.Context, *connect.Message[v1.HealthCheckRequest], *handlerstream.Server[v1.HealthCheckResponse]) error
+	Watch(context.Context, *connect.Envelope[v1.HealthCheckRequest], *handlerstream.Server[v1.HealthCheckResponse]) error
 }
 
 // NewHealthHandler builds an HTTP handler from the service implementation. It
@@ -175,7 +175,7 @@ func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) (string,
 		connect.StreamTypeServer,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
 			typed := handlerstream.NewServer[v1.HealthCheckResponse](sender)
-			req, err := connect.ReceiveUnaryMessage[v1.HealthCheckRequest](receiver)
+			req, err := connect.ReceiveUnaryEnvelope[v1.HealthCheckRequest](receiver)
 			if err != nil {
 				_ = receiver.Close()
 				_ = sender.Close(err)
@@ -201,10 +201,10 @@ type UnimplementedHealthHandler struct{}
 
 var _ HealthHandler = (*UnimplementedHealthHandler)(nil) // verify interface implementation
 
-func (UnimplementedHealthHandler) Check(context.Context, *connect.Message[v1.HealthCheckRequest]) (*connect.Message[v1.HealthCheckResponse], error) {
+func (UnimplementedHealthHandler) Check(context.Context, *connect.Envelope[v1.HealthCheckRequest]) (*connect.Envelope[v1.HealthCheckResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.health.v1.Health.Check isn't implemented"))
 }
 
-func (UnimplementedHealthHandler) Watch(context.Context, *connect.Message[v1.HealthCheckRequest], *handlerstream.Server[v1.HealthCheckResponse]) error {
+func (UnimplementedHealthHandler) Watch(context.Context, *connect.Envelope[v1.HealthCheckRequest], *handlerstream.Server[v1.HealthCheckResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("internal.health.v1.Health.Watch isn't implemented"))
 }

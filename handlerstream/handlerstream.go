@@ -36,19 +36,19 @@ func (c *Client[Req, Res]) Receive() (*Req, error) {
 
 // SendAndClose closes the receive side of the stream, then sends a response
 // back to the client.
-func (c *Client[Req, Res]) SendAndClose(msg *connect.Message[Res]) error {
+func (c *Client[Req, Res]) SendAndClose(envelope *connect.Envelope[Res]) error {
 	if err := c.receiver.Close(); err != nil {
 		return err
 	}
 	sendHeader := c.sender.Header()
-	for k, v := range msg.Header() {
+	for k, v := range envelope.Header() {
 		sendHeader[k] = append(sendHeader[k], v...)
 	}
 	sendTrailer := c.sender.Trailer()
-	for k, v := range msg.Trailer() {
+	for k, v := range envelope.Trailer() {
 		sendTrailer[k] = append(sendTrailer[k], v...)
 	}
-	return c.sender.Send(msg.Body)
+	return c.sender.Send(envelope.Msg)
 }
 
 // Server is the server's view of a server streaming RPC.
