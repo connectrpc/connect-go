@@ -33,22 +33,20 @@ func Example() {
 	// The business logic here is trivial, but the rest of the example is meant
 	// to be somewhat realistic. This server has basic timeouts configured, and
 	// it also exposes gRPC's server reflection and health check APIs.
-	ping := &ExamplePingServer{}                   // our business logic
-	reg := connect.NewRegistrar()                  // for gRPC reflection
-	checker := health.NewChecker(reg)              // basic health checks
-	limit := connect.WithReadMaxBytes(1024 * 1024) // limit request size
+	reg := connect.NewRegistrar()     // for gRPC reflection
+	checker := health.NewChecker(reg) // basic health checks
 
-	// NewServeMux returns a plain net/http *ServeMux. Since a mux is an
-	// http.Handler, connect works with any Go HTTP middleware (e.g., net/http's
+	// The generated code produces plain net/http Handlers, so they're compatible
+	// with most Go HTTP routers and middleware (for example, net/http's
 	// StripPrefix).
-	mux, err := connect.NewServeMux(
-		pingrpc.WithPingServiceHandler(ping, reg, limit), // business logic
-		reflection.WithHandler(reg),                      // server reflection
-		health.WithHandler(checker),                      // health checks
-	)
-	if err != nil {
-		panic(err)
-	}
+	mux := http.NewServeMux()
+	mux.Handle(pingrpc.NewPingServiceHandler(
+		&ExamplePingServer{},                // our business logic
+		connect.WithRegistrar(reg),          // register the ping service's types
+		connect.WithReadMaxBytes(1024*1024), // limit request size
+	))
+	mux.Handle(reflection.NewHandler(reg)) // server reflection
+	mux.Handle(health.NewHandler(checker)) // health checks
 
 	// Timeouts, connection handling, TLS configuration, and other low-level
 	// transport details are handled by net/http. Everything you already know (or

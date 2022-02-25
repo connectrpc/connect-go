@@ -19,7 +19,7 @@ import (
 // might encode durations differently, put them into a different HTTP header,
 // or ignore them entirely.
 type protocol interface {
-	NewHandler(*protocolHandlerParams) (protocolHandler, error)
+	NewHandler(*protocolHandlerParams) protocolHandler
 	NewClient(*protocolClientParams) (protocolClient, error)
 }
 

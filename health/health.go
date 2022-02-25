@@ -3,6 +3,9 @@ package health
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net/http"
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/handlerstream"
@@ -46,7 +49,10 @@ func NewChecker(reg Registrar) func(context.Context, string) (Status, error) {
 		if reg.IsRegistered(service) {
 			return StatusServing, nil
 		}
-		return StatusUnknown, connect.Errorf(connect.CodeNotFound, "unknown service %s", service)
+		return StatusUnknown, connect.NewError(
+			connect.CodeNotFound,
+			fmt.Errorf("unknown service %s", service),
+		)
 	}
 }
 
@@ -73,10 +79,13 @@ func (s *server) Watch(
 	_ *connect.Request[healthpb.HealthCheckRequest],
 	_ *handlerstream.Server[healthpb.HealthCheckResponse],
 ) error {
-	return connect.Errorf(connect.CodeUnimplemented, "connect doesn't support watching health state")
+	return connect.NewError(
+		connect.CodeUnimplemented,
+		errors.New("connect doesn't support watching health state"),
+	)
 }
 
-// WithHandler wraps the supplied function to build HTTP handlers for gRPC's
+// NewHandler wraps the supplied function to build HTTP handlers for gRPC's
 // health-checking API. The health-checking function will be called with a
 // fully-qualified protobuf service name (e.g., "acme.ping.v1.PingService").
 //
@@ -94,11 +103,11 @@ func (s *server) Watch(
 // For more details on gRPC's health checking protocol, see
 // https://github.com/grpc/grpc/blob/master/doc/health-checking.md and
 // https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto.
-func WithHandler(
+func NewHandler(
 	checker func(context.Context, string) (Status, error),
 	opts ...connect.HandlerOption,
-) connect.MuxOption {
-	return healthrpc.WithHealthHandler(
+) (string, http.Handler) {
+	return healthrpc.NewHealthHandler(
 		&server{check: checker},
 		append(opts, connect.WithReplaceProcedurePrefix("internal.", "grpc."))...,
 	)
