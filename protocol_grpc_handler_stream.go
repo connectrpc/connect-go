@@ -70,7 +70,7 @@ func (hs *handlerSender) Send(message any) error {
 
 func (hs *handlerSender) Close(err error) error {
 	defer hs.flush()
-	if connectErr, ok := AsError(err); ok {
+	if connectErr, ok := asError(err); ok {
 		mergeHeaders(hs.Header(), connectErr.Header())
 	}
 	if !hs.web {
@@ -135,10 +135,10 @@ func (hr *handlerReceiver) Receive(message any) error {
 func (hr *handlerReceiver) Close() error {
 	discard(hr.request.Body)
 	if err := hr.request.Body.Close(); err != nil {
-		if connectErr, ok := AsError(err); ok {
+		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
-		return Wrap(CodeUnknown, err)
+		return NewError(CodeUnknown, err)
 	}
 	return nil
 }

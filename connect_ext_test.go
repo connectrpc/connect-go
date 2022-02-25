@@ -3,6 +3,7 @@ package connect_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
@@ -48,14 +49,13 @@ func expectClientHeaderAndTrailer(check bool, req connect.AnyRequest) error {
 
 func expectMetadata(meta http.Header, metaType, key, value string) error {
 	if got := meta.Get(key); got != value {
-		return connect.Errorf(
-			connect.CodeInvalidArgument,
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
 			"%s %q: got %q, expected %q",
 			metaType,
 			key,
 			got,
 			value,
-		)
+		))
 	}
 	return nil
 }
@@ -83,7 +83,7 @@ func (p pingServer) Fail(ctx context.Context, req *connect.Request[pingpb.FailRe
 	if err := expectClientHeaderAndTrailer(p.checkMetadata, req); err != nil {
 		return nil, err
 	}
-	err := connect.Errorf(connect.Code(req.Msg.Code), errorMessage)
+	err := connect.NewError(connect.Code(req.Msg.Code), errors.New(errorMessage))
 	err.Header().Set(handlerHeader, headerValue)
 	err.Trailer().Set(handlerTrailer, trailerValue)
 	return nil, err
@@ -125,7 +125,10 @@ func (p pingServer) CountUp(
 		return err
 	}
 	if req.Msg.Number <= 0 {
-		return connect.Errorf(connect.CodeInvalidArgument, "number must be positive: got %v", req.Msg.Number)
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
+			"number must be positive: got %v",
+			req.Msg.Number,
+		))
 	}
 	stream.ResponseHeader().Set(handlerHeader, headerValue)
 	stream.ResponseTrailer().Set(handlerTrailer, trailerValue)
@@ -171,12 +174,13 @@ func (p pingServer) CumSum(
 
 func TestServerProtoGRPC(t *testing.T) {
 	registrar := connect.NewRegistrar()
-	mux, err := connect.NewServeMux(
-		pingrpc.WithPingServiceHandler(pingServer{checkMetadata: true}, registrar),
-		health.WithHandler(health.NewChecker(registrar)),
-		reflection.WithHandler(registrar),
-	)
-	assert.Nil(t, err, "mux construction error")
+	mux := http.NewServeMux()
+	mux.Handle(pingrpc.NewPingServiceHandler(
+		pingServer{checkMetadata: true},
+		connect.WithRegistrar(registrar),
+	))
+	mux.Handle(health.NewHandler(health.NewChecker(registrar)))
+	mux.Handle(reflection.NewHandler(registrar))
 
 	testPing := func(t *testing.T, client pingrpc.PingServiceClient) {
 		t.Run("ping", func(t *testing.T) {
@@ -317,7 +321,8 @@ func TestServerProtoGRPC(t *testing.T) {
 			response, err := client.Fail(context.Background(), request)
 			assert.Nil(t, response, "fail RPC response")
 			assert.NotNil(t, err, "fail RPC error")
-			connectErr, ok := connect.AsError(err)
+			var connectErr *connect.Error
+			ok := errors.As(err, &connectErr)
 			assert.True(t, ok, "conversion to *connect.Error")
 			assert.Equal(t, connectErr.Code(), connect.CodeResourceExhausted, "error code")
 			assert.Equal(t, connectErr.Error(), "ResourceExhausted: "+errorMessage, "error message")
@@ -360,12 +365,12 @@ func TestServerProtoGRPC(t *testing.T) {
 			)
 		})
 		t.Run("web", func(t *testing.T) {
-			run(t, connect.WithGRPCWeb(true))
+			run(t, connect.WithGRPCWeb())
 		})
 		t.Run("web_json_gzip", func(t *testing.T) {
 			run(
 				t,
-				connect.WithGRPCWeb(true),
+				connect.WithGRPCWeb(),
 				connect.WithCodec(protojson.Name, protojson.New()),
 				connect.WithRequestCompressor(gzip.Name),
 			)
@@ -414,8 +419,8 @@ func TestHeaderBasic(t *testing.T) {
 			return res, nil
 		},
 	}
-	mux, err := connect.NewServeMux(pingrpc.WithPingServiceHandler(pingServer))
-	assert.Nil(t, err, "mux construction error")
+	mux := http.NewServeMux()
+	mux.Handle(pingrpc.NewPingServiceHandler(pingServer))
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
