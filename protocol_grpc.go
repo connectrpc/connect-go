@@ -16,7 +16,7 @@ type protocolGRPC struct {
 }
 
 // NewHandler implements protocol, so it must return an interface.
-func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) (protocolHandler, error) {
+func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler {
 	return &grpcHandler{
 		spec:            params.Spec,
 		web:             g.web,
@@ -24,14 +24,14 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) (protocolHandle
 		compressors:     params.Compressors,
 		maxRequestBytes: params.MaxRequestBytes,
 		accept:          acceptPostValue(g.web, params.Codecs),
-	}, nil
+	}
 }
 
 // NewClient implements protocol, so it must return an interface.
 func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, error) {
 	procedureURL := params.BaseURL + "/" + params.Spec.Procedure
 	if _, err := url.ParseRequestURI(procedureURL); err != nil {
-		return nil, Wrap(CodeUnknown, err)
+		return nil, NewError(CodeUnknown, err)
 	}
 	return &grpcClient{
 		spec:             params.Spec,
@@ -88,7 +88,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	if err != nil && err != errNoTimeout {
 		// Errors here indicate that the client sent an invalid timeout header, so
 		// the error text is safe to send back.
-		failed = Wrap(CodeInvalidArgument, err)
+		failed = NewError(CodeInvalidArgument, err)
 	} else if err == nil {
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
@@ -105,7 +105,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 			// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
 			// should return CodeUnimplemented and specify acceptable compression(s)
 			// (in addition to setting the Grpc-Accept-Encoding header).
-			failed = Errorf(
+			failed = errorf(
 				CodeUnimplemented,
 				"unknown compression %q: accepted grpc-encoding values are %v",
 				msgEncoding, g.compressors.CommaSeparatedNames(),
@@ -162,6 +162,10 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	// We can't return failed as-is: a nil *Error is non-nil when returned as an
 	// error interface.
 	if failed != nil {
+		// Negotiation failed, so we can't establish a stream. To make the
+		// request's HTTP trailers visible to interceptors, we should try to read
+		// the body to EOF.
+		discard(r.Body)
 		return sender, receiver, failed
 	}
 	return sender, receiver, nil
@@ -243,6 +247,7 @@ func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Rece
 			codec:      g.codec,
 		},
 		header:        h,
+		trailer:       make(http.Header),
 		web:           g.web,
 		reader:        pipeReader,
 		compressors:   g.compressors,

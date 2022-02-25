@@ -36,7 +36,7 @@ import (
 
   "golang.org/x/net/http2"
   "golang.org/x/net/http2/h2c"
-
+  "github.com/bufbuild/connect"
   // Generated from protobuf schemas.
   pingrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/connect/ping/v1test"
   pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
@@ -49,19 +49,16 @@ type PingServer struct {
 func (ps *PingServer) Ping(
   ctx context.Context,
   req *connect.Request[pingpb.PingRequest]) (*connect.Response[pingpb.PingResponse], error) {
-  return connect.NewResponse(&pingpb.PingResponse{
-    Number: 42,
-  }), nil
+  log.Println(req.Header().Get("Some-Header"))
+  res := connect.NewResponse(&pingpb.PingResponse{Number: 42})
+  res.Header().Set("Some-Other-Header", "hello!")
+  res.Trailer().Set("Some-Trailer", "goodbye!")
+  return res, nil
 }
 
 func main() {
-  mux, err := connect.NewServeMux(
-    pingpb.WithPingServiceHandler(&PingServer{}), // our logic
-  )
-  if err != nil {
-    log.Println(err)
-    os.Exit(1)
-  }
+  mux := http.NewServeMux()
+  mux.Handle(pingpb.NewPingServiceHandler(&PingServer{})) // our logic
   http.ListenAndServe(
     ":8081",
     h2c.NewHandler(mux, &http2.Server{}),

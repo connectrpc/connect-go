@@ -8,6 +8,7 @@ package pingv1test
 
 import (
 	context "context"
+	errors "errors"
 	connect "github.com/bufbuild/connect"
 	clientstream "github.com/bufbuild/connect/clientstream"
 	protobuf "github.com/bufbuild/connect/codec/protobuf"
@@ -15,6 +16,8 @@ import (
 	gzip "github.com/bufbuild/connect/compress/gzip"
 	handlerstream "github.com/bufbuild/connect/handlerstream"
 	v1test "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
+	http "net/http"
+	path "path"
 	strings "strings"
 )
 
@@ -50,7 +53,6 @@ type PingServiceClient interface {
 func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (PingServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
-		connect.WithGRPC(true),
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
@@ -58,7 +60,7 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 		client pingServiceClient
 		err    error
 	)
-	client.ping, err = connect.NewClientFunc[v1test.PingRequest, v1test.PingResponse](
+	client.ping, err = connect.NewUnaryClientImplementation[v1test.PingRequest, v1test.PingResponse](
 		doer,
 		baseURL,
 		"connect.ping.v1test.PingService/Ping",
@@ -67,7 +69,7 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 	if err != nil {
 		return nil, err
 	}
-	client.fail, err = connect.NewClientFunc[v1test.FailRequest, v1test.FailResponse](
+	client.fail, err = connect.NewUnaryClientImplementation[v1test.FailRequest, v1test.FailResponse](
 		doer,
 		baseURL,
 		"connect.ping.v1test.PingService/Fail",
@@ -76,31 +78,31 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 	if err != nil {
 		return nil, err
 	}
-	client.sum, err = connect.NewClientStream(
+	client.sum, err = connect.NewStreamClientImplementation(
 		doer,
-		connect.StreamTypeClient,
 		baseURL,
 		"connect.ping.v1test.PingService/Sum",
+		connect.StreamTypeClient,
 		opts...,
 	)
 	if err != nil {
 		return nil, err
 	}
-	client.countUp, err = connect.NewClientStream(
+	client.countUp, err = connect.NewStreamClientImplementation(
 		doer,
-		connect.StreamTypeServer,
 		baseURL,
 		"connect.ping.v1test.PingService/CountUp",
+		connect.StreamTypeServer,
 		opts...,
 	)
 	if err != nil {
 		return nil, err
 	}
-	client.cumSum, err = connect.NewClientStream(
+	client.cumSum, err = connect.NewStreamClientImplementation(
 		doer,
-		connect.StreamTypeBidirectional,
 		baseURL,
 		"connect.ping.v1test.PingService/CumSum",
+		connect.StreamTypeBidirectional,
 		opts...,
 	)
 	if err != nil {
@@ -139,6 +141,12 @@ func (c *pingServiceClient) Sum(ctx context.Context) *clientstream.Client[v1test
 // CountUp calls connect.ping.v1test.PingService.CountUp.
 func (c *pingServiceClient) CountUp(ctx context.Context, req *connect.Request[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
 	sender, receiver := c.countUp(ctx)
+	for key, values := range req.Header() {
+		sender.Header()[key] = append(sender.Header()[key], values...)
+	}
+	for key, values := range req.Trailer() {
+		sender.Trailer()[key] = append(sender.Trailer()[key], values...)
+	}
 	if err := sender.Send(req.Msg); err != nil {
 		_ = sender.Close(err)
 		_ = receiver.Close()
@@ -172,47 +180,42 @@ type PingServiceHandler interface {
 	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
 
-// WithPingServiceHandler wraps the service implementation in a
-// connect.MuxOption, which can then be passed to connect.NewServeMux.
+// NewPingServiceHandler builds an HTTP handler from the service implementation.
+// It returns the path on which to mount the handler and the handler itself.
 //
-// By default, services support the gRPC and gRPC-Web protocols with the binary
+// By default, handlers support the gRPC and gRPC-Web protocols with the binary
 // protobuf and JSON codecs.
-func WithPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption) connect.MuxOption {
-	handlers := make([]connect.Handler, 0, 5)
+func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	var lastHandlerPath string
+	mux := http.NewServeMux()
 	opts = append([]connect.HandlerOption{
-		connect.WithGRPC(true),
-		connect.WithGRPCWeb(true),
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCodec(protojson.Name, protojson.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 
-	ping, err := connect.NewUnaryHandler(
+	ping := connect.NewUnaryHandler(
 		"connect.ping.v1test.PingService/Ping", // procedure name
 		"connect.ping.v1test.PingService",      // reflection name
 		svc.Ping,
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *ping)
+	mux.Handle(ping.Path(), ping)
+	lastHandlerPath = ping.Path()
 
-	fail, err := connect.NewUnaryHandler(
+	fail := connect.NewUnaryHandler(
 		"connect.ping.v1test.PingService/Fail", // procedure name
 		"connect.ping.v1test.PingService",      // reflection name
 		svc.Fail,
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *fail)
+	mux.Handle(fail.Path(), fail)
+	lastHandlerPath = fail.Path()
 
-	sum, err := connect.NewStreamingHandler(
-		connect.StreamTypeClient,
+	sum := connect.NewStreamHandler(
 		"connect.ping.v1test.PingService/Sum", // procedure name
 		"connect.ping.v1test.PingService",     // reflection name
+		connect.StreamTypeClient,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
 			typed := handlerstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 			err := svc.Sum(ctx, typed)
@@ -221,15 +224,13 @@ func WithPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOptio
 		},
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *sum)
+	mux.Handle(sum.Path(), sum)
+	lastHandlerPath = sum.Path()
 
-	countUp, err := connect.NewStreamingHandler(
-		connect.StreamTypeServer,
+	countUp := connect.NewStreamHandler(
 		"connect.ping.v1test.PingService/CountUp", // procedure name
 		"connect.ping.v1test.PingService",         // reflection name
+		connect.StreamTypeServer,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
 			typed := handlerstream.NewServer[v1test.CountUpResponse](sender)
 			req, err := connect.ReceiveRequest[v1test.CountUpRequest](receiver)
@@ -247,15 +248,13 @@ func WithPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOptio
 		},
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *countUp)
+	mux.Handle(countUp.Path(), countUp)
+	lastHandlerPath = countUp.Path()
 
-	cumSum, err := connect.NewStreamingHandler(
-		connect.StreamTypeBidirectional,
+	cumSum := connect.NewStreamHandler(
 		"connect.ping.v1test.PingService/CumSum", // procedure name
 		"connect.ping.v1test.PingService",        // reflection name
+		connect.StreamTypeBidirectional,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
 			typed := handlerstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 			err := svc.CumSum(ctx, typed)
@@ -264,12 +263,10 @@ func WithPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOptio
 		},
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *cumSum)
+	mux.Handle(cumSum.Path(), cumSum)
+	lastHandlerPath = cumSum.Path()
 
-	return connect.WithHandlers(handlers, nil)
+	return path.Dir(lastHandlerPath) + "/", mux
 }
 
 // UnimplementedPingServiceHandler returns CodeUnimplemented from all methods.
@@ -278,21 +275,21 @@ type UnimplementedPingServiceHandler struct{}
 var _ PingServiceHandler = (*UnimplementedPingServiceHandler)(nil) // verify interface implementation
 
 func (UnimplementedPingServiceHandler) Ping(context.Context, *connect.Request[v1test.PingRequest]) (*connect.Response[v1test.PingResponse], error) {
-	return nil, connect.Errorf(connect.CodeUnimplemented, "connect.ping.v1test.PingService.Ping isn't implemented")
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.Ping isn't implemented"))
 }
 
 func (UnimplementedPingServiceHandler) Fail(context.Context, *connect.Request[v1test.FailRequest]) (*connect.Response[v1test.FailResponse], error) {
-	return nil, connect.Errorf(connect.CodeUnimplemented, "connect.ping.v1test.PingService.Fail isn't implemented")
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.Fail isn't implemented"))
 }
 
 func (UnimplementedPingServiceHandler) Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error {
-	return connect.Errorf(connect.CodeUnimplemented, "connect.ping.v1test.PingService.Sum isn't implemented")
+	return connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.Sum isn't implemented"))
 }
 
 func (UnimplementedPingServiceHandler) CountUp(context.Context, *connect.Request[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error {
-	return connect.Errorf(connect.CodeUnimplemented, "connect.ping.v1test.PingService.CountUp isn't implemented")
+	return connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.CountUp isn't implemented"))
 }
 
 func (UnimplementedPingServiceHandler) CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error {
-	return connect.Errorf(connect.CodeUnimplemented, "connect.ping.v1test.PingService.CumSum isn't implemented")
+	return connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.CumSum isn't implemented"))
 }

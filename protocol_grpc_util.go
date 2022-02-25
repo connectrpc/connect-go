@@ -79,6 +79,9 @@ func contentTypeFromCodecName(web bool, name string) string {
 }
 
 func grpcErrorToTrailer(trailer http.Header, protobuf codec.Codec, err error) error {
+	if connectErr, ok := asError(err); ok && len(connectErr.trailer) > 0 {
+		mergeHeaders(trailer, connectErr.trailer)
+	}
 	if CodeOf(err) == CodeOK { // safe for nil errors
 		trailer.Set("Grpc-Status", strconv.Itoa(int(CodeOK)))
 		trailer.Set("Grpc-Message", "")
@@ -94,7 +97,7 @@ func grpcErrorToTrailer(trailer http.Header, protobuf codec.Codec, err error) er
 	if err != nil {
 		trailer.Set("Grpc-Status", strconv.Itoa(int(CodeInternal)))
 		trailer.Set("Grpc-Message", percentEncode("error marshaling protobuf status with code "+code))
-		return Errorf(CodeInternal, "couldn't marshal protobuf status: %w", err)
+		return errorf(CodeInternal, "couldn't marshal protobuf status: %w", err)
 	}
 	trailer.Set("Grpc-Status", code)
 	trailer.Set("Grpc-Message", percentEncode(status.Message))
@@ -107,7 +110,7 @@ func statusFromError(err error) (*statuspb.Status, *Error) {
 		Code:    int32(CodeUnknown),
 		Message: err.Error(),
 	}
-	if connectErr, ok := AsError(err); ok {
+	if connectErr, ok := asError(err); ok {
 		status.Code = int32(connectErr.Code())
 		for _, detail := range connectErr.details {
 			// If the detail is already a protobuf Any, we're golden.
@@ -120,7 +123,7 @@ func statusFromError(err error) (*statuspb.Status, *Error) {
 			// attempting an upcast to interface{ AsAny() *anypb.Any }?
 			anyProtoDetail, err := anypb.New(detail)
 			if err != nil {
-				return nil, Errorf(
+				return nil, errorf(
 					CodeInternal,
 					"can't create an *anypb.Any from %v (type %T): %v",
 					detail, detail, err,

@@ -27,6 +27,7 @@ func (cs *clientSender) Send(m any) error      { return cs.stream.Send(m) }
 func (cs *clientSender) Close(err error) error { return cs.stream.CloseSend(err) }
 func (cs *clientSender) Spec() Specification   { return cs.stream.Spec() }
 func (cs *clientSender) Header() http.Header   { return cs.stream.Header() }
+func (cs *clientSender) Trailer() http.Header  { return cs.stream.Trailer() }
 
 // See duplexClientStream below: the send and receive sides of client streams
 // are tightly interconnected, so it's simpler to implement the Receiver
@@ -37,10 +38,11 @@ type clientReceiver struct {
 
 var _ Receiver = (*clientReceiver)(nil)
 
-func (cr *clientReceiver) Receive(m any) error { return cr.stream.Receive(m) }
-func (cr *clientReceiver) Close() error        { return cr.stream.CloseReceive() }
-func (cr *clientReceiver) Spec() Specification { return cr.stream.Spec() }
-func (cr *clientReceiver) Header() http.Header { return cr.stream.ResponseHeader() }
+func (cr *clientReceiver) Receive(m any) error  { return cr.stream.Receive(m) }
+func (cr *clientReceiver) Close() error         { return cr.stream.CloseReceive() }
+func (cr *clientReceiver) Spec() Specification  { return cr.stream.Spec() }
+func (cr *clientReceiver) Header() http.Header  { return cr.stream.ResponseHeader() }
+func (cr *clientReceiver) Trailer() http.Header { return cr.stream.ResponseTrailer() }
 
 // duplexClientStream is a bidirectional exchange of protobuf messages between
 // the client and server. The request body is the stream from client to server,
@@ -64,6 +66,7 @@ type duplexClientStream struct {
 	writer      *io.PipeWriter
 	marshaler   marshaler
 	header      http.Header
+	trailer     http.Header
 
 	// receive goroutine
 	web           bool
@@ -83,6 +86,10 @@ func (cs *duplexClientStream) Spec() Specification {
 
 func (cs *duplexClientStream) Header() http.Header {
 	return cs.header
+}
+
+func (cs *duplexClientStream) Trailer() http.Header {
+	return cs.trailer
 }
 
 func (cs *duplexClientStream) Send(message any) error {
@@ -126,7 +133,7 @@ func (cs *duplexClientStream) Send(message any) error {
 
 func (cs *duplexClientStream) CloseSend(_ error) error {
 	// The user calls CloseSend to indicate that they're done sending data. All
-	// we do here is close the write side of the pipe, so it's safe to do this
+	// we do here is write to the pipe and close it, so it's safe to do this
 	// while makeRequest is running. (This method takes an error to accommodate
 	// server-side streams. Clients can't send an error when they stop sending
 	// data, so we just ignore it.)
@@ -138,11 +145,17 @@ func (cs *duplexClientStream) CloseSend(_ error) error {
 	// forever. To make sure users don't have to worry about this, the generated
 	// code for unary, client streaming, and server streaming RPCs must call
 	// CloseSend automatically rather than requiring the user to do it.
+	if cs.web {
+		if err := cs.marshaler.MarshalWebTrailers(cs.trailer); err != nil {
+			_ = cs.writer.Close()
+			return err
+		}
+	}
 	if err := cs.writer.Close(); err != nil {
-		if connectErr, ok := AsError(err); ok {
+		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
-		return Wrap(CodeUnknown, err)
+		return NewError(CodeUnknown, err)
 	}
 	return nil
 }
@@ -161,14 +174,18 @@ func (cs *duplexClientStream) Receive(message any) error {
 		// If we can't read this LPM, see if the server sent an explicit error in
 		// trailers. First, we need to read the body to EOF.
 		discard(cs.response.Body)
-		trailer := cs.response.Trailer
 		if errors.Is(err, errGotWebTrailers) {
-			trailer = cs.unmarshaler.WebTrailer()
+			if cs.response.Trailer == nil {
+				cs.response.Trailer = cs.unmarshaler.WebTrailer()
+			} else {
+				mergeHeaders(cs.response.Trailer, cs.unmarshaler.WebTrailer())
+			}
 		}
-		if serverErr := extractError(cs.protobuf, trailer); serverErr != nil {
+		if serverErr := extractError(cs.protobuf, cs.response.Trailer); serverErr != nil {
 			// This is expected from a protocol perspective, but receiving trailers
 			// means that we're _not_ getting a message. For users to realize that
 			// the stream has ended, Receive must return an error.
+			serverErr.header = cs.ResponseHeader()
 			cs.setResponseError(serverErr)
 			return serverErr
 		}
@@ -189,7 +206,7 @@ func (cs *duplexClientStream) CloseReceive() error {
 	}
 	discard(cs.response.Body)
 	if err := cs.response.Body.Close(); err != nil {
-		return Wrap(CodeUnknown, err)
+		return NewError(CodeUnknown, err)
 	}
 	return nil
 }
@@ -197,6 +214,11 @@ func (cs *duplexClientStream) CloseReceive() error {
 func (cs *duplexClientStream) ResponseHeader() http.Header {
 	<-cs.responseReady
 	return cs.response.Header
+}
+
+func (cs *duplexClientStream) ResponseTrailer() http.Header {
+	<-cs.responseReady
+	return cs.response.Trailer
 }
 
 func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
@@ -214,11 +236,14 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 
 	req, err := http.NewRequestWithContext(cs.ctx, http.MethodPost, cs.url, cs.reader)
 	if err != nil {
-		cs.setResponseError(Errorf(CodeUnknown, "construct *http.Request: %w", err))
+		cs.setResponseError(errorf(CodeUnknown, "construct *http.Request: %w", err))
 		close(prepared)
 		return
 	}
 	req.Header = cs.header
+	if cs.trailer != nil && !cs.web {
+		req.Trailer = cs.trailer
+	}
 
 	// Before we send off a request, check if we're already out of time.
 	if err := cs.ctx.Err(); err != nil {
@@ -239,11 +264,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	}
 
 	if res.StatusCode != http.StatusOK {
-		code := CodeUnknown
-		if c, ok := httpToCode[res.StatusCode]; ok {
-			code = c
-		}
-		cs.setResponseError(Errorf(code, "HTTP status %v", res.Status))
+		cs.setResponseError(errorf(httpToCode(res.StatusCode), "HTTP status %v", res.Status))
 		return
 	}
 	compression := res.Header.Get("Grpc-Encoding")
@@ -253,7 +274,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 		// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
 		// should return CodeInternal and specify acceptable compression(s) (in
 		// addition to setting the Grpc-Accept-Encoding header).
-		cs.setResponseError(Errorf(
+		cs.setResponseError(errorf(
 			CodeInternal,
 			"unknown compression %q: accepted grpc-encoding values are %v",
 			compression,
@@ -264,6 +285,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	// When there's no body, errors sent from the first-party gRPC servers will
 	// be in the headers.
 	if err := extractError(cs.protobuf, res.Header); err != nil {
+		err.header = res.Header
 		cs.setResponseError(err)
 		return
 	}
@@ -309,28 +331,29 @@ func (cs *duplexClientStream) getResponseError() error {
 // binary protobuf format, even if the messages in the request/response stream
 // use a different codec. Consequently, this function needs a protobuf codec to
 // unmarshal error information in the headers.
-func extractError(protobuf codec.Codec, h http.Header) *Error {
-	codeHeader := h.Get("Grpc-Status")
+func extractError(protobuf codec.Codec, trailer http.Header) *Error {
+	codeHeader := trailer.Get("Grpc-Status")
 	if codeHeader == "" || codeHeader == "0" {
 		return nil
 	}
 
 	code, err := strconv.ParseUint(codeHeader, 10 /* base */, 32 /* bitsize */)
 	if err != nil {
-		return Errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
+		return errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
 	}
-	message := percentDecode(h.Get("Grpc-Message"))
-	retErr := Wrap(Code(code), errors.New(message))
+	message := percentDecode(trailer.Get("Grpc-Message"))
+	retErr := NewError(Code(code), errors.New(message))
+	retErr.trailer = trailer
 
-	detailsBinaryEncoded := h.Get("Grpc-Status-Details-Bin")
+	detailsBinaryEncoded := trailer.Get("Grpc-Status-Details-Bin")
 	if len(detailsBinaryEncoded) > 0 {
 		detailsBinary, err := DecodeBinaryHeader(detailsBinaryEncoded)
 		if err != nil {
-			return Errorf(CodeUnknown, "server returned invalid grpc-status-details-bin trailer: %w", err)
+			return errorf(CodeUnknown, "server returned invalid grpc-status-details-bin trailer: %w", err)
 		}
 		var status statuspb.Status
 		if err := protobuf.Unmarshal(detailsBinary, &status); err != nil {
-			return Errorf(CodeUnknown, "server returned invalid protobuf for error details: %w", err)
+			return errorf(CodeUnknown, "server returned invalid protobuf for error details: %w", err)
 		}
 		for _, d := range status.Details {
 			retErr.details = append(retErr.details, d)

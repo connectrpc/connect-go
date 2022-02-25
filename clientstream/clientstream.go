@@ -74,6 +74,12 @@ func (s *Server[Res]) ResponseHeader() http.Header {
 	return s.receiver.Header()
 }
 
+// ResponseTrailer returns the trailers received from the server. Trailers
+// aren't fully populated until Receive() returns an error wrapping io.EOF.
+func (s *Server[Res]) ResponseTrailer() http.Header {
+	return s.receiver.Trailer()
+}
+
 // Close the receive side of the stream.
 func (s *Server[Res]) Close() error {
 	return s.receiver.Close()
@@ -126,4 +132,10 @@ func (b *Bidirectional[Req, Res]) CloseReceive() error {
 // the first call to Receive returns.
 func (b *Bidirectional[Req, Res]) ResponseHeader() http.Header {
 	return b.receiver.Header()
+}
+
+// ResponseTrailer returns the trailers received from the server. Trailers
+// aren't fully populated until Receive() returns an error wrapping io.EOF.
+func (b *Bidirectional[Req, Res]) ResponseTrailer() http.Header {
+	return b.receiver.Trailer()
 }

@@ -8,6 +8,7 @@ package healthv1
 
 import (
 	context "context"
+	errors "errors"
 	connect "github.com/bufbuild/connect"
 	clientstream "github.com/bufbuild/connect/clientstream"
 	protobuf "github.com/bufbuild/connect/codec/protobuf"
@@ -15,6 +16,8 @@ import (
 	gzip "github.com/bufbuild/connect/compress/gzip"
 	handlerstream "github.com/bufbuild/connect/handlerstream"
 	v1 "github.com/bufbuild/connect/internal/gen/proto/go/grpc/health/v1"
+	http "net/http"
+	path "path"
 	strings "strings"
 )
 
@@ -57,7 +60,6 @@ type HealthClient interface {
 func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (HealthClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
-		connect.WithGRPC(true),
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
@@ -65,7 +67,7 @@ func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOp
 		client healthClient
 		err    error
 	)
-	client.check, err = connect.NewClientFunc[v1.HealthCheckRequest, v1.HealthCheckResponse](
+	client.check, err = connect.NewUnaryClientImplementation[v1.HealthCheckRequest, v1.HealthCheckResponse](
 		doer,
 		baseURL,
 		"internal.health.v1.Health/Check",
@@ -74,11 +76,11 @@ func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOp
 	if err != nil {
 		return nil, err
 	}
-	client.watch, err = connect.NewClientStream(
+	client.watch, err = connect.NewStreamClientImplementation(
 		doer,
-		connect.StreamTypeServer,
 		baseURL,
 		"internal.health.v1.Health/Watch",
+		connect.StreamTypeServer,
 		opts...,
 	)
 	if err != nil {
@@ -103,6 +105,12 @@ func (c *healthClient) Check(ctx context.Context, req *connect.Request[v1.Health
 // Watch calls internal.health.v1.Health.Watch.
 func (c *healthClient) Watch(ctx context.Context, req *connect.Request[v1.HealthCheckRequest]) (*clientstream.Server[v1.HealthCheckResponse], error) {
 	sender, receiver := c.watch(ctx)
+	for key, values := range req.Header() {
+		sender.Header()[key] = append(sender.Header()[key], values...)
+	}
+	for key, values := range req.Trailer() {
+		sender.Trailer()[key] = append(sender.Trailer()[key], values...)
+	}
 	if err := sender.Send(req.Msg); err != nil {
 		_ = sender.Close(err)
 		_ = receiver.Close()
@@ -138,36 +146,33 @@ type HealthHandler interface {
 	Watch(context.Context, *connect.Request[v1.HealthCheckRequest], *handlerstream.Server[v1.HealthCheckResponse]) error
 }
 
-// WithHealthHandler wraps the service implementation in a connect.MuxOption,
-// which can then be passed to connect.NewServeMux.
+// NewHealthHandler builds an HTTP handler from the service implementation. It
+// returns the path on which to mount the handler and the handler itself.
 //
-// By default, services support the gRPC and gRPC-Web protocols with the binary
+// By default, handlers support the gRPC and gRPC-Web protocols with the binary
 // protobuf and JSON codecs.
-func WithHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) connect.MuxOption {
-	handlers := make([]connect.Handler, 0, 2)
+func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	var lastHandlerPath string
+	mux := http.NewServeMux()
 	opts = append([]connect.HandlerOption{
-		connect.WithGRPC(true),
-		connect.WithGRPCWeb(true),
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCodec(protojson.Name, protojson.New()),
 		connect.WithCompressor(gzip.Name, gzip.New()),
 	}, opts...)
 
-	check, err := connect.NewUnaryHandler(
+	check := connect.NewUnaryHandler(
 		"internal.health.v1.Health/Check", // procedure name
 		"internal.health.v1.Health",       // reflection name
 		svc.Check,
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *check)
+	mux.Handle(check.Path(), check)
+	lastHandlerPath = check.Path()
 
-	watch, err := connect.NewStreamingHandler(
-		connect.StreamTypeServer,
+	watch := connect.NewStreamHandler(
 		"internal.health.v1.Health/Watch", // procedure name
 		"internal.health.v1.Health",       // reflection name
+		connect.StreamTypeServer,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
 			typed := handlerstream.NewServer[v1.HealthCheckResponse](sender)
 			req, err := connect.ReceiveRequest[v1.HealthCheckRequest](receiver)
@@ -185,12 +190,10 @@ func WithHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) connect
 		},
 		opts...,
 	)
-	if err != nil {
-		return connect.WithHandlers(nil, err)
-	}
-	handlers = append(handlers, *watch)
+	mux.Handle(watch.Path(), watch)
+	lastHandlerPath = watch.Path()
 
-	return connect.WithHandlers(handlers, nil)
+	return path.Dir(lastHandlerPath) + "/", mux
 }
 
 // UnimplementedHealthHandler returns CodeUnimplemented from all methods.
@@ -199,9 +202,9 @@ type UnimplementedHealthHandler struct{}
 var _ HealthHandler = (*UnimplementedHealthHandler)(nil) // verify interface implementation
 
 func (UnimplementedHealthHandler) Check(context.Context, *connect.Request[v1.HealthCheckRequest]) (*connect.Response[v1.HealthCheckResponse], error) {
-	return nil, connect.Errorf(connect.CodeUnimplemented, "internal.health.v1.Health.Check isn't implemented")
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.health.v1.Health.Check isn't implemented"))
 }
 
 func (UnimplementedHealthHandler) Watch(context.Context, *connect.Request[v1.HealthCheckRequest], *handlerstream.Server[v1.HealthCheckResponse]) error {
-	return connect.Errorf(connect.CodeUnimplemented, "internal.health.v1.Health.Watch isn't implemented")
+	return connect.NewError(connect.CodeUnimplemented, errors.New("internal.health.v1.Health.Watch isn't implemented"))
 }

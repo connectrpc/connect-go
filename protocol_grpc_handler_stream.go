@@ -1,6 +1,7 @@
 package connect
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/bufbuild/connect/codec"
@@ -31,10 +32,12 @@ func newHandlerStream(
 		},
 		protobuf: protobuf,
 		writer:   w,
+		trailer:  make(http.Header, 3), // grpc-{status,message,status-details-bin}
 	}
 	receiver := &handlerReceiver{
 		spec: spec,
 		unmarshaler: unmarshaler{
+			web:        web,
 			reader:     r.Body,
 			max:        maxReadBytes,
 			compressor: requestCompressor,
@@ -51,6 +54,7 @@ type handlerSender struct {
 	marshaler marshaler
 	protobuf  codec.Codec // for errors
 	writer    http.ResponseWriter
+	trailer   http.Header
 }
 
 var _ Sender = (*handlerSender)(nil)
@@ -66,14 +70,22 @@ func (hs *handlerSender) Send(message any) error {
 
 func (hs *handlerSender) Close(err error) error {
 	defer hs.flush()
+	if connectErr, ok := asError(err); ok {
+		mergeHeaders(hs.Header(), connectErr.Header())
+	}
 	if !hs.web {
+		for key, values := range hs.trailer {
+			trailerKey := http.TrailerPrefix + key
+			for _, value := range values {
+				hs.writer.Header().Add(trailerKey, value)
+			}
+		}
 		return grpcErrorToTrailer(hs.writer.Header(), hs.protobuf, err)
 	}
-	trailer := make(http.Header, 3)
-	if trailerErr := grpcErrorToTrailer(trailer, hs.protobuf, err); trailerErr != nil {
+	if trailerErr := grpcErrorToTrailer(hs.trailer, hs.protobuf, err); trailerErr != nil {
 		return trailerErr
 	}
-	if marshalErr := hs.marshaler.MarshalWebTrailers(trailer); marshalErr != nil {
+	if marshalErr := hs.marshaler.MarshalWebTrailers(hs.trailer); marshalErr != nil {
 		return marshalErr
 	}
 	return nil
@@ -85,6 +97,10 @@ func (hs *handlerSender) Spec() Specification {
 
 func (hs *handlerSender) Header() http.Header {
 	return hs.writer.Header()
+}
+
+func (hs *handlerSender) Trailer() http.Header {
+	return hs.trailer
 }
 
 func (hs *handlerSender) flush() {
@@ -103,6 +119,13 @@ var _ Receiver = (*handlerReceiver)(nil)
 
 func (hr *handlerReceiver) Receive(message any) error {
 	if err := hr.unmarshaler.Unmarshal(message); err != nil {
+		if errors.Is(err, errGotWebTrailers) {
+			if hr.request.Trailer == nil {
+				hr.request.Trailer = hr.unmarshaler.WebTrailer()
+			} else {
+				mergeHeaders(hr.request.Trailer, hr.unmarshaler.WebTrailer())
+			}
+		}
 		return err // already coded
 	}
 	// don't return typed nils
@@ -112,10 +135,10 @@ func (hr *handlerReceiver) Receive(message any) error {
 func (hr *handlerReceiver) Close() error {
 	discard(hr.request.Body)
 	if err := hr.request.Body.Close(); err != nil {
-		if connectErr, ok := AsError(err); ok {
+		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
-		return Wrap(CodeUnknown, err)
+		return NewError(CodeUnknown, err)
 	}
 	return nil
 }
@@ -126,4 +149,8 @@ func (hr *handlerReceiver) Spec() Specification {
 
 func (hr *handlerReceiver) Header() http.Header {
 	return hr.request.Header
+}
+
+func (hr *handlerReceiver) Trailer() http.Header {
+	return hr.request.Trailer
 }

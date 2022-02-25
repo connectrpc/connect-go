@@ -2,6 +2,8 @@ package health_test
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -15,14 +17,12 @@ import (
 
 func TestHealth(t *testing.T) {
 	reg := connect.NewRegistrar()
-	mux, err := connect.NewServeMux(
-		pingrpc.WithPingServiceHandler(
-			pingrpc.UnimplementedPingServiceHandler{},
-			reg,
-		),
-		health.WithHandler(health.NewChecker(reg)),
-	)
-	assert.Nil(t, err, "mux construction error")
+	mux := http.NewServeMux()
+	mux.Handle(pingrpc.NewPingServiceHandler(
+		pingrpc.UnimplementedPingServiceHandler{},
+		connect.WithRegistrar(reg),
+	))
+	mux.Handle(health.NewHandler(health.NewChecker(reg)))
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
@@ -48,7 +48,8 @@ func TestHealth(t *testing.T) {
 	t.Run("unknown", func(t *testing.T) {
 		_, err := client.Check(context.Background(), &health.CheckRequest{Service: unknown})
 		assert.NotNil(t, err, "rpc error")
-		connectErr, ok := connect.AsError(err)
+		var connectErr *connect.Error
+		ok := errors.As(err, &connectErr)
 		assert.True(t, ok, "convert to connect error")
 		assert.Equal(t, connectErr.Code(), connect.CodeNotFound, "error code")
 	})
@@ -67,7 +68,8 @@ func TestHealth(t *testing.T) {
 		defer stream.Close()
 		_, err = stream.Receive()
 		assert.NotNil(t, err, "receive err")
-		connectErr, ok := connect.AsError(err)
+		var connectErr *connect.Error
+		ok := errors.As(err, &connectErr)
 		assert.True(t, ok, "convert to connect error")
 		assert.Equal(t, connectErr.Code(), connect.CodeUnimplemented, "error code")
 	})
