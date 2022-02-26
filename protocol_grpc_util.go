@@ -17,7 +17,6 @@ const (
 	typeWebGRPC           = "application/grpc-web"
 	typeDefaultGRPCPrefix = typeDefaultGRPC + "+"
 	typeWebGRPCPrefix     = typeWebGRPC + "+"
-	grpcNameProto         = "proto" // gRPC protocols use "proto" instead of "protobuf"
 )
 
 // Follows https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents
@@ -34,12 +33,9 @@ func acceptPostValue(web bool, codecs readOnlyCodecs) string {
 	}
 	names := codecs.Names()
 	for i, name := range names {
-		if name == codecNameProtobuf {
-			name = grpcNameProto
-		}
 		names[i] = prefix + name
 	}
-	if codecs.Get(codecNameProtobuf) != nil {
+	if codecs.Get(codecNameProto) != nil {
 		names = append(names, bare)
 	}
 	return strings.Join(names, ",")
@@ -48,7 +44,7 @@ func acceptPostValue(web bool, codecs readOnlyCodecs) string {
 func codecFromContentType(web bool, contentType string) string {
 	if (!web && contentType == typeDefaultGRPC) || (web && contentType == typeWebGRPC) {
 		// implicitly protobuf
-		return codecNameProtobuf
+		return codecNameProto
 	}
 	prefix := typeDefaultGRPCPrefix
 	if web {
@@ -57,19 +53,10 @@ func codecFromContentType(web bool, contentType string) string {
 	if !strings.HasPrefix(contentType, prefix) {
 		return ""
 	}
-	name := strings.TrimPrefix(contentType, prefix)
-	if name == grpcNameProto {
-		// normalize to our "protobuf"
-		return codecNameProtobuf
-	}
-	return name
+	return strings.TrimPrefix(contentType, prefix)
 }
 
 func contentTypeFromCodecName(web bool, name string) string {
-	// translate back to gRPC's "proto"
-	if name == codecNameProtobuf {
-		name = grpcNameProto
-	}
 	if web {
 		return typeWebGRPCPrefix + name
 	}

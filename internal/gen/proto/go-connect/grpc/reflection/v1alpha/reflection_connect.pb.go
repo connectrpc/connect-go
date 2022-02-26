@@ -41,7 +41,7 @@ type ServerReflectionClient interface {
 func NewServerReflectionClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (ServerReflectionClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
-		connect.WithProtobufCodec(),
+		connect.WithProtoBinaryCodec(),
 		connect.WithGzip(),
 	}, opts...)
 	var (
@@ -93,8 +93,8 @@ func NewServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.Han
 	var lastHandlerPath string
 	mux := http.NewServeMux()
 	opts = append([]connect.HandlerOption{
-		connect.WithProtobufCodec(),
-		connect.WithProtobufJSONCodec(),
+		connect.WithProtoBinaryCodec(),
+		connect.WithProtoJSONCodec(),
 		connect.WithGzip(),
 	}, opts...)
 

@@ -46,10 +46,10 @@ func (c *clientConfiguration) Validate() *Error {
 }
 
 func (c *clientConfiguration) Protobuf() Codec {
-	if c.Codec.Name() == codecNameProtobuf {
+	if c.Codec.Name() == codecNameProto {
 		return c.Codec
 	}
-	return &protobufBinaryCodec{}
+	return &protoBinaryCodec{}
 }
 
 func (c *clientConfiguration) newSpecification(t StreamType) Specification {

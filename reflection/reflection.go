@@ -26,7 +26,7 @@ import (
 //
 // A *connect.Registrar implements this interface.
 type Registrar interface {
-	Services() []string // returns fully-qualified protobuf services names
+	Services() []string // returns fully-qualified protobuf service names
 }
 
 // NewHandler uses the information in the supplied Registrar to construct HTTP
