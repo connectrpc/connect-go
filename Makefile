@@ -52,7 +52,7 @@ lintfix: bin/gofmt bin/goimports ## Automatically fix some lint errors
 	@./bin/goimports -w $(HANDWRITTEN)
 
 .PHONY: lintpb
-lintpb: bin/buf proto/buf.yaml internal/crosstest/proto/buf.yaml $(PROTOBUFS)
+lintpb: bin/buf internal/proto/buf.yaml internal/crosstest/proto/buf.yaml $(PROTOBUFS)
 	@echo "Checking with buf lint..."
 	@./bin/buf lint
 	@cd internal/crosstest && ../../bin/buf lint
@@ -67,7 +67,7 @@ cover.out: gen $(HANDWRITTEN)
 .PHONY: gen
 gen: .faux.pb ## Regenerate code
 
-.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go bin/protoc-gen-go-grpc bin/protoc-gen-go-connect buf.work.yaml buf.gen.yaml proto/buf.yaml internal/crosstest/buf.work.yaml internal/crosstest/buf.gen.yaml internal/crosstest/proto/buf.yaml
+.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go bin/protoc-gen-go-grpc bin/protoc-gen-go-connect buf.work.yaml buf.gen.yaml internal/proto/buf.yaml internal/crosstest/buf.work.yaml internal/crosstest/buf.gen.yaml internal/crosstest/proto/buf.yaml
 	./bin/buf generate
 	cd internal/crosstest && ../../bin/buf generate
 	touch $(@)
