@@ -35,7 +35,6 @@ func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, 
 		web:              g.web,
 		compressorName:   params.CompressorName,
 		compressors:      params.Compressors,
-		codecName:        params.CodecName,
 		codec:            params.Codec,
 		protobuf:         params.Protobuf,
 		maxResponseBytes: params.MaxResponseBytes,
@@ -189,7 +188,6 @@ type grpcClient struct {
 	web                  bool
 	compressorName       string
 	compressors          readOnlyCompressors
-	codecName            string
 	codec                Codec
 	protobuf             Codec
 	maxResponseBytes     int64
@@ -202,7 +200,7 @@ func (g *grpcClient) WriteRequestHeader(header http.Header) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
 	header["User-Agent"] = userAgent
-	header["Content-Type"] = []string{contentTypeFromCodecName(g.web, g.codecName)}
+	header["Content-Type"] = []string{contentTypeFromCodecName(g.web, g.codec.Name())}
 	if g.compressorName != "" && g.compressorName != compressIdentity {
 		header["Grpc-Encoding"] = []string{g.compressorName}
 	}
