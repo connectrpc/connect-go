@@ -3,8 +3,6 @@ package connect
 import (
 	"context"
 	"net/http"
-
-	"github.com/bufbuild/connect/codec"
 )
 
 // A Protocol defines the HTTP semantics to use when sending and receiving
@@ -75,14 +73,14 @@ type protocolClientParams struct {
 	CompressorName   string
 	Compressors      readOnlyCompressors
 	CodecName        string
-	Codec            codec.Codec
+	Codec            Codec
 	MaxResponseBytes int64
 	Doer             Doer
 	BaseURL          string
 
 	// The gRPC family of protocols always needs access to a protobuf codec to
 	// marshal and unmarshal errors.
-	Protobuf codec.Codec
+	Protobuf Codec
 }
 
 // Client is the client side of a protocol. HTTP clients typically use a single

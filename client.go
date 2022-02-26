@@ -3,9 +3,6 @@ package connect
 import (
 	"context"
 	"net/http"
-
-	"github.com/bufbuild/connect/codec"
-	"github.com/bufbuild/connect/codec/protobuf"
 )
 
 type clientConfiguration struct {
@@ -14,7 +11,7 @@ type clientConfiguration struct {
 	MaxResponseBytes  int64
 	Interceptor       Interceptor
 	Compressors       map[string]Compressor
-	Codec             codec.Codec
+	Codec             Codec
 	CodecName         string
 	RequestCompressor string
 }
@@ -49,11 +46,11 @@ func (c *clientConfiguration) Validate() *Error {
 	return nil
 }
 
-func (c *clientConfiguration) Protobuf() codec.Codec {
-	if c.CodecName == protobuf.Name {
+func (c *clientConfiguration) Protobuf() Codec {
+	if c.CodecName == codecNameProtobuf {
 		return c.Codec
 	}
-	return protobuf.New()
+	return &codecProtobufBinary{}
 }
 
 func (c *clientConfiguration) newSpecification(t StreamType) Specification {

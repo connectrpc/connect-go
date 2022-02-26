@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-
-	"github.com/bufbuild/connect/codec"
 )
 
 type protocolGRPC struct {
@@ -192,8 +190,8 @@ type grpcClient struct {
 	compressorName       string
 	compressors          readOnlyCompressors
 	codecName            string
-	codec                codec.Codec
-	protobuf             codec.Codec
+	codec                Codec
+	protobuf             Codec
 	maxResponseBytes     int64
 	doer                 Doer
 	procedureURL         string

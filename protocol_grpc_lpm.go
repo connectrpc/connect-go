@@ -8,8 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/textproto"
-
-	"github.com/bufbuild/connect/codec"
 )
 
 const (
@@ -30,7 +28,7 @@ var (
 type marshaler struct {
 	writer     io.Writer
 	compressor Compressor
-	codec      codec.Codec
+	codec      Codec
 }
 
 func (m *marshaler) Marshal(message any) *Error {
@@ -107,7 +105,7 @@ func (m *marshaler) writeGRPCPrefix(compressed, trailer bool, size int) *Error {
 type unmarshaler struct {
 	reader     io.Reader
 	max        int64
-	codec      codec.Codec
+	codec      Codec
 	compressor Compressor
 
 	web        bool

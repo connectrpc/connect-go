@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/bufbuild/connect/codec"
-	"github.com/bufbuild/connect/codec/protobuf"
 	statuspb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/status/v1"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -36,12 +34,12 @@ func acceptPostValue(web bool, codecs readOnlyCodecs) string {
 	}
 	names := codecs.Names()
 	for i, name := range names {
-		if name == protobuf.Name {
+		if name == codecNameProtobuf {
 			name = grpcNameProto
 		}
 		names[i] = prefix + name
 	}
-	if codecs.Get(protobuf.Name) != nil {
+	if codecs.Get(codecNameProtobuf) != nil {
 		names = append(names, bare)
 	}
 	return strings.Join(names, ",")
@@ -50,7 +48,7 @@ func acceptPostValue(web bool, codecs readOnlyCodecs) string {
 func codecFromContentType(web bool, contentType string) string {
 	if (!web && contentType == typeDefaultGRPC) || (web && contentType == typeWebGRPC) {
 		// implicitly protobuf
-		return protobuf.Name
+		return codecNameProtobuf
 	}
 	prefix := typeDefaultGRPCPrefix
 	if web {
@@ -62,14 +60,14 @@ func codecFromContentType(web bool, contentType string) string {
 	name := strings.TrimPrefix(contentType, prefix)
 	if name == grpcNameProto {
 		// normalize to our "protobuf"
-		return protobuf.Name
+		return codecNameProtobuf
 	}
 	return name
 }
 
 func contentTypeFromCodecName(web bool, name string) string {
 	// translate back to gRPC's "proto"
-	if name == protobuf.Name {
+	if name == codecNameProtobuf {
 		name = grpcNameProto
 	}
 	if web {
@@ -78,7 +76,7 @@ func contentTypeFromCodecName(web bool, name string) string {
 	return typeDefaultGRPCPrefix + name
 }
 
-func grpcErrorToTrailer(trailer http.Header, protobuf codec.Codec, err error) error {
+func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) error {
 	if connectErr, ok := asError(err); ok && len(connectErr.trailer) > 0 {
 		mergeHeaders(trailer, connectErr.trailer)
 	}

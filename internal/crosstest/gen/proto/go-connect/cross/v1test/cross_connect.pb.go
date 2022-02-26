@@ -11,8 +11,6 @@ import (
 	errors "errors"
 	connect "github.com/bufbuild/connect"
 	clientstream "github.com/bufbuild/connect/clientstream"
-	protobuf "github.com/bufbuild/connect/codec/protobuf"
-	protojson "github.com/bufbuild/connect/codec/protojson"
 	handlerstream "github.com/bufbuild/connect/handlerstream"
 	v1test "github.com/bufbuild/connect/internal/crosstest/gen/proto/go/cross/v1test"
 	http "net/http"
@@ -45,7 +43,7 @@ type CrossServiceClient interface {
 func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (CrossServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
-		connect.WithCodec(protobuf.Name, protobuf.New()),
+		connect.WithProtobuf(),
 		connect.WithGzip(),
 	}, opts...)
 	var (
@@ -177,8 +175,8 @@ func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpti
 	var lastHandlerPath string
 	mux := http.NewServeMux()
 	opts = append([]connect.HandlerOption{
-		connect.WithCodec(protobuf.Name, protobuf.New()),
-		connect.WithCodec(protojson.Name, protojson.New()),
+		connect.WithProtobuf(),
+		connect.WithProtobufJSON(),
 		connect.WithGzip(),
 	}, opts...)
 
