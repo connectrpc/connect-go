@@ -6,7 +6,6 @@ import (
 
 	"github.com/bufbuild/connect/codec"
 	"github.com/bufbuild/connect/codec/protobuf"
-	"github.com/bufbuild/connect/compress"
 )
 
 type clientConfiguration struct {
@@ -14,7 +13,7 @@ type clientConfiguration struct {
 	Procedure         string
 	MaxResponseBytes  int64
 	Interceptor       Interceptor
-	Compressors       map[string]compress.Compressor
+	Compressors       map[string]Compressor
 	Codec             codec.Codec
 	CodecName         string
 	RequestCompressor string
@@ -24,7 +23,7 @@ func newClientConfiguration(procedure string, options []ClientOption) (*clientCo
 	config := clientConfiguration{
 		Protocol:    &protocolGRPC{web: false}, // default to HTTP/2 gRPC
 		Procedure:   procedure,
-		Compressors: make(map[string]compress.Compressor),
+		Compressors: make(map[string]Compressor),
 	}
 	for _, opt := range options {
 		opt.applyToClient(&config)
@@ -39,7 +38,7 @@ func (c *clientConfiguration) Validate() *Error {
 	if c.Codec == nil || c.CodecName == "" {
 		return errorf(CodeUnknown, "no codec configured")
 	}
-	if c.RequestCompressor != "" && c.RequestCompressor != compress.NameIdentity {
+	if c.RequestCompressor != "" && c.RequestCompressor != compressIdentity {
 		if _, ok := c.Compressors[c.RequestCompressor]; !ok {
 			return errorf(CodeUnknown, "no registered compressor for %q", c.RequestCompressor)
 		}
@@ -85,6 +84,16 @@ type requestCompressorOption struct {
 // uncompressed requests.
 func WithRequestCompressor(name string) ClientOption {
 	return &requestCompressorOption{Name: name}
+}
+
+// WithGzipRequests configures the client to gzip requests. It requires that
+// the client already have a registered gzip compressor (via either WithGzip or
+// WithCompressor).
+//
+// Because some servers don't support gzip, clients default to sending
+// uncompressed requests.
+func WithGzipRequests() ClientOption {
+	return WithRequestCompressor(compressGzip)
 }
 
 func (o *requestCompressorOption) applyToClient(config *clientConfiguration) {

@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/bufbuild/connect/codec"
-	"github.com/bufbuild/connect/compress"
 )
 
 // Thankfully, the handler stream is much simpler than the client. net/http
@@ -19,8 +18,8 @@ func newHandlerStream(
 	maxReadBytes int64,
 	codec codec.Codec,
 	protobuf codec.Codec, // for errors
-	requestCompressor compress.Compressor,
-	responseCompressor compress.Compressor,
+	requestCompressor Compressor,
+	responseCompressor Compressor,
 ) (*handlerSender, *handlerReceiver) {
 	sender := &handlerSender{
 		spec: spec,

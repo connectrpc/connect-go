@@ -22,7 +22,6 @@ const (
 	connectPackage      = protogen.GoImportPath("github.com/bufbuild/connect")
 	connectProtoPackage = protogen.GoImportPath("github.com/bufbuild/connect/codec/protobuf")
 	connectJSONPackage  = protogen.GoImportPath("github.com/bufbuild/connect/codec/protojson")
-	connectGzipPackage  = protogen.GoImportPath("github.com/bufbuild/connect/compress/gzip")
 	cstreamPackage      = protogen.GoImportPath("github.com/bufbuild/connect/clientstream")
 	hstreamPackage      = protogen.GoImportPath("github.com/bufbuild/connect/handlerstream")
 )
@@ -215,8 +214,7 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	g.P("opts = append([]", clientOption, "{")
 	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("Name"), ", ",
 		connectProtoPackage.Ident("New"), "()),")
-	g.P(connectPackage.Ident("WithCompressor"), "(", connectGzipPackage.Ident("Name"), ", ",
-		connectGzipPackage.Ident("New"), "()),")
+	g.P(connectPackage.Ident("WithGzip"), "(),")
 	g.P("}, opts...)")
 	g.P("var (")
 	g.P("client ", names.ClientImpl)
@@ -409,7 +407,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 	g.P("opts = append([]", handlerOption, "{")
 	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("Name"), ", ", connectProtoPackage.Ident("New"), "()", "),")
 	g.P(connectPackage.Ident("WithCodec"), "(", connectJSONPackage.Ident("Name"), ", ", connectJSONPackage.Ident("New"), "()", "),")
-	g.P(connectPackage.Ident("WithCompressor"), "(", connectGzipPackage.Ident("Name"), ", ", connectGzipPackage.Ident("New"), "()", "),")
+	g.P(connectPackage.Ident("WithGzip"), "(),")
 	g.P("}, opts...)")
 	g.P()
 	for _, method := range service.Methods {

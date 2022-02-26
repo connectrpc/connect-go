@@ -32,7 +32,6 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/bufbuild/connect"
-	connectgzip "github.com/bufbuild/connect/compress/gzip"
 	"github.com/bufbuild/connect/handlerstream"
 	"github.com/bufbuild/connect/internal/assert"
 	crossrpc "github.com/bufbuild/connect/internal/crosstest/gen/proto/go-connect/cross/v1test"
@@ -451,7 +450,7 @@ func TestConnectServer(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(
 				server.URL,
 				server.Client(),
-				connect.WithRequestCompressor(connectgzip.Name),
+				connect.WithGzipRequests(),
 			)
 			assert.Nil(t, err, "client construction error")
 			testWithConnectClient(t, client)
@@ -529,7 +528,7 @@ func TestConnectServerH2C(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(
 				server.URL,
 				hclient,
-				connect.WithRequestCompressor(connectgzip.Name),
+				connect.WithGzipRequests(),
 			)
 			assert.Nil(t, err, "client construction error")
 			testWithConnectClient(t, client)
@@ -578,7 +577,7 @@ func TestGRPCServer(t *testing.T) {
 			client, err := crossrpc.NewCrossServiceClient(
 				url,
 				hclient,
-				connect.WithRequestCompressor(connectgzip.Name),
+				connect.WithGzipRequests(),
 			)
 			assert.Nil(t, err, "client construction error")
 			testWithConnectClient(t, client)
