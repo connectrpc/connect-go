@@ -13,7 +13,6 @@ import (
 	clientstream "github.com/bufbuild/connect/clientstream"
 	protobuf "github.com/bufbuild/connect/codec/protobuf"
 	protojson "github.com/bufbuild/connect/codec/protojson"
-	gzip "github.com/bufbuild/connect/compress/gzip"
 	handlerstream "github.com/bufbuild/connect/handlerstream"
 	v1alpha "github.com/bufbuild/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
 	http "net/http"
@@ -47,7 +46,7 @@ func NewServerReflectionClient(baseURL string, doer connect.Doer, opts ...connec
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
 		connect.WithCodec(protobuf.Name, protobuf.New()),
-		connect.WithCompressor(gzip.Name, gzip.New()),
+		connect.WithGzip(),
 	}, opts...)
 	var (
 		client serverReflectionClient
@@ -100,7 +99,7 @@ func NewServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.Han
 	opts = append([]connect.HandlerOption{
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCodec(protojson.Name, protojson.New()),
-		connect.WithCompressor(gzip.Name, gzip.New()),
+		connect.WithGzip(),
 	}, opts...)
 
 	serverReflectionInfo := connect.NewStreamHandler(

@@ -10,7 +10,6 @@ import (
 	"net/textproto"
 
 	"github.com/bufbuild/connect/codec"
-	"github.com/bufbuild/connect/compress"
 )
 
 const (
@@ -30,7 +29,7 @@ var (
 
 type marshaler struct {
 	writer     io.Writer
-	compressor compress.Compressor
+	compressor Compressor
 	codec      codec.Codec
 }
 
@@ -109,7 +108,7 @@ type unmarshaler struct {
 	reader     io.Reader
 	max        int64
 	codec      codec.Codec
-	compressor compress.Compressor
+	compressor Compressor
 
 	web        bool
 	webTrailer http.Header

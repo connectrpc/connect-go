@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/bufbuild/connect/codec"
-	"github.com/bufbuild/connect/compress"
 )
 
 type protocolGRPC struct {
@@ -95,10 +94,10 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 		r = r.WithContext(ctx)
 	} // else err == errNoTimeout, nothing to do
 
-	requestCompression := compress.NameIdentity
-	if msgEncoding := r.Header.Get("Grpc-Encoding"); msgEncoding != "" && msgEncoding != compress.NameIdentity {
+	requestCompression := compressIdentity
+	if msgEncoding := r.Header.Get("Grpc-Encoding"); msgEncoding != "" && msgEncoding != compressIdentity {
 		// We default to identity, so we only care if the client sends something
-		// other than the empty string or compress.NameIdentity.
+		// other than the empty string or compressIdentity.
 		if g.compressors.Contains(msgEncoding) {
 			requestCompression = msgEncoding
 		} else if failed == nil {
@@ -119,7 +118,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	responseCompression := requestCompression
 	// If we're not already planning to compress the response, check whether the
 	// client requested a compression algorithm we support.
-	if responseCompression == compress.NameIdentity {
+	if responseCompression == compressIdentity {
 		if acceptEncoding := r.Header.Get("Grpc-Accept-Encoding"); acceptEncoding != "" {
 			for _, name := range strings.FieldsFunc(acceptEncoding, isCommaOrSpace) {
 				if g.compressors.Contains(name) {
@@ -206,7 +205,7 @@ func (g *grpcClient) WriteRequestHeader(header http.Header) {
 	// checks in Header.Set.
 	header["User-Agent"] = userAgent
 	header["Content-Type"] = []string{contentTypeFromCodecName(g.web, g.codecName)}
-	if g.compressorName != "" && g.compressorName != compress.NameIdentity {
+	if g.compressorName != "" && g.compressorName != compressIdentity {
 		header["Grpc-Encoding"] = []string{g.compressorName}
 	}
 	if acceptCompression := g.compressors.CommaSeparatedNames(); acceptCompression != "" {

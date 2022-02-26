@@ -17,7 +17,6 @@ import (
 	grpcgzip "google.golang.org/grpc/encoding/gzip"
 
 	"github.com/bufbuild/connect"
-	connectgzip "github.com/bufbuild/connect/compress/gzip"
 	"github.com/bufbuild/connect/internal/assert"
 	crossrpc "github.com/bufbuild/connect/internal/crosstest/gen/proto/go-connect/cross/v1test"
 	crosspb "github.com/bufbuild/connect/internal/crosstest/gen/proto/go/cross/v1test"
@@ -39,7 +38,7 @@ func BenchmarkConnect(b *testing.B) {
 	client, err := crossrpc.NewCrossServiceClient(
 		server.URL,
 		server.Client(),
-		connect.WithRequestCompressor(connectgzip.Name),
+		connect.WithGzipRequests(),
 	)
 	assert.Nil(b, err, "client construction error")
 	b.ResetTimer()

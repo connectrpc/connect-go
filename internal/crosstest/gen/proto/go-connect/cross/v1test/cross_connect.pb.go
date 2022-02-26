@@ -13,7 +13,6 @@ import (
 	clientstream "github.com/bufbuild/connect/clientstream"
 	protobuf "github.com/bufbuild/connect/codec/protobuf"
 	protojson "github.com/bufbuild/connect/codec/protojson"
-	gzip "github.com/bufbuild/connect/compress/gzip"
 	handlerstream "github.com/bufbuild/connect/handlerstream"
 	v1test "github.com/bufbuild/connect/internal/crosstest/gen/proto/go/cross/v1test"
 	http "net/http"
@@ -47,7 +46,7 @@ func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cl
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
 		connect.WithCodec(protobuf.Name, protobuf.New()),
-		connect.WithCompressor(gzip.Name, gzip.New()),
+		connect.WithGzip(),
 	}, opts...)
 	var (
 		client crossServiceClient
@@ -180,7 +179,7 @@ func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpti
 	opts = append([]connect.HandlerOption{
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCodec(protojson.Name, protojson.New()),
-		connect.WithCompressor(gzip.Name, gzip.New()),
+		connect.WithGzip(),
 	}, opts...)
 
 	ping := connect.NewUnaryHandler(

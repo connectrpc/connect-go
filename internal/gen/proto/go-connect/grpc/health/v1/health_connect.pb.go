@@ -13,7 +13,6 @@ import (
 	clientstream "github.com/bufbuild/connect/clientstream"
 	protobuf "github.com/bufbuild/connect/codec/protobuf"
 	protojson "github.com/bufbuild/connect/codec/protojson"
-	gzip "github.com/bufbuild/connect/compress/gzip"
 	handlerstream "github.com/bufbuild/connect/handlerstream"
 	v1 "github.com/bufbuild/connect/internal/gen/proto/go/grpc/health/v1"
 	http "net/http"
@@ -61,7 +60,7 @@ func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOp
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
 		connect.WithCodec(protobuf.Name, protobuf.New()),
-		connect.WithCompressor(gzip.Name, gzip.New()),
+		connect.WithGzip(),
 	}, opts...)
 	var (
 		client healthClient
@@ -157,7 +156,7 @@ func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) (string,
 	opts = append([]connect.HandlerOption{
 		connect.WithCodec(protobuf.Name, protobuf.New()),
 		connect.WithCodec(protojson.Name, protojson.New()),
-		connect.WithCompressor(gzip.Name, gzip.New()),
+		connect.WithGzip(),
 	}, opts...)
 
 	check := connect.NewUnaryHandler(

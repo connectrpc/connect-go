@@ -14,7 +14,6 @@ import (
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/codec/protojson"
-	"github.com/bufbuild/connect/compress/gzip"
 	"github.com/bufbuild/connect/handlerstream"
 	"github.com/bufbuild/connect/health"
 	"github.com/bufbuild/connect/internal/assert"
@@ -355,13 +354,13 @@ func TestServerProtoGRPC(t *testing.T) {
 			run(t)
 		})
 		t.Run("gzip", func(t *testing.T) {
-			run(t, connect.WithRequestCompressor(gzip.Name))
+			run(t, connect.WithGzipRequests())
 		})
 		t.Run("json_gzip", func(t *testing.T) {
 			run(
 				t,
 				connect.WithCodec(protojson.Name, protojson.New()),
-				connect.WithRequestCompressor(gzip.Name),
+				connect.WithGzipRequests(),
 			)
 		})
 		t.Run("web", func(t *testing.T) {
@@ -372,7 +371,7 @@ func TestServerProtoGRPC(t *testing.T) {
 				t,
 				connect.WithGRPCWeb(),
 				connect.WithCodec(protojson.Name, protojson.New()),
-				connect.WithRequestCompressor(gzip.Name),
+				connect.WithGzipRequests(),
 			)
 		})
 	}

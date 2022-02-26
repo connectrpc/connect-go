@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/bufbuild/connect/codec"
-	"github.com/bufbuild/connect/compress"
 	statuspb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/status/v1"
 )
 
@@ -268,8 +267,8 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 		return
 	}
 	compression := res.Header.Get("Grpc-Encoding")
-	if compression == "" || compression == compress.NameIdentity {
-		compression = compress.NameIdentity
+	if compression == "" || compression == compressIdentity {
+		compression = compressIdentity
 	} else if !cs.compressors.Contains(compression) {
 		// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
 		// should return CodeInternal and specify acceptable compression(s) (in
