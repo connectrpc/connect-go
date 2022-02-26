@@ -41,7 +41,7 @@ type CrossServiceClient interface {
 func NewCrossServiceClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (CrossServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
-		connect.WithProtobuf(),
+		connect.WithProtobufCodec(),
 		connect.WithGzip(),
 	}, opts...)
 	var (
@@ -173,8 +173,8 @@ func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpti
 	var lastHandlerPath string
 	mux := http.NewServeMux()
 	opts = append([]connect.HandlerOption{
-		connect.WithProtobuf(),
-		connect.WithProtobufJSON(),
+		connect.WithProtobufCodec(),
+		connect.WithProtobufJSONCodec(),
 		connect.WithGzip(),
 	}, opts...)
 
