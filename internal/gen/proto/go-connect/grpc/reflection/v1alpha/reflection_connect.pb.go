@@ -10,8 +10,6 @@ import (
 	context "context"
 	errors "errors"
 	connect "github.com/bufbuild/connect"
-	clientstream "github.com/bufbuild/connect/clientstream"
-	handlerstream "github.com/bufbuild/connect/handlerstream"
 	v1alpha "github.com/bufbuild/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
 	http "net/http"
 	path "path"
@@ -31,7 +29,7 @@ const _ = connect.IsAtLeastVersion0_0_1
 type ServerReflectionClient interface {
 	// The reflection service is structured as a bidirectional stream, ensuring
 	// all related requests go to a single server.
-	ServerReflectionInfo(context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]
+	ServerReflectionInfo(context.Context) *connect.BidiStreamForClient[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]
 }
 
 // NewServerReflectionClient constructs a client for the
@@ -72,9 +70,9 @@ var _ ServerReflectionClient = (*serverReflectionClient)(nil) // verify interfac
 
 // ServerReflectionInfo calls
 // internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo.
-func (c *serverReflectionClient) ServerReflectionInfo(ctx context.Context) *clientstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
+func (c *serverReflectionClient) ServerReflectionInfo(ctx context.Context) *connect.BidiStreamForClient[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
 	sender, receiver := c.serverReflectionInfo(ctx)
-	return clientstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
+	return connect.NewBidiStreamForClient[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
 }
 
 // ServerReflectionHandler is an implementation of the
@@ -82,7 +80,7 @@ func (c *serverReflectionClient) ServerReflectionInfo(ctx context.Context) *clie
 type ServerReflectionHandler interface {
 	// The reflection service is structured as a bidirectional stream, ensuring
 	// all related requests go to a single server.
-	ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error
+	ServerReflectionInfo(context.Context, *connect.BidiStream[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error
 }
 
 // NewServerReflectionHandler builds an HTTP handler from the service
@@ -105,7 +103,7 @@ func NewServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.Han
 		"internal.reflection.v1alpha1.ServerReflection",                      // reflection name
 		connect.StreamTypeBidirectional,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
-			typed := handlerstream.NewBidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
+			typed := connect.NewBidiStream[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
 			err := svc.ServerReflectionInfo(ctx, typed)
 			_ = receiver.Close()
 			_ = sender.Close(err)
@@ -124,6 +122,6 @@ type UnimplementedServerReflectionHandler struct{}
 
 var _ ServerReflectionHandler = (*UnimplementedServerReflectionHandler)(nil) // verify interface implementation
 
-func (UnimplementedServerReflectionHandler) ServerReflectionInfo(context.Context, *handlerstream.Bidirectional[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error {
+func (UnimplementedServerReflectionHandler) ServerReflectionInfo(context.Context, *connect.BidiStream[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo isn't implemented"))
 }

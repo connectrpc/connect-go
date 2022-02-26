@@ -8,7 +8,6 @@ import (
 	"net/http"
 
 	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/handlerstream"
 	healthrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/grpc/health/v1"
 	healthpb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/health/v1"
 )
@@ -83,7 +82,7 @@ func (s *server) Check(ctx context.Context, req *connect.Envelope[healthpb.Healt
 func (s *server) Watch(
 	_ context.Context,
 	_ *connect.Envelope[healthpb.HealthCheckRequest],
-	_ *handlerstream.Server[healthpb.HealthCheckResponse],
+	_ *connect.ServerStream[healthpb.HealthCheckResponse],
 ) error {
 	return connect.NewError(
 		connect.CodeUnimplemented,

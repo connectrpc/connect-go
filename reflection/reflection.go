@@ -17,7 +17,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/handlerstream"
 	reflectionrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/grpc/reflection/v1alpha"
 	rpb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
 )
@@ -63,7 +62,7 @@ var _ reflectionrpc.ServerReflectionHandler = (*server)(nil)
 
 func (rs *server) ServerReflectionInfo(
 	ctx context.Context,
-	stream *handlerstream.Bidirectional[rpb.ServerReflectionRequest, rpb.ServerReflectionResponse],
+	stream *connect.BidiStream[rpb.ServerReflectionRequest, rpb.ServerReflectionResponse],
 ) error {
 	fileDescriptorsSent := &fileDescriptorNameSet{}
 	for {

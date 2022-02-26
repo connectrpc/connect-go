@@ -10,8 +10,6 @@ import (
 	context "context"
 	errors "errors"
 	connect "github.com/bufbuild/connect"
-	clientstream "github.com/bufbuild/connect/clientstream"
-	handlerstream "github.com/bufbuild/connect/handlerstream"
 	v1 "github.com/bufbuild/connect/internal/gen/proto/go/grpc/health/v1"
 	http "net/http"
 	path "path"
@@ -46,7 +44,7 @@ type HealthClient interface {
 	// should assume this method is not supported and should not retry the
 	// call.  If the call terminates with any other status (including OK),
 	// clients should retry the call with appropriate exponential backoff.
-	Watch(context.Context, *connect.Envelope[v1.HealthCheckRequest]) (*clientstream.Server[v1.HealthCheckResponse], error)
+	Watch(context.Context, *connect.Envelope[v1.HealthCheckRequest]) (*connect.ServerStreamForClient[v1.HealthCheckResponse], error)
 }
 
 // NewHealthClient constructs a client for the internal.health.v1.Health
@@ -100,7 +98,7 @@ func (c *healthClient) Check(ctx context.Context, req *connect.Envelope[v1.Healt
 }
 
 // Watch calls internal.health.v1.Health.Watch.
-func (c *healthClient) Watch(ctx context.Context, req *connect.Envelope[v1.HealthCheckRequest]) (*clientstream.Server[v1.HealthCheckResponse], error) {
+func (c *healthClient) Watch(ctx context.Context, req *connect.Envelope[v1.HealthCheckRequest]) (*connect.ServerStreamForClient[v1.HealthCheckResponse], error) {
 	sender, receiver := c.watch(ctx)
 	for key, values := range req.Header() {
 		sender.Header()[key] = append(sender.Header()[key], values...)
@@ -117,7 +115,7 @@ func (c *healthClient) Watch(ctx context.Context, req *connect.Envelope[v1.Healt
 		_ = receiver.Close()
 		return nil, err
 	}
-	return clientstream.NewServer[v1.HealthCheckResponse](receiver), nil
+	return connect.NewServerStreamForClient[v1.HealthCheckResponse](receiver), nil
 }
 
 // HealthHandler is an implementation of the internal.health.v1.Health service.
@@ -140,7 +138,7 @@ type HealthHandler interface {
 	// should assume this method is not supported and should not retry the
 	// call.  If the call terminates with any other status (including OK),
 	// clients should retry the call with appropriate exponential backoff.
-	Watch(context.Context, *connect.Envelope[v1.HealthCheckRequest], *handlerstream.Server[v1.HealthCheckResponse]) error
+	Watch(context.Context, *connect.Envelope[v1.HealthCheckRequest], *connect.ServerStream[v1.HealthCheckResponse]) error
 }
 
 // NewHealthHandler builds an HTTP handler from the service implementation. It
@@ -171,7 +169,7 @@ func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) (string,
 		"internal.health.v1.Health",       // reflection name
 		connect.StreamTypeServer,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
-			typed := handlerstream.NewServer[v1.HealthCheckResponse](sender)
+			typed := connect.NewServerStream[v1.HealthCheckResponse](sender)
 			req, err := connect.ReceiveUnaryEnvelope[v1.HealthCheckRequest](receiver)
 			if err != nil {
 				_ = receiver.Close()
@@ -202,6 +200,6 @@ func (UnimplementedHealthHandler) Check(context.Context, *connect.Envelope[v1.He
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.health.v1.Health.Check isn't implemented"))
 }
 
-func (UnimplementedHealthHandler) Watch(context.Context, *connect.Envelope[v1.HealthCheckRequest], *handlerstream.Server[v1.HealthCheckResponse]) error {
+func (UnimplementedHealthHandler) Watch(context.Context, *connect.Envelope[v1.HealthCheckRequest], *connect.ServerStream[v1.HealthCheckResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("internal.health.v1.Health.Watch isn't implemented"))
 }
