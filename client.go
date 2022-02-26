@@ -12,7 +12,6 @@ type clientConfiguration struct {
 	Interceptor       Interceptor
 	Compressors       map[string]Compressor
 	Codec             Codec
-	CodecName         string
 	RequestCompressor string
 }
 
@@ -32,7 +31,7 @@ func newClientConfiguration(procedure string, options []ClientOption) (*clientCo
 }
 
 func (c *clientConfiguration) Validate() *Error {
-	if c.Codec == nil || c.CodecName == "" {
+	if c.Codec == nil || c.Codec.Name() == "" {
 		return errorf(CodeUnknown, "no codec configured")
 	}
 	if c.RequestCompressor != "" && c.RequestCompressor != compressIdentity {
@@ -47,7 +46,7 @@ func (c *clientConfiguration) Validate() *Error {
 }
 
 func (c *clientConfiguration) Protobuf() Codec {
-	if c.CodecName == codecNameProtobuf {
+	if c.Codec.Name() == codecNameProtobuf {
 		return c.Codec
 	}
 	return &codecProtobufBinary{}
@@ -126,7 +125,6 @@ func NewStreamClientImplementation(
 		Spec:             config.newSpecification(stype),
 		CompressorName:   config.RequestCompressor,
 		Compressors:      newReadOnlyCompressors(config.Compressors),
-		CodecName:        config.CodecName,
 		Codec:            config.Codec,
 		Protobuf:         config.Protobuf(),
 		MaxResponseBytes: config.MaxResponseBytes,
@@ -168,7 +166,6 @@ func NewUnaryClientImplementation[Req, Res any](
 		Spec:             spec,
 		CompressorName:   config.RequestCompressor,
 		Compressors:      newReadOnlyCompressors(config.Compressors),
-		CodecName:        config.CodecName,
 		Codec:            config.Codec,
 		Protobuf:         config.Protobuf(),
 		MaxResponseBytes: config.MaxResponseBytes,

@@ -72,7 +72,6 @@ type protocolClientParams struct {
 	Spec             Specification
 	CompressorName   string
 	Compressors      readOnlyCompressors
-	CodecName        string
 	Codec            Codec
 	MaxResponseBytes int64
 	Doer             Doer

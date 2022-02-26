@@ -15,6 +15,7 @@ const (
 // A Codec can marshal structs (typically generated from a schema) to and from
 // bytes.
 type Codec interface {
+	Name() string
 	Marshal(any) ([]byte, error)
 	Unmarshal([]byte, any) error
 }
@@ -22,6 +23,8 @@ type Codec interface {
 type codecProtobufBinary struct{}
 
 var _ Codec = (*codecProtobufBinary)(nil)
+
+func (c *codecProtobufBinary) Name() string { return codecNameProtobuf }
 
 func (c *codecProtobufBinary) Marshal(message any) ([]byte, error) {
 	protoMessage, ok := message.(proto.Message)
@@ -46,7 +49,8 @@ type codecProtobufJSON struct {
 
 var _ Codec = (*codecProtobufJSON)(nil)
 
-// Marshal implements codec.Codec.
+func (c *codecProtobufJSON) Name() string { return codecNameJSON }
+
 func (c *codecProtobufJSON) Marshal(message any) ([]byte, error) {
 	protoMessage, ok := message.(proto.Message)
 	if !ok {
@@ -55,7 +59,6 @@ func (c *codecProtobufJSON) Marshal(message any) ([]byte, error) {
 	return c.marshalOptions.Marshal(protoMessage)
 }
 
-// Unmarshal implements codec.Codec.
 func (c *codecProtobufJSON) Unmarshal(bs []byte, message any) error {
 	protoMessage, ok := message.(proto.Message)
 	if !ok {
