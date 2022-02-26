@@ -19,11 +19,9 @@ const (
 
 	protoPackage = protogen.GoImportPath("google.golang.org/protobuf/proto")
 
-	connectPackage      = protogen.GoImportPath("github.com/bufbuild/connect")
-	connectProtoPackage = protogen.GoImportPath("github.com/bufbuild/connect/codec/protobuf")
-	connectJSONPackage  = protogen.GoImportPath("github.com/bufbuild/connect/codec/protojson")
-	cstreamPackage      = protogen.GoImportPath("github.com/bufbuild/connect/clientstream")
-	hstreamPackage      = protogen.GoImportPath("github.com/bufbuild/connect/handlerstream")
+	connectPackage = protogen.GoImportPath("github.com/bufbuild/connect")
+	cstreamPackage = protogen.GoImportPath("github.com/bufbuild/connect/clientstream")
+	hstreamPackage = protogen.GoImportPath("github.com/bufbuild/connect/handlerstream")
 )
 
 var (
@@ -212,8 +210,7 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		", opts ...", clientOption, ") (", names.Client, ", error) {")
 	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
 	g.P("opts = append([]", clientOption, "{")
-	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("Name"), ", ",
-		connectProtoPackage.Ident("New"), "()),")
+	g.P(connectPackage.Ident("WithProtobuf"), "(),")
 	g.P(connectPackage.Ident("WithGzip"), "(),")
 	g.P("}, opts...)")
 	g.P("var (")
@@ -405,8 +402,8 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 	g.P("var lastHandlerPath string")
 	g.P("mux := ", httpPackage.Ident("NewServeMux"), "()")
 	g.P("opts = append([]", handlerOption, "{")
-	g.P(connectPackage.Ident("WithCodec"), "(", connectProtoPackage.Ident("Name"), ", ", connectProtoPackage.Ident("New"), "()", "),")
-	g.P(connectPackage.Ident("WithCodec"), "(", connectJSONPackage.Ident("Name"), ", ", connectJSONPackage.Ident("New"), "()", "),")
+	g.P(connectPackage.Ident("WithProtobuf"), "(),")
+	g.P(connectPackage.Ident("WithProtobufJSON"), "(),")
 	g.P(connectPackage.Ident("WithGzip"), "(),")
 	g.P("}, opts...)")
 	g.P()

@@ -4,13 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-
-	"github.com/bufbuild/connect/codec"
 )
 
 type handlerConfiguration struct {
 	Compressors      map[string]Compressor
-	Codecs           map[string]codec.Codec
+	Codecs           map[string]Codec
 	MaxRequestBytes  int64
 	Registrar        *Registrar
 	Interceptor      Interceptor
@@ -25,7 +23,7 @@ func newHandlerConfiguration(procedure, registrationName string, options []Handl
 		Procedure:        procedure,
 		RegistrationName: registrationName,
 		Compressors:      make(map[string]Compressor),
-		Codecs:           make(map[string]codec.Codec),
+		Codecs:           make(map[string]Codec),
 		HandleGRPC:       true,
 		HandleGRPCWeb:    true,
 	}

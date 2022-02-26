@@ -3,8 +3,6 @@ package connect
 import (
 	"errors"
 	"net/http"
-
-	"github.com/bufbuild/connect/codec"
 )
 
 // Thankfully, the handler stream is much simpler than the client. net/http
@@ -16,8 +14,8 @@ func newHandlerStream(
 	w http.ResponseWriter,
 	r *http.Request,
 	maxReadBytes int64,
-	codec codec.Codec,
-	protobuf codec.Codec, // for errors
+	codec Codec,
+	protobuf Codec, // for errors
 	requestCompressor Compressor,
 	responseCompressor Compressor,
 ) (*handlerSender, *handlerReceiver) {
@@ -51,7 +49,7 @@ type handlerSender struct {
 	spec      Specification
 	web       bool
 	marshaler marshaler
-	protobuf  codec.Codec // for errors
+	protobuf  Codec // for errors
 	writer    http.ResponseWriter
 	trailer   http.Header
 }

@@ -11,8 +11,6 @@ import (
 	errors "errors"
 	connect "github.com/bufbuild/connect"
 	clientstream "github.com/bufbuild/connect/clientstream"
-	protobuf "github.com/bufbuild/connect/codec/protobuf"
-	protojson "github.com/bufbuild/connect/codec/protojson"
 	handlerstream "github.com/bufbuild/connect/handlerstream"
 	v1 "github.com/bufbuild/connect/internal/gen/proto/go/grpc/health/v1"
 	http "net/http"
@@ -59,7 +57,7 @@ type HealthClient interface {
 func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (HealthClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
-		connect.WithCodec(protobuf.Name, protobuf.New()),
+		connect.WithProtobuf(),
 		connect.WithGzip(),
 	}, opts...)
 	var (
@@ -154,8 +152,8 @@ func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) (string,
 	var lastHandlerPath string
 	mux := http.NewServeMux()
 	opts = append([]connect.HandlerOption{
-		connect.WithCodec(protobuf.Name, protobuf.New()),
-		connect.WithCodec(protojson.Name, protojson.New()),
+		connect.WithProtobuf(),
+		connect.WithProtobufJSON(),
 		connect.WithGzip(),
 	}, opts...)
 

@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/codec/protobuf"
 	"github.com/bufbuild/connect/health"
 	"github.com/bufbuild/connect/internal/assert"
 	pingrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/connect/ping/v1test"
@@ -44,7 +43,7 @@ func TestReflection(t *testing.T) {
 		server.Client(),
 		server.URL,
 		"grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
-		connect.WithCodec(protobuf.Name, protobuf.New()),
+		connect.WithProtobuf(),
 	)
 	assert.Nil(t, err, "client construction error")
 	call := func(req *reflectionpb.ServerReflectionRequest) (*reflectionpb.ServerReflectionResponse, error) {

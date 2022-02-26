@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bufbuild/connect/codec"
 	statuspb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/status/v1"
 )
 
@@ -56,8 +55,8 @@ type duplexClientStream struct {
 	url          string
 	spec         Specification
 	maxReadBytes int64
-	codec        codec.Codec
-	protobuf     codec.Codec // for errors
+	codec        Codec
+	protobuf     Codec // for errors
 
 	// send: guarded by prepareOnce because we can't initialize this state until
 	// the first call to Send.
@@ -330,7 +329,7 @@ func (cs *duplexClientStream) getResponseError() error {
 // binary protobuf format, even if the messages in the request/response stream
 // use a different codec. Consequently, this function needs a protobuf codec to
 // unmarshal error information in the headers.
-func extractError(protobuf codec.Codec, trailer http.Header) *Error {
+func extractError(protobuf Codec, trailer http.Header) *Error {
 	codeHeader := trailer.Get("Grpc-Status")
 	if codeHeader == "" || codeHeader == "0" {
 		return nil
