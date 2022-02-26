@@ -20,13 +20,13 @@ type Codec interface {
 	Unmarshal([]byte, any) error
 }
 
-type codecProtobufBinary struct{}
+type protobufBinaryCodec struct{}
 
-var _ Codec = (*codecProtobufBinary)(nil)
+var _ Codec = (*protobufBinaryCodec)(nil)
 
-func (c *codecProtobufBinary) Name() string { return codecNameProtobuf }
+func (c *protobufBinaryCodec) Name() string { return codecNameProtobuf }
 
-func (c *codecProtobufBinary) Marshal(message any) ([]byte, error) {
+func (c *protobufBinaryCodec) Marshal(message any) ([]byte, error) {
 	protoMessage, ok := message.(proto.Message)
 	if !ok {
 		return nil, errNotProtobuf(message)
@@ -34,7 +34,7 @@ func (c *codecProtobufBinary) Marshal(message any) ([]byte, error) {
 	return proto.Marshal(protoMessage)
 }
 
-func (c *codecProtobufBinary) Unmarshal(bs []byte, message any) error {
+func (c *protobufBinaryCodec) Unmarshal(bs []byte, message any) error {
 	protoMessage, ok := message.(proto.Message)
 	if !ok {
 		return errNotProtobuf(message)
@@ -42,16 +42,16 @@ func (c *codecProtobufBinary) Unmarshal(bs []byte, message any) error {
 	return proto.Unmarshal(bs, protoMessage)
 }
 
-type codecProtobufJSON struct {
+type protobufJSONCodec struct {
 	marshalOptions   protojson.MarshalOptions
 	unmarshalOptions protojson.UnmarshalOptions
 }
 
-var _ Codec = (*codecProtobufJSON)(nil)
+var _ Codec = (*protobufJSONCodec)(nil)
 
-func (c *codecProtobufJSON) Name() string { return codecNameJSON }
+func (c *protobufJSONCodec) Name() string { return codecNameJSON }
 
-func (c *codecProtobufJSON) Marshal(message any) ([]byte, error) {
+func (c *protobufJSONCodec) Marshal(message any) ([]byte, error) {
 	protoMessage, ok := message.(proto.Message)
 	if !ok {
 		return nil, errNotProtobuf(message)
@@ -59,7 +59,7 @@ func (c *codecProtobufJSON) Marshal(message any) ([]byte, error) {
 	return c.marshalOptions.Marshal(protoMessage)
 }
 
-func (c *codecProtobufJSON) Unmarshal(bs []byte, message any) error {
+func (c *protobufJSONCodec) Unmarshal(bs []byte, message any) error {
 	protoMessage, ok := message.(proto.Message)
 	if !ok {
 		return errNotProtobuf(message)
@@ -101,7 +101,7 @@ func (m *codecMap) Protobuf() Codec {
 	if pb, ok := m.codecs[codecNameProtobuf]; ok {
 		return pb
 	}
-	return &codecProtobufBinary{}
+	return &protobufBinaryCodec{}
 }
 
 // Names returns a copy of the registered codec names. The returned slice is

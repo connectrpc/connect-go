@@ -357,7 +357,7 @@ func TestServerProtoGRPC(t *testing.T) {
 		t.Run("json_gzip", func(t *testing.T) {
 			run(
 				t,
-				connect.WithProtobufJSON(),
+				connect.WithProtobufJSONCodec(),
 				connect.WithGzipRequests(),
 			)
 		})
@@ -368,7 +368,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			run(
 				t,
 				connect.WithGRPCWeb(),
-				connect.WithProtobufJSON(),
+				connect.WithProtobufJSONCodec(),
 				connect.WithGzipRequests(),
 			)
 		})

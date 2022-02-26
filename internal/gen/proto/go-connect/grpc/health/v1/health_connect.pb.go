@@ -55,7 +55,7 @@ type HealthClient interface {
 func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (HealthClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
-		connect.WithProtobuf(),
+		connect.WithProtobufCodec(),
 		connect.WithGzip(),
 	}, opts...)
 	var (
@@ -150,8 +150,8 @@ func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) (string,
 	var lastHandlerPath string
 	mux := http.NewServeMux()
 	opts = append([]connect.HandlerOption{
-		connect.WithProtobuf(),
-		connect.WithProtobufJSON(),
+		connect.WithProtobufCodec(),
+		connect.WithProtobufJSONCodec(),
 		connect.WithGzip(),
 	}, opts...)
 

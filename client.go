@@ -49,7 +49,7 @@ func (c *clientConfiguration) Protobuf() Codec {
 	if c.Codec.Name() == codecNameProtobuf {
 		return c.Codec
 	}
-	return &codecProtobufBinary{}
+	return &protobufBinaryCodec{}
 }
 
 func (c *clientConfiguration) newSpecification(t StreamType) Specification {
