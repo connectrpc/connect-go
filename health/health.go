@@ -23,9 +23,15 @@ import (
 type Status int32
 
 const (
-	StatusUnknown    Status = 0 // health state indeterminate
-	StatusServing    Status = 1 // ready to accept requests
-	StatusNotServing Status = 2 // process healthy but service not accepting requests
+	// StatusUnknown indicates that the service's health state is indeterminate.
+	StatusUnknown Status = 0
+
+	// StatusServing indicates that the service is ready to accept requests.
+	StatusServing Status = 1
+
+	// StatusNotServing indicates that the process is healthy but the service is
+	// not accepting requests.
+	StatusNotServing Status = 2
 )
 
 // A Registrar checks whether a fully-qualified protobuf service name (e.g.,
