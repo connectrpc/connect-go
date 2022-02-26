@@ -48,7 +48,7 @@ type PingServiceClient interface {
 func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (PingServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
-		connect.WithProtobufCodec(),
+		connect.WithProtoBinaryCodec(),
 		connect.WithGzip(),
 	}, opts...)
 	var (
@@ -184,8 +184,8 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption
 	var lastHandlerPath string
 	mux := http.NewServeMux()
 	opts = append([]connect.HandlerOption{
-		connect.WithProtobufCodec(),
-		connect.WithProtobufJSONCodec(),
+		connect.WithProtoBinaryCodec(),
+		connect.WithProtoJSONCodec(),
 		connect.WithGzip(),
 	}, opts...)
 

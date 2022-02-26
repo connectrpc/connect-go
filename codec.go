@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	codecNameProtobuf = "protobuf"
-	codecNameJSON     = "json"
+	codecNameProto = "proto"
+	codecNameJSON  = "json"
 )
 
 // A Codec can marshal structs (typically generated from a schema) to and from
@@ -20,54 +20,54 @@ type Codec interface {
 	Unmarshal([]byte, any) error
 }
 
-type protobufBinaryCodec struct{}
+type protoBinaryCodec struct{}
 
-var _ Codec = (*protobufBinaryCodec)(nil)
+var _ Codec = (*protoBinaryCodec)(nil)
 
-func (c *protobufBinaryCodec) Name() string { return codecNameProtobuf }
+func (c *protoBinaryCodec) Name() string { return codecNameProto }
 
-func (c *protobufBinaryCodec) Marshal(message any) ([]byte, error) {
+func (c *protoBinaryCodec) Marshal(message any) ([]byte, error) {
 	protoMessage, ok := message.(proto.Message)
 	if !ok {
-		return nil, errNotProtobuf(message)
+		return nil, errNotProto(message)
 	}
 	return proto.Marshal(protoMessage)
 }
 
-func (c *protobufBinaryCodec) Unmarshal(bs []byte, message any) error {
+func (c *protoBinaryCodec) Unmarshal(bs []byte, message any) error {
 	protoMessage, ok := message.(proto.Message)
 	if !ok {
-		return errNotProtobuf(message)
+		return errNotProto(message)
 	}
 	return proto.Unmarshal(bs, protoMessage)
 }
 
-type protobufJSONCodec struct {
+type protoJSONCodec struct {
 	marshalOptions   protojson.MarshalOptions
 	unmarshalOptions protojson.UnmarshalOptions
 }
 
-var _ Codec = (*protobufJSONCodec)(nil)
+var _ Codec = (*protoJSONCodec)(nil)
 
-func (c *protobufJSONCodec) Name() string { return codecNameJSON }
+func (c *protoJSONCodec) Name() string { return codecNameJSON }
 
-func (c *protobufJSONCodec) Marshal(message any) ([]byte, error) {
+func (c *protoJSONCodec) Marshal(message any) ([]byte, error) {
 	protoMessage, ok := message.(proto.Message)
 	if !ok {
-		return nil, errNotProtobuf(message)
+		return nil, errNotProto(message)
 	}
 	return c.marshalOptions.Marshal(protoMessage)
 }
 
-func (c *protobufJSONCodec) Unmarshal(bs []byte, message any) error {
+func (c *protoJSONCodec) Unmarshal(bs []byte, message any) error {
 	protoMessage, ok := message.(proto.Message)
 	if !ok {
-		return errNotProtobuf(message)
+		return errNotProto(message)
 	}
 	return c.unmarshalOptions.Unmarshal(bs, protoMessage)
 }
 
-func errNotProtobuf(m any) error {
+func errNotProto(m any) error {
 	return fmt.Errorf("%T doesn't implement proto.Message", m)
 }
 
@@ -98,10 +98,10 @@ func (m *codecMap) Get(name string) Codec {
 // marshaling protobuf structs to binary even if the RPC procedures were
 // generated from a different IDL.
 func (m *codecMap) Protobuf() Codec {
-	if pb, ok := m.codecs[codecNameProtobuf]; ok {
+	if pb, ok := m.codecs[codecNameProto]; ok {
 		return pb
 	}
-	return &protobufBinaryCodec{}
+	return &protoBinaryCodec{}
 }
 
 // Names returns a copy of the registered codec names. The returned slice is
