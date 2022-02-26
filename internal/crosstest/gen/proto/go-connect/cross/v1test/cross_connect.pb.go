@@ -10,8 +10,6 @@ import (
 	context "context"
 	errors "errors"
 	connect "github.com/bufbuild/connect"
-	clientstream "github.com/bufbuild/connect/clientstream"
-	handlerstream "github.com/bufbuild/connect/handlerstream"
 	v1test "github.com/bufbuild/connect/internal/crosstest/gen/proto/go/cross/v1test"
 	http "net/http"
 	path "path"
@@ -30,9 +28,9 @@ const _ = connect.IsAtLeastVersion0_0_1
 type CrossServiceClient interface {
 	Ping(context.Context, *connect.Envelope[v1test.PingRequest]) (*connect.Envelope[v1test.PingResponse], error)
 	Fail(context.Context, *connect.Envelope[v1test.FailRequest]) (*connect.Envelope[v1test.FailResponse], error)
-	Sum(context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse]
-	CountUp(context.Context, *connect.Envelope[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error)
-	CumSum(context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]
+	Sum(context.Context) *connect.ClientStreamForClient[v1test.SumRequest, v1test.SumResponse]
+	CountUp(context.Context, *connect.Envelope[v1test.CountUpRequest]) (*connect.ServerStreamForClient[v1test.CountUpResponse], error)
+	CumSum(context.Context) *connect.BidiStreamForClient[v1test.CumSumRequest, v1test.CumSumResponse]
 }
 
 // NewCrossServiceClient constructs a client for the cross.v1test.CrossService
@@ -123,13 +121,13 @@ func (c *crossServiceClient) Fail(ctx context.Context, req *connect.Envelope[v1t
 }
 
 // Sum calls cross.v1test.CrossService.Sum.
-func (c *crossServiceClient) Sum(ctx context.Context) *clientstream.Client[v1test.SumRequest, v1test.SumResponse] {
+func (c *crossServiceClient) Sum(ctx context.Context) *connect.ClientStreamForClient[v1test.SumRequest, v1test.SumResponse] {
 	sender, receiver := c.sum(ctx)
-	return clientstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
+	return connect.NewClientStreamForClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 }
 
 // CountUp calls cross.v1test.CrossService.CountUp.
-func (c *crossServiceClient) CountUp(ctx context.Context, req *connect.Envelope[v1test.CountUpRequest]) (*clientstream.Server[v1test.CountUpResponse], error) {
+func (c *crossServiceClient) CountUp(ctx context.Context, req *connect.Envelope[v1test.CountUpRequest]) (*connect.ServerStreamForClient[v1test.CountUpResponse], error) {
 	sender, receiver := c.countUp(ctx)
 	for key, values := range req.Header() {
 		sender.Header()[key] = append(sender.Header()[key], values...)
@@ -146,13 +144,13 @@ func (c *crossServiceClient) CountUp(ctx context.Context, req *connect.Envelope[
 		_ = receiver.Close()
 		return nil, err
 	}
-	return clientstream.NewServer[v1test.CountUpResponse](receiver), nil
+	return connect.NewServerStreamForClient[v1test.CountUpResponse](receiver), nil
 }
 
 // CumSum calls cross.v1test.CrossService.CumSum.
-func (c *crossServiceClient) CumSum(ctx context.Context) *clientstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse] {
+func (c *crossServiceClient) CumSum(ctx context.Context) *connect.BidiStreamForClient[v1test.CumSumRequest, v1test.CumSumResponse] {
 	sender, receiver := c.cumSum(ctx)
-	return clientstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
+	return connect.NewBidiStreamForClient[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 }
 
 // CrossServiceHandler is an implementation of the cross.v1test.CrossService
@@ -160,9 +158,9 @@ func (c *crossServiceClient) CumSum(ctx context.Context) *clientstream.Bidirecti
 type CrossServiceHandler interface {
 	Ping(context.Context, *connect.Envelope[v1test.PingRequest]) (*connect.Envelope[v1test.PingResponse], error)
 	Fail(context.Context, *connect.Envelope[v1test.FailRequest]) (*connect.Envelope[v1test.FailResponse], error)
-	Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error
-	CountUp(context.Context, *connect.Envelope[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error
-	CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error
+	Sum(context.Context, *connect.ClientStream[v1test.SumRequest, v1test.SumResponse]) error
+	CountUp(context.Context, *connect.Envelope[v1test.CountUpRequest], *connect.ServerStream[v1test.CountUpResponse]) error
+	CumSum(context.Context, *connect.BidiStream[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
 
 // NewCrossServiceHandler builds an HTTP handler from the service
@@ -203,7 +201,7 @@ func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpti
 		"cross.v1test.CrossService",     // reflection name
 		connect.StreamTypeClient,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
-			typed := handlerstream.NewClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
+			typed := connect.NewClientStream[v1test.SumRequest, v1test.SumResponse](sender, receiver)
 			err := svc.Sum(ctx, typed)
 			_ = receiver.Close()
 			_ = sender.Close(err)
@@ -218,7 +216,7 @@ func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpti
 		"cross.v1test.CrossService",         // reflection name
 		connect.StreamTypeServer,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
-			typed := handlerstream.NewServer[v1test.CountUpResponse](sender)
+			typed := connect.NewServerStream[v1test.CountUpResponse](sender)
 			req, err := connect.ReceiveUnaryEnvelope[v1test.CountUpRequest](receiver)
 			if err != nil {
 				_ = receiver.Close()
@@ -242,7 +240,7 @@ func NewCrossServiceHandler(svc CrossServiceHandler, opts ...connect.HandlerOpti
 		"cross.v1test.CrossService",        // reflection name
 		connect.StreamTypeBidirectional,
 		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
-			typed := handlerstream.NewBidirectional[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
+			typed := connect.NewBidiStream[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 			err := svc.CumSum(ctx, typed)
 			_ = receiver.Close()
 			_ = sender.Close(err)
@@ -268,14 +266,14 @@ func (UnimplementedCrossServiceHandler) Fail(context.Context, *connect.Envelope[
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cross.v1test.CrossService.Fail isn't implemented"))
 }
 
-func (UnimplementedCrossServiceHandler) Sum(context.Context, *handlerstream.Client[v1test.SumRequest, v1test.SumResponse]) error {
+func (UnimplementedCrossServiceHandler) Sum(context.Context, *connect.ClientStream[v1test.SumRequest, v1test.SumResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("cross.v1test.CrossService.Sum isn't implemented"))
 }
 
-func (UnimplementedCrossServiceHandler) CountUp(context.Context, *connect.Envelope[v1test.CountUpRequest], *handlerstream.Server[v1test.CountUpResponse]) error {
+func (UnimplementedCrossServiceHandler) CountUp(context.Context, *connect.Envelope[v1test.CountUpRequest], *connect.ServerStream[v1test.CountUpResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("cross.v1test.CrossService.CountUp isn't implemented"))
 }
 
-func (UnimplementedCrossServiceHandler) CumSum(context.Context, *handlerstream.Bidirectional[v1test.CumSumRequest, v1test.CumSumResponse]) error {
+func (UnimplementedCrossServiceHandler) CumSum(context.Context, *connect.BidiStream[v1test.CumSumRequest, v1test.CumSumResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("cross.v1test.CrossService.CumSum isn't implemented"))
 }

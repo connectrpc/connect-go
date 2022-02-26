@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/handlerstream"
 	"github.com/bufbuild/connect/health"
 	"github.com/bufbuild/connect/internal/assert"
 	pingrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/connect/ping/v1test"
@@ -89,7 +88,7 @@ func (p pingServer) Fail(ctx context.Context, req *connect.Envelope[pingpb.FailR
 
 func (p pingServer) Sum(
 	ctx context.Context,
-	stream *handlerstream.Client[pingpb.SumRequest, pingpb.SumResponse],
+	stream *connect.ClientStream[pingpb.SumRequest, pingpb.SumResponse],
 ) error {
 	if p.checkMetadata {
 		if err := expectMetadata(stream.RequestHeader(), "header", clientHeader, headerValue); err != nil {
@@ -117,7 +116,7 @@ func (p pingServer) Sum(
 func (p pingServer) CountUp(
 	ctx context.Context,
 	req *connect.Envelope[pingpb.CountUpRequest],
-	stream *handlerstream.Server[pingpb.CountUpResponse],
+	stream *connect.ServerStream[pingpb.CountUpResponse],
 ) error {
 	if err := expectClientHeaderAndTrailer(p.checkMetadata, req); err != nil {
 		return err
@@ -143,7 +142,7 @@ func (p pingServer) CountUp(
 
 func (p pingServer) CumSum(
 	ctx context.Context,
-	stream *handlerstream.Bidirectional[pingpb.CumSumRequest, pingpb.CumSumResponse],
+	stream *connect.BidiStream[pingpb.CumSumRequest, pingpb.CumSumResponse],
 ) error {
 	var sum int64
 	if p.checkMetadata {

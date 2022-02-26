@@ -32,7 +32,6 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/handlerstream"
 	"github.com/bufbuild/connect/internal/assert"
 	crossrpc "github.com/bufbuild/connect/internal/crosstest/gen/proto/go-connect/cross/v1test"
 	crosspb "github.com/bufbuild/connect/internal/crosstest/gen/proto/go/cross/v1test"
@@ -73,7 +72,7 @@ func (c crossServerConnect) Fail(ctx context.Context, req *connect.Envelope[cros
 
 func (c crossServerConnect) Sum(
 	ctx context.Context,
-	stream *handlerstream.Client[crosspb.SumRequest, crosspb.SumResponse],
+	stream *connect.ClientStream[crosspb.SumRequest, crosspb.SumResponse],
 ) error {
 	var sum int64
 	for {
@@ -95,7 +94,7 @@ func (c crossServerConnect) Sum(
 func (c crossServerConnect) CountUp(
 	ctx context.Context,
 	req *connect.Envelope[crosspb.CountUpRequest],
-	stream *handlerstream.Server[crosspb.CountUpResponse],
+	stream *connect.ServerStream[crosspb.CountUpResponse],
 ) error {
 	if req.Msg.Number <= 0 {
 		return connect.NewError(
@@ -116,7 +115,7 @@ func (c crossServerConnect) CountUp(
 
 func (c crossServerConnect) CumSum(
 	ctx context.Context,
-	stream *handlerstream.Bidirectional[crosspb.CumSumRequest, crosspb.CumSumResponse],
+	stream *connect.BidiStream[crosspb.CumSumRequest, crosspb.CumSumResponse],
 ) error {
 	var sum int64
 	for {
