@@ -28,6 +28,7 @@ const (
 	clientTrailer  = "Connect-Client-Trailer"
 	handlerHeader  = "Connect-Handler-Header"
 	handlerTrailer = "Connect-Handler-Trailer"
+
 	errorMessage = "oh no"
 )
 
