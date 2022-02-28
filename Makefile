@@ -19,19 +19,12 @@ help: ## Describe useful make targets
 clean: ## Delete build output
 	rm -f bin/{buf,gofmt,goimports,staticcheck,protoc-gen-*}
 	rm -f .faux.pb
-	rm -rf internal/gen/proto internal/crosstest/gen/proto
+	rm -rf internal/gen/proto
 	touch $(PROTOBUFS)
 
 .PHONY: test
 test: gen $(HANDWRITTEN) ## Run unit tests
 	@$(GO) test -vet=off -race -cover ./...
-	@cd internal/crosstest && $(GO) test -vet=off -race ./...
-
-.PHONY: bench
-BENCH ?= .
-bench: gen $(HANDWRITTEN) ## Run benchmarks
-	@$(GO) version
-	@cd internal/crosstest && $(GO) test -vet=off -bench=$(BENCH) $(BENCHFLAGS) -run="^$$" .
 
 .PHONY: lint
 lint: lintpb bin/gofmt bin/goimports bin/staticcheck ## Lint Go and protobuf
@@ -52,10 +45,9 @@ lintfix: bin/gofmt bin/goimports ## Automatically fix some lint errors
 	@./bin/goimports -w $(HANDWRITTEN)
 
 .PHONY: lintpb
-lintpb: bin/buf internal/proto/buf.yaml internal/crosstest/proto/buf.yaml $(PROTOBUFS)
+lintpb: bin/buf internal/proto/buf.yaml $(PROTOBUFS)
 	@echo "Checking with buf lint..."
 	@./bin/buf lint
-	@cd internal/crosstest && ../../bin/buf lint
 
 .PHONY: cover
 cover: cover.out ## Browse coverage for the main package
@@ -67,29 +59,25 @@ cover.out: gen $(HANDWRITTEN)
 .PHONY: gen
 gen: .faux.pb ## Regenerate code
 
-.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go bin/protoc-gen-go-grpc bin/protoc-gen-connect-go buf.work.yaml buf.gen.yaml internal/proto/buf.yaml internal/crosstest/buf.work.yaml internal/crosstest/buf.gen.yaml internal/crosstest/proto/buf.yaml
+.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go bin/protoc-gen-go-grpc bin/protoc-gen-connect-go buf.work.yaml buf.gen.yaml internal/proto/buf.yaml
 	./bin/buf generate
-	cd internal/crosstest && ../../bin/buf generate
 	touch $(@)
 
-bin/protoc-gen-go: internal/crosstest/go.mod
-	cd internal/crosstest && GOBIN=$(PWD)/bin $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go
-
-bin/protoc-gen-go-grpc: internal/crosstest/go.mod
-	cd internal/crosstest && GOBIN=$(PWD)/bin $(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc
+bin/protoc-gen-go: go.mod
+	GOBIN=$(PWD)/bin $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go
 
 bin/protoc-gen-connect-go: $(shell ls cmd/protoc-gen-connect-go/*.go) go.mod
 	$(GO) build -o $(@) ./cmd/protoc-gen-connect-go
 
-bin/buf: internal/crosstest/go.mod
-	cd internal/crosstest && GOBIN=$(PWD)/bin $(GO) install github.com/bufbuild/buf/cmd/buf
+bin/buf: go.mod
+	GOBIN=$(PWD)/bin $(GO) install github.com/bufbuild/buf/cmd/buf
 
 bin/gofmt:
 	$(GO) build -o $(@) cmd/gofmt
 
-bin/goimports: internal/crosstest/go.mod
-	cd internal/crosstest && GOBIN=$(PWD)/bin $(GO) install golang.org/x/tools/cmd/goimports
+bin/goimports: go.mod
+	GOBIN=$(PWD)/bin $(GO) install golang.org/x/tools/cmd/goimports
 
-bin/staticcheck: internal/crosstest/go.mod
-	cd internal/crosstest && GOBIN=$(PWD)/bin $(GO) install honnef.co/go/tools/cmd/staticcheck
+bin/staticcheck: go.mod
+	GOBIN=$(PWD)/bin $(GO) install honnef.co/go/tools/cmd/staticcheck
 
