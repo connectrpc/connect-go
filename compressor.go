@@ -3,7 +3,6 @@ package connect
 import (
 	"bytes"
 	"compress/gzip"
-	_ "embed"
 	"io"
 	"strings"
 	"sync"
@@ -16,8 +15,23 @@ const (
 
 const oneKiB = 1024
 
-//go:embed empty.gz
-var emptyGzipBytes []byte
+// To reset gzip readers when returning them to a sync.Pool, we need a source
+// of valid gzipped data. Gzip files begin with a 10-byte header, which is
+// simple enough to write in a literal - no need to go:embed a file.
+var emptyGzipBytes = []byte{
+	// Magic number, identifies file type.
+	0x1f, 0x8b,
+	// Compression method. 0-7 reserved, 8 deflate.
+	8,
+	// File flags.
+	0,
+	// 32-bit timestamp.
+	0, 0, 0, 0,
+	// Compression flags.
+	0,
+	// Operating system ID, 3 is Unix.
+	3,
+}
 
 // A Compressor provides compressing readers and writers. The interface is
 // designed to let implementations use a sync.Pool.
@@ -80,7 +94,9 @@ func (c *gzipCompressor) PutReader(r io.ReadCloser) {
 	if err := gzipReader.Close(); err != nil { // close if we haven't already
 		return
 	}
-	gzipReader.Reset(bytes.NewReader(emptyGzipBytes)) // don't keep references
+	if err := gzipReader.Reset(bytes.NewReader(emptyGzipBytes)); err != nil { // don't keep references
+		return
+	}
 	c.readers.Put(gzipReader)
 }
 
