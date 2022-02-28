@@ -8,7 +8,7 @@ import (
 	"net/http"
 
 	"github.com/bufbuild/connect"
-	healthrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/grpc/health/v1"
+	healthrpc "github.com/bufbuild/connect/internal/gen/proto/connect/grpc/health/v1"
 	healthpb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/health/v1"
 )
 
