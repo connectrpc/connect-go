@@ -18,7 +18,7 @@ import (
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/internal/assert"
-	crossrpc "github.com/bufbuild/connect/internal/crosstest/gen/proto/go-connect/cross/v1test"
+	crossrpc "github.com/bufbuild/connect/internal/crosstest/gen/proto/connect/cross/v1test"
 	crosspb "github.com/bufbuild/connect/internal/crosstest/gen/proto/go/cross/v1test"
 )
 

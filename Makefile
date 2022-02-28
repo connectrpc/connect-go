@@ -67,7 +67,7 @@ cover.out: gen $(HANDWRITTEN)
 .PHONY: gen
 gen: .faux.pb ## Regenerate code
 
-.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go bin/protoc-gen-go-grpc bin/protoc-gen-go-connect buf.work.yaml buf.gen.yaml internal/proto/buf.yaml internal/crosstest/buf.work.yaml internal/crosstest/buf.gen.yaml internal/crosstest/proto/buf.yaml
+.faux.pb: $(PROTOBUFS) bin/buf bin/protoc-gen-go bin/protoc-gen-go-grpc bin/protoc-gen-connect-go buf.work.yaml buf.gen.yaml internal/proto/buf.yaml internal/crosstest/buf.work.yaml internal/crosstest/buf.gen.yaml internal/crosstest/proto/buf.yaml
 	./bin/buf generate
 	cd internal/crosstest && ../../bin/buf generate
 	touch $(@)
@@ -78,8 +78,8 @@ bin/protoc-gen-go: internal/crosstest/go.mod
 bin/protoc-gen-go-grpc: internal/crosstest/go.mod
 	cd internal/crosstest && GOBIN=$(PWD)/bin $(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc
 
-bin/protoc-gen-go-connect: $(shell ls cmd/protoc-gen-go-connect/*.go) go.mod
-	$(GO) build -o $(@) ./cmd/protoc-gen-go-connect
+bin/protoc-gen-connect-go: $(shell ls cmd/protoc-gen-connect-go/*.go) go.mod
+	$(GO) build -o $(@) ./cmd/protoc-gen-connect-go
 
 bin/buf: internal/crosstest/go.mod
 	cd internal/crosstest && GOBIN=$(PWD)/bin $(GO) install github.com/bufbuild/buf/cmd/buf

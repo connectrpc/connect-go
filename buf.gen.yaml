@@ -8,8 +8,8 @@ plugins:
     out: internal/gen/proto/go
     opt: paths=source_relative
     path: ./bin/protoc-gen-go
-  - name: go-connect
-    out: internal/gen/proto/go-connect
+  - name: connect-go
+    out: internal/gen/proto/connect
     opt:
       - paths=source_relative
-    path: ./bin/protoc-gen-go-connect
+    path: ./bin/protoc-gen-connect-go
