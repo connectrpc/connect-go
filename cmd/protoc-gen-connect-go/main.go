@@ -17,6 +17,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/types/pluginpb"
@@ -24,16 +25,15 @@ import (
 	"github.com/bufbuild/connect"
 )
 
-var version = flag.Bool("version", false, "Print the version and exit.")
-
 func main() {
-	flag.Parse()
+	flagSet := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	version := flagSet.Bool("version", false, "Print the version and exit.")
+	flagSet.Parse(os.Args[1:])
 	if *version {
-		fmt.Printf("protoc-gen-connect-go %s\n", connect.Version)
+		fmt.Printf("%s %s\n", os.Args[0], connect.Version)
 		return
 	}
-	var flags flag.FlagSet
-	protogen.Options{ParamFunc: flags.Set}.Run(
+	protogen.Options{}.Run(
 		func(plugin *protogen.Plugin) error {
 			plugin.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL)
 			for _, f := range plugin.Files {
