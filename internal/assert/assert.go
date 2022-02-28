@@ -1,3 +1,6 @@
+// Package assert is a minimal assert package using generics.
+//
+// This prevents connect from needing additional dependencies.
 package assert
 
 import (
@@ -11,59 +14,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/protobuf/testing/protocmp"
 )
-
-type params struct {
-	got, want any
-	cmpOpts   []cmp.Option // user-supplied equality configuration
-	message   string       // user-supplied description of failure
-	printDiff bool         // include diff in failure output
-}
-
-func newParams(got, want any, message string, opts ...Option) *params {
-	p := &params{
-		got:     got,
-		want:    want,
-		cmpOpts: []cmp.Option{protocmp.Transform()},
-		message: message,
-	}
-	for _, opt := range opts {
-		opt.apply(p)
-	}
-	if p.got == nil || p.want == nil {
-		// diff panics on nil
-		p.printDiff = false
-	}
-	return p
-}
-
-// An Option modifies assertions.
-type Option interface {
-	apply(*params)
-}
-
-type optionFunc func(*params)
-
-func (f optionFunc) apply(p *params) { f(p) }
-
-// Fmt treats the assertion message as a template, using fmt.Sprintf and the
-// supplied arguments to expand it. For example,
-//   assert.Equal(t, 0, 1, "failed to parse %q", assert.Fmt("foobar"))
-// will print the message
-//   failed to parse "foobar"
-func Fmt(args ...any) Option {
-	return optionFunc(func(p *params) {
-		if len(args) > 0 {
-			p.message = fmt.Sprintf(p.message, args...)
-		}
-	})
-}
-
-// Diff prints a diff between "got" and "want" on failures.
-func Diff() Option {
-	return optionFunc(func(p *params) {
-		p.printDiff = true
-	})
-}
 
 // Equal asserts that two values are equal.
 func Equal[T any](t testing.TB, got, want T, message string, opts ...Option) bool {
@@ -193,6 +143,60 @@ func Panics(t testing.TB, panicker func(), message string, opts ...Option) {
 		}
 	}()
 	panicker()
+}
+
+// An Option modifies assertions.
+type Option interface {
+	apply(*params)
+}
+
+// Fmt treats the assertion message as a template, using fmt.Sprintf and the
+// supplied arguments to expand it. For example,
+//   assert.Equal(t, 0, 1, "failed to parse %q", assert.Fmt("foobar"))
+// will print the message
+//   failed to parse "foobar"
+func Fmt(args ...any) Option {
+	return optionFunc(func(p *params) {
+		if len(args) > 0 {
+			p.message = fmt.Sprintf(p.message, args...)
+		}
+	})
+}
+
+// Diff prints a diff between "got" and "want" on failures.
+func Diff() Option {
+	return optionFunc(func(p *params) {
+		p.printDiff = true
+	})
+}
+
+type optionFunc func(*params)
+
+func (f optionFunc) apply(p *params) { f(p) }
+
+type params struct {
+	got       any
+	want      any
+	cmpOpts   []cmp.Option // user-supplied equality configuration
+	message   string       // user-supplied description of failure
+	printDiff bool         // include diff in failure output
+}
+
+func newParams(got, want any, message string, opts ...Option) *params {
+	p := &params{
+		got:     got,
+		want:    want,
+		cmpOpts: []cmp.Option{protocmp.Transform()},
+		message: message,
+	}
+	for _, opt := range opts {
+		opt.apply(p)
+	}
+	if p.got == nil || p.want == nil {
+		// diff panics on nil
+		p.printDiff = false
+	}
+	return p
 }
 
 func report(t testing.TB, params *params, desc string, showWant bool) {
