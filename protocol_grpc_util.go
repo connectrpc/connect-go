@@ -20,6 +20,13 @@ const (
 )
 
 // Follows https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents
+//
+//   While the protocol does not require a user-agent to function it is recommended
+//   that clients provide a structured user-agent string that provides a basic
+//   description of the calling library, version & platform to facilitate issue diagnosis
+//   in heterogeneous environments. The following structure is recommended to library developers:
+//
+//   User-Agent → "grpc-" Language ?("-" Variant) "/" Version ?( " ("  *(AdditionalProperty ";") ")" )
 var userAgent = []string{fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())}
 
 func isCommaOrSpace(c rune) bool {
