@@ -16,16 +16,14 @@ import (
 	strings "strings"
 )
 
-// This is a compile-time assertion to ensure that this generated file and the
-// connect package are compatible. If you get a compiler error that this
-// constant isn't defined, this code was generated with a version of connect
-// newer than the one compiled into your binary. You can fix the problem by
-// either regenerating this code with an older version of connect or updating
-// the connect version compiled into your binary.
+// This is a compile-time assertion to ensure that this generated file and the connect package are
+// compatible. If you get a compiler error that this constant isn't defined, this code was generated
+// with a version of connect newer than the one compiled into your binary. You can fix the problem
+// by either regenerating this code with an older version of connect or updating the connect version
+// compiled into your binary.
 const _ = connect.IsAtLeastVersion0_0_1
 
-// PingServiceClient is a client for the connect.ping.v1test.PingService
-// service.
+// PingServiceClient is a client for the connect.ping.v1test.PingService service.
 type PingServiceClient interface {
 	// Ping sends a ping to the server to determine if it's reachable.
 	Ping(context.Context, *connect.Envelope[v1test.PingRequest]) (*connect.Envelope[v1test.PingResponse], error)
@@ -39,12 +37,11 @@ type PingServiceClient interface {
 	CumSum(context.Context) *connect.BidiStreamForClient[v1test.CumSumRequest, v1test.CumSumResponse]
 }
 
-// NewPingServiceClient constructs a client for the
-// connect.ping.v1test.PingService service. By default, it uses the binary
-// protobuf codec.
+// NewPingServiceClient constructs a client for the connect.ping.v1test.PingService service. By
+// default, it uses the binary protobuf codec.
 //
-// The URL supplied here should be the base URL for the gRPC server (e.g.,
-// https://api.acme.com or https://acme.com/grpc).
+// The URL supplied here should be the base URL for the gRPC server (e.g., https://api.acme.com or
+// https://acme.com/grpc).
 func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (PingServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
@@ -160,8 +157,7 @@ func (c *pingServiceClient) CumSum(ctx context.Context) *connect.BidiStreamForCl
 	return connect.NewBidiStreamForClient[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
 }
 
-// PingServiceHandler is an implementation of the
-// connect.ping.v1test.PingService service.
+// PingServiceHandler is an implementation of the connect.ping.v1test.PingService service.
 type PingServiceHandler interface {
 	// Ping sends a ping to the server to determine if it's reachable.
 	Ping(context.Context, *connect.Envelope[v1test.PingRequest]) (*connect.Envelope[v1test.PingResponse], error)
@@ -175,11 +171,11 @@ type PingServiceHandler interface {
 	CumSum(context.Context, *connect.BidiStream[v1test.CumSumRequest, v1test.CumSumResponse]) error
 }
 
-// NewPingServiceHandler builds an HTTP handler from the service implementation.
-// It returns the path on which to mount the handler and the handler itself.
+// NewPingServiceHandler builds an HTTP handler from the service implementation. It returns the path
+// on which to mount the handler and the handler itself.
 //
-// By default, handlers support the gRPC and gRPC-Web protocols with the binary
-// protobuf and JSON codecs.
+// By default, handlers support the gRPC and gRPC-Web protocols with the binary protobuf and JSON
+// codecs.
 func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	var lastHandlerPath string
 	mux := http.NewServeMux()

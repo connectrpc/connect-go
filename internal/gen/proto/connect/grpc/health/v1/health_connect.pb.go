@@ -16,12 +16,11 @@ import (
 	strings "strings"
 )
 
-// This is a compile-time assertion to ensure that this generated file and the
-// connect package are compatible. If you get a compiler error that this
-// constant isn't defined, this code was generated with a version of connect
-// newer than the one compiled into your binary. You can fix the problem by
-// either regenerating this code with an older version of connect or updating
-// the connect version compiled into your binary.
+// This is a compile-time assertion to ensure that this generated file and the connect package are
+// compatible. If you get a compiler error that this constant isn't defined, this code was generated
+// with a version of connect newer than the one compiled into your binary. You can fix the problem
+// by either regenerating this code with an older version of connect or updating the connect version
+// compiled into your binary.
 const _ = connect.IsAtLeastVersion0_0_1
 
 // HealthClient is a client for the internal.health.v1.Health service.
@@ -47,11 +46,11 @@ type HealthClient interface {
 	Watch(context.Context, *connect.Envelope[v1.HealthCheckRequest]) (*connect.ServerStreamForClient[v1.HealthCheckResponse], error)
 }
 
-// NewHealthClient constructs a client for the internal.health.v1.Health
-// service. By default, it uses the binary protobuf codec.
+// NewHealthClient constructs a client for the internal.health.v1.Health service. By default, it
+// uses the binary protobuf codec.
 //
-// The URL supplied here should be the base URL for the gRPC server (e.g.,
-// https://api.acme.com or https://acme.com/grpc).
+// The URL supplied here should be the base URL for the gRPC server (e.g., https://api.acme.com or
+// https://acme.com/grpc).
 func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (HealthClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
@@ -141,11 +140,11 @@ type HealthHandler interface {
 	Watch(context.Context, *connect.Envelope[v1.HealthCheckRequest], *connect.ServerStream[v1.HealthCheckResponse]) error
 }
 
-// NewHealthHandler builds an HTTP handler from the service implementation. It
-// returns the path on which to mount the handler and the handler itself.
+// NewHealthHandler builds an HTTP handler from the service implementation. It returns the path on
+// which to mount the handler and the handler itself.
 //
-// By default, handlers support the gRPC and gRPC-Web protocols with the binary
-// protobuf and JSON codecs.
+// By default, handlers support the gRPC and gRPC-Web protocols with the binary protobuf and JSON
+// codecs.
 func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	var lastHandlerPath string
 	mux := http.NewServeMux()
