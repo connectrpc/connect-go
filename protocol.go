@@ -16,6 +16,10 @@ import (
 // puts those strings into the "Grpc-Timeout" HTTP header. Other protocols
 // might encode durations differently, put them into a different HTTP header,
 // or ignore them entirely.
+//
+// We don't have any short-term plans to export this interface; it's just here
+// to separate the protocol-specific portions of connect from the
+// protocol-agnostic plumbing.
 type protocol interface {
 	NewHandler(*protocolHandlerParams) protocolHandler
 	NewClient(*protocolClientParams) (protocolClient, error)
