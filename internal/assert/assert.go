@@ -175,8 +175,8 @@ type optionFunc func(*params)
 func (f optionFunc) apply(p *params) { f(p) }
 
 type params struct {
-	got any
-	want any
+	got       any
+	want      any
 	cmpOpts   []cmp.Option // user-supplied equality configuration
 	message   string       // user-supplied description of failure
 	printDiff bool         // include diff in failure output
