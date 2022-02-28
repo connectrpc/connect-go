@@ -7,23 +7,22 @@ import (
 	"net/http"
 )
 
-// Version is the semantic version of the connect module.
-const Version = "0.0.1"
-
-// These constants are used in compile-time handshakes with connect's generated
-// code.
-const IsAtLeastVersion0_0_1 = true
-
-// StreamType describes whether the client, server, neither, or both is
-// streaming.
-type StreamType uint8
-
 const (
+	// Version is the semantic version of the connect module.
+	Version = "0.0.1"
+
+	// These constants are used in compile-time handshakes with connect's generated
+	// code.
+	IsAtLeastVersion0_0_1 = true
+
 	StreamTypeUnary         StreamType = 0b00
 	StreamTypeClient                   = 0b01
 	StreamTypeServer                   = 0b10
 	StreamTypeBidirectional            = StreamTypeClient | StreamTypeServer
 )
+
+// StreamType describes whether the client, server, neither, or both is streaming.
+type StreamType uint8
 
 // Sender is the writable side of a bidirectional stream of messages. Sender
 // implementations do not need to be safe for concurrent use.

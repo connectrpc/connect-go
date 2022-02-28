@@ -11,9 +11,8 @@ import (
 const (
 	compressGzip     = "gzip"
 	compressIdentity = "identity"
+	oneKiB           = 1024
 )
-
-const oneKiB = 1024
 
 // To reset gzip readers when returning them to a sync.Pool, we need a source
 // of valid gzipped data. Gzip files begin with a 10-byte header, which is

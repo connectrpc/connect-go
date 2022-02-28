@@ -12,15 +12,6 @@ import (
 	healthpb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/health/v1"
 )
 
-// Status describes the health of a service.
-//
-// These correspond to the ServingStatus enum in gRPC's health.proto. Because
-// connect doesn't support watching health, SERVICE_UNKNOWN isn't exposed here.
-//
-// For details, see the protobuf schema:
-// https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto.
-type Status int32
-
 const (
 	// StatusUnknown indicates that the service's health state is indeterminate.
 	StatusUnknown Status = 0
@@ -32,6 +23,15 @@ const (
 	// not accepting requests.
 	StatusNotServing Status = 2
 )
+
+// Status describes the health of a service.
+//
+// These correspond to the ServingStatus enum in gRPC's health.proto. Because
+// connect doesn't support watching health, SERVICE_UNKNOWN isn't exposed here.
+//
+// For details, see the protobuf schema:
+// https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto.
+type Status int32
 
 // A Registrar checks whether a fully-qualified protobuf service name (e.g.,
 // "acme.ping.v1.PingService") has been registered.

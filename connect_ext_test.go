@@ -20,7 +20,6 @@ import (
 	"github.com/bufbuild/connect/reflection"
 )
 
-const errorMessage = "oh no"
 
 const (
 	headerValue    = "some header value"
@@ -29,6 +28,7 @@ const (
 	clientTrailer  = "Connect-Client-Trailer"
 	handlerHeader  = "Connect-Handler-Header"
 	handlerTrailer = "Connect-Handler-Trailer"
+	errorMessage = "oh no"
 )
 
 func expectClientHeaderAndTrailer(check bool, req connect.AnyEnvelope) error {
