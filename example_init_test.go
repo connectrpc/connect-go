@@ -16,8 +16,10 @@ var examplePingServer *inMemoryServer
 // inMemoryServer is an HTTP server that uses in-memory pipes instead of TCP.
 // It supports HTTP/2 and has TLS enabled.
 //
-// It's intended to be a preconfigured, faster alternative to the standard
-// library's httptest.inMemoryServer.
+// The Go Playground panics if we try to start a TCP-backed server. If you're
+// not familiar with the Playground's behavior, it looks like our examples are
+// broken. This server lets us write examples that work in the playground
+// without abstracting over HTTP.
 type inMemoryServer struct {
 	server   *httptest.Server
 	listener *memoryListener
