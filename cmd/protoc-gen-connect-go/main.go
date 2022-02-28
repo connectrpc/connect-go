@@ -24,22 +24,24 @@ import (
 	"github.com/bufbuild/connect"
 )
 
+var version = flag.Bool("version", false, "Print the version and exit.")
+
 func main() {
-	version := flag.Bool("version", false, "Print the version and exit.")
 	flag.Parse()
 	if *version {
 		fmt.Printf("protoc-gen-connect-go %s\n", connect.Version)
 		return
 	}
-
 	var flags flag.FlagSet
-	protogen.Options{ParamFunc: flags.Set}.Run(func(gen *protogen.Plugin) error {
-		gen.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL)
-		for _, f := range gen.Files {
-			if f.Generate {
-				generate(gen, f)
+	protogen.Options{ParamFunc: flags.Set}.Run(
+		func(plugin *protogen.Plugin) error {
+			plugin.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL)
+			for _, f := range plugin.Files {
+				if f.Generate {
+					generate(plugin, f)
+				}
 			}
-		}
-		return nil
-	})
+			return nil
+		},
+	)
 }
