@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -21,6 +23,8 @@ const (
 
 	connectPackage = protogen.GoImportPath("github.com/bufbuild/connect")
 	hstreamPackage = protogen.GoImportPath("github.com/bufbuild/connect/handlerstream")
+
+	commentWidth = 97 // leave room for "// "
 )
 
 var (
@@ -60,7 +64,7 @@ func preamble(gen *protogen.Plugin, file *protogen.File, g *protogen.GeneratedFi
 	g.P("// - protoc-gen-connect-go v", connect.Version)
 	g.P("// - protoc              ", protocVersion(gen))
 	if file.Proto.GetOptions().GetDeprecated() {
-		wrap(g, file.Desc.Path(), " is a deprecated file.")
+		wrapComments(g, file.Desc.Path(), " is a deprecated file.")
 	} else {
 		g.P("// source: ", file.Desc.Path())
 	}
@@ -80,7 +84,7 @@ func content(file *protogen.File, g *protogen.GeneratedFile) {
 }
 
 func handshake(g *protogen.GeneratedFile) {
-	wrap(g, "This is a compile-time assertion to ensure that this generated file ",
+	wrapComments(g, "This is a compile-time assertion to ensure that this generated file ",
 		"and the connect package are compatible. If you get a compiler error that this constant ",
 		"isn't defined, this code was generated with a version of connect newer than the one ",
 		"compiled into your binary. You can fix the problem by either regenerating this code ",
@@ -129,7 +133,7 @@ func service(file *protogen.File, g *protogen.GeneratedFile, service *protogen.S
 }
 
 func clientInterface(g *protogen.GeneratedFile, service *protogen.Service, names names) {
-	wrap(g, names.Client, " is a client for the ", service.Desc.FullName(), " service.")
+	wrapComments(g, names.Client, " is a client for the ", service.Desc.FullName(), " service.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
@@ -196,10 +200,10 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	clientOption := connectPackage.Ident("ClientOption")
 
 	// Client constructor.
-	wrap(g, names.ClientConstructor, " constructs a client for the ", service.Desc.FullName(),
+	wrapComments(g, names.ClientConstructor, " constructs a client for the ", service.Desc.FullName(),
 		" service. By default, it uses the binary protobuf codec.")
 	g.P("//")
-	wrap(g, "The URL supplied here should be the base URL for the gRPC server ",
+	wrapComments(g, "The URL supplied here should be the base URL for the gRPC server ",
 		"(e.g., https://api.acme.com or https://acme.com/grpc).")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
@@ -254,7 +258,7 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	g.P()
 
 	// Client struct.
-	wrap(g, names.ClientImpl, " implements ", names.Client, ".")
+	wrapComments(g, names.ClientImpl, " implements ", names.Client, ".")
 	g.P("type ", names.ClientImpl, " struct {")
 	typeSender := connectPackage.Ident("Sender")
 	typeReceiver := connectPackage.Ident("Receiver")
@@ -278,7 +282,7 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *
 	receiver := names.ClientImpl
 	isStreamingClient := method.Desc.IsStreamingClient()
 	isStreamingServer := method.Desc.IsStreamingServer()
-	wrap(g, method.GoName, " calls ", method.Desc.FullName(), ".")
+	wrapComments(g, method.GoName, " calls ", method.Desc.FullName(), ".")
 	if method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
@@ -323,7 +327,7 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *
 }
 
 func serverInterface(g *protogen.GeneratedFile, service *protogen.Service, names names) {
-	wrap(g, names.Server, " is an implementation of the ", service.Desc.FullName(), " service.")
+	wrapComments(g, names.Server, " is an implementation of the ", service.Desc.FullName(), " service.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
@@ -386,10 +390,10 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 }
 
 func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, names names) {
-	wrap(g, names.ServerConstructor, " builds an HTTP handler from the service implementation.",
+	wrapComments(g, names.ServerConstructor, " builds an HTTP handler from the service implementation.",
 		" It returns the path on which to mount the handler and the handler itself.")
 	g.P("//")
-	wrap(g, "By default, handlers support the gRPC and gRPC-Web protocols with ",
+	wrapComments(g, "By default, handlers support the gRPC and gRPC-Web protocols with ",
 		"the binary protobuf and JSON codecs.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
@@ -474,7 +478,7 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 }
 
 func unimplementedServerImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names) {
-	wrap(g, names.UnimplementedServer, " returns CodeUnimplemented from all methods.")
+	wrapComments(g, names.UnimplementedServer, " returns CodeUnimplemented from all methods.")
 	g.P("type ", names.UnimplementedServer, " struct {}")
 	g.P()
 	g.P("var _ ", names.Server, " = (*", names.UnimplementedServer, ")(nil) // verify interface implementation")
@@ -511,5 +515,39 @@ func leadingComments(g *protogen.GeneratedFile, comments protogen.Comments, isDe
 			g.P("//")
 		}
 		deprecated(g)
+	}
+}
+
+// Raggedy comments in the generated code are driving me insane. This
+// word-wrapping function is ruinously inefficient, but it gets the job done.
+func wrapComments(g *protogen.GeneratedFile, elems ...any) {
+	text := &bytes.Buffer{}
+	for _, el := range elems {
+		switch el := el.(type) {
+		case protogen.GoIdent:
+			fmt.Fprint(text, g.QualifiedGoIdent(el))
+		default:
+			fmt.Fprint(text, el)
+		}
+	}
+	words := strings.Fields(text.String())
+	text.Reset()
+	var pos int
+	for _, word := range words {
+		n := utf8.RuneCountInString(word)
+		if pos > 0 && pos+n+1 > commentWidth {
+			g.P("// ", text.String())
+			text.Reset()
+			pos = 0
+		}
+		if pos > 0 {
+			text.WriteRune(' ')
+			pos += 1
+		}
+		text.WriteString(word)
+		pos += n
+	}
+	if text.Len() > 0 {
+		g.P("// ", text.String())
 	}
 }

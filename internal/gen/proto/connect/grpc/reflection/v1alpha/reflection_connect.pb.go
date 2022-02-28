@@ -16,16 +16,14 @@ import (
 	strings "strings"
 )
 
-// This is a compile-time assertion to ensure that this generated file and the
-// connect package are compatible. If you get a compiler error that this
-// constant isn't defined, this code was generated with a version of connect
-// newer than the one compiled into your binary. You can fix the problem by
-// either regenerating this code with an older version of connect or updating
-// the connect version compiled into your binary.
+// This is a compile-time assertion to ensure that this generated file and the connect package are
+// compatible. If you get a compiler error that this constant isn't defined, this code was generated
+// with a version of connect newer than the one compiled into your binary. You can fix the problem
+// by either regenerating this code with an older version of connect or updating the connect version
+// compiled into your binary.
 const _ = connect.IsAtLeastVersion0_0_1
 
-// ServerReflectionClient is a client for the
-// internal.reflection.v1alpha1.ServerReflection service.
+// ServerReflectionClient is a client for the internal.reflection.v1alpha1.ServerReflection service.
 type ServerReflectionClient interface {
 	// The reflection service is structured as a bidirectional stream, ensuring
 	// all related requests go to a single server.
@@ -33,11 +31,11 @@ type ServerReflectionClient interface {
 }
 
 // NewServerReflectionClient constructs a client for the
-// internal.reflection.v1alpha1.ServerReflection service. By default, it uses
-// the binary protobuf codec.
+// internal.reflection.v1alpha1.ServerReflection service. By default, it uses the binary protobuf
+// codec.
 //
-// The URL supplied here should be the base URL for the gRPC server (e.g.,
-// https://api.acme.com or https://acme.com/grpc).
+// The URL supplied here should be the base URL for the gRPC server (e.g., https://api.acme.com or
+// https://acme.com/grpc).
 func NewServerReflectionClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (ServerReflectionClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	opts = append([]connect.ClientOption{
@@ -68,27 +66,25 @@ type serverReflectionClient struct {
 
 var _ ServerReflectionClient = (*serverReflectionClient)(nil) // verify interface implementation
 
-// ServerReflectionInfo calls
-// internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo.
+// ServerReflectionInfo calls internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo.
 func (c *serverReflectionClient) ServerReflectionInfo(ctx context.Context) *connect.BidiStreamForClient[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
 	sender, receiver := c.serverReflectionInfo(ctx)
 	return connect.NewBidiStreamForClient[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
 }
 
-// ServerReflectionHandler is an implementation of the
-// internal.reflection.v1alpha1.ServerReflection service.
+// ServerReflectionHandler is an implementation of the internal.reflection.v1alpha1.ServerReflection
+// service.
 type ServerReflectionHandler interface {
 	// The reflection service is structured as a bidirectional stream, ensuring
 	// all related requests go to a single server.
 	ServerReflectionInfo(context.Context, *connect.BidiStream[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error
 }
 
-// NewServerReflectionHandler builds an HTTP handler from the service
-// implementation. It returns the path on which to mount the handler and the
-// handler itself.
+// NewServerReflectionHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
 //
-// By default, handlers support the gRPC and gRPC-Web protocols with the binary
-// protobuf and JSON codecs.
+// By default, handlers support the gRPC and gRPC-Web protocols with the binary protobuf and JSON
+// codecs.
 func NewServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	var lastHandlerPath string
 	mux := http.NewServeMux()
@@ -116,8 +112,7 @@ func NewServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.Han
 	return path.Dir(lastHandlerPath) + "/", mux
 }
 
-// UnimplementedServerReflectionHandler returns CodeUnimplemented from all
-// methods.
+// UnimplementedServerReflectionHandler returns CodeUnimplemented from all methods.
 type UnimplementedServerReflectionHandler struct{}
 
 var _ ServerReflectionHandler = (*UnimplementedServerReflectionHandler)(nil) // verify interface implementation
