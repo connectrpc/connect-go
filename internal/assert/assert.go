@@ -1,6 +1,6 @@
 // Package assert is a minimal assert package using generics.
 //
-// This prevent connect from needing additional dependencies.
+// This prevents connect from needing additional dependencies.
 package assert
 
 import (
