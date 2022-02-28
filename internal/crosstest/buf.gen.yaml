@@ -12,8 +12,8 @@ plugins:
     out: gen/proto/go
     opt: paths=source_relative
     path: ../../bin/protoc-gen-go-grpc
-  - name: go-connect
-    out: gen/proto/go-connect
+  - name: connect-go
+    out: gen/proto/connect
     opt:
       - paths=source_relative
-    path: ../../bin/protoc-gen-go-connect
+    path: ../../bin/protoc-gen-connect-go

@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/bufbuild/connect"
-	reflectionrpc "github.com/bufbuild/connect/internal/gen/proto/go-connect/grpc/reflection/v1alpha"
+	reflectionrpc "github.com/bufbuild/connect/internal/gen/proto/connect/grpc/reflection/v1alpha"
 	rpb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
 )
 
