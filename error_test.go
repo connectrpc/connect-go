@@ -26,10 +26,6 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-func TestErrorCodeOK(t *testing.T) {
-	assert.Nil(t, NewError(CodeOK, errors.New("ok")), "wrap code ok")
-}
-
 func TestErrorFormatting(t *testing.T) {
 	assert.Equal(
 		t,
@@ -53,7 +49,6 @@ func TestErrorCode(t *testing.T) {
 }
 
 func TestCodeOf(t *testing.T) {
-	assert.Equal(t, CodeOf(nil), CodeOK, "nil error code")
 	assert.Equal(
 		t,
 		CodeOf(NewError(CodeUnavailable, errors.New("foo"))),
