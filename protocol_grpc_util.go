@@ -89,7 +89,7 @@ func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) error {
 		mergeHeaders(trailer, connectErr.trailer)
 	}
 	if err == nil {
-		trailer.Set("Grpc-Status", strconv.Itoa(int(codeOK)))
+		trailer.Set("Grpc-Status", "0") // zero is the gRPC OK status
 		trailer.Set("Grpc-Message", "")
 		trailer.Set("Grpc-Status-Details-Bin", "")
 		return nil

@@ -19,10 +19,10 @@ import (
 )
 
 const (
-	// CodeOK indicates that the operation was a success. It's unexported because
-	// it overlaps awkwardly with Go's error semantics: what does it mean to have
-	// a non-nil error with a CodeOK status?
-	codeOK Code = 0
+	// The zero code is OK, which indicates that the operation was a success. We
+	// don't define a constant for it because it overlaps awkwardly with Go's
+	// error semantics: what does it mean to have a non-nil error with an OK
+	// status?
 
 	// CodeCanceled indicates that the operation was canceled, typically by the
 	// caller.
@@ -137,7 +137,7 @@ const (
 	// authentication credentials for the operation.
 	CodeUnauthenticated Code = 16
 
-	minCode Code = codeOK
+	minCode Code = CodeUnknown
 	maxCode Code = CodeUnauthenticated
 )
 
@@ -151,8 +151,6 @@ type Code uint32
 
 func (c Code) String() string {
 	switch c {
-	case codeOK:
-		return "Ok"
 	case CodeCanceled:
 		return "Canceled"
 	case CodeUnknown:
