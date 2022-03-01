@@ -1,0 +1,56 @@
+run:
+  skip-dirs-use-default: false
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+  forbidigo:
+    forbid:
+      - '^fmt\.Print'
+      - '^log\.'
+      - '^print$'
+      - '^println$'
+linters:
+  enable:
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - containedctx
+    - contextcheck
+    - deadcode
+    - decorder
+    - depguard
+    - dogsled
+    - errcheck
+    - exportloopref
+    - forbidigo
+    - forcetypeassert
+    - gochecknoinits
+    - gofmt
+    - goheader
+    - goimports
+    - gomodguard
+    - goprintffuncname
+    - gosec
+    - gosimple
+    - govet
+    - grouper
+    - importas
+    - ineffassign
+    - makezero
+    - misspell
+    - nakedret
+    - nilerr
+    - nolintlint
+    - predeclared
+    - promlinter
+    - rowserrcheck
+    - staticcheck
+    - structcheck
+    - stylecheck
+    - typecheck
+    - unconvert
+    - unused
+    - varcheck
+    - wastedassign
+    - whitespace
+  disable-all: true
