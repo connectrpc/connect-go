@@ -30,6 +30,8 @@ jobs:
           fetch-depth: 1
       - name: Test
         run: make test
+      - name: Check Generated Code
+        run: make checkgen
       - name: Lint
         if: matrix.go-version == '1.18.0-beta2'
         run: make lint
