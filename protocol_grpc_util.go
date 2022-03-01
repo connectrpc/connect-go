@@ -88,8 +88,8 @@ func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) error {
 	if connectErr, ok := asError(err); ok && len(connectErr.trailer) > 0 {
 		mergeHeaders(trailer, connectErr.trailer)
 	}
-	if CodeOf(err) == CodeOK { // safe for nil errors
-		trailer.Set("Grpc-Status", strconv.Itoa(int(CodeOK)))
+	if err == nil {
+		trailer.Set("Grpc-Status", strconv.Itoa(int(codeOK)))
 		trailer.Set("Grpc-Message", "")
 		trailer.Set("Grpc-Status-Details-Bin", "")
 		return nil

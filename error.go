@@ -65,12 +65,8 @@ type Error struct {
 	trailer http.Header
 }
 
-// NewError annotates any Go error with a status code. If the code is CodeOK,
-// the returned *Error is nil.
+// NewError annotates any Go error with a status code.
 func NewError(c Code, underlying error) *Error {
-	if c == CodeOK {
-		return nil
-	}
 	return &Error{code: c, err: underlying}
 }
 
@@ -90,9 +86,6 @@ func (e *Error) Unwrap() error {
 
 // Code returns the error's status code.
 func (e *Error) Code() Code {
-	if e == nil {
-		return CodeOK
-	}
 	return e.code
 }
 
@@ -136,12 +129,9 @@ func (e *Error) Trailer() http.Header {
 	return e.trailer
 }
 
-// CodeOf returns the error's status code if it is or wraps a *connect.Error,
-// CodeOK if the error is nil, and CodeUnknown otherwise.
+// CodeOf returns the error's status code if it is or wraps a *connect.Error
+// and CodeUnknown otherwise.
 func CodeOf(err error) Code {
-	if err == nil {
-		return CodeOK
-	}
 	if connectErr, ok := asError(err); ok {
 		return connectErr.Code()
 	}
@@ -149,7 +139,7 @@ func CodeOf(err error) Code {
 }
 
 // errorf calls fmt.Errorf with the supplied template and arguments, then wraps
-// the resulting error. If the code is CodeOK, the returned error is nil.
+// the resulting error.
 func errorf(c Code, template string, args ...any) *Error {
 	return NewError(c, fmt.Errorf(template, args...))
 }
