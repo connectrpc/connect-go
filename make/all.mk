@@ -30,7 +30,7 @@ $(call _assert_var,CACHE_BIN)
 
 BENCH ?= .
 
-bufgeneratedeps:: $(BUF) $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC) $(CACHE_BIN)/protoc-gen-connect-go
+bufgeneratedeps:: $(BUF) $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC) installprotoc-gen-connect-go
 
 .PHONY: bufgeneratecleango
 bufgeneratecleango:
@@ -43,7 +43,3 @@ bufgeneratego:
 	buf generate
 
 bufgeneratesteps:: bufgeneratego
-
-$(CACHE_BIN)/protoc-gen-connect-go: $(shell ls cmd/protoc-gen-connect-go/*.go) go.mod
-	go version
-	go build -o $(@) ./cmd/protoc-gen-connect-go
