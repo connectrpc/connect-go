@@ -18,6 +18,14 @@ import (
 	"fmt"
 )
 
+// A Code is one of gRPC's canonical status codes. There are no user-defined
+// codes, so only the codes enumerated below are valid.
+//
+// See the specification at
+// https://github.com/grpc/grpc/blob/master/doc/statuscodes.md for detailed
+// descriptions of each code and example usage.
+type Code uint32
+
 const (
 	// CodeOK indicates that the operation was a success.
 	CodeOK Code = 0
@@ -138,14 +146,6 @@ const (
 	minCode Code = CodeOK
 	maxCode Code = CodeUnauthenticated
 )
-
-// A Code is one of gRPC's canonical status codes. There are no user-defined
-// codes, so only the codes enumerated below are valid.
-//
-// See the specification at
-// https://github.com/grpc/grpc/blob/master/doc/statuscodes.md for detailed
-// descriptions of each code and example usage.
-type Code uint32
 
 func (c Code) String() string {
 	switch c {
