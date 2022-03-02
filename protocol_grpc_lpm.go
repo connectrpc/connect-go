@@ -62,7 +62,7 @@ func (m *marshaler) MarshalWebTrailers(trailer http.Header) *Error {
 	return m.writeLPM(true /* trailer */, raw.Bytes())
 }
 
-func (m *marshaler) writeLPM(trailer bool, message []byte) (retErr *Error) {
+func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
 	if m.compressor == nil || !m.compressor.ShouldCompress(message) {
 		if err := m.writeGRPCPrefix(false /* compressed */, trailer, len(message)); err != nil {
 			return err // already enriched
@@ -82,7 +82,7 @@ func (m *marshaler) writeLPM(trailer bool, message []byte) (retErr *Error) {
 		_ = compressingWriteCloser.Close()
 		return errorf(CodeInternal, "couldn't compress data: %w", err)
 	}
-	if err := compressingWriteCloser.Close(); err != nil && retErr == nil {
+	if err := compressingWriteCloser.Close(); err != nil {
 		return errorf(CodeInternal, "couldn't close compressing writer: %w", err)
 	}
 	if err := m.writeGRPCPrefix(true /* compressed */, trailer, data.Len()); err != nil {
