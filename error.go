@@ -71,7 +71,10 @@ func NewError(c Code, underlying error) *Error {
 }
 
 func (e *Error) Error() string {
-	text := e.err.Error()
+	var text string
+	if e.err != nil {
+		text = e.err.Error()
+	}
 	if text == "" {
 		return e.code.String()
 	}
