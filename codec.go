@@ -16,7 +16,6 @@ package connect
 
 import (
 	"fmt"
-	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -27,24 +26,23 @@ const (
 	codecNameJSON  = "json"
 )
 
-// A Codec can marshal structs (typically generated from a schema) to and from
-// bytes.
+// Codec marshals structs (typically generated from a schema) to and from bytes.
 type Codec interface {
 	// Name returns the name of the Codec.
 	//
-	// This may be used as part of the Content-Type within HTTP, for example
+	// This may be used as part of the Content-Type within HTTP. For example,
 	// with gRPC this is the content subtype, that is "application/grpc+proto"
 	// will map to the Codec with name "proto".
 	//
-	// Names are expected not to be empty, and are treated in a case-insensitive
+	// Names are expected to not be empty.
 	Name() string
 	// Marshal marshals the given message.
 	//
-	// Marshal may expect a specific type of message, and error if this type is not given.
+	// Marshal may expect a specific type of message, and will error if this type is not given.
 	Marshal(any) ([]byte, error)
 	// Marshal unmarshals the given message.
 	//
-	// Unmarshal may expect a specific type of message, and error if this type is not given.
+	// Unmarshal may expect a specific type of message, and will error if this type is not given.
 	Unmarshal([]byte, any) error
 }
 
@@ -121,9 +119,8 @@ type codecMap struct {
 	nameToCodec map[string]Codec
 }
 
-// Get the named codec.
 func (m *codecMap) Get(name string) Codec {
-	return m.nameToCodec[strings.ToLower(name)]
+	return m.nameToCodec[name]
 }
 
 func (m *codecMap) Protobuf() Codec {
