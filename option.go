@@ -41,11 +41,11 @@ func WithCompressMinBytes(min int) Option {
 }
 
 func (o *compressMinBytesOption) applyToClient(config *clientConfiguration) {
-	config.MinCompressBytes = o.min
+	config.CompressMinBytes = o.min
 }
 
 func (o *compressMinBytesOption) applyToHandler(config *handlerConfiguration) {
-	config.MinCompressBytes = o.min
+	config.CompressMinBytes = o.min
 }
 
 type replaceProcedurePrefixOption struct {

@@ -34,7 +34,7 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 		codecs:           params.Codecs,
 		compressors:      params.Compressors,
 		maxRequestBytes:  params.MaxRequestBytes,
-		minCompressBytes: params.MinCompressBytes,
+		minCompressBytes: params.CompressMinBytes,
 		accept:           acceptPostValue(g.web, params.Codecs),
 	}
 }
@@ -53,7 +53,7 @@ func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, 
 		codec:            params.Codec,
 		protobuf:         params.Protobuf,
 		maxResponseBytes: params.MaxResponseBytes,
-		minCompressBytes: params.MinCompressBytes,
+		minCompressBytes: params.CompressMinBytes,
 		doer:             params.Doer,
 		procedureURL:     procedureURL,
 	}, nil
@@ -259,7 +259,7 @@ func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Rece
 			writer:           pipeWriter,
 			compressor:       g.compressors.Get(g.compressorName),
 			codec:            g.codec,
-			minCompressBytes: g.minCompressBytes,
+			compressMinBytes: g.minCompressBytes,
 		},
 		header:        h,
 		trailer:       make(http.Header),
