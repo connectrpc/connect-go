@@ -41,7 +41,7 @@ var (
 
 type marshaler struct {
 	writer           io.Writer
-	compressor       Compressor
+	compressionPool  compressionPool
 	codec            Codec
 	compressMinBytes int
 }
@@ -64,7 +64,7 @@ func (m *marshaler) MarshalWebTrailers(trailer http.Header) *Error {
 }
 
 func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
-	if m.compressor == nil || len(message) < m.compressMinBytes {
+	if m.compressionPool == nil || len(message) < m.compressMinBytes {
 		if err := m.writeGRPCPrefix(false /* compressed */, trailer, len(message)); err != nil {
 			return err // already enriched
 		}
@@ -75,14 +75,17 @@ func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
 	}
 	// OPT: easy opportunity to pool buffers
 	data := bytes.NewBuffer(make([]byte, 0, len(message)))
-	compressingWriter := m.compressor.GetWriter(data)
-	defer m.compressor.PutWriter(compressingWriter)
+	compressor, err := m.compressionPool.GetWriter(data)
+	if err != nil {
+		return errorf(CodeUnknown, "get compressor: %w", err)
+	}
 
-	if _, err := compressingWriter.Write(message); err != nil { // returns uncompressed size, which isn't useful
+	if _, err := compressor.Write(message); err != nil { // returns uncompressed size, which isn't useful
+		_ = m.compressionPool.PutWriter(compressor)
 		return errorf(CodeInternal, "couldn't compress data: %w", err)
 	}
-	if err := compressingWriter.Close(); err != nil {
-		return errorf(CodeInternal, "couldn't close compressing writer: %w", err)
+	if err := m.compressionPool.PutWriter(compressor); err != nil {
+		return errorf(CodeInternal, "couldn't close compressor: %w", err)
 	}
 	if err := m.writeGRPCPrefix(true /* compressed */, trailer, data.Len()); err != nil {
 		return err // already enriched
@@ -118,10 +121,10 @@ func (m *marshaler) writeGRPCPrefix(compressed, trailer bool, size int) *Error {
 }
 
 type unmarshaler struct {
-	reader     io.Reader
-	max        int64
-	codec      Codec
-	compressor Compressor
+	reader          io.Reader
+	max             int64
+	codec           Codec
+	compressionPool compressionPool
 
 	web        bool
 	webTrailer http.Header
@@ -198,7 +201,7 @@ func (u *unmarshaler) Unmarshal(message any) *Error {
 		}
 	}
 
-	if compressed && u.compressor == nil {
+	if compressed && u.compressionPool == nil {
 		return errorf(
 			CodeInvalidArgument,
 			"gRPC protocol error: sent compressed message without Grpc-Encoding header",
@@ -206,15 +209,14 @@ func (u *unmarshaler) Unmarshal(message any) *Error {
 	}
 
 	if size > 0 && compressed {
-		decompressingReader, err := u.compressor.GetReader(bytes.NewReader(raw))
+		decompressor, err := u.compressionPool.GetReader(bytes.NewReader(raw))
 		if err != nil {
 			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
 		}
-		defer u.compressor.PutReader(decompressingReader)
-		defer decompressingReader.Close()
+		defer u.compressionPool.PutReader(decompressor)
 		// OPT: easy opportunity to pool buffers
 		decompressed := bytes.NewBuffer(make([]byte, 0, len(raw)))
-		if _, err := decompressed.ReadFrom(decompressingReader); err != nil {
+		if _, err := decompressed.ReadFrom(decompressor); err != nil {
 			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
 		}
 		raw = decompressed.Bytes()

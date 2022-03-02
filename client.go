@@ -20,21 +20,21 @@ import (
 )
 
 type clientConfiguration struct {
-	Protocol          protocol
-	Procedure         string
-	MaxResponseBytes  int64
-	CompressMinBytes  int
-	Interceptor       Interceptor
-	Compressors       map[string]Compressor
-	Codec             Codec
-	RequestCompressor string
+	Protocol               protocol
+	Procedure              string
+	MaxResponseBytes       int64
+	CompressMinBytes       int
+	Interceptor            Interceptor
+	CompressionPools       map[string]compressionPool
+	Codec                  Codec
+	RequestCompressionName string
 }
 
 func newClientConfiguration(procedure string, options []ClientOption) (*clientConfiguration, *Error) {
 	config := clientConfiguration{
-		Protocol:    &protocolGRPC{web: false}, // default to HTTP/2 gRPC
-		Procedure:   procedure,
-		Compressors: make(map[string]Compressor),
+		Protocol:         &protocolGRPC{web: false}, // default to HTTP/2 gRPC
+		Procedure:        procedure,
+		CompressionPools: make(map[string]compressionPool),
 	}
 	for _, opt := range options {
 		opt.applyToClient(&config)
@@ -49,9 +49,9 @@ func (c *clientConfiguration) Validate() *Error {
 	if c.Codec == nil || c.Codec.Name() == "" {
 		return errorf(CodeUnknown, "no codec configured")
 	}
-	if c.RequestCompressor != "" && c.RequestCompressor != compressIdentity {
-		if _, ok := c.Compressors[c.RequestCompressor]; !ok {
-			return errorf(CodeUnknown, "no registered compressor for %q", c.RequestCompressor)
+	if c.RequestCompressionName != "" && c.RequestCompressionName != compressionIdentity {
+		if _, ok := c.CompressionPools[c.RequestCompressionName]; !ok {
+			return errorf(CodeUnknown, "unknown compression %q", c.RequestCompressionName)
 		}
 	}
 	if c.Protocol == nil {
@@ -83,18 +83,18 @@ type ClientOption interface {
 	applyToClient(*clientConfiguration)
 }
 
-type requestCompressorOption struct {
+type requestCompressionOption struct {
 	Name string
 }
 
-// WithRequestCompressor configures the client to use the specified algorithm
-// to compress request messages. If the algorithm has not been registered using
-// WithCompressor, the generated client constructor will return an error.
+// WithRequestCompression configures the client to use the specified algorithm to
+// compress request messages. If the algorithm has not been registered using
+// WithCompression, the generated client constructor will return an error.
 //
 // Because some servers don't support compression, clients default to sending
 // uncompressed requests.
-func WithRequestCompressor(name string) ClientOption {
-	return &requestCompressorOption{Name: name}
+func WithRequestCompression(name string) ClientOption {
+	return &requestCompressionOption{Name: name}
 }
 
 // WithGzipRequests configures the client to gzip requests. It requires that
@@ -104,11 +104,11 @@ func WithRequestCompressor(name string) ClientOption {
 // Because some servers don't support gzip, clients default to sending
 // uncompressed requests.
 func WithGzipRequests() ClientOption {
-	return WithRequestCompressor(compressGzip)
+	return WithRequestCompression(compressionGzip)
 }
 
-func (o *requestCompressorOption) applyToClient(config *clientConfiguration) {
-	config.RequestCompressor = o.Name
+func (o *requestCompressionOption) applyToClient(config *clientConfiguration) {
+	config.RequestCompressionName = o.Name
 }
 
 type enableGRPCWebOption struct{}
@@ -138,8 +138,8 @@ func NewStreamClientImplementation(
 	}
 	protocolClient, protocolErr := config.Protocol.NewClient(&protocolClientParams{
 		Spec:             config.newSpecification(stype),
-		CompressorName:   config.RequestCompressor,
-		Compressors:      newReadOnlyCompressors(config.Compressors),
+		CompressionName:  config.RequestCompressionName,
+		CompressionPools: newReadOnlyCompressionPools(config.CompressionPools),
 		Codec:            config.Codec,
 		Protobuf:         config.Protobuf(),
 		MaxResponseBytes: config.MaxResponseBytes,
@@ -180,8 +180,8 @@ func NewUnaryClientImplementation[Req, Res any](
 	spec := config.newSpecification(StreamTypeUnary)
 	protocolClient, protocolErr := config.Protocol.NewClient(&protocolClientParams{
 		Spec:             spec,
-		CompressorName:   config.RequestCompressor,
-		Compressors:      newReadOnlyCompressors(config.Compressors),
+		CompressionName:  config.RequestCompressionName,
+		CompressionPools: newReadOnlyCompressionPools(config.CompressionPools),
 		Codec:            config.Codec,
 		Protobuf:         config.Protobuf(),
 		MaxResponseBytes: config.MaxResponseBytes,

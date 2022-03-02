@@ -21,7 +21,7 @@ import (
 )
 
 type handlerConfiguration struct {
-	Compressors      map[string]Compressor
+	CompressionPools map[string]compressionPool
 	Codecs           map[string]Codec
 	MaxRequestBytes  int64
 	CompressMinBytes int
@@ -37,7 +37,7 @@ func newHandlerConfiguration(procedure, registrationName string, options []Handl
 	config := handlerConfiguration{
 		Procedure:        procedure,
 		RegistrationName: registrationName,
-		Compressors:      make(map[string]Compressor),
+		CompressionPools: make(map[string]compressionPool),
 		Codecs:           make(map[string]Codec),
 		HandleGRPC:       true,
 		HandleGRPCWeb:    true,
@@ -68,12 +68,12 @@ func (c *handlerConfiguration) newProtocolHandlers(streamType StreamType) []prot
 	}
 	handlers := make([]protocolHandler, 0, len(protocols))
 	codecs := newReadOnlyCodecs(c.Codecs)
-	compressors := newReadOnlyCompressors(c.Compressors)
+	compressors := newReadOnlyCompressionPools(c.CompressionPools)
 	for _, protocol := range protocols {
 		handlers = append(handlers, protocol.NewHandler(&protocolHandlerParams{
 			Spec:             c.newSpecification(streamType),
 			Codecs:           codecs,
-			Compressors:      compressors,
+			CompressionPools: compressors,
 			MaxRequestBytes:  c.MaxRequestBytes,
 			CompressMinBytes: c.CompressMinBytes,
 		}))
