@@ -62,7 +62,6 @@ type Compressor interface {
 }
 
 type gzipCompressor struct {
-	min     int
 	readers sync.Pool
 	writers sync.Pool
 }
@@ -71,7 +70,6 @@ var _ Compressor = (*gzipCompressor)(nil)
 
 func newGzipCompressor() *gzipCompressor {
 	return &gzipCompressor{
-		min: oneKiB,
 		readers: sync.Pool{
 			New: func() any {
 				// We don't want to use gzip.NewReader, because it requires a source of
