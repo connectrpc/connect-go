@@ -24,7 +24,25 @@ import (
 	"github.com/bufbuild/connect/internal/assert"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
+
+func TestErrorNilUnderlying(t *testing.T) {
+	err := NewError(CodeUnknown, nil)
+	assert.NotNil(t, err, "should be allowed to wrap a nil error")
+	assert.Equal(t, err.Error(), CodeUnknown.String(), "message")
+	assert.Equal(t, err.Code(), CodeUnknown, "code")
+	assert.Zero(t, err.Details(), "details")
+	detail, anyErr := anypb.New(&emptypb.Empty{})
+	assert.Nil(t, anyErr, "create proto.Any")
+	err.AddDetail(detail)
+	assert.Equal(t, len(err.Details()), 1, "details")
+	err.Header().Set("foo", "bar")
+	assert.Equal(t, err.Header().Get("foo"), "bar", "header")
+	err.Trailer().Set("baz", "quux")
+	assert.Equal(t, err.Trailer().Get("baz"), "quux", "trailer")
+	assert.Equal(t, CodeOf(err), CodeUnknown, "code")
+}
 
 func TestErrorFormatting(t *testing.T) {
 	assert.Equal(
