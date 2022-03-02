@@ -62,7 +62,7 @@ func (m *marshaler) MarshalWebTrailers(trailer http.Header) *Error {
 	return m.writeLPM(true /* trailer */, raw.Bytes())
 }
 
-func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
+func (m *marshaler) writeLPM(trailer bool, message []byte) (retErr *Error) {
 	if m.compressor == nil || !m.compressor.ShouldCompress(message) {
 		if err := m.writeGRPCPrefix(false /* compressed */, trailer, len(message)); err != nil {
 			return err // already enriched
@@ -74,13 +74,15 @@ func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
 	}
 	// OPT: easy opportunity to pool buffers
 	data := bytes.NewBuffer(make([]byte, 0, len(message)))
-	compressingWriter := m.compressor.GetWriter(data)
-	defer m.compressor.PutWriter(compressingWriter)
-
-	if _, err := compressingWriter.Write(message); err != nil { // returns uncompressed size, which isn't useful
+	compressingWriteCloser, err := m.compressor.NewWriteCloser(data)
+	if err != nil {
+		return errorf(CodeInternal, "error getting compressing writer: %w", err)
+	}
+	if _, err := compressingWriteCloser.Write(message); err != nil { // returns uncompressed size, which isn't useful
+		_ = compressingWriteCloser.Close()
 		return errorf(CodeInternal, "couldn't compress data: %w", err)
 	}
-	if err := compressingWriter.Close(); err != nil {
+	if err := compressingWriteCloser.Close(); err != nil && retErr == nil {
 		return errorf(CodeInternal, "couldn't close compressing writer: %w", err)
 	}
 	if err := m.writeGRPCPrefix(true /* compressed */, trailer, data.Len()); err != nil {
@@ -205,15 +207,14 @@ func (u *unmarshaler) Unmarshal(message any) *Error {
 	}
 
 	if size > 0 && compressed {
-		decompressingReader, err := u.compressor.GetReader(bytes.NewReader(raw))
+		decompressingReadCloser, err := u.compressor.NewReadCloser(bytes.NewReader(raw))
 		if err != nil {
 			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
 		}
-		defer u.compressor.PutReader(decompressingReader)
-		defer decompressingReader.Close()
+		defer decompressingReadCloser.Close()
 		// OPT: easy opportunity to pool buffers
 		decompressed := bytes.NewBuffer(make([]byte, 0, len(raw)))
-		if _, err := decompressed.ReadFrom(decompressingReader); err != nil {
+		if _, err := decompressed.ReadFrom(decompressingReadCloser); err != nil {
 			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
 		}
 		raw = decompressed.Bytes()

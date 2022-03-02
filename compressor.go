@@ -17,6 +17,7 @@ package connect
 import (
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -54,12 +55,17 @@ var emptyGzipBytes = []byte{
 // compressing a given payload. Often, it's not worth burning CPU cycles
 // compressing small payloads.
 type Compressor interface {
-	GetReader(io.Reader) (io.ReadCloser, error)
-	PutReader(io.ReadCloser)
-
+	// NewReadCloser provides a ReadCloser that wraps the given Reader with compression.
+	//
+	// This ReadCloser must be closed when no longer used.
+	NewReadCloser(io.Reader) (io.ReadCloser, error)
+	// GetWriteCloser provides a WriteCloser that wraps the given Writer with compression.
+	//
+	// This WriteCloser must be closed when no longer used.
+	// Any data written into the given Writer is not valid until the WriteCloser is closed.
+	NewWriteCloser(io.Writer) (io.WriteCloser, error)
+	// ShouldCompress says whether or not the given payload should be compressed.
 	ShouldCompress([]byte) bool
-	GetWriter(io.Writer) io.WriteCloser
-	PutWriter(io.WriteCloser)
 }
 
 type gzipCompressor struct {
@@ -88,51 +94,36 @@ func newGzipCompressor() *gzipCompressor {
 	}
 }
 
-func (c *gzipCompressor) ShouldCompress(bs []byte) bool {
-	return len(bs) > c.min
-}
-
-func (c *gzipCompressor) GetReader(r io.Reader) (io.ReadCloser, error) {
+func (c *gzipCompressor) NewReadCloser(reader io.Reader) (io.ReadCloser, error) {
 	gzipReader, ok := c.readers.Get().(*gzip.Reader)
 	if !ok {
-		return gzip.NewReader(r)
+		// this should never happen since we control what goes into the pool
+		return nil, fmt.Errorf("expected *gzip.Reader from pool but got %T", gzipReader)
 	}
-	return gzipReader, gzipReader.Reset(r)
+	if err := gzipReader.Reset(reader); err != nil {
+		return nil, err
+	}
+	return pooledGzipReader{
+		Reader:         gzipReader,
+		gzipCompressor: c,
+	}, nil
 }
 
-func (c *gzipCompressor) PutReader(r io.ReadCloser) {
-	gzipReader, ok := r.(*gzip.Reader)
-	if !ok {
-		return
-	}
-	if err := gzipReader.Close(); err != nil { // close if we haven't already
-		return
-	}
-	if err := gzipReader.Reset(bytes.NewReader(emptyGzipBytes)); err != nil { // don't keep references
-		return
-	}
-	c.readers.Put(gzipReader)
-}
-
-func (c *gzipCompressor) GetWriter(w io.Writer) io.WriteCloser {
+func (c *gzipCompressor) NewWriteCloser(writer io.Writer) (io.WriteCloser, error) {
 	gzipWriter, ok := c.writers.Get().(*gzip.Writer)
 	if !ok {
-		return gzip.NewWriter(w)
+		// this should never happen since we control what goes into the pool
+		return nil, fmt.Errorf("expected *gzip.Writer from pool but got %T", gzipWriter)
 	}
-	gzipWriter.Reset(w)
-	return gzipWriter
+	gzipWriter.Reset(writer)
+	return pooledGzipWriter{
+		Writer:         gzipWriter,
+		gzipCompressor: c,
+	}, nil
 }
 
-func (c *gzipCompressor) PutWriter(w io.WriteCloser) {
-	gzipWriter, ok := w.(*gzip.Writer)
-	if !ok {
-		return
-	}
-	if err := gzipWriter.Close(); err != nil { // close if we haven't already
-		return
-	}
-	gzipWriter.Reset(io.Discard) // don't keep references
-	c.writers.Put(gzipWriter)
+func (c *gzipCompressor) ShouldCompress(bs []byte) bool {
+	return len(bs) > c.min
 }
 
 // readOnlyCompressors is a read-only interface to a map of named compressors.
@@ -143,34 +134,75 @@ type readOnlyCompressors interface {
 	CommaSeparatedNames() string
 }
 
-type compressorMap struct {
-	compressors map[string]Compressor
-	names       string
-}
-
-func newReadOnlyCompressors(compressors map[string]Compressor) *compressorMap {
-	known := make([]string, 0, len(compressors))
-	for name := range compressors {
-		known = append(known, name)
+func newReadOnlyCompressors(nameToCompressor map[string]Compressor) readOnlyCompressors {
+	names := make([]string, 0, len(nameToCompressor))
+	for name := range nameToCompressor {
+		names = append(names, name)
 	}
 	return &compressorMap{
-		compressors: compressors,
-		names:       strings.Join(known, ","),
+		nameToCompressor:    nameToCompressor,
+		commaSeparatedNames: strings.Join(names, ","),
 	}
+}
+
+// compressorMap implements readOnlyCompressors
+type compressorMap struct {
+	nameToCompressor    map[string]Compressor
+	commaSeparatedNames string
 }
 
 func (m *compressorMap) Get(name string) Compressor {
 	if name == "" || name == compressIdentity {
 		return nil
 	}
-	return m.compressors[name]
+	return m.nameToCompressor[name]
 }
 
 func (m *compressorMap) Contains(name string) bool {
-	_, ok := m.compressors[name]
+	_, ok := m.nameToCompressor[name]
 	return ok
 }
 
 func (m *compressorMap) CommaSeparatedNames() string {
-	return m.names
+	return m.commaSeparatedNames
+}
+
+// pooledGzipReader wraps a gzipReader and a gzipCompressor, which contains sync.Pools.
+//
+// This allows us to override Close() to put the gzipReader back into the corresponding Pool.
+type pooledGzipReader struct {
+	*gzip.Reader
+
+	gzipCompressor *gzipCompressor
+}
+
+func (r pooledGzipReader) Close() error {
+	if err := r.Reader.Close(); err != nil {
+		return err
+	}
+	// Don't keep references
+	if err := r.Reader.Reset(bytes.NewReader(emptyGzipBytes)); err != nil {
+		return err
+	}
+	r.gzipCompressor.readers.Put(r.Reader)
+	return nil
+}
+
+// pooledGzipWriter wraps a gzipWriter and a gzipCompressor, which contains sync.Pools.
+//
+// This allows us to override Close() to put the gzipWriter back into the corresponding Pool.
+type pooledGzipWriter struct {
+	*gzip.Writer
+
+	gzipCompressor *gzipCompressor
+}
+
+func (w pooledGzipWriter) Close() error {
+	if err := w.Writer.Close(); err != nil {
+		return err
+	}
+	// Don't keep references
+	w.Writer.Reset(io.Discard)
+	w.gzipCompressor.writers.Put(w.Writer)
+	return nil
 }
