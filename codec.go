@@ -26,11 +26,23 @@ const (
 	codecNameJSON  = "json"
 )
 
-// A Codec can marshal structs (typically generated from a schema) to and from
-// bytes.
+// Codec marshals structs (typically generated from a schema) to and from bytes.
 type Codec interface {
+	// Name returns the name of the Codec.
+	//
+	// This may be used as part of the Content-Type within HTTP. For example,
+	// with gRPC this is the content subtype, that is "application/grpc+proto"
+	// will map to the Codec with name "proto".
+	//
+	// Names are expected to not be empty.
 	Name() string
+	// Marshal marshals the given message.
+	//
+	// Marshal may expect a specific type of message, and will error if this type is not given.
 	Marshal(any) ([]byte, error)
+	// Marshal unmarshals the given message.
+	//
+	// Unmarshal may expect a specific type of message, and will error if this type is not given.
 	Unmarshal([]byte, any) error
 }
 
@@ -48,12 +60,12 @@ func (c *protoBinaryCodec) Marshal(message any) ([]byte, error) {
 	return proto.Marshal(protoMessage)
 }
 
-func (c *protoBinaryCodec) Unmarshal(bs []byte, message any) error {
+func (c *protoBinaryCodec) Unmarshal(data []byte, message any) error {
 	protoMessage, ok := message.(proto.Message)
 	if !ok {
 		return errNotProto(message)
 	}
-	return proto.Unmarshal(bs, protoMessage)
+	return proto.Unmarshal(data, protoMessage)
 }
 
 type protoJSONCodec struct {
@@ -81,49 +93,51 @@ func (c *protoJSONCodec) Unmarshal(bs []byte, message any) error {
 	return c.unmarshalOptions.Unmarshal(bs, protoMessage)
 }
 
-func errNotProto(m any) error {
-	return fmt.Errorf("%T doesn't implement proto.Message", m)
-}
-
 // readOnlyCodecs is a read-only interface to a map of named codecs.
 type readOnlyCodecs interface {
+	// Get gets the Codec with the given name.
 	Get(string) Codec
+	// Protobuf gets the user-supplied protobuf codec, falling back to the default
+	// implementation if necessary.
+	//
+	// This is helpful in the gRPC protocol, where the wire protocol requires
+	// marshaling protobuf structs to binary even if the RPC procedures were
+	// generated from a different IDL.
 	Protobuf() Codec
+	// Names returns a copy of the registered codec names. The returned slice is
+	// safe for the caller to mutate.
 	Names() []string
 }
 
+func newReadOnlyCodecs(nameToCodec map[string]Codec) readOnlyCodecs {
+	return &codecMap{
+		nameToCodec: nameToCodec,
+	}
+}
+
 type codecMap struct {
-	codecs map[string]Codec
+	nameToCodec map[string]Codec
 }
 
-func newReadOnlyCodecs(m map[string]Codec) *codecMap {
-	return &codecMap{m}
-}
-
-// Get the named codec.
 func (m *codecMap) Get(name string) Codec {
-	return m.codecs[name]
+	return m.nameToCodec[name]
 }
 
-// Get the user-supplied protobuf codec, falling back to the default
-// implementation if necessary.
-//
-// This is helpful in the gRPC protocol, where the wire protocol requires
-// marshaling protobuf structs to binary even if the RPC procedures were
-// generated from a different IDL.
 func (m *codecMap) Protobuf() Codec {
-	if pb, ok := m.codecs[codecNameProto]; ok {
+	if pb, ok := m.nameToCodec[codecNameProto]; ok {
 		return pb
 	}
 	return &protoBinaryCodec{}
 }
 
-// Names returns a copy of the registered codec names. The returned slice is
-// safe for the caller to mutate.
 func (m *codecMap) Names() []string {
-	names := make([]string, 0, len(m.codecs))
-	for name := range m.codecs {
+	names := make([]string, 0, len(m.nameToCodec))
+	for name := range m.nameToCodec {
 		names = append(names, name)
 	}
 	return names
+}
+
+func errNotProto(message any) error {
+	return fmt.Errorf("%T doesn't implement proto.Message", message)
 }
