@@ -31,15 +31,15 @@ func newHandlerStream(
 	compressMinBytes int,
 	codec Codec,
 	protobuf Codec, // for errors
-	requestCompressor Compressor,
-	responseCompressor Compressor,
+	requestCompressionPools compressionPool,
+	responseCompressionPools compressionPool,
 ) (*handlerSender, *handlerReceiver) {
 	sender := &handlerSender{
 		spec: spec,
 		web:  web,
 		marshaler: marshaler{
 			writer:           w,
-			compressor:       responseCompressor,
+			compressionPool:  responseCompressionPools,
 			codec:            codec,
 			compressMinBytes: compressMinBytes,
 		},
@@ -50,11 +50,11 @@ func newHandlerStream(
 	receiver := &handlerReceiver{
 		spec: spec,
 		unmarshaler: unmarshaler{
-			web:        web,
-			reader:     r.Body,
-			max:        maxReadBytes,
-			compressor: requestCompressor,
-			codec:      codec,
+			web:             web,
+			reader:          r.Body,
+			max:             maxReadBytes,
+			compressionPool: requestCompressionPools,
+			codec:           codec,
 		},
 		request: r,
 	}

@@ -47,7 +47,7 @@ type protocol interface {
 type protocolHandlerParams struct {
 	Spec             Specification
 	Codecs           readOnlyCodecs
-	Compressors      readOnlyCompressors
+	CompressionPools readOnlyCompressionPools
 	MaxRequestBytes  int64
 	CompressMinBytes int
 }
@@ -89,8 +89,8 @@ type protocolHandler interface {
 // rather than constructing their own, since new fields may have been added.
 type protocolClientParams struct {
 	Spec             Specification
-	CompressorName   string
-	Compressors      readOnlyCompressors
+	CompressionName  string
+	CompressionPools readOnlyCompressionPools
 	Codec            Codec
 	MaxResponseBytes int64
 	CompressMinBytes int

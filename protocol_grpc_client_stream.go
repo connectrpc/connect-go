@@ -81,12 +81,12 @@ type duplexClientStream struct {
 	trailer     http.Header
 
 	// receive goroutine
-	web           bool
-	reader        *io.PipeReader
-	response      *http.Response
-	responseReady chan struct{}
-	unmarshaler   unmarshaler
-	compressors   readOnlyCompressors
+	web              bool
+	reader           *io.PipeReader
+	response         *http.Response
+	responseReady    chan struct{}
+	unmarshaler      unmarshaler
+	compressionPools readOnlyCompressionPools
 
 	responseErrMu sync.Mutex
 	responseErr   error
@@ -280,9 +280,9 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 		return
 	}
 	compression := res.Header.Get("Grpc-Encoding")
-	if compression == "" || compression == compressIdentity {
-		compression = compressIdentity
-	} else if !cs.compressors.Contains(compression) {
+	if compression == "" || compression == compressionIdentity {
+		compression = compressionIdentity
+	} else if !cs.compressionPools.Contains(compression) {
 		// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
 		// should return CodeInternal and specify acceptable compression(s) (in
 		// addition to setting the Grpc-Accept-Encoding header).
@@ -290,7 +290,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 			CodeInternal,
 			"unknown compression %q: accepted grpc-encoding values are %v",
 			compression,
-			cs.compressors.CommaSeparatedNames(),
+			cs.compressionPools.CommaSeparatedNames(),
 		))
 		return
 	}
@@ -305,11 +305,11 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	// probably a message waiting in the stream.
 	cs.response = res
 	cs.unmarshaler = unmarshaler{
-		reader:     res.Body,
-		max:        cs.maxReadBytes,
-		codec:      cs.codec,
-		compressor: cs.compressors.Get(compression),
-		web:        cs.web,
+		reader:          res.Body,
+		max:             cs.maxReadBytes,
+		codec:           cs.codec,
+		compressionPool: cs.compressionPools.Get(compression),
+		web:             cs.web,
 	}
 }
 

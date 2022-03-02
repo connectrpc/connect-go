@@ -32,7 +32,7 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 		spec:             params.Spec,
 		web:              g.web,
 		codecs:           params.Codecs,
-		compressors:      params.Compressors,
+		compressionPools: params.CompressionPools,
 		maxRequestBytes:  params.MaxRequestBytes,
 		minCompressBytes: params.CompressMinBytes,
 		accept:           acceptPostValue(g.web, params.Codecs),
@@ -48,8 +48,8 @@ func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, 
 	return &grpcClient{
 		spec:             params.Spec,
 		web:              g.web,
-		compressorName:   params.CompressorName,
-		compressors:      params.Compressors,
+		compressionName:  params.CompressionName,
+		compressionPools: params.CompressionPools,
 		codec:            params.Codec,
 		protobuf:         params.Protobuf,
 		maxResponseBytes: params.MaxResponseBytes,
@@ -63,7 +63,7 @@ type grpcHandler struct {
 	spec             Specification
 	web              bool
 	codecs           readOnlyCodecs
-	compressors      readOnlyCompressors
+	compressionPools readOnlyCompressionPools
 	maxRequestBytes  int64
 	minCompressBytes int
 	accept           string
@@ -108,11 +108,11 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 		r = r.WithContext(ctx)
 	} // else err == errNoTimeout, nothing to do
 
-	requestCompression := compressIdentity
-	if msgEncoding := r.Header.Get("Grpc-Encoding"); msgEncoding != "" && msgEncoding != compressIdentity {
+	requestCompression := compressionIdentity
+	if msgEncoding := r.Header.Get("Grpc-Encoding"); msgEncoding != "" && msgEncoding != compressionIdentity {
 		// We default to identity, so we only care if the client sends something
 		// other than the empty string or compressIdentity.
-		if g.compressors.Contains(msgEncoding) {
+		if g.compressionPools.Contains(msgEncoding) {
 			requestCompression = msgEncoding
 		} else if failed == nil {
 			// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
@@ -121,7 +121,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 			failed = errorf(
 				CodeUnimplemented,
 				"unknown compression %q: accepted grpc-encoding values are %v",
-				msgEncoding, g.compressors.CommaSeparatedNames(),
+				msgEncoding, g.compressionPools.CommaSeparatedNames(),
 			)
 		}
 	}
@@ -132,10 +132,10 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	responseCompression := requestCompression
 	// If we're not already planning to compress the response, check whether the
 	// client requested a compression algorithm we support.
-	if responseCompression == compressIdentity {
+	if responseCompression == compressionIdentity {
 		if acceptEncoding := r.Header.Get("Grpc-Accept-Encoding"); acceptEncoding != "" {
 			for _, name := range strings.FieldsFunc(acceptEncoding, isCommaOrSpace) {
-				if g.compressors.Contains(name) {
+				if g.compressionPools.Contains(name) {
 					// We found a mutually supported compression algorithm. Unlike standard
 					// HTTP, there's no preference weighting, so can bail out immediately.
 					responseCompression = name
@@ -153,7 +153,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	// Since we know that these header keys are already in canonical form, we can
 	// skip the normalization in Header.Set.
 	w.Header()["Content-Type"] = []string{r.Header.Get("Content-Type")}
-	w.Header()["Grpc-Accept-Encoding"] = []string{g.compressors.CommaSeparatedNames()}
+	w.Header()["Grpc-Accept-Encoding"] = []string{g.compressionPools.CommaSeparatedNames()}
 	w.Header()["Grpc-Encoding"] = []string{responseCompression}
 	if !g.web {
 		// Every standard gRPC response will have these trailers, but gRPC-Web
@@ -170,8 +170,8 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 		g.minCompressBytes,
 		clientCodec,
 		g.codecs.Protobuf(), // for errors
-		g.compressors.Get(requestCompression),
-		g.compressors.Get(responseCompression),
+		g.compressionPools.Get(requestCompression),
+		g.compressionPools.Get(responseCompression),
 	))
 	// We can't return failed as-is: a nil *Error is non-nil when returned as an
 	// error interface.
@@ -204,8 +204,8 @@ func (g *grpcHandler) wrapStream(sender Sender, receiver Receiver) (Sender, Rece
 type grpcClient struct {
 	spec                 Specification
 	web                  bool
-	compressorName       string
-	compressors          readOnlyCompressors
+	compressionName      string
+	compressionPools     readOnlyCompressionPools
 	codec                Codec
 	protobuf             Codec
 	maxResponseBytes     int64
@@ -220,10 +220,10 @@ func (g *grpcClient) WriteRequestHeader(header http.Header) {
 	// checks in Header.Set.
 	header["User-Agent"] = userAgent
 	header["Content-Type"] = []string{contentTypeFromCodecName(g.web, g.codec.Name())}
-	if g.compressorName != "" && g.compressorName != compressIdentity {
-		header["Grpc-Encoding"] = []string{g.compressorName}
+	if g.compressionName != "" && g.compressionName != compressionIdentity {
+		header["Grpc-Encoding"] = []string{g.compressionName}
 	}
-	if acceptCompression := g.compressors.CommaSeparatedNames(); acceptCompression != "" {
+	if acceptCompression := g.compressionPools.CommaSeparatedNames(); acceptCompression != "" {
 		header["Grpc-Accept-Encoding"] = []string{acceptCompression}
 	}
 	if !g.web {
@@ -257,16 +257,16 @@ func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Rece
 		writer:       pipeWriter,
 		marshaler: marshaler{
 			writer:           pipeWriter,
-			compressor:       g.compressors.Get(g.compressorName),
+			compressionPool:  g.compressionPools.Get(g.compressionName),
 			codec:            g.codec,
 			compressMinBytes: g.minCompressBytes,
 		},
-		header:        h,
-		trailer:       make(http.Header),
-		web:           g.web,
-		reader:        pipeReader,
-		compressors:   g.compressors,
-		responseReady: make(chan struct{}),
+		header:           h,
+		trailer:          make(http.Header),
+		web:              g.web,
+		reader:           pipeReader,
+		compressionPools: g.compressionPools,
+		responseReady:    make(chan struct{}),
 	}
 	return g.wrapStream(&clientSender{duplex}, &clientReceiver{duplex})
 }
