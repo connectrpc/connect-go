@@ -28,7 +28,7 @@ func newHandlerStream(
 	w http.ResponseWriter,
 	r *http.Request,
 	maxReadBytes int64,
-	minCompressBytes int,
+	compressMinBytes int,
 	codec Codec,
 	protobuf Codec, // for errors
 	requestCompressor Compressor,
@@ -41,7 +41,7 @@ func newHandlerStream(
 			writer:           w,
 			compressor:       responseCompressor,
 			codec:            codec,
-			minCompressBytes: minCompressBytes,
+			compressMinBytes: compressMinBytes,
 		},
 		protobuf: protobuf,
 		writer:   w,
