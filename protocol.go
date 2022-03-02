@@ -49,7 +49,7 @@ type protocolHandlerParams struct {
 	Codecs           readOnlyCodecs
 	Compressors      readOnlyCompressors
 	MaxRequestBytes  int64
-	MinCompressBytes int
+	CompressMinBytes int
 }
 
 // Handler is the server side of a protocol. HTTP handlers typically support
@@ -93,7 +93,7 @@ type protocolClientParams struct {
 	Compressors      readOnlyCompressors
 	Codec            Codec
 	MaxResponseBytes int64
-	MinCompressBytes int
+	CompressMinBytes int
 	Doer             Doer
 	BaseURL          string
 

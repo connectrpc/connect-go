@@ -43,7 +43,7 @@ type marshaler struct {
 	writer           io.Writer
 	compressor       Compressor
 	codec            Codec
-	minCompressBytes int
+	compressMinBytes int
 }
 
 func (m *marshaler) Marshal(message any) *Error {
@@ -64,7 +64,7 @@ func (m *marshaler) MarshalWebTrailers(trailer http.Header) *Error {
 }
 
 func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
-	if m.compressor == nil || len(message) < m.minCompressBytes {
+	if m.compressor == nil || len(message) < m.compressMinBytes {
 		if err := m.writeGRPCPrefix(false /* compressed */, trailer, len(message)); err != nil {
 			return err // already enriched
 		}

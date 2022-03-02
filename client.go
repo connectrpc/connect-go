@@ -23,7 +23,7 @@ type clientConfiguration struct {
 	Protocol          protocol
 	Procedure         string
 	MaxResponseBytes  int64
-	MinCompressBytes  int
+	CompressMinBytes  int
 	Interceptor       Interceptor
 	Compressors       map[string]Compressor
 	Codec             Codec
@@ -143,7 +143,7 @@ func NewStreamClientImplementation(
 		Codec:            config.Codec,
 		Protobuf:         config.Protobuf(),
 		MaxResponseBytes: config.MaxResponseBytes,
-		MinCompressBytes: config.MinCompressBytes,
+		CompressMinBytes: config.CompressMinBytes,
 		Doer:             doer,
 		BaseURL:          baseURL,
 	})
@@ -185,7 +185,7 @@ func NewUnaryClientImplementation[Req, Res any](
 		Codec:            config.Codec,
 		Protobuf:         config.Protobuf(),
 		MaxResponseBytes: config.MaxResponseBytes,
-		MinCompressBytes: config.MinCompressBytes,
+		CompressMinBytes: config.CompressMinBytes,
 		Doer:             doer,
 		BaseURL:          baseURL,
 	})
