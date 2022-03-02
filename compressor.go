@@ -57,7 +57,6 @@ type Compressor interface {
 	GetReader(io.Reader) (io.ReadCloser, error)
 	PutReader(io.ReadCloser)
 
-	ShouldCompress([]byte) bool
 	GetWriter(io.Writer) io.WriteCloser
 	PutWriter(io.WriteCloser)
 }
@@ -86,10 +85,6 @@ func newGzipCompressor() *gzipCompressor {
 			},
 		},
 	}
-}
-
-func (c *gzipCompressor) ShouldCompress(bs []byte) bool {
-	return len(bs) > c.min
 }
 
 func (c *gzipCompressor) GetReader(r io.Reader) (io.ReadCloser, error) {

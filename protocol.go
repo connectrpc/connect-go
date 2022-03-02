@@ -45,10 +45,11 @@ type protocol interface {
 // Specification rather than constructing their own, since new fields may have
 // been added.
 type protocolHandlerParams struct {
-	Spec            Specification
-	Codecs          readOnlyCodecs
-	Compressors     readOnlyCompressors
-	MaxRequestBytes int64
+	Spec             Specification
+	Codecs           readOnlyCodecs
+	Compressors      readOnlyCompressors
+	MaxRequestBytes  int64
+	MinCompressBytes int
 }
 
 // Handler is the server side of a protocol. HTTP handlers typically support
@@ -92,6 +93,7 @@ type protocolClientParams struct {
 	Compressors      readOnlyCompressors
 	Codec            Codec
 	MaxResponseBytes int64
+	MinCompressBytes int
 	Doer             Doer
 	BaseURL          string
 
