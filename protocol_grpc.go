@@ -29,12 +29,13 @@ type protocolGRPC struct {
 // NewHandler implements protocol, so it must return an interface.
 func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler {
 	return &grpcHandler{
-		spec:            params.Spec,
-		web:             g.web,
-		codecs:          params.Codecs,
-		compressors:     params.Compressors,
-		maxRequestBytes: params.MaxRequestBytes,
-		accept:          acceptPostValue(g.web, params.Codecs),
+		spec:             params.Spec,
+		web:              g.web,
+		codecs:           params.Codecs,
+		compressors:      params.Compressors,
+		maxRequestBytes:  params.MaxRequestBytes,
+		minCompressBytes: params.MinCompressBytes,
+		accept:           acceptPostValue(g.web, params.Codecs),
 	}
 }
 
@@ -52,18 +53,20 @@ func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, 
 		codec:            params.Codec,
 		protobuf:         params.Protobuf,
 		maxResponseBytes: params.MaxResponseBytes,
+		minCompressBytes: params.MinCompressBytes,
 		doer:             params.Doer,
 		procedureURL:     procedureURL,
 	}, nil
 }
 
 type grpcHandler struct {
-	spec            Specification
-	web             bool
-	codecs          readOnlyCodecs
-	compressors     readOnlyCompressors
-	maxRequestBytes int64
-	accept          string
+	spec             Specification
+	web              bool
+	codecs           readOnlyCodecs
+	compressors      readOnlyCompressors
+	maxRequestBytes  int64
+	minCompressBytes int
+	accept           string
 }
 
 func (g *grpcHandler) ShouldHandleMethod(method string) bool {
@@ -164,6 +167,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 		w,
 		r,
 		g.maxRequestBytes,
+		g.minCompressBytes,
 		clientCodec,
 		g.codecs.Protobuf(), // for errors
 		g.compressors.Get(requestCompression),
@@ -205,6 +209,7 @@ type grpcClient struct {
 	codec                Codec
 	protobuf             Codec
 	maxResponseBytes     int64
+	minCompressBytes     int
 	doer                 Doer
 	procedureURL         string
 	wrapErrorInterceptor Interceptor
@@ -251,9 +256,10 @@ func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Rece
 		protobuf:     g.protobuf,
 		writer:       pipeWriter,
 		marshaler: marshaler{
-			writer:     pipeWriter,
-			compressor: g.compressors.Get(g.compressorName),
-			codec:      g.codec,
+			writer:           pipeWriter,
+			compressor:       g.compressors.Get(g.compressorName),
+			codec:            g.codec,
+			minCompressBytes: g.minCompressBytes,
 		},
 		header:        h,
 		trailer:       make(http.Header),
