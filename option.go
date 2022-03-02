@@ -25,6 +25,29 @@ type Option interface {
 	HandlerOption
 }
 
+type compressMinBytesOption struct {
+	min int
+}
+
+// WithCompressMinBytes sets a minimum size threshold for compression:
+// regardless of compressor configuration, messages smaller than the configured
+// minimum are sent uncompressed.
+//
+// The default minimum is zero. Setting a minimum compression threshold may
+// improve overall performance, because the CPU cost of compressing very small
+// messages usually isn't worth the small reduction in network I/O.
+func WithCompressMinBytes(min int) Option {
+	return &compressMinBytesOption{min: min}
+}
+
+func (o *compressMinBytesOption) applyToClient(config *clientConfiguration) {
+	config.MinCompressBytes = o.min
+}
+
+func (o *compressMinBytesOption) applyToHandler(config *handlerConfiguration) {
+	config.MinCompressBytes = o.min
+}
+
 type replaceProcedurePrefixOption struct {
 	prefix      string
 	replacement string
@@ -176,9 +199,8 @@ func WithCompressor(name string, c Compressor) Option {
 	}
 }
 
-// WithGzip registers a gzip compressor. The compressor uses the standard
-// library's gzip package with the default compression level, and it doesn't
-// compress messages smaller than 1kb.
+// WithGzip registers a gzip compressor backed by the standard library's gzip
+// package with the default compression level.
 //
 // Handlers with this option applied accept gzipped requests and can send
 // gzipped responses. Clients with this option applied request gzipped

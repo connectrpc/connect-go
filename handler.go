@@ -24,6 +24,7 @@ type handlerConfiguration struct {
 	Compressors      map[string]Compressor
 	Codecs           map[string]Codec
 	MaxRequestBytes  int64
+	MinCompressBytes int
 	Registrar        *Registrar
 	Interceptor      Interceptor
 	Procedure        string
@@ -70,10 +71,11 @@ func (c *handlerConfiguration) newProtocolHandlers(streamType StreamType) []prot
 	compressors := newReadOnlyCompressors(c.Compressors)
 	for _, protocol := range protocols {
 		handlers = append(handlers, protocol.NewHandler(&protocolHandlerParams{
-			Spec:            c.newSpecification(streamType),
-			Codecs:          codecs,
-			Compressors:     compressors,
-			MaxRequestBytes: c.MaxRequestBytes,
+			Spec:             c.newSpecification(streamType),
+			Codecs:           codecs,
+			Compressors:      compressors,
+			MaxRequestBytes:  c.MaxRequestBytes,
+			MinCompressBytes: c.MinCompressBytes,
 		}))
 	}
 	return handlers
