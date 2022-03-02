@@ -103,8 +103,6 @@ type healthClient struct {
 	watch func(context.Context) (connect.Sender, connect.Receiver)
 }
 
-var _ HealthClient = (*healthClient)(nil) // verify interface implementation
-
 // Check calls internal.health.v1.Health.Check.
 func (c *healthClient) Check(ctx context.Context, req *connect.Envelope[v1.HealthCheckRequest]) (*connect.Envelope[v1.HealthCheckResponse], error) {
 	return c.check(ctx, req)
@@ -206,8 +204,6 @@ func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) (string,
 
 // UnimplementedHealthHandler returns CodeUnimplemented from all methods.
 type UnimplementedHealthHandler struct{}
-
-var _ HealthHandler = (*UnimplementedHealthHandler)(nil) // verify interface implementation
 
 func (UnimplementedHealthHandler) Check(context.Context, *connect.Envelope[v1.HealthCheckRequest]) (*connect.Envelope[v1.HealthCheckResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.health.v1.Health.Check isn't implemented"))
