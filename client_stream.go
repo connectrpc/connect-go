@@ -15,6 +15,8 @@
 package connect
 
 import (
+	"errors"
+	"io"
 	"net/http"
 )
 
@@ -61,6 +63,8 @@ func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Envelope[Res], err
 // ServerStreamForClient is the client's view of a server streaming RPC.
 type ServerStreamForClient[Res any] struct {
 	receiver Receiver
+	msg      Res
+	err      error
 }
 
 // NewServerStreamForClient constructs the client's view of a server streaming
@@ -69,14 +73,32 @@ func NewServerStreamForClient[Res any](r Receiver) *ServerStreamForClient[Res] {
 	return &ServerStreamForClient[Res]{receiver: r}
 }
 
-// Receive a message. When the server is done sending messages, Receive will
-// return an error that wraps io.EOF.
-func (s *ServerStreamForClient[Res]) Receive() (*Res, error) {
-	var res Res
-	if err := s.receiver.Receive(&res); err != nil {
-		return nil, err
+// Receive advances the stream to the next message, which will then be
+// available through the Msg method. It returns false when the stream stops,
+// either by reaching the end or by encountering an unexpected error. After
+// Receive returns false, the Err method will return any unexpected error
+// encountered.
+func (s *ServerStreamForClient[Res]) Receive() bool {
+	if s.err != nil {
+		return false
 	}
-	return &res, nil
+	s.err = s.receiver.Receive(&s.msg)
+	return s.err == nil
+}
+
+// Msg returns the most recent message unmarshaled by a call to Receive. The
+// returned message points to data that will be overwritten by the next call to
+// Receive.
+func (s *ServerStreamForClient[Res]) Msg() *Res {
+	return &s.msg
+}
+
+// Err returns the first non-EOF error that was encountered by Receive.
+func (s *ServerStreamForClient[Res]) Err() error {
+	if s.err == nil || errors.Is(s.err, io.EOF) {
+		return nil
+	}
+	return s.err
 }
 
 // ResponseHeader returns the headers received from the server. It blocks until
