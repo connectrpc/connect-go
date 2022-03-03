@@ -78,8 +78,6 @@ type serverReflectionClient struct {
 	serverReflectionInfo func(context.Context) (connect.Sender, connect.Receiver)
 }
 
-var _ ServerReflectionClient = (*serverReflectionClient)(nil) // verify interface implementation
-
 // ServerReflectionInfo calls internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo.
 func (c *serverReflectionClient) ServerReflectionInfo(ctx context.Context) *connect.BidiStreamForClient[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
 	sender, receiver := c.serverReflectionInfo(ctx)
@@ -128,8 +126,6 @@ func NewServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.Han
 
 // UnimplementedServerReflectionHandler returns CodeUnimplemented from all methods.
 type UnimplementedServerReflectionHandler struct{}
-
-var _ ServerReflectionHandler = (*UnimplementedServerReflectionHandler)(nil) // verify interface implementation
 
 func (UnimplementedServerReflectionHandler) ServerReflectionInfo(context.Context, *connect.BidiStream[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo isn't implemented"))
