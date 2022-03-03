@@ -110,21 +110,19 @@ func (p pingServer) Sum(
 		}
 	}
 	var sum int64
-	for {
+	for stream.Receive() {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		msg, err := stream.Receive()
-		if errors.Is(err, io.EOF) {
-			response := connect.NewEnvelope(&pingpb.SumResponse{Sum: sum})
-			response.Header().Set(handlerHeader, headerValue)
-			response.Trailer().Set(handlerTrailer, trailerValue)
-			return stream.SendAndClose(response)
-		} else if err != nil {
-			return err
-		}
-		sum += msg.Number
+		sum += stream.Msg().Number
 	}
+	if stream.Err() != nil {
+		return stream.Err()
+	}
+	response := connect.NewEnvelope(&pingpb.SumResponse{Sum: sum})
+	response.Header().Set(handlerHeader, headerValue)
+	response.Trailer().Set(handlerTrailer, trailerValue)
+	return stream.SendAndClose(response)
 }
 
 func (p pingServer) CountUp(
@@ -253,16 +251,11 @@ func TestServerProtoGRPC(t *testing.T) {
 			request.Trailer().Set(clientTrailer, trailerValue)
 			stream, err := client.CountUp(context.Background(), request)
 			assert.Nil(t, err, "send error")
-			for {
-				msg, err := stream.Receive()
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				assert.Nil(t, err, "receive error")
-				got = append(got, msg.Number)
+			for stream.Receive() {
+				got = append(got, stream.Msg().Number)
 			}
-			err = stream.Close()
-			assert.Nil(t, err, "close error")
+			assert.Nil(t, stream.Err(), "receive error")
+			assert.Nil(t, stream.Close(), "close error")
 			assert.Equal(t, got, expect, "responses")
 		})
 	}

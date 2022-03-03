@@ -15,6 +15,8 @@
 package connect
 
 import (
+	"errors"
+	"io"
 	"net/http"
 )
 
@@ -22,6 +24,8 @@ import (
 type ClientStream[Req, Res any] struct {
 	sender   Sender
 	receiver Receiver
+	msg      Req
+	err      error
 }
 
 // NewClientStream constructs the handler's view of a client streaming RPC.
@@ -34,14 +38,32 @@ func (c *ClientStream[Req, Res]) RequestHeader() http.Header {
 	return c.receiver.Header()
 }
 
-// Receive a message. When the client is done sending messages, Receive returns
-// an error that wraps io.EOF.
-func (c *ClientStream[Req, Res]) Receive() (*Req, error) {
-	var req Req
-	if err := c.receiver.Receive(&req); err != nil {
-		return nil, err
+// Receive advances the stream to the next message, which will then be
+// available through the Msg method. It returns false when the stream stops,
+// either by reaching the end or by encountering an unexpected error. After
+// Receive returns false, the Err method will return any unexpected error
+// encountered.
+func (c *ClientStream[Req, Res]) Receive() bool {
+	if c.err != nil {
+		return false
 	}
-	return &req, nil
+	c.err = c.receiver.Receive(&c.msg)
+	return c.err == nil
+}
+
+// Msg returns the most recent message unmarshaled by a call to Receive. The
+// returned message points to data that will be overwritten by the next call to
+// Receive.
+func (c *ClientStream[Req, Res]) Msg() *Req {
+	return &c.msg
+}
+
+// Err returns the first non-EOF error that was encountered by Receive.
+func (c *ClientStream[Req, Res]) Err() error {
+	if c.err == nil || errors.Is(c.err, io.EOF) {
+		return nil
+	}
+	return c.err
 }
 
 // SendAndClose closes the receive side of the stream, then sends a response
@@ -51,11 +73,11 @@ func (c *ClientStream[Req, Res]) SendAndClose(envelope *Envelope[Res]) error {
 		return err
 	}
 	sendHeader := c.sender.Header()
-	for k, v := range envelope.Header() {
+	for k, v := range envelope.header {
 		sendHeader[k] = append(sendHeader[k], v...)
 	}
 	sendTrailer := c.sender.Trailer()
-	for k, v := range envelope.Trailer() {
+	for k, v := range envelope.trailer {
 		sendTrailer[k] = append(sendTrailer[k], v...)
 	}
 	return c.sender.Send(envelope.Msg)
