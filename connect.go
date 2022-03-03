@@ -15,7 +15,6 @@
 package connect
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -185,12 +184,6 @@ type AnyEnvelope interface {
 	// backward compatibility.
 	internalOnly()
 }
-
-// UnaryFunc is the generic signature of a unary RPC. Interceptors wrap Funcs.
-//
-// The type of the request and response struct depend on the codec being used.
-// When using protobuf, they'll always be proto.Message implementations.
-type UnaryFunc func(context.Context, AnyEnvelope) (AnyEnvelope, error)
 
 // Doer is the transport-level interface connect expects HTTP clients to
 // implement. The standard library's http.Client implements Doer.
