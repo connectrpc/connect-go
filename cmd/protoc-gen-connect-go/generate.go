@@ -285,8 +285,6 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	}
 	g.P("}")
 	g.P()
-	g.P("var _ ", names.Client, " = (*", names.ClientImpl, ")(nil) // verify interface implementation")
-	g.P()
 	for _, method := range service.Methods {
 		clientMethod(g, service, method, names)
 	}
@@ -494,8 +492,6 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 func unimplementedServerImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names) {
 	wrapComments(g, names.UnimplementedServer, " returns CodeUnimplemented from all methods.")
 	g.P("type ", names.UnimplementedServer, " struct {}")
-	g.P()
-	g.P("var _ ", names.Server, " = (*", names.UnimplementedServer, ")(nil) // verify interface implementation")
 	g.P()
 	for _, method := range service.Methods {
 		g.P("func (", names.UnimplementedServer, ") ", serverSignature(g, method), "{")

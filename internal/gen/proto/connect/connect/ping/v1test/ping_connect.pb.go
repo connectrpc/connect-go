@@ -126,8 +126,6 @@ type pingServiceClient struct {
 	cumSum  func(context.Context) (connect.Sender, connect.Receiver)
 }
 
-var _ PingServiceClient = (*pingServiceClient)(nil) // verify interface implementation
-
 // Ping calls connect.ping.v1test.PingService.Ping.
 func (c *pingServiceClient) Ping(ctx context.Context, req *connect.Envelope[v1test.PingRequest]) (*connect.Envelope[v1test.PingResponse], error) {
 	return c.ping(ctx, req)
@@ -276,8 +274,6 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption
 
 // UnimplementedPingServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedPingServiceHandler struct{}
-
-var _ PingServiceHandler = (*UnimplementedPingServiceHandler)(nil) // verify interface implementation
 
 func (UnimplementedPingServiceHandler) Ping(context.Context, *connect.Envelope[v1test.PingRequest]) (*connect.Envelope[v1test.PingResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1test.PingService.Ping isn't implemented"))
