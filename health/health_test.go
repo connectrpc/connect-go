@@ -80,10 +80,10 @@ func TestHealth(t *testing.T) {
 		)
 		assert.Nil(t, err, "rpc error")
 		defer stream.Close()
-		_, err = stream.Receive()
-		assert.NotNil(t, err, "receive err")
+		assert.False(t, stream.Receive(), "receive")
+		assert.NotNil(t, stream.Err(), "receive err")
 		var connectErr *connect.Error
-		ok := errors.As(err, &connectErr)
+		ok := errors.As(stream.Err(), &connectErr)
 		assert.True(t, ok, "convert to connect error")
 		assert.Equal(t, connectErr.Code(), connect.CodeUnimplemented, "error code")
 	})
