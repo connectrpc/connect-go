@@ -52,16 +52,13 @@ type PingServiceClient interface {
 }
 
 // NewPingServiceClient constructs a client for the connect.ping.v1test.PingService service. By
-// default, it uses the binary protobuf codec.
+// default, it uses the HTTP/2 gRPC protocol and the binary protobuf Codec. It asks for gzipped
+// responses and sends uncompressed requests.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g., https://api.acme.com or
 // https://acme.com/grpc).
 func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (PingServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
-	opts = append([]connect.ClientOption{
-		connect.WithProtoBinaryCodec(),
-		connect.WithGzip(),
-	}, opts...)
 	pingClient, pingErr := connect.NewClient[v1test.PingRequest, v1test.PingResponse](
 		baseURL,
 		"connect.ping.v1test.PingService/Ping",
@@ -172,11 +169,6 @@ type PingServiceHandler interface {
 func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	var lastHandlerPath string
 	mux := http.NewServeMux()
-	opts = append([]connect.HandlerOption{
-		connect.WithProtoBinaryCodec(),
-		connect.WithProtoJSONCodec(),
-		connect.WithGzip(),
-	}, opts...)
 
 	ping := connect.NewUnaryHandler(
 		"connect.ping.v1test.PingService/Ping", // procedure name

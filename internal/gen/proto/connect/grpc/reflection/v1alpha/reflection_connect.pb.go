@@ -45,17 +45,14 @@ type ServerReflectionClient interface {
 }
 
 // NewServerReflectionClient constructs a client for the
-// internal.reflection.v1alpha1.ServerReflection service. By default, it uses the binary protobuf
-// codec.
+// internal.reflection.v1alpha1.ServerReflection service. By default, it uses the HTTP/2 gRPC
+// protocol and the binary protobuf Codec. It asks for gzipped responses and sends uncompressed
+// requests.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g., https://api.acme.com or
 // https://acme.com/grpc).
 func NewServerReflectionClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (ServerReflectionClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
-	opts = append([]connect.ClientOption{
-		connect.WithProtoBinaryCodec(),
-		connect.WithGzip(),
-	}, opts...)
 	serverReflectionInfoClient, serverReflectionInfoErr := connect.NewClient[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](
 		baseURL,
 		"internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo",
@@ -96,11 +93,6 @@ type ServerReflectionHandler interface {
 func NewServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	var lastHandlerPath string
 	mux := http.NewServeMux()
-	opts = append([]connect.HandlerOption{
-		connect.WithProtoBinaryCodec(),
-		connect.WithProtoJSONCodec(),
-		connect.WithGzip(),
-	}, opts...)
 
 	serverReflectionInfo := connect.NewBidiStreamHandler(
 		"internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo", // procedure name
