@@ -41,12 +41,11 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 
 // NewClient implements protocol, so it must return an interface.
 func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, error) {
-	procedureURL := params.BaseURL + "/" + params.Spec.Procedure
+	procedureURL := params.BaseURL + "/" + params.Procedure
 	if _, err := url.ParseRequestURI(procedureURL); err != nil {
 		return nil, NewError(CodeUnknown, err)
 	}
 	return &grpcClient{
-		spec:             params.Spec,
 		web:              g.web,
 		compressionName:  params.CompressionName,
 		compressionPools: params.CompressionPools,
@@ -202,7 +201,6 @@ func (g *grpcHandler) wrapStream(sender Sender, receiver Receiver) (Sender, Rece
 }
 
 type grpcClient struct {
-	spec                 Specification
 	web                  bool
 	compressionName      string
 	compressionPools     readOnlyCompressionPools
@@ -232,7 +230,11 @@ func (g *grpcClient) WriteRequestHeader(header http.Header) {
 	}
 }
 
-func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Receiver) {
+func (g *grpcClient) NewStream(
+	ctx context.Context,
+	spec Specification,
+	h http.Header,
+) (Sender, Receiver) {
 	// In a typical HTTP/1.1 request, we'd put the body into a bytes.Buffer, hand
 	// the buffer to http.NewRequest, and fire off the request with doer.Do. That
 	// won't work here because we're establishing a stream - we don't even have
@@ -250,7 +252,7 @@ func (g *grpcClient) NewStream(ctx context.Context, h http.Header) (Sender, Rece
 		ctx:          ctx,
 		doer:         g.doer,
 		url:          g.procedureURL,
-		spec:         g.spec,
+		spec:         spec,
 		maxReadBytes: g.maxResponseBytes,
 		codec:        g.codec,
 		protobuf:     g.protobuf,

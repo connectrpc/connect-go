@@ -71,62 +71,44 @@ func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOp
 		connect.WithProtoBinaryCodec(),
 		connect.WithGzip(),
 	}, opts...)
-	var (
-		client healthClient
-		err    error
-	)
-	client.check, err = connect.NewUnaryClientImplementation[v1.HealthCheckRequest, v1.HealthCheckResponse](
-		doer,
+	checkClient, checkErr := connect.NewClient[v1.HealthCheckRequest, v1.HealthCheckResponse](
 		baseURL,
 		"internal.health.v1.Health/Check",
+		doer,
 		opts...,
 	)
-	if err != nil {
-		return nil, err
+	if checkErr != nil {
+		return nil, checkErr
 	}
-	client.watch, err = connect.NewStreamClientImplementation(
-		doer,
+	watchClient, watchErr := connect.NewClient[v1.HealthCheckRequest, v1.HealthCheckResponse](
 		baseURL,
 		"internal.health.v1.Health/Watch",
-		connect.StreamTypeServer,
+		doer,
 		opts...,
 	)
-	if err != nil {
-		return nil, err
+	if watchErr != nil {
+		return nil, watchErr
 	}
-	return &client, nil
+	return &healthClient{
+		check: checkClient,
+		watch: watchClient,
+	}, nil
 }
 
 // healthClient implements HealthClient.
 type healthClient struct {
-	check func(context.Context, *connect.Envelope[v1.HealthCheckRequest]) (*connect.Envelope[v1.HealthCheckResponse], error)
-	watch func(context.Context) (connect.Sender, connect.Receiver)
+	check *connect.Client[v1.HealthCheckRequest, v1.HealthCheckResponse]
+	watch *connect.Client[v1.HealthCheckRequest, v1.HealthCheckResponse]
 }
 
 // Check calls internal.health.v1.Health.Check.
 func (c *healthClient) Check(ctx context.Context, req *connect.Envelope[v1.HealthCheckRequest]) (*connect.Envelope[v1.HealthCheckResponse], error) {
-	return c.check(ctx, req)
+	return c.check.CallUnary(ctx, req)
 }
 
 // Watch calls internal.health.v1.Health.Watch.
 func (c *healthClient) Watch(ctx context.Context, req *connect.Envelope[v1.HealthCheckRequest]) (*connect.ServerStreamForClient[v1.HealthCheckResponse], error) {
-	sender, receiver := c.watch(ctx)
-	for key, values := range req.Header() {
-		sender.Header()[key] = append(sender.Header()[key], values...)
-	}
-	for key, values := range req.Trailer() {
-		sender.Trailer()[key] = append(sender.Trailer()[key], values...)
-	}
-	if err := sender.Send(req.Msg); err != nil {
-		_ = sender.Close(err)
-		_ = receiver.Close()
-		return nil, err
-	}
-	if err := sender.Close(nil); err != nil {
-		_ = receiver.Close()
-		return nil, err
-	}
-	return connect.NewServerStreamForClient[v1.HealthCheckResponse](receiver), nil
+	return c.watch.CallServerStream(ctx, req)
 }
 
 // HealthHandler is an implementation of the internal.health.v1.Health service.

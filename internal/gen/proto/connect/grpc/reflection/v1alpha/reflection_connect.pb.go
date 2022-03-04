@@ -56,32 +56,28 @@ func NewServerReflectionClient(baseURL string, doer connect.Doer, opts ...connec
 		connect.WithProtoBinaryCodec(),
 		connect.WithGzip(),
 	}, opts...)
-	var (
-		client serverReflectionClient
-		err    error
-	)
-	client.serverReflectionInfo, err = connect.NewStreamClientImplementation(
-		doer,
+	serverReflectionInfoClient, serverReflectionInfoErr := connect.NewClient[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](
 		baseURL,
 		"internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo",
-		connect.StreamTypeBidirectional,
+		doer,
 		opts...,
 	)
-	if err != nil {
-		return nil, err
+	if serverReflectionInfoErr != nil {
+		return nil, serverReflectionInfoErr
 	}
-	return &client, nil
+	return &serverReflectionClient{
+		serverReflectionInfo: serverReflectionInfoClient,
+	}, nil
 }
 
 // serverReflectionClient implements ServerReflectionClient.
 type serverReflectionClient struct {
-	serverReflectionInfo func(context.Context) (connect.Sender, connect.Receiver)
+	serverReflectionInfo *connect.Client[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse]
 }
 
 // ServerReflectionInfo calls internal.reflection.v1alpha1.ServerReflection.ServerReflectionInfo.
 func (c *serverReflectionClient) ServerReflectionInfo(ctx context.Context) *connect.BidiStreamForClient[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse] {
-	sender, receiver := c.serverReflectionInfo(ctx)
-	return connect.NewBidiStreamForClient[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
+	return c.serverReflectionInfo.CallBidiStream(ctx)
 }
 
 // ServerReflectionHandler is an implementation of the internal.reflection.v1alpha1.ServerReflection
