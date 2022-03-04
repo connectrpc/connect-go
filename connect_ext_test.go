@@ -27,7 +27,6 @@ import (
 	"testing"
 
 	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/health"
 	"github.com/bufbuild/connect/internal/assert"
 	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
 	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
@@ -188,7 +187,7 @@ func TestServerProtoGRPC(t *testing.T) {
 		pingServer{checkMetadata: true},
 		connect.WithRegistrar(registrar),
 	))
-	mux.Handle(health.NewHandler(health.NewChecker(registrar)))
+	mux.Handle(connect.NewHealthHandler(connect.NewHealthChecker(registrar)))
 	mux.Handle(reflection.NewHandler(registrar))
 
 	testPing := func(t *testing.T, client pingrpc.PingServiceClient) {

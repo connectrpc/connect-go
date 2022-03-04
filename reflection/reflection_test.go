@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/health"
 	"github.com/bufbuild/connect/internal/assert"
 	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
 	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
@@ -37,7 +36,6 @@ func TestReflection(t *testing.T) {
 		pingrpc.UnimplementedPingServiceHandler{},
 		connect.WithRegistrar(reg),
 	))
-	mux.Handle(health.NewHandler(health.NewChecker(reg)))
 	mux.Handle(reflection.NewHandler(reg))
 
 	server := httptest.NewUnstartedServer(mux)
