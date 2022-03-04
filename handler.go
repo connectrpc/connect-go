@@ -163,7 +163,7 @@ func NewBidiStreamHandler[Req, Res any](
 ) *Handler {
 	return newStreamHandler(
 		procedure, registrationName,
-		StreamTypeBidirectional,
+		StreamTypeBidi,
 		func(ctx context.Context, sender Sender, receiver Receiver) {
 			stream := NewBidiStream[Req, Res](sender, receiver)
 			err := implementation(ctx, stream)
@@ -180,7 +180,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// EOF: the stream we construct later on already does that, and we only
 	// return early when dealing with misbehaving clients. In those cases, it's
 	// okay if we can't re-use the connection.
-	isBidi := (h.spec.StreamType & StreamTypeBidirectional) == StreamTypeBidirectional
+	isBidi := (h.spec.StreamType & StreamTypeBidi) == StreamTypeBidi
 	if isBidi && r.ProtoMajor < 2 {
 		h.failNegotiation(w, http.StatusHTTPVersionNotSupported)
 		return

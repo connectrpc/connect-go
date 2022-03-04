@@ -137,7 +137,7 @@ func (c *Client[Req, Res]) CallServerStream(
 
 // CallBidiStream calls a bidirectional streaming procedure.
 func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForClient[Req, Res] {
-	sender, receiver := c.newStream(ctx, StreamTypeBidirectional)
+	sender, receiver := c.newStream(ctx, StreamTypeBidi)
 	return NewBidiStreamForClient[Req, Res](sender, receiver)
 }
 
