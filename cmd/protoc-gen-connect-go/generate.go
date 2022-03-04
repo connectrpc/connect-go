@@ -33,20 +33,13 @@ const (
 	pathPackage    = protogen.GoImportPath("path")
 	stringsPackage = protogen.GoImportPath("strings")
 
-	protoPackage = protogen.GoImportPath("google.golang.org/protobuf/proto")
-
 	connectPackage = protogen.GoImportPath("github.com/bufbuild/connect")
-	hstreamPackage = protogen.GoImportPath("github.com/bufbuild/connect/handlerstream")
+	protoPackage   = protogen.GoImportPath("google.golang.org/protobuf/proto")
 
 	commentWidth = 97 // leave room for "// "
 )
 
-var (
-	contextContext          = contextPackage.Ident("Context")
-	contextCanceled         = contextPackage.Ident("Canceled")
-	contextDeadlineExceeded = contextPackage.Ident("DeadlineExceeded")
-	errorsIs                = errorsPackage.Ident("Is")
-)
+var contextContext = contextPackage.Ident("Context")
 
 func generate(gen *protogen.Plugin, file *protogen.File) *protogen.GeneratedFile {
 	if len(file.Services) == 0 {
