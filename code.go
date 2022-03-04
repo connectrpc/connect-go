@@ -187,6 +187,15 @@ func (c Code) String() string {
 	return fmt.Sprintf("Code(%d)", c)
 }
 
+// CodeOf returns the error's status code if it is or wraps a *connect.Error
+// and CodeUnknown otherwise.
+func CodeOf(err error) Code {
+	if connectErr, ok := asError(err); ok {
+		return connectErr.Code()
+	}
+	return CodeUnknown
+}
+
 func httpToCode(httpCode int) Code {
 	// https://github.com/grpc/grpc/blob/master/doc/http-grpc-status-mapping.md
 	// Note that this is not just the inverse of the gRPC-to-HTTP mapping.
