@@ -61,16 +61,13 @@ type HealthClient interface {
 }
 
 // NewHealthClient constructs a client for the internal.health.v1.Health service. By default, it
-// uses the binary protobuf codec.
+// uses the HTTP/2 gRPC protocol and the binary protobuf Codec. It asks for gzipped responses and
+// sends uncompressed requests.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g., https://api.acme.com or
 // https://acme.com/grpc).
 func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (HealthClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
-	opts = append([]connect.ClientOption{
-		connect.WithProtoBinaryCodec(),
-		connect.WithGzip(),
-	}, opts...)
 	checkClient, checkErr := connect.NewClient[v1.HealthCheckRequest, v1.HealthCheckResponse](
 		baseURL,
 		"internal.health.v1.Health/Check",
@@ -142,11 +139,6 @@ type HealthHandler interface {
 func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	var lastHandlerPath string
 	mux := http.NewServeMux()
-	opts = append([]connect.HandlerOption{
-		connect.WithProtoBinaryCodec(),
-		connect.WithProtoJSONCodec(),
-		connect.WithGzip(),
-	}, opts...)
 
 	check := connect.NewUnaryHandler(
 		"internal.health.v1.Health/Check", // procedure name

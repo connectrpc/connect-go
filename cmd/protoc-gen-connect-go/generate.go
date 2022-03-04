@@ -208,7 +208,8 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 
 	// Client constructor.
 	wrapComments(g, names.ClientConstructor, " constructs a client for the ", service.Desc.FullName(),
-		" service. By default, it uses the binary protobuf codec.")
+		" service. By default, it uses the HTTP/2 gRPC protocol and the binary protobuf Codec. ",
+		"It asks for gzipped responses and sends uncompressed requests.")
 	g.P("//")
 	wrapComments(g, "The URL supplied here should be the base URL for the gRPC server ",
 		"(e.g., https://api.acme.com or https://acme.com/grpc).")
@@ -219,10 +220,6 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	g.P("func ", names.ClientConstructor, " (baseURL string, doer ", connectPackage.Ident("Doer"),
 		", opts ...", clientOption, ") (", names.Client, ", error) {")
 	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
-	g.P("opts = append([]", clientOption, "{")
-	g.P(connectPackage.Ident("WithProtoBinaryCodec"), "(),")
-	g.P(connectPackage.Ident("WithGzip"), "(),")
-	g.P("}, opts...)")
 	for _, method := range service.Methods {
 		g.P(unexport(method.GoName), "Client, ", unexport(method.GoName), "Err := ",
 			connectPackage.Ident("NewClient"),
@@ -362,11 +359,6 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		") (string, ", httpPackage.Ident("Handler"), ") {")
 	g.P("var lastHandlerPath string")
 	g.P("mux := ", httpPackage.Ident("NewServeMux"), "()")
-	g.P("opts = append([]", handlerOption, "{")
-	g.P(connectPackage.Ident("WithProtoBinaryCodec"), "(),")
-	g.P(connectPackage.Ident("WithProtoJSONCodec"), "(),")
-	g.P(connectPackage.Ident("WithGzip"), "(),")
-	g.P("}, opts...)")
 	g.P()
 	for _, method := range service.Methods {
 		hname := unexport(string(method.Desc.Name()))
