@@ -32,10 +32,10 @@ const IsAtLeastVersion0_0_1 = true
 type StreamType uint8
 
 const (
-	StreamTypeUnary         StreamType = 0b00
-	StreamTypeClient                   = 0b01
-	StreamTypeServer                   = 0b10
-	StreamTypeBidirectional            = StreamTypeClient | StreamTypeServer
+	StreamTypeUnary  StreamType = 0b00
+	StreamTypeClient            = 0b01
+	StreamTypeServer            = 0b10
+	StreamTypeBidi              = StreamTypeClient | StreamTypeServer
 )
 
 // Sender is the writable side of a bidirectional stream of messages. Sender
