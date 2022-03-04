@@ -132,15 +132,6 @@ func (e *Error) Trailer() http.Header {
 	return e.trailer
 }
 
-// CodeOf returns the error's status code if it is or wraps a *connect.Error
-// and CodeUnknown otherwise.
-func CodeOf(err error) Code {
-	if connectErr, ok := asError(err); ok {
-		return connectErr.Code()
-	}
-	return CodeUnknown
-}
-
 // errorf calls fmt.Errorf with the supplied template and arguments, then wraps
 // the resulting error.
 func errorf(c Code, template string, args ...any) *Error {
