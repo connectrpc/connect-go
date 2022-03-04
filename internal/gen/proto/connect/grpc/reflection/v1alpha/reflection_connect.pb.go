@@ -102,16 +102,10 @@ func NewServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.Han
 		connect.WithGzip(),
 	}, opts...)
 
-	serverReflectionInfo := connect.NewStreamHandler(
+	serverReflectionInfo := connect.NewBidiStreamHandler(
 		"internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo", // procedure name
 		"internal.reflection.v1alpha1.ServerReflection",                      // reflection name
-		connect.StreamTypeBidirectional,
-		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
-			typed := connect.NewBidiStream[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](sender, receiver)
-			err := svc.ServerReflectionInfo(ctx, typed)
-			_ = receiver.Close()
-			_ = sender.Close(err)
-		},
+		svc.ServerReflectionInfo,
 		opts...,
 	)
 	mux.Handle(serverReflectionInfo.Path(), serverReflectionInfo)

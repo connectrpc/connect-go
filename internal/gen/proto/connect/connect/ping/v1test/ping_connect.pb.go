@@ -196,55 +196,28 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption
 	mux.Handle(fail.Path(), fail)
 	lastHandlerPath = fail.Path()
 
-	sum := connect.NewStreamHandler(
+	sum := connect.NewClientStreamHandler(
 		"connect.ping.v1test.PingService/Sum", // procedure name
 		"connect.ping.v1test.PingService",     // reflection name
-		connect.StreamTypeClient,
-		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
-			typed := connect.NewClientStream[v1test.SumRequest, v1test.SumResponse](sender, receiver)
-			err := svc.Sum(ctx, typed)
-			_ = receiver.Close()
-			_ = sender.Close(err)
-		},
+		svc.Sum,
 		opts...,
 	)
 	mux.Handle(sum.Path(), sum)
 	lastHandlerPath = sum.Path()
 
-	countUp := connect.NewStreamHandler(
+	countUp := connect.NewServerStreamHandler(
 		"connect.ping.v1test.PingService/CountUp", // procedure name
 		"connect.ping.v1test.PingService",         // reflection name
-		connect.StreamTypeServer,
-		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
-			typed := connect.NewServerStream[v1test.CountUpResponse](sender)
-			req, err := connect.ReceiveUnaryEnvelope[v1test.CountUpRequest](receiver)
-			if err != nil {
-				_ = receiver.Close()
-				_ = sender.Close(err)
-				return
-			}
-			if err = receiver.Close(); err != nil {
-				_ = sender.Close(err)
-				return
-			}
-			err = svc.CountUp(ctx, req, typed)
-			_ = sender.Close(err)
-		},
+		svc.CountUp,
 		opts...,
 	)
 	mux.Handle(countUp.Path(), countUp)
 	lastHandlerPath = countUp.Path()
 
-	cumSum := connect.NewStreamHandler(
+	cumSum := connect.NewBidiStreamHandler(
 		"connect.ping.v1test.PingService/CumSum", // procedure name
 		"connect.ping.v1test.PingService",        // reflection name
-		connect.StreamTypeBidirectional,
-		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
-			typed := connect.NewBidiStream[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
-			err := svc.CumSum(ctx, typed)
-			_ = receiver.Close()
-			_ = sender.Close(err)
-		},
+		svc.CumSum,
 		opts...,
 	)
 	mux.Handle(cumSum.Path(), cumSum)
