@@ -22,7 +22,6 @@ import (
 	"github.com/bufbuild/connect"
 	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
 	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
-	"github.com/bufbuild/connect/reflection"
 )
 
 // ExamplePingServer implements some trivial business logic. The protobuf
@@ -58,7 +57,7 @@ func Example() {
 		connect.WithRegistrar(reg),          // register the ping service's types
 		connect.WithReadMaxBytes(1024*1024), // limit request size
 	))
-	mux.Handle(reflection.NewHandler(reg))        // server reflection
+	mux.Handle(connect.NewReflectionHandler(reg)) // server reflection
 	mux.Handle(connect.NewHealthHandler(checker)) // health checks
 
 	// Timeouts, connection handling, TLS configuration, and other low-level

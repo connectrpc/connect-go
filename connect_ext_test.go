@@ -30,7 +30,6 @@ import (
 	"github.com/bufbuild/connect/internal/assert"
 	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
 	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
-	"github.com/bufbuild/connect/reflection"
 )
 
 const errorMessage = "oh no"
@@ -181,14 +180,10 @@ func (p pingServer) CumSum(
 }
 
 func TestServerProtoGRPC(t *testing.T) {
-	registrar := connect.NewRegistrar()
 	mux := http.NewServeMux()
 	mux.Handle(pingrpc.NewPingServiceHandler(
 		pingServer{checkMetadata: true},
-		connect.WithRegistrar(registrar),
 	))
-	mux.Handle(connect.NewHealthHandler(connect.NewHealthChecker(registrar)))
-	mux.Handle(reflection.NewHandler(registrar))
 
 	testPing := func(t *testing.T, client pingrpc.PingServiceClient) {
 		t.Run("ping", func(t *testing.T) {
