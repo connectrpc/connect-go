@@ -123,7 +123,7 @@ func NewUnaryHandler[Req, Res any](
 			}
 		}
 
-		untyped := Func(func(ctx context.Context, request AnyEnvelope) (AnyEnvelope, error) {
+		untyped := UnaryFunc(func(ctx context.Context, request AnyEnvelope) (AnyEnvelope, error) {
 			if clientVisibleError != nil {
 				// We've already encountered an error, short-circuit before calling the
 				// handler's implementation.

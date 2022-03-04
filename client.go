@@ -144,7 +144,7 @@ func NewUnaryClientImplementation[Req, Res any](
 	if protocolErr != nil {
 		return nil, NewError(CodeUnknown, protocolErr)
 	}
-	send := Func(func(ctx context.Context, request AnyEnvelope) (AnyEnvelope, error) {
+	send := UnaryFunc(func(ctx context.Context, request AnyEnvelope) (AnyEnvelope, error) {
 		sender, receiver := protocolClient.NewStream(ctx, request.Header())
 		mergeHeaders(sender.Trailer(), request.Trailer())
 		if err := sender.Send(request.Any()); err != nil {
