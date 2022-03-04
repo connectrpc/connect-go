@@ -26,7 +26,6 @@ import (
 	connect "github.com/bufbuild/connect"
 	v1alpha "github.com/bufbuild/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
 	http "net/http"
-	path "path"
 	strings "strings"
 )
 
@@ -91,19 +90,14 @@ type ServerReflectionHandler interface {
 // By default, handlers support the gRPC and gRPC-Web protocols with the binary protobuf and JSON
 // codecs.
 func NewServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	var lastHandlerPath string
 	mux := http.NewServeMux()
-
-	serverReflectionInfo := connect.NewBidiStreamHandler(
+	mux.Handle("/internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo", connect.NewBidiStreamHandler(
 		"internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo", // procedure name
 		"internal.reflection.v1alpha1.ServerReflection",                      // reflection name
 		svc.ServerReflectionInfo,
 		opts...,
-	)
-	mux.Handle(serverReflectionInfo.Path(), serverReflectionInfo)
-	lastHandlerPath = serverReflectionInfo.Path()
-
-	return path.Dir(lastHandlerPath) + "/", mux
+	))
+	return "/internal.reflection.v1alpha1.ServerReflection/", mux
 }
 
 // UnimplementedServerReflectionHandler returns CodeUnimplemented from all methods.
