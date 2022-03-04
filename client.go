@@ -22,6 +22,9 @@ import (
 // Client is a reusable, concurrency-safe client for a single procedure.
 // Depending on the procedure's type, use the CallUnary, CallClientStream,
 // CallServerStream, or CallBidiStream method.
+//
+// By default, clients use the HTTP/2 gRPC protocol and the binary protobuf
+// Codec. They ask for gzipped responses and send uncompressed requests.
 type Client[Req, Res any] struct {
 	config         *clientConfiguration
 	callUnary      func(context.Context, *Envelope[Req]) (*Envelope[Res], error)
@@ -169,6 +172,8 @@ func newClientConfiguration(procedure string, options []ClientOption) (*clientCo
 		Procedure:        procedure,
 		CompressionPools: make(map[string]compressionPool),
 	}
+	WithProtoBinaryCodec().applyToClient(&config)
+	WithGzip().applyToClient(&config)
 	for _, opt := range options {
 		opt.applyToClient(&config)
 	}

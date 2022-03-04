@@ -57,7 +57,6 @@ func TestReflection(t *testing.T) {
 		server.URL,
 		"grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
 		server.Client(),
-		connect.WithProtoBinaryCodec(),
 	)
 	assert.Nil(t, err, "client construction error")
 	call := func(req *reflectionpb.ServerReflectionRequest) (*reflectionpb.ServerReflectionResponse, error) {
