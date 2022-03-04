@@ -41,10 +41,10 @@ func NewRegistrar() *Registrar {
 	return &Registrar{services: make(map[string]struct{})}
 }
 
-// Services returns the fully-qualified names of the registered protobuf
+// serviceNames returns the fully-qualified names of the registered protobuf
 // services. The returned slice is a copy, so it's safe for callers to modify.
 // This method is safe to call concurrently.
-func (r *Registrar) Services() []string {
+func (r *Registrar) serviceNames() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -56,9 +56,9 @@ func (r *Registrar) Services() []string {
 	return names
 }
 
-// IsRegistered checks whether a fully-qualified protobuf service name is
+// isRegistered checks whether a fully-qualified protobuf service name is
 // registered. It's safe to call concurrently.
-func (r *Registrar) IsRegistered(service string) bool {
+func (r *Registrar) isRegistered(service string) bool {
 	r.mu.RLock()
 	_, ok := r.services[service]
 	r.mu.RUnlock()
@@ -143,7 +143,7 @@ func (r *Registrar) serverReflectionInfo(
 				}
 			}
 		case *rpb.ServerReflectionRequest_ListServices:
-			services := r.Services()
+			services := r.serviceNames()
 			serviceResponses := make([]*rpb.ServiceResponse, len(services))
 			for i, name := range services {
 				serviceResponses[i] = &rpb.ServiceResponse{Name: name}

@@ -28,6 +28,11 @@ import (
 )
 
 func TestHealth(t *testing.T) {
+	const (
+		pingFQN = "connect.ping.v1test.PingService"
+		unknown = "foobar"
+	)
+
 	reg := connect.NewRegistrar()
 	mux := http.NewServeMux()
 	mux.Handle(pingrpc.NewPingServiceHandler(
@@ -45,11 +50,6 @@ func TestHealth(t *testing.T) {
 		server.Client(),
 	)
 	assert.Nil(t, err, "client construction error")
-
-	const pingFQN = "connect.ping.v1test.PingService"
-	const unknown = "foobar"
-	assert.True(t, reg.IsRegistered(pingFQN), "ping service registered")
-	assert.False(t, reg.IsRegistered(unknown), "unknown service registered")
 
 	t.Run("process", func(t *testing.T) {
 		res, err := client.CallUnary(

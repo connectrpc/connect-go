@@ -56,7 +56,7 @@ func NewHealthChecker(reg *Registrar) func(context.Context, string) (HealthStatu
 		if service == "" {
 			return HealthStatusServing, nil
 		}
-		if reg.IsRegistered(service) {
+		if reg.isRegistered(service) {
 			return HealthStatusServing, nil
 		}
 		return HealthStatusUnspecified, NewError(
