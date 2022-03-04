@@ -370,62 +370,22 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 	g.P()
 	for _, method := range service.Methods {
 		hname := unexport(string(method.Desc.Name()))
-
-		if method.Desc.IsStreamingServer() || method.Desc.IsStreamingClient() {
-			g.P(hname, " := ", connectPackage.Ident("NewStreamHandler"), "(")
-			g.P(`"`, procedureName(method), `", // procedure name`)
-			g.P(`"`, reflectionName(service), `", // reflection name`)
-			if method.Desc.IsStreamingServer() && method.Desc.IsStreamingClient() {
-				g.P(connectPackage.Ident("StreamTypeBidirectional"), ",")
-			} else if method.Desc.IsStreamingServer() {
-				g.P(connectPackage.Ident("StreamTypeServer"), ",")
-			} else {
-				g.P(connectPackage.Ident("StreamTypeClient"), ",")
-			}
-			g.P("func(ctx ", contextContext, ", sender ", connectPackage.Ident("Sender"),
-				", receiver ", connectPackage.Ident("Receiver"), ") {")
-			if method.Desc.IsStreamingServer() && method.Desc.IsStreamingClient() {
-				// bidi streaming
-				g.P("typed := ", connectPackage.Ident("NewBidiStream"),
-					"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]", "(sender, receiver)")
-			} else if method.Desc.IsStreamingClient() {
-				// client streaming
-				g.P("typed := ", connectPackage.Ident("NewClientStream"),
-					"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]", "(sender, receiver)")
-			} else {
-				// server streaming
-				g.P("typed := ", connectPackage.Ident("NewServerStream"),
-					"[", method.Output.GoIdent, "]", "(sender)")
-			}
-			if method.Desc.IsStreamingServer() && !method.Desc.IsStreamingClient() {
-				g.P("req, err := ", connectPackage.Ident("ReceiveUnaryEnvelope"), "[", method.Input.GoIdent, "]",
-					"(receiver)")
-				g.P("if err != nil {")
-				g.P("_ = receiver.Close()")
-				g.P("_ = sender.Close(err)")
-				g.P("return")
-				g.P("}")
-				g.P("if err = receiver.Close(); err != nil {")
-				g.P("_ = sender.Close(err)")
-				g.P("return")
-				g.P("}")
-				g.P("err = svc.", method.GoName, "(ctx, req, typed)")
-			} else {
-				g.P("err := svc.", method.GoName, "(ctx, typed)")
-				g.P("_ = receiver.Close()")
-			}
-			g.P("_ = sender.Close(err)")
-			g.P("},")
-			g.P("opts...,")
-			g.P(")")
+		isStreamingServer := method.Desc.IsStreamingServer()
+		isStreamingClient := method.Desc.IsStreamingClient()
+		if isStreamingClient && !isStreamingServer {
+			g.P(hname, " := ", connectPackage.Ident("NewClientStreamHandler"), "(")
+		} else if !isStreamingClient && isStreamingServer {
+			g.P(hname, " := ", connectPackage.Ident("NewServerStreamHandler"), "(")
+		} else if isStreamingClient && isStreamingServer {
+			g.P(hname, " := ", connectPackage.Ident("NewBidiStreamHandler"), "(")
 		} else {
 			g.P(hname, " := ", connectPackage.Ident("NewUnaryHandler"), "(")
-			g.P(`"`, procedureName(method), `", // procedure name`)
-			g.P(`"`, reflectionName(service), `", // reflection name`)
-			g.P("svc.", method.GoName, ",")
-			g.P("opts...,")
-			g.P(")")
 		}
+		g.P(`"`, procedureName(method), `", // procedure name`)
+		g.P(`"`, reflectionName(service), `", // reflection name`)
+		g.P("svc.", method.GoName, ",")
+		g.P("opts...,")
+		g.P(")")
 		g.P("mux.Handle(", hname, ".Path(), ", hname, ")")
 		g.P("lastHandlerPath = ", hname, ".Path()")
 		g.P()
