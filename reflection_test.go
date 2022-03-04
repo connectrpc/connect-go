@@ -43,10 +43,6 @@ func TestReflection(t *testing.T) {
 	defer server.Close()
 
 	pingRequestFQN := string((&pingpb.PingRequest{}).ProtoReflect().Descriptor().FullName())
-	assert.Equal(t, reg.Services(), []string{
-		"connect.ping.v1test.PingService",
-	}, "services registered in memory")
-
 	client, err := connect.NewClient[
 		reflectionpb.ServerReflectionRequest,
 		reflectionpb.ServerReflectionResponse,
