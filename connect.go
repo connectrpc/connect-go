@@ -102,40 +102,6 @@ func NewEnvelope[T any](message *T) *Envelope[T] {
 	}
 }
 
-// ReceiveUnaryEnvelope unmarshals a message from a Receiver, then envelopes
-// the message and attaches the Receiver's headers, trailers, and RPC
-// specification. It attempts to consume the Receiver and isn't appropriate
-// when receiving multiple messages.
-func ReceiveUnaryEnvelope[T any](receiver Receiver) (*Envelope[T], error) {
-	var msg T
-	if err := receiver.Receive(&msg); err != nil {
-		return nil, err
-	}
-	// In a well-formed stream, the request message may be followed by a block
-	// of in-stream trailers. To ensure that we receive the trailers, try to
-	// read another message from the stream.
-	if err := receiver.Receive(new(T)); err == nil {
-		return nil, NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
-	} else if err != nil && !errors.Is(err, io.EOF) {
-		return nil, NewError(CodeUnknown, err)
-	}
-	return &Envelope[T]{
-		Msg:     &msg,
-		spec:    receiver.Spec(),
-		header:  receiver.Header(),
-		trailer: receiver.Trailer(),
-	}, nil
-}
-
-func receiveUnaryEnvelopeMetadata[T any](r Receiver) *Envelope[T] {
-	return &Envelope[T]{
-		Msg:     new(T),
-		spec:    r.Spec(),
-		header:  r.Header(),
-		trailer: r.Trailer(),
-	}
-}
-
 // Any returns the concrete request message as an empty interface, so that
 // *Request implements the AnyRequest interface.
 func (e *Envelope[_]) Any() any {
@@ -196,4 +162,38 @@ type Specification struct {
 	StreamType StreamType
 	Procedure  string // e.g., "acme.foo.v1.FooService/Bar"
 	IsClient   bool   // otherwise we're in a handler
+}
+
+// receiveUnaryEnvelope unmarshals a message from a Receiver, then envelopes
+// the message and attaches the Receiver's headers, trailers, and RPC
+// specification. It attempts to consume the Receiver and isn't appropriate
+// when receiving multiple messages.
+func receiveUnaryEnvelope[T any](receiver Receiver) (*Envelope[T], error) {
+	var msg T
+	if err := receiver.Receive(&msg); err != nil {
+		return nil, err
+	}
+	// In a well-formed stream, the request message may be followed by a block
+	// of in-stream trailers. To ensure that we receive the trailers, try to
+	// read another message from the stream.
+	if err := receiver.Receive(new(T)); err == nil {
+		return nil, NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
+	} else if err != nil && !errors.Is(err, io.EOF) {
+		return nil, NewError(CodeUnknown, err)
+	}
+	return &Envelope[T]{
+		Msg:     &msg,
+		spec:    receiver.Spec(),
+		header:  receiver.Header(),
+		trailer: receiver.Trailer(),
+	}, nil
+}
+
+func receiveUnaryEnvelopeMetadata[T any](r Receiver) *Envelope[T] {
+	return &Envelope[T]{
+		Msg:     new(T),
+		spec:    r.Spec(),
+		header:  r.Header(),
+		trailer: r.Trailer(),
+	}
 }

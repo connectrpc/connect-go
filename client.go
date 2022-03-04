@@ -70,7 +70,7 @@ func NewClient[Req, Res any](
 			_ = receiver.Close()
 			return nil, err
 		}
-		response, err := ReceiveUnaryEnvelope[Res](receiver)
+		response, err := receiveUnaryEnvelope[Res](receiver)
 		if err != nil {
 			_ = receiver.Close()
 			return nil, err
