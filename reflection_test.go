@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package reflection_test
+package connect_test
 
 import (
 	"bytes"
@@ -26,7 +26,6 @@ import (
 	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
 	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
 	reflectionpb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
-	"github.com/bufbuild/connect/reflection"
 )
 
 func TestReflection(t *testing.T) {
@@ -36,7 +35,7 @@ func TestReflection(t *testing.T) {
 		pingrpc.UnimplementedPingServiceHandler{},
 		connect.WithRegistrar(reg),
 	))
-	mux.Handle(reflection.NewHandler(reg))
+	mux.Handle(connect.NewReflectionHandler(reg))
 
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
