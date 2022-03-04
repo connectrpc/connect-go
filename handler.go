@@ -16,7 +16,6 @@ package connect
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 )
 
@@ -236,11 +235,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.failNegotiation(w, http.StatusUnsupportedMediaType)
-}
-
-// Path returns the path to use when mounting this handler.
-func (h *Handler) Path() string {
-	return fmt.Sprintf("/" + h.spec.Procedure)
 }
 
 func (h *Handler) failNegotiation(w http.ResponseWriter, code int) {

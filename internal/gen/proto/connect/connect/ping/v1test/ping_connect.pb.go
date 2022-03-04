@@ -26,7 +26,6 @@ import (
 	connect "github.com/bufbuild/connect"
 	v1test "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
 	http "net/http"
-	path "path"
 	strings "strings"
 )
 
@@ -167,55 +166,38 @@ type PingServiceHandler interface {
 // By default, handlers support the gRPC and gRPC-Web protocols with the binary protobuf and JSON
 // codecs.
 func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	var lastHandlerPath string
 	mux := http.NewServeMux()
-
-	ping := connect.NewUnaryHandler(
+	mux.Handle("/connect.ping.v1test.PingService/Ping", connect.NewUnaryHandler(
 		"connect.ping.v1test.PingService/Ping", // procedure name
 		"connect.ping.v1test.PingService",      // reflection name
 		svc.Ping,
 		opts...,
-	)
-	mux.Handle(ping.Path(), ping)
-	lastHandlerPath = ping.Path()
-
-	fail := connect.NewUnaryHandler(
+	))
+	mux.Handle("/connect.ping.v1test.PingService/Fail", connect.NewUnaryHandler(
 		"connect.ping.v1test.PingService/Fail", // procedure name
 		"connect.ping.v1test.PingService",      // reflection name
 		svc.Fail,
 		opts...,
-	)
-	mux.Handle(fail.Path(), fail)
-	lastHandlerPath = fail.Path()
-
-	sum := connect.NewClientStreamHandler(
+	))
+	mux.Handle("/connect.ping.v1test.PingService/Sum", connect.NewClientStreamHandler(
 		"connect.ping.v1test.PingService/Sum", // procedure name
 		"connect.ping.v1test.PingService",     // reflection name
 		svc.Sum,
 		opts...,
-	)
-	mux.Handle(sum.Path(), sum)
-	lastHandlerPath = sum.Path()
-
-	countUp := connect.NewServerStreamHandler(
+	))
+	mux.Handle("/connect.ping.v1test.PingService/CountUp", connect.NewServerStreamHandler(
 		"connect.ping.v1test.PingService/CountUp", // procedure name
 		"connect.ping.v1test.PingService",         // reflection name
 		svc.CountUp,
 		opts...,
-	)
-	mux.Handle(countUp.Path(), countUp)
-	lastHandlerPath = countUp.Path()
-
-	cumSum := connect.NewBidiStreamHandler(
+	))
+	mux.Handle("/connect.ping.v1test.PingService/CumSum", connect.NewBidiStreamHandler(
 		"connect.ping.v1test.PingService/CumSum", // procedure name
 		"connect.ping.v1test.PingService",        // reflection name
 		svc.CumSum,
 		opts...,
-	)
-	mux.Handle(cumSum.Path(), cumSum)
-	lastHandlerPath = cumSum.Path()
-
-	return path.Dir(lastHandlerPath) + "/", mux
+	))
+	return "/connect.ping.v1test.PingService/", mux
 }
 
 // UnimplementedPingServiceHandler returns CodeUnimplemented from all methods.

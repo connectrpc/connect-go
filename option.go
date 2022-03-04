@@ -17,7 +17,6 @@ package connect
 import (
 	"compress/gzip"
 	"io/ioutil"
-	"strings"
 )
 
 // A ClientOption configures a connect client.
@@ -234,27 +233,6 @@ func WithReadMaxBytes(n int64) Option {
 	return &readMaxBytesOption{n}
 }
 
-// WithReplaceProcedurePrefix changes the URL used to call a procedure.
-// Typically, generated code sets the procedure name: for example, a protobuf
-// procedure's name and URL is composed from the fully-qualified protobuf
-// package name, the service name, and the method name. This option replaces a
-// prefix of the procedure name with another static string. Using this option
-// is usually a bad idea, but it's occasionally necessary to prevent protobuf
-// package collisions. (For example, connect uses this option to serve the
-// health and reflection APIs without generating runtime conflicts with
-// grpc-go.)
-//
-// WithReplaceProcedurePrefix doesn't change the data exposed by the reflection
-// API. To prevent inconsistencies between the reflection data and the actual
-// service URL, using this option disables reflection for the modified service
-// (though other services can still be introspected).
-func WithReplaceProcedurePrefix(prefix, replacement string) Option {
-	return &replaceProcedurePrefixOption{
-		Prefix:      prefix,
-		Replacement: replacement,
-	}
-}
-
 type codecOption struct {
 	Codec Codec
 }
@@ -354,27 +332,6 @@ type registrarOption struct {
 
 func (o *registrarOption) applyToHandler(config *handlerConfiguration) {
 	config.Registrar = o.Registrar
-}
-
-type replaceProcedurePrefixOption struct {
-	Prefix      string
-	Replacement string
-}
-
-func (o *replaceProcedurePrefixOption) applyToClient(config *clientConfiguration) {
-	config.Procedure = o.transform(config.Procedure)
-}
-
-func (o *replaceProcedurePrefixOption) applyToHandler(config *handlerConfiguration) {
-	config.Procedure = o.transform(config.Procedure)
-	config.RegistrationName = "" // disable reflection
-}
-
-func (o *replaceProcedurePrefixOption) transform(name string) string {
-	if !strings.HasPrefix(name, o.Prefix) {
-		return name
-	}
-	return o.Replacement + strings.TrimPrefix(name, o.Prefix)
 }
 
 type requestCompressionOption struct {

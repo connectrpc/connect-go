@@ -26,7 +26,6 @@ import (
 	connect "github.com/bufbuild/connect"
 	v1 "github.com/bufbuild/connect/internal/gen/proto/go/grpc/health/v1"
 	http "net/http"
-	path "path"
 	strings "strings"
 )
 
@@ -137,28 +136,20 @@ type HealthHandler interface {
 // By default, handlers support the gRPC and gRPC-Web protocols with the binary protobuf and JSON
 // codecs.
 func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	var lastHandlerPath string
 	mux := http.NewServeMux()
-
-	check := connect.NewUnaryHandler(
+	mux.Handle("/internal.health.v1.Health/Check", connect.NewUnaryHandler(
 		"internal.health.v1.Health/Check", // procedure name
 		"internal.health.v1.Health",       // reflection name
 		svc.Check,
 		opts...,
-	)
-	mux.Handle(check.Path(), check)
-	lastHandlerPath = check.Path()
-
-	watch := connect.NewServerStreamHandler(
+	))
+	mux.Handle("/internal.health.v1.Health/Watch", connect.NewServerStreamHandler(
 		"internal.health.v1.Health/Watch", // procedure name
 		"internal.health.v1.Health",       // reflection name
 		svc.Watch,
 		opts...,
-	)
-	mux.Handle(watch.Path(), watch)
-	lastHandlerPath = watch.Path()
-
-	return path.Dir(lastHandlerPath) + "/", mux
+	))
+	return "/internal.health.v1.Health/", mux
 }
 
 // UnimplementedHealthHandler returns CodeUnimplemented from all methods.
