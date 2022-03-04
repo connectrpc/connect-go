@@ -27,131 +27,6 @@ import (
 	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
 )
 
-// headerInterceptor makes it easier to write interceptors that inspect or
-// mutate HTTP headers. It applies the same logic to unary and streaming
-// procedures, wrapping the send or receive side of the stream as appropriate.
-//
-// It's useful as a testing harness to make sure that we're chaining
-// interceptors in the correct order.
-type headerInterceptor struct {
-	inspectRequestHeader  func(connect.Specification, http.Header)
-	inspectResponseHeader func(connect.Specification, http.Header)
-}
-
-// newHeaderInterceptor constructs a headerInterceptor. Nil function pointers
-// are treated as no-ops.
-func newHeaderInterceptor(
-	inspectRequestHeader func(connect.Specification, http.Header),
-	inspectResponseHeader func(connect.Specification, http.Header),
-) *headerInterceptor {
-	h := headerInterceptor{
-		inspectRequestHeader:  inspectRequestHeader,
-		inspectResponseHeader: inspectResponseHeader,
-	}
-	if h.inspectRequestHeader == nil {
-		h.inspectRequestHeader = func(_ connect.Specification, _ http.Header) {}
-	}
-	if h.inspectResponseHeader == nil {
-		h.inspectResponseHeader = func(_ connect.Specification, _ http.Header) {}
-	}
-	return &h
-}
-
-func (h *headerInterceptor) WrapUnary(next connect.Func) connect.Func {
-	f := func(ctx context.Context, req connect.AnyEnvelope) (connect.AnyEnvelope, error) {
-		h.inspectRequestHeader(req.Spec(), req.Header())
-		res, err := next(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		h.inspectResponseHeader(req.Spec(), res.Header())
-		return res, nil
-	}
-	return connect.Func(f)
-}
-
-func (h *headerInterceptor) WrapStreamContext(ctx context.Context) context.Context {
-	return ctx
-}
-
-// WrapStreamSender implements Interceptor. Depending on whether it's operating
-// on a client or handler, it wraps the sender with the request- or
-// response-inspecting function.
-func (h *headerInterceptor) WrapStreamSender(ctx context.Context, sender connect.Sender) connect.Sender {
-	if sender.Spec().IsClient {
-		return &headerInspectingSender{Sender: sender, inspect: h.inspectRequestHeader}
-	}
-	return &headerInspectingSender{Sender: sender, inspect: h.inspectResponseHeader}
-}
-
-// WrapStreamReceiver implements Interceptor. Depending on whether it's
-// operating on a client or handler, it wraps the sender with the response- or
-// request-inspecting function.
-func (h *headerInterceptor) WrapStreamReceiver(ctx context.Context, receiver connect.Receiver) connect.Receiver {
-	if receiver.Spec().IsClient {
-		return &headerInspectingReceiver{Receiver: receiver, inspect: h.inspectResponseHeader}
-	}
-	return &headerInspectingReceiver{Receiver: receiver, inspect: h.inspectRequestHeader}
-}
-
-type headerInspectingSender struct {
-	connect.Sender
-
-	called  bool // senders don't need to be thread-safe
-	inspect func(connect.Specification, http.Header)
-}
-
-func (s *headerInspectingSender) Send(m any) error {
-	if !s.called {
-		s.inspect(s.Spec(), s.Header())
-		s.called = true
-	}
-	return s.Sender.Send(m)
-}
-
-type headerInspectingReceiver struct {
-	connect.Receiver
-
-	called  bool // receivers don't need to be thread-safe
-	inspect func(connect.Specification, http.Header)
-}
-
-func (r *headerInspectingReceiver) Receive(m any) error {
-	if !r.called {
-		r.inspect(r.Spec(), r.Header())
-		r.called = true
-	}
-	if err := r.Receiver.Receive(m); err != nil {
-		return err
-	}
-	return nil
-}
-
-type assertCalledInterceptor struct {
-	called *bool
-}
-
-func (i *assertCalledInterceptor) WrapUnary(next connect.Func) connect.Func {
-	return connect.Func(func(ctx context.Context, req connect.AnyEnvelope) (connect.AnyEnvelope, error) {
-		*i.called = true
-		return next(ctx, req)
-	})
-}
-
-func (i *assertCalledInterceptor) WrapStreamContext(ctx context.Context) context.Context {
-	return ctx
-}
-
-func (i *assertCalledInterceptor) WrapStreamSender(_ context.Context, sender connect.Sender) connect.Sender {
-	*i.called = true
-	return sender
-}
-
-func (i *assertCalledInterceptor) WrapStreamReceiver(_ context.Context, receiver connect.Receiver) connect.Receiver {
-	*i.called = true
-	return receiver
-}
-
 func TestClientStreamErrors(t *testing.T) {
 	_, err := pingrpc.NewPingServiceClient("INVALID_URL", http.DefaultClient)
 	assert.NotNil(t, err, "client construction error")
@@ -283,10 +158,12 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	)
 
 	mux := http.NewServeMux()
-	mux.Handle(pingrpc.NewPingServiceHandler(
-		pingServer{},
-		handlerOnion,
-	))
+	mux.Handle(
+		pingrpc.NewPingServiceHandler(
+			pingServer{},
+			handlerOnion,
+		),
+	)
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
@@ -302,4 +179,131 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 
 	_, err = client.CountUp(context.Background(), connect.NewEnvelope(&pingpb.CountUpRequest{Number: 10}))
 	assert.Nil(t, err, "error calling CountUp")
+}
+
+// headerInterceptor makes it easier to write interceptors that inspect or
+// mutate HTTP headers. It applies the same logic to unary and streaming
+// procedures, wrapping the send or receive side of the stream as appropriate.
+//
+// It's useful as a testing harness to make sure that we're chaining
+// interceptors in the correct order.
+type headerInterceptor struct {
+	inspectRequestHeader  func(connect.Specification, http.Header)
+	inspectResponseHeader func(connect.Specification, http.Header)
+}
+
+// newHeaderInterceptor constructs a headerInterceptor. Nil function pointers
+// are treated as no-ops.
+func newHeaderInterceptor(
+	inspectRequestHeader func(connect.Specification, http.Header),
+	inspectResponseHeader func(connect.Specification, http.Header),
+) *headerInterceptor {
+	h := headerInterceptor{
+		inspectRequestHeader:  inspectRequestHeader,
+		inspectResponseHeader: inspectResponseHeader,
+	}
+	if h.inspectRequestHeader == nil {
+		h.inspectRequestHeader = func(_ connect.Specification, _ http.Header) {}
+	}
+	if h.inspectResponseHeader == nil {
+		h.inspectResponseHeader = func(_ connect.Specification, _ http.Header) {}
+	}
+	return &h
+}
+
+func (h *headerInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	f := func(ctx context.Context, req connect.AnyEnvelope) (connect.AnyEnvelope, error) {
+		h.inspectRequestHeader(req.Spec(), req.Header())
+		res, err := next(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		h.inspectResponseHeader(req.Spec(), res.Header())
+		return res, nil
+	}
+	return connect.UnaryFunc(f)
+}
+
+func (h *headerInterceptor) WrapStreamContext(ctx context.Context) context.Context {
+	return ctx
+}
+
+// WrapStreamSender implements Interceptor. Depending on whether it's operating
+// on a client or handler, it wraps the sender with the request- or
+// response-inspecting function.
+func (h *headerInterceptor) WrapStreamSender(ctx context.Context, sender connect.Sender) connect.Sender {
+	if sender.Spec().IsClient {
+		return &headerInspectingSender{Sender: sender, inspect: h.inspectRequestHeader}
+	}
+	return &headerInspectingSender{Sender: sender, inspect: h.inspectResponseHeader}
+}
+
+// WrapStreamReceiver implements Interceptor. Depending on whether it's
+// operating on a client or handler, it wraps the sender with the response- or
+// request-inspecting function.
+func (h *headerInterceptor) WrapStreamReceiver(ctx context.Context, receiver connect.Receiver) connect.Receiver {
+	if receiver.Spec().IsClient {
+		return &headerInspectingReceiver{Receiver: receiver, inspect: h.inspectResponseHeader}
+	}
+	return &headerInspectingReceiver{Receiver: receiver, inspect: h.inspectRequestHeader}
+}
+
+type headerInspectingSender struct {
+	connect.Sender
+
+	called  bool // senders don't need to be thread-safe
+	inspect func(connect.Specification, http.Header)
+}
+
+func (s *headerInspectingSender) Send(m any) error {
+	if !s.called {
+		s.inspect(s.Spec(), s.Header())
+		s.called = true
+	}
+	return s.Sender.Send(m)
+}
+
+type headerInspectingReceiver struct {
+	connect.Receiver
+
+	called  bool // receivers don't need to be thread-safe
+	inspect func(connect.Specification, http.Header)
+}
+
+func (r *headerInspectingReceiver) Receive(m any) error {
+	if !r.called {
+		r.inspect(r.Spec(), r.Header())
+		r.called = true
+	}
+	if err := r.Receiver.Receive(m); err != nil {
+		return err
+	}
+	return nil
+}
+
+type assertCalledInterceptor struct {
+	called *bool
+}
+
+func (i *assertCalledInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return connect.UnaryFunc(
+		func(ctx context.Context, req connect.AnyEnvelope) (connect.AnyEnvelope, error) {
+			*i.called = true
+			return next(ctx, req)
+		},
+	)
+}
+
+func (i *assertCalledInterceptor) WrapStreamContext(ctx context.Context) context.Context {
+	return ctx
+}
+
+func (i *assertCalledInterceptor) WrapStreamSender(_ context.Context, sender connect.Sender) connect.Sender {
+	*i.called = true
+	return sender
+}
+
+func (i *assertCalledInterceptor) WrapStreamReceiver(_ context.Context, receiver connect.Receiver) connect.Receiver {
+	*i.called = true
+	return receiver
 }

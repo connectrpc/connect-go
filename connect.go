@@ -15,7 +15,6 @@
 package connect
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -184,49 +183,6 @@ type AnyEnvelope interface {
 	// Only internal implementations, so we can add methods without breaking
 	// backward compatibility.
 	internalOnly()
-}
-
-// Func is the generic signature of a unary RPC. Interceptors wrap Funcs.
-//
-// The type of the request and response struct depend on the codec being used.
-// When using protobuf, they'll always be proto.Message implementations.
-type Func func(context.Context, AnyEnvelope) (AnyEnvelope, error)
-
-// An Interceptor adds logic to a generated handler or client, like the
-// decorators or middleware you may have seen in other libraries. Interceptors
-// may replace the context, mutate the request, mutate the response, handle the
-// returned error, retry, recover from panics, emit logs and metrics, or do
-// nearly anything else.
-type Interceptor interface {
-	// WrapUnary adds logic to a unary procedure. The returned Func must be safe
-	// to call concurrently.
-	WrapUnary(Func) Func
-
-	// WrapStreamContext, WrapStreamSender, and WrapStreamReceiver work together
-	// to add logic to streaming procedures. Stream interceptors work in phases.
-	// First, each interceptor may wrap the request context. Then, the connect
-	// runtime constructs a (Sender, Receiver) pair. Finally, each interceptor
-	// may wrap the Sender and/or Receiver. For example, the flow within a
-	// Handler looks like this:
-	//
-	//   func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	//     ctx := r.Context()
-	//     if ic := h.interceptor; ic != nil {
-	//       ctx = ic.WrapStreamContext(ctx)
-	//     }
-	//     sender, receiver := h.newStream(w, r.WithContext(ctx))
-	//     if ic := h.interceptor; ic != nil {
-	//       sender = ic.WrapStreamSender(ctx, sender)
-	//       receiver = ic.WrapStreamReceiver(ctx, receiver)
-	//     }
-	//     h.serveStream(sender, receiver)
-	//   }
-	//
-	// Sender and Receiver implementations don't need to be safe for concurrent
-	// use.
-	WrapStreamContext(context.Context) context.Context
-	WrapStreamSender(context.Context, Sender) Sender
-	WrapStreamReceiver(context.Context, Receiver) Receiver
 }
 
 // Doer is the transport-level interface connect expects HTTP clients to
