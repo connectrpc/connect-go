@@ -19,6 +19,139 @@ import (
 	"net/http"
 )
 
+// Client is a reusable, concurrency-safe client for a single procedure.
+// Depending on the procedure's type, use the CallUnary, CallClientStream,
+// CallServerStream, or CallBidiStream method.
+type Client[Req, Res any] struct {
+	config         *clientConfiguration
+	callUnary      func(context.Context, *Envelope[Req]) (*Envelope[Res], error)
+	protocolClient protocolClient
+}
+
+// NewClient constructs a new Client.
+func NewClient[Req, Res any](
+	baseURL, procedure string,
+	doer Doer,
+	options ...ClientOption,
+) (*Client[Req, Res], error) {
+	config, err := newClientConfiguration(procedure, options)
+	if err != nil {
+		return nil, err
+	}
+	protocolClient, protocolErr := config.Protocol.NewClient(&protocolClientParams{
+		CompressionName:  config.RequestCompressionName,
+		CompressionPools: newReadOnlyCompressionPools(config.CompressionPools),
+		Codec:            config.Codec,
+		Protobuf:         config.protobuf(),
+		MaxResponseBytes: config.MaxResponseBytes,
+		CompressMinBytes: config.CompressMinBytes,
+		Doer:             doer,
+		BaseURL:          baseURL,
+		Procedure:        config.Procedure,
+	})
+	if protocolErr != nil {
+		return nil, protocolErr
+	}
+	// Rather than applying unary interceptors along the hot path, we can do it
+	// once at client creation.
+	unarySpec := config.newSpecification(StreamTypeUnary)
+	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyEnvelope) (AnyEnvelope, error) {
+		sender, receiver := protocolClient.NewStream(ctx, unarySpec, request.Header())
+		mergeHeaders(sender.Trailer(), request.Trailer())
+		if err := sender.Send(request.Any()); err != nil {
+			_ = sender.Close(err)
+			_ = receiver.Close()
+			return nil, err
+		}
+		if err := sender.Close(nil); err != nil {
+			_ = receiver.Close()
+			return nil, err
+		}
+		response, err := ReceiveUnaryEnvelope[Res](receiver)
+		if err != nil {
+			_ = receiver.Close()
+			return nil, err
+		}
+		return response, receiver.Close()
+	})
+	if ic := config.Interceptor; ic != nil {
+		unaryFunc = ic.WrapUnary(unaryFunc)
+	}
+	callUnary := func(ctx context.Context, request *Envelope[Req]) (*Envelope[Res], error) {
+		// To make the specification and RPC headers visible to the full interceptor
+		// chain (as though they were supplied by the caller), we'll add them here.
+		request.spec = unarySpec
+		protocolClient.WriteRequestHeader(request.Header())
+		response, err := unaryFunc(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		typed, ok := response.(*Envelope[Res])
+		if !ok {
+			return nil, errorf(CodeInternal, "unexpected client response type %T", response)
+		}
+		return typed, nil
+	}
+	return &Client[Req, Res]{
+		config:         config,
+		callUnary:      callUnary,
+		protocolClient: protocolClient,
+	}, nil
+}
+
+// CallUnary calls a request-response procedure.
+func (c *Client[Req, Res]) CallUnary(
+	ctx context.Context,
+	req *Envelope[Req],
+) (*Envelope[Res], error) {
+	return c.callUnary(ctx, req)
+}
+
+// CallClientStream calls a client streaming procedure.
+func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamForClient[Req, Res] {
+	sender, receiver := c.newStream(ctx, StreamTypeClient)
+	return NewClientStreamForClient[Req, Res](sender, receiver)
+}
+
+// CallServerStream calls a server streaming procedure.
+func (c *Client[Req, Res]) CallServerStream(
+	ctx context.Context,
+	req *Envelope[Req],
+) (*ServerStreamForClient[Res], error) {
+	sender, receiver := c.newStream(ctx, StreamTypeServer)
+	mergeHeaders(sender.Header(), req.header)
+	mergeHeaders(sender.Trailer(), req.trailer)
+	if err := sender.Send(req.Msg); err != nil {
+		_ = sender.Close(err)
+		_ = receiver.Close()
+		return nil, err
+	}
+	if err := sender.Close(nil); err != nil {
+		return nil, err
+	}
+	return NewServerStreamForClient[Res](receiver), nil
+}
+
+// CallBidiStream calls a bidirectional streaming procedure.
+func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForClient[Req, Res] {
+	sender, receiver := c.newStream(ctx, StreamTypeBidirectional)
+	return NewBidiStreamForClient[Req, Res](sender, receiver)
+}
+
+func (c *Client[Req, Res]) newStream(ctx context.Context, streamType StreamType) (Sender, Receiver) {
+	if ic := c.config.Interceptor; ic != nil {
+		ctx = ic.WrapStreamContext(ctx)
+	}
+	header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
+	c.protocolClient.WriteRequestHeader(header)
+	sender, receiver := c.protocolClient.NewStream(ctx, c.config.newSpecification(streamType), header)
+	if ic := c.config.Interceptor; ic != nil {
+		sender = ic.WrapStreamSender(ctx, sender)
+		receiver = ic.WrapStreamReceiver(ctx, receiver)
+	}
+	return sender, receiver
+}
+
 type clientConfiguration struct {
 	Protocol               protocol
 	Procedure              string
@@ -39,13 +172,13 @@ func newClientConfiguration(procedure string, options []ClientOption) (*clientCo
 	for _, opt := range options {
 		opt.applyToClient(&config)
 	}
-	if err := config.Validate(); err != nil {
+	if err := config.validate(); err != nil {
 		return nil, err
 	}
 	return &config, nil
 }
 
-func (c *clientConfiguration) Validate() *Error {
+func (c *clientConfiguration) validate() *Error {
 	if c.Codec == nil || c.Codec.Name() == "" {
 		return errorf(CodeUnknown, "no codec configured")
 	}
@@ -60,7 +193,7 @@ func (c *clientConfiguration) Validate() *Error {
 	return nil
 }
 
-func (c *clientConfiguration) Protobuf() Codec {
+func (c *clientConfiguration) protobuf() Codec {
 	if c.Codec.Name() == codecNameProto {
 		return c.Codec
 	}
@@ -73,112 +206,4 @@ func (c *clientConfiguration) newSpecification(t StreamType) Specification {
 		Procedure:  c.Procedure,
 		IsClient:   true,
 	}
-}
-
-// NewStreamClientImplementation is used by generated code - most users will
-// never need to use it directly. It returns a stream constructor for a
-// client-, server-, or bidirectional streaming remote procedure.
-func NewStreamClientImplementation(
-	doer Doer,
-	baseURL, procedure string,
-	stype StreamType,
-	options ...ClientOption,
-) (func(context.Context) (Sender, Receiver), error) {
-	config, err := newClientConfiguration(procedure, options)
-	if err != nil {
-		return nil, err
-	}
-	protocolClient, protocolErr := config.Protocol.NewClient(&protocolClientParams{
-		Spec:             config.newSpecification(stype),
-		CompressionName:  config.RequestCompressionName,
-		CompressionPools: newReadOnlyCompressionPools(config.CompressionPools),
-		Codec:            config.Codec,
-		Protobuf:         config.Protobuf(),
-		MaxResponseBytes: config.MaxResponseBytes,
-		CompressMinBytes: config.CompressMinBytes,
-		Doer:             doer,
-		BaseURL:          baseURL,
-	})
-	if protocolErr != nil {
-		return nil, NewError(CodeUnknown, protocolErr)
-	}
-	return func(ctx context.Context) (Sender, Receiver) {
-		if ic := config.Interceptor; ic != nil {
-			ctx = ic.WrapStreamContext(ctx)
-		}
-		header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
-		protocolClient.WriteRequestHeader(header)
-		sender, receiver := protocolClient.NewStream(ctx, header)
-		if ic := config.Interceptor; ic != nil {
-			sender = ic.WrapStreamSender(ctx, sender)
-			receiver = ic.WrapStreamReceiver(ctx, receiver)
-		}
-		return sender, receiver
-	}, nil
-}
-
-// NewUnaryClientImplementation is used by generated code - most users will
-// never need to use it directly. It returns a strongly-typed function to call
-// a unary procedure.
-func NewUnaryClientImplementation[Req, Res any](
-	doer Doer,
-	baseURL, procedure string,
-	options ...ClientOption,
-) (func(context.Context, *Envelope[Req]) (*Envelope[Res], error), error) {
-	config, err := newClientConfiguration(procedure, options)
-	if err != nil {
-		return nil, err
-	}
-	spec := config.newSpecification(StreamTypeUnary)
-	protocolClient, protocolErr := config.Protocol.NewClient(&protocolClientParams{
-		Spec:             spec,
-		CompressionName:  config.RequestCompressionName,
-		CompressionPools: newReadOnlyCompressionPools(config.CompressionPools),
-		Codec:            config.Codec,
-		Protobuf:         config.Protobuf(),
-		MaxResponseBytes: config.MaxResponseBytes,
-		CompressMinBytes: config.CompressMinBytes,
-		Doer:             doer,
-		BaseURL:          baseURL,
-	})
-	if protocolErr != nil {
-		return nil, NewError(CodeUnknown, protocolErr)
-	}
-	send := UnaryFunc(func(ctx context.Context, request AnyEnvelope) (AnyEnvelope, error) {
-		sender, receiver := protocolClient.NewStream(ctx, request.Header())
-		mergeHeaders(sender.Trailer(), request.Trailer())
-		if err := sender.Send(request.Any()); err != nil {
-			_ = sender.Close(err)
-			_ = receiver.Close()
-			return nil, err
-		}
-		if err := sender.Close(nil); err != nil {
-			_ = receiver.Close()
-			return nil, err
-		}
-		response, err := ReceiveUnaryEnvelope[Res](receiver)
-		if err != nil {
-			_ = receiver.Close()
-			return nil, err
-		}
-		return response, receiver.Close()
-	})
-	if ic := config.Interceptor; ic != nil {
-		send = ic.WrapUnary(send)
-	}
-	return func(ctx context.Context, request *Envelope[Req]) (*Envelope[Res], error) {
-		// To make the specification and RPC headers visible to the full interceptor
-		// chain (as though they were supplied by the caller), we'll add them here.
-		request.spec = spec
-		protocolClient.WriteRequestHeader(request.Header())
-		response, err := send(ctx, request)
-		if err != nil {
-			return nil, err
-		}
-		typed, ok := response.(*Envelope[Res])
-		if !ok {
-			return nil, errorf(CodeInternal, "unexpected client response type %T", response)
-		}
-		return typed, nil
-	}, nil
 }

@@ -223,58 +223,35 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 	g.P(connectPackage.Ident("WithProtoBinaryCodec"), "(),")
 	g.P(connectPackage.Ident("WithGzip"), "(),")
 	g.P("}, opts...)")
-	g.P("var (")
-	g.P("client ", names.ClientImpl)
-	g.P("err error")
-	g.P(")")
 	for _, method := range service.Methods {
-		if method.Desc.IsStreamingClient() || method.Desc.IsStreamingServer() {
-			g.P(
-				"client.",
-				unexport(method.GoName),
-				", err = ",
-				connectPackage.Ident("NewStreamClientImplementation"),
-				"(",
-			)
-			g.P("doer,")
-			g.P("baseURL,")
-			g.P(`"`, procedureName(method), `",`)
-			if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
-				g.P(connectPackage.Ident("StreamTypeBidirectional"), ",")
-			} else if method.Desc.IsStreamingClient() {
-				g.P(connectPackage.Ident("StreamTypeClient"), ",")
-			} else {
-				g.P(connectPackage.Ident("StreamTypeServer"), ",")
-			}
-			g.P("opts...,")
-			g.P(")")
-		} else {
-			g.P("client.", unexport(method.GoName), ", err = ", connectPackage.Ident("NewUnaryClientImplementation"), "[", method.Input.GoIdent, ", ", method.Output.GoIdent, "](")
-			g.P("doer,")
-			g.P("baseURL,")
-			g.P(`"`, procedureName(method), `",`)
-			g.P("opts...,")
-			g.P(")")
-		}
-		g.P("if err != nil {")
-		g.P("return nil, err")
+		g.P(unexport(method.GoName), "Client, ", unexport(method.GoName), "Err := ",
+			connectPackage.Ident("NewClient"),
+			"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]",
+			"(",
+		)
+		g.P("baseURL,")
+		g.P(`"`, procedureName(method), `",`)
+		g.P("doer,")
+		g.P("opts...,")
+		g.P(")")
+		g.P("if ", unexport(method.GoName), "Err != nil {")
+		g.P("return nil, ", unexport(method.GoName), "Err")
 		g.P("}")
 	}
-	g.P("return &client, nil")
+	g.P("return &", names.ClientImpl, "{")
+	for _, method := range service.Methods {
+		g.P(unexport(method.GoName), ": ", unexport(method.GoName), "Client,")
+	}
+	g.P("}, nil")
 	g.P("}")
 	g.P()
 
 	// Client struct.
 	wrapComments(g, names.ClientImpl, " implements ", names.Client, ".")
 	g.P("type ", names.ClientImpl, " struct {")
-	typeSender := connectPackage.Ident("Sender")
-	typeReceiver := connectPackage.Ident("Receiver")
 	for _, method := range service.Methods {
-		if method.Desc.IsStreamingServer() || method.Desc.IsStreamingClient() {
-			g.P(unexport(method.GoName), " func(", contextContext, ") (", typeSender, ", ", typeReceiver, ")")
-		} else {
-			g.P(unexport(method.GoName), " func", serverSignatureParams(g, method, false /* named */))
-		}
+		g.P(unexport(method.GoName), " *", connectPackage.Ident("Client"),
+			"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]")
 	}
 	g.P("}")
 	g.P()
@@ -294,38 +271,14 @@ func clientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *
 	}
 	g.P("func (c *", receiver, ") ", clientSignature(g, method, true /* named */), " {")
 
-	if isStreamingClient || isStreamingServer {
-		g.P("sender, receiver := c.", unexport(method.GoName), "(ctx)")
-		if !isStreamingClient && isStreamingServer {
-			// server streaming, we need to send the request.
-			g.P("for key, values := range req.Header() {")
-			g.P("sender.Header()[key] = append(sender.Header()[key], values...)")
-			g.P("}")
-			g.P("for key, values := range req.Trailer() {")
-			g.P("sender.Trailer()[key] = append(sender.Trailer()[key], values...)")
-			g.P("}")
-			g.P("if err := sender.Send(req.Msg); err != nil {")
-			g.P("_ = sender.Close(err)")
-			g.P("_ = receiver.Close()")
-			g.P("return nil, err")
-			g.P("}")
-			g.P("if err := sender.Close(nil); err != nil {")
-			g.P("_ = receiver.Close()")
-			g.P("return nil, err")
-			g.P("}")
-			g.P("return ", connectPackage.Ident("NewServerStreamForClient"),
-				"[", method.Output.GoIdent, "]", "(receiver), nil")
-		} else if isStreamingClient && !isStreamingServer {
-			// client streaming
-			g.P("return ", connectPackage.Ident("NewClientStreamForClient"),
-				"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]", "(sender, receiver)")
-		} else {
-			// bidi streaming
-			g.P("return ", connectPackage.Ident("NewBidiStreamForClient"),
-				"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]", "(sender, receiver)")
-		}
+	if isStreamingClient && !isStreamingServer {
+		g.P("return c.", unexport(method.GoName), ".CallClientStream(ctx)")
+	} else if !isStreamingClient && isStreamingServer {
+		g.P("return c.", unexport(method.GoName), ".CallServerStream(ctx, req)")
+	} else if isStreamingClient && isStreamingServer {
+		g.P("return c.", unexport(method.GoName), ".CallBidiStream(ctx)")
 	} else {
-		g.P("return c.", unexport(method.GoName), "(ctx, req)")
+		g.P("return c.", unexport(method.GoName), ".CallUnary(ctx, req)")
 	}
 	g.P("}")
 	g.P()

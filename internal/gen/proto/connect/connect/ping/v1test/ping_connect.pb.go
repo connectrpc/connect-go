@@ -62,111 +62,92 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 		connect.WithProtoBinaryCodec(),
 		connect.WithGzip(),
 	}, opts...)
-	var (
-		client pingServiceClient
-		err    error
-	)
-	client.ping, err = connect.NewUnaryClientImplementation[v1test.PingRequest, v1test.PingResponse](
-		doer,
+	pingClient, pingErr := connect.NewClient[v1test.PingRequest, v1test.PingResponse](
 		baseURL,
 		"connect.ping.v1test.PingService/Ping",
+		doer,
 		opts...,
 	)
-	if err != nil {
-		return nil, err
+	if pingErr != nil {
+		return nil, pingErr
 	}
-	client.fail, err = connect.NewUnaryClientImplementation[v1test.FailRequest, v1test.FailResponse](
-		doer,
+	failClient, failErr := connect.NewClient[v1test.FailRequest, v1test.FailResponse](
 		baseURL,
 		"connect.ping.v1test.PingService/Fail",
+		doer,
 		opts...,
 	)
-	if err != nil {
-		return nil, err
+	if failErr != nil {
+		return nil, failErr
 	}
-	client.sum, err = connect.NewStreamClientImplementation(
-		doer,
+	sumClient, sumErr := connect.NewClient[v1test.SumRequest, v1test.SumResponse](
 		baseURL,
 		"connect.ping.v1test.PingService/Sum",
-		connect.StreamTypeClient,
+		doer,
 		opts...,
 	)
-	if err != nil {
-		return nil, err
+	if sumErr != nil {
+		return nil, sumErr
 	}
-	client.countUp, err = connect.NewStreamClientImplementation(
-		doer,
+	countUpClient, countUpErr := connect.NewClient[v1test.CountUpRequest, v1test.CountUpResponse](
 		baseURL,
 		"connect.ping.v1test.PingService/CountUp",
-		connect.StreamTypeServer,
+		doer,
 		opts...,
 	)
-	if err != nil {
-		return nil, err
+	if countUpErr != nil {
+		return nil, countUpErr
 	}
-	client.cumSum, err = connect.NewStreamClientImplementation(
-		doer,
+	cumSumClient, cumSumErr := connect.NewClient[v1test.CumSumRequest, v1test.CumSumResponse](
 		baseURL,
 		"connect.ping.v1test.PingService/CumSum",
-		connect.StreamTypeBidirectional,
+		doer,
 		opts...,
 	)
-	if err != nil {
-		return nil, err
+	if cumSumErr != nil {
+		return nil, cumSumErr
 	}
-	return &client, nil
+	return &pingServiceClient{
+		ping:    pingClient,
+		fail:    failClient,
+		sum:     sumClient,
+		countUp: countUpClient,
+		cumSum:  cumSumClient,
+	}, nil
 }
 
 // pingServiceClient implements PingServiceClient.
 type pingServiceClient struct {
-	ping    func(context.Context, *connect.Envelope[v1test.PingRequest]) (*connect.Envelope[v1test.PingResponse], error)
-	fail    func(context.Context, *connect.Envelope[v1test.FailRequest]) (*connect.Envelope[v1test.FailResponse], error)
-	sum     func(context.Context) (connect.Sender, connect.Receiver)
-	countUp func(context.Context) (connect.Sender, connect.Receiver)
-	cumSum  func(context.Context) (connect.Sender, connect.Receiver)
+	ping    *connect.Client[v1test.PingRequest, v1test.PingResponse]
+	fail    *connect.Client[v1test.FailRequest, v1test.FailResponse]
+	sum     *connect.Client[v1test.SumRequest, v1test.SumResponse]
+	countUp *connect.Client[v1test.CountUpRequest, v1test.CountUpResponse]
+	cumSum  *connect.Client[v1test.CumSumRequest, v1test.CumSumResponse]
 }
 
 // Ping calls connect.ping.v1test.PingService.Ping.
 func (c *pingServiceClient) Ping(ctx context.Context, req *connect.Envelope[v1test.PingRequest]) (*connect.Envelope[v1test.PingResponse], error) {
-	return c.ping(ctx, req)
+	return c.ping.CallUnary(ctx, req)
 }
 
 // Fail calls connect.ping.v1test.PingService.Fail.
 func (c *pingServiceClient) Fail(ctx context.Context, req *connect.Envelope[v1test.FailRequest]) (*connect.Envelope[v1test.FailResponse], error) {
-	return c.fail(ctx, req)
+	return c.fail.CallUnary(ctx, req)
 }
 
 // Sum calls connect.ping.v1test.PingService.Sum.
 func (c *pingServiceClient) Sum(ctx context.Context) *connect.ClientStreamForClient[v1test.SumRequest, v1test.SumResponse] {
-	sender, receiver := c.sum(ctx)
-	return connect.NewClientStreamForClient[v1test.SumRequest, v1test.SumResponse](sender, receiver)
+	return c.sum.CallClientStream(ctx)
 }
 
 // CountUp calls connect.ping.v1test.PingService.CountUp.
 func (c *pingServiceClient) CountUp(ctx context.Context, req *connect.Envelope[v1test.CountUpRequest]) (*connect.ServerStreamForClient[v1test.CountUpResponse], error) {
-	sender, receiver := c.countUp(ctx)
-	for key, values := range req.Header() {
-		sender.Header()[key] = append(sender.Header()[key], values...)
-	}
-	for key, values := range req.Trailer() {
-		sender.Trailer()[key] = append(sender.Trailer()[key], values...)
-	}
-	if err := sender.Send(req.Msg); err != nil {
-		_ = sender.Close(err)
-		_ = receiver.Close()
-		return nil, err
-	}
-	if err := sender.Close(nil); err != nil {
-		_ = receiver.Close()
-		return nil, err
-	}
-	return connect.NewServerStreamForClient[v1test.CountUpResponse](receiver), nil
+	return c.countUp.CallServerStream(ctx, req)
 }
 
 // CumSum calls connect.ping.v1test.PingService.CumSum.
 func (c *pingServiceClient) CumSum(ctx context.Context) *connect.BidiStreamForClient[v1test.CumSumRequest, v1test.CumSumResponse] {
-	sender, receiver := c.cumSum(ctx)
-	return connect.NewBidiStreamForClient[v1test.CumSumRequest, v1test.CumSumResponse](sender, receiver)
+	return c.cumSum.CallBidiStream(ctx)
 }
 
 // PingServiceHandler is an implementation of the connect.ping.v1test.PingService service.
