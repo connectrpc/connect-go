@@ -30,7 +30,6 @@ const (
 	contextPackage = protogen.GoImportPath("context")
 	errorsPackage  = protogen.GoImportPath("errors")
 	httpPackage    = protogen.GoImportPath("net/http")
-	pathPackage    = protogen.GoImportPath("path")
 	stringsPackage = protogen.GoImportPath("strings")
 
 	connectPackage = protogen.GoImportPath("github.com/bufbuild/connect")
@@ -357,32 +356,26 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 	handlerOption := connectPackage.Ident("HandlerOption")
 	g.P("func ", names.ServerConstructor, "(svc ", names.Server, ", opts ...", handlerOption,
 		") (string, ", httpPackage.Ident("Handler"), ") {")
-	g.P("var lastHandlerPath string")
 	g.P("mux := ", httpPackage.Ident("NewServeMux"), "()")
-	g.P()
 	for _, method := range service.Methods {
-		hname := unexport(string(method.Desc.Name()))
 		isStreamingServer := method.Desc.IsStreamingServer()
 		isStreamingClient := method.Desc.IsStreamingClient()
 		if isStreamingClient && !isStreamingServer {
-			g.P(hname, " := ", connectPackage.Ident("NewClientStreamHandler"), "(")
+			g.P(`mux.Handle("/`, procedureName(method), `", `, connectPackage.Ident("NewClientStreamHandler"), "(")
 		} else if !isStreamingClient && isStreamingServer {
-			g.P(hname, " := ", connectPackage.Ident("NewServerStreamHandler"), "(")
+			g.P(`mux.Handle("/`, procedureName(method), `", `, connectPackage.Ident("NewServerStreamHandler"), "(")
 		} else if isStreamingClient && isStreamingServer {
-			g.P(hname, " := ", connectPackage.Ident("NewBidiStreamHandler"), "(")
+			g.P(`mux.Handle("/`, procedureName(method), `", `, connectPackage.Ident("NewBidiStreamHandler"), "(")
 		} else {
-			g.P(hname, " := ", connectPackage.Ident("NewUnaryHandler"), "(")
+			g.P(`mux.Handle("/`, procedureName(method), `", `, connectPackage.Ident("NewUnaryHandler"), "(")
 		}
 		g.P(`"`, procedureName(method), `", // procedure name`)
 		g.P(`"`, reflectionName(service), `", // reflection name`)
 		g.P("svc.", method.GoName, ",")
 		g.P("opts...,")
-		g.P(")")
-		g.P("mux.Handle(", hname, ".Path(), ", hname, ")")
-		g.P("lastHandlerPath = ", hname, ".Path()")
-		g.P()
+		g.P("))")
 	}
-	g.P("return ", pathPackage.Ident("Dir"), `(lastHandlerPath)+"/", mux`)
+	g.P(`return "/`, reflectionName(service), `/", mux`)
 	g.P("}")
 	g.P()
 }
