@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package health_test
+package connect_test
 
 import (
 	"context"
@@ -22,10 +22,8 @@ import (
 	"testing"
 
 	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/health"
 	"github.com/bufbuild/connect/internal/assert"
 	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
-	healthrpc "github.com/bufbuild/connect/internal/gen/proto/connect/grpc/health/v1"
 	healthpb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/health/v1"
 )
 
@@ -36,12 +34,16 @@ func TestHealth(t *testing.T) {
 		pingrpc.UnimplementedPingServiceHandler{},
 		connect.WithRegistrar(reg),
 	))
-	mux.Handle(health.NewHandler(health.NewChecker(reg)))
+	mux.Handle(connect.NewHealthHandler(connect.NewHealthChecker(reg)))
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
 	defer server.Close()
-	client, err := health.NewClient(server.URL, server.Client())
+	client, err := connect.NewClient[healthpb.HealthCheckRequest, healthpb.HealthCheckResponse](
+		server.URL,
+		"grpc.health.v1.Health/Check",
+		server.Client(),
+	)
 	assert.Nil(t, err, "client construction error")
 
 	const pingFQN = "connect.ping.v1test.PingService"
@@ -50,17 +52,26 @@ func TestHealth(t *testing.T) {
 	assert.False(t, reg.IsRegistered(unknown), "unknown service registered")
 
 	t.Run("process", func(t *testing.T) {
-		res, err := client.Check(context.Background(), &health.CheckRequest{})
+		res, err := client.CallUnary(
+			context.Background(),
+			connect.NewEnvelope(&healthpb.HealthCheckRequest{}),
+		)
 		assert.Nil(t, err, "rpc error")
-		assert.Equal(t, res.Status, health.StatusServing, "status")
+		assert.Equal(t, res.Msg.Status, connect.HealthStatusServing, "status")
 	})
 	t.Run("known", func(t *testing.T) {
-		res, err := client.Check(context.Background(), &health.CheckRequest{Service: pingFQN})
+		res, err := client.CallUnary(
+			context.Background(),
+			connect.NewEnvelope(&healthpb.HealthCheckRequest{Service: pingFQN}),
+		)
 		assert.Nil(t, err, "rpc error")
-		assert.Equal(t, health.Status(res.Status), health.StatusServing, "status")
+		assert.Equal(t, res.Msg.Status, connect.HealthStatusServing, "status")
 	})
 	t.Run("unknown", func(t *testing.T) {
-		_, err := client.Check(context.Background(), &health.CheckRequest{Service: unknown})
+		_, err := client.CallUnary(
+			context.Background(),
+			connect.NewEnvelope(&healthpb.HealthCheckRequest{Service: unknown}),
+		)
 		assert.NotNil(t, err, "rpc error")
 		var connectErr *connect.Error
 		ok := errors.As(err, &connectErr)
@@ -68,13 +79,13 @@ func TestHealth(t *testing.T) {
 		assert.Equal(t, connectErr.Code(), connect.CodeNotFound, "error code")
 	})
 	t.Run("watch", func(t *testing.T) {
-		client, err := healthrpc.NewHealthClient(
+		client, err := connect.NewClient[healthpb.HealthCheckRequest, healthpb.HealthCheckResponse](
 			server.URL,
+			"grpc.health.v1.Health/Watch",
 			server.Client(),
-			connect.WithReplaceProcedurePrefix("internal.", "grpc."),
 		)
 		assert.Nil(t, err, "client construction error")
-		stream, err := client.Watch(
+		stream, err := client.CallServerStream(
 			context.Background(),
 			connect.NewEnvelope(&healthpb.HealthCheckRequest{Service: pingFQN}),
 		)
