@@ -53,7 +53,7 @@ func NewUnaryHandler[Req, Res any](
 			request = receiveUnaryEnvelopeMetadata[Req](receiver)
 		} else {
 			var err error
-			request, err = ReceiveUnaryEnvelope[Req](receiver)
+			request, err = receiveUnaryEnvelope[Req](receiver)
 			if err != nil {
 				// Interceptors should see this error too. Just as above, they need a
 				// useful Message.
@@ -138,7 +138,7 @@ func NewServerStreamHandler[Req, Res any](
 		StreamTypeServer,
 		func(ctx context.Context, sender Sender, receiver Receiver) {
 			stream := NewServerStream[Res](sender)
-			req, err := ReceiveUnaryEnvelope[Req](receiver)
+			req, err := receiveUnaryEnvelope[Req](receiver)
 			if err != nil {
 				_ = receiver.Close()
 				_ = sender.Close(err)

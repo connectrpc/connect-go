@@ -49,7 +49,7 @@ func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Envelope[Res], err
 	if err := c.sender.Close(nil); err != nil {
 		return nil, err
 	}
-	res, err := ReceiveUnaryEnvelope[Res](c.receiver)
+	res, err := receiveUnaryEnvelope[Res](c.receiver)
 	if err != nil {
 		_ = c.receiver.Close()
 		return nil, err
