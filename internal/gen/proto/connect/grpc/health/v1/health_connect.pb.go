@@ -157,25 +157,10 @@ func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) (string,
 	mux.Handle(check.Path(), check)
 	lastHandlerPath = check.Path()
 
-	watch := connect.NewStreamHandler(
+	watch := connect.NewServerStreamHandler(
 		"internal.health.v1.Health/Watch", // procedure name
 		"internal.health.v1.Health",       // reflection name
-		connect.StreamTypeServer,
-		func(ctx context.Context, sender connect.Sender, receiver connect.Receiver) {
-			typed := connect.NewServerStream[v1.HealthCheckResponse](sender)
-			req, err := connect.ReceiveUnaryEnvelope[v1.HealthCheckRequest](receiver)
-			if err != nil {
-				_ = receiver.Close()
-				_ = sender.Close(err)
-				return
-			}
-			if err = receiver.Close(); err != nil {
-				_ = sender.Close(err)
-				return
-			}
-			err = svc.Watch(ctx, req, typed)
-			_ = sender.Close(err)
-		},
+		svc.Watch,
 		opts...,
 	)
 	mux.Handle(watch.Path(), watch)
