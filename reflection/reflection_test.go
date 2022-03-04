@@ -50,18 +50,18 @@ func TestReflection(t *testing.T) {
 		"connect.ping.v1test.PingService",
 	}, "services registered in memory")
 
-	detailed, err := connect.NewUnaryClientImplementation[
+	client, err := connect.NewClient[
 		reflectionpb.ServerReflectionRequest,
 		reflectionpb.ServerReflectionResponse,
 	](
-		server.Client(),
 		server.URL,
 		"grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
+		server.Client(),
 		connect.WithProtoBinaryCodec(),
 	)
 	assert.Nil(t, err, "client construction error")
 	call := func(req *reflectionpb.ServerReflectionRequest) (*reflectionpb.ServerReflectionResponse, error) {
-		res, err := detailed(context.Background(), connect.NewEnvelope(req))
+		res, err := client.CallUnary(context.Background(), connect.NewEnvelope(req))
 		if err != nil {
 			return nil, err
 		}

@@ -88,7 +88,6 @@ type protocolHandler interface {
 // Protocol implementations should take care to use the supplied Specification
 // rather than constructing their own, since new fields may have been added.
 type protocolClientParams struct {
-	Spec             Specification
 	CompressionName  string
 	CompressionPools readOnlyCompressionPools
 	Codec            Codec
@@ -96,6 +95,7 @@ type protocolClientParams struct {
 	CompressMinBytes int
 	Doer             Doer
 	BaseURL          string
+	Procedure        string
 
 	// The gRPC family of protocols always needs access to a protobuf codec to
 	// marshal and unmarshal errors.
@@ -114,7 +114,7 @@ type protocolClient interface {
 	// been populated by WriteRequestHeader. When constructing a stream for a
 	// unary call, implementations may assume that the Sender's Send and Close
 	// methods return before the Receiver's Receive or Close methods are called.
-	NewStream(context.Context, http.Header) (Sender, Receiver)
+	NewStream(context.Context, Specification, http.Header) (Sender, Receiver)
 }
 
 // errorTranslatingSender wraps a Sender to ensure that we always return coded
