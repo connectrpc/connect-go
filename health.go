@@ -87,7 +87,7 @@ func NewHealthChecker(reg *Registrar) func(context.Context, string) (HealthStatu
 // https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto.
 func NewHealthHandler(
 	checker func(context.Context, string) (HealthStatus, error),
-	opts ...HandlerOption,
+	options ...HandlerOption,
 ) (string, http.Handler) {
 	const serviceName = "/grpc.health.v1.Health/"
 	mux := http.NewServeMux()
@@ -100,7 +100,13 @@ func NewHealthHandler(
 			}
 			return NewEnvelope(&healthpb.HealthCheckResponse{Status: status}), nil
 		},
-		opts...,
+		WithHandlerOptions(options...),
+		// To avoid runtime panics from protobuf registry conflicts with
+		// google.golang.org/grpc/health/grpc_health_v1, our copy of health.proto
+		// uses a different package name. We're pretending to be the gRPC
+		// package, though, so we need to disable reflection to avoid inconsistent
+		// package names in the reflection results.
+		&disableRegistrationOption{},
 	)
 	mux.Handle(serviceName+"Check", check)
 	watch := NewServerStreamHandler(
@@ -115,7 +121,8 @@ func NewHealthHandler(
 				errors.New("connect doesn't support watching health state"),
 			)
 		},
-		opts...,
+		WithHandlerOptions(options...),
+		&disableRegistrationOption{}, // see above
 	)
 	mux.Handle(serviceName+"Watch", watch)
 	return serviceName, mux

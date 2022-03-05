@@ -37,6 +37,12 @@ func NewReflectionHandler(registrar *Registrar, options ...HandlerOption) (strin
 	return serviceName, NewBidiStreamHandler(
 		serviceName+"ServerReflectionInfo",
 		registrar.serverReflectionInfo,
-		options...,
+		// To avoid runtime panics from protobuf registry conflicts with
+		// google.golang.org/grpc/health/grpc_health_v1, our copy of health.proto
+		// uses a different package name. We're pretending to be the gRPC
+		// package, though, so we need to disable reflection to avoid inconsistent
+		// package names in the reflection results.
+		WithHandlerOptions(options...),
+		&disableRegistrationOption{},
 	)
 }
