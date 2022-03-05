@@ -64,19 +64,19 @@ type HealthClient interface {
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g., https://api.acme.com or
 // https://acme.com/grpc).
-func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (HealthClient, error) {
+func NewHealthClient(doer connect.Doer, baseURL string, opts ...connect.ClientOption) (HealthClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	checkClient, err := connect.NewClient[v1.HealthCheckRequest, v1.HealthCheckResponse](
-		baseURL+"/internal.health.v1.Health/Check",
 		doer,
+		baseURL+"/internal.health.v1.Health/Check",
 		opts...,
 	)
 	if err != nil {
 		return nil, err
 	}
 	watchClient, err := connect.NewClient[v1.HealthCheckRequest, v1.HealthCheckResponse](
-		baseURL+"/internal.health.v1.Health/Watch",
 		doer,
+		baseURL+"/internal.health.v1.Health/Watch",
 		opts...,
 	)
 	if err != nil {

@@ -60,8 +60,8 @@ func Example_client() {
 	httpClient = examplePingServer.Client()
 
 	client, err := pingrpc.NewPingServiceClient(
-		examplePingServer.URL(),
 		httpClient,
+		examplePingServer.URL(),
 		connect.WithGRPC(),
 	)
 	if err != nil {
