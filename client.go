@@ -33,11 +33,11 @@ type Client[Req, Res any] struct {
 
 // NewClient constructs a new Client.
 func NewClient[Req, Res any](
-	baseURL, procedure string,
+	url string,
 	doer Doer,
 	options ...ClientOption,
 ) (*Client[Req, Res], error) {
-	config, err := newClientConfiguration(procedure, options)
+	config, err := newClientConfiguration(url, options)
 	if err != nil {
 		return nil, err
 	}
@@ -49,8 +49,7 @@ func NewClient[Req, Res any](
 		MaxResponseBytes: config.MaxResponseBytes,
 		CompressMinBytes: config.CompressMinBytes,
 		Doer:             doer,
-		BaseURL:          baseURL,
-		Procedure:        config.Procedure,
+		URL:              url,
 	})
 	if protocolErr != nil {
 		return nil, protocolErr
@@ -166,10 +165,11 @@ type clientConfiguration struct {
 	RequestCompressionName string
 }
 
-func newClientConfiguration(procedure string, options []ClientOption) (*clientConfiguration, *Error) {
+func newClientConfiguration(url string, options []ClientOption) (*clientConfiguration, *Error) {
+	_, procedureName := grpcURLToPackageProcedureName(url)
 	config := clientConfiguration{
 		Protocol:         &protocolGRPC{web: false}, // default to HTTP/2 gRPC
-		Procedure:        procedure,
+		Procedure:        procedureName,
 		CompressionPools: make(map[string]compressionPool),
 	}
 	WithProtoBinaryCodec().applyToClient(&config)
