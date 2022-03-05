@@ -202,8 +202,8 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		g.P("//")
 		deprecated(g)
 	}
-	g.P("func ", names.ClientConstructor, " (baseURL string, doer ", connectPackage.Ident("Doer"),
-		", opts ...", clientOption, ") (", names.Client, ", error) {")
+	g.P("func ", names.ClientConstructor, " (doer ", connectPackage.Ident("Doer"),
+		", baseURL string, opts ...", clientOption, ") (", names.Client, ", error) {")
 	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
 	for _, method := range service.Methods {
 		g.P(unexport(method.GoName), "Client, err := ",
@@ -211,8 +211,8 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 			"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]",
 			"(",
 		)
-		g.P(`baseURL + "`, procedureName(method), `",`)
 		g.P("doer,")
+		g.P(`baseURL + "`, procedureName(method), `",`)
 		g.P("opts...,")
 		g.P(")")
 		g.P("if err != nil {")
