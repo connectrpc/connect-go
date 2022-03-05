@@ -36,8 +36,8 @@ type Client[Req, Res any] struct {
 
 // NewClient constructs a new Client.
 func NewClient[Req, Res any](
-	url string,
 	doer Doer,
+	url string,
 	options ...ClientOption,
 ) (*Client[Req, Res], error) {
 	config, err := newClientConfiguration(url, options)

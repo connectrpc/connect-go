@@ -39,8 +39,8 @@ func TestHandlerReadMaxBytes(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	client, err := pingrpc.NewPingServiceClient(
-		server.URL,
 		server.Client(),
+		server.URL,
 		connect.WithGRPC(),
 	)
 	assert.Nil(t, err, "client construction error")

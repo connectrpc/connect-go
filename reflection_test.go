@@ -47,8 +47,8 @@ func TestReflection(t *testing.T) {
 		reflectionpb.ServerReflectionRequest,
 		reflectionpb.ServerReflectionResponse,
 	](
-		server.URL+"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
 		server.Client(),
+		server.URL+"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
 		connect.WithGRPC(),
 	)
 	assert.Nil(t, err, "client construction error")

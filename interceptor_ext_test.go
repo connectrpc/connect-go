@@ -28,7 +28,7 @@ import (
 )
 
 func TestClientStreamErrors(t *testing.T) {
-	_, err := pingrpc.NewPingServiceClient("INVALID_URL", http.DefaultClient)
+	_, err := pingrpc.NewPingServiceClient(http.DefaultClient, "INVALID_URL", connect.WithGRPC())
 	assert.NotNil(t, err, "client construction error")
 	// We don't even get to calling methods on the client, so there's no question
 	// of interceptors running. Once we're calling methods on the client, all
@@ -168,8 +168,8 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	defer server.Close()
 
 	client, err := pingrpc.NewPingServiceClient(
-		server.URL,
 		server.Client(),
+		server.URL,
 		connect.WithGRPC(),
 		clientOnion,
 	)

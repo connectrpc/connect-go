@@ -341,7 +341,7 @@ func TestServerProtoGRPC(t *testing.T) {
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) {
 		run := func(t *testing.T, opts ...connect.ClientOption) {
-			client, err := pingrpc.NewPingServiceClient(server.URL, server.Client(), opts...)
+			client, err := pingrpc.NewPingServiceClient(server.Client(), server.URL, opts...)
 			assert.Nil(t, err, "client construction error")
 			testPing(t, client)
 			testSum(t, client)
@@ -423,7 +423,7 @@ func TestHeaderBasic(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	client, err := pingrpc.NewPingServiceClient(server.URL, server.Client(), connect.WithGRPC())
+	client, err := pingrpc.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPC())
 	assert.Nil(t, err, "client construction error")
 	req := connect.NewEnvelope(&pingpb.PingRequest{})
 	req.Header().Set(key, cval)
