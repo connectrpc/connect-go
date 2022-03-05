@@ -58,8 +58,9 @@ type HealthClient interface {
 }
 
 // NewHealthClient constructs a client for the internal.health.v1.Health service. By default, it
-// uses the HTTP/2 gRPC protocol and the binary protobuf Codec. It asks for gzipped responses and
-// sends uncompressed requests.
+// uses the binary protobuf Codec, asks for gzipped responses, and sends uncompressed requests. It
+// doesn't have a default protocol; you must supply either the connect.WithGRPC() or
+// connect.WithGRPCWeb() options.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g., https://api.acme.com or
 // https://acme.com/grpc).

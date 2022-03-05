@@ -191,8 +191,10 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 
 	// Client constructor.
 	wrapComments(g, names.ClientConstructor, " constructs a client for the ", service.Desc.FullName(),
-		" service. By default, it uses the HTTP/2 gRPC protocol and the binary protobuf Codec. ",
-		"It asks for gzipped responses and sends uncompressed requests.")
+		" service. By default, it uses the binary protobuf Codec, ",
+		"asks for gzipped responses, and sends uncompressed requests. ",
+		"It doesn't have a default protocol; you must supply either the connect.WithGRPC() or ",
+		"connect.WithGRPCWeb() options.")
 	g.P("//")
 	wrapComments(g, "The URL supplied here should be the base URL for the gRPC server ",
 		"(e.g., https://api.acme.com or https://acme.com/grpc).")

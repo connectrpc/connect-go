@@ -23,8 +23,11 @@ import (
 // Depending on the procedure's type, use the CallUnary, CallClientStream,
 // CallServerStream, or CallBidiStream method.
 //
-// By default, clients use the HTTP/2 gRPC protocol and the binary protobuf
-// Codec. They ask for gzipped responses and send uncompressed requests.
+// By default, clients use the binary protobuf Codec, ask for gzipped
+// responses, and send uncompressed requests. They don't have a default
+// protocol; callers of NewClient or generated client constructors must
+// explicitly choose a protocol with either the WithGRPC or WithGRPCWeb
+// options.
 type Client[Req, Res any] struct {
 	config         *clientConfiguration
 	callUnary      func(context.Context, *Envelope[Req]) (*Envelope[Res], error)
@@ -168,7 +171,6 @@ type clientConfiguration struct {
 func newClientConfiguration(url string, options []ClientOption) (*clientConfiguration, *Error) {
 	_, procedureName := grpcURLToPackageProcedureName(url)
 	config := clientConfiguration{
-		Protocol:         &protocolGRPC{web: false}, // default to HTTP/2 gRPC
 		Procedure:        procedureName,
 		CompressionPools: make(map[string]compressionPool),
 	}
