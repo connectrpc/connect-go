@@ -308,6 +308,12 @@ func (o *compressMinBytesOption) applyToHandler(config *handlerConfiguration) {
 	config.CompressMinBytes = o.Min
 }
 
+type disableRegistrationOption struct{}
+
+func (o *disableRegistrationOption) applyToHandler(config *handlerConfiguration) {
+	config.DisableRegistration = true
+}
+
 type handlerOptionsOption struct {
 	options []HandlerOption
 }
