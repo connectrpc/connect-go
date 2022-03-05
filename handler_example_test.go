@@ -41,7 +41,7 @@ func (*ExamplePingServer) Ping(
 	}), nil
 }
 
-func Example() {
+func Example_handler() {
 	// The business logic here is trivial, but the rest of the example is meant
 	// to be somewhat realistic. This server has basic timeouts configured, and
 	// it also exposes gRPC's server reflection and health check APIs.
