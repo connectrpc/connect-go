@@ -65,23 +65,23 @@ type HealthClient interface {
 // https://acme.com/grpc).
 func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (HealthClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
-	checkClient, checkErr := connect.NewClient[v1.HealthCheckRequest, v1.HealthCheckResponse](
+	checkClient, err := connect.NewClient[v1.HealthCheckRequest, v1.HealthCheckResponse](
 		baseURL,
 		"internal.health.v1.Health/Check",
 		doer,
 		opts...,
 	)
-	if checkErr != nil {
-		return nil, checkErr
+	if err != nil {
+		return nil, err
 	}
-	watchClient, watchErr := connect.NewClient[v1.HealthCheckRequest, v1.HealthCheckResponse](
+	watchClient, err := connect.NewClient[v1.HealthCheckRequest, v1.HealthCheckResponse](
 		baseURL,
 		"internal.health.v1.Health/Watch",
 		doer,
 		opts...,
 	)
-	if watchErr != nil {
-		return nil, watchErr
+	if err != nil {
+		return nil, err
 	}
 	return &healthClient{
 		check: checkClient,
