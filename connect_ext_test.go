@@ -350,14 +350,15 @@ func TestServerProtoGRPC(t *testing.T) {
 			testErrors(t, client)
 		}
 		t.Run("identity", func(t *testing.T) {
-			run(t)
+			run(t, connect.WithGRPC())
 		})
 		t.Run("gzip", func(t *testing.T) {
-			run(t, connect.WithGzipRequests())
+			run(t, connect.WithGRPC(), connect.WithGzipRequests())
 		})
 		t.Run("json_gzip", func(t *testing.T) {
 			run(
 				t,
+				connect.WithGRPC(),
 				connect.WithProtoJSONCodec(),
 				connect.WithGzipRequests(),
 			)
@@ -422,7 +423,7 @@ func TestHeaderBasic(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	client, err := pingrpc.NewPingServiceClient(server.URL, server.Client())
+	client, err := pingrpc.NewPingServiceClient(server.URL, server.Client(), connect.WithGRPC())
 	assert.Nil(t, err, "client construction error")
 	req := connect.NewEnvelope(&pingpb.PingRequest{})
 	req.Header().Set(key, cval)

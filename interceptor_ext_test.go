@@ -170,6 +170,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	client, err := pingrpc.NewPingServiceClient(
 		server.URL,
 		server.Client(),
+		connect.WithGRPC(),
 		clientOnion,
 	)
 	assert.Nil(t, err, "client construction error")

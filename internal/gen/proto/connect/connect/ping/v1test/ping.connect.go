@@ -49,8 +49,9 @@ type PingServiceClient interface {
 }
 
 // NewPingServiceClient constructs a client for the connect.ping.v1test.PingService service. By
-// default, it uses the HTTP/2 gRPC protocol and the binary protobuf Codec. It asks for gzipped
-// responses and sends uncompressed requests.
+// default, it uses the binary protobuf Codec, asks for gzipped responses, and sends uncompressed
+// requests. It doesn't have a default protocol; you must supply either the connect.WithGRPC() or
+// connect.WithGRPCWeb() options.
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g., https://api.acme.com or
 // https://acme.com/grpc).

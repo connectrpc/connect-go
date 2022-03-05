@@ -62,6 +62,7 @@ func Example_client() {
 	client, err := pingrpc.NewPingServiceClient(
 		examplePingServer.URL(),
 		httpClient,
+		connect.WithGRPC(),
 	)
 	if err != nil {
 		logger.Println("error:", err)
