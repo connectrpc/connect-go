@@ -34,11 +34,11 @@ type Handler struct {
 
 // NewUnaryHandler constructs a Handler for a request-response procedure.
 func NewUnaryHandler[Req, Res any](
-	procedure, registrationName string,
+	procedure string,
 	unary func(context.Context, *Envelope[Req]) (*Envelope[Res], error),
 	options ...HandlerOption,
 ) *Handler {
-	config := newHandlerConfiguration(procedure, registrationName, options)
+	config := newHandlerConfiguration(procedure, options)
 	// Given a (possibly failed) stream, how should we call the unary function?
 	implementation := func(ctx context.Context, sender Sender, receiver Receiver, clientVisibleError error) {
 		defer receiver.Close()
@@ -110,12 +110,12 @@ func NewUnaryHandler[Req, Res any](
 
 // NewClientStreamHandler constructs a Handler for a client streaming procedure.
 func NewClientStreamHandler[Req, Res any](
-	procedure, registrationName string,
+	procedure string,
 	implementation func(context.Context, *ClientStream[Req, Res]) error,
 	options ...HandlerOption,
 ) *Handler {
 	return newStreamHandler(
-		procedure, registrationName,
+		procedure,
 		StreamTypeClient,
 		func(ctx context.Context, sender Sender, receiver Receiver) {
 			stream := NewClientStream[Req, Res](sender, receiver)
@@ -129,12 +129,12 @@ func NewClientStreamHandler[Req, Res any](
 
 // NewServerStreamHandler constructs a Handler for a server streaming procedure.
 func NewServerStreamHandler[Req, Res any](
-	procedure, registrationName string,
+	procedure string,
 	implementation func(context.Context, *Envelope[Req], *ServerStream[Res]) error,
 	options ...HandlerOption,
 ) *Handler {
 	return newStreamHandler(
-		procedure, registrationName,
+		procedure,
 		StreamTypeServer,
 		func(ctx context.Context, sender Sender, receiver Receiver) {
 			stream := NewServerStream[Res](sender)
@@ -157,12 +157,12 @@ func NewServerStreamHandler[Req, Res any](
 
 // NewBidiStreamHandler constructs a Handler for a bidirectional streaming procedure.
 func NewBidiStreamHandler[Req, Res any](
-	procedure, registrationName string,
+	procedure string,
 	implementation func(context.Context, *BidiStream[Req, Res]) error,
 	options ...HandlerOption,
 ) *Handler {
 	return newStreamHandler(
-		procedure, registrationName,
+		procedure,
 		StreamTypeBidi,
 		func(ctx context.Context, sender Sender, receiver Receiver) {
 			stream := NewBidiStream[Req, Res](sender, receiver)
@@ -253,15 +253,14 @@ type handlerConfiguration struct {
 	Registrar        *Registrar
 	Interceptor      Interceptor
 	Procedure        string
-	RegistrationName string
 	HandleGRPC       bool
 	HandleGRPCWeb    bool
 }
 
-func newHandlerConfiguration(procedure, registrationName string, options []HandlerOption) *handlerConfiguration {
+func newHandlerConfiguration(procedure string, options []HandlerOption) *handlerConfiguration {
+	registrationName, procedureName := grpcURLToPackageProcedureName(procedure)
 	config := handlerConfiguration{
-		Procedure:        procedure,
-		RegistrationName: registrationName,
+		Procedure:        procedureName,
 		CompressionPools: make(map[string]compressionPool),
 		Codecs:           make(map[string]Codec),
 		HandleGRPC:       true,
@@ -273,8 +272,8 @@ func newHandlerConfiguration(procedure, registrationName string, options []Handl
 	for _, opt := range options {
 		opt.applyToHandler(&config)
 	}
-	if reg := config.Registrar; reg != nil && config.RegistrationName != "" {
-		reg.register(config.RegistrationName)
+	if reg := config.Registrar; reg != nil {
+		reg.register(registrationName)
 	}
 	return &config
 }
@@ -310,12 +309,12 @@ func (c *handlerConfiguration) newProtocolHandlers(streamType StreamType) []prot
 }
 
 func newStreamHandler(
-	procedure, registrationName string,
+	procedure string,
 	streamType StreamType,
 	implementation func(context.Context, Sender, Receiver),
 	options ...HandlerOption,
 ) *Handler {
-	config := newHandlerConfiguration(procedure, registrationName, options)
+	config := newHandlerConfiguration(procedure, options)
 	return &Handler{
 		spec:        config.newSpecification(streamType),
 		interceptor: config.Interceptor,

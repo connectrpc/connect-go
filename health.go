@@ -89,11 +89,10 @@ func NewHealthHandler(
 	checker func(context.Context, string) (HealthStatus, error),
 	opts ...HandlerOption,
 ) (string, http.Handler) {
-	const serviceName = "grpc.health.v1.Health"
+	const serviceName = "/grpc.health.v1.Health/"
 	mux := http.NewServeMux()
 	check := NewUnaryHandler(
-		serviceName+"/Check", // procedure name
-		serviceName,          // registration name
+		serviceName+"Check",
 		func(ctx context.Context, req *Envelope[healthpb.HealthCheckRequest]) (*Envelope[healthpb.HealthCheckResponse], error) {
 			status, err := checker(ctx, req.Msg.Service)
 			if err != nil {
@@ -103,10 +102,9 @@ func NewHealthHandler(
 		},
 		opts...,
 	)
-	mux.Handle("/"+serviceName+"/Check", check)
+	mux.Handle(serviceName+"Check", check)
 	watch := NewServerStreamHandler(
-		serviceName+"/Watch", // procedure name
-		serviceName,          // registration name
+		serviceName+"Watch",
 		func(
 			_ context.Context,
 			_ *Envelope[healthpb.HealthCheckRequest],
@@ -119,6 +117,6 @@ func NewHealthHandler(
 		},
 		opts...,
 	)
-	mux.Handle("/"+serviceName+"/Watch", watch)
-	return "/" + serviceName + "/", mux
+	mux.Handle(serviceName+"Watch", watch)
+	return serviceName, mux
 }

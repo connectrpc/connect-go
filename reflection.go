@@ -33,10 +33,9 @@ import (
 // https://github.com/grpc/grpc/blob/master/doc/server-reflection.md, and
 // https://github.com/fullstorydev/grpcurl.
 func NewReflectionHandler(registrar *Registrar, options ...HandlerOption) (string, http.Handler) {
-	const serviceName = "grpc.reflection.v1alpha.ServerReflection"
-	return "/" + serviceName + "/", NewBidiStreamHandler(
-		serviceName+"/ServerReflectionInfo", // procedure name
-		serviceName,                         // registration name
+	const serviceName = "/grpc.reflection.v1alpha.ServerReflection/"
+	return serviceName, NewBidiStreamHandler(
+		serviceName+"ServerReflectionInfo",
 		registrar.serverReflectionInfo,
 		options...,
 	)

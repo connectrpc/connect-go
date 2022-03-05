@@ -68,6 +68,9 @@ func (r *Registrar) isRegistered(service string) bool {
 // Registers a protobuf package and service combination. Safe to call
 // concurrently.
 func (r *Registrar) register(name string) {
+	if name == "" {
+		return
+	}
 	r.mu.Lock()
 	r.services[name] = struct{}{}
 	r.mu.Unlock()

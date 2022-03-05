@@ -53,7 +53,7 @@ func ExampleInterceptor() {
 	client.Ping(context.Background(), connect.NewEnvelope(&pingpb.PingRequest{Number: 42}))
 
 	// Output:
-	// calling: connect.ping.v1test.PingService/Ping
+	// calling: /connect.ping.v1test.PingService/Ping
 	// request: number:42
 	// response: number:42
 }
