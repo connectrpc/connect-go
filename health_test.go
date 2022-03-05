@@ -47,6 +47,7 @@ func TestHealth(t *testing.T) {
 	client, err := connect.NewClient[healthpb.HealthCheckRequest, healthpb.HealthCheckResponse](
 		server.URL+"/grpc.health.v1.Health/Check",
 		server.Client(),
+		connect.WithGRPC(),
 	)
 	assert.Nil(t, err, "client construction error")
 
@@ -81,6 +82,7 @@ func TestHealth(t *testing.T) {
 		client, err := connect.NewClient[healthpb.HealthCheckRequest, healthpb.HealthCheckResponse](
 			server.URL+"/grpc.health.v1.Health/Watch",
 			server.Client(),
+			connect.WithGRPC(),
 		)
 		assert.Nil(t, err, "client construction error")
 		stream, err := client.CallServerStream(
