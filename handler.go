@@ -246,15 +246,16 @@ func (h *Handler) failNegotiation(w http.ResponseWriter, code int) {
 }
 
 type handlerConfiguration struct {
-	CompressionPools map[string]compressionPool
-	Codecs           map[string]Codec
-	MaxRequestBytes  int64
-	CompressMinBytes int
-	Registrar        *Registrar
-	Interceptor      Interceptor
-	Procedure        string
-	HandleGRPC       bool
-	HandleGRPCWeb    bool
+	CompressionPools    map[string]compressionPool
+	Codecs              map[string]Codec
+	MaxRequestBytes     int64
+	CompressMinBytes    int
+	Registrar           *Registrar
+	Interceptor         Interceptor
+	Procedure           string
+	DisableRegistration bool
+	HandleGRPC          bool
+	HandleGRPCWeb       bool
 }
 
 func newHandlerConfiguration(procedure string, options []HandlerOption) *handlerConfiguration {
@@ -272,7 +273,7 @@ func newHandlerConfiguration(procedure string, options []HandlerOption) *handler
 	for _, opt := range options {
 		opt.applyToHandler(&config)
 	}
-	if reg := config.Registrar; reg != nil {
+	if reg := config.Registrar; reg != nil && !config.DisableRegistration {
 		reg.register(registrationName)
 	}
 	return &config
