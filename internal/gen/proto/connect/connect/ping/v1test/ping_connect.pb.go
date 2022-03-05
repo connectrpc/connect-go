@@ -56,50 +56,50 @@ type PingServiceClient interface {
 // https://acme.com/grpc).
 func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (PingServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
-	pingClient, pingErr := connect.NewClient[v1test.PingRequest, v1test.PingResponse](
+	pingClient, err := connect.NewClient[v1test.PingRequest, v1test.PingResponse](
 		baseURL,
 		"connect.ping.v1test.PingService/Ping",
 		doer,
 		opts...,
 	)
-	if pingErr != nil {
-		return nil, pingErr
+	if err != nil {
+		return nil, err
 	}
-	failClient, failErr := connect.NewClient[v1test.FailRequest, v1test.FailResponse](
+	failClient, err := connect.NewClient[v1test.FailRequest, v1test.FailResponse](
 		baseURL,
 		"connect.ping.v1test.PingService/Fail",
 		doer,
 		opts...,
 	)
-	if failErr != nil {
-		return nil, failErr
+	if err != nil {
+		return nil, err
 	}
-	sumClient, sumErr := connect.NewClient[v1test.SumRequest, v1test.SumResponse](
+	sumClient, err := connect.NewClient[v1test.SumRequest, v1test.SumResponse](
 		baseURL,
 		"connect.ping.v1test.PingService/Sum",
 		doer,
 		opts...,
 	)
-	if sumErr != nil {
-		return nil, sumErr
+	if err != nil {
+		return nil, err
 	}
-	countUpClient, countUpErr := connect.NewClient[v1test.CountUpRequest, v1test.CountUpResponse](
+	countUpClient, err := connect.NewClient[v1test.CountUpRequest, v1test.CountUpResponse](
 		baseURL,
 		"connect.ping.v1test.PingService/CountUp",
 		doer,
 		opts...,
 	)
-	if countUpErr != nil {
-		return nil, countUpErr
+	if err != nil {
+		return nil, err
 	}
-	cumSumClient, cumSumErr := connect.NewClient[v1test.CumSumRequest, v1test.CumSumResponse](
+	cumSumClient, err := connect.NewClient[v1test.CumSumRequest, v1test.CumSumResponse](
 		baseURL,
 		"connect.ping.v1test.PingService/CumSum",
 		doer,
 		opts...,
 	)
-	if cumSumErr != nil {
-		return nil, cumSumErr
+	if err != nil {
+		return nil, err
 	}
 	return &pingServiceClient{
 		ping:    pingClient,
