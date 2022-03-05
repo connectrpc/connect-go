@@ -50,14 +50,14 @@ type ServerReflectionClient interface {
 // https://acme.com/grpc).
 func NewServerReflectionClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (ServerReflectionClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
-	serverReflectionInfoClient, serverReflectionInfoErr := connect.NewClient[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](
+	serverReflectionInfoClient, err := connect.NewClient[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](
 		baseURL,
 		"internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo",
 		doer,
 		opts...,
 	)
-	if serverReflectionInfoErr != nil {
-		return nil, serverReflectionInfoErr
+	if err != nil {
+		return nil, err
 	}
 	return &serverReflectionClient{
 		serverReflectionInfo: serverReflectionInfoClient,
