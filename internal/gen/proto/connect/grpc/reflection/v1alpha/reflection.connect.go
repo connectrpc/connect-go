@@ -51,8 +51,7 @@ type ServerReflectionClient interface {
 func NewServerReflectionClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (ServerReflectionClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	serverReflectionInfoClient, err := connect.NewClient[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](
-		baseURL,
-		"internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo",
+		baseURL+"/internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo",
 		doer,
 		opts...,
 	)
@@ -90,8 +89,7 @@ type ServerReflectionHandler interface {
 func NewServerReflectionHandler(svc ServerReflectionHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	mux := http.NewServeMux()
 	mux.Handle("/internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo", connect.NewBidiStreamHandler(
-		"internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo", // procedure name
-		"internal.reflection.v1alpha1.ServerReflection",                      // reflection name
+		"/internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo",
 		svc.ServerReflectionInfo,
 		opts...,
 	))

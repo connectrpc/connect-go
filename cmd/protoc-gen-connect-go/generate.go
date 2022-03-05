@@ -175,7 +175,7 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named b
 
 func procedureName(method *protogen.Method) string {
 	return fmt.Sprintf(
-		"%s.%s/%s",
+		"/%s.%s/%s",
 		method.Parent.Desc.ParentFile().Package(),
 		method.Parent.Desc.Name(),
 		method.Desc.Name(),
@@ -209,8 +209,7 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 			"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]",
 			"(",
 		)
-		g.P("baseURL,")
-		g.P(`"`, procedureName(method), `",`)
+		g.P(`baseURL + "`, procedureName(method), `",`)
 		g.P("doer,")
 		g.P("opts...,")
 		g.P(")")
@@ -345,16 +344,15 @@ func serverConstructor(g *protogen.GeneratedFile, service *protogen.Service, nam
 		isStreamingServer := method.Desc.IsStreamingServer()
 		isStreamingClient := method.Desc.IsStreamingClient()
 		if isStreamingClient && !isStreamingServer {
-			g.P(`mux.Handle("/`, procedureName(method), `", `, connectPackage.Ident("NewClientStreamHandler"), "(")
+			g.P(`mux.Handle("`, procedureName(method), `", `, connectPackage.Ident("NewClientStreamHandler"), "(")
 		} else if !isStreamingClient && isStreamingServer {
-			g.P(`mux.Handle("/`, procedureName(method), `", `, connectPackage.Ident("NewServerStreamHandler"), "(")
+			g.P(`mux.Handle("`, procedureName(method), `", `, connectPackage.Ident("NewServerStreamHandler"), "(")
 		} else if isStreamingClient && isStreamingServer {
-			g.P(`mux.Handle("/`, procedureName(method), `", `, connectPackage.Ident("NewBidiStreamHandler"), "(")
+			g.P(`mux.Handle("`, procedureName(method), `", `, connectPackage.Ident("NewBidiStreamHandler"), "(")
 		} else {
-			g.P(`mux.Handle("/`, procedureName(method), `", `, connectPackage.Ident("NewUnaryHandler"), "(")
+			g.P(`mux.Handle("`, procedureName(method), `", `, connectPackage.Ident("NewUnaryHandler"), "(")
 		}
-		g.P(`"`, procedureName(method), `", // procedure name`)
-		g.P(`"`, reflectionName(service), `", // reflection name`)
+		g.P(`"`, procedureName(method), `",`)
 		g.P("svc.", method.GoName, ",")
 		g.P("opts...,")
 		g.P("))")

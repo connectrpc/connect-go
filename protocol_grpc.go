@@ -41,8 +41,7 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 
 // NewClient implements protocol, so it must return an interface.
 func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, error) {
-	procedureURL := params.BaseURL + "/" + params.Procedure
-	if _, err := url.ParseRequestURI(procedureURL); err != nil {
+	if _, err := url.ParseRequestURI(params.URL); err != nil {
 		return nil, NewError(CodeUnknown, err)
 	}
 	return &grpcClient{
@@ -54,7 +53,7 @@ func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, 
 		maxResponseBytes: params.MaxResponseBytes,
 		minCompressBytes: params.CompressMinBytes,
 		doer:             params.Doer,
-		procedureURL:     procedureURL,
+		procedureURL:     params.URL,
 	}, nil
 }
 

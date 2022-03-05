@@ -57,8 +57,7 @@ type PingServiceClient interface {
 func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (PingServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	pingClient, err := connect.NewClient[v1test.PingRequest, v1test.PingResponse](
-		baseURL,
-		"connect.ping.v1test.PingService/Ping",
+		baseURL+"/connect.ping.v1test.PingService/Ping",
 		doer,
 		opts...,
 	)
@@ -66,8 +65,7 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 		return nil, err
 	}
 	failClient, err := connect.NewClient[v1test.FailRequest, v1test.FailResponse](
-		baseURL,
-		"connect.ping.v1test.PingService/Fail",
+		baseURL+"/connect.ping.v1test.PingService/Fail",
 		doer,
 		opts...,
 	)
@@ -75,8 +73,7 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 		return nil, err
 	}
 	sumClient, err := connect.NewClient[v1test.SumRequest, v1test.SumResponse](
-		baseURL,
-		"connect.ping.v1test.PingService/Sum",
+		baseURL+"/connect.ping.v1test.PingService/Sum",
 		doer,
 		opts...,
 	)
@@ -84,8 +81,7 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 		return nil, err
 	}
 	countUpClient, err := connect.NewClient[v1test.CountUpRequest, v1test.CountUpResponse](
-		baseURL,
-		"connect.ping.v1test.PingService/CountUp",
+		baseURL+"/connect.ping.v1test.PingService/CountUp",
 		doer,
 		opts...,
 	)
@@ -93,8 +89,7 @@ func NewPingServiceClient(baseURL string, doer connect.Doer, opts ...connect.Cli
 		return nil, err
 	}
 	cumSumClient, err := connect.NewClient[v1test.CumSumRequest, v1test.CumSumResponse](
-		baseURL,
-		"connect.ping.v1test.PingService/CumSum",
+		baseURL+"/connect.ping.v1test.PingService/CumSum",
 		doer,
 		opts...,
 	)
@@ -166,32 +161,27 @@ type PingServiceHandler interface {
 func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	mux := http.NewServeMux()
 	mux.Handle("/connect.ping.v1test.PingService/Ping", connect.NewUnaryHandler(
-		"connect.ping.v1test.PingService/Ping", // procedure name
-		"connect.ping.v1test.PingService",      // reflection name
+		"/connect.ping.v1test.PingService/Ping",
 		svc.Ping,
 		opts...,
 	))
 	mux.Handle("/connect.ping.v1test.PingService/Fail", connect.NewUnaryHandler(
-		"connect.ping.v1test.PingService/Fail", // procedure name
-		"connect.ping.v1test.PingService",      // reflection name
+		"/connect.ping.v1test.PingService/Fail",
 		svc.Fail,
 		opts...,
 	))
 	mux.Handle("/connect.ping.v1test.PingService/Sum", connect.NewClientStreamHandler(
-		"connect.ping.v1test.PingService/Sum", // procedure name
-		"connect.ping.v1test.PingService",     // reflection name
+		"/connect.ping.v1test.PingService/Sum",
 		svc.Sum,
 		opts...,
 	))
 	mux.Handle("/connect.ping.v1test.PingService/CountUp", connect.NewServerStreamHandler(
-		"connect.ping.v1test.PingService/CountUp", // procedure name
-		"connect.ping.v1test.PingService",         // reflection name
+		"/connect.ping.v1test.PingService/CountUp",
 		svc.CountUp,
 		opts...,
 	))
 	mux.Handle("/connect.ping.v1test.PingService/CumSum", connect.NewBidiStreamHandler(
-		"connect.ping.v1test.PingService/CumSum", // procedure name
-		"connect.ping.v1test.PingService",        // reflection name
+		"/connect.ping.v1test.PingService/CumSum",
 		svc.CumSum,
 		opts...,
 	))

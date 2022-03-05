@@ -45,8 +45,7 @@ func TestHealth(t *testing.T) {
 	server.StartTLS()
 	defer server.Close()
 	client, err := connect.NewClient[healthpb.HealthCheckRequest, healthpb.HealthCheckResponse](
-		server.URL,
-		"grpc.health.v1.Health/Check",
+		server.URL+"/grpc.health.v1.Health/Check",
 		server.Client(),
 	)
 	assert.Nil(t, err, "client construction error")
@@ -80,8 +79,7 @@ func TestHealth(t *testing.T) {
 	})
 	t.Run("watch", func(t *testing.T) {
 		client, err := connect.NewClient[healthpb.HealthCheckRequest, healthpb.HealthCheckResponse](
-			server.URL,
-			"grpc.health.v1.Health/Watch",
+			server.URL+"/grpc.health.v1.Health/Watch",
 			server.Client(),
 		)
 		assert.Nil(t, err, "client construction error")

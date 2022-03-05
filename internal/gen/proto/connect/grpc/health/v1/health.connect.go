@@ -66,8 +66,7 @@ type HealthClient interface {
 func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOption) (HealthClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	checkClient, err := connect.NewClient[v1.HealthCheckRequest, v1.HealthCheckResponse](
-		baseURL,
-		"internal.health.v1.Health/Check",
+		baseURL+"/internal.health.v1.Health/Check",
 		doer,
 		opts...,
 	)
@@ -75,8 +74,7 @@ func NewHealthClient(baseURL string, doer connect.Doer, opts ...connect.ClientOp
 		return nil, err
 	}
 	watchClient, err := connect.NewClient[v1.HealthCheckRequest, v1.HealthCheckResponse](
-		baseURL,
-		"internal.health.v1.Health/Watch",
+		baseURL+"/internal.health.v1.Health/Watch",
 		doer,
 		opts...,
 	)
@@ -136,14 +134,12 @@ type HealthHandler interface {
 func NewHealthHandler(svc HealthHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	mux := http.NewServeMux()
 	mux.Handle("/internal.health.v1.Health/Check", connect.NewUnaryHandler(
-		"internal.health.v1.Health/Check", // procedure name
-		"internal.health.v1.Health",       // reflection name
+		"/internal.health.v1.Health/Check",
 		svc.Check,
 		opts...,
 	))
 	mux.Handle("/internal.health.v1.Health/Watch", connect.NewServerStreamHandler(
-		"internal.health.v1.Health/Watch", // procedure name
-		"internal.health.v1.Health",       // reflection name
+		"/internal.health.v1.Health/Watch",
 		svc.Watch,
 		opts...,
 	))

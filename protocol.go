@@ -94,8 +94,7 @@ type protocolClientParams struct {
 	MaxResponseBytes int64
 	CompressMinBytes int
 	Doer             Doer
-	BaseURL          string
-	Procedure        string
+	URL              string
 
 	// The gRPC family of protocols always needs access to a protobuf codec to
 	// marshal and unmarshal errors.
