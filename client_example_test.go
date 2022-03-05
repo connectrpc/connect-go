@@ -26,7 +26,7 @@ import (
 	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
 )
 
-func ExampleClient() {
+func Example_client() {
 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 	// Timeouts, connection pooling, custom dialers, and other low-level
 	// transport details are handled by net/http. Everything you already know
