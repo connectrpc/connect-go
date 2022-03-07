@@ -16,7 +16,6 @@ package connect_test
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,7 +29,7 @@ import (
 
 func TestClientStreamErrors(t *testing.T) {
 	_, err := pingrpc.NewPingServiceClient(http.DefaultClient, "INVALID_URL", connect.WithGRPC())
-	assert.NotNil(t, err, "client construction error")
+	assert.NotNil(t, err)
 	// We don't even get to calling methods on the client, so there's no question
 	// of interceptors running. Once we're calling methods on the client, all
 	// errors are visible to interceptors.
@@ -60,13 +59,13 @@ func TestHandlerStreamErrors(t *testing.T) {
 			server.URL+"/connect.ping.v1test.PingService/Ping",
 			strings.NewReader(""),
 		)
-		assert.Nil(t, err, "error constructing request")
+		assert.Nil(t, err)
 		request.Header.Set("Content-Type", "application/grpc+proto")
 		request.Header.Set("Grpc-Timeout", "INVALID")
 		res, err := server.Client().Do(request)
-		assert.Nil(t, err, "network error sending request")
-		assert.Equal(t, res.StatusCode, http.StatusOK, "response HTTP status")
-		assert.True(t, called, "expected interceptors to be called")
+		assert.Nil(t, err)
+		assert.Equal(t, res.StatusCode, http.StatusOK)
+		assert.True(t, called)
 	})
 	t.Run("stream", func(t *testing.T) {
 		defer reset()
@@ -75,13 +74,13 @@ func TestHandlerStreamErrors(t *testing.T) {
 			server.URL+"/connect.ping.v1test.PingService/CountUp",
 			strings.NewReader(""),
 		)
-		assert.Nil(t, err, "error constructing request")
+		assert.Nil(t, err)
 		request.Header.Set("Content-Type", "application/grpc+proto")
 		request.Header.Set("Grpc-Timeout", "INVALID")
 		res, err := server.Client().Do(request)
-		assert.Nil(t, err, "network error sending request")
-		assert.Equal(t, res.StatusCode, http.StatusOK, "response HTTP status")
-		assert.True(t, called, "expected interceptors to be called")
+		assert.Nil(t, err)
+		assert.Equal(t, res.StatusCode, http.StatusOK)
+		assert.True(t, called)
 	})
 }
 
@@ -94,7 +93,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 				assert.NotZero(
 					t,
 					h.Get(expect),
-					fmt.Sprintf(
+					assert.Sprintf(
 						"%s (IsClient %v): header %q missing: %v",
 						spec.Procedure,
 						spec.IsClient,
@@ -113,7 +112,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 			assert.NotZero(
 				t,
 				h.Get(k),
-				fmt.Sprintf(
+				assert.Sprintf(
 					"%s (IsClient %v): checking all headers, %q missing: %v",
 					spec.Procedure,
 					spec.IsClient,
@@ -139,7 +138,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 		newHeaderInterceptor(
 			// 1 (start). request: should see protocol-related headers
 			func(_ connect.Specification, h http.Header) {
-				assert.NotZero(t, h.Get("Grpc-Accept-Encoding"), "grpc-accept-encoding missing")
+				assert.NotZero(t, h.Get("Grpc-Accept-Encoding"))
 			},
 			// 12 (end). response: check "one"-"four"
 			assertAllPresent,
@@ -184,13 +183,13 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 		connect.WithGRPC(),
 		clientOnion,
 	)
-	assert.Nil(t, err, "client construction error")
+	assert.Nil(t, err)
 
 	_, err = client.Ping(context.Background(), connect.NewEnvelope(&pingpb.PingRequest{Number: 10}))
-	assert.Nil(t, err, "error calling Ping")
+	assert.Nil(t, err)
 
 	_, err = client.CountUp(context.Background(), connect.NewEnvelope(&pingpb.CountUpRequest{Number: 10}))
-	assert.Nil(t, err, "error calling CountUp")
+	assert.Nil(t, err)
 }
 
 // headerInterceptor makes it easier to write interceptors that inspect or

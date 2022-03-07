@@ -49,34 +49,34 @@ func TestHealth(t *testing.T) {
 		server.URL+"/grpc.health.v1.Health/Check",
 		connect.WithGRPC(),
 	)
-	assert.Nil(t, err, "client construction error")
+	assert.Nil(t, err)
 
 	t.Run("process", func(t *testing.T) {
 		res, err := client.CallUnary(
 			context.Background(),
 			connect.NewEnvelope(&healthpb.HealthCheckRequest{}),
 		)
-		assert.Nil(t, err, "rpc error")
-		assert.Equal(t, res.Msg.Status, connect.HealthStatusServing, "status")
+		assert.Nil(t, err)
+		assert.Equal(t, res.Msg.Status, connect.HealthStatusServing)
 	})
 	t.Run("known", func(t *testing.T) {
 		res, err := client.CallUnary(
 			context.Background(),
 			connect.NewEnvelope(&healthpb.HealthCheckRequest{Service: pingFQN}),
 		)
-		assert.Nil(t, err, "rpc error")
-		assert.Equal(t, res.Msg.Status, connect.HealthStatusServing, "status")
+		assert.Nil(t, err)
+		assert.Equal(t, res.Msg.Status, connect.HealthStatusServing)
 	})
 	t.Run("unknown", func(t *testing.T) {
 		_, err := client.CallUnary(
 			context.Background(),
 			connect.NewEnvelope(&healthpb.HealthCheckRequest{Service: unknown}),
 		)
-		assert.NotNil(t, err, "rpc error")
+		assert.NotNil(t, err)
 		var connectErr *connect.Error
 		ok := errors.As(err, &connectErr)
-		assert.True(t, ok, "convert to connect error")
-		assert.Equal(t, connectErr.Code(), connect.CodeNotFound, "error code")
+		assert.True(t, ok)
+		assert.Equal(t, connectErr.Code(), connect.CodeNotFound)
 	})
 	t.Run("watch", func(t *testing.T) {
 		client, err := connect.NewClient[healthpb.HealthCheckRequest, healthpb.HealthCheckResponse](
@@ -84,18 +84,18 @@ func TestHealth(t *testing.T) {
 			server.URL+"/grpc.health.v1.Health/Watch",
 			connect.WithGRPC(),
 		)
-		assert.Nil(t, err, "client construction error")
+		assert.Nil(t, err)
 		stream, err := client.CallServerStream(
 			context.Background(),
 			connect.NewEnvelope(&healthpb.HealthCheckRequest{Service: pingFQN}),
 		)
-		assert.Nil(t, err, "rpc error")
+		assert.Nil(t, err)
 		defer stream.Close()
-		assert.False(t, stream.Receive(), "receive")
-		assert.NotNil(t, stream.Err(), "receive err")
+		assert.False(t, stream.Receive())
+		assert.NotNil(t, stream.Err())
 		var connectErr *connect.Error
 		ok := errors.As(stream.Err(), &connectErr)
-		assert.True(t, ok, "convert to connect error")
-		assert.Equal(t, connectErr.Code(), connect.CodeUnimplemented, "error code")
+		assert.True(t, ok)
+		assert.Equal(t, connectErr.Code(), connect.CodeUnimplemented)
 	})
 }

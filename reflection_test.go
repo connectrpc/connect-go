@@ -51,7 +51,7 @@ func TestReflection(t *testing.T) {
 		server.URL+"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
 		connect.WithGRPC(),
 	)
-	assert.Nil(t, err, "client construction error")
+	assert.Nil(t, err)
 	call := func(req *reflectionpb.ServerReflectionRequest) (*reflectionpb.ServerReflectionResponse, error) {
 		res, err := client.CallUnary(context.Background(), connect.NewEnvelope(req))
 		if err != nil {
@@ -68,7 +68,7 @@ func TestReflection(t *testing.T) {
 			},
 		}
 		res, err := call(req)
-		assert.Nil(t, err, "reflection RPC error")
+		assert.Nil(t, err)
 		expect := &reflectionpb.ServerReflectionResponse{
 			ValidHost:       req.Host,
 			OriginalRequest: req,
@@ -80,7 +80,7 @@ func TestReflection(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, res, expect, "response")
+		assert.Equal(t, res, expect)
 	})
 	t.Run("file_by_filename", func(t *testing.T) {
 		req := &reflectionpb.ServerReflectionRequest{
@@ -90,15 +90,14 @@ func TestReflection(t *testing.T) {
 			},
 		}
 		res, err := call(req)
-		assert.Nil(t, err, "reflection RPC error")
-		assert.Nil(t, res.GetErrorResponse(), "error in response")
+		assert.Nil(t, err)
+		assert.Nil(t, res.GetErrorResponse())
 		fds := res.GetFileDescriptorResponse()
-		assert.NotNil(t, fds, "file descriptor response")
-		assert.Equal(t, len(fds.FileDescriptorProto), 1, "number of fds returned")
+		assert.NotNil(t, fds)
+		assert.Equal(t, len(fds.FileDescriptorProto), 1)
 		assert.True(
 			t,
 			bytes.Contains(fds.FileDescriptorProto[0], []byte(pingRequestFQN)),
-			"fd should contain PingRequest struct",
 		)
 	})
 	t.Run("file_containing_symbol", func(t *testing.T) {
@@ -109,15 +108,14 @@ func TestReflection(t *testing.T) {
 			},
 		}
 		res, err := call(req)
-		assert.Nil(t, err, "reflection RPC error")
-		assert.Nil(t, res.GetErrorResponse(), "error in response")
+		assert.Nil(t, err)
+		assert.Nil(t, res.GetErrorResponse())
 		fds := res.GetFileDescriptorResponse()
-		assert.NotNil(t, fds, "file descriptor response")
-		assert.Equal(t, len(fds.FileDescriptorProto), 1, "number of fds returned")
+		assert.NotNil(t, fds)
+		assert.Equal(t, len(fds.FileDescriptorProto), 1)
 		assert.True(
 			t,
 			bytes.Contains(fds.FileDescriptorProto[0], []byte(pingRequestFQN)),
-			"fd should contain PingRequest struct",
 		)
 	})
 	t.Run("file_containing_extension", func(t *testing.T) {
@@ -131,11 +129,11 @@ func TestReflection(t *testing.T) {
 			},
 		}
 		res, err := call(req)
-		assert.Nil(t, err, "reflection RPC error")
+		assert.Nil(t, err)
 		msgerr := res.GetErrorResponse()
-		assert.NotNil(t, msgerr, "error in response proto")
-		assert.Equal(t, msgerr.ErrorCode, int32(connect.CodeNotFound), "error code")
-		assert.NotZero(t, msgerr.ErrorMessage, "error message")
+		assert.NotNil(t, msgerr)
+		assert.Equal(t, msgerr.ErrorCode, int32(connect.CodeNotFound))
+		assert.NotZero(t, msgerr.ErrorMessage)
 	})
 	t.Run("all_extension_numbers_of_type", func(t *testing.T) {
 		req := &reflectionpb.ServerReflectionRequest{
@@ -145,7 +143,7 @@ func TestReflection(t *testing.T) {
 			},
 		}
 		res, err := call(req)
-		assert.Nil(t, err, "reflection RPC error")
+		assert.Nil(t, err)
 		expect := &reflectionpb.ServerReflectionResponse{
 			ValidHost:       req.Host,
 			OriginalRequest: req,
@@ -155,6 +153,6 @@ func TestReflection(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, res, expect, "response")
+		assert.Equal(t, res, expect)
 	})
 }

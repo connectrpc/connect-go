@@ -193,10 +193,10 @@ func TestServerProtoGRPC(t *testing.T) {
 			req.Trailer().Set(clientTrailer, trailerValue)
 			expect := &pingpb.PingResponse{Number: num}
 			res, err := client.Ping(context.Background(), req)
-			assert.Nil(t, err, "ping error")
-			assert.Equal(t, res.Msg, expect, "ping response")
-			assert.Equal(t, res.Header().Get(handlerHeader), headerValue, "ping header")
-			assert.Equal(t, res.Trailer().Get(handlerTrailer), trailerValue, "ping trailer")
+			assert.Nil(t, err)
+			assert.Equal(t, res.Msg, expect)
+			assert.Equal(t, res.Header().Get(handlerHeader), headerValue)
+			assert.Equal(t, res.Trailer().Get(handlerTrailer), trailerValue)
 		})
 		t.Run("large ping", func(t *testing.T) {
 			// Using a large payload splits the request and response over multiple
@@ -207,10 +207,10 @@ func TestServerProtoGRPC(t *testing.T) {
 			req.Header().Set(clientHeader, headerValue)
 			req.Trailer().Set(clientTrailer, trailerValue)
 			res, err := client.Ping(context.Background(), req)
-			assert.Nil(t, err, "ping error")
-			assert.Equal(t, res.Msg.Text, hellos, "ping response")
-			assert.Equal(t, res.Header().Get(handlerHeader), headerValue, "ping header")
-			assert.Equal(t, res.Trailer().Get(handlerTrailer), trailerValue, "ping trailer")
+			assert.Nil(t, err)
+			assert.Equal(t, res.Msg.Text, hellos)
+			assert.Equal(t, res.Header().Get(handlerHeader), headerValue)
+			assert.Equal(t, res.Trailer().Get(handlerTrailer), trailerValue)
 		})
 	}
 	testSum := func(t *testing.T, client pingrpc.PingServiceClient) {
@@ -223,13 +223,13 @@ func TestServerProtoGRPC(t *testing.T) {
 			stream.RequestHeader().Set(clientHeader, headerValue)
 			for i := int64(1); i <= upTo; i++ {
 				err := stream.Send(&pingpb.SumRequest{Number: i})
-				assert.Nil(t, err, fmt.Sprintf("Send %d", i))
+				assert.Nil(t, err, assert.Sprintf("send %d", i))
 			}
 			res, err := stream.CloseAndReceive()
-			assert.Nil(t, err, "CloseAndReceive error")
-			assert.Equal(t, res.Msg.Sum, expect, "response sum")
-			assert.Equal(t, res.Header().Get(handlerHeader), headerValue, "response header")
-			assert.Equal(t, res.Trailer().Get(handlerTrailer), trailerValue, "response trailer")
+			assert.Nil(t, err)
+			assert.Equal(t, res.Msg.Sum, expect)
+			assert.Equal(t, res.Header().Get(handlerHeader), headerValue)
+			assert.Equal(t, res.Trailer().Get(handlerTrailer), trailerValue)
 		})
 	}
 	testCountUp := func(t *testing.T, client pingrpc.PingServiceClient) {
@@ -244,13 +244,13 @@ func TestServerProtoGRPC(t *testing.T) {
 			request.Header().Set(clientHeader, headerValue)
 			request.Trailer().Set(clientTrailer, trailerValue)
 			stream, err := client.CountUp(context.Background(), request)
-			assert.Nil(t, err, "send error")
+			assert.Nil(t, err)
 			for stream.Receive() {
 				got = append(got, stream.Msg().Number)
 			}
-			assert.Nil(t, stream.Err(), "receive error")
-			assert.Nil(t, stream.Close(), "close error")
-			assert.Equal(t, got, expect, "responses")
+			assert.Nil(t, stream.Err())
+			assert.Nil(t, stream.Close())
+			assert.Equal(t, got, expect)
 		})
 	}
 	testCumSum := func(t *testing.T, client pingrpc.PingServiceClient, expectSuccess bool) {
@@ -262,16 +262,16 @@ func TestServerProtoGRPC(t *testing.T) {
 			stream.RequestHeader().Set(clientHeader, headerValue)
 			if !expectSuccess { // server doesn't support HTTP/2
 				err := stream.Send(&pingpb.CumSumRequest{})
-				assert.Nil(t, err, "first send on HTTP/1.1") // succeeds, haven't gotten response back yet
-				assert.Nil(t, stream.CloseSend(), "close send error on HTTP/1.1")
+				assert.Nil(t, err) // haven't gotten response back yet
+				assert.Nil(t, stream.CloseSend())
 				_, err = stream.Receive()
-				assert.NotNil(t, err, "first receive on HTTP/1.1") // should be 505
+				assert.NotNil(t, err) // should be 505
 				assert.True(
 					t,
 					strings.Contains(err.Error(), "HTTP status 505"),
-					fmt.Sprintf("expected 505, got %v", err),
+					assert.Sprintf("expected 505, got %v", err),
 				)
-				assert.Nil(t, stream.CloseReceive(), "close receive error on HTTP/1.1")
+				assert.Nil(t, stream.CloseReceive())
 				return
 			}
 			var wg sync.WaitGroup
@@ -280,9 +280,9 @@ func TestServerProtoGRPC(t *testing.T) {
 				defer wg.Done()
 				for i, n := range send {
 					err := stream.Send(&pingpb.CumSumRequest{Number: n})
-					assert.Nil(t, err, fmt.Sprintf("send error #%d", i))
+					assert.Nil(t, err, assert.Sprintf("send error #%d", i))
 				}
-				assert.Nil(t, stream.CloseSend(), "close send error")
+				assert.Nil(t, stream.CloseSend())
 			}()
 			go func() {
 				defer wg.Done()
@@ -291,25 +291,15 @@ func TestServerProtoGRPC(t *testing.T) {
 					if errors.Is(err, io.EOF) {
 						break
 					}
-					assert.Nil(t, err, "receive error")
+					assert.Nil(t, err)
 					got = append(got, msg.Sum)
 				}
-				assert.Nil(t, stream.CloseReceive(), "close receive error")
+				assert.Nil(t, stream.CloseReceive())
 			}()
 			wg.Wait()
-			assert.Equal(t, got, expect, "sums")
-			assert.Equal(
-				t,
-				stream.ResponseHeader().Get(handlerHeader),
-				headerValue,
-				"custom header",
-			)
-			assert.Equal(
-				t,
-				stream.ResponseTrailer().Get(handlerTrailer),
-				trailerValue,
-				"custom header",
-			)
+			assert.Equal(t, got, expect)
+			assert.Equal(t, stream.ResponseHeader().Get(handlerHeader), headerValue)
+			assert.Equal(t, stream.ResponseTrailer().Get(handlerTrailer), trailerValue)
 		})
 	}
 	testErrors := func(t *testing.T, client pingrpc.PingServiceClient) {
@@ -321,32 +311,22 @@ func TestServerProtoGRPC(t *testing.T) {
 			request.Trailer().Set(clientTrailer, trailerValue)
 
 			response, err := client.Fail(context.Background(), request)
-			assert.Nil(t, response, "fail RPC response")
-			assert.NotNil(t, err, "fail RPC error")
+			assert.Nil(t, response)
+			assert.NotNil(t, err)
 			var connectErr *connect.Error
 			ok := errors.As(err, &connectErr)
-			assert.True(t, ok, "conversion to *connect.Error")
-			assert.Equal(t, connectErr.Code(), connect.CodeResourceExhausted, "error code")
-			assert.Equal(t, connectErr.Error(), "ResourceExhausted: "+errorMessage, "error message")
-			assert.Zero(t, connectErr.Details(), "error details")
-			assert.Equal(
-				t,
-				connectErr.Header().Get(handlerHeader),
-				headerValue,
-				"custom header",
-			)
-			assert.Equal(
-				t,
-				connectErr.Trailer().Get(handlerTrailer),
-				trailerValue,
-				"custom trailer",
-			)
+			assert.True(t, ok, assert.Sprintf("conversion to *connect.Error"))
+			assert.Equal(t, connectErr.Code(), connect.CodeResourceExhausted)
+			assert.Equal(t, connectErr.Error(), "ResourceExhausted: "+errorMessage)
+			assert.Zero(t, connectErr.Details())
+			assert.Equal(t, connectErr.Header().Get(handlerHeader), headerValue)
+			assert.Equal(t, connectErr.Trailer().Get(handlerTrailer), trailerValue)
 		})
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) {
 		run := func(t *testing.T, opts ...connect.ClientOption) {
 			client, err := pingrpc.NewPingServiceClient(server.Client(), server.URL, opts...)
-			assert.Nil(t, err, "client construction error")
+			assert.Nil(t, err)
 			testPing(t, client)
 			testSum(t, client)
 			testCountUp(t, client)
@@ -416,7 +396,7 @@ func TestHeaderBasic(t *testing.T) {
 
 	pingServer := &pluggablePingServer{
 		ping: func(ctx context.Context, req *connect.Envelope[pingpb.PingRequest]) (*connect.Envelope[pingpb.PingResponse], error) {
-			assert.Equal(t, req.Header().Get(key), cval, "expected handler to receive headers")
+			assert.Equal(t, req.Header().Get(key), cval)
 			res := connect.NewEnvelope(&pingpb.PingResponse{})
 			res.Header().Set(key, hval)
 			return res, nil
@@ -428,10 +408,10 @@ func TestHeaderBasic(t *testing.T) {
 	defer server.Close()
 
 	client, err := pingrpc.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPC())
-	assert.Nil(t, err, "client construction error")
+	assert.Nil(t, err)
 	req := connect.NewEnvelope(&pingpb.PingRequest{})
 	req.Header().Set(key, cval)
 	res, err := client.Ping(context.Background(), req)
-	assert.Nil(t, err, "error making request")
-	assert.Equal(t, res.Header().Get(key), hval, "expected client to receive headers")
+	assert.Nil(t, err)
+	assert.Equal(t, res.Header().Get(key), hval)
 }
