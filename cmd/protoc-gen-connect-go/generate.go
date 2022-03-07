@@ -204,7 +204,7 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		", opts ...", clientOption, ") (", names.Client, ", error) {")
 	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
 	for _, method := range service.Methods {
-		g.P(unexport(method.GoName), "Client, ", unexport(method.GoName), "Err := ",
+		g.P(unexport(method.GoName), "Client, err := ",
 			connectPackage.Ident("NewClient"),
 			"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]",
 			"(",
@@ -214,8 +214,8 @@ func clientImplementation(g *protogen.GeneratedFile, service *protogen.Service, 
 		g.P("doer,")
 		g.P("opts...,")
 		g.P(")")
-		g.P("if ", unexport(method.GoName), "Err != nil {")
-		g.P("return nil, ", unexport(method.GoName), "Err")
+		g.P("if err != nil {")
+		g.P("return nil, err")
 		g.P("}")
 	}
 	g.P("return &", names.ClientImpl, "{")
