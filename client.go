@@ -195,7 +195,10 @@ func (c *clientConfiguration) validate() *Error {
 		}
 	}
 	if c.Protocol == nil {
-		return errorf(CodeUnknown, "no protocol configured")
+		return errorf(
+			CodeUnknown,
+			"no protocol configured: use either WithGRPC() or WithGRPCWeb()",
+		)
 	}
 	return nil
 }
