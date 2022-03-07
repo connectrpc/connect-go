@@ -259,9 +259,9 @@ type handlerConfiguration struct {
 }
 
 func newHandlerConfiguration(procedure string, options []HandlerOption) *handlerConfiguration {
-	registrationName, procedureName := grpcURLToPackageProcedureName(procedure)
+	parsedURL := parseProtobufURL(procedure)
 	config := handlerConfiguration{
-		Procedure:        procedureName,
+		Procedure:        parsedURL.ProtoPath,
 		CompressionPools: make(map[string]compressionPool),
 		Codecs:           make(map[string]Codec),
 		HandleGRPC:       true,
@@ -274,7 +274,7 @@ func newHandlerConfiguration(procedure string, options []HandlerOption) *handler
 		opt.applyToHandler(&config)
 	}
 	if reg := config.Registrar; reg != nil && !config.DisableRegistration {
-		reg.register(registrationName)
+		reg.register(parsedURL.FullyQualifiedServiceName)
 	}
 	return &config
 }

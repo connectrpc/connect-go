@@ -154,17 +154,3 @@ func discard(r io.Reader) {
 	lr := &io.LimitedReader{R: r, N: 1024 * 1024 * 4}
 	io.Copy(io.Discard, lr)
 }
-
-func grpcURLToPackageProcedureName(path string) (pkg string, procedurePath string) {
-	segments := strings.Split(path, "/")
-	switch len(segments) {
-	case 0:
-		return "", "/"
-	case 1:
-		return "", "/" + segments[0] + "/"
-	default:
-		pkg := segments[len(segments)-2]
-		method := segments[len(segments)-1]
-		return pkg, "/" + pkg + "/" + method
-	}
-}

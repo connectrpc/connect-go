@@ -169,9 +169,9 @@ type clientConfiguration struct {
 }
 
 func newClientConfiguration(url string, options []ClientOption) (*clientConfiguration, *Error) {
-	_, procedureName := grpcURLToPackageProcedureName(url)
+	parsedURL := parseProtobufURL(url)
 	config := clientConfiguration{
-		Procedure:        procedureName,
+		Procedure:        parsedURL.ProtoPath,
 		CompressionPools: make(map[string]compressionPool),
 	}
 	WithProtoBinaryCodec().applyToClient(&config)
