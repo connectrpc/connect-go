@@ -68,10 +68,7 @@ func (c *protoBinaryCodec) Unmarshal(data []byte, message any) error {
 	return proto.Unmarshal(data, protoMessage)
 }
 
-type protoJSONCodec struct {
-	marshalOptions   protojson.MarshalOptions
-	unmarshalOptions protojson.UnmarshalOptions
-}
+type protoJSONCodec struct{}
 
 var _ Codec = (*protoJSONCodec)(nil)
 
@@ -82,7 +79,8 @@ func (c *protoJSONCodec) Marshal(message any) ([]byte, error) {
 	if !ok {
 		return nil, errNotProto(message)
 	}
-	return c.marshalOptions.Marshal(protoMessage)
+	var options protojson.MarshalOptions
+	return options.Marshal(protoMessage)
 }
 
 func (c *protoJSONCodec) Unmarshal(bs []byte, message any) error {
@@ -90,7 +88,8 @@ func (c *protoJSONCodec) Unmarshal(bs []byte, message any) error {
 	if !ok {
 		return errNotProto(message)
 	}
-	return c.unmarshalOptions.Unmarshal(bs, protoMessage)
+	var options protojson.UnmarshalOptions
+	return options.Unmarshal(bs, protoMessage)
 }
 
 // readOnlyCodecs is a read-only interface to a map of named codecs.
