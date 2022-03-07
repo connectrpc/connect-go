@@ -16,6 +16,7 @@ package connect_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -93,8 +94,13 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 				assert.NotZero(
 					t,
 					h.Get(expect),
-					"%s (IsClient %v): header %q missing: %v",
-					assert.Fmt(spec.Procedure, spec.IsClient, expect, h),
+					fmt.Sprintf(
+						"%s (IsClient %v): header %q missing: %v",
+						spec.Procedure,
+						spec.IsClient,
+						expect,
+						h,
+					),
 				)
 			}
 			h.Set(add, "v")
@@ -107,8 +113,13 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 			assert.NotZero(
 				t,
 				h.Get(k),
-				"%s (IsClient %v): checking all headers, %q missing: %v",
-				assert.Fmt(spec.Procedure, spec.IsClient, k, h),
+				fmt.Sprintf(
+					"%s (IsClient %v): checking all headers, %q missing: %v",
+					spec.Procedure,
+					spec.IsClient,
+					k,
+					h,
+				),
 			)
 		}
 	}

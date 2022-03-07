@@ -223,7 +223,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			stream.RequestHeader().Set(clientHeader, headerValue)
 			for i := int64(1); i <= upTo; i++ {
 				err := stream.Send(&pingpb.SumRequest{Number: i})
-				assert.Nil(t, err, "Send %v", assert.Fmt(i))
+				assert.Nil(t, err, fmt.Sprintf("Send %d", i))
 			}
 			res, err := stream.CloseAndReceive()
 			assert.Nil(t, err, "CloseAndReceive error")
@@ -266,7 +266,11 @@ func TestServerProtoGRPC(t *testing.T) {
 				assert.Nil(t, stream.CloseSend(), "close send error on HTTP/1.1")
 				_, err = stream.Receive()
 				assert.NotNil(t, err, "first receive on HTTP/1.1") // should be 505
-				assert.True(t, strings.Contains(err.Error(), "HTTP status 505"), "expected 505, got %v", assert.Fmt(err))
+				assert.True(
+					t,
+					strings.Contains(err.Error(), "HTTP status 505"),
+					fmt.Sprintf("expected 505, got %v", err),
+				)
 				assert.Nil(t, stream.CloseReceive(), "close receive error on HTTP/1.1")
 				return
 			}
@@ -276,7 +280,7 @@ func TestServerProtoGRPC(t *testing.T) {
 				defer wg.Done()
 				for i, n := range send {
 					err := stream.Send(&pingpb.CumSumRequest{Number: n})
-					assert.Nil(t, err, "send error #%d", assert.Fmt(i))
+					assert.Nil(t, err, fmt.Sprintf("send error #%d", i))
 				}
 				assert.Nil(t, stream.CloseSend(), "close send error")
 			}()
