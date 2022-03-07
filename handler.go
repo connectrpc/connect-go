@@ -274,7 +274,9 @@ func newHandlerConfiguration(procedure string, options []HandlerOption) *handler
 		opt.applyToHandler(&config)
 	}
 	if reg := config.Registrar; reg != nil && !config.DisableRegistration {
-		reg.register(parsedURL.FullyQualifiedServiceName)
+		if parsedURL.FullyQualifiedServiceName != "" {
+			reg.register(parsedURL.FullyQualifiedServiceName)
+		}
 	}
 	return &config
 }
