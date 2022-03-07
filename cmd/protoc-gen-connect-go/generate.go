@@ -42,7 +42,7 @@ func generate(gen *protogen.Plugin, file *protogen.File) *protogen.GeneratedFile
 	if len(file.Services) == 0 {
 		return nil
 	}
-	filename := file.GeneratedFilenamePrefix + "_connect.pb.go"
+	filename := file.GeneratedFilenamePrefix + ".connect.go"
 	var path protogen.GoImportPath
 	g := gen.NewGeneratedFile(filename, path)
 	preamble(gen, file, g)
