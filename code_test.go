@@ -32,7 +32,7 @@ func TestCode(t *testing.T) {
 		assert.False(
 			t,
 			strings.Contains(code.String(), "("),
-			"update Code.String() method for new codes!",
+			assert.Sprintf("update Code.String() method for new code %v", code),
 		)
 	}
 }
