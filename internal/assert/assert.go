@@ -30,75 +30,69 @@ import (
 )
 
 // Equal asserts that two values are equal.
-func Equal[T any](t testing.TB, got, want T, message string, opts ...Option) bool {
+func Equal[T any](t testing.TB, got, want T, message string) bool {
 	t.Helper()
-	params := newParams(got, want, message, opts...)
-	if cmp.Equal(got, want, params.cmpOpts...) {
+	if cmpEqual(got, want) {
 		return true
 	}
-	report(t, params, "assert.Equal", true /* showWant */)
+	report(t, got, want, message, "assert.Equal", true /* showWant */)
 	return false
 }
 
 // NotEqual asserts that two values aren't equal.
-func NotEqual[T any](t testing.TB, got, want T, message string, opts ...Option) bool {
+func NotEqual[T any](t testing.TB, got, want T, message string) bool {
 	t.Helper()
-	params := newParams(got, want, message, opts...)
-	if !cmp.Equal(got, want, params.cmpOpts...) {
+	if !cmpEqual(got, want) {
 		return true
 	}
-	report(t, params, "assert.NotEqual", true /* showWant */)
+	report(t, got, want, message, "assert.NotEqual", true /* showWant */)
 	return false
 }
 
 // Nil asserts that the value is nil.
-func Nil(t testing.TB, got any, message string, opts ...Option) bool {
+func Nil(t testing.TB, got any, message string) bool {
 	t.Helper()
 	if isNil(got) {
 		return true
 	}
-	params := newParams(got, nil, message, opts...)
-	report(t, params, "assert.Nil", false /* showWant */)
+	report(t, got, nil, message, "assert.Nil", false /* showWant */)
 	return false
 }
 
 // NotNil asserts that the value isn't nil.
-func NotNil(t testing.TB, got any, message string, opts ...Option) bool {
+func NotNil(t testing.TB, got any, message string) bool {
 	t.Helper()
 	if !isNil(got) {
 		return true
 	}
-	params := newParams(got, nil, message, opts...)
-	report(t, params, "assert.NotNil", false /* showWant */)
+	report(t, got, nil, message, "assert.NotNil", false /* showWant */)
 	return false
 }
 
 // Zero asserts that the value is its type's zero value.
-func Zero[T any](t testing.TB, got T, message string, opts ...Option) bool {
+func Zero[T any](t testing.TB, got T, message string) bool {
 	t.Helper()
 	var want T
-	params := newParams(got, want, message, opts...)
-	if cmp.Equal(got, want, params.cmpOpts...) {
+	if cmpEqual(got, want) {
 		return true
 	}
-	report(t, params, fmt.Sprintf("assert.Zero (type %T)", got), false /* showWant */)
+	report(t, got, want, message, fmt.Sprintf("assert.Zero (type %T)", got), false /* showWant */)
 	return false
 }
 
 // NotZero asserts that the value is non-zero.
-func NotZero[T any](t testing.TB, got T, message string, opts ...Option) bool {
+func NotZero[T any](t testing.TB, got T, message string) bool {
 	t.Helper()
 	var want T
-	params := newParams(got, want, message, opts...)
-	if !cmp.Equal(got, want, params.cmpOpts...) {
+	if !cmpEqual(got, want) {
 		return true
 	}
-	report(t, params, fmt.Sprintf("assert.NotZero (type %T)", got), false /* showWant */)
+	report(t, got, want, message, fmt.Sprintf("assert.NotZero (type %T)", got), false /* showWant */)
 	return false
 }
 
 // Match asserts that the value matches a regexp.
-func Match(t testing.TB, got, want, message string, opts ...Option) bool {
+func Match(t testing.TB, got, want, message string) bool {
 	t.Helper()
 	re, err := regexp.Compile(want)
 	if err != nil {
@@ -107,126 +101,64 @@ func Match(t testing.TB, got, want, message string, opts ...Option) bool {
 	if re.MatchString(got) {
 		return true
 	}
-	params := newParams(got, want, message, opts...)
-	report(t, params, "assert.Match", true /* showWant */)
+	report(t, got, want, message, "assert.Match", true /* showWant */)
 	return false
 }
 
 // ErrorIs asserts that "want" is in "got's" error chain. See the standard
 // library's errors package for details on error chains. On failure, output is
 // identical to Equal.
-func ErrorIs(t testing.TB, got, want error, message string, opts ...Option) bool {
+func ErrorIs(t testing.TB, got, want error, message string) bool {
 	t.Helper()
 	if errors.Is(got, want) {
 		return true
 	}
-	params := newParams(got, want, message, opts...)
-	report(t, params, "assert.ErrorIs", true /* showWant */)
+	report(t, got, want, message, "assert.ErrorIs", true /* showWant */)
 	return false
 }
 
 // False asserts that "got" is false.
-func False(t testing.TB, got bool, message string, opts ...Option) bool {
+func False(t testing.TB, got bool, message string) bool {
 	t.Helper()
 	if !got {
 		return true
 	}
-	params := newParams(got, false, message, opts...)
-	report(t, params, "assert.False", false)
+	report(t, got, false, message, "assert.False", false /* showWant */)
 	return false
 }
 
 // True asserts that "got" is true.
-func True(t testing.TB, got bool, message string, opts ...Option) bool {
+func True(t testing.TB, got bool, message string) bool {
 	t.Helper()
 	if got {
 		return true
 	}
-	params := newParams(got, false, message, opts...)
-	report(t, params, "assert.True", false)
+	report(t, got, true, message, "assert.True", false /* showWant */)
 	return false
 }
 
 // Panics asserts that the function called panics.
-func Panics(t testing.TB, panicker func(), message string, opts ...Option) {
+func Panics(t testing.TB, panicker func(), message string) {
 	t.Helper()
 	defer func() {
 		if r := recover(); r == nil {
-			params := newParams("no panic", "panic", message, opts...)
-			report(t, params, "assert.Panic", false)
+			report(t, r, nil, message, "assert.Panic", false /* showWant */)
 		}
 	}()
 	panicker()
 }
 
-// An Option modifies assertions.
-type Option interface {
-	apply(*params)
-}
-
-// Fmt treats the assertion message as a template, using fmt.Sprintf and the
-// supplied arguments to expand it. For example,
-//   assert.Equal(t, 0, 1, "failed to parse %q", assert.Fmt("foobar"))
-// will print the message
-//   failed to parse "foobar"
-func Fmt(args ...any) Option {
-	return optionFunc(func(p *params) {
-		if len(args) > 0 {
-			p.message = fmt.Sprintf(p.message, args...)
-		}
-	})
-}
-
-// Diff prints a diff between "got" and "want" on failures.
-func Diff() Option {
-	return optionFunc(func(p *params) {
-		p.printDiff = true
-	})
-}
-
-type optionFunc func(*params)
-
-func (f optionFunc) apply(p *params) { f(p) }
-
-type params struct {
-	got       any
-	want      any
-	cmpOpts   []cmp.Option // user-supplied equality configuration
-	message   string       // user-supplied description of failure
-	printDiff bool         // include diff in failure output
-}
-
-func newParams(got, want any, message string, opts ...Option) *params {
-	p := &params{
-		got:     got,
-		want:    want,
-		cmpOpts: []cmp.Option{protocmp.Transform()},
-		message: message,
-	}
-	for _, opt := range opts {
-		opt.apply(p)
-	}
-	if p.got == nil || p.want == nil {
-		// diff panics on nil
-		p.printDiff = false
-	}
-	return p
-}
-
-func report(t testing.TB, params *params, desc string, showWant bool) {
+func report(t testing.TB, got, want any, message, desc string, showWant bool) {
 	t.Helper()
 	w := &bytes.Buffer{}
-	if params.message != "" {
-		w.WriteString(params.message)
+	if message != "" {
+		w.WriteString(message)
 	}
 	w.WriteString("\n")
 	fmt.Fprintf(w, "assertion:\t%s\n", desc)
-	fmt.Fprintf(w, "got:\t%+v\n", params.got)
+	fmt.Fprintf(w, "got:\t%+v\n", got)
 	if showWant {
-		fmt.Fprintf(w, "want:\t%+v\n", params.want)
-	}
-	if params.printDiff {
-		fmt.Fprintf(w, "\ndiff (-want, +got):\n%v", cmp.Diff(params.want, params.got))
+		fmt.Fprintf(w, "want:\t%+v\n", want)
 	}
 	t.Fatal(w.String())
 }
@@ -247,4 +179,8 @@ func isNil(got any) bool {
 	default:
 		return false
 	}
+}
+
+func cmpEqual(got, want any) bool {
+	return cmp.Equal(got, want, protocmp.Transform())
 }

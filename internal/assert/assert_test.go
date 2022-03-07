@@ -22,8 +22,8 @@ import (
 
 func TestAssertions(t *testing.T) {
 	t.Run("equal", func(t *testing.T) {
-		Equal(t, 1, 1, "%v aren't equal", Diff(), Fmt("ints"))
-		NotEqual(t, 1, 2, "")
+		Equal(t, 1, 1, "1 == 1")
+		NotEqual(t, 1, 2, "1 != 2")
 	})
 
 	t.Run("nil", func(t *testing.T) {

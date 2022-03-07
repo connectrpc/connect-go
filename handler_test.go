@@ -16,6 +16,7 @@ package connect_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,7 +61,6 @@ func TestHandlerReadMaxBytes(t *testing.T) {
 	assert.True(
 		t,
 		strings.Contains(err.Error(), expect),
-		"error msg %q contains %q",
-		assert.Fmt(err.Error(), expect),
+		fmt.Sprintf("error msg %q contains %q", err.Error(), expect),
 	)
 }
