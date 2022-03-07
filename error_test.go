@@ -29,19 +29,19 @@ import (
 
 func TestErrorNilUnderlying(t *testing.T) {
 	err := NewError(CodeUnknown, nil)
-	assert.NotNil(t, err, "should be allowed to wrap a nil error")
-	assert.Equal(t, err.Error(), CodeUnknown.String(), "message")
-	assert.Equal(t, err.Code(), CodeUnknown, "code")
-	assert.Zero(t, err.Details(), "details")
+	assert.NotNil(t, err)
+	assert.Equal(t, err.Error(), CodeUnknown.String())
+	assert.Equal(t, err.Code(), CodeUnknown)
+	assert.Zero(t, err.Details())
 	detail, anyErr := anypb.New(&emptypb.Empty{})
-	assert.Nil(t, anyErr, "create proto.Any")
+	assert.Nil(t, anyErr)
 	err.AddDetail(detail)
-	assert.Equal(t, len(err.Details()), 1, "details")
+	assert.Equal(t, len(err.Details()), 1)
 	err.Header().Set("foo", "bar")
-	assert.Equal(t, err.Header().Get("foo"), "bar", "header")
+	assert.Equal(t, err.Header().Get("foo"), "bar")
 	err.Trailer().Set("baz", "quux")
-	assert.Equal(t, err.Trailer().Get("baz"), "quux", "trailer")
-	assert.Equal(t, CodeOf(err), CodeUnknown, "code")
+	assert.Equal(t, err.Trailer().Get("baz"), "quux")
+	assert.Equal(t, CodeOf(err), CodeUnknown)
 }
 
 func TestErrorFormatting(t *testing.T) {
@@ -49,11 +49,10 @@ func TestErrorFormatting(t *testing.T) {
 		t,
 		NewError(CodeUnavailable, errors.New("")).Error(),
 		CodeUnavailable.String(),
-		"no message",
 	)
 	got := NewError(CodeUnavailable, errors.New("foo")).Error()
-	assert.True(t, strings.Contains(got, CodeUnavailable.String()), "error text should include code")
-	assert.True(t, strings.Contains(got, "foo"), "error text should include message")
+	assert.True(t, strings.Contains(got, CodeUnavailable.String()))
+	assert.True(t, strings.Contains(got, "foo"))
 }
 
 func TestErrorCode(t *testing.T) {
@@ -62,8 +61,8 @@ func TestErrorCode(t *testing.T) {
 		NewError(CodeUnavailable, errors.New("foo")),
 	)
 	connectErr, ok := asError(err)
-	assert.True(t, ok, "extract connect error")
-	assert.Equal(t, connectErr.Code(), CodeUnavailable, "extracted code")
+	assert.True(t, ok)
+	assert.Equal(t, connectErr.Code(), CodeUnavailable)
 }
 
 func TestCodeOf(t *testing.T) {
@@ -71,17 +70,16 @@ func TestCodeOf(t *testing.T) {
 		t,
 		CodeOf(NewError(CodeUnavailable, errors.New("foo"))),
 		CodeUnavailable,
-		"explicitly-set code",
 	)
-	assert.Equal(t, CodeOf(errors.New("foo")), CodeUnknown, "fallback code")
+	assert.Equal(t, CodeOf(errors.New("foo")), CodeUnknown)
 }
 
 func TestErrorDetails(t *testing.T) {
 	second := durationpb.New(time.Second)
 	detail, err := anypb.New(second)
-	assert.Nil(t, err, "create anypb.Any")
+	assert.Nil(t, err)
 	connectErr := NewError(CodeUnknown, errors.New("error with details"))
-	assert.Zero(t, connectErr.Details(), "details before adding")
+	assert.Zero(t, connectErr.Details())
 	connectErr.AddDetail(detail)
-	assert.Equal(t, connectErr.Details(), []ErrorDetail{detail}, "details after adding")
+	assert.Equal(t, connectErr.Details(), []ErrorDetail{detail})
 }

@@ -15,7 +15,6 @@
 package connect
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/bufbuild/connect/internal/assert"
@@ -59,6 +58,5 @@ func assertParsedProtobufURL(t testing.TB, inputURL, expectService, expectPath s
 			FullyQualifiedServiceName: expectService,
 			ProtoPath:                 expectPath,
 		},
-		fmt.Sprintf("%q", inputURL),
 	)
 }

@@ -16,7 +16,6 @@ package connect_test
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,23 +43,23 @@ func TestHandlerReadMaxBytes(t *testing.T) {
 		server.URL,
 		connect.WithGRPC(),
 	)
-	assert.Nil(t, err, "client construction error")
+	assert.Nil(t, err)
 
 	padding := "padding                      "
 	req := &pingpb.PingRequest{Number: 42, Text: padding}
 	// Ensure that the probe is actually too big.
 	probeBytes, err := proto.Marshal(req)
-	assert.Nil(t, err, "marshal request")
-	assert.Equal(t, len(probeBytes), readMaxBytes+1, "probe size")
+	assert.Nil(t, err)
+	assert.Equal(t, len(probeBytes), readMaxBytes+1)
 
 	_, err = client.Ping(context.Background(), connect.NewEnvelope(req))
 
-	assert.NotNil(t, err, "ping error")
-	assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument, "error code")
+	assert.NotNil(t, err)
+	assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
 	const expect = "larger than configured max"
 	assert.True(
 		t,
 		strings.Contains(err.Error(), expect),
-		fmt.Sprintf("error msg %q contains %q", err.Error(), expect),
+		assert.Sprintf("error msg %q contains %q", err.Error(), expect),
 	)
 }

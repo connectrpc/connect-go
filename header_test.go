@@ -55,11 +55,11 @@ func TestPercentEncodingQuick(t *testing.T) {
 
 func TestPercentEncoding(t *testing.T) {
 	roundtrip := func(input string) {
-		assert.True(t, utf8.ValidString(input), "input invalid UTF-8")
+		assert.True(t, utf8.ValidString(input), assert.Sprintf("input invalid UTF-8"))
 		encoded := percentEncode(input)
 		t.Logf("%q encoded as %q", input, encoded)
 		decoded := percentDecode(encoded)
-		assert.Equal(t, decoded, input, "roundtrip corrupted string")
+		assert.Equal(t, decoded, input)
 	}
 
 	roundtrip("foo")
@@ -82,5 +82,5 @@ func TestHeaderMerge(t *testing.T) {
 		"Bar": []string{"one"},
 		"Baz": nil,
 	}
-	assert.Equal(t, header, expect, "merge result")
+	assert.Equal(t, header, expect)
 }
