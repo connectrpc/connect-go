@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -46,7 +47,7 @@ const (
 )
 
 var (
-	programName = os.Args[0]
+	programName = filepath.Base(os.Args[0])
 )
 
 func main() {
