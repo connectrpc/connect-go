@@ -25,7 +25,7 @@ import (
 	"github.com/bufbuild/connect/internal/assert"
 	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
 	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
-	reflectionpb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/reflection/v1alpha"
+	reflectionpb "github.com/bufbuild/connect/internal/gen/proto/go/connectext/grpc/reflection/v1alpha"
 )
 
 func TestReflection(t *testing.T) {
