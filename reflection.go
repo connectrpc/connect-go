@@ -14,9 +14,7 @@
 
 package connect
 
-import (
-	"net/http"
-)
+import "net/http"
 
 // NewReflectionHandler uses the information in the supplied Registrar to
 // construct an HTTP handler for gRPC's server reflection API. It returns the

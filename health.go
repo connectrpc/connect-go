@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"net/http"
 
-	healthpb "github.com/bufbuild/connect/internal/gen/proto/go/grpc/health/v1"
+	healthpb "github.com/bufbuild/connect/internal/gen/proto/go/connectext/grpc/health/v1"
 )
 
 // Status describes the health of a service.
