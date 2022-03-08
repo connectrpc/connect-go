@@ -20,8 +20,6 @@ package grpc.status.v1;
 
 import "google/protobuf/any.proto";
 
-option go_package = "github.com/bufbuild/connect/internal/gen/proto/go/grpc/status/v1;statuspb";
-
 // See https://cloud.google.com/apis/design/errors.
 //
 // This struct must remain binary-compatible with
