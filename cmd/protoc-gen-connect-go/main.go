@@ -12,9 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// protoc-gen-connect-go is a plugin for the protocol buffer compiler that
-// generates Go code. To use it, build this program and make it available on
-// your PATH as protoc-gen-connect-go.
+// protoc-gen-connect-go is a plugin for the Protobuf compiler that generates Go code. To use it,
+// build this program and make it available on your PATH as protoc-gen-connect-go.
+//
+// The 'connect-go' suffix becomes part of the arguments for the Protobuf compiler. For example,
+// with protoc, alongside the base Go types provided via the protoc-gen-go plugin, you'll invoke it
+// like this:
+//
+//	 protoc --go_out=go --connect-go_out=connect path/to/file.proto
+//
+// With buf, your buf.gen.yaml will look like this:
+//
+//   version: v1
+//   plugins:
+//     name: go
+//     out: go
+//     name: connect-go
+//     out: connect
+//
+// This generates service definitions for the Protobuf types and services defined by file.proto. As
+// invoked above, the output will be written to:
+//
+//	 go/path/to/file.pb.go
+//	 connect/path/to/file.connect.go
 package main
 
 import (
