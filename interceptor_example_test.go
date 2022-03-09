@@ -20,7 +20,7 @@ import (
 	"os"
 
 	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1rpc"
+	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
 	pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
 )
 
@@ -41,7 +41,7 @@ func ExampleInterceptor() {
 			})
 		},
 	)
-	client, err := pingv1rpc.NewPingServiceClient(
+	client, err := pingv1connect.NewPingServiceClient(
 		examplePingServer.Client(),
 		examplePingServer.URL(),
 		connect.WithGRPC(),
@@ -81,7 +81,7 @@ func ExampleWithInterceptors() {
 			})
 		},
 	)
-	client, err := pingv1rpc.NewPingServiceClient(
+	client, err := pingv1connect.NewPingServiceClient(
 		examplePingServer.Client(),
 		examplePingServer.URL(),
 		connect.WithGRPC(),

@@ -20,17 +20,17 @@ import (
 	"time"
 
 	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1rpc"
+	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
 	pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
 )
 
 // ExamplePingServer implements some trivial business logic. The protobuf
 // definition for this API is in proto/connect/ping/v1/ping.proto.
 type ExamplePingServer struct {
-	pingv1rpc.UnimplementedPingServiceHandler
+	pingv1connect.UnimplementedPingServiceHandler
 }
 
-// Ping implements pingv1rpc.PingServiceHandler.
+// Ping implements pingv1connect.PingServiceHandler.
 func (*ExamplePingServer) Ping(
 	_ context.Context,
 	req *connect.Envelope[pingv1.PingRequest],
@@ -52,7 +52,7 @@ func Example_handler() {
 	// with most Go HTTP routers and middleware (for example, net/http's
 	// StripPrefix).
 	mux := http.NewServeMux()
-	mux.Handle(pingv1rpc.NewPingServiceHandler(
+	mux.Handle(pingv1connect.NewPingServiceHandler(
 		&ExamplePingServer{},                // our business logic
 		connect.WithRegistrar(reg),          // register the ping service's types
 		connect.WithReadMaxBytes(1024*1024), // limit request size
