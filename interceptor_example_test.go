@@ -20,8 +20,8 @@ import (
 	"os"
 
 	"github.com/bufbuild/connect"
-	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
-	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
+	pingrpc "github.com/bufbuild/connect/internal/gen/connect/ping/v1"
+	pingpb "github.com/bufbuild/connect/internal/gen/go/ping/v1"
 )
 
 func ExampleInterceptor() {
@@ -54,7 +54,7 @@ func ExampleInterceptor() {
 	client.Ping(context.Background(), connect.NewEnvelope(&pingpb.PingRequest{Number: 42}))
 
 	// Output:
-	// calling: /connect.ping.v1test.PingService/Ping
+	// calling: /ping.v1.PingService/Ping
 	// request: number:42
 	// response: number:42
 }

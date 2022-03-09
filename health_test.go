@@ -23,13 +23,13 @@ import (
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/internal/assert"
-	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
-	healthpb "github.com/bufbuild/connect/internal/gen/proto/go/connectext/grpc/health/v1"
+	pingrpc "github.com/bufbuild/connect/internal/gen/connect/ping/v1"
+	healthpb "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/health/v1"
 )
 
 func TestHealth(t *testing.T) {
 	const (
-		pingFQN = "connect.ping.v1test.PingService"
+		pingFQN = "ping.v1.PingService"
 		unknown = "foobar"
 	)
 

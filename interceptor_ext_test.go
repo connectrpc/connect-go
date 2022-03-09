@@ -23,8 +23,8 @@ import (
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/internal/assert"
-	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
-	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
+	pingrpc "github.com/bufbuild/connect/internal/gen/connect/ping/v1"
+	pingpb "github.com/bufbuild/connect/internal/gen/go/ping/v1"
 )
 
 func TestClientStreamErrors(t *testing.T) {
@@ -56,7 +56,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 		defer reset()
 		request, err := http.NewRequest(
 			http.MethodPost,
-			server.URL+"/connect.ping.v1test.PingService/Ping",
+			server.URL+"/ping.v1.PingService/Ping",
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err)
@@ -71,7 +71,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 		defer reset()
 		request, err := http.NewRequest(
 			http.MethodPost,
-			server.URL+"/connect.ping.v1test.PingService/CountUp",
+			server.URL+"/ping.v1.PingService/CountUp",
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err)

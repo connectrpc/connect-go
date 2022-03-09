@@ -23,9 +23,9 @@ import (
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/internal/assert"
-	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
-	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
-	reflectionpb "github.com/bufbuild/connect/internal/gen/proto/go/connectext/grpc/reflection/v1alpha"
+	pingrpc "github.com/bufbuild/connect/internal/gen/connect/ping/v1"
+	reflectionpb "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/reflection/v1alpha"
+	pingpb "github.com/bufbuild/connect/internal/gen/go/ping/v1"
 )
 
 func TestReflection(t *testing.T) {
@@ -75,7 +75,7 @@ func TestReflection(t *testing.T) {
 			MessageResponse: &reflectionpb.ServerReflectionResponse_ListServicesResponse{
 				ListServicesResponse: &reflectionpb.ListServiceResponse{
 					Service: []*reflectionpb.ServiceResponse{
-						{Name: "connect.ping.v1test.PingService"},
+						{Name: "ping.v1.PingService"},
 					},
 				},
 			},
@@ -86,7 +86,7 @@ func TestReflection(t *testing.T) {
 		req := &reflectionpb.ServerReflectionRequest{
 			Host: "some-host",
 			MessageRequest: &reflectionpb.ServerReflectionRequest_FileByFilename{
-				FileByFilename: "connect/ping/v1test/ping.proto",
+				FileByFilename: "ping/v1/ping.proto",
 			},
 		}
 		res, err := call(req)
