@@ -21,11 +21,10 @@ package pingv1rpc
 import (
 	context "context"
 	errors "errors"
-	http "net/http"
-	strings "strings"
-
 	connect "github.com/bufbuild/connect"
 	v1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
+	http "net/http"
+	strings "strings"
 )
 
 // This is a compile-time assertion to ensure that this generated file and the connect package are
