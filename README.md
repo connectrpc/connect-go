@@ -30,7 +30,7 @@ see the [docs][].
 
 Curious what all this looks like in practice? From a [protobuf
 schema](internal/proto/connect/ping/v1/ping.proto), we generate [a small RPC
-package](internal/gen/connect/connect/ping/v1/pingv1rpc/ping.connect.go). Using that
+package](internal/gen/connect/connect/ping/v1/pingv1connect/ping.connect.go). Using that
 package, we can build a server:
 
 ```go
@@ -41,12 +41,12 @@ import (
   "net/http"
 
   "github.com/bufbuild/connect"
-  "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1rpc"
+  "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
   pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
 )
 
 type PingServer struct {
-  pingv1rpc.UnimplementedPingServiceHandler // returns errors from all methods
+  pingv1connect.UnimplementedPingServiceHandler // returns errors from all methods
 }
 
 func (ps *PingServer) Ping(
@@ -85,12 +85,12 @@ import (
   "net/http"
 
   "github.com/bufbuild/connect"
-  "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1rpc"
+  "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
   pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
 )
 
 func main() {
-  client, err := pingv1rpc.NewPingServiceClient(
+  client, err := pingv1connect.NewPingServiceClient(
     http.DefaultClient,
     "https://localhost:8081/",
   )

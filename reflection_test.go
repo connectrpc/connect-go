@@ -23,7 +23,7 @@ import (
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/internal/assert"
-	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1rpc"
+	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
 	pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
 	reflectionv1alpha1 "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/reflection/v1alpha"
 )
@@ -31,8 +31,8 @@ import (
 func TestReflection(t *testing.T) {
 	reg := connect.NewRegistrar()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1rpc.NewPingServiceHandler(
-		pingv1rpc.UnimplementedPingServiceHandler{},
+	mux.Handle(pingv1connect.NewPingServiceHandler(
+		pingv1connect.UnimplementedPingServiceHandler{},
 		connect.WithRegistrar(reg),
 	))
 	mux.Handle(connect.NewReflectionHandler(reg))
