@@ -13,7 +13,9 @@ negotiation. It also generates an idiomatic, type-safe client.
 Connect is wire-compatible with the [gRPC][grpc] protocol, including streaming.
 Connect servers interoperate seamlessly with generated clients in [more than a
 dozen languages][grpc-implementations], command-line tools like [grpcurl][],
-and proxies like [Envoy][envoy] and [gRPC-Gateway][grpc-gateway].
+and proxies like [Envoy][envoy] and [gRPC-Gateway][grpc-gateway]. They also
+support gRPC-Web natively, so they can serve browser traffic without a
+translating proxy. Connect clients work with any gRPC or gRPC-Web server.
 
 Under the hood, connect is just [protocol buffers][protobuf] and the standard
 library: no custom HTTP implementation, no new name resolution or load
@@ -26,7 +28,10 @@ see the [docs][].
 
 ## A Small Example
 
-Curious what all this looks like in practice? Here's a small h2c server:
+Curious what all this looks like in practice? From a [protobuf
+schema](internal/proto/connect/ping/v1/ping.proto), we generate [a small RPC
+package](internal/gen/connect/connect/ping/v1/pingv1rpc/ping.connect.go). Using that
+package, we can build a server:
 
 ```go
 package main
@@ -36,22 +41,22 @@ import (
   "net/http"
 
   "github.com/bufbuild/connect"
-  pingpb "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
-  pingrpc "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test"
+  "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1rpc"
+  pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
 )
 
 type PingServer struct {
-  pingrpc.UnimplementedPingServiceHandler // returns errors from all methods
+  pingv1rpc.UnimplementedPingServiceHandler // returns errors from all methods
 }
 
 func (ps *PingServer) Ping(
   ctx context.Context,
-  req *connect.Envelope[pingpb.PingRequest]) (*connect.Envelope[pingpb.PingResponse], error) {
+  req *connect.Envelope[pingv1.PingRequest]) (*connect.Envelope[pingv1.PingResponse], error) {
   // connect.Envelope gives you direct access to headers and trailers.
   // No context-based nonsense!
   log.Println(req.Header().Get("Some-Header"))
-  res := connect.NewEnvelope(&pingpb.PingResponse{
-    // req.Msg is a strongly-typed *pingpb.PingRequest, so
+  res := connect.NewEnvelope(&pingv1.PingResponse{
+    // req.Msg is a strongly-typed *pingv1.PingRequest, so
     // we can access its fields without type assertions.
     Number: req.Msg.Number,
   })
@@ -64,15 +69,47 @@ func main() {
   mux := http.NewServeMux()
   // The generated constructors return a path and a plain net/http
   // handler.
-  mux.Handle(pingpb.NewPingServiceHandler(&PingServer{}))
-  http.ListenAndServe(
-    ":8081",
-    h2c.NewHandler(mux, &http2.Server{}),
-  )
+  mux.Handle(pingv1.NewPingServiceHandler(&PingServer{}))
+  http.ListenAndServeTLS(":8081", "server.crt", "server.key", mux)
 }
 ```
 
-With that server running, you can make requests with any gRPC client.
+With that server running, you can make requests with any gRPC client. Using
+connect,
+
+```go
+package main
+
+import (
+  "log"
+  "net/http"
+
+  "github.com/bufbuild/connect"
+  "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1rpc"
+  pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
+)
+
+func main() {
+  client, err := pingv1rpc.NewPingServiceClient(
+    http.DefaultClient,
+    "https://localhost:8081/",
+  )
+  if err != nil {
+    log.Fatalln(err)
+  }
+  req := connect.NewEnvelope(&pingv1.PingRequest{
+    Number: 42,
+  })
+  req.Header().Set("Some-Header", "hello from connect")
+  res, err := client.Ping(context.Background(), req)
+  if err != nil {
+    log.Fatalln(err)
+  }
+  log.Println(res.Msg)
+  log.Println(res.Header().Get("Some-Other-Header"))
+  log.Println(res.Trailer().Get("Some-Trailer"))
+}
+```
 
 You can find production-ready examples of [servers][prod-server] and
 [clients][prod-client] in the API documentation.
