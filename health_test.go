@@ -23,8 +23,8 @@ import (
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/internal/assert"
-	pingrpc "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test"
-	healthpb "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/health/v1"
+	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test/pingv1testrpc"
+	healthv1 "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/health/v1"
 )
 
 func TestHealth(t *testing.T) {
@@ -35,8 +35,8 @@ func TestHealth(t *testing.T) {
 
 	reg := connect.NewRegistrar()
 	mux := http.NewServeMux()
-	mux.Handle(pingrpc.NewPingServiceHandler(
-		pingrpc.UnimplementedPingServiceHandler{},
+	mux.Handle(pingv1testrpc.NewPingServiceHandler(
+		pingv1testrpc.UnimplementedPingServiceHandler{},
 		connect.WithRegistrar(reg),
 	))
 	mux.Handle(connect.NewHealthHandler(connect.NewHealthChecker(reg)))
@@ -44,7 +44,7 @@ func TestHealth(t *testing.T) {
 	server.EnableHTTP2 = true
 	server.StartTLS()
 	defer server.Close()
-	client, err := connect.NewClient[healthpb.HealthCheckRequest, healthpb.HealthCheckResponse](
+	client, err := connect.NewClient[healthv1.HealthCheckRequest, healthv1.HealthCheckResponse](
 		server.Client(),
 		server.URL+"/grpc.health.v1.Health/Check",
 		connect.WithGRPC(),
@@ -54,7 +54,7 @@ func TestHealth(t *testing.T) {
 	t.Run("process", func(t *testing.T) {
 		res, err := client.CallUnary(
 			context.Background(),
-			connect.NewEnvelope(&healthpb.HealthCheckRequest{}),
+			connect.NewEnvelope(&healthv1.HealthCheckRequest{}),
 		)
 		assert.Nil(t, err)
 		assert.Equal(t, res.Msg.Status, connect.HealthStatusServing)
@@ -62,7 +62,7 @@ func TestHealth(t *testing.T) {
 	t.Run("known", func(t *testing.T) {
 		res, err := client.CallUnary(
 			context.Background(),
-			connect.NewEnvelope(&healthpb.HealthCheckRequest{Service: pingFQN}),
+			connect.NewEnvelope(&healthv1.HealthCheckRequest{Service: pingFQN}),
 		)
 		assert.Nil(t, err)
 		assert.Equal(t, res.Msg.Status, connect.HealthStatusServing)
@@ -70,7 +70,7 @@ func TestHealth(t *testing.T) {
 	t.Run("unknown", func(t *testing.T) {
 		_, err := client.CallUnary(
 			context.Background(),
-			connect.NewEnvelope(&healthpb.HealthCheckRequest{Service: unknown}),
+			connect.NewEnvelope(&healthv1.HealthCheckRequest{Service: unknown}),
 		)
 		assert.NotNil(t, err)
 		var connectErr *connect.Error
@@ -79,7 +79,7 @@ func TestHealth(t *testing.T) {
 		assert.Equal(t, connectErr.Code(), connect.CodeNotFound)
 	})
 	t.Run("watch", func(t *testing.T) {
-		client, err := connect.NewClient[healthpb.HealthCheckRequest, healthpb.HealthCheckResponse](
+		client, err := connect.NewClient[healthv1.HealthCheckRequest, healthv1.HealthCheckResponse](
 			server.Client(),
 			server.URL+"/grpc.health.v1.Health/Watch",
 			connect.WithGRPC(),
@@ -87,7 +87,7 @@ func TestHealth(t *testing.T) {
 		assert.Nil(t, err)
 		stream, err := client.CallServerStream(
 			context.Background(),
-			connect.NewEnvelope(&healthpb.HealthCheckRequest{Service: pingFQN}),
+			connect.NewEnvelope(&healthv1.HealthCheckRequest{Service: pingFQN}),
 		)
 		assert.Nil(t, err)
 		defer stream.Close()

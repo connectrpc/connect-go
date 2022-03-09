@@ -42,6 +42,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -62,6 +63,7 @@ const (
 	protoPackage   = protogen.GoImportPath("google.golang.org/protobuf/proto")
 
 	generatedFilenameExtension = ".connect.go"
+	generatedPackageSuffix     = "rpc"
 
 	commentWidth = 97 // leave room for "// "
 )
@@ -95,9 +97,22 @@ func generate(plugin *protogen.Plugin, file *protogen.File) {
 	if len(file.Services) == 0 {
 		return
 	}
-	// TODO: why is it OK for this to be empty?
-	var path protogen.GoImportPath
-	g := plugin.NewGeneratedFile(file.GeneratedFilenamePrefix+generatedFilenameExtension, path)
+	file.GoPackageName += generatedPackageSuffix
+
+	dir := filepath.Dir(string(file.GeneratedFilenamePrefix))
+	base := filepath.Base(string(file.GeneratedFilenamePrefix))
+	file.GeneratedFilenamePrefix = filepath.Join(
+		dir,
+		string(file.GoPackageName),
+		base,
+	)
+	g := plugin.NewGeneratedFile(
+		file.GeneratedFilenamePrefix+generatedFilenameExtension,
+		protogen.GoImportPath(path.Join(
+			string(file.GoImportPath),
+			string(file.GoPackageName),
+		)),
+	)
 	generatePreamble(g, file)
 	for _, service := range file.Services {
 		generateService(g, file, service)

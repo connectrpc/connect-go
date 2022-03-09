@@ -16,7 +16,7 @@
 //
 // Source: connectext/grpc/reflection/v1alpha/reflection.proto
 
-package reflectionv1alpha1
+package reflectionv1alpha1rpc
 
 import (
 	context "context"

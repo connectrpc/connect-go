@@ -16,7 +16,7 @@
 //
 // Source: connect/ping/v1test/ping.proto
 
-package pingv1test
+package pingv1testrpc
 
 import (
 	context "context"

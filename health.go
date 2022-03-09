@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"net/http"
 
-	healthpb "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/health/v1"
+	healthv1 "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/health/v1"
 )
 
 // Status describes the health of a service.
@@ -30,20 +30,20 @@ import (
 //
 // For details, see the protobuf schema:
 // https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto.
-type HealthStatus = healthpb.HealthCheckResponse_ServingStatus
+type HealthStatus = healthv1.HealthCheckResponse_ServingStatus
 
 const (
 	// HealthStatusUnspecified indicates that the service's health state is
 	// indeterminate.
-	HealthStatusUnspecified HealthStatus = healthpb.HealthCheckResponse_SERVING_STATUS_UNSPECIFIED
+	HealthStatusUnspecified HealthStatus = healthv1.HealthCheckResponse_SERVING_STATUS_UNSPECIFIED
 
 	// HealthStatusServing indicates that the service is ready to accept
 	// requests.
-	HealthStatusServing HealthStatus = healthpb.HealthCheckResponse_SERVING_STATUS_UNSPECIFIED
+	HealthStatusServing HealthStatus = healthv1.HealthCheckResponse_SERVING_STATUS_UNSPECIFIED
 
 	// HealthStatusNotServing indicates that the process is healthy but the
 	// service is not accepting requests.
-	HealthStatusNotServing HealthStatus = healthpb.HealthCheckResponse_SERVING_STATUS_UNSPECIFIED
+	HealthStatusNotServing HealthStatus = healthv1.HealthCheckResponse_SERVING_STATUS_UNSPECIFIED
 )
 
 // NewHealthChecker returns a health-checking function that always returns
@@ -93,12 +93,12 @@ func NewHealthHandler(
 	mux := http.NewServeMux()
 	check := NewUnaryHandler(
 		serviceName+"Check",
-		func(ctx context.Context, req *Envelope[healthpb.HealthCheckRequest]) (*Envelope[healthpb.HealthCheckResponse], error) {
+		func(ctx context.Context, req *Envelope[healthv1.HealthCheckRequest]) (*Envelope[healthv1.HealthCheckResponse], error) {
 			status, err := checker(ctx, req.Msg.Service)
 			if err != nil {
 				return nil, err
 			}
-			return NewEnvelope(&healthpb.HealthCheckResponse{Status: status}), nil
+			return NewEnvelope(&healthv1.HealthCheckResponse{Status: status}), nil
 		},
 		WithHandlerOptions(options...),
 		// To avoid runtime panics from protobuf registry conflicts with
@@ -113,8 +113,8 @@ func NewHealthHandler(
 		serviceName+"Watch",
 		func(
 			_ context.Context,
-			_ *Envelope[healthpb.HealthCheckRequest],
-			_ *ServerStream[healthpb.HealthCheckResponse],
+			_ *Envelope[healthv1.HealthCheckRequest],
+			_ *ServerStream[healthv1.HealthCheckResponse],
 		) error {
 			return NewError(
 				CodeUnimplemented,
