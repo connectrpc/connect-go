@@ -63,7 +63,7 @@ const (
 	protoPackage   = protogen.GoImportPath("google.golang.org/protobuf/proto")
 
 	generatedFilenameExtension = ".connect.go"
-	generatedPackageSuffix     = "rpc"
+	generatedPackageSuffix     = "connect"
 
 	commentWidth = 97 // leave room for "// "
 )
