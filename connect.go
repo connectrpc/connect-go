@@ -151,9 +151,9 @@ type AnyEnvelope interface {
 	internalOnly()
 }
 
-// Doer is the transport-level interface connect expects HTTP clients to
-// implement. The standard library's http.Client implements Doer.
-type Doer interface {
+// HTTPClient is the transport-level interface connect expects HTTP clients to
+// implement. The standard library's http.Client implements HTTPClient.
+type HTTPClient interface {
 	Do(*http.Request) (*http.Response, error)
 }
 

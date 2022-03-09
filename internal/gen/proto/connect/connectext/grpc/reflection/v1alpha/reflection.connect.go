@@ -48,10 +48,10 @@ type ServerReflectionClient interface {
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g., https://api.acme.com or
 // https://acme.com/grpc).
-func NewServerReflectionClient(doer connect.Doer, baseURL string, opts ...connect.ClientOption) (ServerReflectionClient, error) {
+func NewServerReflectionClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) (ServerReflectionClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	serverReflectionInfoClient, err := connect.NewClient[v1alpha.ServerReflectionRequest, v1alpha.ServerReflectionResponse](
-		doer,
+		httpClient,
 		baseURL+"/internal.reflection.v1alpha1.ServerReflection/ServerReflectionInfo",
 		opts...,
 	)
