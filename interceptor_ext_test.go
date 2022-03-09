@@ -23,12 +23,12 @@ import (
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/internal/assert"
-	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test/pingv1testrpc"
-	pingv1test "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
+	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1rpc"
+	pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
 )
 
 func TestClientStreamErrors(t *testing.T) {
-	_, err := pingv1testrpc.NewPingServiceClient(http.DefaultClient, "INVALID_URL", connect.WithGRPC())
+	_, err := pingv1rpc.NewPingServiceClient(http.DefaultClient, "INVALID_URL", connect.WithGRPC())
 	assert.NotNil(t, err)
 	// We don't even get to calling methods on the client, so there's no question
 	// of interceptors running. Once we're calling methods on the client, all
@@ -45,7 +45,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 		called = false
 	}
 	mux := http.NewServeMux()
-	mux.Handle(pingv1testrpc.NewPingServiceHandler(
+	mux.Handle(pingv1rpc.NewPingServiceHandler(
 		pingServer{},
 		connect.WithInterceptors(&assertCalledInterceptor{&called}),
 	))
@@ -56,7 +56,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 		defer reset()
 		request, err := http.NewRequest(
 			http.MethodPost,
-			server.URL+"/connect.ping.v1test.PingService/Ping",
+			server.URL+"/connect.ping.v1.PingService/Ping",
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err)
@@ -71,7 +71,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 		defer reset()
 		request, err := http.NewRequest(
 			http.MethodPost,
-			server.URL+"/connect.ping.v1test.PingService/CountUp",
+			server.URL+"/connect.ping.v1.PingService/CountUp",
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err)
@@ -169,7 +169,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.Handle(
-		pingv1testrpc.NewPingServiceHandler(
+		pingv1rpc.NewPingServiceHandler(
 			pingServer{},
 			handlerOnion,
 		),
@@ -177,7 +177,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	client, err := pingv1testrpc.NewPingServiceClient(
+	client, err := pingv1rpc.NewPingServiceClient(
 		server.Client(),
 		server.URL,
 		connect.WithGRPC(),
@@ -185,10 +185,10 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	)
 	assert.Nil(t, err)
 
-	_, err = client.Ping(context.Background(), connect.NewEnvelope(&pingv1test.PingRequest{Number: 10}))
+	_, err = client.Ping(context.Background(), connect.NewEnvelope(&pingv1.PingRequest{Number: 10}))
 	assert.Nil(t, err)
 
-	_, err = client.CountUp(context.Background(), connect.NewEnvelope(&pingv1test.CountUpRequest{Number: 10}))
+	_, err = client.CountUp(context.Background(), connect.NewEnvelope(&pingv1.CountUpRequest{Number: 10}))
 	assert.Nil(t, err)
 }
 

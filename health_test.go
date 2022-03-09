@@ -23,20 +23,20 @@ import (
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/internal/assert"
-	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test/pingv1testrpc"
+	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1rpc"
 	healthv1 "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/health/v1"
 )
 
 func TestHealth(t *testing.T) {
 	const (
-		pingFQN = "connect.ping.v1test.PingService"
+		pingFQN = "connect.ping.v1.PingService"
 		unknown = "foobar"
 	)
 
 	reg := connect.NewRegistrar()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1testrpc.NewPingServiceHandler(
-		pingv1testrpc.UnimplementedPingServiceHandler{},
+	mux.Handle(pingv1rpc.NewPingServiceHandler(
+		pingv1rpc.UnimplementedPingServiceHandler{},
 		connect.WithRegistrar(reg),
 	))
 	mux.Handle(connect.NewHealthHandler(connect.NewHealthChecker(reg)))

@@ -22,7 +22,7 @@ import (
 	"net/http/httptest"
 	"sync"
 
-	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test/pingv1testrpc"
+	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1rpc"
 )
 
 var examplePingServer *inMemoryServer
@@ -139,6 +139,6 @@ func init() {
 	//
 	// The least-awful option is to set up the server in init().
 	mux := http.NewServeMux()
-	mux.Handle(pingv1testrpc.NewPingServiceHandler(pingServer{}))
+	mux.Handle(pingv1rpc.NewPingServiceHandler(pingServer{}))
 	examplePingServer = newInMemoryServer(mux)
 }

@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test/pingv1testrpc"
-	pingv1test "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
+	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1rpc"
+	pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
 )
 
 func Example_client() {
@@ -59,7 +59,7 @@ func Example_client() {
 	// client that communicate over in-memory pipes. Don't do this in production!
 	httpClient = examplePingServer.Client()
 
-	client, err := pingv1testrpc.NewPingServiceClient(
+	client, err := pingv1rpc.NewPingServiceClient(
 		httpClient,
 		examplePingServer.URL(),
 		connect.WithGRPC(),
@@ -70,7 +70,7 @@ func Example_client() {
 	}
 	res, err := client.Ping(
 		context.Background(),
-		connect.NewEnvelope(&pingv1test.PingRequest{Number: 42}),
+		connect.NewEnvelope(&pingv1.PingRequest{Number: 42}),
 	)
 	if err != nil {
 		logger.Println("error:", err)
