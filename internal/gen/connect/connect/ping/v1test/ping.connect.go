@@ -22,7 +22,7 @@ import (
 	context "context"
 	errors "errors"
 	connect "github.com/bufbuild/connect"
-	v1test "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
+	v1test "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
 	http "net/http"
 	strings "strings"
 )

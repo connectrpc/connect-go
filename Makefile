@@ -31,7 +31,7 @@ bufgeneratedeps:: $(BUF) $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC) installprotoc-ge
 
 .PHONY: bufgeneratecleango
 bufgeneratecleango:
-	rm -rf internal/gen/proto
+	rm -rf internal/gen
 
 bufgenerateclean:: bufgeneratecleango
 
