@@ -170,7 +170,7 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 		g.P("//")
 		deprecated(g)
 	}
-	g.P("func ", names.ClientConstructor, " (doer ", connectPackage.Ident("Doer"),
+	g.P("func ", names.ClientConstructor, " (httpClient ", connectPackage.Ident("HTTPClient"),
 		", baseURL string, opts ...", clientOption, ") (", names.Client, ", error) {")
 	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
 	for _, method := range service.Methods {
@@ -179,7 +179,7 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 			"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]",
 			"(",
 		)
-		g.P("doer,")
+		g.P("httpClient,")
 		g.P(`baseURL + "`, procedureName(method), `",`)
 		g.P("opts...,")
 		g.P(")")

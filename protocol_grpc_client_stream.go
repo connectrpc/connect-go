@@ -65,7 +65,7 @@ func (cr *clientReceiver) Trailer() http.Header { return cr.stream.ResponseTrail
 // many more comments than usual.
 type duplexClientStream struct {
 	ctx          context.Context
-	doer         Doer
+	httpClient   HTTPClient
 	url          string
 	spec         Specification
 	maxReadBytes int64
@@ -269,7 +269,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	close(prepared)
 	// Once we send a message to the server, they send a message back and
 	// establish the receive side of the stream.
-	res, err := cs.doer.Do(req)
+	res, err := cs.httpClient.Do(req)
 	if err != nil {
 		cs.setResponseError(err)
 		return

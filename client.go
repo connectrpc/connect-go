@@ -36,7 +36,7 @@ type Client[Req, Res any] struct {
 
 // NewClient constructs a new Client.
 func NewClient[Req, Res any](
-	doer Doer,
+	httpClient HTTPClient,
 	url string,
 	options ...ClientOption,
 ) (*Client[Req, Res], error) {
@@ -51,7 +51,7 @@ func NewClient[Req, Res any](
 		Protobuf:         config.protobuf(),
 		MaxResponseBytes: config.MaxResponseBytes,
 		CompressMinBytes: config.CompressMinBytes,
-		Doer:             doer,
+		HTTPClient:       httpClient,
 		URL:              url,
 	})
 	if protocolErr != nil {

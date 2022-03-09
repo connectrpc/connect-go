@@ -93,7 +93,7 @@ type protocolClientParams struct {
 	Codec            Codec
 	MaxResponseBytes int64
 	CompressMinBytes int
-	Doer             Doer
+	HTTPClient       HTTPClient
 	URL              string
 
 	// The gRPC family of protocols always needs access to a protobuf codec to

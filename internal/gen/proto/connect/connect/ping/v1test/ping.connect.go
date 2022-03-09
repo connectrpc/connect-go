@@ -55,10 +55,10 @@ type PingServiceClient interface {
 //
 // The URL supplied here should be the base URL for the gRPC server (e.g., https://api.acme.com or
 // https://acme.com/grpc).
-func NewPingServiceClient(doer connect.Doer, baseURL string, opts ...connect.ClientOption) (PingServiceClient, error) {
+func NewPingServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) (PingServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	pingClient, err := connect.NewClient[v1test.PingRequest, v1test.PingResponse](
-		doer,
+		httpClient,
 		baseURL+"/connect.ping.v1test.PingService/Ping",
 		opts...,
 	)
@@ -66,7 +66,7 @@ func NewPingServiceClient(doer connect.Doer, baseURL string, opts ...connect.Cli
 		return nil, err
 	}
 	failClient, err := connect.NewClient[v1test.FailRequest, v1test.FailResponse](
-		doer,
+		httpClient,
 		baseURL+"/connect.ping.v1test.PingService/Fail",
 		opts...,
 	)
@@ -74,7 +74,7 @@ func NewPingServiceClient(doer connect.Doer, baseURL string, opts ...connect.Cli
 		return nil, err
 	}
 	sumClient, err := connect.NewClient[v1test.SumRequest, v1test.SumResponse](
-		doer,
+		httpClient,
 		baseURL+"/connect.ping.v1test.PingService/Sum",
 		opts...,
 	)
@@ -82,7 +82,7 @@ func NewPingServiceClient(doer connect.Doer, baseURL string, opts ...connect.Cli
 		return nil, err
 	}
 	countUpClient, err := connect.NewClient[v1test.CountUpRequest, v1test.CountUpResponse](
-		doer,
+		httpClient,
 		baseURL+"/connect.ping.v1test.PingService/CountUp",
 		opts...,
 	)
@@ -90,7 +90,7 @@ func NewPingServiceClient(doer connect.Doer, baseURL string, opts ...connect.Cli
 		return nil, err
 	}
 	cumSumClient, err := connect.NewClient[v1test.CumSumRequest, v1test.CumSumResponse](
-		doer,
+		httpClient,
 		baseURL+"/connect.ping.v1test.PingService/CumSum",
 		opts...,
 	)
