@@ -23,22 +23,22 @@ import (
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/internal/assert"
-	pingrpc "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test"
-	pingpb "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
+	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test/pingv1testrpc"
+	pingv1test "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
 	"google.golang.org/protobuf/proto"
 )
 
 func TestHandlerReadMaxBytes(t *testing.T) {
 	const readMaxBytes = 32
 	mux := http.NewServeMux()
-	mux.Handle(pingrpc.NewPingServiceHandler(
+	mux.Handle(pingv1testrpc.NewPingServiceHandler(
 		&ExamplePingServer{},
 		connect.WithReadMaxBytes(readMaxBytes),
 	))
 
 	server := httptest.NewServer(mux)
 	defer server.Close()
-	client, err := pingrpc.NewPingServiceClient(
+	client, err := pingv1testrpc.NewPingServiceClient(
 		server.Client(),
 		server.URL,
 		connect.WithGRPC(),
@@ -46,7 +46,7 @@ func TestHandlerReadMaxBytes(t *testing.T) {
 	assert.Nil(t, err)
 
 	padding := "padding                      "
-	req := &pingpb.PingRequest{Number: 42, Text: padding}
+	req := &pingv1test.PingRequest{Number: 42, Text: padding}
 	// Ensure that the probe is actually too big.
 	probeBytes, err := proto.Marshal(req)
 	assert.Nil(t, err)

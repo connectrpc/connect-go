@@ -22,7 +22,7 @@ import (
 	"sort"
 	"sync"
 
-	rpb "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/reflection/v1alpha"
+	reflectionv1alpha1 "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/reflection/v1alpha"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -76,7 +76,10 @@ func (r *Registrar) register(name string) {
 // serverReflectionInfo implements the gRPC server reflection API.
 func (r *Registrar) serverReflectionInfo(
 	ctx context.Context,
-	stream *BidiStream[rpb.ServerReflectionRequest, rpb.ServerReflectionResponse],
+	stream *BidiStream[
+		reflectionv1alpha1.ServerReflectionRequest,
+		reflectionv1alpha1.ServerReflectionResponse,
+	],
 ) error {
 	fileDescriptorsSent := &fileDescriptorNameSet{}
 	for {
@@ -93,21 +96,21 @@ func (r *Registrar) serverReflectionInfo(
 		//
 		// Note that the server reflection API sends file descriptors as uncompressed
 		// proto-serialized bytes.
-		response := &rpb.ServerReflectionResponse{
+		response := &reflectionv1alpha1.ServerReflectionResponse{
 			ValidHost:       request.Host,
 			OriginalRequest: request,
 		}
 		switch messageRequest := request.MessageRequest.(type) {
-		case *rpb.ServerReflectionRequest_FileByFilename:
+		case *reflectionv1alpha1.ServerReflectionRequest_FileByFilename:
 			data, err := getFileByFilename(messageRequest.FileByFilename, fileDescriptorsSent)
 			if err != nil {
 				response.MessageResponse = newNotFoundResponse(err)
 			} else {
-				response.MessageResponse = &rpb.ServerReflectionResponse_FileDescriptorResponse{
-					FileDescriptorResponse: &rpb.FileDescriptorResponse{FileDescriptorProto: data},
+				response.MessageResponse = &reflectionv1alpha1.ServerReflectionResponse_FileDescriptorResponse{
+					FileDescriptorResponse: &reflectionv1alpha1.FileDescriptorResponse{FileDescriptorProto: data},
 				}
 			}
-		case *rpb.ServerReflectionRequest_FileContainingSymbol:
+		case *reflectionv1alpha1.ServerReflectionRequest_FileContainingSymbol:
 			data, err := getFileContainingSymbol(
 				messageRequest.FileContainingSymbol,
 				fileDescriptorsSent,
@@ -115,41 +118,41 @@ func (r *Registrar) serverReflectionInfo(
 			if err != nil {
 				response.MessageResponse = newNotFoundResponse(err)
 			} else {
-				response.MessageResponse = &rpb.ServerReflectionResponse_FileDescriptorResponse{
-					FileDescriptorResponse: &rpb.FileDescriptorResponse{FileDescriptorProto: data},
+				response.MessageResponse = &reflectionv1alpha1.ServerReflectionResponse_FileDescriptorResponse{
+					FileDescriptorResponse: &reflectionv1alpha1.FileDescriptorResponse{FileDescriptorProto: data},
 				}
 			}
-		case *rpb.ServerReflectionRequest_FileContainingExtension:
+		case *reflectionv1alpha1.ServerReflectionRequest_FileContainingExtension:
 			msgFQN := messageRequest.FileContainingExtension.ContainingType
 			extNumber := messageRequest.FileContainingExtension.ExtensionNumber
 			data, err := getFileContainingExtension(msgFQN, extNumber, fileDescriptorsSent)
 			if err != nil {
 				response.MessageResponse = newNotFoundResponse(err)
 			} else {
-				response.MessageResponse = &rpb.ServerReflectionResponse_FileDescriptorResponse{
-					FileDescriptorResponse: &rpb.FileDescriptorResponse{FileDescriptorProto: data},
+				response.MessageResponse = &reflectionv1alpha1.ServerReflectionResponse_FileDescriptorResponse{
+					FileDescriptorResponse: &reflectionv1alpha1.FileDescriptorResponse{FileDescriptorProto: data},
 				}
 			}
-		case *rpb.ServerReflectionRequest_AllExtensionNumbersOfType:
+		case *reflectionv1alpha1.ServerReflectionRequest_AllExtensionNumbersOfType:
 			nums, err := getAllExtensionNumbersOfType(messageRequest.AllExtensionNumbersOfType)
 			if err != nil {
 				response.MessageResponse = newNotFoundResponse(err)
 			} else {
-				response.MessageResponse = &rpb.ServerReflectionResponse_AllExtensionNumbersResponse{
-					AllExtensionNumbersResponse: &rpb.ExtensionNumberResponse{
+				response.MessageResponse = &reflectionv1alpha1.ServerReflectionResponse_AllExtensionNumbersResponse{
+					AllExtensionNumbersResponse: &reflectionv1alpha1.ExtensionNumberResponse{
 						BaseTypeName:    messageRequest.AllExtensionNumbersOfType,
 						ExtensionNumber: nums,
 					},
 				}
 			}
-		case *rpb.ServerReflectionRequest_ListServices:
+		case *reflectionv1alpha1.ServerReflectionRequest_ListServices:
 			services := r.serviceNames()
-			serviceResponses := make([]*rpb.ServiceResponse, len(services))
+			serviceResponses := make([]*reflectionv1alpha1.ServiceResponse, len(services))
 			for i, name := range services {
-				serviceResponses[i] = &rpb.ServiceResponse{Name: name}
+				serviceResponses[i] = &reflectionv1alpha1.ServiceResponse{Name: name}
 			}
-			response.MessageResponse = &rpb.ServerReflectionResponse_ListServicesResponse{
-				ListServicesResponse: &rpb.ListServiceResponse{Service: serviceResponses},
+			response.MessageResponse = &reflectionv1alpha1.ServerReflectionResponse_ListServicesResponse{
+				ListServicesResponse: &reflectionv1alpha1.ListServiceResponse{Service: serviceResponses},
 			}
 		default:
 			return NewError(CodeInvalidArgument, fmt.Errorf(
@@ -256,9 +259,9 @@ func (s *fileDescriptorNameSet) Contains(fd protoreflect.FileDescriptor) bool {
 	return ok
 }
 
-func newNotFoundResponse(err error) *rpb.ServerReflectionResponse_ErrorResponse {
-	return &rpb.ServerReflectionResponse_ErrorResponse{
-		ErrorResponse: &rpb.ErrorResponse{
+func newNotFoundResponse(err error) *reflectionv1alpha1.ServerReflectionResponse_ErrorResponse {
+	return &reflectionv1alpha1.ServerReflectionResponse_ErrorResponse{
+		ErrorResponse: &reflectionv1alpha1.ErrorResponse{
 			ErrorCode:    int32(CodeNotFound),
 			ErrorMessage: err.Error(),
 		},

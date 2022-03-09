@@ -20,22 +20,22 @@ import (
 	"time"
 
 	"github.com/bufbuild/connect"
-	pingrpc "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test"
-	pingpb "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
+	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test/pingv1testrpc"
+	pingv1test "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
 )
 
 // ExamplePingServer implements some trivial business logic. The protobuf
 // definition for this API is in proto/connect/ping/v1test/ping.proto.
 type ExamplePingServer struct {
-	pingrpc.UnimplementedPingServiceHandler
+	pingv1testrpc.UnimplementedPingServiceHandler
 }
 
-// Ping implements pingrpc.PingServiceHandler.
+// Ping implements pingv1testrpc.PingServiceHandler.
 func (*ExamplePingServer) Ping(
 	_ context.Context,
-	req *connect.Envelope[pingpb.PingRequest],
-) (*connect.Envelope[pingpb.PingResponse], error) {
-	return connect.NewEnvelope(&pingpb.PingResponse{
+	req *connect.Envelope[pingv1test.PingRequest],
+) (*connect.Envelope[pingv1test.PingResponse], error) {
+	return connect.NewEnvelope(&pingv1test.PingResponse{
 		Number: req.Msg.Number,
 		Text:   req.Msg.Text,
 	}), nil
@@ -52,7 +52,7 @@ func Example_handler() {
 	// with most Go HTTP routers and middleware (for example, net/http's
 	// StripPrefix).
 	mux := http.NewServeMux()
-	mux.Handle(pingrpc.NewPingServiceHandler(
+	mux.Handle(pingv1testrpc.NewPingServiceHandler(
 		&ExamplePingServer{},                // our business logic
 		connect.WithRegistrar(reg),          // register the ping service's types
 		connect.WithReadMaxBytes(1024*1024), // limit request size

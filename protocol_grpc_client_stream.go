@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	statuspb "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/status/v1"
+	statusv1 "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/status/v1"
 )
 
 // See duplexClientStream below: the send and receive sides of client streams
@@ -363,7 +363,7 @@ func extractError(protobuf Codec, trailer http.Header) *Error {
 		if err != nil {
 			return errorf(CodeUnknown, "server returned invalid grpc-status-details-bin trailer: %w", err)
 		}
-		var status statuspb.Status
+		var status statusv1.Status
 		if err := protobuf.Unmarshal(detailsBinary, &status); err != nil {
 			return errorf(CodeUnknown, "server returned invalid protobuf for error details: %w", err)
 		}

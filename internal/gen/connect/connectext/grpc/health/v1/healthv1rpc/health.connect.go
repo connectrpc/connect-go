@@ -16,7 +16,7 @@
 //
 // Source: connectext/grpc/health/v1/health.proto
 
-package healthv1
+package healthv1rpc
 
 import (
 	context "context"
