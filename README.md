@@ -36,10 +36,8 @@ import (
   "net/http"
 
   "github.com/bufbuild/connect"
-  pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
-  pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
-  "golang.org/x/net/http2"
-  "golang.org/x/net/http2/h2c"
+  pingpb "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
+  pingrpc "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test"
 )
 
 type PingServer struct {

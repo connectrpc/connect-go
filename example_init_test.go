@@ -22,7 +22,7 @@ import (
 	"net/http/httptest"
 	"sync"
 
-	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
+	pingrpc "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test"
 )
 
 var examplePingServer *inMemoryServer

@@ -23,8 +23,8 @@ import (
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/internal/assert"
-	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
-	healthpb "github.com/bufbuild/connect/internal/gen/proto/go/connectext/grpc/health/v1"
+	pingrpc "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test"
+	healthpb "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/health/v1"
 )
 
 func TestHealth(t *testing.T) {

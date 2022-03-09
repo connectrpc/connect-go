@@ -23,8 +23,8 @@ import (
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/internal/assert"
-	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
-	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
+	pingrpc "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test"
+	pingpb "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
 	"google.golang.org/protobuf/proto"
 )
 

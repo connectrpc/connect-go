@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"github.com/bufbuild/connect"
-	pingrpc "github.com/bufbuild/connect/internal/gen/proto/connect/connect/ping/v1test"
-	pingpb "github.com/bufbuild/connect/internal/gen/proto/go/connect/ping/v1test"
+	pingrpc "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test"
+	pingpb "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
 )
 
 // ExamplePingServer implements some trivial business logic. The protobuf
