@@ -20,8 +20,8 @@ import (
 	"os"
 
 	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test/pingv1testrpc"
-	pingv1test "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
+	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1rpc"
+	pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
 )
 
 func ExampleInterceptor() {
@@ -41,7 +41,7 @@ func ExampleInterceptor() {
 			})
 		},
 	)
-	client, err := pingv1testrpc.NewPingServiceClient(
+	client, err := pingv1rpc.NewPingServiceClient(
 		examplePingServer.Client(),
 		examplePingServer.URL(),
 		connect.WithGRPC(),
@@ -51,10 +51,10 @@ func ExampleInterceptor() {
 		logger.Println("error:", err)
 		return
 	}
-	client.Ping(context.Background(), connect.NewEnvelope(&pingv1test.PingRequest{Number: 42}))
+	client.Ping(context.Background(), connect.NewEnvelope(&pingv1.PingRequest{Number: 42}))
 
 	// Output:
-	// calling: /connect.ping.v1test.PingService/Ping
+	// calling: /connect.ping.v1.PingService/Ping
 	// request: number:42
 	// response: number:42
 }
@@ -81,7 +81,7 @@ func ExampleWithInterceptors() {
 			})
 		},
 	)
-	client, err := pingv1testrpc.NewPingServiceClient(
+	client, err := pingv1rpc.NewPingServiceClient(
 		examplePingServer.Client(),
 		examplePingServer.URL(),
 		connect.WithGRPC(),
@@ -91,7 +91,7 @@ func ExampleWithInterceptors() {
 		logger.Println("error:", err)
 		return
 	}
-	client.Ping(context.Background(), connect.NewEnvelope(&pingv1test.PingRequest{}))
+	client.Ping(context.Background(), connect.NewEnvelope(&pingv1.PingRequest{}))
 
 	// Output:
 	// outer interceptor: before call
