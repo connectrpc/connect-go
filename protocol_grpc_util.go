@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"strings"
 
-	statuspb "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/status/v1"
+	statusv1 "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/status/v1"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -111,8 +111,8 @@ func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) error {
 	return nil
 }
 
-func statusFromError(err error) (*statuspb.Status, *Error) {
-	status := &statuspb.Status{
+func statusFromError(err error) (*statusv1.Status, *Error) {
+	status := &statusv1.Status{
 		Code:    int32(CodeUnknown),
 		Message: err.Error(),
 	}

@@ -23,16 +23,16 @@ import (
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/internal/assert"
-	pingrpc "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test"
-	pingpb "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
-	reflectionpb "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/reflection/v1alpha"
+	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test/pingv1testrpc"
+	pingv1test "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
+	reflectionv1alpha1 "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/reflection/v1alpha"
 )
 
 func TestReflection(t *testing.T) {
 	reg := connect.NewRegistrar()
 	mux := http.NewServeMux()
-	mux.Handle(pingrpc.NewPingServiceHandler(
-		pingrpc.UnimplementedPingServiceHandler{},
+	mux.Handle(pingv1testrpc.NewPingServiceHandler(
+		pingv1testrpc.UnimplementedPingServiceHandler{},
 		connect.WithRegistrar(reg),
 	))
 	mux.Handle(connect.NewReflectionHandler(reg))
@@ -42,17 +42,17 @@ func TestReflection(t *testing.T) {
 	server.StartTLS()
 	defer server.Close()
 
-	pingRequestFQN := string((&pingpb.PingRequest{}).ProtoReflect().Descriptor().FullName())
+	pingRequestFQN := string((&pingv1test.PingRequest{}).ProtoReflect().Descriptor().FullName())
 	client, err := connect.NewClient[
-		reflectionpb.ServerReflectionRequest,
-		reflectionpb.ServerReflectionResponse,
+		reflectionv1alpha1.ServerReflectionRequest,
+		reflectionv1alpha1.ServerReflectionResponse,
 	](
 		server.Client(),
 		server.URL+"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
 		connect.WithGRPC(),
 	)
 	assert.Nil(t, err)
-	call := func(req *reflectionpb.ServerReflectionRequest) (*reflectionpb.ServerReflectionResponse, error) {
+	call := func(req *reflectionv1alpha1.ServerReflectionRequest) (*reflectionv1alpha1.ServerReflectionResponse, error) {
 		res, err := client.CallUnary(context.Background(), connect.NewEnvelope(req))
 		if err != nil {
 			return nil, err
@@ -61,20 +61,20 @@ func TestReflection(t *testing.T) {
 	}
 
 	t.Run("list_services", func(t *testing.T) {
-		req := &reflectionpb.ServerReflectionRequest{
+		req := &reflectionv1alpha1.ServerReflectionRequest{
 			Host: "some-host",
-			MessageRequest: &reflectionpb.ServerReflectionRequest_ListServices{
+			MessageRequest: &reflectionv1alpha1.ServerReflectionRequest_ListServices{
 				ListServices: "ignored per proto documentation",
 			},
 		}
 		res, err := call(req)
 		assert.Nil(t, err)
-		expect := &reflectionpb.ServerReflectionResponse{
+		expect := &reflectionv1alpha1.ServerReflectionResponse{
 			ValidHost:       req.Host,
 			OriginalRequest: req,
-			MessageResponse: &reflectionpb.ServerReflectionResponse_ListServicesResponse{
-				ListServicesResponse: &reflectionpb.ListServiceResponse{
-					Service: []*reflectionpb.ServiceResponse{
+			MessageResponse: &reflectionv1alpha1.ServerReflectionResponse_ListServicesResponse{
+				ListServicesResponse: &reflectionv1alpha1.ListServiceResponse{
+					Service: []*reflectionv1alpha1.ServiceResponse{
 						{Name: "connect.ping.v1test.PingService"},
 					},
 				},
@@ -83,9 +83,9 @@ func TestReflection(t *testing.T) {
 		assert.Equal(t, res, expect)
 	})
 	t.Run("file_by_filename", func(t *testing.T) {
-		req := &reflectionpb.ServerReflectionRequest{
+		req := &reflectionv1alpha1.ServerReflectionRequest{
 			Host: "some-host",
-			MessageRequest: &reflectionpb.ServerReflectionRequest_FileByFilename{
+			MessageRequest: &reflectionv1alpha1.ServerReflectionRequest_FileByFilename{
 				FileByFilename: "connect/ping/v1test/ping.proto",
 			},
 		}
@@ -101,9 +101,9 @@ func TestReflection(t *testing.T) {
 		)
 	})
 	t.Run("file_containing_symbol", func(t *testing.T) {
-		req := &reflectionpb.ServerReflectionRequest{
+		req := &reflectionv1alpha1.ServerReflectionRequest{
 			Host: "some-host",
-			MessageRequest: &reflectionpb.ServerReflectionRequest_FileContainingSymbol{
+			MessageRequest: &reflectionv1alpha1.ServerReflectionRequest_FileContainingSymbol{
 				FileContainingSymbol: pingRequestFQN,
 			},
 		}
@@ -119,10 +119,10 @@ func TestReflection(t *testing.T) {
 		)
 	})
 	t.Run("file_containing_extension", func(t *testing.T) {
-		req := &reflectionpb.ServerReflectionRequest{
+		req := &reflectionv1alpha1.ServerReflectionRequest{
 			Host: "some-host",
-			MessageRequest: &reflectionpb.ServerReflectionRequest_FileContainingExtension{
-				FileContainingExtension: &reflectionpb.ExtensionRequest{
+			MessageRequest: &reflectionv1alpha1.ServerReflectionRequest_FileContainingExtension{
+				FileContainingExtension: &reflectionv1alpha1.ExtensionRequest{
 					ContainingType:  pingRequestFQN,
 					ExtensionNumber: 42,
 				},
@@ -136,19 +136,19 @@ func TestReflection(t *testing.T) {
 		assert.NotZero(t, msgerr.ErrorMessage)
 	})
 	t.Run("all_extension_numbers_of_type", func(t *testing.T) {
-		req := &reflectionpb.ServerReflectionRequest{
+		req := &reflectionv1alpha1.ServerReflectionRequest{
 			Host: "some-host",
-			MessageRequest: &reflectionpb.ServerReflectionRequest_AllExtensionNumbersOfType{
+			MessageRequest: &reflectionv1alpha1.ServerReflectionRequest_AllExtensionNumbersOfType{
 				AllExtensionNumbersOfType: pingRequestFQN,
 			},
 		}
 		res, err := call(req)
 		assert.Nil(t, err)
-		expect := &reflectionpb.ServerReflectionResponse{
+		expect := &reflectionv1alpha1.ServerReflectionResponse{
 			ValidHost:       req.Host,
 			OriginalRequest: req,
-			MessageResponse: &reflectionpb.ServerReflectionResponse_AllExtensionNumbersResponse{
-				AllExtensionNumbersResponse: &reflectionpb.ExtensionNumberResponse{
+			MessageResponse: &reflectionv1alpha1.ServerReflectionResponse_AllExtensionNumbersResponse{
+				AllExtensionNumbersResponse: &reflectionv1alpha1.ExtensionNumberResponse{
 					BaseTypeName: pingRequestFQN,
 				},
 			},
