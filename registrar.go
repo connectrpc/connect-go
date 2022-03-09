@@ -22,7 +22,7 @@ import (
 	"sort"
 	"sync"
 
-	rpb "github.com/bufbuild/connect/internal/gen/proto/go/connectext/grpc/reflection/v1alpha"
+	rpb "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/reflection/v1alpha"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"

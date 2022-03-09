@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	statuspb "github.com/bufbuild/connect/internal/gen/proto/go/connectext/grpc/status/v1"
+	statuspb "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/status/v1"
 )
 
 // See duplexClientStream below: the send and receive sides of client streams
