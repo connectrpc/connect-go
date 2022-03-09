@@ -16,6 +16,7 @@ package connect
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -42,6 +43,11 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 // NewClient implements protocol, so it must return an interface.
 func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, error) {
 	if _, err := url.ParseRequestURI(params.URL); err != nil {
+		if !strings.Contains(params.URL, "://") {
+			// URL doesn't have a scheme, so the user is likely accustomed to
+			// grpc-go's APIs.
+			err = fmt.Errorf("URL %q missing scheme: use http:// or https:// (unlike grpc-go)", params.URL)
+		}
 		return nil, NewError(CodeUnknown, err)
 	}
 	return &grpcClient{
