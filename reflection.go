@@ -32,7 +32,7 @@ import "net/http"
 // https://github.com/fullstorydev/grpcurl.
 func NewReflectionHandler(registrar *Registrar, options ...HandlerOption) (string, http.Handler) {
 	const serviceName = "/grpc.reflection.v1alpha.ServerReflection/"
-	handler := NewBidiStreamHandler(
+	return serviceName, NewBidiStreamHandler(
 		serviceName+"ServerReflectionInfo",
 		registrar.serverReflectionInfo,
 		// To avoid runtime panics from protobuf registry conflicts with
@@ -43,5 +43,4 @@ func NewReflectionHandler(registrar *Registrar, options ...HandlerOption) (strin
 		WithHandlerOptions(options...),
 		&disableRegistrationOption{},
 	)
-	return serviceName, handler
 }
