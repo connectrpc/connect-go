@@ -23,16 +23,16 @@ import (
 
 	"github.com/bufbuild/connect"
 	"github.com/bufbuild/connect/internal/assert"
-	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1test/pingv1testrpc"
-	pingv1test "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1test"
+	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1rpc"
+	pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
 	reflectionv1alpha1 "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/reflection/v1alpha"
 )
 
 func TestReflection(t *testing.T) {
 	reg := connect.NewRegistrar()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1testrpc.NewPingServiceHandler(
-		pingv1testrpc.UnimplementedPingServiceHandler{},
+	mux.Handle(pingv1rpc.NewPingServiceHandler(
+		pingv1rpc.UnimplementedPingServiceHandler{},
 		connect.WithRegistrar(reg),
 	))
 	mux.Handle(connect.NewReflectionHandler(reg))
@@ -42,7 +42,7 @@ func TestReflection(t *testing.T) {
 	server.StartTLS()
 	defer server.Close()
 
-	pingRequestFQN := string((&pingv1test.PingRequest{}).ProtoReflect().Descriptor().FullName())
+	pingRequestFQN := string((&pingv1.PingRequest{}).ProtoReflect().Descriptor().FullName())
 	client, err := connect.NewClient[
 		reflectionv1alpha1.ServerReflectionRequest,
 		reflectionv1alpha1.ServerReflectionResponse,
@@ -75,7 +75,7 @@ func TestReflection(t *testing.T) {
 			MessageResponse: &reflectionv1alpha1.ServerReflectionResponse_ListServicesResponse{
 				ListServicesResponse: &reflectionv1alpha1.ListServiceResponse{
 					Service: []*reflectionv1alpha1.ServiceResponse{
-						{Name: "connect.ping.v1test.PingService"},
+						{Name: "connect.ping.v1.PingService"},
 					},
 				},
 			},
@@ -86,7 +86,7 @@ func TestReflection(t *testing.T) {
 		req := &reflectionv1alpha1.ServerReflectionRequest{
 			Host: "some-host",
 			MessageRequest: &reflectionv1alpha1.ServerReflectionRequest_FileByFilename{
-				FileByFilename: "connect/ping/v1test/ping.proto",
+				FileByFilename: "connect/ping/v1/ping.proto",
 			},
 		}
 		res, err := call(req)
