@@ -52,7 +52,7 @@ func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, 
 		protobuf:         params.Protobuf,
 		maxResponseBytes: params.MaxResponseBytes,
 		minCompressBytes: params.CompressMinBytes,
-		doer:             params.Doer,
+		httpClient:       params.HTTPClient,
 		procedureURL:     params.URL,
 	}, nil
 }
@@ -207,7 +207,7 @@ type grpcClient struct {
 	protobuf             Codec
 	maxResponseBytes     int64
 	minCompressBytes     int
-	doer                 Doer
+	httpClient           HTTPClient
 	procedureURL         string
 	wrapErrorInterceptor Interceptor
 }
@@ -235,10 +235,10 @@ func (g *grpcClient) NewStream(
 	h http.Header,
 ) (Sender, Receiver) {
 	// In a typical HTTP/1.1 request, we'd put the body into a bytes.Buffer, hand
-	// the buffer to http.NewRequest, and fire off the request with doer.Do. That
-	// won't work here because we're establishing a stream - we don't even have
-	// all the data we'll eventually send. Instead, we use io.Pipe as the request
-	// body.
+	// the buffer to http.NewRequest, and fire off the request with
+	// httpClient.Do. That won't work here because we're establishing a stream -
+	// we don't even have all the data we'll eventually send. Instead, we use
+	// io.Pipe as the request body.
 	//
 	// net/http will own the read side of the pipe, and we'll hold onto the write
 	// side. Writes to pipeWriter will block until net/http pulls the data from pipeReader and
@@ -249,7 +249,7 @@ func (g *grpcClient) NewStream(
 	pipeReader, pipeWriter := io.Pipe()
 	duplex := &duplexClientStream{
 		ctx:          ctx,
-		doer:         g.doer,
+		httpClient:   g.httpClient,
 		url:          g.procedureURL,
 		spec:         spec,
 		maxReadBytes: g.maxResponseBytes,
