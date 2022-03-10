@@ -52,10 +52,8 @@ const (
 //
 // Handler-side Senders may mutate trailers until calling Close, when the
 // trailers are written to the network. Clients should avoid sending trailers:
-// usage is nuanced and protocol-specific. For gRPC's HTTP/2 variant in
-// particular, clients must set trailer keys prior to the first call to Send
-// and then set trailer values before calling Close. See net/http's
-// Request.Trailer for details.
+// usage is nuanced, protocol-specific, and will likely create
+// incompatibilities with other gRPC implementations.
 type Sender interface {
 	Send(any) error
 	Close(error) error
@@ -81,20 +79,74 @@ type Receiver interface {
 	Trailer() http.Header
 }
 
-// Envelope is a wrapper around a generated request or response message. It
-// provides access to metadata like headers, trailers, and the RPC
-// specification, as well as strongly-typed access to the message itself.
-type Envelope[T any] struct {
+// Request is a wrapper around a generated request message. It provides
+// access to metadata like headers and the RPC specification, as well as
+// strongly-typed access to the message itself.
+type Request[T any] struct {
 	Msg *T
 
-	spec    Specification
+	spec   Specification
+	header http.Header
+}
+
+// NewRequest wraps a generated request message.
+func NewRequest[T any](message *T) *Request[T] {
+	return &Request[T]{
+		Msg: message,
+		// Initialized lazily so we don't allocate unnecessarily.
+		header: nil,
+	}
+}
+
+// Any returns the concrete request message as an empty interface, so that
+// *Request implements the AnyRequest interface.
+func (r *Request[_]) Any() any {
+	return r.Msg
+}
+
+// Spec returns the Specification for this RPC.
+func (r *Request[_]) Spec() Specification {
+	return r.spec
+}
+
+// Header returns the HTTP headers for this request.
+func (r *Request[_]) Header() http.Header {
+	if r.header == nil {
+		r.header = make(http.Header)
+	}
+	return r.header
+}
+
+// internalOnly implements AnyRequest.
+func (e *Request[_]) internalOnly() {}
+
+// AnyRequest is the common method set of all Requests, regardless of type
+// parameter. It's used in unary interceptors.
+//
+// To preserve our ability to add methods to this interface without breaking
+// backward compatibility, only types defined in this package can implement
+// AnyRequest.
+type AnyRequest interface {
+	Any() any
+	Spec() Specification
+	Header() http.Header
+
+	internalOnly()
+}
+
+// Response is a wrapper around a generated response message. It provides
+// access to metadata like headers and trailers, as well as strongly-typed
+// access to the message itself.
+type Response[T any] struct {
+	Msg *T
+
 	header  http.Header
 	trailer http.Header
 }
 
-// NewEnvelope envelopes a request or response message.
-func NewEnvelope[T any](message *T) *Envelope[T] {
-	return &Envelope[T]{
+// NewResponse wraps a generated response message.
+func NewResponse[T any](message *T) *Response[T] {
+	return &Response[T]{
 		Msg: message,
 		// Initialized lazily so we don't allocate unnecessarily.
 		header:  nil,
@@ -102,52 +154,44 @@ func NewEnvelope[T any](message *T) *Envelope[T] {
 	}
 }
 
-// Any returns the concrete request message as an empty interface, so that
-// *Request implements the AnyRequest interface.
-func (e *Envelope[_]) Any() any {
-	return e.Msg
+// Any returns the concrete response message as an empty interface, so that
+// *Response implements the AnyResponse interface.
+func (r *Response[_]) Any() any {
+	return r.Msg
 }
 
-// Spec returns the Specification for this RPC.
-func (e *Envelope[_]) Spec() Specification {
-	return e.spec
-}
-
-// Header returns the HTTP headers for this request.
-func (e *Envelope[_]) Header() http.Header {
-	if e.header == nil {
-		e.header = make(http.Header)
+// Header returns the HTTP headers for this response.
+func (r *Response[_]) Header() http.Header {
+	if r.header == nil {
+		r.header = make(http.Header)
 	}
-	return e.header
+	return r.header
 }
 
-// Trailer returns the trailers for this request. Depending on the underlying
-// RPC protocol, trailers may be HTTP trailers, a protocol-specific block of
-// metadata, or the union of the two.
-func (e *Envelope[_]) Trailer() http.Header {
-	if e.trailer == nil {
-		e.trailer = make(http.Header)
+// Trailer returns the trailers for this response. Depending on the underlying
+// RPC protocol, trailers may be sent as HTTP trailers or a protocol-specific
+// block of in-body metadata.
+func (r *Response[_]) Trailer() http.Header {
+	if r.trailer == nil {
+		r.trailer = make(http.Header)
 	}
-	return e.trailer
+	return r.trailer
 }
 
-// internalOnly implements AnyEnvelope.
-func (e *Envelope[_]) internalOnly() {}
+// internalOnly implements AnyResponse.
+func (e *Response[_]) internalOnly() {}
 
-// AnyEnvelope is the common method set of all Envelopes, regardless of type
+// AnyResponse is the common method set of all Responses, regardless of type
 // parameter. It's used in unary interceptors.
 //
 // To preserve our ability to add methods to this interface without breaking
 // backward compatibility, only types defined in this package can implement
-// AnyEnvelope.
-type AnyEnvelope interface {
+// AnyRequest.
+type AnyResponse interface {
 	Any() any
-	Spec() Specification
 	Header() http.Header
 	Trailer() http.Header
 
-	// Only internal implementations, so we can add methods without breaking
-	// backward compatibility.
 	internalOnly()
 }
 
@@ -164,35 +208,54 @@ type Specification struct {
 	IsClient   bool   // otherwise we're in a handler
 }
 
-// receiveUnaryEnvelope unmarshals a message from a Receiver, then envelopes
-// the message and attaches the Receiver's headers, trailers, and RPC
-// specification. It attempts to consume the Receiver and isn't appropriate
-// when receiving multiple messages.
-func receiveUnaryEnvelope[T any](receiver Receiver) (*Envelope[T], error) {
+// receiveUnaryRequest unmarshals a message from a Receiver, then envelopes
+// the message and attaches the Receiver's headers and RPC specification.
+func receiveUnaryRequest[T any](receiver Receiver) (*Request[T], error) {
 	var msg T
 	if err := receiver.Receive(&msg); err != nil {
 		return nil, err
 	}
-	// In a well-formed stream, the request message may be followed by a block
-	// of in-stream trailers. To ensure that we receive the trailers, try to
-	// read another message from the stream.
+	return &Request[T]{
+		Msg:    &msg,
+		spec:   receiver.Spec(),
+		header: receiver.Header(),
+	}, nil
+}
+
+func receiveUnaryRequestMetadata[T any](r Receiver) *Request[T] {
+	return &Request[T]{
+		Msg:    new(T),
+		spec:   r.Spec(),
+		header: r.Header(),
+	}
+}
+
+// receiveUnaryResponse unmarshals a message from a Receiver, then envelopes
+// the message and attaches the Receiver's headers and trailers. It attempts to
+// consume the Receiver and isn't appropriate when receiving multiple messages.
+func receiveUnaryResponse[T any](receiver Receiver) (*Response[T], error) {
+	var msg T
+	if err := receiver.Receive(&msg); err != nil {
+		return nil, err
+	}
+	// In a well-formed stream, the response message may be followed by a block
+	// of in-stream trailers or HTTP trailers. To ensure that we receive the
+	// trailers, try to read another message from the stream.
 	if err := receiver.Receive(new(T)); err == nil {
 		return nil, NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
 	} else if err != nil && !errors.Is(err, io.EOF) {
 		return nil, NewError(CodeUnknown, err)
 	}
-	return &Envelope[T]{
+	return &Response[T]{
 		Msg:     &msg,
-		spec:    receiver.Spec(),
 		header:  receiver.Header(),
 		trailer: receiver.Trailer(),
 	}, nil
 }
 
-func receiveUnaryEnvelopeMetadata[T any](r Receiver) *Envelope[T] {
-	return &Envelope[T]{
+func receiveUnaryResponseMetadata[T any](r Receiver) *Response[T] {
+	return &Response[T]{
 		Msg:     new(T),
-		spec:    r.Spec(),
 		header:  r.Header(),
 		trailer: r.Trailer(),
 	}

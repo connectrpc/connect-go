@@ -33,9 +33,9 @@ type ExamplePingServer struct {
 // Ping implements pingv1connect.PingServiceHandler.
 func (*ExamplePingServer) Ping(
 	_ context.Context,
-	req *connect.Envelope[pingv1.PingRequest],
-) (*connect.Envelope[pingv1.PingResponse], error) {
-	return connect.NewEnvelope(&pingv1.PingResponse{
+	req *connect.Request[pingv1.PingRequest],
+) (*connect.Response[pingv1.PingResponse], error) {
+	return connect.NewResponse(&pingv1.PingResponse{
 		Number: req.Msg.Number,
 		Text:   req.Msg.Text,
 	}), nil

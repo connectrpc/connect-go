@@ -93,12 +93,12 @@ func NewHealthHandler(
 	mux := http.NewServeMux()
 	check := NewUnaryHandler(
 		serviceName+"Check",
-		func(ctx context.Context, req *Envelope[healthv1.HealthCheckRequest]) (*Envelope[healthv1.HealthCheckResponse], error) {
+		func(ctx context.Context, req *Request[healthv1.HealthCheckRequest]) (*Response[healthv1.HealthCheckResponse], error) {
 			status, err := checker(ctx, req.Msg.Service)
 			if err != nil {
 				return nil, err
 			}
-			return NewEnvelope(&healthv1.HealthCheckResponse{Status: status}), nil
+			return NewResponse(&healthv1.HealthCheckResponse{Status: status}), nil
 		},
 		WithHandlerOptions(options...),
 		// To avoid runtime panics from protobuf registry conflicts with
@@ -113,7 +113,7 @@ func NewHealthHandler(
 		serviceName+"Watch",
 		func(
 			_ context.Context,
-			_ *Envelope[healthv1.HealthCheckRequest],
+			_ *Request[healthv1.HealthCheckRequest],
 			_ *ServerStream[healthv1.HealthCheckResponse],
 		) error {
 			return NewError(

@@ -70,7 +70,7 @@ func Example_client() {
 	}
 	res, err := client.Ping(
 		context.Background(),
-		connect.NewEnvelope(&pingv1.PingRequest{Number: 42}),
+		connect.NewRequest(&pingv1.PingRequest{Number: 42}),
 	)
 	if err != nil {
 		logger.Println("error:", err)
