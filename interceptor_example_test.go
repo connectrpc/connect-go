@@ -28,7 +28,7 @@ func ExampleInterceptor() {
 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 	loggingInterceptor := connect.UnaryInterceptorFunc(
 		func(next connect.UnaryFunc) connect.UnaryFunc {
-			return connect.UnaryFunc(func(ctx context.Context, req connect.AnyEnvelope) (connect.AnyEnvelope, error) {
+			return connect.UnaryFunc(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 				logger.Println("calling:", req.Spec().Procedure)
 				logger.Println("request:", req.Any())
 				res, err := next(ctx, req)
@@ -51,7 +51,7 @@ func ExampleInterceptor() {
 		logger.Println("error:", err)
 		return
 	}
-	client.Ping(context.Background(), connect.NewEnvelope(&pingv1.PingRequest{Number: 42}))
+	client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 42}))
 
 	// Output:
 	// calling: /connect.ping.v1.PingService/Ping
@@ -63,7 +63,7 @@ func ExampleWithInterceptors() {
 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 	outer := connect.UnaryInterceptorFunc(
 		func(next connect.UnaryFunc) connect.UnaryFunc {
-			return connect.UnaryFunc(func(ctx context.Context, req connect.AnyEnvelope) (connect.AnyEnvelope, error) {
+			return connect.UnaryFunc(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 				logger.Println("outer interceptor: before call")
 				res, err := next(ctx, req)
 				logger.Println("outer interceptor: after call")
@@ -73,7 +73,7 @@ func ExampleWithInterceptors() {
 	)
 	inner := connect.UnaryInterceptorFunc(
 		func(next connect.UnaryFunc) connect.UnaryFunc {
-			return connect.UnaryFunc(func(ctx context.Context, req connect.AnyEnvelope) (connect.AnyEnvelope, error) {
+			return connect.UnaryFunc(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 				logger.Println("inner interceptor: before call")
 				res, err := next(ctx, req)
 				logger.Println("inner interceptor: after call")
@@ -91,7 +91,7 @@ func ExampleWithInterceptors() {
 		logger.Println("error:", err)
 		return
 	}
-	client.Ping(context.Background(), connect.NewEnvelope(&pingv1.PingRequest{}))
+	client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
 
 	// Output:
 	// outer interceptor: before call

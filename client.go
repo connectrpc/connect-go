@@ -30,7 +30,7 @@ import (
 // options.
 type Client[Req, Res any] struct {
 	config         *clientConfiguration
-	callUnary      func(context.Context, *Envelope[Req]) (*Envelope[Res], error)
+	callUnary      func(context.Context, *Request[Req]) (*Response[Res], error)
 	protocolClient protocolClient
 }
 
@@ -60,9 +60,8 @@ func NewClient[Req, Res any](
 	// Rather than applying unary interceptors along the hot path, we can do it
 	// once at client creation.
 	unarySpec := config.newSpecification(StreamTypeUnary)
-	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyEnvelope) (AnyEnvelope, error) {
+	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
 		sender, receiver := protocolClient.NewStream(ctx, unarySpec, request.Header())
-		mergeHeaders(sender.Trailer(), request.Trailer())
 		if err := sender.Send(request.Any()); err != nil {
 			_ = sender.Close(err)
 			_ = receiver.Close()
@@ -72,7 +71,7 @@ func NewClient[Req, Res any](
 			_ = receiver.Close()
 			return nil, err
 		}
-		response, err := receiveUnaryEnvelope[Res](receiver)
+		response, err := receiveUnaryResponse[Res](receiver)
 		if err != nil {
 			_ = receiver.Close()
 			return nil, err
@@ -82,7 +81,7 @@ func NewClient[Req, Res any](
 	if ic := config.Interceptor; ic != nil {
 		unaryFunc = ic.WrapUnary(unaryFunc)
 	}
-	callUnary := func(ctx context.Context, request *Envelope[Req]) (*Envelope[Res], error) {
+	callUnary := func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
 		// To make the specification and RPC headers visible to the full interceptor
 		// chain (as though they were supplied by the caller), we'll add them here.
 		request.spec = unarySpec
@@ -91,7 +90,7 @@ func NewClient[Req, Res any](
 		if err != nil {
 			return nil, err
 		}
-		typed, ok := response.(*Envelope[Res])
+		typed, ok := response.(*Response[Res])
 		if !ok {
 			return nil, errorf(CodeInternal, "unexpected client response type %T", response)
 		}
@@ -107,8 +106,8 @@ func NewClient[Req, Res any](
 // CallUnary calls a request-response procedure.
 func (c *Client[Req, Res]) CallUnary(
 	ctx context.Context,
-	req *Envelope[Req],
-) (*Envelope[Res], error) {
+	req *Request[Req],
+) (*Response[Res], error) {
 	return c.callUnary(ctx, req)
 }
 
@@ -121,11 +120,10 @@ func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamFo
 // CallServerStream calls a server streaming procedure.
 func (c *Client[Req, Res]) CallServerStream(
 	ctx context.Context,
-	req *Envelope[Req],
+	req *Request[Req],
 ) (*ServerStreamForClient[Res], error) {
 	sender, receiver := c.newStream(ctx, StreamTypeServer)
 	mergeHeaders(sender.Header(), req.header)
-	mergeHeaders(sender.Trailer(), req.trailer)
 	if err := sender.Send(req.Msg); err != nil {
 		_ = sender.Close(err)
 		_ = receiver.Close()

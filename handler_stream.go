@@ -68,7 +68,7 @@ func (c *ClientStream[Req, Res]) Err() error {
 
 // SendAndClose closes the receive side of the stream, then sends a response
 // back to the client.
-func (c *ClientStream[Req, Res]) SendAndClose(envelope *Envelope[Res]) error {
+func (c *ClientStream[Req, Res]) SendAndClose(envelope *Response[Res]) error {
 	if err := c.receiver.Close(); err != nil {
 		return err
 	}

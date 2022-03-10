@@ -37,13 +37,13 @@ const _ = connect.IsAtLeastVersion0_0_1
 // PingServiceClient is a client for the connect.ping.v1.PingService service.
 type PingServiceClient interface {
 	// Ping sends a ping to the server to determine if it's reachable.
-	Ping(context.Context, *connect.Envelope[v1.PingRequest]) (*connect.Envelope[v1.PingResponse], error)
+	Ping(context.Context, *connect.Request[v1.PingRequest]) (*connect.Response[v1.PingResponse], error)
 	// Fail always fails.
-	Fail(context.Context, *connect.Envelope[v1.FailRequest]) (*connect.Envelope[v1.FailResponse], error)
+	Fail(context.Context, *connect.Request[v1.FailRequest]) (*connect.Response[v1.FailResponse], error)
 	// Sum calculates the sum of the numbers sent on the stream.
 	Sum(context.Context) *connect.ClientStreamForClient[v1.SumRequest, v1.SumResponse]
 	// CountUp returns a stream of the numbers up to the given request.
-	CountUp(context.Context, *connect.Envelope[v1.CountUpRequest]) (*connect.ServerStreamForClient[v1.CountUpResponse], error)
+	CountUp(context.Context, *connect.Request[v1.CountUpRequest]) (*connect.ServerStreamForClient[v1.CountUpResponse], error)
 	// CumSum determines the cumulative sum of all the numbers sent on the stream.
 	CumSum(context.Context) *connect.BidiStreamForClient[v1.CumSumRequest, v1.CumSumResponse]
 }
@@ -116,12 +116,12 @@ type pingServiceClient struct {
 }
 
 // Ping calls connect.ping.v1.PingService.Ping.
-func (c *pingServiceClient) Ping(ctx context.Context, req *connect.Envelope[v1.PingRequest]) (*connect.Envelope[v1.PingResponse], error) {
+func (c *pingServiceClient) Ping(ctx context.Context, req *connect.Request[v1.PingRequest]) (*connect.Response[v1.PingResponse], error) {
 	return c.ping.CallUnary(ctx, req)
 }
 
 // Fail calls connect.ping.v1.PingService.Fail.
-func (c *pingServiceClient) Fail(ctx context.Context, req *connect.Envelope[v1.FailRequest]) (*connect.Envelope[v1.FailResponse], error) {
+func (c *pingServiceClient) Fail(ctx context.Context, req *connect.Request[v1.FailRequest]) (*connect.Response[v1.FailResponse], error) {
 	return c.fail.CallUnary(ctx, req)
 }
 
@@ -131,7 +131,7 @@ func (c *pingServiceClient) Sum(ctx context.Context) *connect.ClientStreamForCli
 }
 
 // CountUp calls connect.ping.v1.PingService.CountUp.
-func (c *pingServiceClient) CountUp(ctx context.Context, req *connect.Envelope[v1.CountUpRequest]) (*connect.ServerStreamForClient[v1.CountUpResponse], error) {
+func (c *pingServiceClient) CountUp(ctx context.Context, req *connect.Request[v1.CountUpRequest]) (*connect.ServerStreamForClient[v1.CountUpResponse], error) {
 	return c.countUp.CallServerStream(ctx, req)
 }
 
@@ -143,13 +143,13 @@ func (c *pingServiceClient) CumSum(ctx context.Context) *connect.BidiStreamForCl
 // PingServiceHandler is an implementation of the connect.ping.v1.PingService service.
 type PingServiceHandler interface {
 	// Ping sends a ping to the server to determine if it's reachable.
-	Ping(context.Context, *connect.Envelope[v1.PingRequest]) (*connect.Envelope[v1.PingResponse], error)
+	Ping(context.Context, *connect.Request[v1.PingRequest]) (*connect.Response[v1.PingResponse], error)
 	// Fail always fails.
-	Fail(context.Context, *connect.Envelope[v1.FailRequest]) (*connect.Envelope[v1.FailResponse], error)
+	Fail(context.Context, *connect.Request[v1.FailRequest]) (*connect.Response[v1.FailResponse], error)
 	// Sum calculates the sum of the numbers sent on the stream.
 	Sum(context.Context, *connect.ClientStream[v1.SumRequest, v1.SumResponse]) error
 	// CountUp returns a stream of the numbers up to the given request.
-	CountUp(context.Context, *connect.Envelope[v1.CountUpRequest], *connect.ServerStream[v1.CountUpResponse]) error
+	CountUp(context.Context, *connect.Request[v1.CountUpRequest], *connect.ServerStream[v1.CountUpResponse]) error
 	// CumSum determines the cumulative sum of all the numbers sent on the stream.
 	CumSum(context.Context, *connect.BidiStream[v1.CumSumRequest, v1.CumSumResponse]) error
 }
@@ -192,11 +192,11 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption
 // UnimplementedPingServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedPingServiceHandler struct{}
 
-func (UnimplementedPingServiceHandler) Ping(context.Context, *connect.Envelope[v1.PingRequest]) (*connect.Envelope[v1.PingResponse], error) {
+func (UnimplementedPingServiceHandler) Ping(context.Context, *connect.Request[v1.PingRequest]) (*connect.Response[v1.PingResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1.PingService.Ping isn't implemented"))
 }
 
-func (UnimplementedPingServiceHandler) Fail(context.Context, *connect.Envelope[v1.FailRequest]) (*connect.Envelope[v1.FailResponse], error) {
+func (UnimplementedPingServiceHandler) Fail(context.Context, *connect.Request[v1.FailRequest]) (*connect.Response[v1.FailResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1.PingService.Fail isn't implemented"))
 }
 
@@ -204,7 +204,7 @@ func (UnimplementedPingServiceHandler) Sum(context.Context, *connect.ClientStrea
 	return connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1.PingService.Sum isn't implemented"))
 }
 
-func (UnimplementedPingServiceHandler) CountUp(context.Context, *connect.Envelope[v1.CountUpRequest], *connect.ServerStream[v1.CountUpResponse]) error {
+func (UnimplementedPingServiceHandler) CountUp(context.Context, *connect.Request[v1.CountUpRequest], *connect.ServerStream[v1.CountUpResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("connect.ping.v1.PingService.CountUp isn't implemented"))
 }
 

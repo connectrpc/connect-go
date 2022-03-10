@@ -53,7 +53,7 @@ func TestReflection(t *testing.T) {
 	)
 	assert.Nil(t, err)
 	call := func(req *reflectionv1alpha1.ServerReflectionRequest) (*reflectionv1alpha1.ServerReflectionResponse, error) {
-		res, err := client.CallUnary(context.Background(), connect.NewEnvelope(req))
+		res, err := client.CallUnary(context.Background(), connect.NewRequest(req))
 		if err != nil {
 			return nil, err
 		}

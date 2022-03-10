@@ -185,10 +185,10 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	)
 	assert.Nil(t, err)
 
-	_, err = client.Ping(context.Background(), connect.NewEnvelope(&pingv1.PingRequest{Number: 10}))
+	_, err = client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
 	assert.Nil(t, err)
 
-	_, err = client.CountUp(context.Background(), connect.NewEnvelope(&pingv1.CountUpRequest{Number: 10}))
+	_, err = client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
 	assert.Nil(t, err)
 }
 
@@ -223,7 +223,7 @@ func newHeaderInterceptor(
 }
 
 func (h *headerInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
-	f := func(ctx context.Context, req connect.AnyEnvelope) (connect.AnyEnvelope, error) {
+	f := func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 		h.inspectRequestHeader(req.Spec(), req.Header())
 		res, err := next(ctx, req)
 		if err != nil {
@@ -298,7 +298,7 @@ type assertCalledInterceptor struct {
 
 func (i *assertCalledInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 	return connect.UnaryFunc(
-		func(ctx context.Context, req connect.AnyEnvelope) (connect.AnyEnvelope, error) {
+		func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			*i.called = true
 			return next(ctx, req)
 		},
