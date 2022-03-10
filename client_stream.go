@@ -45,11 +45,11 @@ func (c *ClientStreamForClient[Req, Res]) Send(msg *Req) error {
 
 // CloseAndReceive closes the send side of the stream and waits for the
 // response.
-func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Envelope[Res], error) {
+func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Response[Res], error) {
 	if err := c.sender.Close(nil); err != nil {
 		return nil, err
 	}
-	res, err := receiveUnaryEnvelope[Res](c.receiver)
+	res, err := receiveUnaryResponse[Res](c.receiver)
 	if err != nil {
 		_ = c.receiver.Close()
 		return nil, err

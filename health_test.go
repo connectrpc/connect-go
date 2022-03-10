@@ -54,7 +54,7 @@ func TestHealth(t *testing.T) {
 	t.Run("process", func(t *testing.T) {
 		res, err := client.CallUnary(
 			context.Background(),
-			connect.NewEnvelope(&healthv1.HealthCheckRequest{}),
+			connect.NewRequest(&healthv1.HealthCheckRequest{}),
 		)
 		assert.Nil(t, err)
 		assert.Equal(t, res.Msg.Status, connect.HealthStatusServing)
@@ -62,7 +62,7 @@ func TestHealth(t *testing.T) {
 	t.Run("known", func(t *testing.T) {
 		res, err := client.CallUnary(
 			context.Background(),
-			connect.NewEnvelope(&healthv1.HealthCheckRequest{Service: pingFQN}),
+			connect.NewRequest(&healthv1.HealthCheckRequest{Service: pingFQN}),
 		)
 		assert.Nil(t, err)
 		assert.Equal(t, res.Msg.Status, connect.HealthStatusServing)
@@ -70,7 +70,7 @@ func TestHealth(t *testing.T) {
 	t.Run("unknown", func(t *testing.T) {
 		_, err := client.CallUnary(
 			context.Background(),
-			connect.NewEnvelope(&healthv1.HealthCheckRequest{Service: unknown}),
+			connect.NewRequest(&healthv1.HealthCheckRequest{Service: unknown}),
 		)
 		assert.NotNil(t, err)
 		var connectErr *connect.Error
@@ -87,7 +87,7 @@ func TestHealth(t *testing.T) {
 		assert.Nil(t, err)
 		stream, err := client.CallServerStream(
 			context.Background(),
-			connect.NewEnvelope(&healthv1.HealthCheckRequest{Service: pingFQN}),
+			connect.NewRequest(&healthv1.HealthCheckRequest{Service: pingFQN}),
 		)
 		assert.Nil(t, err)
 		defer stream.Close()

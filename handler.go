@@ -35,7 +35,7 @@ type Handler struct {
 // NewUnaryHandler constructs a Handler for a request-response procedure.
 func NewUnaryHandler[Req, Res any](
 	procedure string,
-	unary func(context.Context, *Envelope[Req]) (*Envelope[Res], error),
+	unary func(context.Context, *Request[Req]) (*Response[Res], error),
 	options ...HandlerOption,
 ) *Handler {
 	config := newHandlerConfiguration(procedure, options)
@@ -43,26 +43,26 @@ func NewUnaryHandler[Req, Res any](
 	implementation := func(ctx context.Context, sender Sender, receiver Receiver, clientVisibleError error) {
 		defer receiver.Close()
 
-		var request *Envelope[Req]
+		var request *Request[Req]
 		if clientVisibleError != nil {
 			// The protocol implementation failed to establish a stream. To make the
 			// resulting error visible to the interceptor stack, we still want to
 			// call the wrapped unary Func. To do that safely, we need a useful
 			// Message struct. (Note that we do *not* actually calling the handler's
 			// implementation.)
-			request = receiveUnaryEnvelopeMetadata[Req](receiver)
+			request = receiveUnaryRequestMetadata[Req](receiver)
 		} else {
 			var err error
-			request, err = receiveUnaryEnvelope[Req](receiver)
+			request, err = receiveUnaryRequest[Req](receiver)
 			if err != nil {
 				// Interceptors should see this error too. Just as above, they need a
 				// useful Message.
 				clientVisibleError = err
-				request = receiveUnaryEnvelopeMetadata[Req](receiver)
+				request = receiveUnaryRequestMetadata[Req](receiver)
 			}
 		}
 
-		untyped := UnaryFunc(func(ctx context.Context, request AnyEnvelope) (AnyEnvelope, error) {
+		untyped := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
 			if clientVisibleError != nil {
 				// We've already encountered an error, short-circuit before calling the
 				// handler's implementation.
@@ -71,7 +71,7 @@ func NewUnaryHandler[Req, Res any](
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			typed, ok := request.(*Envelope[Req])
+			typed, ok := request.(*Request[Req])
 			if !ok {
 				return nil, errorf(CodeInternal, "unexpected handler request type %T", request)
 			}
@@ -79,10 +79,6 @@ func NewUnaryHandler[Req, Res any](
 			if err != nil {
 				return nil, err
 			}
-			// The handler implementation can't set the specification using exported
-			// APIs (and shouldn't need to). We set it here so it's visible to the
-			// interceptor chain.
-			res.spec = config.newSpecification(StreamTypeUnary)
 			return res, nil
 		})
 		if ic := config.Interceptor; ic != nil {
@@ -130,7 +126,7 @@ func NewClientStreamHandler[Req, Res any](
 // NewServerStreamHandler constructs a Handler for a server streaming procedure.
 func NewServerStreamHandler[Req, Res any](
 	procedure string,
-	implementation func(context.Context, *Envelope[Req], *ServerStream[Res]) error,
+	implementation func(context.Context, *Request[Req], *ServerStream[Res]) error,
 	options ...HandlerOption,
 ) *Handler {
 	return newStreamHandler(
@@ -138,7 +134,7 @@ func NewServerStreamHandler[Req, Res any](
 		StreamTypeServer,
 		func(ctx context.Context, sender Sender, receiver Receiver) {
 			stream := NewServerStream[Res](sender)
-			req, err := receiveUnaryEnvelope[Req](receiver)
+			req, err := receiveUnaryRequest[Req](receiver)
 			if err != nil {
 				_ = receiver.Close()
 				_ = sender.Close(err)
