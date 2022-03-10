@@ -17,7 +17,6 @@ package connect
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 
 	healthv1 "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/health/v1"
@@ -46,26 +45,6 @@ const (
 	HealthStatusNotServing HealthStatus = healthv1.HealthCheckResponse_SERVING_STATUS_UNSPECIFIED
 )
 
-// NewHealthChecker returns a health-checking function that always returns
-// HealthStatusServing for the process and all registered services. It's safe
-// to call concurrently.
-//
-// The returned function can be passed to NewHealthHandler.
-func NewHealthChecker(reg *Registrar) func(context.Context, string) (HealthStatus, error) {
-	return func(_ context.Context, service string) (HealthStatus, error) {
-		if service == "" {
-			return HealthStatusServing, nil
-		}
-		if reg.isRegistered(service) {
-			return HealthStatusServing, nil
-		}
-		return HealthStatusUnspecified, NewError(
-			CodeNotFound,
-			fmt.Errorf("unknown service %s", service),
-		)
-	}
-}
-
 // NewHealthHandler wraps the supplied function to build an HTTP handler for
 // gRPC's health-checking API. It returns the path on which to mount the
 // handler and the HTTP handler itself.
@@ -85,10 +64,7 @@ func NewHealthChecker(reg *Registrar) func(context.Context, string) (HealthStatu
 // For more details on gRPC's health checking protocol, see
 // https://github.com/grpc/grpc/blob/master/doc/health-checking.md and
 // https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto.
-func NewHealthHandler(
-	checker func(context.Context, string) (HealthStatus, error),
-	options ...HandlerOption,
-) (string, http.Handler) {
+func NewHealthHandler(checker func(context.Context, string) (HealthStatus, error)) (string, http.Handler) {
 	const serviceName = "/grpc.health.v1.Health/"
 	mux := http.NewServeMux()
 	check := NewUnaryHandler(
@@ -100,7 +76,6 @@ func NewHealthHandler(
 			}
 			return NewEnvelope(&healthv1.HealthCheckResponse{Status: status}), nil
 		},
-		WithHandlerOptions(options...),
 		// To avoid runtime panics from protobuf registry conflicts with
 		// google.golang.org/grpc/health/grpc_health_v1, our copy of health.proto
 		// uses a different package name. We're pretending to be the gRPC
@@ -121,7 +96,6 @@ func NewHealthHandler(
 				errors.New("connect doesn't support watching health state"),
 			)
 		},
-		WithHandlerOptions(options...),
 		&disableRegistrationOption{}, // see above
 	)
 	mux.Handle(serviceName+"Watch", watch)

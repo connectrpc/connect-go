@@ -35,7 +35,7 @@ func TestReflection(t *testing.T) {
 		pingv1connect.UnimplementedPingServiceHandler{},
 		connect.WithRegistrar(reg),
 	))
-	mux.Handle(connect.NewReflectionHandler(reg))
+	mux.Handle(reg.NewReflectionHandler())
 
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true

@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"sort"
 	"sync"
 
@@ -31,6 +32,20 @@ import (
 
 // A Registrar collects information to support gRPC server reflection
 // when building handlers.
+//
+// Handlers will register themselves with a Registrar when the
+// connect.WithRegistrar option is used.
+//
+//   registrar := connect.NewRegistrar()
+//   mux := http.NewServeMux()
+//   mux.Handle(
+//     pingv1connect.NewPingServiceHandler(
+//       &ExamplePingServer{},
+//       connect.WithRegistrar(registrar),
+//     ),
+//   )
+//   mux.Handle(registrar.NewReflectionHandler())
+//   mux.Handle(registrar.NewHealthHandler())
 type Registrar struct {
 	mu       sync.RWMutex
 	services map[string]struct{}
@@ -39,6 +54,58 @@ type Registrar struct {
 // NewRegistrar constructs an empty Registrar.
 func NewRegistrar() *Registrar {
 	return &Registrar{services: make(map[string]struct{})}
+}
+
+// NewReflectionHandler uses the information in the Registrar to
+// construct an HTTP handler for gRPC's server reflection API. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// Note that because the reflection API requires bidirectional streaming, the
+// returned handler only supports gRPC over HTTP/2 (i.e., it doesn't support
+// gRPC-Web). Also keep in mind that the reflection service exposes every
+// protobuf package compiled into your binary - think twice before exposing it
+// outside your organization.
+//
+// For more information, see:
+// https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md
+// https://github.com/grpc/grpc/blob/master/doc/server-reflection.md
+// https://github.com/fullstorydev/grpcurl
+func (r *Registrar) NewReflectionHandler() (string, http.Handler) {
+	const serviceName = "/grpc.reflection.v1alpha.ServerReflection/"
+	return serviceName, NewBidiStreamHandler(
+		serviceName+"ServerReflectionInfo",
+		r.serverReflectionInfo,
+		&disableRegistrationOption{},
+	)
+}
+
+// NewHealthHandler uses the information in the Registrar to construct  an HTTP
+// handler for gRPC's health-checking API. It returns the path on which to mount the
+// handler and the HTTP handler itself. It always returns HealthStatusServing for
+// the process and all registered services.
+//
+// Note that the returned handler only supports the unary Check method, not the
+// streaming Watch. As suggested in gRPC's health schema, connect returns
+// CodeUnimplemented for the Watch method.
+//
+// For more details on gRPC's health checking protocol, see
+// https://github.com/grpc/grpc/blob/master/doc/health-checking.md and
+// https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto.
+func (r *Registrar) NewHealthHandler() (string, http.Handler) {
+	return NewHealthHandler(
+		func(_ context.Context, service string) (HealthStatus, error) {
+			if service == "" {
+				return HealthStatusServing, nil
+			}
+			if r.isRegistered(service) {
+				return HealthStatusServing, nil
+			}
+			return HealthStatusUnspecified, NewError(
+				CodeNotFound,
+				fmt.Errorf("unknown service %s", service),
+			)
+		},
+	)
 }
 
 // serviceNames returns the fully-qualified names of the registered protobuf

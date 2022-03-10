@@ -39,7 +39,7 @@ func TestHealth(t *testing.T) {
 		pingv1connect.UnimplementedPingServiceHandler{},
 		connect.WithRegistrar(reg),
 	))
-	mux.Handle(connect.NewHealthHandler(connect.NewHealthChecker(reg)))
+	mux.Handle(reg.NewHealthHandler())
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
