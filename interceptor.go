@@ -23,7 +23,7 @@ import (
 // The type of the request and response structs depend on the codec being used.
 // When using protobuf, request.Any() and response.Any() will always be
 // proto.Message implementations.
-type UnaryFunc func(context.Context, AnyRequest) (AnyResponse, error)
+type UnaryFunc = func(context.Context, AnyRequest) (AnyResponse, error)
 
 // An Interceptor adds logic to a generated handler or client, like the
 // decorators or middleware you may have seen in other libraries. Interceptors

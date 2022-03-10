@@ -60,7 +60,7 @@ func NewClient[Req, Res any](
 	// Rather than applying unary interceptors along the hot path, we can do it
 	// once at client creation.
 	unarySpec := config.newSpecification(StreamTypeUnary)
-	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
+	unaryFunc := func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
 		sender, receiver := protocolClient.NewStream(ctx, unarySpec, request.Header())
 		if err := sender.Send(request.Any()); err != nil {
 			_ = sender.Close(err)
@@ -77,7 +77,7 @@ func NewClient[Req, Res any](
 			return nil, err
 		}
 		return response, receiver.Close()
-	})
+	}
 	if ic := config.Interceptor; ic != nil {
 		unaryFunc = ic.WrapUnary(unaryFunc)
 	}

@@ -62,7 +62,7 @@ func NewUnaryHandler[Req, Res any](
 			}
 		}
 
-		untyped := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
+		untyped := func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
 			if clientVisibleError != nil {
 				// We've already encountered an error, short-circuit before calling the
 				// handler's implementation.
@@ -80,7 +80,7 @@ func NewUnaryHandler[Req, Res any](
 				return nil, err
 			}
 			return res, nil
-		})
+		}
 		if ic := config.Interceptor; ic != nil {
 			untyped = ic.WrapUnary(untyped)
 		}
