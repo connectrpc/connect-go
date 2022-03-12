@@ -34,6 +34,11 @@ import (
 // compiled into your binary.
 const _ = connect.IsAtLeastVersion0_0_1
 
+// Fully-qualified service names, for use with connect's grpcreflect and grpchealth packages.
+const (
+	ServerReflectionName = "internal.reflection.v1alpha1.ServerReflection"
+)
+
 // ServerReflectionClient is a client for the internal.reflection.v1alpha1.ServerReflection service.
 type ServerReflectionClient interface {
 	// The reflection service is structured as a bidirectional stream, ensuring

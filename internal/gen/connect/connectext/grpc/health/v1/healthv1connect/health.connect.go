@@ -34,6 +34,11 @@ import (
 // compiled into your binary.
 const _ = connect.IsAtLeastVersion0_0_1
 
+// Fully-qualified service names, for use with connect's grpcreflect and grpchealth packages.
+const (
+	HealthName = "internal.health.v1.Health"
+)
+
 // HealthClient is a client for the internal.health.v1.Health service.
 type HealthClient interface {
 	// If the requested service is unknown, the call will fail with status
