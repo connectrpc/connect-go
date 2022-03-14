@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package connect_test
+package grpchealth_test
 
 import (
 	"context"
@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/bufbuild/connect"
+	"github.com/bufbuild/connect/grpchealth"
 	"github.com/bufbuild/connect/internal/assert"
 	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
 	healthv1 "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/health/v1"
@@ -33,13 +34,10 @@ func TestHealth(t *testing.T) {
 		unknown = "foobar"
 	)
 
-	reg := connect.NewRegistrar()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(
-		pingv1connect.UnimplementedPingServiceHandler{},
-		connect.WithRegistrar(reg),
-	))
-	mux.Handle(connect.NewHealthHandler(connect.NewHealthChecker(reg)))
+	mux.Handle(grpchealth.NewHandler([]string{
+		pingv1connect.PingServiceName,
+	}))
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
@@ -57,7 +55,11 @@ func TestHealth(t *testing.T) {
 			connect.NewRequest(&healthv1.HealthCheckRequest{}),
 		)
 		assert.Nil(t, err)
-		assert.Equal(t, res.Msg.Status, connect.HealthStatusServing)
+		assert.Equal(
+			t,
+			grpchealth.Status(res.Msg.Status),
+			grpchealth.StatusServing,
+		)
 	})
 	t.Run("known", func(t *testing.T) {
 		res, err := client.CallUnary(
@@ -65,7 +67,11 @@ func TestHealth(t *testing.T) {
 			connect.NewRequest(&healthv1.HealthCheckRequest{Service: pingFQN}),
 		)
 		assert.Nil(t, err)
-		assert.Equal(t, res.Msg.Status, connect.HealthStatusServing)
+		assert.Equal(
+			t,
+			grpchealth.Status(res.Msg.Status),
+			grpchealth.StatusServing,
+		)
 	})
 	t.Run("unknown", func(t *testing.T) {
 		_, err := client.CallUnary(

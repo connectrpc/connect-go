@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/bufbuild/connect"
+	"github.com/bufbuild/connect/grpchealth"
 	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
 	pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
 )
@@ -45,8 +46,7 @@ func Example_handler() {
 	// The business logic here is trivial, but the rest of the example is meant
 	// to be somewhat realistic. This server has basic timeouts configured, and
 	// it also exposes gRPC's server reflection and health check APIs.
-	reg := connect.NewRegistrar()            // for gRPC reflection
-	checker := connect.NewHealthChecker(reg) // basic health checks
+	reg := connect.NewRegistrar() // for gRPC reflection
 
 	// The generated code produces plain net/http Handlers, so they're compatible
 	// with most Go HTTP routers and middleware (for example, net/http's
@@ -57,8 +57,11 @@ func Example_handler() {
 		connect.WithRegistrar(reg),          // register the ping service's types
 		connect.WithReadMaxBytes(1024*1024), // limit request size
 	))
+	services := []string{pingv1connect.PingServiceName}
 	mux.Handle(connect.NewReflectionHandler(reg)) // server reflection
-	mux.Handle(connect.NewHealthHandler(checker)) // health checks
+	mux.Handle(grpchealth.NewHandler(             // health checks
+		grpchealth.NewBasicChecker(services...),
+	))
 
 	// Timeouts, connection handling, TLS configuration, and other low-level
 	// transport details are handled by net/http. Everything you already know (or
