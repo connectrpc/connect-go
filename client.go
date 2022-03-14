@@ -167,9 +167,9 @@ type clientConfiguration struct {
 }
 
 func newClientConfiguration(url string, options []ClientOption) (*clientConfiguration, *Error) {
-	parsedURL := parseProtobufURL(url)
+	protoPath := extractProtobufPath(url)
 	config := clientConfiguration{
-		Procedure:        parsedURL.ProtoPath,
+		Procedure:        protoPath,
 		CompressionPools: make(map[string]compressionPool),
 	}
 	WithProtoBinaryCodec().applyToClient(&config)

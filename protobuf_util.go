@@ -18,18 +18,11 @@ import (
 	"strings"
 )
 
-type parsedProtobufURL struct {
-	// FullyQualifiedServiceName is fully-qualified protobuf service name (for
-	// example, "acme.user.v1.UserService"). Connect uses this for reflection.
-	FullyQualifiedServiceName string
-	// ProtoPath is the trailing portion of the URL's path that corresponds to
-	// the protobuf package, service, and method. It always starts with a slash.
-	// Within connect, we use this as (1) Specification.Procedure and (2) the
-	// path when mounting handlers on muxes.
-	ProtoPath string
-}
-
-func parseProtobufURL(url string) *parsedProtobufURL {
+// extractProtobufPath returns the trailing portion of the URL's path,
+// corresponding to the protobuf package, service, and method. It always starts
+// with a slash. Within connect, we use this as (1) Specification.Procedure and
+// (2) the path when mounting handlers on muxes.
+func extractProtobufPath(url string) string {
 	segments := strings.Split(url, "/")
 	var pkg, method string
 	if len(segments) > 0 {
@@ -40,19 +33,10 @@ func parseProtobufURL(url string) *parsedProtobufURL {
 		method = segments[len(segments)-1]
 	}
 	if pkg == "" {
-		return &parsedProtobufURL{
-			FullyQualifiedServiceName: "",
-			ProtoPath:                 "/",
-		}
+		return "/"
 	}
 	if method == "" {
-		return &parsedProtobufURL{
-			FullyQualifiedServiceName: pkg,
-			ProtoPath:                 "/" + pkg,
-		}
+		return "/" + pkg
 	}
-	return &parsedProtobufURL{
-		FullyQualifiedServiceName: pkg,
-		ProtoPath:                 "/" + pkg + "/" + method,
-	}
+	return "/" + pkg + "/" + method
 }
