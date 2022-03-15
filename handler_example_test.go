@@ -20,8 +20,6 @@ import (
 	"time"
 
 	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/grpchealth"
-	"github.com/bufbuild/connect/grpcreflect"
 	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
 	pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
 )
@@ -56,13 +54,8 @@ func Example_handler() {
 		&ExamplePingServer{},                // our business logic
 		connect.WithReadMaxBytes(1024*1024), // limit request size
 	))
-	// The grpchealth and grpcreflection sub-packages offer support for the
-	// standard gRPC health checking and server reflection APIs. Serving these
-	// APIs makes it easy to integrate your connect server with Kubernetes health
-	// checks, CLI tools like grpcurl, and a variety of other systems.
-	services := []string{pingv1connect.PingServiceName}
-	mux.Handle(grpchealth.NewHandler(services))
-	mux.Handle(grpcreflect.NewHandler(services))
+	// You can serve gRPC's health and server reflection APIs using
+	// github.com/bufbuild/connect-ecosystem-go.
 
 	// Timeouts, connection handling, TLS configuration, and other low-level
 	// transport details are handled by net/http. Everything you already know (or
