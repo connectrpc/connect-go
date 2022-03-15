@@ -120,17 +120,6 @@ func (r *Request[_]) Header() http.Header {
 // internalOnly implements AnyRequest.
 func (e *Request[_]) internalOnly() {}
 
-// TransformRequest maps over the Request's message type, converting it to a
-// new type. The original Request's specification and headers are preserved on
-// the new Request.
-func TransformRequest[From, To any](req *Request[From], transform func(*From) *To) *Request[To] {
-	return &Request[To]{
-		Msg:    transform(req.Msg),
-		spec:   req.spec,
-		header: req.header,
-	}
-}
-
 // AnyRequest is the common method set of all Requests, regardless of type
 // parameter. It's used in unary interceptors.
 //
@@ -191,17 +180,6 @@ func (r *Response[_]) Trailer() http.Header {
 
 // internalOnly implements AnyResponse.
 func (e *Response[_]) internalOnly() {}
-
-// TransformResponse maps over the Response's message type, converting it to a
-// new type. The original Response's headers and trailers are preserved on the
-// new Response.
-func TransformResponse[From, To any](res *Response[From], transform func(*From) *To) *Response[To] {
-	return &Response[To]{
-		Msg:     transform(res.Msg),
-		header:  res.header,
-		trailer: res.trailer,
-	}
-}
 
 // AnyResponse is the common method set of all Responses, regardless of type
 // parameter. It's used in unary interceptors.
