@@ -1,42 +1,99 @@
+# See https://tech.davis-hansson.com/p/make/
+SHELL := bash
+.DELETE_ON_ERROR:
+.SHELLFLAGS := -eu -o pipefail -c
+.DEFAULT_GOAL := all
+MAKEFLAGS += --warn-undefined-variables
+MAKEFLAGS += --no-builtin-rules
 MAKEFLAGS += --no-print-directory
-MAKEGO := make/go
-MAKEGO_REMOTE := https://github.com/bufbuild/makego.git
-PROJECT := connect
-GO_MODULE := github.com/bufbuild/connect
-GO_MOD_VERSION := 1.18
-GO_BINS := $(GO_BINS) cmd/protoc-gen-connect-go
-GO_ALL_REPO_PKGS := ./...
-GIT_FILE_IGNORES := $(GIT_FILE_IGNORES) \
-	cover.out \
-	*.pprof \
-	*.svg
-# TODO: remove when golangci-lint works with 1.18
-SKIP_GOLANGCI_LINT := 1
+BIN=.tmp/bin
+# Set to use a different compiler. For example, `GO=go1.18rc1 make test`.
+GO ?= go
+COPYRIGHT_YEARS := 2021-2022
+# Which commit of bufbuild/makego should we source checknodiffgenerated.bash
+# from?
+MAKEGO_COMMIT := 383cdab9b837b1fba0883948ff54ed20eedbd611
 
-LICENSE_HEADER_LICENSE_TYPE := apache
-LICENSE_HEADER_COPYRIGHT_HOLDER := Buf Technologies, Inc.
-LICENSE_HEADER_YEAR_RANGE := 2021-2022
-LICENSE_HEADER_IGNORES := \/testdata
+# External Go binaries used in testing, linting, or code generation. Add new
+# binaries by running `go get $YOUR_TOOL` in internal/tools and adding the
+# import path here.
+EXTERNAL_GO_TOOLS := \
+	github.com/bufbuild/buf/cmd/buf \
+	github.com/bufbuild/buf/private/pkg/licenseheader/cmd/license-header \
+	google.golang.org/protobuf/cmd/protoc-gen-go
 
-BUF_LINT_INPUT := .
+.PHONY: help
+help: ## Describe useful make targets
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-30s %s\n", $$1, $$2}'
 
-include make/go/bootstrap.mk
-include make/go/go.mk
-include make/go/buf.mk
-include make/go/license_header.mk
-include make/go/dep_protoc_gen_go.mk
-include make/go/dep_protoc_gen_go_grpc.mk
+.PHONY: all
+all: ## Build, test, and lint (default)
+	$(MAKE) test
+	$(MAKE) lint
+	$(MAKE) checkgenerate
 
-bufgeneratedeps:: $(BUF) $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC) installprotoc-gen-connect-go
+.PHONY: clean
+clean: ## Delete intermediate build artifacts
+	@# -X only removes untracked files, -d recurses into directories, -f actually removes files/dirs
+	git clean -Xdf
 
-.PHONY: bufgeneratecleango
-bufgeneratecleango:
+.PHONY: test
+test: build ## Run unit tests
+	$(GO) test -vet=off -race -cover ./...
+
+.PHONY: build
+build: generate ## Build all packages
+	$(GO) build ./...
+
+.PHONY: lint
+lint: $(BIN)/gofmt $(BIN)/buf ## Lint Go and protobuf
+	test -z "$$(./$(BIN)/gofmt -s -l . | tee /dev/stderr)"
+	@# TODO: replace vet with golangci-lint when it supports 1.18
+	@# Configure staticcheck to target the correct Go version and enable
+	@# ST1020, ST1021, and ST1022.
+	$(GO) vet ./...
+	$(BIN)/buf lint
+
+.PHONY: lintfix
+lintfix: $(BIN)/gofmt ## Automatically fix some lint errors
+	$(BIN)/gofmt -s -w .
+
+.PHONY: generate
+generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
 	rm -rf internal/gen
+	PATH=$(BIN) $(BIN)/buf generate
+	@$(BIN)/license-header \
+		--license-type apache \
+		--copyright-holder "Buf Technologies, Inc." \
+		--year-range "$(COPYRIGHT_YEARS)" \
+		$(shell git ls-files) $(shell git ls-files --exclude-standard --others)
 
-bufgenerateclean:: bufgeneratecleango
+.PHONY: upgrade
+upgrade: ## Upgrade dependencies
+	go get -u -t ./... && go mod tidy -v
+	cd internal/tools && go get -u -t . && go mod tidy -v
 
-.PHONY: bufgeneratego
-bufgeneratego:
-	buf generate
+.PHONY: checkgenerate
+checkgenerate: $(BIN)/checknodiffgenerated.bash
+	$(BIN)/checknodiffgenerated.bash $(MAKE) generate
 
-bufgeneratesteps:: bufgeneratego
+$(BIN)/gofmt:
+	@mkdir -p $(@D)
+	$(GO) build -o $(@) cmd/gofmt
+
+.PHONY: $(BIN)/protoc-gen-connect-go
+$(BIN)/protoc-gen-connect-go:
+	@mkdir -p $(@D)
+	$(GO) build -o $(@) ./cmd/protoc-gen-connect-go
+
+$(BIN)/checknodiffgenerated.bash:
+	@mkdir -p $(@D)
+	curl -SsLo $(@) https://raw.githubusercontent.com/bufbuild/makego/$(MAKEGO_COMMIT)/make/go/scripts/checknodiffgenerated.bash
+	chmod u+x $(@)
+
+define install-go-bin
+$$(BIN)/$(notdir $1): internal/tools/go.mod
+	@mkdir -p $$(@D)
+	cd internal/tools && GOBIN=$$(PWD)/$$(BIN) $$(GO) install $1
+endef
+$(foreach gobin,$(EXTERNAL_GO_TOOLS),$(eval $(call install-go-bin,$(gobin))))
