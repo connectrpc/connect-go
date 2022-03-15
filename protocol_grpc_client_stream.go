@@ -144,6 +144,14 @@ func (cs *duplexClientStream) Send(message any) error {
 }
 
 func (cs *duplexClientStream) CloseSend(_ error) error {
+	// In the case where Send was never called, we need to clear the responseReady
+	// channel since the client stream can still receive messages even if the send
+	// is closed.
+	cs.prepareOnce.Do(func() {
+		requestPrepared := make(chan struct{})
+		go cs.makeRequest(requestPrepared)
+		<-requestPrepared
+	})
 	// The user calls CloseSend to indicate that they're done sending data. All
 	// we do here is write to the pipe and close it, so it's safe to do this
 	// while makeRequest is running. (This method takes an error to accommodate
@@ -178,6 +186,11 @@ func (cs *duplexClientStream) Receive(message any) error {
 	<-cs.responseReady
 	if err := cs.getResponseError(); err != nil {
 		// The stream is already closed or corrupted.
+		return err
+	}
+	// Before we receive the message, check if the context has been cancelled.
+	if err := cs.ctx.Err(); err != nil {
+		cs.setResponseError(err)
 		return err
 	}
 	// Consume one message from the response stream.
