@@ -34,7 +34,7 @@ import (
 // compiled into your binary.
 const _ = connect.IsAtLeastVersion0_0_1
 
-// Fully-qualified service names, for use with connect's grpcreflect and grpchealth packages.
+// Fully-qualified service names.
 const (
 	PingServiceName = "connect.ping.v1.PingService"
 )

@@ -141,8 +141,7 @@ func generatePreamble(g *protogen.GeneratedFile, file *protogen.File) {
 }
 
 func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protogen.Service) {
-	wrapComments(g, "Fully-qualified service names, for use with connect's ",
-		"grpcreflect and grpchealth packages.")
+	wrapComments(g, "Fully-qualified service names.")
 	g.P("const (")
 	for _, service := range services {
 		g.P(service.Desc.Name(), `Name = "`, service.Desc.FullName(), `"`)
