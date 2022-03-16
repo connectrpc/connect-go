@@ -34,6 +34,9 @@ import (
 
 const errorMessage = "oh no"
 
+// The ping server implementation used in the tests returns errors if the
+// client doesn't set a header, and the server sets headers and trailers on the
+// response.
 const (
 	headerValue    = "some header value"
 	trailerValue   = "some trailer value"
@@ -42,140 +45,7 @@ const (
 	handlerTrailer = "Connect-Handler-Trailer"
 )
 
-func expectClientHeader(check bool, req connect.AnyRequest) error {
-	if !check {
-		return nil
-	}
-	if err := expectMetadata(req.Header(), "header", clientHeader, headerValue); err != nil {
-		return err
-	}
-	return nil
-}
-
-func expectMetadata(meta http.Header, metaType, key, value string) error {
-	if got := meta.Get(key); got != value {
-		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
-			"%s %q: got %q, expected %q",
-			metaType,
-			key,
-			got,
-			value,
-		))
-	}
-	return nil
-}
-
-type pingServer struct {
-	pingv1connect.UnimplementedPingServiceHandler
-
-	checkMetadata bool
-}
-
-func (p pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
-	if err := expectClientHeader(p.checkMetadata, req); err != nil {
-		return nil, err
-	}
-	res := connect.NewResponse(&pingv1.PingResponse{
-		Number: req.Msg.Number,
-		Text:   req.Msg.Text,
-	})
-	res.Header().Set(handlerHeader, headerValue)
-	res.Trailer().Set(handlerTrailer, trailerValue)
-	return res, nil
-}
-
-func (p pingServer) Fail(ctx context.Context, req *connect.Request[pingv1.FailRequest]) (*connect.Response[pingv1.FailResponse], error) {
-	if err := expectClientHeader(p.checkMetadata, req); err != nil {
-		return nil, err
-	}
-	err := connect.NewError(connect.Code(req.Msg.Code), errors.New(errorMessage))
-	err.Header().Set(handlerHeader, headerValue)
-	err.Trailer().Set(handlerTrailer, trailerValue)
-	return nil, err
-}
-
-func (p pingServer) Sum(
-	ctx context.Context,
-	stream *connect.ClientStream[pingv1.SumRequest, pingv1.SumResponse],
-) error {
-	if p.checkMetadata {
-		if err := expectMetadata(stream.RequestHeader(), "header", clientHeader, headerValue); err != nil {
-			return err
-		}
-	}
-	var sum int64
-	for stream.Receive() {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		sum += stream.Msg().Number
-	}
-	if stream.Err() != nil {
-		return stream.Err()
-	}
-	response := connect.NewResponse(&pingv1.SumResponse{Sum: sum})
-	response.Header().Set(handlerHeader, headerValue)
-	response.Trailer().Set(handlerTrailer, trailerValue)
-	return stream.SendAndClose(response)
-}
-
-func (p pingServer) CountUp(
-	ctx context.Context,
-	req *connect.Request[pingv1.CountUpRequest],
-	stream *connect.ServerStream[pingv1.CountUpResponse],
-) error {
-	if err := expectClientHeader(p.checkMetadata, req); err != nil {
-		return err
-	}
-	if req.Msg.Number <= 0 {
-		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
-			"number must be positive: got %v",
-			req.Msg.Number,
-		))
-	}
-	stream.ResponseHeader().Set(handlerHeader, headerValue)
-	stream.ResponseTrailer().Set(handlerTrailer, trailerValue)
-	for i := int64(1); i <= req.Msg.Number; i++ {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := stream.Send(&pingv1.CountUpResponse{Number: i}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (p pingServer) CumSum(
-	ctx context.Context,
-	stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse],
-) error {
-	var sum int64
-	if p.checkMetadata {
-		if err := expectMetadata(stream.RequestHeader(), "header", clientHeader, headerValue); err != nil {
-			return err
-		}
-	}
-	stream.ResponseHeader().Set(handlerHeader, headerValue)
-	stream.ResponseTrailer().Set(handlerTrailer, trailerValue)
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		msg, err := stream.Receive()
-		if errors.Is(err, io.EOF) {
-			return nil
-		} else if err != nil {
-			return err
-		}
-		sum += msg.Number
-		if err := stream.Send(&pingv1.CumSumResponse{Sum: sum}); err != nil {
-			return err
-		}
-	}
-}
-
-func TestServerProtoGRPC(t *testing.T) {
+func TestServer(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(
 		pingServer{checkMetadata: true},
@@ -382,7 +252,6 @@ func TestServerProtoGRPC(t *testing.T) {
 			)
 		})
 	}
-
 	t.Run("http1", func(t *testing.T) {
 		server := httptest.NewServer(mux)
 		defer server.Close()
@@ -451,4 +320,137 @@ func failNoHTTP2(t testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSum
 		assert.Sprintf("expected 505, got %v", err),
 	)
 	assert.Nil(t, stream.CloseReceive())
+}
+
+func expectClientHeader(check bool, req connect.AnyRequest) error {
+	if !check {
+		return nil
+	}
+	if err := expectMetadata(req.Header(), "header", clientHeader, headerValue); err != nil {
+		return err
+	}
+	return nil
+}
+
+func expectMetadata(meta http.Header, metaType, key, value string) error {
+	if got := meta.Get(key); got != value {
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
+			"%s %q: got %q, expected %q",
+			metaType,
+			key,
+			got,
+			value,
+		))
+	}
+	return nil
+}
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+
+	checkMetadata bool
+}
+
+func (p pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	if err := expectClientHeader(p.checkMetadata, req); err != nil {
+		return nil, err
+	}
+	res := connect.NewResponse(&pingv1.PingResponse{
+		Number: req.Msg.Number,
+		Text:   req.Msg.Text,
+	})
+	res.Header().Set(handlerHeader, headerValue)
+	res.Trailer().Set(handlerTrailer, trailerValue)
+	return res, nil
+}
+
+func (p pingServer) Fail(ctx context.Context, req *connect.Request[pingv1.FailRequest]) (*connect.Response[pingv1.FailResponse], error) {
+	if err := expectClientHeader(p.checkMetadata, req); err != nil {
+		return nil, err
+	}
+	err := connect.NewError(connect.Code(req.Msg.Code), errors.New(errorMessage))
+	err.Header().Set(handlerHeader, headerValue)
+	err.Trailer().Set(handlerTrailer, trailerValue)
+	return nil, err
+}
+
+func (p pingServer) Sum(
+	ctx context.Context,
+	stream *connect.ClientStream[pingv1.SumRequest, pingv1.SumResponse],
+) error {
+	if p.checkMetadata {
+		if err := expectMetadata(stream.RequestHeader(), "header", clientHeader, headerValue); err != nil {
+			return err
+		}
+	}
+	var sum int64
+	for stream.Receive() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		sum += stream.Msg().Number
+	}
+	if stream.Err() != nil {
+		return stream.Err()
+	}
+	response := connect.NewResponse(&pingv1.SumResponse{Sum: sum})
+	response.Header().Set(handlerHeader, headerValue)
+	response.Trailer().Set(handlerTrailer, trailerValue)
+	return stream.SendAndClose(response)
+}
+
+func (p pingServer) CountUp(
+	ctx context.Context,
+	req *connect.Request[pingv1.CountUpRequest],
+	stream *connect.ServerStream[pingv1.CountUpResponse],
+) error {
+	if err := expectClientHeader(p.checkMetadata, req); err != nil {
+		return err
+	}
+	if req.Msg.Number <= 0 {
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
+			"number must be positive: got %v",
+			req.Msg.Number,
+		))
+	}
+	stream.ResponseHeader().Set(handlerHeader, headerValue)
+	stream.ResponseTrailer().Set(handlerTrailer, trailerValue)
+	for i := int64(1); i <= req.Msg.Number; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := stream.Send(&pingv1.CountUpResponse{Number: i}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p pingServer) CumSum(
+	ctx context.Context,
+	stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse],
+) error {
+	var sum int64
+	if p.checkMetadata {
+		if err := expectMetadata(stream.RequestHeader(), "header", clientHeader, headerValue); err != nil {
+			return err
+		}
+	}
+	stream.ResponseHeader().Set(handlerHeader, headerValue)
+	stream.ResponseTrailer().Set(handlerTrailer, trailerValue)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		msg, err := stream.Receive()
+		if errors.Is(err, io.EOF) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		sum += msg.Number
+		if err := stream.Send(&pingv1.CumSumResponse{Sum: sum}); err != nil {
+			return err
+		}
+	}
 }
