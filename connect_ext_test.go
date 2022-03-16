@@ -195,6 +195,45 @@ func TestServer(t *testing.T) {
 			assert.NotNil(t, err)
 			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
 		})
+		t.Run("cumsum_empty_stream", func(t *testing.T) {
+			stream := client.CumSum(context.Background())
+			if !expectSuccess { // server doesn't support HTTP/2
+				failHTTP2Support(t, stream)
+				return
+			}
+			assert.Nil(t, stream.CloseSend())
+			res, err := stream.Receive()
+			assert.Nil(t, res)
+			assert.True(t, strings.Contains(err.Error(),
+				fmt.Sprintf(
+					`header %q: got "", expected %q`,
+					clientHeader,
+					headerValue,
+				),
+			))
+		})
+		t.Run("cumsum_cancel_after_first_response", func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			stream := client.CumSum(ctx)
+			if !expectSuccess {
+				failHTTP2Support(t, stream)
+				return
+			}
+			var got []int64
+			err := stream.Send(&pingv1.CumSumRequest{Number: 42})
+			assert.Nil(t, err)
+			msg, err := stream.Receive()
+			assert.Nil(t, err)
+			got = append(got, msg.Sum)
+			cancel()
+			_, err = stream.Receive()
+			assert.True(t, strings.Contains(err.Error(),
+				fmt.Sprintf(
+					connect.CodeCanceled.String(),
+				),
+			))
+			assert.Equal(t, 1, len(got))
+		})
 	}
 	testErrors := func(t *testing.T, client pingv1connect.PingServiceClient) {
 		t.Run("errors", func(t *testing.T) {
