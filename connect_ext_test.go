@@ -206,6 +206,13 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.Equal(t, res.Header().Get(handlerHeader), headerValue)
 			assert.Equal(t, res.Trailer().Get(handlerTrailer), trailerValue)
 		})
+		t.Run("ping_error", func(t *testing.T) {
+			_, err := client.Ping(
+				context.Background(),
+				connect.NewRequest(&pingv1.PingRequest{}),
+			)
+			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
+		})
 	}
 	testSum := func(t *testing.T, client pingv1connect.PingServiceClient) {
 		t.Run("sum", func(t *testing.T) {
@@ -224,6 +231,12 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.Equal(t, res.Msg.Sum, expect)
 			assert.Equal(t, res.Header().Get(handlerHeader), headerValue)
 			assert.Equal(t, res.Trailer().Get(handlerTrailer), trailerValue)
+		})
+		t.Run("sum_error", func(t *testing.T) {
+			stream := client.Sum(context.Background())
+			assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
+			_, err := stream.CloseAndReceive()
+			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
 		})
 	}
 	testCountUp := func(t *testing.T, client pingv1connect.PingServiceClient) {
@@ -245,6 +258,21 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.Nil(t, stream.Close())
 			assert.Equal(t, got, expect)
 		})
+		t.Run("count_up_error", func(t *testing.T) {
+			stream, err := client.CountUp(
+				context.Background(),
+				connect.NewRequest(&pingv1.CountUpRequest{Number: 1}),
+			)
+			assert.Nil(t, err)
+			for stream.Receive() {
+				t.Fatalf("expected error, shouldn't receive any messages")
+			}
+			assert.Equal(
+				t,
+				connect.CodeOf(stream.Err()),
+				connect.CodeInvalidArgument,
+			)
+		})
 	}
 	testCumSum := func(t *testing.T, client pingv1connect.PingServiceClient, expectSuccess bool) {
 		t.Run("cumsum", func(t *testing.T) {
@@ -254,17 +282,7 @@ func TestServerProtoGRPC(t *testing.T) {
 			stream := client.CumSum(context.Background())
 			stream.RequestHeader().Set(clientHeader, headerValue)
 			if !expectSuccess { // server doesn't support HTTP/2
-				err := stream.Send(&pingv1.CumSumRequest{})
-				assert.Nil(t, err) // haven't gotten response back yet
-				assert.Nil(t, stream.CloseSend())
-				_, err = stream.Receive()
-				assert.NotNil(t, err) // should be 505
-				assert.True(
-					t,
-					strings.Contains(err.Error(), "HTTP status 505"),
-					assert.Sprintf("expected 505, got %v", err),
-				)
-				assert.Nil(t, stream.CloseReceive())
+				failNoHTTP2(t, stream)
 				return
 			}
 			var wg sync.WaitGroup
@@ -293,6 +311,19 @@ func TestServerProtoGRPC(t *testing.T) {
 			assert.Equal(t, got, expect)
 			assert.Equal(t, stream.ResponseHeader().Get(handlerHeader), headerValue)
 			assert.Equal(t, stream.ResponseTrailer().Get(handlerTrailer), trailerValue)
+		})
+		t.Run("cumsum_error", func(t *testing.T) {
+			stream := client.CumSum(context.Background())
+			if !expectSuccess {
+				failNoHTTP2(t, stream)
+				return
+			}
+			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 42}))
+			// We didn't send the headers the server expects, so we should now get an
+			// error.
+			_, err := stream.Receive()
+			assert.NotNil(t, err)
+			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
 		})
 	}
 	testErrors := func(t *testing.T, client pingv1connect.PingServiceClient) {
@@ -406,4 +437,18 @@ func TestHeaderBasic(t *testing.T) {
 	res, err := client.Ping(context.Background(), req)
 	assert.Nil(t, err)
 	assert.Equal(t, res.Header().Get(key), hval)
+}
+
+func failNoHTTP2(t testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]) {
+	err := stream.Send(&pingv1.CumSumRequest{})
+	assert.Nil(t, err) // haven't gotten response back yet
+	assert.Nil(t, stream.CloseSend())
+	_, err = stream.Receive()
+	assert.NotNil(t, err) // should be 505
+	assert.True(
+		t,
+		strings.Contains(err.Error(), "HTTP status 505"),
+		assert.Sprintf("expected 505, got %v", err),
+	)
+	assert.Nil(t, stream.CloseReceive())
 }
