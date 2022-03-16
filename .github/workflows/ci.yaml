@@ -1,11 +1,10 @@
 name: ci
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+    tags: ['v*']
   pull_request:
-    branches:
-      - main
+    branches: [main]
   schedule:
     - cron: '15 22 * * *'
 # Prevent writing to the repository using the CI token.
@@ -13,31 +12,32 @@ on:
 permissions: read-all
 jobs:
   ci:
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: [1.18.0-rc1]
-        os: [ubuntu-20.04]
-    runs-on: ${{ matrix.os }}
+        go-version: [1.18.x]
+        include:
+          - go: 1.18.x
+            latest: true
     steps:
       - name: Checkout Code
         uses: actions/checkout@v2
         with:
           fetch-depth: 1
       - name: Install Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v3
         with:
-          stable: '!contains(${{ matrix.go }}, "beta") && !contains(${{ matrix.go }}, "rc")'
           go-version: ${{ matrix.go-version }}
       - name: Cache
         uses: actions/cache@v2
         with:
-          path: |
-            ~/.cache/connect/${{ runner.os }}/x86_64/bin
-            ~/.cache/connect/${{ runner.os }}/x86_64/go/pkg/mod
-            ~/.cache/connect/${{ runner.os }}/x86_64/include
-            ~/.cache/connect/${{ runner.os }}/x86_64/versions
-          key: ${{ runner.os }}-connect-ci-${{ hashFiles('**/go.sum', 'make/**') }}
-          restore-keys: |
-            ${{ runner.os }}-connect-ci-
-      - name: Test & Lint
-        run: make ci
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-connect-ci-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-connect-ci-
+      - name: Test
+        run: make test
+      - name: Lint
+        # Often, lint & gofmt guidelines depend on the Go version. To prevent
+        # conflicting guidance, run only on the most recent supported version.
+        if: matrix.latest
+        run: make lint && make checkgenerate
