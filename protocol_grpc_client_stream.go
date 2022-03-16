@@ -105,18 +105,7 @@ func (cs *duplexClientStream) Trailer() http.Header {
 }
 
 func (cs *duplexClientStream) Send(message any) error {
-	// stream.makeRequest hands the read side of the pipe off to net/http and
-	// waits to establish the response stream. There's a small class of errors we
-	// can catch before writing to the request body, so we don't want to start
-	// writing to the stream until we're sure that we're actually waiting on the
-	// server. This makes user-visible behavior more predictable: for example, if
-	// they've configured the server's base URL as "hwws://acme.com", they'll
-	// always get an invalid URL error on their first attempt to send.
-	cs.prepareOnce.Do(func() {
-		requestPrepared := make(chan struct{})
-		go cs.makeRequest(requestPrepared)
-		<-requestPrepared
-	})
+	cs.prepareRequests()
 	// Calling Marshal writes data to the send stream. It's safe to do this while
 	// makeRequest is running, because we're writing to our side of the pipe
 	// (which is safe to do while net/http reads from the other side).
@@ -147,11 +136,7 @@ func (cs *duplexClientStream) CloseSend(_ error) error {
 	// In the case where Send was never called, we need to clear the responseReady
 	// channel since the client stream can still receive messages even if the send
 	// is closed.
-	cs.prepareOnce.Do(func() {
-		requestPrepared := make(chan struct{})
-		go cs.makeRequest(requestPrepared)
-		<-requestPrepared
-	})
+	cs.prepareRequests()
 	// The user calls CloseSend to indicate that they're done sending data. All
 	// we do here is write to the pipe and close it, so it's safe to do this
 	// while makeRequest is running. (This method takes an error to accommodate
@@ -244,6 +229,21 @@ func (cs *duplexClientStream) ResponseHeader() http.Header {
 func (cs *duplexClientStream) ResponseTrailer() http.Header {
 	<-cs.responseReady
 	return cs.response.Trailer
+}
+
+// stream.makeRequest hands the read side of the pipe off to net/http and
+// waits to establish the response stream. There's a small class of errors we
+// can catch before writing to the request body, so we don't want to start
+// writing to the stream until we're sure that we're actually waiting on the
+// server. This makes user-visible behavior more predictable: for example, if
+// they've configured the server's base URL as "hwws://acme.com", they'll
+// always get an invalid URL error on their first attempt to send.
+func (cs *duplexClientStream) prepareRequests() {
+	cs.prepareOnce.Do(func() {
+		requestPrepared := make(chan struct{})
+		go cs.makeRequest(requestPrepared)
+		<-requestPrepared
+	})
 }
 
 func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
