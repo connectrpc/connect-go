@@ -146,7 +146,12 @@ func (hr *handlerReceiver) Receive(message any) error {
 }
 
 func (hr *handlerReceiver) Close() error {
-	discard(hr.request.Body)
+	// We don't want to copy unread portions of the body to /dev/null here: if
+	// the client hasn't closed the request body, we'll block until the server
+	// timeout kicks in. This could happen because the client is malicious, but
+	// a well-intentioned client may just not expect the server to be returning
+	// an error for a streaming RPC. Better to accept that we can't always reuse
+	// TCP connections.
 	if err := hr.request.Body.Close(); err != nil {
 		if connectErr, ok := asError(err); ok {
 			return connectErr
