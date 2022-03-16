@@ -203,6 +203,7 @@ func TestServer(t *testing.T) {
 		})
 		t.Run("cumsum_empty_stream", func(t *testing.T) {
 			stream := client.CumSum(context.Background())
+			stream.RequestHeader().Set(clientHeader, headerValue)
 			if !expectSuccess { // server doesn't support HTTP/2
 				failNoHTTP2(t, stream)
 				return
@@ -210,18 +211,13 @@ func TestServer(t *testing.T) {
 			assert.Nil(t, stream.CloseSend())
 			res, err := stream.Receive()
 			assert.Nil(t, res)
-			assert.True(t, strings.Contains(err.Error(),
-				fmt.Sprintf(
-					`header %q: got "", expected %q`,
-					clientHeader,
-					headerValue,
-				),
-			))
+			assert.True(t, errors.Is(err, io.EOF))
 			assert.Nil(t, stream.CloseReceive()) // clean-up the stream
 		})
 		t.Run("cumsum_cancel_after_first_response", func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			stream := client.CumSum(ctx)
+			stream.RequestHeader().Set(clientHeader, headerValue)
 			if !expectSuccess {
 				failNoHTTP2(t, stream)
 				return
