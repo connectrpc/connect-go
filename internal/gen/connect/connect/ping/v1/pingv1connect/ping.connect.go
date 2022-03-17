@@ -34,8 +34,8 @@ import (
 // compiled into your binary.
 const _ = connect.IsAtLeastVersion0_0_1
 
-// Fully-qualified service names.
 const (
+	// PingServiceName is the fully-qualified name of the PingService service.
 	PingServiceName = "connect.ping.v1.PingService"
 )
 
