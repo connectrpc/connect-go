@@ -352,15 +352,21 @@ func (cs *duplexClientStream) setError(err error, isRequest bool) {
 	} else {
 		cs.responseErr = err
 	}
-	// The next call (reader.CloseWithError) also needs to acquire an internal
+	// The next call (cs.reader.Close) also needs to acquire an internal
 	// lock, so we want to scope errMu's usage narrowly and avoid defer.
 	cs.errMu.Unlock()
 
-	// The write end of the pipe will now return this error too. It's safe to
-	// call this method more than once and/or concurrently (calls after the first
-	// are no-ops), so it's okay for us to call this even though net/http
-	// sometimes closes the reader too.
-	cs.reader.CloseWithError(err)
+	// We've already hit an error, so we should stop writing to the request body.
+	// It's safe to call Close more than once and/or concurrently (calls after
+	// the first are no-ops), so it's okay for us to call this even though
+	// net/http sometimes closes the reader too. We do _not_ want to close the
+	// pipe with CloseWithError(err), because that will prevent errors returned
+	// from cs.marshaler.Marshal from going through the logic in
+	// improveMarshalerError and reduce determinism.
+	//
+	// It's safe to ignore the returned error here. Under the hood, Close calls
+	// CloseWithError, which is documented to always return nil.
+	_ = cs.reader.Close()
 }
 
 func (cs *duplexClientStream) getRequestError() error {
