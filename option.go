@@ -75,14 +75,6 @@ func WithHandlerOptions(options ...HandlerOption) HandlerOption {
 	return &handlerOptionsOption{options}
 }
 
-// WithRegistrar registers the handler with the supplied Registrar. The
-// Registrar can then be used with github.com/bufbuild/reflection to expose
-// type information for all the known services using gRPC's server reflection
-// protocol.
-func WithRegistrar(registrar *Registrar) HandlerOption {
-	return &registrarOption{Registrar: registrar}
-}
-
 // Option implements both ClientOption and HandlerOption, so it can be applied
 // both client-side and server-side.
 type Option interface {
@@ -312,12 +304,6 @@ func (o *compressMinBytesOption) applyToHandler(config *handlerConfiguration) {
 	config.CompressMinBytes = o.Min
 }
 
-type disableRegistrationOption struct{}
-
-func (o *disableRegistrationOption) applyToHandler(config *handlerConfiguration) {
-	config.DisableRegistration = true
-}
-
 type handlerOptionsOption struct {
 	options []HandlerOption
 }
@@ -387,14 +373,6 @@ func (o *readMaxBytesOption) applyToClient(config *clientConfiguration) {
 
 func (o *readMaxBytesOption) applyToHandler(config *handlerConfiguration) {
 	config.MaxRequestBytes = o.Max
-}
-
-type registrarOption struct {
-	Registrar *Registrar
-}
-
-func (o *registrarOption) applyToHandler(config *handlerConfiguration) {
-	config.Registrar = o.Registrar
 }
 
 type requestCompressionOption struct {

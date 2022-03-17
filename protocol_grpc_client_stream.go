@@ -74,11 +74,12 @@ type duplexClientStream struct {
 
 	// send: guarded by prepareOnce because we can't initialize this state until
 	// the first call to Send.
-	prepareOnce sync.Once
-	writer      *io.PipeWriter
-	marshaler   marshaler
-	header      http.Header
-	trailer     http.Header
+	prepareOnce     sync.Once
+	writer          *io.PipeWriter
+	marshaler       marshaler
+	sentAtLeastOnce bool
+	header          http.Header
+	trailer         http.Header
 
 	// receive goroutine
 	web              bool
@@ -88,8 +89,9 @@ type duplexClientStream struct {
 	unmarshaler      unmarshaler
 	compressionPools readOnlyCompressionPools
 
-	responseErrMu sync.Mutex
-	responseErr   error
+	errMu       sync.Mutex
+	requestErr  error
+	responseErr error
 }
 
 func (cs *duplexClientStream) Spec() Specification {
@@ -105,30 +107,14 @@ func (cs *duplexClientStream) Trailer() http.Header {
 }
 
 func (cs *duplexClientStream) Send(message any) error {
+	defer func() { cs.sentAtLeastOnce = true }()
 	cs.prepareRequests()
 	// Calling Marshal writes data to the send stream. It's safe to do this while
 	// makeRequest is running, because we're writing to our side of the pipe
 	// (which is safe to do while net/http reads from the other side).
 	if err := cs.marshaler.Marshal(message); err != nil {
-		if errors.Is(err, io.ErrClosedPipe) {
-			// net/http closed the request body, so it's sure that we can't send more
-			// data. In these cases, we expect a response from the server. Wait for
-			// that response so we can give the user a more informative error than
-			// "pipe closed".
-			<-cs.responseReady
-			if err := cs.getResponseError(); err != nil {
-				return err
-			}
-		}
-		// In this case, the read side of the pipe was closed with an explicit
-		// error (possibly sent by the server, possibly just io.EOF). The io.Pipe
-		// makes that error visible to us on the write side without any data races.
-		// We've already enriched the error with a status code, so we can just
-		// return it to the caller.
-		return err
+		return cs.improveMarshalerError(err)
 	}
-	// Marshal returns an *Error. To avoid returning a typed nil, use a literal
-	// nil here.
 	return nil
 }
 
@@ -153,7 +139,7 @@ func (cs *duplexClientStream) CloseSend(_ error) error {
 	if cs.web {
 		if err := cs.marshaler.MarshalWebTrailers(cs.trailer); err != nil {
 			_ = cs.writer.Close()
-			return err
+			return cs.improveMarshalerError(err)
 		}
 	}
 	if err := cs.writer.Close(); err != nil {
@@ -169,7 +155,7 @@ func (cs *duplexClientStream) Receive(message any) error {
 	// First, we wait until we've gotten the response headers and established the
 	// server-to-client side of the stream.
 	<-cs.responseReady
-	if err := cs.getResponseError(); err != nil {
+	if err := cs.getRequestOrResponseError(); err != nil {
 		// The stream is already closed or corrupted.
 		return err
 	}
@@ -196,6 +182,7 @@ func (cs *duplexClientStream) Receive(message any) error {
 			// means that we're _not_ getting a message. For users to realize that
 			// the stream has ended, Receive must return an error.
 			serverErr.header = cs.ResponseHeader()
+			serverErr.trailer = cs.response.Trailer
 			cs.setResponseError(serverErr)
 			return serverErr
 		}
@@ -261,7 +248,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 
 	req, err := http.NewRequestWithContext(cs.ctx, http.MethodPost, cs.url, cs.reader)
 	if err != nil {
-		cs.setResponseError(errorf(CodeUnknown, "construct *http.Request: %w", err))
+		cs.setRequestError(errorf(CodeUnknown, "construct *http.Request: %w", err))
 		close(prepared)
 		return
 	}
@@ -272,7 +259,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 
 	// Before we send off a request, check if we're already out of time.
 	if err := cs.ctx.Err(); err != nil {
-		cs.setResponseError(err)
+		cs.setRequestError(err)
 		close(prepared)
 		return
 	}
@@ -311,6 +298,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	// be in the headers.
 	if err := extractError(cs.protobuf, res.Header); err != nil {
 		err.header = res.Header
+		err.trailer = res.Trailer
 		cs.setResponseError(err)
 		return
 	}
@@ -326,29 +314,86 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	}
 }
 
+func (cs *duplexClientStream) improveMarshalerError(err error) error {
+	if !errors.Is(err, io.ErrClosedPipe) {
+		return err
+	}
+	// err is an io.ErrClosedPipe, which means that net/http closed the request
+	// body. It only does this when we can't send more data. In these cases, we
+	// expect a response from the server or some network error.
+	if !cs.sentAtLeastOnce {
+		// This is the first time we're marshaling data to the network. Because
+		// of the vagaries of goroutine scheduling, it's possible that we've
+		// already gotten a response from the server. However, user-visible
+		// behavior is more deterministic if we pretend that we're still waiting
+		// for the response and only return errors that were caught before we
+		// called HTTPClient.Do.
+		if requestErr := cs.getRequestError(); requestErr != nil {
+			return requestErr
+		}
+		return nil
+	}
+	// We've already sent at least one message to the server. Wait for a
+	// response so we can give the user a more informative error than "pipe
+	// closed".
+	<-cs.responseReady
+	if responseErr := cs.getRequestOrResponseError(); responseErr != nil {
+		return responseErr
+	}
+	// As a last resort, return the original error as-is. We shouldn't get here.
+	return err
+}
+
+func (cs *duplexClientStream) setRequestError(err error) {
+	cs.setError(err, true /* isRequest */)
+}
+
 func (cs *duplexClientStream) setResponseError(err error) {
+	cs.setError(err, false /* isRequest */)
+}
+
+func (cs *duplexClientStream) setError(err error, isRequest bool) {
 	// Normally, we can rely on our built-in middleware to add codes to
 	// context-related errors. However, errors set here are exposed on the
 	// io.Writer end of the pipe, where they'll likely be miscoded if they're not
 	// already wrapped.
 	err = wrapIfContextError(err)
 
-	cs.responseErrMu.Lock()
-	cs.responseErr = err
-	// The next call (reader.CloseWithError) also needs to acquire an internal
-	// lock, so we want to scope responseErrMu's usage narrowly and avoid defer.
-	cs.responseErrMu.Unlock()
+	cs.errMu.Lock()
+	if isRequest {
+		cs.requestErr = err
+	} else {
+		cs.responseErr = err
+	}
+	// The next call (cs.reader.Close) also needs to acquire an internal
+	// lock, so we want to scope errMu's usage narrowly and avoid defer.
+	cs.errMu.Unlock()
 
-	// The write end of the pipe will now return this error too. It's safe to
-	// call this method more than once and/or concurrently (calls after the first
-	// are no-ops), so it's okay for us to call this even though net/http
-	// sometimes closes the reader too.
-	cs.reader.CloseWithError(err)
+	// We've already hit an error, so we should stop writing to the request body.
+	// It's safe to call Close more than once and/or concurrently (calls after
+	// the first are no-ops), so it's okay for us to call this even though
+	// net/http sometimes closes the reader too. We do _not_ want to close the
+	// pipe with CloseWithError(err), because that will prevent errors returned
+	// from cs.marshaler.Marshal from going through the logic in
+	// improveMarshalerError and reduce determinism.
+	//
+	// It's safe to ignore the returned error here. Under the hood, Close calls
+	// CloseWithError, which is documented to always return nil.
+	_ = cs.reader.Close()
 }
 
-func (cs *duplexClientStream) getResponseError() error {
-	cs.responseErrMu.Lock()
-	defer cs.responseErrMu.Unlock()
+func (cs *duplexClientStream) getRequestError() error {
+	cs.errMu.Lock()
+	defer cs.errMu.Unlock()
+	return cs.requestErr
+}
+
+func (cs *duplexClientStream) getRequestOrResponseError() error {
+	cs.errMu.Lock()
+	defer cs.errMu.Unlock()
+	if cs.requestErr != nil {
+		return cs.requestErr
+	}
 	return cs.responseErr
 }
 
@@ -368,7 +413,6 @@ func extractError(protobuf Codec, trailer http.Header) *Error {
 	}
 	message := percentDecode(trailer.Get("Grpc-Message"))
 	retErr := NewError(Code(code), errors.New(message))
-	retErr.trailer = trailer
 
 	detailsBinaryEncoded := trailer.Get("Grpc-Status-Details-Bin")
 	if len(detailsBinaryEncoded) > 0 {
