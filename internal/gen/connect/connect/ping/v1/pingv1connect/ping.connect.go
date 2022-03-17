@@ -34,6 +34,11 @@ import (
 // compiled into your binary.
 const _ = connect.IsAtLeastVersion0_0_1
 
+const (
+	// PingServiceName is the fully-qualified name of the PingService service.
+	PingServiceName = "connect.ping.v1.PingService"
+)
+
 // PingServiceClient is a client for the connect.ping.v1.PingService service.
 type PingServiceClient interface {
 	// Ping sends a ping to the server to determine if it's reachable.

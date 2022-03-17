@@ -114,6 +114,7 @@ func generate(plugin *protogen.Plugin, file *protogen.File) {
 		)),
 	)
 	generatePreamble(g, file)
+	generateServiceNameConstants(g, file.Services)
 	for _, service := range file.Services {
 		generateService(g, file, service)
 	}
@@ -136,6 +137,18 @@ func generatePreamble(g *protogen.GeneratedFile, file *protogen.File) {
 		"compiled into your binary. You can fix the problem by either regenerating this code ",
 		"with an older version of connect or updating the connect version compiled into your binary.")
 	g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion0_0_1"))
+	g.P()
+}
+
+func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protogen.Service) {
+	g.P("const (")
+	for _, service := range services {
+		constName := fmt.Sprintf("%sName", service.Desc.Name())
+		wrapComments(g, constName, " is the fully-qualified name of the ",
+			service.Desc.Name(), " service.")
+		g.P(constName, ` = "`, service.Desc.FullName(), `"`)
+	}
+	g.P(")")
 	g.P()
 }
 
