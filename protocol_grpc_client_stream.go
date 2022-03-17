@@ -74,12 +74,12 @@ type duplexClientStream struct {
 
 	// send: guarded by prepareOnce because we can't initialize this state until
 	// the first call to Send.
-	prepareOnce sync.Once
-	writer      *io.PipeWriter
-	marshaler   marshaler
-	numSent     int
-	header      http.Header
-	trailer     http.Header
+	prepareOnce     sync.Once
+	writer          *io.PipeWriter
+	marshaler       marshaler
+	sentAtLeastOnce bool
+	header          http.Header
+	trailer         http.Header
 
 	// receive goroutine
 	web              bool
@@ -107,7 +107,7 @@ func (cs *duplexClientStream) Trailer() http.Header {
 }
 
 func (cs *duplexClientStream) Send(message any) error {
-	defer func() { cs.numSent++ }()
+	defer func() { cs.sentAtLeastOnce = true }()
 	// stream.makeRequest hands the read side of the pipe off to net/http and
 	// waits to establish the response stream. There's a small class of errors we
 	// can catch before writing to the request body, so we don't want to start
@@ -308,7 +308,7 @@ func (cs *duplexClientStream) improveMarshalerError(err error) error {
 	// err is an io.ErrClosedPipe, which means that net/http closed the request
 	// body. It only does this when we can't send more data. In these cases, we
 	// expect a response from the server or some network error.
-	if cs.numSent == 0 {
+	if !cs.sentAtLeastOnce {
 		// This is the first time we're marshaling data to the network. Because
 		// of the vagaries of goroutine scheduling, it's possible that we've
 		// already gotten a response from the server. However, user-visible
