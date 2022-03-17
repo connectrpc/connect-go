@@ -21,42 +21,40 @@ import (
 )
 
 func TestParseProtobufURL(t *testing.T) {
-	assertParsedProtobufURL(
+	assertExtractedProtobufPath(
 		t,
+		// full URL
 		"https://api.foo.com/grpc/foo.user.v1.UserService/GetUser",
-		"foo.user.v1.UserService",
 		"/foo.user.v1.UserService/GetUser",
 	)
-	assertParsedProtobufURL(
+	assertExtractedProtobufPath(
 		t,
+		// rooted path
 		"/foo.user.v1.UserService/GetUser",
-		"foo.user.v1.UserService",
 		"/foo.user.v1.UserService/GetUser",
 	)
-	assertParsedProtobufURL(
+	assertExtractedProtobufPath(
 		t,
+		// path without leading or trailing slashes
 		"foo.user.v1.UserService/GetUser",
-		"foo.user.v1.UserService",
 		"/foo.user.v1.UserService/GetUser",
 	)
-	assertParsedProtobufURL(t, "", "", "/")
-	assertParsedProtobufURL(t, "//", "", "/")
-	assertParsedProtobufURL(
+	assertExtractedProtobufPath(
 		t,
+		// path with trailing slash
 		"/foo.user.v1.UserService.GetUser/",
-		"foo.user.v1.UserService.GetUser",
 		"/foo.user.v1.UserService.GetUser",
 	)
+	// edge cases
+	assertExtractedProtobufPath(t, "", "/")
+	assertExtractedProtobufPath(t, "//", "/")
 }
 
-func assertParsedProtobufURL(t testing.TB, inputURL, expectService, expectPath string) {
+func assertExtractedProtobufPath(t testing.TB, inputURL, expectPath string) {
 	t.Helper()
 	assert.Equal(
 		t,
-		parseProtobufURL(inputURL),
-		&parsedProtobufURL{
-			FullyQualifiedServiceName: expectService,
-			ProtoPath:                 expectPath,
-		},
+		extractProtobufPath(inputURL),
+		expectPath,
 	)
 }

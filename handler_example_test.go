@@ -45,20 +45,17 @@ func Example_handler() {
 	// The business logic here is trivial, but the rest of the example is meant
 	// to be somewhat realistic. This server has basic timeouts configured, and
 	// it also exposes gRPC's server reflection and health check APIs.
-	reg := connect.NewRegistrar()            // for gRPC reflection
-	checker := connect.NewHealthChecker(reg) // basic health checks
 
-	// The generated code produces plain net/http Handlers, so they're compatible
-	// with most Go HTTP routers and middleware (for example, net/http's
-	// StripPrefix).
+	// protoc-gen-connect-go generates constructors that return plain net/http
+	// Handlers, so they're compatible with most Go HTTP routers and middleware
+	// (for example, net/http's StripPrefix).
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(
 		&ExamplePingServer{},                // our business logic
-		connect.WithRegistrar(reg),          // register the ping service's types
 		connect.WithReadMaxBytes(1024*1024), // limit request size
 	))
-	mux.Handle(connect.NewReflectionHandler(reg)) // server reflection
-	mux.Handle(connect.NewHealthHandler(checker)) // health checks
+	// You can serve gRPC's health and server reflection APIs using
+	// github.com/bufbuild/connect-ecosystem-go.
 
 	// Timeouts, connection handling, TLS configuration, and other low-level
 	// transport details are handled by net/http. Everything you already know (or

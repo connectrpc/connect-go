@@ -242,22 +242,20 @@ func (h *Handler) failNegotiation(w http.ResponseWriter, code int) {
 }
 
 type handlerConfiguration struct {
-	CompressionPools    map[string]compressionPool
-	Codecs              map[string]Codec
-	MaxRequestBytes     int64
-	CompressMinBytes    int
-	Registrar           *Registrar
-	Interceptor         Interceptor
-	Procedure           string
-	DisableRegistration bool
-	HandleGRPC          bool
-	HandleGRPCWeb       bool
+	CompressionPools map[string]compressionPool
+	Codecs           map[string]Codec
+	MaxRequestBytes  int64
+	CompressMinBytes int
+	Interceptor      Interceptor
+	Procedure        string
+	HandleGRPC       bool
+	HandleGRPCWeb    bool
 }
 
 func newHandlerConfiguration(procedure string, options []HandlerOption) *handlerConfiguration {
-	parsedURL := parseProtobufURL(procedure)
+	protoPath := extractProtobufPath(procedure)
 	config := handlerConfiguration{
-		Procedure:        parsedURL.ProtoPath,
+		Procedure:        protoPath,
 		CompressionPools: make(map[string]compressionPool),
 		Codecs:           make(map[string]Codec),
 		HandleGRPC:       true,
@@ -268,11 +266,6 @@ func newHandlerConfiguration(procedure string, options []HandlerOption) *handler
 	WithGzip().applyToHandler(&config)
 	for _, opt := range options {
 		opt.applyToHandler(&config)
-	}
-	if reg := config.Registrar; reg != nil && !config.DisableRegistration {
-		if parsedURL.FullyQualifiedServiceName != "" {
-			reg.register(parsedURL.FullyQualifiedServiceName)
-		}
 	}
 	return &config
 }
