@@ -213,7 +213,9 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, connectErr.Error(), "ResourceExhausted: "+errorMessage)
 			assert.Zero(t, connectErr.Details())
 			assert.Equal(t, connectErr.Header().Get(handlerHeader), headerValue)
-			assert.Equal(t, connectErr.Trailer().Get(handlerTrailer), trailerValue)
+			// Since there were no messages in the stream, the handler-set trailers
+			// were sent as HTTP headers.
+			assert.Equal(t, connectErr.Header().Get(handlerTrailer), trailerValue)
 		})
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) {

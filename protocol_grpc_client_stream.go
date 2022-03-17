@@ -184,6 +184,7 @@ func (cs *duplexClientStream) Receive(message any) error {
 			// means that we're _not_ getting a message. For users to realize that
 			// the stream has ended, Receive must return an error.
 			serverErr.header = cs.ResponseHeader()
+			serverErr.trailer = cs.response.Trailer
 			cs.setResponseError(serverErr)
 			return serverErr
 		}
@@ -284,6 +285,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	// be in the headers.
 	if err := extractError(cs.protobuf, res.Header); err != nil {
 		err.header = res.Header
+		err.trailer = res.Trailer
 		cs.setResponseError(err)
 		return
 	}
@@ -392,7 +394,6 @@ func extractError(protobuf Codec, trailer http.Header) *Error {
 	}
 	message := percentDecode(trailer.Get("Grpc-Message"))
 	retErr := NewError(Code(code), errors.New(message))
-	retErr.trailer = trailer
 
 	detailsBinaryEncoded := trailer.Get("Grpc-Status-Details-Bin")
 	if len(detailsBinaryEncoded) > 0 {
