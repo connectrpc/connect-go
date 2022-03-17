@@ -159,11 +159,6 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	w.Header()["Content-Type"] = []string{r.Header.Get("Content-Type")}
 	w.Header()["Grpc-Accept-Encoding"] = []string{g.compressionPools.CommaSeparatedNames()}
 	w.Header()["Grpc-Encoding"] = []string{responseCompression}
-	if !g.web {
-		// Every standard gRPC response will have these trailers, but gRPC-Web
-		// doesn't use HTTP trailers.
-		w.Header()["Trailer"] = []string{"Grpc-Status", "Grpc-Message", "Grpc-Status-Details-Bin"}
-	}
 
 	sender, receiver := g.wrapStream(newHandlerStream(
 		g.spec,
