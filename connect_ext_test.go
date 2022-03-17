@@ -208,6 +208,8 @@ func TestServer(t *testing.T) {
 				failNoHTTP2(t, stream)
 				return
 			}
+			// Deliberately closing with calling Send to test the behavior of Receive.
+			// This test case is based on the grpc interop tests.
 			assert.Nil(t, stream.CloseSend())
 			res, err := stream.Receive()
 			assert.Nil(t, res)
@@ -233,6 +235,18 @@ func TestServer(t *testing.T) {
 			_, err = stream.Receive()
 			assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
 			assert.Equal(t, got, expect)
+		})
+		t.Run("cumsum_cancel_before_send", func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			stream := client.CumSum(ctx)
+			stream.RequestHeader().Set(clientHeader, headerValue)
+			// Send once first, since `makeRequest` does check for context errors
+			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 8}))
+			cancel()
+			// On a subsequent send, ensure that we are still catching context cancellations without
+			// calling makeRequest.
+			err := stream.Send(&pingv1.CumSumRequest{Number: 19})
+			assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled, assert.Sprintf("%v", err))
 		})
 	}
 	testErrors := func(t *testing.T, client pingv1connect.PingServiceClient) {

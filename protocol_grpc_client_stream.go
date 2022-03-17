@@ -109,6 +109,11 @@ func (cs *duplexClientStream) Trailer() http.Header {
 func (cs *duplexClientStream) Send(message any) error {
 	defer func() { cs.sentAtLeastOnce = true }()
 	cs.prepareRequests()
+	// Before we receive the message, check if the context has been canceled.
+	if err := cs.ctx.Err(); err != nil {
+		cs.setResponseError(err)
+		return err
+	}
 	// Calling Marshal writes data to the send stream. It's safe to do this while
 	// makeRequest is running, because we're writing to our side of the pipe
 	// (which is safe to do while net/http reads from the other side).
@@ -119,9 +124,9 @@ func (cs *duplexClientStream) Send(message any) error {
 }
 
 func (cs *duplexClientStream) CloseSend(_ error) error {
-	// In the case where Send was never called, we need to clear the responseReady
-	// channel since the client stream can still receive messages even if the send
-	// is closed.
+	// Even if Send was never called, we need to make an HTTP request. This ensures
+	// that we've sent any headers to the server and that we got an HTTP response body
+	// from the server for Receive to unmarshal from if called.
 	cs.prepareRequests()
 	// The user calls CloseSend to indicate that they're done sending data. All
 	// we do here is write to the pipe and close it, so it's safe to do this
@@ -159,7 +164,7 @@ func (cs *duplexClientStream) Receive(message any) error {
 		// The stream is already closed or corrupted.
 		return err
 	}
-	// Before we receive the message, check if the context has been cancelled.
+	// Before we receive the message, check if the context has been canceled.
 	if err := cs.ctx.Err(); err != nil {
 		cs.setResponseError(err)
 		return err
