@@ -83,7 +83,7 @@ func (hs *handlerSender) Send(message any) error {
 		// our trailers by advertising them in the "Trailer" header.
 		//
 		// This doesn't apply to gRPC-Web, where we don't use HTTP trailers.
-		hs.writer.Header()["Trailer"] = []string{
+		hs.Header()["Trailer"] = []string{
 			"Grpc-Message",
 			"Grpc-Status",
 			"Grpc-Status-Details-Bin",
@@ -99,7 +99,8 @@ func (hs *handlerSender) Send(message any) error {
 func (hs *handlerSender) Close(err error) error {
 	defer hs.flush()
 	if connectErr, ok := asError(err); ok {
-		mergeHeaders(hs.Header(), connectErr.Header())
+		mergeHeaders(hs.Header(), connectErr.header)
+		mergeHeaders(hs.Trailer(), connectErr.trailer)
 	}
 	if !hs.web || !hs.wroteToBody {
 		// We're using standard gRPC and/or we haven't written any data to the
