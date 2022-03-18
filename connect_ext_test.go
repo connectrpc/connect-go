@@ -106,6 +106,9 @@ func TestServer(t *testing.T) {
 			stream := client.Sum(context.Background())
 			assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
 			_, err := stream.CloseAndReceive()
+			if err != nil {
+				assert.ErrorIs(t, err, connect.NewError(connect.CodeUnknown, io.EOF))
+			}
 			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
 		})
 		t.Run("sum_close_and_receive_without_send", func(t *testing.T) {
@@ -200,8 +203,9 @@ func TestServer(t *testing.T) {
 			// We didn't send the headers the server expects, so we should now get an
 			// error.
 			_, err := stream.Receive()
-			assert.NotNil(t, err)
-			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
+			if err != nil {
+				assert.ErrorIs(t, err, connect.NewError(connect.CodeUnknown, io.EOF))
+			}
 		})
 		t.Run("cumsum_empty_stream", func(t *testing.T) {
 			stream := client.CumSum(context.Background())
@@ -371,7 +375,7 @@ func failNoHTTP2(t testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSum
 	assert.Nil(t, stream.CloseSend())
 	_, err = stream.Receive()
 	assert.NotNil(t, err) // should be 505
-	assert.True(
+	assert.Equal(
 		t,
 		strings.Contains(err.Error(), "HTTP status 505"),
 		assert.Sprintf("expected 505, got %v", err),
