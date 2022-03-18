@@ -104,11 +104,11 @@ func TestServer(t *testing.T) {
 		})
 		t.Run("sum_error", func(t *testing.T) {
 			stream := client.Sum(context.Background())
-			assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
-			_, err := stream.CloseAndReceive()
+			err := stream.Send(&pingv1.SumRequest{Number: 1})
 			if err != nil {
 				assert.ErrorIs(t, err, connect.NewError(connect.CodeUnknown, io.EOF))
 			}
+			_, err = stream.CloseAndReceive()
 			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
 		})
 		t.Run("sum_close_and_receive_without_send", func(t *testing.T) {
@@ -199,13 +199,13 @@ func TestServer(t *testing.T) {
 				failNoHTTP2(t, stream)
 				return
 			}
-			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 42}))
+			if err := stream.Send(&pingv1.CumSumRequest{Number: 42}); err != nil {
+				assert.ErrorIs(t, err, connect.NewError(connect.CodeUnknown, io.EOF))
+			}
 			// We didn't send the headers the server expects, so we should now get an
 			// error.
 			_, err := stream.Receive()
-			if err != nil {
-				assert.ErrorIs(t, err, connect.NewError(connect.CodeUnknown, io.EOF))
-			}
+			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
 		})
 		t.Run("cumsum_empty_stream", func(t *testing.T) {
 			stream := client.CumSum(context.Background())
@@ -232,8 +232,9 @@ func TestServer(t *testing.T) {
 			}
 			var got []int64
 			expect := []int64{42}
-			err := stream.Send(&pingv1.CumSumRequest{Number: 42})
-			assert.Nil(t, err)
+			if err := stream.Send(&pingv1.CumSumRequest{Number: 42}); err != nil {
+				assert.ErrorIs(t, err, connect.NewError(connect.CodeUnknown, io.EOF))
+			}
 			msg, err := stream.Receive()
 			assert.Nil(t, err)
 			got = append(got, msg.Sum)
@@ -370,10 +371,11 @@ func TestHeaderBasic(t *testing.T) {
 }
 
 func failNoHTTP2(t testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]) {
-	err := stream.Send(&pingv1.CumSumRequest{})
-	assert.Nil(t, err) // haven't gotten response back yet
+	if err := stream.Send(&pingv1.CumSumRequest{}); err != nil {
+		assert.ErrorIs(t, err, connect.NewError(connect.CodeUnknown, io.EOF))
+	}
 	assert.Nil(t, stream.CloseSend())
-	_, err = stream.Receive()
+	_, err := stream.Receive()
 	assert.NotNil(t, err) // should be 505
 	assert.True(
 		t,

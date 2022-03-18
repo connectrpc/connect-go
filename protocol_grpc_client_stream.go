@@ -270,6 +270,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	// At this point, we've caught all the errors we can - it's time to send data
 	// to the server. Unblock Send.
 	close(prepared)
+
 	// Once we send a message to the server, they send a message back and
 	// establish the receive side of the stream.
 	res, err := cs.httpClient.Do(req)
