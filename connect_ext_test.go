@@ -110,9 +110,11 @@ func TestServer(t *testing.T) {
 		})
 		t.Run("sum_close_and_receive_without_send", func(t *testing.T) {
 			stream := client.Sum(context.Background())
-			res, err := stream.CloseAndReceive()
-			assert.Nil(t, res)
-			assert.NotNil(t, err)
+			stream.RequestHeader().Set(clientHeader, headerValue)
+			got, err := stream.CloseAndReceive()
+			assert.Nil(t, err)
+			assert.Equal(t, got.Msg, &pingv1.SumResponse{}) // receive header only stream
+			assert.Equal(t, got.Header().Get(handlerHeader), headerValue)
 		})
 	}
 	testCountUp := func(t *testing.T, client pingv1connect.PingServiceClient) {
