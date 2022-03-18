@@ -116,7 +116,7 @@ func TestServer(t *testing.T) {
 			stream.RequestHeader().Set(clientHeader, headerValue)
 			got, err := stream.CloseAndReceive()
 			assert.Nil(t, err)
-			assert.Zero(t, *got.Msg) // receive header only stream
+			assert.Equal(t, got.Msg, &pingv1.SumResponse{}) // receive header only stream
 			assert.Equal(t, got.Header().Get(handlerHeader), headerValue)
 		})
 	}
@@ -229,6 +229,7 @@ func TestServer(t *testing.T) {
 			stream.RequestHeader().Set(clientHeader, headerValue)
 			if !expectSuccess { // server doesn't support HTTP/2
 				failNoHTTP2(t, stream)
+				cancel()
 				return
 			}
 			var got []int64
