@@ -16,6 +16,8 @@ package connect
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 )
 
@@ -62,7 +64,10 @@ func NewClient[Req, Res any](
 	unarySpec := config.newSpecification(StreamTypeUnary)
 	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
 		sender, receiver := protocolClient.NewStream(ctx, unarySpec, request.Header())
-		if err := sender.Send(request.Any()); err != nil {
+		// Send always returns an io.EOF unless the error is from the client-side.
+		// We want the user to continue to call Receive in those cases to get the
+		// full error from the server-side.
+		if err := sender.Send(request.Any()); err != nil && !errors.Is(err, io.EOF) {
 			_ = sender.Close(err)
 			_ = receiver.Close()
 			return nil, err
@@ -124,7 +129,10 @@ func (c *Client[Req, Res]) CallServerStream(
 ) (*ServerStreamForClient[Res], error) {
 	sender, receiver := c.newStream(ctx, StreamTypeServer)
 	mergeHeaders(sender.Header(), req.header)
-	if err := sender.Send(req.Msg); err != nil {
+	// Send always returns an io.EOF unless the error is from the client-side.
+	// We want the user to continue to call Receive in those cases to get the
+	// full error from the server-side.
+	if err := sender.Send(req.Msg); err != nil && !errors.Is(err, io.EOF) {
 		_ = sender.Close(err)
 		_ = receiver.Close()
 		return nil, err

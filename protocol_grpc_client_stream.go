@@ -74,12 +74,11 @@ type duplexClientStream struct {
 
 	// send: guarded by prepareOnce because we can't initialize this state until
 	// the first call to Send.
-	prepareOnce     sync.Once
-	writer          *io.PipeWriter
-	marshaler       marshaler
-	sentAtLeastOnce bool
-	header          http.Header
-	trailer         http.Header
+	prepareOnce sync.Once
+	writer      *io.PipeWriter
+	marshaler   marshaler
+	header      http.Header
+	trailer     http.Header
 
 	// receive goroutine
 	web              bool
@@ -107,29 +106,31 @@ func (cs *duplexClientStream) Trailer() http.Header {
 }
 
 func (cs *duplexClientStream) Send(message any) error {
-	defer func() { cs.sentAtLeastOnce = true }()
-	// stream.makeRequest hands the read side of the pipe off to net/http and
-	// waits to establish the response stream. There's a small class of errors we
-	// can catch before writing to the request body, so we don't want to start
-	// writing to the stream until we're sure that we're actually waiting on the
-	// server. This makes user-visible behavior more predictable: for example, if
-	// they've configured the server's base URL as "hwws://acme.com", they'll
-	// always get an invalid URL error on their first attempt to send.
-	cs.prepareOnce.Do(func() {
-		requestPrepared := make(chan struct{})
-		go cs.makeRequest(requestPrepared)
-		<-requestPrepared
-	})
+	cs.prepareRequests()
+	// Before we receive the message, check if the context has been canceled.
+	if err := cs.ctx.Err(); err != nil {
+		cs.setResponseError(err)
+		return err
+	}
 	// Calling Marshal writes data to the send stream. It's safe to do this while
 	// makeRequest is running, because we're writing to our side of the pipe
 	// (which is safe to do while net/http reads from the other side).
 	if err := cs.marshaler.Marshal(message); err != nil {
-		return cs.improveMarshalerError(err)
+		if !errors.Is(err, io.ErrClosedPipe) {
+			return err
+		}
+		// In all other cases, we return a io.EOF, similar to gRPC and the user
+		// will get the state of the stream through Receive.
+		return NewError(CodeUnknown, io.EOF)
 	}
 	return nil
 }
 
 func (cs *duplexClientStream) CloseSend(_ error) error {
+	// Even if Send was never called, we need to make an HTTP request. This ensures
+	// that we've sent any headers to the server and that we got an HTTP response body
+	// from the server for Receive to unmarshal from if called.
+	cs.prepareRequests()
 	// The user calls CloseSend to indicate that they're done sending data. All
 	// we do here is write to the pipe and close it, so it's safe to do this
 	// while makeRequest is running. (This method takes an error to accommodate
@@ -145,8 +146,10 @@ func (cs *duplexClientStream) CloseSend(_ error) error {
 	// CloseSend automatically rather than requiring the user to do it.
 	if cs.web {
 		if err := cs.marshaler.MarshalWebTrailers(cs.trailer); err != nil {
-			_ = cs.writer.Close()
-			return cs.improveMarshalerError(err)
+			if !errors.Is(err, io.ErrClosedPipe) {
+				_ = cs.writer.Close()
+				return err
+			}
 		}
 	}
 	if err := cs.writer.Close(); err != nil {
@@ -164,6 +167,11 @@ func (cs *duplexClientStream) Receive(message any) error {
 	<-cs.responseReady
 	if err := cs.getRequestOrResponseError(); err != nil {
 		// The stream is already closed or corrupted.
+		return err
+	}
+	// Before we receive the message, check if the context has been canceled.
+	if err := cs.ctx.Err(); err != nil {
+		cs.setResponseError(err)
 		return err
 	}
 	// Consume one message from the response stream.
@@ -220,6 +228,21 @@ func (cs *duplexClientStream) ResponseTrailer() http.Header {
 	return cs.response.Trailer
 }
 
+// stream.makeRequest hands the read side of the pipe off to net/http and
+// waits to establish the response stream. There's a small class of errors we
+// can catch before writing to the request body, so we don't want to start
+// writing to the stream until we're sure that we're actually waiting on the
+// server. This makes user-visible behavior more predictable: for example, if
+// they've configured the server's base URL as "hwws://acme.com", they'll
+// always get an invalid URL error on their first attempt to send.
+func (cs *duplexClientStream) prepareRequests() {
+	cs.prepareOnce.Do(func() {
+		requestPrepared := make(chan struct{})
+		go cs.makeRequest(requestPrepared)
+		<-requestPrepared
+	})
+}
+
 func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	// This runs concurrently with Send and CloseSend. Receive and CloseReceive
 	// wait on cs.responseReady, so we can't race with them.
@@ -244,16 +267,10 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 		req.Trailer = cs.trailer
 	}
 
-	// Before we send off a request, check if we're already out of time.
-	if err := cs.ctx.Err(); err != nil {
-		cs.setRequestError(err)
-		close(prepared)
-		return
-	}
-
 	// At this point, we've caught all the errors we can - it's time to send data
 	// to the server. Unblock Send.
 	close(prepared)
+
 	// Once we send a message to the server, they send a message back and
 	// establish the receive side of the stream.
 	res, err := cs.httpClient.Do(req)
@@ -301,36 +318,6 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	}
 }
 
-func (cs *duplexClientStream) improveMarshalerError(err error) error {
-	if !errors.Is(err, io.ErrClosedPipe) {
-		return err
-	}
-	// err is an io.ErrClosedPipe, which means that net/http closed the request
-	// body. It only does this when we can't send more data. In these cases, we
-	// expect a response from the server or some network error.
-	if !cs.sentAtLeastOnce {
-		// This is the first time we're marshaling data to the network. Because
-		// of the vagaries of goroutine scheduling, it's possible that we've
-		// already gotten a response from the server. However, user-visible
-		// behavior is more deterministic if we pretend that we're still waiting
-		// for the response and only return errors that were caught before we
-		// called HTTPClient.Do.
-		if requestErr := cs.getRequestError(); requestErr != nil {
-			return requestErr
-		}
-		return nil
-	}
-	// We've already sent at least one message to the server. Wait for a
-	// response so we can give the user a more informative error than "pipe
-	// closed".
-	<-cs.responseReady
-	if responseErr := cs.getRequestOrResponseError(); responseErr != nil {
-		return responseErr
-	}
-	// As a last resort, return the original error as-is. We shouldn't get here.
-	return err
-}
-
 func (cs *duplexClientStream) setRequestError(err error) {
 	cs.setError(err, true /* isRequest */)
 }
@@ -359,10 +346,7 @@ func (cs *duplexClientStream) setError(err error, isRequest bool) {
 	// We've already hit an error, so we should stop writing to the request body.
 	// It's safe to call Close more than once and/or concurrently (calls after
 	// the first are no-ops), so it's okay for us to call this even though
-	// net/http sometimes closes the reader too. We do _not_ want to close the
-	// pipe with CloseWithError(err), because that will prevent errors returned
-	// from cs.marshaler.Marshal from going through the logic in
-	// improveMarshalerError and reduce determinism.
+	// net/http sometimes closes the reader too.
 	//
 	// It's safe to ignore the returned error here. Under the hood, Close calls
 	// CloseWithError, which is documented to always return nil.
