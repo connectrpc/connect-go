@@ -267,13 +267,6 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 		req.Trailer = cs.trailer
 	}
 
-	// Before we send off a request, check if we're already out of time.
-	if err := cs.ctx.Err(); err != nil {
-		cs.setRequestError(err)
-		close(prepared)
-		return
-	}
-
 	// At this point, we've caught all the errors we can - it's time to send data
 	// to the server. Unblock Send.
 	close(prepared)

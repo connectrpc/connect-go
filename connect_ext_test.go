@@ -116,7 +116,7 @@ func TestServer(t *testing.T) {
 			stream.RequestHeader().Set(clientHeader, headerValue)
 			got, err := stream.CloseAndReceive()
 			assert.Nil(t, err)
-			assert.Equal(t, got.Msg, &pingv1.SumResponse{}) // receive header only stream
+			assert.Zero(t, *got.Msg) // receive header only stream
 			assert.Equal(t, got.Header().Get(handlerHeader), headerValue)
 		})
 	}
@@ -375,7 +375,7 @@ func failNoHTTP2(t testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSum
 	assert.Nil(t, stream.CloseSend())
 	_, err = stream.Receive()
 	assert.NotNil(t, err) // should be 505
-	assert.Equal(
+	assert.True(
 		t,
 		strings.Contains(err.Error(), "HTTP status 505"),
 		assert.Sprintf("expected 505, got %v", err),
