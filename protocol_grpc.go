@@ -158,7 +158,9 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	// skip the normalization in Header.Set.
 	w.Header()["Content-Type"] = []string{r.Header.Get("Content-Type")}
 	w.Header()["Grpc-Accept-Encoding"] = []string{g.compressionPools.CommaSeparatedNames()}
-	w.Header()["Grpc-Encoding"] = []string{responseCompression}
+	if responseCompression != compressionIdentity {
+		w.Header()["Grpc-Encoding"] = []string{responseCompression}
+	}
 
 	sender, receiver := g.wrapStream(newHandlerStream(
 		g.spec,
