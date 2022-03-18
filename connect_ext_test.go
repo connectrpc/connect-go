@@ -452,9 +452,6 @@ func (p pingServer) Sum(
 	}
 	var sum int64
 	for stream.Receive() {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
 		sum += stream.Msg().Number
 	}
 	if stream.Err() != nil {
@@ -483,9 +480,6 @@ func (p pingServer) CountUp(
 	stream.ResponseHeader().Set(handlerHeader, headerValue)
 	stream.ResponseTrailer().Set(handlerTrailer, trailerValue)
 	for i := int64(1); i <= req.Msg.Number; i++ {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
 		if err := stream.Send(&pingv1.CountUpResponse{Number: i}); err != nil {
 			return err
 		}
@@ -506,9 +500,6 @@ func (p pingServer) CumSum(
 	stream.ResponseHeader().Set(handlerHeader, headerValue)
 	stream.ResponseTrailer().Set(handlerTrailer, trailerValue)
 	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
 		msg, err := stream.Receive()
 		if errors.Is(err, io.EOF) {
 			return nil
