@@ -76,19 +76,6 @@ var _ Sender = (*handlerSender)(nil)
 func (hs *handlerSender) Send(message any) error {
 	defer hs.flush()
 	hs.wroteToBody = true
-	if !hs.web {
-		// We're going to write body data, so we'll have to send gRPC's status
-		// information in HTTP trailers. Since we know the trailer keys ahead of
-		// time, we maximize the chance that any intervening proxies will support
-		// our trailers by advertising them in the "Trailer" header.
-		//
-		// This doesn't apply to gRPC-Web, where we don't use HTTP trailers.
-		hs.Header()["Trailer"] = []string{
-			"Grpc-Message",
-			"Grpc-Status",
-			"Grpc-Status-Details-Bin",
-		}
-	}
 	if err := hs.marshaler.Marshal(message); err != nil {
 		return err // already coded
 	}
