@@ -104,12 +104,11 @@ func TestServer(t *testing.T) {
 		})
 		t.Run("sum_error", func(t *testing.T) {
 			stream := client.Sum(context.Background())
-			err := stream.Send(&pingv1.SumRequest{Number: 1})
-			if err != nil {
+			if err := stream.Send(&pingv1.SumRequest{Number: 1}); err != nil {
 				assert.ErrorIs(t, err, io.EOF)
 				assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
 			}
-			_, err = stream.CloseAndReceive()
+			_, err := stream.CloseAndReceive()
 			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
 		})
 		t.Run("sum_close_and_receive_without_send", func(t *testing.T) {
@@ -250,11 +249,10 @@ func TestServer(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			stream := client.CumSum(ctx)
 			stream.RequestHeader().Set(clientHeader, headerValue)
-			// Send once first, since `makeRequest` does check for context errors
 			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 8}))
 			cancel()
-			// On a subsequent send, ensure that we are still catching context cancellations without
-			// calling makeRequest.
+			// On a subsequent send, ensure that we are still catching context
+			// cancellations.
 			err := stream.Send(&pingv1.CumSumRequest{Number: 19})
 			assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled, assert.Sprintf("%v", err))
 		})
