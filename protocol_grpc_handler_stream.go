@@ -89,31 +89,47 @@ func (hs *handlerSender) Close(err error) error {
 		mergeHeaders(hs.Header(), connectErr.header)
 		mergeHeaders(hs.Trailer(), connectErr.trailer)
 	}
-	if !hs.web || !hs.wroteToBody {
-		// We're using standard gRPC and/or we haven't written any data to the
-		// response body. In the latter case, we should send what gRPC calls a
-		// "trailers-only" response. Confusingly, gRPC's "trailers-only" response
-		// puts all the data in HTTP _headers_ (even for gRPC-Web).
-		for key, values := range hs.trailer {
-			if hs.wroteToBody {
-				// We're using standard gRPC, so we'll have to send this metadata as
-				// HTTP trailers. In net/http's ResponseWriter API, we do that by
-				// writing to the headers map with a special prefix.
-				key = http.TrailerPrefix + key
-			}
-			for _, value := range values {
-				hs.writer.Header().Add(key, value)
-			}
+	if !hs.wroteToBody {
+		// Regardless of whether we're using standard gRPC or gRPC-Web, we should
+		// send what gRPC calls a "trailers-only" response. Confusingly, gRPC's
+		// "trailers-only" response puts all the data in HTTP _headers_ (even for
+		// gRPC-Web).
+		mergeHeaders(hs.Header(), hs.Trailer())
+		return grpcErrorToTrailer(
+			hs.Header(),
+			false, // prefixTrailerKeys
+			hs.protobuf,
+			err,
+		)
+	}
+	if hs.web {
+		// We're using gRPC-Web and we can't send a trailers-only response, so we
+		// write trailers to the HTTP body.
+		if trailerErr := grpcErrorToTrailer(
+			hs.trailer,
+			false, // prefixTrailerKeys
+			hs.protobuf,
+			err,
+		); trailerErr != nil {
+			return trailerErr
 		}
-		return grpcErrorToTrailer(hs.writer.Header(), hs.protobuf, err)
+		return hs.marshaler.MarshalWebTrailers(hs.trailer)
 	}
-	if trailerErr := grpcErrorToTrailer(hs.trailer, hs.protobuf, err); trailerErr != nil {
-		return trailerErr
+	// We're using standard gRPC and we've already written to the body,
+	// so we send the remaining metadata as HTTP trailers. In
+	// net/http's ResponseWriter API, we do that by writing to the headers map
+	// with a special prefix.
+	for key, values := range hs.trailer {
+		for _, value := range values {
+			hs.writer.Header().Add(http.TrailerPrefix+key, value)
+		}
 	}
-	if marshalErr := hs.marshaler.MarshalWebTrailers(hs.trailer); marshalErr != nil {
-		return marshalErr
-	}
-	return nil
+	return grpcErrorToTrailer(
+		hs.writer.Header(),
+		true, // prefixTrailerKeys
+		hs.protobuf,
+		err,
+	)
 }
 
 func (hs *handlerSender) Spec() Specification {
