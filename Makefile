@@ -14,14 +14,6 @@ COPYRIGHT_YEARS := 2021-2022
 # from?
 MAKEGO_COMMIT := 383cdab9b837b1fba0883948ff54ed20eedbd611
 
-# External Go binaries used in testing, linting, or code generation. Add new
-# binaries by running `go get $YOUR_TOOL` in internal/tools and adding the
-# import path here.
-EXTERNAL_GO_TOOLS := \
-	github.com/bufbuild/buf/cmd/buf \
-	github.com/bufbuild/buf/private/pkg/licenseheader/cmd/license-header \
-	google.golang.org/protobuf/cmd/protoc-gen-go
-
 .PHONY: help
 help: ## Describe useful make targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-30s %s\n", $$1, $$2}'
@@ -71,7 +63,6 @@ generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/li
 .PHONY: upgrade
 upgrade: ## Upgrade dependencies
 	go get -u -t ./... && go mod tidy -v
-	cd internal/tools && go get -u -t . && go mod tidy -v
 
 .PHONY: checkgenerate
 checkgenerate: $(BIN)/checknodiffgenerated.bash
@@ -86,14 +77,21 @@ $(BIN)/protoc-gen-connect-go:
 	@mkdir -p $(@D)
 	$(GO) build -o $(@) ./cmd/protoc-gen-connect-go
 
+$(BIN)/buf: Makefile
+	@mkdir -p $(@D)
+	GOBIN=$(abspath $(@D)) $(GO) install github.com/bufbuild/buf/cmd/buf@v1.1.1
+
+$(BIN)/license-header: Makefile
+	@mkdir -p $(@D)
+	GOBIN=$(abspath $(@D)) $(GO) install \
+		  github.com/bufbuild/buf/private/pkg/licenseheader/cmd/license-header@v1.1.1
+
+$(BIN)/protoc-gen-go: Makefile
+	@mkdir -p $(@D)
+	GOBIN=$(abspath $(@D)) $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@v1.27.1
+
 $(BIN)/checknodiffgenerated.bash:
 	@mkdir -p $(@D)
 	curl -SsLo $(@) https://raw.githubusercontent.com/bufbuild/makego/$(MAKEGO_COMMIT)/make/go/scripts/checknodiffgenerated.bash
 	chmod u+x $(@)
 
-define install-go-bin
-$$(BIN)/$(notdir $1): internal/tools/go.mod
-	@mkdir -p $$(@D)
-	cd internal/tools && GOBIN=$$(PWD)/$$(BIN) $$(GO) install $1
-endef
-$(foreach gobin,$(EXTERNAL_GO_TOOLS),$(eval $(call install-go-bin,$(gobin))))
