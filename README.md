@@ -116,7 +116,9 @@ You can find production-ready examples of [servers][prod-server] and
 
 ## Status
 
-This is the earliest of early alphas: APIs *will* break before the first stable
+Connect is in _beta_: we use it internally, but expect the Go community to
+discover new patterns for working with generics in the coming months. We plan
+to tag a release candidate in July 2022 and stable v1 soon after the Go 1.19
 release.
 
 ## Support and Versioning
