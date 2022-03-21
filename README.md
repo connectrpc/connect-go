@@ -127,7 +127,6 @@ Connect supports:
 
 * The [two most recent major releases][go-support-policy] of Go, with a minimum
   of Go 1.18.
-* Version 3 of the protocol buffer language ([proto3][]).
 * [APIv2][] of protocol buffers in Go (`google.golang.org/protobuf`).
 
 Within those parameters, connect follows semantic versioning. We make no
