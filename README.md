@@ -128,11 +128,12 @@ Connect supports:
 * Version 3 of the protocol buffer language ([proto3][]).
 * [APIv2][] of protocol buffers in Go (`google.golang.org/protobuf`).
 
-Within those parameters, connect follows semantic versioning.
+Within those parameters, connect follows semantic versioning. We make no
+exceptions for deprecated or experimental APIs.
 
 ## Legal
 
-Offered under the [MIT license][license].
+Offered under the [Apache 2 license][license].
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
 [docs]: https://bufconnect.com
