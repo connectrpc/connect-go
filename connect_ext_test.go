@@ -274,13 +274,8 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, connectErr.Code(), connect.CodeResourceExhausted)
 			assert.Equal(t, connectErr.Error(), "ResourceExhausted: "+errorMessage)
 			assert.Zero(t, connectErr.Details())
-			assert.Equal(t, connectErr.Header().Get(handlerHeader), headerValue)
-			// FIXME: whether the metadata set by the handler is sent as HTTP headers
-			// or trailers is complex: it depends on the gRPC variant in use and
-			// whether or not any messages were sent on the stream. This isn't great,
-			// since changing protocols now requires code changes.
-			t.Skip("FIXME: address in next commit")
-			assert.Equal(t, connectErr.Trailer().Get(handlerTrailer), trailerValue)
+			assert.Equal(t, connectErr.Meta().Get(handlerHeader), headerValue)
+			assert.Equal(t, connectErr.Meta().Get(handlerTrailer), trailerValue)
 		})
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) {
@@ -438,8 +433,8 @@ func (p pingServer) Fail(ctx context.Context, req *connect.Request[pingv1.FailRe
 		return nil, err
 	}
 	err := connect.NewError(connect.Code(req.Msg.Code), errors.New(errorMessage))
-	err.Header().Set(handlerHeader, headerValue)
-	err.Trailer().Set(handlerTrailer, trailerValue)
+	err.Meta().Set(handlerHeader, headerValue)
+	err.Meta().Set(handlerTrailer, trailerValue)
 	return nil, err
 }
 

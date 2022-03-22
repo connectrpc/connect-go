@@ -191,8 +191,8 @@ func (cs *duplexClientStream) Receive(message any) error {
 			// This is expected from a protocol perspective, but receiving trailers
 			// means that we're _not_ getting a message. For users to realize that
 			// the stream has ended, Receive must return an error.
-			serverErr.header = cs.ResponseHeader()
-			serverErr.trailer = cs.response.Trailer
+			serverErr.meta = cs.ResponseHeader()
+			mergeHeaders(serverErr.meta, cs.response.Trailer)
 			cs.setResponseError(serverErr)
 			return serverErr
 		}
@@ -301,8 +301,8 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	// When there's no body, gRPC-Web servers will send error information in the
 	// HTTP headers.
 	if err := extractError(cs.protobuf, res.Header); cs.web && err != nil {
-		err.header = res.Header
-		err.trailer = res.Trailer
+		err.meta = res.Header
+		mergeHeaders(err.meta, res.Trailer)
 		cs.setResponseError(err)
 		return
 	}

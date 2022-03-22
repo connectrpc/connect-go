@@ -86,8 +86,9 @@ func (hs *handlerSender) Send(message any) error {
 func (hs *handlerSender) Close(err error) error {
 	defer hs.flush()
 	if connectErr, ok := asError(err); ok {
-		mergeHeaders(hs.Header(), connectErr.header)
-		mergeHeaders(hs.Trailer(), connectErr.trailer)
+		// For now, assume that error metadata should be sent as HTTP trailers.
+		// We'll handle exceptions below.
+		mergeHeaders(hs.Trailer(), connectErr.meta)
 	}
 	if hs.web && !hs.wroteToBody {
 		// Regardless of whether we're using standard gRPC or gRPC-Web, we should

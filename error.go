@@ -61,8 +61,7 @@ type Error struct {
 	code    Code
 	err     error
 	details []ErrorDetail
-	header  http.Header
-	trailer http.Header
+	meta    http.Header
 }
 
 // NewError annotates any Go error with a status code.
@@ -102,34 +101,19 @@ func (e *Error) AddDetail(d ErrorDetail) {
 	e.details = append(e.details, d)
 }
 
-// Header allows the error to carry additional metadata as HTTP headers.
+// Meta allows the error to carry additional information as key-value pairs.
 //
-// Unary and client streaming handlers may set headers freely. Server streaming
-// and bidirectional streaming handlers should use them only if no messages
-// have been sent to the client; when returning errors after sending one or
-// more messages, any headers are ignored.
+// Metadata written by handlers may be sent as HTTP headers, HTTP trailers, or
+// a block of in-body metadata, depending on the protocol in use and whether or
+// not the handler has already written messages to the stream.
 //
-// When clients receive errors, Header returns the HTTP response headers.
-func (e *Error) Header() http.Header {
-	if e.header == nil {
-		e.header = make(http.Header)
+// When clients receive errors, the metadata contains the union of the HTTP
+// headers, HTTP trailers, and in-body metadata, if any.
+func (e *Error) Meta() http.Header {
+	if e.meta == nil {
+		e.meta = make(http.Header)
 	}
-	return e.header
-}
-
-// Trailer allows the error to carry additional metadata as end-of-stream
-// trailers. The RPC protocol in use determines whether the trailers are
-// written to the network as HTTP trailers or a protocol-specific block of
-// metadata.
-//
-// Unary and streaming handlers may always attach custom trailers to errors.
-// When clients receive errors, Trailer returns the union of the HTTP response
-// trailers and protocol-specific trailers (if any).
-func (e *Error) Trailer() http.Header {
-	if e.trailer == nil {
-		e.trailer = make(http.Header)
-	}
-	return e.trailer
+	return e.meta
 }
 
 // errorf calls fmt.Errorf with the supplied template and arguments, then wraps
