@@ -300,11 +300,13 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	}
 	// When there's no body, gRPC-Web servers will send error information in the
 	// HTTP headers.
-	if err := extractError(cs.protobuf, res.Header); cs.web && err != nil {
-		err.meta = res.Header
-		mergeHeaders(err.meta, res.Trailer)
-		cs.setResponseError(err)
-		return
+	if cs.web {
+		if err := extractError(cs.protobuf, res.Header); err != nil {
+			err.meta = res.Header
+			mergeHeaders(err.meta, res.Trailer)
+			cs.setResponseError(err)
+			return
+		}
 	}
 	// Success! We got a response with valid headers and no error, so there's
 	// probably a message waiting in the stream.
