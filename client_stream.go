@@ -39,6 +39,10 @@ func (c *ClientStreamForClient[Req, Res]) RequestHeader() http.Header {
 
 // Send a message to the server. The first call to Send also sends the request
 // headers.
+//
+// If the server returns an error, Send returns an error that wraps io.EOF.
+// Clients should check for case using the standard library's errors.Is and
+// unmarshal the error using CloseAndReceive.
 func (c *ClientStreamForClient[Req, Res]) Send(msg *Req) error {
 	return c.sender.Send(msg)
 }
@@ -137,6 +141,10 @@ func (b *BidiStreamForClient[Req, Res]) RequestHeader() http.Header {
 
 // Send a message to the server. The first call to Send also sends the request
 // headers.
+//
+// If the server returns an error, Send returns an error that wraps io.EOF.
+// Clients should check for case using the standard library's errors.Is and
+// unmarshal the error using Receive.
 func (b *BidiStreamForClient[Req, Res]) Send(msg *Req) error {
 	return b.sender.Send(msg)
 }
@@ -146,8 +154,8 @@ func (b *BidiStreamForClient[Req, Res]) CloseSend() error {
 	return b.sender.Close(nil)
 }
 
-// Receive a message. When the server is done sending messages, Receive will
-// return an error that wraps io.EOF.
+// Receive a message. When the server is done sending messages and no other
+// errors have occurred, Receive will return an error that wraps io.EOF.
 func (b *BidiStreamForClient[Req, Res]) Receive() (*Res, error) {
 	var res Res
 	if err := b.receiver.Receive(&res); err != nil {
