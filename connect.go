@@ -43,7 +43,7 @@ const (
 //
 // Sender implementations provided by this module guarantee that all returned
 // errors can be cast to *Error using errors.As. The Close method of Sender
-// implementations provided by this package automatically adds the appropriate
+// implementations provided by this module automatically adds the appropriate
 // codes when passed context.DeadlineExceeded or context.Canceled.
 //
 // Like the standard library's http.ResponseWriter, both client- and
@@ -54,6 +54,12 @@ const (
 // trailers are written to the network. Clients should avoid sending trailers:
 // usage is nuanced, protocol-specific, and will likely create
 // incompatibilities with other gRPC implementations.
+//
+// Once servers return an error, they're not interested in receiving additional
+// messages and clients should stop sending them. Client-side Senders indicate
+// this by returning a wrapped io.EOF from Send. Clients should check for this
+// condition with the standard library's errors.Is and call the receiver's
+// Receive method to unmarshal the error.
 type Sender interface {
 	Send(any) error
 	Close(error) error
