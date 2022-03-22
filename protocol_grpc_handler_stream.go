@@ -89,11 +89,14 @@ func (hs *handlerSender) Close(err error) error {
 		mergeHeaders(hs.Header(), connectErr.header)
 		mergeHeaders(hs.Trailer(), connectErr.trailer)
 	}
-	if !hs.wroteToBody {
+	if hs.web && !hs.wroteToBody {
 		// Regardless of whether we're using standard gRPC or gRPC-Web, we should
-		// send what gRPC calls a "trailers-only" response. Confusingly, gRPC's
-		// "trailers-only" response puts all the data in HTTP _headers_ (even for
-		// gRPC-Web).
+		// send what gRPC calls a "trailers-only" response. Confusingly, gRPC-Web
+		// specifies that a "trailers-only" response puts all the data in HTTP
+		// _headers_. From https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md:
+		//
+		// "Trailers-only responses: no change to the gRPC protocol spec. Trailers
+		// may be sent together with response headers, with no message in the body."
 		mergeHeaders(hs.Header(), hs.Trailer())
 		return grpcErrorToTrailer(
 			hs.Header(),
