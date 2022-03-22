@@ -37,10 +37,8 @@ func TestErrorNilUnderlying(t *testing.T) {
 	assert.Nil(t, anyErr)
 	err.AddDetail(detail)
 	assert.Equal(t, len(err.Details()), 1)
-	err.Header().Set("foo", "bar")
-	assert.Equal(t, err.Header().Get("foo"), "bar")
-	err.Trailer().Set("baz", "quux")
-	assert.Equal(t, err.Trailer().Get("baz"), "quux")
+	err.Meta().Set("foo", "bar")
+	assert.Equal(t, err.Meta().Get("foo"), "bar")
 	assert.Equal(t, CodeOf(err), CodeUnknown)
 }
 
