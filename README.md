@@ -148,5 +148,4 @@ Offered under the [Apache 2 license][license].
 [license]: https://github.com/bufbuild/connect/blob/main/LICENSE.txt
 [prod-client]: https://pkg.go.dev/github.com/bufbuild/connect#example-Client
 [prod-server]: https://pkg.go.dev/github.com/bufbuild/connect#example-package
-[proto3]: https://cloud.google.com/apis/design/proto3
 [protobuf]: https://developers.google.com/protocol-buffers
