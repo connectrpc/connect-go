@@ -18,8 +18,6 @@ support gRPC-Web natively, so they can serve browser traffic without a
 translating proxy. Connect clients work with any gRPC or gRPC-Web server.
 
 Under the hood, Connect is just [Protocol Buffers][protobuf] and the standard
-Under the hood, Connect is just [protocol buffers][protobuf] and the standard
->>>>>>> 2c02f98 (Capitalize Connect in docs)
 library: no custom HTTP implementation, no new name resolution or load
 balancing APIs, and no surprises. Everything you already know about `net/http`
 still applies, and any package that works with an `http.Server`, `http.Client`,
