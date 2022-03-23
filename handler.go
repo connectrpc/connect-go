@@ -20,7 +20,7 @@ import (
 )
 
 // A Handler is the server-side implementation of a single RPC defined by a
-// protocol buffer service.
+// Protocol Buffers service.
 //
 // By default, Handlers support the gRPC and gRPC-Web protocols with the binary
 // protobuf and JSON codecs. They support gzip compression using the standard

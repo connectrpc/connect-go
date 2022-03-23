@@ -1,4 +1,4 @@
-connect
+Connect
 =======
 
 [![Build](https://github.com/bufbuild/connect/actions/workflows/ci.yml/badge.svg?event=push?branch=main)](https://github.com/bufbuild/connect/actions/workflows/ci.yml)
@@ -6,25 +6,25 @@ connect
 [![GoDoc](https://pkg.go.dev/badge/github.com/bufbuild/connect.svg)](https://pkg.go.dev/github.com/bufbuild/connect)
 
 Connect is a small framework for building HTTP APIs. You write a short API
-definition file and implement your application logic, and connect generates
+definition file and implement your application logic, and Connect generates
 code to handle marshaling, routing, error handling, and content-type
 negotiation. It also generates an idiomatic, type-safe client.
 
-Connect is wire-compatible with the [gRPC][grpc] protocol, including streaming.
+Connect is wire compatible with the [gRPC][grpc] protocol, including streaming.
 Connect servers interoperate seamlessly with generated clients in [more than a
-dozen languages][grpc-implementations], command-line tools like [grpcurl][],
+dozen languages][grpc-implementations], command-line tools like [grpcurl],
 and proxies like [Envoy][envoy] and [gRPC-Gateway][grpc-gateway]. They also
 support gRPC-Web natively, so they can serve browser traffic without a
 translating proxy. Connect clients work with any gRPC or gRPC-Web server.
 
-Under the hood, connect is just [protocol buffers][protobuf] and the standard
+Under the hood, Connect is just [Protocol Buffers][protobuf] and the standard
 library: no custom HTTP implementation, no new name resolution or load
 balancing APIs, and no surprises. Everything you already know about `net/http`
 still applies, and any package that works with an `http.Server`, `http.Client`,
-or `http.Handler` also works with connect.
+or `http.Handler` also works with Connect.
 
-For more on connect, including a walkthrough and a comparison to alternatives,
-see the [docs][].
+For more on Connect, including a walkthrough and a comparison to alternatives,
+see the [docs].
 
 ## A Small Example
 
@@ -127,9 +127,9 @@ Connect supports:
 
 * The [two most recent major releases][go-support-policy] of Go, with a minimum
   of Go 1.18.
-* [APIv2][] of protocol buffers in Go (`google.golang.org/protobuf`).
+* [APIv2] of Protocol Buffers in Go (`google.golang.org/protobuf`).
 
-Within those parameters, connect follows semantic versioning. We make no
+Within those parameters, Connect follows semantic versioning. We make no
 exceptions for deprecated or experimental APIs.
 
 ## Legal
