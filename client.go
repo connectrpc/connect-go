@@ -25,7 +25,7 @@ import (
 // Depending on the procedure's type, use the CallUnary, CallClientStream,
 // CallServerStream, or CallBidiStream method.
 //
-// By default, clients use the binary protobuf Codec, ask for gzipped
+// By default, clients use the binary Protobuf Codec, ask for gzipped
 // responses, and send uncompressed requests. They don't have a default
 // protocol; callers of NewClient or generated client constructors must
 // explicitly choose a protocol with either the WithGRPC or WithGRPCWeb

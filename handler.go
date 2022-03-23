@@ -23,7 +23,7 @@ import (
 // Protocol Buffers service.
 //
 // By default, Handlers support the gRPC and gRPC-Web protocols with the binary
-// protobuf and JSON codecs. They support gzip compression using the standard
+// Protobuf and JSON codecs. They support gzip compression using the standard
 // library's compress/gzip.
 type Handler struct {
 	spec             Specification

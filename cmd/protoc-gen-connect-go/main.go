@@ -187,7 +187,7 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 
 	// Client constructor.
 	wrapComments(g, names.ClientConstructor, " constructs a client for the ", service.Desc.FullName(),
-		" service. By default, it uses the binary protobuf Codec, ",
+		" service. By default, it uses the binary Protobuf Codec, ",
 		"asks for gzipped responses, and sends uncompressed requests. ",
 		"It doesn't have a default protocol; you must supply either the connect.WithGRPC() or ",
 		"connect.WithGRPCWeb() options.")
@@ -317,7 +317,7 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 		" It returns the path on which to mount the handler and the handler itself.")
 	g.P("//")
 	wrapComments(g, "By default, handlers support the gRPC and gRPC-Web protocols with ",
-		"the binary protobuf and JSON codecs.")
+		"the binary Protobuf and JSON codecs.")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)
