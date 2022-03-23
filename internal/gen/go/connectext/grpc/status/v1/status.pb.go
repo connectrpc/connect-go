@@ -18,7 +18,7 @@
 // 	protoc        (unknown)
 // source: connectext/grpc/status/v1/status.proto
 
-// This package is for internal use by connect, and provides no backward
+// This package is for internal use by Connect, and provides no backward
 // compatibility guarantees whatsoever.
 
 package statusv1
