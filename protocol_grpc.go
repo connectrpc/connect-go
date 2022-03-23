@@ -247,7 +247,7 @@ func (g *grpcClient) NewStream(
 	// side. Writes to pipeWriter will block until net/http pulls the data from pipeReader and
 	// puts it onto the network - there's no buffer between the two. (The two
 	// sides of the pipe are meant to be used concurrently.) Once the server gets
-	// the first protobuf message that we send, it'll send back headers and start
+	// the first Protobuf message that we send, it'll send back headers and start
 	// the response stream.
 	pipeReader, pipeWriter := io.Pipe()
 	duplex := &duplexClientStream{

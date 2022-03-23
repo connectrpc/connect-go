@@ -54,7 +54,7 @@ type PingServiceClient interface {
 }
 
 // NewPingServiceClient constructs a client for the connect.ping.v1.PingService service. By default,
-// it uses the binary protobuf Codec, asks for gzipped responses, and sends uncompressed requests.
+// it uses the binary Protobuf Codec, asks for gzipped responses, and sends uncompressed requests.
 // It doesn't have a default protocol; you must supply either the connect.WithGRPC() or
 // connect.WithGRPCWeb() options.
 //
@@ -162,7 +162,7 @@ type PingServiceHandler interface {
 // NewPingServiceHandler builds an HTTP handler from the service implementation. It returns the path
 // on which to mount the handler and the handler itself.
 //
-// By default, handlers support the gRPC and gRPC-Web protocols with the binary protobuf and JSON
+// By default, handlers support the gRPC and gRPC-Web protocols with the binary Protobuf and JSON
 // codecs.
 func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	mux := http.NewServeMux()

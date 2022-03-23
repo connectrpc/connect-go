@@ -24,14 +24,14 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// An ErrorDetail is a self-describing protobuf message attached to an *Error.
+// An ErrorDetail is a self-describing Protobuf message attached to an *Error.
 // Error details are sent over the network to clients, which can then work with
 // strongly-typed data rather than trying to parse a complex error message.
 //
-// The ErrorDetail interface is implemented by protobuf's Any type, provided in
+// The ErrorDetail interface is implemented by Protobuf's Any type, provided in
 // Go by the google.golang.org/protobuf/types/known/anypb package. The
 // google.golang.org/genproto/googleapis/rpc/errdetails package contains a
-// variety of protobuf messages commonly wrapped in anypb.Any and used as error
+// variety of Protobuf messages commonly wrapped in anypb.Any and used as error
 // details.
 type ErrorDetail interface {
 	proto.Message
@@ -41,7 +41,7 @@ type ErrorDetail interface {
 }
 
 // An Error captures three key pieces of information: a Code, an underlying Go
-// error, and an optional collection of arbitrary protobuf messages called
+// error, and an optional collection of arbitrary Protobuf messages called
 // "details" (more on those below). Servers send the code, the underlying
 // error's Error() output, and details over the wire to clients. Remember that
 // the underlying error's message will be sent to clients - take care not to
@@ -55,7 +55,7 @@ type ErrorDetail interface {
 // Error details were introduced before gRPC adopted a formal proposal process,
 // so they're not clearly documented anywhere and may differ slightly between
 // implementations. Roughly, they're an optional mechanism for servers,
-// middleware, and proxies to attach arbitrary protobuf messages to the error
+// middleware, and proxies to attach arbitrary Protobuf messages to the error
 // code and message.
 type Error struct {
 	code    Code
