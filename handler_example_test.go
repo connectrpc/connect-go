@@ -24,7 +24,7 @@ import (
 	pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
 )
 
-// ExamplePingServer implements some trivial business logic. The protobuf
+// ExamplePingServer implements some trivial business logic. The Protobuf
 // definition for this API is in proto/connect/ping/v1/ping.proto.
 type ExamplePingServer struct {
 	pingv1connect.UnimplementedPingServiceHandler

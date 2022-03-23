@@ -7,7 +7,7 @@ Connect
 
 Connect is a small framework for building HTTP APIs. You write a short API
 definition file and implement your application logic, and Connect generates
-code to handle marshaling, routing, error handling, and content-type
+code to handle marshaling, routing, error handling, and content type
 negotiation. It also generates an idiomatic, type-safe client.
 
 Connect is wire compatible with the [gRPC][grpc] protocol, including streaming.
@@ -26,9 +26,9 @@ or `http.Handler` also works with Connect.
 For more on Connect, including a walkthrough and a comparison to alternatives,
 see the [docs].
 
-## A Small Example
+## A small example
 
-Curious what all this looks like in practice? From a [protobuf
+Curious what all this looks like in practice? From a [Protobuf
 schema](internal/proto/connect/ping/v1/ping.proto), we generate [a small RPC
 package](internal/gen/connect/connect/ping/v1/pingv1connect/ping.connect.go). Using that
 package, we can build a server:
@@ -121,7 +121,7 @@ discover new patterns for working with generics in the coming months. We plan
 to tag a release candidate in July 2022 and stable v1 soon after the Go 1.19
 release.
 
-## Support and Versioning
+## Support and versioning
 
 Connect supports:
 

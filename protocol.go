@@ -96,7 +96,7 @@ type protocolClientParams struct {
 	HTTPClient       HTTPClient
 	URL              string
 
-	// The gRPC family of protocols always needs access to a protobuf codec to
+	// The gRPC family of protocols always needs access to a Protobuf codec to
 	// marshal and unmarshal errors.
 	Protobuf Codec
 }

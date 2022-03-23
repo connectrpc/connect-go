@@ -56,7 +56,7 @@ func (cr *clientReceiver) Spec() Specification  { return cr.stream.Spec() }
 func (cr *clientReceiver) Header() http.Header  { return cr.stream.ResponseHeader() }
 func (cr *clientReceiver) Trailer() http.Header { return cr.stream.ResponseTrailer() }
 
-// duplexClientStream is a bidirectional exchange of protobuf messages between
+// duplexClientStream is a bidirectional exchange of Protobuf messages between
 // the client and server. The request body is the stream from client to server,
 // and the response body is the reverse.
 //
@@ -371,8 +371,8 @@ func (cs *duplexClientStream) getRequestOrResponseError() error {
 }
 
 // The gRPC wire protocol specifies that errors should be serialized using the
-// binary protobuf format, even if the messages in the request/response stream
-// use a different codec. Consequently, this function needs a protobuf codec to
+// binary Protobuf format, even if the messages in the request/response stream
+// use a different codec. Consequently, this function needs a Protobuf codec to
 // unmarshal error information in the headers.
 func extractError(protobuf Codec, trailer http.Header) *Error {
 	codeHeader := trailer.Get("Grpc-Status")
@@ -400,7 +400,7 @@ func extractError(protobuf Codec, trailer http.Header) *Error {
 		for _, d := range status.Details {
 			retErr.details = append(retErr.details, d)
 		}
-		// Prefer the protobuf-encoded data to the headers (grpc-go does this too).
+		// Prefer the Protobuf-encoded data to the headers (grpc-go does this too).
 		retErr.code = Code(status.Code)
 		retErr.err = errors.New(status.Message)
 	}
