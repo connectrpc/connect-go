@@ -1,7 +1,7 @@
 Connect
 =======
 
-[![Build](https://github.com/bufbuild/connect/actions/workflows/ci.yaml/badge.svg?event=push?branch=main)](https://github.com/bufbuild/connect/actions/workflows/ci.yaml)
+[![Build](https://github.com/bufbuild/connect/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/bufbuild/connect/actions/workflows/ci.yaml)
 [![Report Card](https://goreportcard.com/badge/github.com/bufbuild/connect)](https://goreportcard.com/report/github.com/bufbuild/connect)
 [![GoDoc](https://pkg.go.dev/badge/github.com/bufbuild/connect.svg)](https://pkg.go.dev/github.com/bufbuild/connect)
 
