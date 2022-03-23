@@ -14,7 +14,7 @@
 
 syntax = "proto3";
 
-// This package is for internal use by connect, and provides no backward
+// This package is for internal use by Connect, and provides no backward
 // compatibility guarantees whatsoever.
 package grpc.status.v1;
 
