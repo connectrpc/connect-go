@@ -26,10 +26,10 @@ import (
 // For example, connect supports the gRPC protocol using this abstraction. Among
 // many other things, the protocol implementation is responsible for
 // translating timeouts from Go contexts to HTTP and vice versa. For gRPC, it
-// converts timeouts to and from strings (e.g., 10*time.Second <-> "10S"), and
-// puts those strings into the "Grpc-Timeout" HTTP header. Other protocols
-// might encode durations differently, put them into a different HTTP header,
-// or ignore them entirely.
+// converts timeouts to and from strings (for example, 10*time.Second <->
+// "10S"), and puts those strings into the "Grpc-Timeout" HTTP header. Other
+// protocols might encode durations differently, put them into a different HTTP
+// header, or ignore them entirely.
 //
 // We don't have any short-term plans to export this interface; it's just here
 // to separate the protocol-specific portions of connect from the
