@@ -193,7 +193,7 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 		"connect.WithGRPCWeb() options.")
 	g.P("//")
 	wrapComments(g, "The URL supplied here should be the base URL for the gRPC server ",
-		"(e.g., https://api.acme.com or https://acme.com/grpc).")
+		"(for example, http://api.acme.com or https://acme.com/grpc).")
 	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
 		g.P("//")
 		deprecated(g)

@@ -58,8 +58,8 @@ type PingServiceClient interface {
 // It doesn't have a default protocol; you must supply either the connect.WithGRPC() or
 // connect.WithGRPCWeb() options.
 //
-// The URL supplied here should be the base URL for the gRPC server (e.g., https://api.acme.com or
-// https://acme.com/grpc).
+// The URL supplied here should be the base URL for the gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
 func NewPingServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) (PingServiceClient, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	pingClient, err := connect.NewClient[v1.PingRequest, v1.PingResponse](
