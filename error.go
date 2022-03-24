@@ -124,9 +124,9 @@ func errorf(c Code, template string, args ...any) *Error {
 
 // asError uses errors.As to unwrap any error and look for a connect *Error.
 func asError(err error) (*Error, bool) {
-	var re *Error
-	ok := errors.As(err, &re)
-	return re, ok
+	var connectErr *Error
+	ok := errors.As(err, &connectErr)
+	return connectErr, ok
 }
 
 // wrapIfUncoded ensures that all errors are wrapped. It leaves already-wrapped
