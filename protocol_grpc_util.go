@@ -103,19 +103,13 @@ func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) error {
 		return statusErr
 	}
 	code := strconv.Itoa(int(status.Code))
-	var statusBinary []byte
-	if len(status.Details) > 0 {
-		bin, err := protobuf.Marshal(status)
-		if err != nil {
-			return errorf(CodeInternal, "couldn't marshal protobuf status: %w", err)
-		}
-		statusBinary = bin
+	bin, err := protobuf.Marshal(status)
+	if err != nil {
+		return errorf(CodeInternal, "couldn't marshal protobuf status: %w", err)
 	}
 	trailer.Set(statusKey, code)
 	trailer.Set(messageKey, percentEncode(status.Message))
-	if len(statusBinary) > 0 {
-		trailer.Set(detailsKey, EncodeBinaryHeader(statusBinary))
-	}
+	trailer.Set(detailsKey, EncodeBinaryHeader(bin))
 	return nil
 }
 
