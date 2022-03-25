@@ -47,11 +47,12 @@ lint: $(BIN)/gofmt $(BIN)/buf ## Lint Go and protobuf
 	$(BIN)/buf lint
 
 .PHONY: lintfix
-lintfix: $(BIN)/gofmt ## Automatically fix some lint errors
+lintfix: $(BIN)/gofmt $(BIN)/buf ## Automatically fix some lint errors
 	$(BIN)/gofmt -s -w .
+	$(BIN)/buf format -w .
 
 .PHONY: generate
-generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
+generate: lintfix $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
 	rm -rf internal/gen
 	PATH=$(BIN) $(BIN)/buf generate
 	@$(BIN)/license-header \
@@ -79,12 +80,12 @@ $(BIN)/protoc-gen-connect-go:
 
 $(BIN)/buf: Makefile
 	@mkdir -p $(@D)
-	GOBIN=$(abspath $(@D)) $(GO) install github.com/bufbuild/buf/cmd/buf@v1.1.1
+	GOBIN=$(abspath $(@D)) $(GO) install github.com/bufbuild/buf/cmd/buf@v1.2.1
 
 $(BIN)/license-header: Makefile
 	@mkdir -p $(@D)
 	GOBIN=$(abspath $(@D)) $(GO) install \
-		  github.com/bufbuild/buf/private/pkg/licenseheader/cmd/license-header@v1.1.1
+		  github.com/bufbuild/buf/private/pkg/licenseheader/cmd/license-header@v1.2.1
 
 $(BIN)/protoc-gen-go: Makefile
 	@mkdir -p $(@D)
