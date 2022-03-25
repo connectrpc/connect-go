@@ -298,7 +298,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 		))
 		return
 	}
-	// When there's no body, gRPC-Web servers will send error information in the
+	// When there's no body, gRPC-Web servers _may_ send error information in the
 	// HTTP headers.
 	if cs.web {
 		if err := extractError(cs.protobuf, res.Header); err != nil {

@@ -45,7 +45,8 @@ func newHandlerStream(
 		},
 		protobuf: protobuf,
 		writer:   w,
-		trailer:  make(http.Header, 3), // grpc-{status,message,status-details-bin}
+		header:   make(http.Header),
+		trailer:  make(http.Header),
 	}
 	receiver := &handlerReceiver{
 		spec: spec,
@@ -67,6 +68,7 @@ type handlerSender struct {
 	marshaler   marshaler
 	protobuf    Codec // for errors
 	writer      http.ResponseWriter
+	header      http.Header
 	trailer     http.Header
 	wroteToBody bool
 }
@@ -75,7 +77,10 @@ var _ Sender = (*handlerSender)(nil)
 
 func (hs *handlerSender) Send(message any) error {
 	defer hs.flush()
-	hs.wroteToBody = true
+	if !hs.wroteToBody {
+		mergeHeaders(hs.writer.Header(), hs.header)
+		hs.wroteToBody = true
+	}
 	if err := hs.marshaler.Marshal(message); err != nil {
 		return err // already coded
 	}
@@ -85,55 +90,41 @@ func (hs *handlerSender) Send(message any) error {
 
 func (hs *handlerSender) Close(err error) error {
 	defer hs.flush()
-	if connectErr, ok := asError(err); ok {
-		// For now, assume that error metadata should be sent as HTTP trailers.
-		// We'll handle exceptions below.
-		mergeHeaders(hs.Trailer(), connectErr.meta)
+	// If we haven't written the headers yet, do so.
+	if !hs.wroteToBody {
+		mergeHeaders(hs.writer.Header(), hs.header)
 	}
-	if hs.web && !hs.wroteToBody {
-		// Regardless of whether we're using standard gRPC or gRPC-Web, we should
-		// send what gRPC calls a "trailers-only" response. Confusingly, gRPC-Web
-		// specifies that a "trailers-only" response puts all the data in HTTP
-		// _headers_. From https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md:
-		//
-		// "Trailers-only responses: no change to the gRPC protocol spec. Trailers
-		// may be sent together with response headers, with no message in the body."
-		mergeHeaders(hs.Header(), hs.Trailer())
-		return grpcErrorToTrailer(
-			hs.Header(),
-			false, // prefixTrailerKeys
-			hs.protobuf,
-			err,
-		)
+	// gRPC always sends the error's code, message, details, and metadata as
+	// trailers. Future protocols may not do this, though, so we don't want to
+	// mutate the trailers map that the user sees.
+	mergedTrailers := make(http.Header, len(hs.trailer)+2) // always make space for status & message
+	mergeHeaders(mergedTrailers, hs.trailer)
+	if marshalErr := grpcErrorToTrailer(mergedTrailers, hs.protobuf, err); marshalErr != nil {
+		return marshalErr
 	}
 	if hs.web {
-		// We're using gRPC-Web and we can't send a trailers-only response, so we
-		// write trailers to the HTTP body.
-		if trailerErr := grpcErrorToTrailer(
-			hs.trailer,
-			false, // prefixTrailerKeys
-			hs.protobuf,
-			err,
-		); trailerErr != nil {
-			return trailerErr
-		}
-		return hs.marshaler.MarshalWebTrailers(hs.trailer)
+		// We're using gRPC-Web, so we write trailing metadata to the HTTP body.
+		//
+		// If we haven't written to the body, we're sending what gRPC calls a
+		// "trailers-only" response. Under those circumstances, the gRPC-Web spec
+		// says that implementations _may_ send trailing metadata as HTTP headers
+		// instead. We're not going to do that because Envoy, the reference
+		// implementation, doesn't. The gRPC-Web spec is explicitly a description
+		// of the reference implementations rather than a proper specification, so
+		// we should prioritize emulating Envoy.
+		return hs.marshaler.MarshalWebTrailers(mergedTrailers)
 	}
-	// We're using standard gRPC and we've already written to the body,
-	// so we send the remaining metadata as HTTP trailers. In
-	// net/http's ResponseWriter API, we do that by writing to the headers map
-	// with a special prefix.
-	for key, values := range hs.trailer {
+	// We're using standard gRPC. Even if we haven't written to the body and
+	// we're sending a "trailers-only" response, we must send trailing metadata
+	// as HTTP trailers. In net/http's ResponseWriter API, we do that by writing
+	// to the headers map with a special prefix. This is purely an implementation
+	// detail, so we should hide it and _not_ mutate the user-visible headers.
+	for key, values := range mergedTrailers {
 		for _, value := range values {
 			hs.writer.Header().Add(http.TrailerPrefix+key, value)
 		}
 	}
-	return grpcErrorToTrailer(
-		hs.writer.Header(),
-		true, // prefixTrailerKeys
-		hs.protobuf,
-		err,
-	)
+	return nil
 }
 
 func (hs *handlerSender) Spec() Specification {
@@ -141,7 +132,7 @@ func (hs *handlerSender) Spec() Specification {
 }
 
 func (hs *handlerSender) Header() http.Header {
-	return hs.writer.Header()
+	return hs.header
 }
 
 func (hs *handlerSender) Trailer() http.Header {
