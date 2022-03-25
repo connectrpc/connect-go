@@ -84,23 +84,19 @@ func contentTypeFromCodecName(web bool, name string) string {
 	return typeDefaultGRPCPrefix + name
 }
 
-func grpcErrorToTrailer(trailer http.Header, prefix bool, protobuf Codec, err error) error {
-	var (
+func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) error {
+	const (
 		statusKey  = "Grpc-Status"
 		messageKey = "Grpc-Message"
 		detailsKey = "Grpc-Status-Details-Bin"
 	)
-	if prefix {
-		statusKey = http.TrailerPrefix + statusKey
-		messageKey = http.TrailerPrefix + messageKey
-		detailsKey = http.TrailerPrefix + detailsKey
-	}
 	if err == nil {
 		trailer.Set(statusKey, "0") // zero is the gRPC OK status
 		trailer.Set(messageKey, "")
-		// We don't need to set grpc-status-details-bin on success (grpc-go doesn't
-		// either).
 		return nil
+	}
+	if connectErr, ok := asError(err); ok {
+		mergeHeaders(trailer, connectErr.meta)
 	}
 	status, statusErr := statusFromError(err)
 	if statusErr != nil {
@@ -109,8 +105,6 @@ func grpcErrorToTrailer(trailer http.Header, prefix bool, protobuf Codec, err er
 	code := strconv.Itoa(int(status.Code))
 	bin, err := protobuf.Marshal(status)
 	if err != nil {
-		trailer.Set(statusKey, strconv.Itoa(int(CodeInternal)))
-		trailer.Set(messageKey, percentEncode("error marshaling protobuf status with code "+code))
 		return errorf(CodeInternal, "couldn't marshal protobuf status: %w", err)
 	}
 	trailer.Set(statusKey, code)
