@@ -17,55 +17,54 @@ syntax = "proto3";
 package connect.ping.v1;
 
 message PingRequest {
-    int64 number = 1;
-    string text = 2;
+  int64 number = 1;
+  string text = 2;
 }
 
 message PingResponse {
-    int64 number = 1;
-    string text = 2;
+  int64 number = 1;
+  string text = 2;
 }
 
 message FailRequest {
-    int32 code = 1;
+  int32 code = 1;
 }
 
-message FailResponse {
-}
+message FailResponse {}
 
 message SumRequest {
-    int64 number = 1;
+  int64 number = 1;
 }
 
 message SumResponse {
-    int64 sum = 1;
+  int64 sum = 1;
 }
 
 message CountUpRequest {
-    int64 number = 1;
+  int64 number = 1;
 }
 
 message CountUpResponse {
-    int64 number = 1;
+  int64 number = 1;
 }
 
 message CumSumRequest {
-    int64 number = 1;
+  int64 number = 1;
 }
 
 message CumSumResponse {
-    int64 sum = 1;
+  int64 sum = 1;
 }
 
 service PingService {
-    // Ping sends a ping to the server to determine if it's reachable.
-    rpc Ping(PingRequest) returns (PingResponse) {}
-    // Fail always fails.
-    rpc Fail(FailRequest) returns (FailResponse) {}
-    // Sum calculates the sum of the numbers sent on the stream.
-    rpc Sum(stream SumRequest) returns (SumResponse) {}
-    // CountUp returns a stream of the numbers up to the given request.
-    rpc CountUp(CountUpRequest) returns (stream CountUpResponse) {}
-    // CumSum determines the cumulative sum of all the numbers sent on the stream.
-    rpc CumSum(stream CumSumRequest) returns (stream CumSumResponse) {}
+  // Ping sends a ping to the server to determine if it's reachable.
+  rpc Ping(PingRequest) returns (PingResponse) {}
+  // Fail always fails.
+  rpc Fail(FailRequest) returns (FailResponse) {}
+  // Sum calculates the sum of the numbers sent on the stream.
+  rpc Sum(stream SumRequest) returns (SumResponse) {}
+  // CountUp returns a stream of the numbers up to the given request.
+  rpc CountUp(CountUpRequest) returns (stream CountUpResponse) {}
+  // CumSum determines the cumulative sum of all the numbers sent on the stream.
+  rpc CumSum(stream CumSumRequest) returns (stream CumSumResponse) {}
 }

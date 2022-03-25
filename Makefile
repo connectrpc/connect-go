@@ -39,7 +39,8 @@ build: generate ## Build all packages
 
 .PHONY: lint
 lint: $(BIN)/gofmt $(BIN)/buf ## Lint Go and protobuf
-	test -z "$$(./$(BIN)/gofmt -s -l . | tee /dev/stderr)"
+	test -z "$$($(BIN)/gofmt -s -l . | tee /dev/stderr)"
+	test -z "$$($(BIN)/buf format -d . | tee /dev/stderr)"
 	@# TODO: replace vet with golangci-lint when it supports 1.18
 	@# Configure staticcheck to target the correct Go version and enable
 	@# ST1020, ST1021, and ST1022.
@@ -47,8 +48,9 @@ lint: $(BIN)/gofmt $(BIN)/buf ## Lint Go and protobuf
 	$(BIN)/buf lint
 
 .PHONY: lintfix
-lintfix: $(BIN)/gofmt ## Automatically fix some lint errors
+lintfix: $(BIN)/gofmt $(BIN)/buf ## Automatically fix some lint errors
 	$(BIN)/gofmt -s -w .
+	$(BIN)/buf format -w .
 
 .PHONY: generate
 generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
@@ -79,12 +81,12 @@ $(BIN)/protoc-gen-connect-go:
 
 $(BIN)/buf: Makefile
 	@mkdir -p $(@D)
-	GOBIN=$(abspath $(@D)) $(GO) install github.com/bufbuild/buf/cmd/buf@v1.1.1
+	GOBIN=$(abspath $(@D)) $(GO) install github.com/bufbuild/buf/cmd/buf@v1.2.1
 
 $(BIN)/license-header: Makefile
 	@mkdir -p $(@D)
 	GOBIN=$(abspath $(@D)) $(GO) install \
-		  github.com/bufbuild/buf/private/pkg/licenseheader/cmd/license-header@v1.1.1
+		  github.com/bufbuild/buf/private/pkg/licenseheader/cmd/license-header@v1.2.1
 
 $(BIN)/protoc-gen-go: Makefile
 	@mkdir -p $(@D)
