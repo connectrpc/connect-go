@@ -39,7 +39,8 @@ build: generate ## Build all packages
 
 .PHONY: lint
 lint: $(BIN)/gofmt $(BIN)/buf ## Lint Go and protobuf
-	test -z "$$(./$(BIN)/gofmt -s -l . | tee /dev/stderr)"
+	test -z "$$($(BIN)/gofmt -s -l . | tee /dev/stderr)"
+	test -z "$$($(BIN)/buf format -d . | tee /dev/stderr)"
 	@# TODO: replace vet with golangci-lint when it supports 1.18
 	@# Configure staticcheck to target the correct Go version and enable
 	@# ST1020, ST1021, and ST1022.
@@ -52,7 +53,7 @@ lintfix: $(BIN)/gofmt $(BIN)/buf ## Automatically fix some lint errors
 	$(BIN)/buf format -w .
 
 .PHONY: generate
-generate: lintfix $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
+generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
 	rm -rf internal/gen
 	PATH=$(BIN) $(BIN)/buf generate
 	@$(BIN)/license-header \
