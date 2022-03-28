@@ -74,5 +74,5 @@ func Example_handler() {
 	}
 	// You could also use golang.org/x/net/http2/h2c to serve gRPC requests
 	// without TLS.
-	srv.ListenAndServeTLS("testdata/server.crt", "testdata/server.key")
+	srv.ListenAndServeTLS("internal/testdata/server.crt", "internal/testdata/server.key")
 }
