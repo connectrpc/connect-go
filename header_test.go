@@ -21,7 +21,7 @@ import (
 	"testing/quick"
 	"unicode/utf8"
 
-	"github.com/bufbuild/connect/internal/assert"
+	"github.com/bufbuild/connect-go/internal/assert"
 )
 
 func TestBinaryEncodingQuick(t *testing.T) {
