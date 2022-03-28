@@ -6,13 +6,10 @@ SHELL := bash
 MAKEFLAGS += --warn-undefined-variables
 MAKEFLAGS += --no-builtin-rules
 MAKEFLAGS += --no-print-directory
-BIN=.tmp/bin
+BIN := .tmp/bin
+COPYRIGHT_YEARS := 2021-2022
 # Set to use a different compiler. For example, `GO=go1.18rc1 make test`.
 GO ?= go
-COPYRIGHT_YEARS := 2021-2022
-# Which commit of bufbuild/makego should we source checknodiffgenerated.bash
-# from?
-MAKEGO_COMMIT := 383cdab9b837b1fba0883948ff54ed20eedbd611
 
 .PHONY: help
 help: ## Describe useful make targets
@@ -22,7 +19,6 @@ help: ## Describe useful make targets
 all: ## Build, test, and lint (default)
 	$(MAKE) test
 	$(MAKE) lint
-	$(MAKE) checkgenerate
 
 .PHONY: clean
 clean: ## Delete intermediate build artifacts
@@ -71,8 +67,9 @@ upgrade: ## Upgrade dependencies
 	go get -u -t ./... && go mod tidy -v
 
 .PHONY: checkgenerate
-checkgenerate: $(BIN)/checknodiffgenerated.bash
-	$(BIN)/checknodiffgenerated.bash $(MAKE) generate
+checkgenerate:
+	@# Used in CI to verify that `make generate` doesn't produce a diff.
+	test -z "$$(git status --porcelain | tee /dev/stderr)"
 
 $(BIN)/gofmt:
 	@mkdir -p $(@D)
@@ -97,7 +94,3 @@ $(BIN)/protoc-gen-go: Makefile go.mod
 	@# The version of protoc-gen-go is determined by the version in go.mod
 	GOBIN=$(abspath $(@D)) $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go
 
-$(BIN)/checknodiffgenerated.bash:
-	@mkdir -p $(@D)
-	curl -SsLo $(@) https://raw.githubusercontent.com/bufbuild/makego/$(MAKEGO_COMMIT)/make/go/scripts/checknodiffgenerated.bash
-	chmod u+x $(@)

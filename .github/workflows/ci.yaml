@@ -36,9 +36,9 @@ jobs:
           key: ${{ runner.os }}-connect-ci-${{ hashFiles('**/go.sum') }}
           restore-keys: ${{ runner.os }}-connect-ci-
       - name: Test
-        run: make test
+        run: make test && make checkgenerate
       - name: Lint
         # Often, lint & gofmt guidelines depend on the Go version. To prevent
         # conflicting guidance, run only on the most recent supported version.
         if: matrix.latest
-        run: make lint && make checkgenerate
+        run: make lint
