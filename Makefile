@@ -90,7 +90,8 @@ $(BIN)/license-header: Makefile
 
 $(BIN)/protoc-gen-go: Makefile
 	@mkdir -p $(@D)
-	GOBIN=$(abspath $(@D)) $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28.0
+	@# The version of protoc-gen-go is determined by the version in go.mod
+	GOBIN=$(abspath $(@D)) $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go
 
 $(BIN)/checknodiffgenerated.bash:
 	@mkdir -p $(@D)
