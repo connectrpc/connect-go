@@ -55,7 +55,7 @@ func Example_handler() {
 		connect.WithReadMaxBytes(1024*1024), // limit request size
 	))
 	// You can serve gRPC's health and server reflection APIs using
-	// github.com/bufbuild/connect-go-ecosystem-go.
+	// github.com/bufbuild/connect-grpchealth-go and github.com/bufbuild/connect-grpcreflect-go.
 
 	// Timeouts, connection handling, TLS configuration, and other low-level
 	// transport details are handled by net/http. Everything you already know (or
