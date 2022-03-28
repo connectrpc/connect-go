@@ -25,6 +25,7 @@ import (
 )
 
 func TestBinaryEncodingQuick(t *testing.T) {
+	t.Parallel()
 	roundtrip := func(bs []byte) bool {
 		encoded := EncodeBinaryHeader(bs)
 		decoded, err := DecodeBinaryHeader(encoded)
@@ -40,6 +41,7 @@ func TestBinaryEncodingQuick(t *testing.T) {
 }
 
 func TestPercentEncodingQuick(t *testing.T) {
+	t.Parallel()
 	roundtrip := func(input string) bool {
 		if !utf8.ValidString(input) {
 			return true
@@ -54,6 +56,7 @@ func TestPercentEncodingQuick(t *testing.T) {
 }
 
 func TestPercentEncoding(t *testing.T) {
+	t.Parallel()
 	roundtrip := func(input string) {
 		assert.True(t, utf8.ValidString(input), assert.Sprintf("input invalid UTF-8"))
 		encoded := percentEncode(input)
@@ -69,6 +72,7 @@ func TestPercentEncoding(t *testing.T) {
 }
 
 func TestHeaderMerge(t *testing.T) {
+	t.Parallel()
 	header := http.Header{
 		"Foo": []string{"one"},
 	}

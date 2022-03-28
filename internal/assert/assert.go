@@ -30,119 +30,119 @@ import (
 )
 
 // Equal asserts that two values are equal.
-func Equal[T any](t testing.TB, got, want T, options ...Option) bool {
-	t.Helper()
+func Equal[T any](tb testing.TB, got, want T, options ...Option) bool {
+	tb.Helper()
 	if cmpEqual(got, want) {
 		return true
 	}
-	report(t, got, want, "assert.Equal", true /* showWant */, options...)
+	report(tb, got, want, "assert.Equal", true /* showWant */, options...)
 	return false
 }
 
 // NotEqual asserts that two values aren't equal.
-func NotEqual[T any](t testing.TB, got, want T, options ...Option) bool {
-	t.Helper()
+func NotEqual[T any](tb testing.TB, got, want T, options ...Option) bool {
+	tb.Helper()
 	if !cmpEqual(got, want) {
 		return true
 	}
-	report(t, got, want, "assert.NotEqual", true /* showWant */, options...)
+	report(tb, got, want, "assert.NotEqual", true /* showWant */, options...)
 	return false
 }
 
 // Nil asserts that the value is nil.
-func Nil(t testing.TB, got any, options ...Option) bool {
-	t.Helper()
+func Nil(tb testing.TB, got any, options ...Option) bool {
+	tb.Helper()
 	if isNil(got) {
 		return true
 	}
-	report(t, got, nil, "assert.Nil", false /* showWant */, options...)
+	report(tb, got, nil, "assert.Nil", false /* showWant */, options...)
 	return false
 }
 
 // NotNil asserts that the value isn't nil.
-func NotNil(t testing.TB, got any, options ...Option) bool {
-	t.Helper()
+func NotNil(tb testing.TB, got any, options ...Option) bool {
+	tb.Helper()
 	if !isNil(got) {
 		return true
 	}
-	report(t, got, nil, "assert.NotNil", false /* showWant */, options...)
+	report(tb, got, nil, "assert.NotNil", false /* showWant */, options...)
 	return false
 }
 
 // Zero asserts that the value is its type's zero value.
-func Zero[T any](t testing.TB, got T, options ...Option) bool {
-	t.Helper()
+func Zero[T any](tb testing.TB, got T, options ...Option) bool {
+	tb.Helper()
 	var want T
 	if cmpEqual(got, want) {
 		return true
 	}
-	report(t, got, want, fmt.Sprintf("assert.Zero (type %T)", got), false /* showWant */, options...)
+	report(tb, got, want, fmt.Sprintf("assert.Zero (type %T)", got), false /* showWant */, options...)
 	return false
 }
 
 // NotZero asserts that the value is non-zero.
-func NotZero[T any](t testing.TB, got T, options ...Option) bool {
-	t.Helper()
+func NotZero[T any](tb testing.TB, got T, options ...Option) bool {
+	tb.Helper()
 	var want T
 	if !cmpEqual(got, want) {
 		return true
 	}
-	report(t, got, want, fmt.Sprintf("assert.NotZero (type %T)", got), false /* showWant */, options...)
+	report(tb, got, want, fmt.Sprintf("assert.NotZero (type %T)", got), false /* showWant */, options...)
 	return false
 }
 
 // Match asserts that the value matches a regexp.
-func Match(t testing.TB, got, want string, options ...Option) bool {
-	t.Helper()
+func Match(tb testing.TB, got, want string, options ...Option) bool {
+	tb.Helper()
 	re, err := regexp.Compile(want)
 	if err != nil {
-		t.Fatalf("invalid regexp %q: %v", want, err)
+		tb.Fatalf("invalid regexp %q: %v", want, err)
 	}
 	if re.MatchString(got) {
 		return true
 	}
-	report(t, got, want, "assert.Match", true /* showWant */, options...)
+	report(tb, got, want, "assert.Match", true /* showWant */, options...)
 	return false
 }
 
 // ErrorIs asserts that "want" is in "got's" error chain. See the standard
 // library's errors package for details on error chains. On failure, output is
 // identical to Equal.
-func ErrorIs(t testing.TB, got, want error, options ...Option) bool {
-	t.Helper()
+func ErrorIs(tb testing.TB, got, want error, options ...Option) bool {
+	tb.Helper()
 	if errors.Is(got, want) {
 		return true
 	}
-	report(t, got, want, "assert.ErrorIs", true /* showWant */, options...)
+	report(tb, got, want, "assert.ErrorIs", true /* showWant */, options...)
 	return false
 }
 
 // False asserts that "got" is false.
-func False(t testing.TB, got bool, options ...Option) bool {
-	t.Helper()
+func False(tb testing.TB, got bool, options ...Option) bool {
+	tb.Helper()
 	if !got {
 		return true
 	}
-	report(t, got, false, "assert.False", false /* showWant */, options...)
+	report(tb, got, false, "assert.False", false /* showWant */, options...)
 	return false
 }
 
 // True asserts that "got" is true.
-func True(t testing.TB, got bool, options ...Option) bool {
-	t.Helper()
+func True(tb testing.TB, got bool, options ...Option) bool {
+	tb.Helper()
 	if got {
 		return true
 	}
-	report(t, got, true, "assert.True", false /* showWant */, options...)
+	report(tb, got, true, "assert.True", false /* showWant */, options...)
 	return false
 }
 
 // Panics asserts that the function called panics.
-func Panics(t testing.TB, panicker func(), options ...Option) {
-	t.Helper()
+func Panics(tb testing.TB, panicker func(), options ...Option) {
+	tb.Helper()
 	defer func() {
 		if r := recover(); r == nil {
-			report(t, r, nil, "assert.Panic", false /* showWant */, options...)
+			report(tb, r, nil, "assert.Panic", false /* showWant */, options...)
 		}
 	}()
 	panicker()
@@ -171,8 +171,8 @@ func (o *sprintfOption) message() string {
 	return o.msg
 }
 
-func report(t testing.TB, got, want any, desc string, showWant bool, options ...Option) {
-	t.Helper()
+func report(tb testing.TB, got, want any, desc string, showWant bool, options ...Option) {
+	tb.Helper()
 	w := &bytes.Buffer{}
 	if len(options) > 0 {
 		w.WriteString(options[len(options)-1].message())
@@ -183,7 +183,7 @@ func report(t testing.TB, got, want any, desc string, showWant bool, options ...
 	if showWant {
 		fmt.Fprintf(w, "want:\t%+v\n", want)
 	}
-	t.Fatal(w.String())
+	tb.Fatal(w.String())
 }
 
 func isNil(got any) bool {

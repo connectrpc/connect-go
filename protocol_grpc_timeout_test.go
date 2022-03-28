@@ -15,6 +15,7 @@
 package connect
 
 import (
+	"errors"
 	"math"
 	"testing"
 	"testing/quick"
@@ -24,8 +25,9 @@ import (
 )
 
 func TestParseTimeout(t *testing.T) {
+	t.Parallel()
 	_, err := parseTimeout("")
-	assert.True(t, err == errNoTimeout)
+	assert.True(t, errors.Is(err, errNoTimeout))
 
 	_, err = parseTimeout("foo")
 	assert.NotNil(t, err)
@@ -33,9 +35,9 @@ func TestParseTimeout(t *testing.T) {
 	assert.NotNil(t, err)
 	_, err = parseTimeout("999999999n") // 9 digits
 	assert.NotNil(t, err)
-	assert.False(t, err == errNoTimeout)
+	assert.False(t, errors.Is(err, errNoTimeout))
 	_, err = parseTimeout("99999999H") // 8 digits but overflows time.Duration
-	assert.True(t, err == errNoTimeout)
+	assert.True(t, errors.Is(err, errNoTimeout))
 
 	d, err := parseTimeout("45S")
 	assert.Nil(t, err)
@@ -48,6 +50,7 @@ func TestParseTimeout(t *testing.T) {
 }
 
 func TestEncodeTimeout(t *testing.T) {
+	t.Parallel()
 	to, err := encodeTimeout(time.Hour + time.Second)
 	assert.Nil(t, err)
 	assert.Equal(t, to, "3601000m")
@@ -60,6 +63,7 @@ func TestEncodeTimeout(t *testing.T) {
 }
 
 func TestEncodeTimeoutQuick(t *testing.T) {
+	t.Parallel()
 	// Ensure that the error case is actually unreachable.
 	encode := func(d time.Duration) bool {
 		_, err := encodeTimeout(d)

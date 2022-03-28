@@ -3,54 +3,69 @@ run:
 linters-settings:
   errcheck:
     check-type-assertions: true
+  exhaustivestruct:
+    struct-patterns:
+      # No zero values for param structs.
+      - 'github.com/bufbuild/connect-go.*[pP]arams'
   forbidigo:
     forbid:
       - '^fmt\.Print'
       - '^log\.'
       - '^print$'
       - '^println$'
+      - '^panic$'
+  godox:
+    # TODO, OPT, etc. comments are fine to commit. Use FIXME comments for
+    # temporary hacks, and use godox to prevent committing them.
+    keywords: [FIXME]
 linters:
-  enable:
-    - asciicheck
-    - bidichk
-    - bodyclose
-    - containedctx
-    - contextcheck
-    - deadcode
-    - decorder
-    - depguard
-    - dogsled
-    - errcheck
-    - exportloopref
-    - forbidigo
-    - forcetypeassert
-    - gochecknoinits
-    - gofmt
-    - goheader
-    - goimports
-    - gomodguard
-    - goprintffuncname
-    - gosec
-    - gosimple
-    - govet
-    - grouper
-    - importas
-    - ineffassign
-    - makezero
-    - misspell
-    - nakedret
-    - nilerr
-    - nolintlint
-    - predeclared
-    - promlinter
-    - rowserrcheck
-    - staticcheck
-    - structcheck
-    - stylecheck
-    - typecheck
-    - unconvert
-    - unused
-    - varcheck
-    - wastedassign
-    - whitespace
-  disable-all: true
+  enable-all: true
+  disable:
+    - wrapcheck     # don't _always_ need to wrap errors
+    - funlen        # rely on code review to limit function length
+    - wsl           # generous whitespace violates house style
+    - gocognit      # dubious "cognitive overhead" quantification
+    - golint        # deprecated by Go team
+    - lll           # don't want hard limits for line length
+    - maligned      # readability trumps efficient struct packing
+    - cyclop        # covered by gocyclo
+    - nlreturn      # generous whitespace violates house style
+    - scopelint     # deprecated by author
+    - interfacer    # deprecated by author
+    - gofumpt       # prefer standard gofmt
+    - ireturn       # "accept interfaces, return structs" isn't ironclad
+    - testpackage   # internal tests are fine
+    - gomnd         # some unnamed constants are okay
+    - maintidx      # covered by gocyclo
+    - varnamelen    # FIXME
+issues:
+  exclude:
+    # Don't ban use of fmt.Errorf to create new errors, but the remaining
+    # checks from err113 are useful.
+    - "err113: do not define dynamic errors.*"
+
+  exclude-rules:
+    # If future reflect.Kinds are nil-able, we'll find out when a test fails.
+    - linters: [exhaustive]
+      path: internal/assert/assert.go
+    # We need a client stream to contain a context.
+    - linters: [containedctx]
+      path: protocol_grpc_client_stream.go
+    # We need to init a global in-mem HTTP server for testable examples.
+    - linters: [gochecknoinits, gochecknoglobals]
+      path: example_init_test.go
+    # We need to initialize a global map from a slice.
+    - linters: [gochecknoinits, gochecknoglobals]
+      path: protocol_grpc_timeout.go
+    # We purposefully do an ineffectual assignment for an example.
+    - linters: [ineffassign]
+      path: client_example_test.go
+    # The generated file is effectively a global receiver.
+    - linters: [varnamelen]
+      path: cmd/protoc-gen-connect-go
+      text: "parameter name 'g' is too short"
+    # Doesn't work with type parameters.
+    # TODO: re-enable when working.
+    - linters:
+        - revive
+      text: "receiver-naming:.*for invalid-type$"
