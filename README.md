@@ -1,9 +1,9 @@
 Connect
 =======
 
-[![Build](https://github.com/bufbuild/connect/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/bufbuild/connect/actions/workflows/ci.yaml)
-[![Report Card](https://goreportcard.com/badge/github.com/bufbuild/connect)](https://goreportcard.com/report/github.com/bufbuild/connect)
-[![GoDoc](https://pkg.go.dev/badge/github.com/bufbuild/connect.svg)](https://pkg.go.dev/github.com/bufbuild/connect)
+[![Build](https://connectrpc.com/connect/actions/workflows/ci.yaml/badge.svg?branch=main)](https://connectrpc.com/connect/actions/workflows/ci.yaml)
+[![Report Card](https://goreportcard.com/badge/connectrpc.com/connect)](https://goreportcard.com/report/connectrpc.com/connect)
+[![GoDoc](https://pkg.go.dev/badge/connectrpc.com/connect.svg)](https://pkg.go.dev/connectrpc.com/connect)
 
 Connect is a small framework for building HTTP APIs. You write a short API
 definition file and implement your application logic, and Connect generates
@@ -40,9 +40,9 @@ import (
   "log"
   "net/http"
 
-  "github.com/bufbuild/connect"
-  "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
-  pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
+  "connectrpc.com/connect"
+  "connectrpc.com/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
+  pingv1 "connectrpc.com/connect/internal/gen/go/connect/ping/v1"
 )
 
 type PingServer struct {
@@ -84,9 +84,9 @@ import (
   "log"
   "net/http"
 
-  "github.com/bufbuild/connect"
-  "github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
-  pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
+  "connectrpc.com/connect"
+  "connectrpc.com/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
+  pingv1 "connectrpc.com/connect/internal/gen/go/connect/ping/v1"
 )
 
 func main() {
@@ -139,13 +139,13 @@ Offered under the [Apache 2 license][license].
 [APIv2]: https://blog.golang.org/protobuf-apiv2
 [docs]: https://bufconnect.com
 [envoy]: https://www.envoyproxy.io/
-[godoc]: https://pkg.go.dev/github.com/bufbuild/connect
+[godoc]: https://pkg.go.dev/connectrpc.com/connect
 [go-support-policy]: https://golang.org/doc/devel/release#policy
 [grpc-gateway]: https://grpc-ecosystem.github.io/grpc-gateway/
 [grpc]: https://grpc.io/
 [grpc-implementations]: https://grpc.io/docs/languages/
 [grpcurl]: https://github.com/fullstorydev/grpcurl
-[license]: https://github.com/bufbuild/connect/blob/main/LICENSE.txt
-[prod-client]: https://pkg.go.dev/github.com/bufbuild/connect#example-Client
-[prod-server]: https://pkg.go.dev/github.com/bufbuild/connect#example-package
+[license]: https://connectrpc.com/connect/blob/main/LICENSE.txt
+[prod-client]: https://pkg.go.dev/connectrpc.com/connect#example-Client
+[prod-server]: https://pkg.go.dev/connectrpc.com/connect#example-package
 [protobuf]: https://developers.google.com/protocol-buffers

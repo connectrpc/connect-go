@@ -17,7 +17,7 @@ package connect
 import (
 	"testing"
 
-	"github.com/bufbuild/connect/internal/assert"
+	"connectrpc.com/connect/internal/assert"
 )
 
 func TestParseProtobufURL(t *testing.T) {

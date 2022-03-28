@@ -1,4 +1,4 @@
-module github.com/bufbuild/connect
+module connectrpc.com/connect
 
 go 1.18
 

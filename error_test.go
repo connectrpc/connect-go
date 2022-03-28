@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bufbuild/connect/internal/assert"
+	"connectrpc.com/connect/internal/assert"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"

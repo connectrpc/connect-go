@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bufbuild/connect/internal/assert"
+	"connectrpc.com/connect/internal/assert"
 )
 
 func TestCode(t *testing.T) {

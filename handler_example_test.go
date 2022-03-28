@@ -19,9 +19,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
-	pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
+	"connectrpc.com/connect"
+	"connectrpc.com/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
+	pingv1 "connectrpc.com/connect/internal/gen/go/connect/ping/v1"
 )
 
 // ExamplePingServer implements some trivial business logic. The Protobuf
@@ -55,7 +55,7 @@ func Example_handler() {
 		connect.WithReadMaxBytes(1024*1024), // limit request size
 	))
 	// You can serve gRPC's health and server reflection APIs using
-	// github.com/bufbuild/connect-ecosystem-go.
+	// github.com/bufbuild/connect-grpchealth-go and github.com/bufbuild/connect-grpcreflect-go.
 
 	// Timeouts, connection handling, TLS configuration, and other low-level
 	// transport details are handled by net/http. Everything you already know (or

@@ -20,7 +20,7 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/bufbuild/connect/internal/assert"
+	"connectrpc.com/connect/internal/assert"
 )
 
 func TestParseTimeout(t *testing.T) {

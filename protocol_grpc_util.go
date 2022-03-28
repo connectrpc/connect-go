@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"strings"
 
-	statusv1 "github.com/bufbuild/connect/internal/gen/go/connectext/grpc/status/v1"
+	statusv1 "connectrpc.com/connect/internal/gen/go/connectext/grpc/status/v1"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 

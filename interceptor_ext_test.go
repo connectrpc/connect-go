@@ -21,10 +21,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bufbuild/connect"
-	"github.com/bufbuild/connect/internal/assert"
-	"github.com/bufbuild/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
-	pingv1 "github.com/bufbuild/connect/internal/gen/go/connect/ping/v1"
+	"connectrpc.com/connect"
+	"connectrpc.com/connect/internal/assert"
+	"connectrpc.com/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
+	pingv1 "connectrpc.com/connect/internal/gen/go/connect/ping/v1"
 )
 
 func TestClientStreamErrors(t *testing.T) {
