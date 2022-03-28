@@ -24,6 +24,7 @@ import (
 )
 
 func TestGRPCHandlerSender(t *testing.T) {
+	t.Parallel()
 	newSender := func(web bool) *handlerSender {
 		responseWriter := httptest.NewRecorder()
 		protobufCodec := &protoBinaryCodec{}
@@ -40,9 +41,11 @@ func TestGRPCHandlerSender(t *testing.T) {
 		}
 	}
 	t.Run("web", func(t *testing.T) {
+		t.Parallel()
 		testGRPCHandlerSenderMetadata(t, newSender(true))
 	})
 	t.Run("http2", func(t *testing.T) {
+		t.Parallel()
 		testGRPCHandlerSenderMetadata(t, newSender(false))
 	})
 }
@@ -50,6 +53,7 @@ func TestGRPCHandlerSender(t *testing.T) {
 func testGRPCHandlerSenderMetadata(t *testing.T, sender Sender) {
 	// Closing the sender shouldn't unpredictably mutate user-visible headers or
 	// trailers.
+	t.Helper()
 	expectHeaders := sender.Header().Clone()
 	expectTrailers := sender.Trailer().Clone()
 	sender.Close(NewError(CodeUnavailable, errors.New("oh no")))

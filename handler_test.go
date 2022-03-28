@@ -29,6 +29,7 @@ import (
 )
 
 func TestHandlerReadMaxBytes(t *testing.T) {
+	t.Parallel()
 	const readMaxBytes = 32
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(

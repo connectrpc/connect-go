@@ -51,7 +51,10 @@ func ExampleInterceptor() {
 		logger.Println("error:", err)
 		return
 	}
-	client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 42}))
+	if _, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 42})); err != nil {
+		logger.Println("error:", err)
+		return
+	}
 
 	// Output:
 	// calling: /connect.ping.v1.PingService/Ping
@@ -91,7 +94,10 @@ func ExampleWithInterceptors() {
 		logger.Println("error:", err)
 		return
 	}
-	client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
+	if _, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{})); err != nil {
+		logger.Println("error:", err)
+		return
+	}
 
 	// Output:
 	// outer interceptor: before call

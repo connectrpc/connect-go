@@ -22,6 +22,7 @@ import (
 )
 
 func TestCode(t *testing.T) {
+	t.Parallel()
 	var valid []Code
 	for code := minCode; code <= maxCode; code++ {
 		valid = append(valid, code)

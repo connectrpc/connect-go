@@ -21,6 +21,7 @@ import (
 )
 
 func TestParseProtobufURL(t *testing.T) {
+	t.Parallel()
 	assertExtractedProtobufPath(
 		t,
 		// full URL
@@ -50,10 +51,10 @@ func TestParseProtobufURL(t *testing.T) {
 	assertExtractedProtobufPath(t, "//", "/")
 }
 
-func assertExtractedProtobufPath(t testing.TB, inputURL, expectPath string) {
-	t.Helper()
+func assertExtractedProtobufPath(tb testing.TB, inputURL, expectPath string) {
+	tb.Helper()
 	assert.Equal(
-		t,
+		tb,
 		extractProtobufPath(inputURL),
 		expectPath,
 	)

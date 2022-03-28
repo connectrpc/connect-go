@@ -264,11 +264,3 @@ func receiveUnaryResponse[T any](receiver Receiver) (*Response[T], error) {
 		trailer: receiver.Trailer(),
 	}, nil
 }
-
-func receiveUnaryResponseMetadata[T any](r Receiver) *Response[T] {
-	return &Response[T]{
-		Msg:     new(T),
-		header:  r.Header(),
-		trailer: r.Trailer(),
-	}
-}

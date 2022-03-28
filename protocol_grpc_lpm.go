@@ -29,14 +29,11 @@ const (
 	flagLPMTrailer    = 0b10000000
 )
 
-var (
-	sizeZeroPrefix    = make([]byte, 4)
-	errGotWebTrailers = errorf(
-		CodeUnknown,
-		"end of message stream, next block of data is gRPC-Web trailers: %w",
-		// User code checks for end of stream with errors.Is(err, io.EOF).
-		io.EOF,
-	)
+var errGotWebTrailers = errorf(
+	CodeUnknown,
+	"end of message stream, next block of data is gRPC-Web trailers: %w",
+	// User code checks for end of stream with errors.Is(err, io.EOF).
+	io.EOF,
 )
 
 type marshaler struct {
@@ -108,7 +105,7 @@ func (m *marshaler) writeGRPCPrefix(compressed, trailer bool, size int) *Error {
 		prefixes[0] = flagLPMCompressed
 	}
 	if trailer {
-		prefixes[0] = prefixes[0] | flagLPMTrailer
+		prefixes[0] |= flagLPMTrailer
 	}
 	binary.BigEndian.PutUint32(prefixes[1:5], uint32(size))
 	if _, err := m.writer.Write(prefixes[:]); err != nil {
@@ -130,26 +127,27 @@ type unmarshaler struct {
 	webTrailer http.Header
 }
 
-func (u *unmarshaler) Unmarshal(message any) *Error {
+func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 	// Each length-prefixed message starts with 5 bytes of metadata: a one-byte
 	// unsigned integer used as a set of bitwise flags, and a four-byte unsigned
 	// integer indicating the message length.
 	prefixes := make([]byte, 5)
 	n, err := u.reader.Read(prefixes)
-	if (err == nil || errors.Is(err, io.EOF)) &&
+	switch {
+	case (err == nil || errors.Is(err, io.EOF)) &&
 		n == 5 &&
 		(prefixes[0]&flagLPMTrailer != flagLPMTrailer) &&
-		bytes.Equal(prefixes[1:5], sizeZeroPrefix) {
+		isSizeZeroPrefix(prefixes):
 		// Successfully read prefix, LPM isn't a trailers block, and expect no
 		// additional data, so there's nothing left to do - the zero value of the
 		// msg is correct.
 		return nil
-	} else if err != nil && errors.Is(err, io.EOF) && n == 0 {
+	case err != nil && errors.Is(err, io.EOF) && n == 0:
 		// The stream ended cleanly. That's expected, but we need to propagate them
 		// to the user so that they know that the stream has ended. We shouldn't
 		// add any alarming text about protocol errors, though.
 		return NewError(CodeUnknown, err)
-	} else if err != nil || n < 5 {
+	case err != nil || n < 5:
 		// Something else has gone wrong - the stream didn't end cleanly.
 		return errorf(
 			CodeInvalidArgument,
@@ -158,7 +156,7 @@ func (u *unmarshaler) Unmarshal(message any) *Error {
 	}
 
 	// The first byte of the prefix is a set of bitwise flags.
-	flags := uint8(prefixes[0])
+	flags := prefixes[0]
 	// The least significant bit is the flag for compression.
 	compressed := (flags&flagLPMCompressed == flagLPMCompressed)
 	// The most significant bit is the flag for gRPC-Web trailers.
@@ -213,7 +211,8 @@ func (u *unmarshaler) Unmarshal(message any) *Error {
 		if err != nil {
 			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
 		}
-		defer u.compressionPool.PutReader(decompressor)
+		// TODO: handle error with user-provided observability hook (#179)
+		defer u.compressionPool.PutReader(decompressor) // nolint:errcheck
 		// OPT: easy opportunity to pool buffers
 		decompressed := bytes.NewBuffer(make([]byte, 0, len(raw)))
 		if _, err := decompressed.ReadFrom(decompressor); err != nil {
@@ -226,7 +225,7 @@ func (u *unmarshaler) Unmarshal(message any) *Error {
 		// Per the gRPC-Web specification, trailers should be encoded as an HTTP/1
 		// headers block _without_ the terminating newline. To make the headers
 		// parseable by net/textproto, we need to add the newline.
-		raw = append(raw, '\n')
+		raw = append(raw, '\n') // nolint:makezero
 		bufferedReader := bufio.NewReader(bytes.NewReader(raw))
 		mimeReader := textproto.NewReader(bufferedReader)
 		mimeHeader, err := mimeReader.ReadMIMEHeader()
@@ -251,4 +250,16 @@ func (u *unmarshaler) Unmarshal(message any) *Error {
 
 func (u *unmarshaler) WebTrailer() http.Header {
 	return u.webTrailer
+}
+
+func isSizeZeroPrefix(prefix []byte) bool {
+	if len(prefix) != 5 {
+		return false
+	}
+	for i := 1; i < 5; i++ {
+		if prefix[i] != 0 {
+			return false
+		}
+	}
+	return true
 }

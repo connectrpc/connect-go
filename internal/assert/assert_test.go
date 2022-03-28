@@ -21,12 +21,16 @@ import (
 )
 
 func TestAssertions(t *testing.T) {
+	t.Parallel()
+
 	t.Run("equal", func(t *testing.T) {
+		t.Parallel()
 		Equal(t, 1, 1, Sprintf("1 == %d", 1))
 		NotEqual(t, 1, 2)
 	})
 
 	t.Run("nil", func(t *testing.T) {
+		t.Parallel()
 		Nil(t, nil)
 		Nil(t, (*chan int)(nil))
 		Nil(t, (*func())(nil))
@@ -48,6 +52,7 @@ func TestAssertions(t *testing.T) {
 	})
 
 	t.Run("zero", func(t *testing.T) {
+		t.Parallel()
 		var n *int
 		Zero(t, n)
 		var p pair
@@ -62,11 +67,13 @@ func TestAssertions(t *testing.T) {
 	})
 
 	t.Run("error chain", func(t *testing.T) {
+		t.Parallel()
 		want := errors.New("base error")
 		ErrorIs(t, fmt.Errorf("context: %w", want), want)
 	})
 
 	t.Run("unexported fields", func(t *testing.T) {
+		t.Parallel()
 		// Two pairs differ only in an unexported field.
 		p1 := pair{1, 2}
 		p2 := pair{1, 3}
@@ -74,11 +81,13 @@ func TestAssertions(t *testing.T) {
 	})
 
 	t.Run("regexp", func(t *testing.T) {
+		t.Parallel()
 		Match(t, "foobar", `^foo`)
 	})
 
 	t.Run("panics", func(t *testing.T) {
-		Panics(t, func() { panic("testing") })
+		t.Parallel()
+		Panics(t, func() { panic("testing") }) // nolint:forbidigo
 	})
 }
 
