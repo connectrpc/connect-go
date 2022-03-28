@@ -27,6 +27,20 @@ import (
 
 var examplePingServer *inMemoryServer
 
+func init() {
+	// Generally, init functions are bad.
+	//
+	// To write testable examples that users can grok *and* can execute in the
+	// playground, where networking is disabled, we need an HTTP server that uses
+	// in-memory pipes instead of TCP. We don't want to pollute every example
+	// with this setup code.
+	//
+	// The least-awful option is to set up the server in init().
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	examplePingServer = newInMemoryServer(mux)
+}
+
 // inMemoryServer is an HTTP server that uses in-memory pipes instead of TCP.
 // It supports HTTP/2 and has TLS enabled.
 //
@@ -128,17 +142,3 @@ func (*memoryAddr) Network() string { return "memory" }
 // String implements io.Stringer, returning a value that matches the
 // certificates used by net/http/httptest.
 func (*memoryAddr) String() string { return "example.com" }
-
-func init() {
-	// Generally, init functions are bad.
-	//
-	// To write testable examples that users can grok *and* can execute in the
-	// playground, where networking is disabled, we need an HTTP server that uses
-	// in-memory pipes instead of TCP. We don't want to pollute every example
-	// with this setup code.
-	//
-	// The least-awful option is to set up the server in init().
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
-	examplePingServer = newInMemoryServer(mux)
-}

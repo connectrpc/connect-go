@@ -28,6 +28,7 @@ import (
 )
 
 func TestClientStreamErrors(t *testing.T) {
+	t.Parallel()
 	_, err := pingv1connect.NewPingServiceClient(http.DefaultClient, "INVALID_URL", connect.WithGRPC())
 	assert.NotNil(t, err)
 	// We don't even get to calling methods on the client, so there's no question
@@ -36,6 +37,7 @@ func TestClientStreamErrors(t *testing.T) {
 }
 
 func TestHandlerStreamErrors(t *testing.T) {
+	t.Parallel()
 	// If we receive an HTTP request and send a response, interceptors should
 	// fire - even if we can't successfully set up a stream. (This is different
 	// from clients, where stream creation fails before any HTTP request is
@@ -52,7 +54,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	t.Run("unary", func(t *testing.T) {
+	t.Run("unary", func(t *testing.T) { // nolint:paralleltest
 		defer reset()
 		request, err := http.NewRequest(
 			http.MethodPost,
@@ -67,7 +69,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 		assert.Equal(t, res.StatusCode, http.StatusOK)
 		assert.True(t, called)
 	})
-	t.Run("stream", func(t *testing.T) {
+	t.Run("stream", func(t *testing.T) { // nolint:paralleltest
 		defer reset()
 		request, err := http.NewRequest(
 			http.MethodPost,
@@ -85,6 +87,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 }
 
 func TestOnionOrderingEndToEnd(t *testing.T) {
+	t.Parallel()
 	// Helper function: returns a function that asserts that there's some value
 	// set for header "expect", and adds a value for header "add".
 	newInspector := func(expect, add string) func(connect.Specification, http.Header) {

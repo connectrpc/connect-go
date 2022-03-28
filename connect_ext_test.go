@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -46,14 +45,10 @@ const (
 )
 
 func TestServer(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(
-		pingServer{checkMetadata: true},
-	))
-
-	testPing := func(t *testing.T, client pingv1connect.PingServiceClient) {
+	t.Parallel()
+	testPing := func(t *testing.T, client pingv1connect.PingServiceClient) { // nolint:thelper
 		t.Run("ping", func(t *testing.T) {
-			num := rand.Int63()
+			num := int64(42)
 			req := connect.NewRequest(&pingv1.PingRequest{Number: num})
 			req.Header().Set(clientHeader, headerValue)
 			expect := &pingv1.PingResponse{Number: num}
@@ -84,7 +79,7 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
 		})
 	}
-	testSum := func(t *testing.T, client pingv1connect.PingServiceClient) {
+	testSum := func(t *testing.T, client pingv1connect.PingServiceClient) { // nolint:thelper
 		t.Run("sum", func(t *testing.T) {
 			const (
 				upTo   = 10
@@ -120,7 +115,7 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, got.Header().Get(handlerHeader), headerValue)
 		})
 	}
-	testCountUp := func(t *testing.T, client pingv1connect.PingServiceClient) {
+	testCountUp := func(t *testing.T, client pingv1connect.PingServiceClient) { // nolint:thelper
 		t.Run("count_up", func(t *testing.T) {
 			const n = 5
 			got := make([]int64, 0, n)
@@ -155,7 +150,7 @@ func TestServer(t *testing.T) {
 			)
 		})
 	}
-	testCumSum := func(t *testing.T, client pingv1connect.PingServiceClient, expectSuccess bool) {
+	testCumSum := func(t *testing.T, client pingv1connect.PingServiceClient, expectSuccess bool) { // nolint:thelper
 		t.Run("cumsum", func(t *testing.T) {
 			send := []int64{3, 5, 1}
 			expect := []int64{3, 8, 9}
@@ -258,7 +253,7 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled, assert.Sprintf("%v", err))
 		})
 	}
-	testErrors := func(t *testing.T, client pingv1connect.PingServiceClient) {
+	testErrors := func(t *testing.T, client pingv1connect.PingServiceClient) { // nolint:thelper
 		t.Run("errors", func(t *testing.T) {
 			request := connect.NewRequest(&pingv1.FailRequest{
 				Code: int32(connect.CodeResourceExhausted),
@@ -278,8 +273,9 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, connectErr.Meta().Get(handlerTrailer), trailerValue)
 		})
 	}
-	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) {
+	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) { // nolint:thelper
 		run := func(t *testing.T, opts ...connect.ClientOption) {
+			t.Helper()
 			client, err := pingv1connect.NewPingServiceClient(server.Client(), server.URL, opts...)
 			assert.Nil(t, err)
 			testPing(t, client)
@@ -314,12 +310,20 @@ func TestServer(t *testing.T) {
 			)
 		})
 	}
+
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(
+		pingServer{checkMetadata: true},
+	))
+
 	t.Run("http1", func(t *testing.T) {
+		t.Parallel()
 		server := httptest.NewServer(mux)
 		defer server.Close()
 		testMatrix(t, server, false /* bidi */)
 	})
 	t.Run("http2", func(t *testing.T) {
+		t.Parallel()
 		server := httptest.NewUnstartedServer(mux)
 		server.EnableHTTP2 = true
 		server.StartTLS()
@@ -342,6 +346,7 @@ func (p *pluggablePingServer) Ping(
 }
 
 func TestHeaderBasic(t *testing.T) {
+	t.Parallel()
 	const (
 		key  = "Test-Key"
 		cval = "client value"
@@ -370,20 +375,21 @@ func TestHeaderBasic(t *testing.T) {
 	assert.Equal(t, res.Header().Get(key), hval)
 }
 
-func failNoHTTP2(t testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]) {
+func failNoHTTP2(tb testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]) {
+	tb.Helper()
 	if err := stream.Send(&pingv1.CumSumRequest{}); err != nil {
-		assert.ErrorIs(t, err, io.EOF)
-		assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+		assert.ErrorIs(tb, err, io.EOF)
+		assert.Equal(tb, connect.CodeOf(err), connect.CodeUnknown)
 	}
-	assert.Nil(t, stream.CloseSend())
+	assert.Nil(tb, stream.CloseSend())
 	_, err := stream.Receive()
-	assert.NotNil(t, err) // should be 505
+	assert.NotNil(tb, err) // should be 505
 	assert.True(
-		t,
+		tb,
 		strings.Contains(err.Error(), "HTTP status 505"),
 		assert.Sprintf("expected 505, got %v", err),
 	)
-	assert.Nil(t, stream.CloseReceive())
+	assert.Nil(tb, stream.CloseReceive())
 }
 
 func expectClientHeader(check bool, req connect.AnyRequest) error {

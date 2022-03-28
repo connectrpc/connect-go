@@ -58,7 +58,6 @@ const (
 	httpPackage    = protogen.GoImportPath("net/http")
 	stringsPackage = protogen.GoImportPath("strings")
 	connectPackage = protogen.GoImportPath("connectrpc.com/connect")
-	protoPackage   = protogen.GoImportPath("google.golang.org/protobuf/proto")
 
 	generatedFilenameExtension = ".connect.go"
 	generatedPackageSuffix     = "connect"
@@ -100,24 +99,24 @@ func generate(plugin *protogen.Plugin, file *protogen.File) {
 	}
 	file.GoPackageName += generatedPackageSuffix
 
-	dir := filepath.Dir(string(file.GeneratedFilenamePrefix))
-	base := filepath.Base(string(file.GeneratedFilenamePrefix))
+	dir := filepath.Dir(file.GeneratedFilenamePrefix)
+	base := filepath.Base(file.GeneratedFilenamePrefix)
 	file.GeneratedFilenamePrefix = filepath.Join(
 		dir,
 		string(file.GoPackageName),
 		base,
 	)
-	g := plugin.NewGeneratedFile(
+	generatedFile := plugin.NewGeneratedFile(
 		file.GeneratedFilenamePrefix+generatedFilenameExtension,
 		protogen.GoImportPath(path.Join(
 			string(file.GoImportPath),
 			string(file.GoPackageName),
 		)),
 	)
-	generatePreamble(g, file)
-	generateServiceNameConstants(g, file.Services)
+	generatePreamble(generatedFile, file)
+	generateServiceNameConstants(generatedFile, file.Services)
 	for _, service := range file.Services {
-		generateService(g, file, service)
+		generateService(generatedFile, file, service)
 	}
 }
 
@@ -164,7 +163,7 @@ func generateService(g *protogen.GeneratedFile, file *protogen.File, service *pr
 
 func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Service, names names) {
 	wrapComments(g, names.Client, " is a client for the ", service.Desc.FullName(), " service.")
-	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
+	if isDeprecatedService(service) {
 		g.P("//")
 		deprecated(g)
 	}
@@ -175,7 +174,7 @@ func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Servic
 		leadingComments(
 			g,
 			method.Comments.Leading,
-			method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated(),
+			isDeprecatedMethod(method),
 		)
 		g.P(clientSignature(g, method, false /* named */))
 	}
@@ -195,7 +194,7 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 	g.P("//")
 	wrapComments(g, "The URL supplied here should be the base URL for the gRPC server ",
 		"(for example, http://api.acme.com or https://acme.com/grpc).")
-	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
+	if isDeprecatedService(service) {
 		g.P("//")
 		deprecated(g)
 	}
@@ -243,19 +242,20 @@ func generateClientMethod(g *protogen.GeneratedFile, service *protogen.Service, 
 	isStreamingClient := method.Desc.IsStreamingClient()
 	isStreamingServer := method.Desc.IsStreamingServer()
 	wrapComments(g, method.GoName, " calls ", method.Desc.FullName(), ".")
-	if method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated() {
+	if isDeprecatedMethod(method) {
 		g.P("//")
 		deprecated(g)
 	}
 	g.P("func (c *", receiver, ") ", clientSignature(g, method, true /* named */), " {")
 
-	if isStreamingClient && !isStreamingServer {
+	switch {
+	case isStreamingClient && !isStreamingServer:
 		g.P("return c.", unexport(method.GoName), ".CallClientStream(ctx)")
-	} else if !isStreamingClient && isStreamingServer {
+	case !isStreamingClient && isStreamingServer:
 		g.P("return c.", unexport(method.GoName), ".CallServerStream(ctx, req)")
-	} else if isStreamingClient && isStreamingServer {
+	case isStreamingClient && isStreamingServer:
 		g.P("return c.", unexport(method.GoName), ".CallBidiStream(ctx)")
-	} else {
+	default:
 		g.P("return c.", unexport(method.GoName), ".CallUnary(ctx, req)")
 	}
 	g.P("}")
@@ -294,7 +294,7 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named b
 
 func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Service, names names) {
 	wrapComments(g, names.Server, " is an implementation of the ", service.Desc.FullName(), " service.")
-	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
+	if isDeprecatedService(service) {
 		g.P("//")
 		deprecated(g)
 	}
@@ -304,7 +304,7 @@ func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Servic
 		leadingComments(
 			g,
 			method.Comments.Leading,
-			method.Desc.Options().(*descriptorpb.MethodOptions).GetDeprecated(),
+			isDeprecatedMethod(method),
 		)
 		g.Annotate(names.Server+"."+method.GoName, method.Location)
 		g.P(serverSignature(g, method))
@@ -319,7 +319,7 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 	g.P("//")
 	wrapComments(g, "By default, handlers support the gRPC and gRPC-Web protocols with ",
 		"the binary Protobuf and JSON codecs.")
-	if service.Desc.Options().(*descriptorpb.ServiceOptions).GetDeprecated() {
+	if isDeprecatedService(service) {
 		g.P("//")
 		deprecated(g)
 	}
@@ -330,13 +330,14 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 	for _, method := range service.Methods {
 		isStreamingServer := method.Desc.IsStreamingServer()
 		isStreamingClient := method.Desc.IsStreamingClient()
-		if isStreamingClient && !isStreamingServer {
+		switch {
+		case isStreamingClient && !isStreamingServer:
 			g.P(`mux.Handle("`, procedureName(method), `", `, connectPackage.Ident("NewClientStreamHandler"), "(")
-		} else if !isStreamingClient && isStreamingServer {
+		case !isStreamingClient && isStreamingServer:
 			g.P(`mux.Handle("`, procedureName(method), `", `, connectPackage.Ident("NewServerStreamHandler"), "(")
-		} else if isStreamingClient && isStreamingServer {
+		case isStreamingClient && isStreamingServer:
 			g.P(`mux.Handle("`, procedureName(method), `", `, connectPackage.Ident("NewBidiStreamHandler"), "(")
-		} else {
+		default:
 			g.P(`mux.Handle("`, procedureName(method), `", `, connectPackage.Ident("NewUnaryHandler"), "(")
 		}
 		g.P(`"`, procedureName(method), `",`)
@@ -425,6 +426,16 @@ func reflectionName(service *protogen.Service) string {
 	return fmt.Sprintf("%s.%s", service.Desc.ParentFile().Package(), service.Desc.Name())
 }
 
+func isDeprecatedService(service *protogen.Service) bool {
+	serviceOptions, ok := service.Desc.Options().(*descriptorpb.ServiceOptions)
+	return ok && serviceOptions.GetDeprecated()
+}
+
+func isDeprecatedMethod(method *protogen.Method) bool {
+	methodOptions, ok := method.Desc.Options().(*descriptorpb.MethodOptions)
+	return ok && methodOptions.GetDeprecated()
+}
+
 // Raggedy comments in the generated code are driving me insane. This
 // word-wrapping function is ruinously inefficient, but it gets the job done.
 func wrapComments(g *protogen.GeneratedFile, elems ...any) {
@@ -441,18 +452,18 @@ func wrapComments(g *protogen.GeneratedFile, elems ...any) {
 	text.Reset()
 	var pos int
 	for _, word := range words {
-		n := utf8.RuneCountInString(word)
-		if pos > 0 && pos+n+1 > commentWidth {
+		numRunes := utf8.RuneCountInString(word)
+		if pos > 0 && pos+numRunes+1 > commentWidth {
 			g.P("// ", text.String())
 			text.Reset()
 			pos = 0
 		}
 		if pos > 0 {
 			text.WriteRune(' ')
-			pos += 1
+			pos++
 		}
 		text.WriteString(word)
-		pos += n
+		pos += numRunes
 	}
 	if text.Len() > 0 {
 		g.P("// ", text.String())

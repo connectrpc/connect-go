@@ -33,7 +33,7 @@ const (
 	typeWebGRPCPrefix     = typeWebGRPC + "+"
 )
 
-// Follows https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents
+// userAgent follows https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents.
 //
 //   While the protocol does not require a user-agent to function it is recommended
 //   that clients provide a structured user-agent string that provides a basic
@@ -41,7 +41,9 @@ const (
 //   in heterogeneous environments. The following structure is recommended to library developers:
 //
 //   User-Agent → "grpc-" Language ?("-" Variant) "/" Version ?( " ("  *(AdditionalProperty ";") ")" )
-var userAgent = []string{fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())}
+func userAgent() string {
+	return fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())
+}
 
 func isCommaOrSpace(c rune) bool {
 	return c == ',' || c == ' '
@@ -148,11 +150,13 @@ func statusFromError(err error) (*statusv1.Status, *Error) {
 
 func discard(r io.Reader) {
 	if lr, ok := r.(*io.LimitedReader); ok {
-		io.Copy(io.Discard, lr)
+		// TODO: Are we OK ignoring this error? I think so
+		_, _ = io.Copy(io.Discard, lr)
 		return
 	}
 	// We don't want to get stuck throwing data away forever, so limit how much
 	// we're willing to do here: at most, we'll copy 4 MiB.
 	lr := &io.LimitedReader{R: r, N: 1024 * 1024 * 4}
-	io.Copy(io.Discard, lr)
+	// TODO: Are we OK ignoring this error? I think so
+	_, _ = io.Copy(io.Discard, lr)
 }

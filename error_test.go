@@ -28,6 +28,7 @@ import (
 )
 
 func TestErrorNilUnderlying(t *testing.T) {
+	t.Parallel()
 	err := NewError(CodeUnknown, nil)
 	assert.NotNil(t, err)
 	assert.Equal(t, err.Error(), CodeUnknown.String())
@@ -43,6 +44,7 @@ func TestErrorNilUnderlying(t *testing.T) {
 }
 
 func TestErrorFormatting(t *testing.T) {
+	t.Parallel()
 	assert.Equal(
 		t,
 		NewError(CodeUnavailable, errors.New("")).Error(),
@@ -54,6 +56,7 @@ func TestErrorFormatting(t *testing.T) {
 }
 
 func TestErrorCode(t *testing.T) {
+	t.Parallel()
 	err := fmt.Errorf(
 		"another: %w",
 		NewError(CodeUnavailable, errors.New("foo")),
@@ -64,6 +67,7 @@ func TestErrorCode(t *testing.T) {
 }
 
 func TestCodeOf(t *testing.T) {
+	t.Parallel()
 	assert.Equal(
 		t,
 		CodeOf(NewError(CodeUnavailable, errors.New("foo"))),
@@ -73,6 +77,7 @@ func TestCodeOf(t *testing.T) {
 }
 
 func TestErrorDetails(t *testing.T) {
+	t.Parallel()
 	second := durationpb.New(time.Second)
 	detail, err := anypb.New(second)
 	assert.Nil(t, err)
@@ -83,6 +88,7 @@ func TestErrorDetails(t *testing.T) {
 }
 
 func TestErrorIs(t *testing.T) {
+	t.Parallel()
 	// errors.New and fmt.Errorf return *errors.errorString. errors.Is
 	// considers two *errors.errorStrings equal iff they have the same address.
 	err := errors.New("oh no")

@@ -16,6 +16,7 @@ package connect
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -102,7 +103,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	var failed *Error
 
 	timeout, err := parseTimeout(r.Header.Get("Grpc-Timeout"))
-	if err != nil && err != errNoTimeout {
+	if err != nil && !errors.Is(err, errNoTimeout) {
 		// Errors here indicate that the client sent an invalid timeout header, so
 		// the error text is safe to send back.
 		failed = NewError(CodeInvalidArgument, err)
@@ -110,7 +111,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
 		r = r.WithContext(ctx)
-	} // else err == errNoTimeout, nothing to do
+	} // else err wraps errNoTimeout, nothing to do
 
 	requestCompression := compressionIdentity
 	if msgEncoding := r.Header.Get("Grpc-Encoding"); msgEncoding != "" && msgEncoding != compressionIdentity {
@@ -218,7 +219,7 @@ type grpcClient struct {
 func (g *grpcClient) WriteRequestHeader(header http.Header) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
-	header["User-Agent"] = userAgent
+	header["User-Agent"] = []string{userAgent()}
 	header["Content-Type"] = []string{contentTypeFromCodecName(g.web, g.codec.Name())}
 	if g.compressionName != "" && g.compressionName != compressionIdentity {
 		header["Grpc-Encoding"] = []string{g.compressionName}
