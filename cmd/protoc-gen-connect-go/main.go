@@ -63,22 +63,22 @@ const (
 	generatedFilenameExtension = ".connect.go"
 	generatedPackageSuffix     = "connect"
 
-	usage = "See https://docs.bufconnect.com for how to use this plugin.\n\nFlags:\n  -h, --help\tPrint this help and exit.\n      --version\tPrint the version and exit.\n"
+	usage = "See https://docs.bufconnect.com for how to use this plugin.\n\nFlags:\n  -h, --help\tPrint this help and exit.\n      --version\tPrint the version and exit."
 
 	commentWidth = 97 // leave room for "// "
 )
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
-		fmt.Fprintf(os.Stdout, "%s\n", connect.Version)
+		fmt.Fprintln(os.Stdout, connect.Version)
 		os.Exit(0)
 	}
 	if len(os.Args) == 2 && (os.Args[1] == "-h" || os.Args[1] == "--help") {
-		fmt.Fprintf(os.Stdout, usage)
+		fmt.Fprintln(os.Stdout, usage)
 		os.Exit(0)
 	}
 	if len(os.Args) != 1 {
-		fmt.Fprintf(os.Stderr, usage)
+		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(1)
 	}
 	protogen.Options{}.Run(
