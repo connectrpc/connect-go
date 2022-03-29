@@ -39,7 +39,6 @@ package main
 
 import (
 	"bytes"
-	"flag"
 	"fmt"
 	"os"
 	"path"
@@ -69,15 +68,21 @@ const (
 
 var (
 	programName = filepath.Base(os.Args[0])
+	usage       = fmt.Sprintf("Usage of %s:\n  --version\tPrint the version and exit.\n", programName)
 )
 
 func main() {
-	flagSet := flag.NewFlagSet(programName, flag.ExitOnError)
-	version := flagSet.Bool("version", false, "Print the version and exit.")
-	flagSet.Parse(os.Args[1:])
-	if *version {
-		fmt.Printf("%s %s\n", programName, connect.Version)
-		return
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Fprintf(os.Stdout, "%s %s\n", programName, connect.Version)
+		os.Exit(0)
+	}
+	if len(os.Args) == 2 && (os.Args[1] == "-h" || os.Args[1] == "--help") {
+		fmt.Fprintf(os.Stdout, usage)
+		os.Exit(0)
+	}
+	if len(os.Args) != 1 {
+		fmt.Fprintf(os.Stderr, usage)
+		os.Exit(1)
 	}
 	protogen.Options{}.Run(
 		func(plugin *protogen.Plugin) error {
