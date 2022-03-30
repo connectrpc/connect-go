@@ -269,6 +269,8 @@ func (g *grpcClient) NewStream(
 		trailer:          make(http.Header),
 		web:              g.web,
 		reader:           pipeReader,
+		responseHeader:   make(http.Header),
+		responseTrailer:  make(http.Header),
 		compressionPools: g.compressionPools,
 		responseReady:    make(chan struct{}),
 	}
