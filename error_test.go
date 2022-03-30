@@ -81,3 +81,16 @@ func TestErrorDetails(t *testing.T) {
 	connectErr.AddDetail(detail)
 	assert.Equal(t, connectErr.Details(), []ErrorDetail{detail})
 }
+
+func TestErrorIs(t *testing.T) {
+	// errors.New and fmt.Errorf return *errors.errorString. errors.Is
+	// considers two *errors.errorStrings equal iff they have the same address.
+	err := errors.New("oh no")
+	assert.False(t, errors.Is(err, errors.New("oh no")))
+	assert.True(t, errors.Is(err, err))
+	// Our errors should have the same semantics. Note that we'd need to extend
+	// the ErrorDetail interface to support value equality.
+	connectErr := NewError(CodeUnavailable, err)
+	assert.False(t, errors.Is(connectErr, NewError(CodeUnavailable, err)))
+	assert.True(t, errors.Is(connectErr, connectErr))
+}
