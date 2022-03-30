@@ -87,8 +87,7 @@ type Receiver interface {
 
 	Spec() Specification
 	Header() http.Header
-	// Trailers are populated only after Receive returns an error wrapping
-	// io.EOF.
+	// Trailers are populated only after Receive returns an error.
 	Trailer() http.Header
 }
 

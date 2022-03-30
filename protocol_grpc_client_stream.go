@@ -84,6 +84,8 @@ type duplexClientStream struct {
 	web              bool
 	reader           *io.PipeReader
 	response         *http.Response
+	responseHeader   http.Header
+	responseTrailer  http.Header
 	responseReady    chan struct{}
 	unmarshaler      unmarshaler
 	compressionPools readOnlyCompressionPools
@@ -180,19 +182,16 @@ func (cs *duplexClientStream) Receive(message any) error {
 		// If we can't read this LPM, see if the server sent an explicit error in
 		// trailers. First, we need to read the body to EOF.
 		discard(cs.response.Body)
+		mergeHeaders(cs.responseTrailer, cs.response.Trailer)
 		if errors.Is(err, errGotWebTrailers) {
-			if cs.response.Trailer == nil {
-				cs.response.Trailer = cs.unmarshaler.WebTrailer()
-			} else {
-				mergeHeaders(cs.response.Trailer, cs.unmarshaler.WebTrailer())
-			}
+			mergeHeaders(cs.responseTrailer, cs.unmarshaler.WebTrailer())
 		}
-		if serverErr := extractError(cs.protobuf, cs.response.Trailer); serverErr != nil {
+		if serverErr := extractError(cs.protobuf, cs.responseTrailer); serverErr != nil {
 			// This is expected from a protocol perspective, but receiving trailers
 			// means that we're _not_ getting a message. For users to realize that
 			// the stream has ended, Receive must return an error.
-			serverErr.meta = cs.ResponseHeader()
-			mergeHeaders(serverErr.meta, cs.response.Trailer)
+			serverErr.meta = cs.responseHeader.Clone()
+			mergeHeaders(serverErr.meta, cs.responseTrailer)
 			cs.setResponseError(serverErr)
 			return serverErr
 		}
@@ -220,12 +219,12 @@ func (cs *duplexClientStream) CloseReceive() error {
 
 func (cs *duplexClientStream) ResponseHeader() http.Header {
 	<-cs.responseReady
-	return cs.response.Header
+	return cs.responseHeader
 }
 
 func (cs *duplexClientStream) ResponseTrailer() http.Header {
 	<-cs.responseReady
-	return cs.response.Trailer
+	return cs.responseTrailer
 }
 
 // stream.makeRequest hands the read side of the pipe off to net/http and
@@ -300,17 +299,39 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	}
 	// When there's no body, gRPC-Web servers _may_ send error information in the
 	// HTTP headers.
-	if cs.web {
-		if err := extractError(cs.protobuf, res.Header); err != nil {
-			err.meta = res.Header
-			mergeHeaders(err.meta, res.Trailer)
-			cs.setResponseError(err)
-			return
+	//
+	// From our perspective, standard gRPC servers also send error information in
+	// the HTTP headers when they send "trailers-only" responses (which they do
+	// when unary RPCs return errors, or when streaming RPCs return errors
+	// immediately). The gRPC HTTP/2 specification says that "...Trailers-Only
+	// are...delivered in a single HTTP2 HEADERS frame block. For responses
+	// end-of-stream is indicated by the presence of the END_STREAM flag on the
+	// last received HEADERS frame that carries Trailers." The final bit - that
+	// HEADERS frames with EOS set should be treated as gRPC trailers, even if no
+	// DATA frames have been sent on the stream - isn't standard HTTP/2
+	// semantics, so net/http doesn't know anything about it. To us, then, these
+	// trailers-only responses actually appear as headers-only responses.
+	if err := extractError(cs.protobuf, res.Header); err != nil {
+		// Per the specification, only the HTTP status code and Content-Type should
+		// be treated as headers. The rest should be treated as trailing metadata.
+		if contentType := res.Header.Get("Content-Type"); contentType != "" {
+			cs.responseHeader.Set("Content-Type", contentType)
 		}
+		mergeHeaders(cs.responseTrailer, res.Header)
+		cs.responseTrailer.Del("Content-Type")
+		// If we get some actual HTTP trailers, treat those as trailing metadata too.
+		discard(res.Body)
+		mergeHeaders(cs.responseTrailer, res.Trailer)
+		// Merge HTTP headers and trailers into the error metadata.
+		err.meta = res.Header.Clone()
+		mergeHeaders(err.meta, res.Trailer)
+		cs.setResponseError(err)
+		return
 	}
 	// Success! We got a response with valid headers and no error, so there's
 	// probably a message waiting in the stream.
 	cs.response = res
+	mergeHeaders(cs.responseHeader, res.Header)
 	cs.unmarshaler = unmarshaler{
 		reader:          res.Body,
 		max:             cs.maxReadBytes,
