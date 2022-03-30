@@ -116,9 +116,12 @@ func (hs *handlerSender) Close(err error) error {
 	}
 	// We're using standard gRPC. Even if we haven't written to the body and
 	// we're sending a "trailers-only" response, we must send trailing metadata
-	// as HTTP trailers. In net/http's ResponseWriter API, we do that by writing
-	// to the headers map with a special prefix. This is purely an implementation
-	// detail, so we should hide it and _not_ mutate the user-visible headers.
+	// as HTTP trailers. (If we had frame-level control of the HTTP/2 layer, we
+	// could send a single HEADER frame and no DATA frames, but net/http doesn't
+	// expose APIs that low-level.) In net/http's ResponseWriter API, we do that
+	// by writing to the headers map with a special prefix. This is purely an
+	// implementation detail, so we should hide it and _not_ mutate the
+	// user-visible headers.
 	for key, values := range mergedTrailers {
 		for _, value := range values {
 			hs.writer.Header().Add(http.TrailerPrefix+key, value)
