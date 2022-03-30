@@ -37,6 +37,10 @@ test: build ## Run unit tests
 build: generate ## Build all packages
 	$(GO) build ./...
 
+.PHONY: install
+install: ## Install all binaries
+	$(GO) install ./...
+
 .PHONY: lint
 lint: $(BIN)/gofmt $(BIN)/buf ## Lint Go and protobuf
 	test -z "$$($(BIN)/gofmt -s -l . | tee /dev/stderr)"
