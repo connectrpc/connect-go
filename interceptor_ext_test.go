@@ -91,36 +91,36 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	// Helper function: returns a function that asserts that there's some value
 	// set for header "expect", and adds a value for header "add".
 	newInspector := func(expect, add string) func(connect.Specification, http.Header) {
-		return func(spec connect.Specification, h http.Header) {
+		return func(spec connect.Specification, header http.Header) {
 			if expect != "" {
 				assert.NotZero(
 					t,
-					h.Get(expect),
+					header.Get(expect),
 					assert.Sprintf(
 						"%s (IsClient %v): header %q missing: %v",
 						spec.Procedure,
 						spec.IsClient,
 						expect,
-						h,
+						header,
 					),
 				)
 			}
-			h.Set(add, "v")
+			header.Set(add, "v")
 		}
 	}
 	// Helper function: asserts that there's a value present for header keys
 	// "one", "two", "three", and "four".
-	assertAllPresent := func(spec connect.Specification, h http.Header) {
-		for _, k := range []string{"one", "two", "three", "four"} {
+	assertAllPresent := func(spec connect.Specification, header http.Header) {
+		for _, key := range []string{"one", "two", "three", "four"} {
 			assert.NotZero(
 				t,
-				h.Get(k),
+				header.Get(key),
 				assert.Sprintf(
 					"%s (IsClient %v): checking all headers, %q missing: %v",
 					spec.Procedure,
 					spec.IsClient,
-					k,
-					h,
+					key,
+					header,
 				),
 			)
 		}
@@ -212,21 +212,21 @@ func newHeaderInterceptor(
 	inspectRequestHeader func(connect.Specification, http.Header),
 	inspectResponseHeader func(connect.Specification, http.Header),
 ) *headerInterceptor {
-	h := headerInterceptor{
+	interceptor := headerInterceptor{
 		inspectRequestHeader:  inspectRequestHeader,
 		inspectResponseHeader: inspectResponseHeader,
 	}
-	if h.inspectRequestHeader == nil {
-		h.inspectRequestHeader = func(_ connect.Specification, _ http.Header) {}
+	if interceptor.inspectRequestHeader == nil {
+		interceptor.inspectRequestHeader = func(_ connect.Specification, _ http.Header) {}
 	}
-	if h.inspectResponseHeader == nil {
-		h.inspectResponseHeader = func(_ connect.Specification, _ http.Header) {}
+	if interceptor.inspectResponseHeader == nil {
+		interceptor.inspectResponseHeader = func(_ connect.Specification, _ http.Header) {}
 	}
-	return &h
+	return &interceptor
 }
 
 func (h *headerInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
-	f := func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+	call := func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 		h.inspectRequestHeader(req.Spec(), req.Header())
 		res, err := next(ctx, req)
 		if err != nil {
@@ -235,7 +235,7 @@ func (h *headerInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc 
 		h.inspectResponseHeader(req.Spec(), res.Header())
 		return res, nil
 	}
-	return connect.UnaryFunc(f)
+	return connect.UnaryFunc(call)
 }
 
 func (h *headerInterceptor) WrapStreamContext(ctx context.Context) context.Context {
