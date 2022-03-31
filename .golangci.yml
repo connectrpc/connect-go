@@ -18,6 +18,10 @@ linters-settings:
     # TODO, OPT, etc. comments are fine to commit. Use FIXME comments for
     # temporary hacks, and use godox to prevent committing them.
     keywords: [FIXME]
+  varnamelen:
+    ignore-decls:
+      - T any
+      - i int
 linters:
   enable-all: true
   disable:
@@ -37,7 +41,6 @@ linters:
     - testpackage   # internal tests are fine
     - gomnd         # some unnamed constants are okay
     - maintidx      # covered by gocyclo
-    - varnamelen    # FIXME
 issues:
   exclude:
     # Don't ban use of fmt.Errorf to create new errors, but the remaining
