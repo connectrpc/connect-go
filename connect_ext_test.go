@@ -117,13 +117,13 @@ func TestServer(t *testing.T) {
 	}
 	testCountUp := func(t *testing.T, client pingv1connect.PingServiceClient) { // nolint:thelper
 		t.Run("count_up", func(t *testing.T) {
-			const n = 5
-			got := make([]int64, 0, n)
-			expect := make([]int64, 0, n)
-			for i := 1; i <= n; i++ {
+			const upTo = 5
+			got := make([]int64, 0, upTo)
+			expect := make([]int64, 0, upTo)
+			for i := 1; i <= upTo; i++ {
 				expect = append(expect, int64(i))
 			}
-			request := connect.NewRequest(&pingv1.CountUpRequest{Number: n})
+			request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
 			request.Header().Set(clientHeader, headerValue)
 			stream, err := client.CountUp(context.Background(), request)
 			assert.Nil(t, err)
@@ -161,10 +161,10 @@ func TestServer(t *testing.T) {
 				failNoHTTP2(t, stream)
 				return
 			}
-			var wg sync.WaitGroup
-			wg.Add(2)
+			var waitGroup sync.WaitGroup
+			waitGroup.Add(2)
 			go func() {
-				defer wg.Done()
+				defer waitGroup.Done()
 				for i, n := range send {
 					err := stream.Send(&pingv1.CumSumRequest{Number: n})
 					assert.Nil(t, err, assert.Sprintf("send error #%d", i))
@@ -172,7 +172,7 @@ func TestServer(t *testing.T) {
 				assert.Nil(t, stream.CloseSend())
 			}()
 			go func() {
-				defer wg.Done()
+				defer waitGroup.Done()
 				for {
 					msg, err := stream.Receive()
 					if errors.Is(err, io.EOF) {
@@ -183,7 +183,7 @@ func TestServer(t *testing.T) {
 				}
 				assert.Nil(t, stream.CloseReceive())
 			}()
-			wg.Wait()
+			waitGroup.Wait()
 			assert.Equal(t, got, expect)
 			assert.Equal(t, stream.ResponseHeader().Get(handlerHeader), headerValue)
 			assert.Equal(t, stream.ResponseTrailer().Get(handlerTrailer), trailerValue)
