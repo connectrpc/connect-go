@@ -173,17 +173,17 @@ func (o *sprintfOption) message() string {
 
 func report(tb testing.TB, got, want any, desc string, showWant bool, options ...Option) {
 	tb.Helper()
-	w := &bytes.Buffer{}
+	buffer := &bytes.Buffer{}
 	if len(options) > 0 {
-		w.WriteString(options[len(options)-1].message())
+		buffer.WriteString(options[len(options)-1].message())
 	}
-	w.WriteString("\n")
-	fmt.Fprintf(w, "assertion:\t%s\n", desc)
-	fmt.Fprintf(w, "got:\t%+v\n", got)
+	buffer.WriteString("\n")
+	fmt.Fprintf(buffer, "assertion:\t%s\n", desc)
+	fmt.Fprintf(buffer, "got:\t%+v\n", got)
 	if showWant {
-		fmt.Fprintf(w, "want:\t%+v\n", want)
+		fmt.Fprintf(buffer, "want:\t%+v\n", want)
 	}
-	tb.Fatal(w.String())
+	tb.Fatal(buffer.String())
 }
 
 func isNil(got any) bool {
