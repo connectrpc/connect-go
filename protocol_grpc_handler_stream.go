@@ -25,8 +25,8 @@ import (
 func newHandlerStream(
 	spec Specification,
 	web bool,
-	w http.ResponseWriter,
-	r *http.Request,
+	responseWriter http.ResponseWriter,
+	request *http.Request,
 	maxReadBytes int64,
 	compressMinBytes int,
 	codec Codec,
@@ -38,13 +38,13 @@ func newHandlerStream(
 		spec: spec,
 		web:  web,
 		marshaler: marshaler{
-			writer:           w,
+			writer:           responseWriter,
 			compressionPool:  responseCompressionPools,
 			codec:            codec,
 			compressMinBytes: compressMinBytes,
 		},
 		protobuf: protobuf,
-		writer:   w,
+		writer:   responseWriter,
 		header:   make(http.Header),
 		trailer:  make(http.Header),
 	}
@@ -52,12 +52,12 @@ func newHandlerStream(
 		spec: spec,
 		unmarshaler: unmarshaler{
 			web:             web,
-			reader:          r.Body,
+			reader:          request.Body,
 			max:             maxReadBytes,
 			compressionPool: requestCompressionPools,
 			codec:           codec,
 		},
-		request: r,
+		request: request,
 	}
 	return sender, receiver
 }
