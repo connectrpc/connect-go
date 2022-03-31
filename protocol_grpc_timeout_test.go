@@ -39,27 +39,27 @@ func TestParseTimeout(t *testing.T) {
 	_, err = parseTimeout("99999999H") // 8 digits but overflows time.Duration
 	assert.True(t, errors.Is(err, errNoTimeout))
 
-	d, err := parseTimeout("45S")
+	duration, err := parseTimeout("45S")
 	assert.Nil(t, err)
-	assert.Equal(t, d, 45*time.Second)
+	assert.Equal(t, duration, 45*time.Second)
 
 	const long = "99999999S"
-	d, err = parseTimeout(long) // 8 digits, shouldn't overflow
+	duration, err = parseTimeout(long) // 8 digits, shouldn't overflow
 	assert.Nil(t, err)
-	assert.Equal(t, d, 99999999*time.Second)
+	assert.Equal(t, duration, 99999999*time.Second)
 }
 
 func TestEncodeTimeout(t *testing.T) {
 	t.Parallel()
-	to, err := encodeTimeout(time.Hour + time.Second)
+	timeout, err := encodeTimeout(time.Hour + time.Second)
 	assert.Nil(t, err)
-	assert.Equal(t, to, "3601000m")
-	to, err = encodeTimeout(time.Duration(math.MaxInt64))
+	assert.Equal(t, timeout, "3601000m")
+	timeout, err = encodeTimeout(time.Duration(math.MaxInt64))
 	assert.Nil(t, err)
-	assert.Equal(t, to, "2562047H")
-	to, err = encodeTimeout(-1 * time.Hour)
+	assert.Equal(t, timeout, "2562047H")
+	timeout, err = encodeTimeout(-1 * time.Hour)
 	assert.Nil(t, err)
-	assert.Equal(t, to, "0n")
+	assert.Equal(t, timeout, "0n")
 }
 
 func TestEncodeTimeoutQuick(t *testing.T) {
