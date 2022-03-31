@@ -81,20 +81,20 @@ type typedCompressionPool[D Decompressor, C Compressor] struct {
 	compressors   sync.Pool
 }
 
-func (c *typedCompressionPool[D, C]) GetReader(r io.Reader) (io.Reader, error) {
+func (c *typedCompressionPool[D, C]) GetReader(reader io.Reader) (io.Reader, error) {
 	decompressor, ok := c.decompressors.Get().(D)
 	if !ok {
 		var expected D
 		return nil, fmt.Errorf("expected %T, got incorrect type from pool", expected)
 	}
-	return decompressor, decompressor.Reset(r)
+	return decompressor, decompressor.Reset(reader)
 }
 
-func (c *typedCompressionPool[D, C]) PutReader(r io.Reader) error {
-	decompressor, ok := r.(D)
+func (c *typedCompressionPool[D, C]) PutReader(reader io.Reader) error {
+	decompressor, ok := reader.(D)
 	if !ok {
 		var expected D
-		return fmt.Errorf("expected %T, got %T", expected, r)
+		return fmt.Errorf("expected %T, got %T", expected, reader)
 	}
 	if err := decompressor.Close(); err != nil {
 		return err
@@ -110,21 +110,21 @@ func (c *typedCompressionPool[D, C]) PutReader(r io.Reader) error {
 	return nil
 }
 
-func (c *typedCompressionPool[D, C]) GetWriter(w io.Writer) (io.Writer, error) {
+func (c *typedCompressionPool[D, C]) GetWriter(writer io.Writer) (io.Writer, error) {
 	compressor, ok := c.compressors.Get().(C)
 	if !ok {
 		var expected C
 		return nil, fmt.Errorf("expected %T, got incorrect type from pool", expected)
 	}
-	compressor.Reset(w)
+	compressor.Reset(writer)
 	return compressor, nil
 }
 
-func (c *typedCompressionPool[D, C]) PutWriter(w io.Writer) error {
-	compressor, ok := w.(C)
+func (c *typedCompressionPool[D, C]) PutWriter(writer io.Writer) error {
+	compressor, ok := writer.(C)
 	if !ok {
 		var expected C
-		return fmt.Errorf("expected %T, got %T", expected, w)
+		return fmt.Errorf("expected %T, got %T", expected, writer)
 	}
 	if err := compressor.Close(); err != nil {
 		return err
