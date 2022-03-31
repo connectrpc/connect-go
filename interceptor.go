@@ -97,13 +97,13 @@ func newChain(interceptors []Interceptor) *chain {
 	// We usually wrap in reverse order to have the first interceptor from
 	// the slice act first. Rather than doing this dance repeatedly, reverse the
 	// interceptor order now.
-	var c chain
+	var chain chain
 	for i := len(interceptors) - 1; i >= 0; i-- {
 		if interceptor := interceptors[i]; interceptor != nil {
-			c.interceptors = append(c.interceptors, interceptor)
+			chain.interceptors = append(chain.interceptors, interceptor)
 		}
 	}
-	return &c
+	return &chain
 }
 
 func (c *chain) WrapUnary(next UnaryFunc) UnaryFunc {
