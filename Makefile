@@ -38,16 +38,15 @@ install: ## Install all binaries
 	$(GO) install ./...
 
 .PHONY: lint
-lint: $(BIN)/gofmt $(BIN)/golangci-lint $(BIN)/buf ## Lint Go and protobuf
-	test -z "$$($(BIN)/gofmt -s -l . | tee /dev/stderr)"
+lint: $(BIN)/golangci-lint $(BIN)/buf ## Lint Go and protobuf
 	test -z "$$($(BIN)/buf format -d . | tee /dev/stderr)"
 	$(GO) vet ./...
 	$(BIN)/golangci-lint run
 	$(BIN)/buf lint
 
 .PHONY: lintfix
-lintfix: $(BIN)/gofmt $(BIN)/buf ## Automatically fix some lint errors
-	$(BIN)/gofmt -s -w .
+lintfix: $(BIN)/buf ## Automatically fix some lint errors
+	$(BIN)/golangci-lint run --fix
 	$(BIN)/buf format -w .
 
 .PHONY: generate
@@ -68,10 +67,6 @@ upgrade: ## Upgrade dependencies
 checkgenerate:
 	@# Used in CI to verify that `make generate` doesn't produce a diff.
 	test -z "$$(git status --porcelain | tee /dev/stderr)"
-
-$(BIN)/gofmt:
-	@mkdir -p $(@D)
-	$(GO) build -o $(@) cmd/gofmt
 
 .PHONY: $(BIN)/protoc-gen-connect-go
 $(BIN)/protoc-gen-connect-go:
