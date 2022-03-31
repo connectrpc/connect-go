@@ -91,8 +91,11 @@ func (g *grpcHandler) WriteAccept(header http.Header) {
 	addCommaSeparatedHeader(header, "Accept-Post", g.accept)
 }
 
-func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender, Receiver, error) {
-	codecName := codecFromContentType(g.web, r.Header.Get("Content-Type"))
+func (g *grpcHandler) NewStream(
+	responseWriter http.ResponseWriter,
+	request *http.Request,
+) (Sender, Receiver, error) {
+	codecName := codecFromContentType(g.web, request.Header.Get("Content-Type"))
 	// ShouldHandleContentType guarantees that this is non-nil
 	clientCodec := g.codecs.Get(codecName)
 
@@ -102,19 +105,19 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	// will send the error to the client.
 	var failed *Error
 
-	timeout, err := parseTimeout(r.Header.Get("Grpc-Timeout"))
+	timeout, err := parseTimeout(request.Header.Get("Grpc-Timeout"))
 	if err != nil && !errors.Is(err, errNoTimeout) {
 		// Errors here indicate that the client sent an invalid timeout header, so
 		// the error text is safe to send back.
 		failed = NewError(CodeInvalidArgument, err)
 	} else if err == nil {
-		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		ctx, cancel := context.WithTimeout(request.Context(), timeout)
 		defer cancel()
-		r = r.WithContext(ctx)
+		request = request.WithContext(ctx)
 	} // else err wraps errNoTimeout, nothing to do
 
 	requestCompression := compressionIdentity
-	if msgEncoding := r.Header.Get("Grpc-Encoding"); msgEncoding != "" && msgEncoding != compressionIdentity {
+	if msgEncoding := request.Header.Get("Grpc-Encoding"); msgEncoding != "" && msgEncoding != compressionIdentity {
 		// We default to identity, so we only care if the client sends something
 		// other than the empty string or compressIdentity.
 		if g.compressionPools.Contains(msgEncoding) {
@@ -138,7 +141,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	// If we're not already planning to compress the response, check whether the
 	// client requested a compression algorithm we support.
 	if responseCompression == compressionIdentity {
-		if acceptEncoding := r.Header.Get("Grpc-Accept-Encoding"); acceptEncoding != "" {
+		if acceptEncoding := request.Header.Get("Grpc-Accept-Encoding"); acceptEncoding != "" {
 			for _, name := range strings.FieldsFunc(acceptEncoding, isCommaOrSpace) {
 				if g.compressionPools.Contains(name) {
 					// We found a mutually supported compression algorithm. Unlike standard
@@ -157,17 +160,17 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 	//
 	// Since we know that these header keys are already in canonical form, we can
 	// skip the normalization in Header.Set.
-	w.Header()["Content-Type"] = []string{r.Header.Get("Content-Type")}
-	w.Header()["Grpc-Accept-Encoding"] = []string{g.compressionPools.CommaSeparatedNames()}
+	responseWriter.Header()["Content-Type"] = []string{request.Header.Get("Content-Type")}
+	responseWriter.Header()["Grpc-Accept-Encoding"] = []string{g.compressionPools.CommaSeparatedNames()}
 	if responseCompression != compressionIdentity {
-		w.Header()["Grpc-Encoding"] = []string{responseCompression}
+		responseWriter.Header()["Grpc-Encoding"] = []string{responseCompression}
 	}
 
 	sender, receiver := g.wrapStream(newHandlerStream(
 		g.spec,
 		g.web,
-		w,
-		r,
+		responseWriter,
+		request,
 		g.maxRequestBytes,
 		g.minCompressBytes,
 		clientCodec,
@@ -181,7 +184,7 @@ func (g *grpcHandler) NewStream(w http.ResponseWriter, r *http.Request) (Sender,
 		// Negotiation failed, so we can't establish a stream. To make the
 		// request's HTTP trailers visible to interceptors, we should try to read
 		// the body to EOF.
-		discard(r.Body)
+		discard(request.Body)
 		return sender, receiver, failed
 	}
 	return sender, receiver, nil
@@ -236,7 +239,7 @@ func (g *grpcClient) WriteRequestHeader(header http.Header) {
 func (g *grpcClient) NewStream(
 	ctx context.Context,
 	spec Specification,
-	h http.Header,
+	header http.Header,
 ) (Sender, Receiver) {
 	// In a typical HTTP/1.1 request, we'd put the body into a bytes.Buffer, hand
 	// the buffer to http.NewRequest, and fire off the request with
@@ -266,7 +269,7 @@ func (g *grpcClient) NewStream(
 			codec:            g.codec,
 			compressMinBytes: g.minCompressBytes,
 		},
-		header:           h,
+		header:           header,
 		trailer:          make(http.Header),
 		web:              g.web,
 		reader:           pipeReader,
