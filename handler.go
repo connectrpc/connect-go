@@ -171,38 +171,38 @@ func NewBidiStreamHandler[Req, Res any](
 }
 
 // ServeHTTP implements http.Handler.
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
 	// We don't need to defer functions  to close the request body or read to
 	// EOF: the stream we construct later on already does that, and we only
 	// return early when dealing with misbehaving clients. In those cases, it's
 	// okay if we can't re-use the connection.
 	isBidi := (h.spec.StreamType & StreamTypeBidi) == StreamTypeBidi
-	if isBidi && r.ProtoMajor < 2 {
-		h.failNegotiation(w, http.StatusHTTPVersionNotSupported)
+	if isBidi && request.ProtoMajor < 2 {
+		h.failNegotiation(responseWriter, http.StatusHTTPVersionNotSupported)
 		return
 	}
 
 	methodHandlers := make([]protocolHandler, 0, len(h.protocolHandlers))
 	for _, protocolHandler := range h.protocolHandlers {
-		if protocolHandler.ShouldHandleMethod(r.Method) {
+		if protocolHandler.ShouldHandleMethod(request.Method) {
 			methodHandlers = append(methodHandlers, protocolHandler)
 		}
 	}
 	if len(methodHandlers) == 0 {
 		// grpc-go returns a 500 here, but interoperability with non-gRPC HTTP
 		// clients is better if we return a 405.
-		h.failNegotiation(w, http.StatusMethodNotAllowed)
+		h.failNegotiation(responseWriter, http.StatusMethodNotAllowed)
 		return
 	}
 
 	// TODO: for GETs, we should parse the Accept header and offer each handler
 	// each content-type.
-	contentType := r.Header.Get("Content-Type")
+	contentType := request.Header.Get("Content-Type")
 	for _, protocolHandler := range methodHandlers {
 		if !protocolHandler.ShouldHandleContentType(contentType) {
 			continue
 		}
-		ctx := r.Context()
+		ctx := request.Context()
 		if ic := h.interceptor; ic != nil {
 			ctx = ic.WrapStreamContext(ctx)
 		}
@@ -211,16 +211,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// timeout or an unavailable codec. We'd like those errors to be visible to
 		// the interceptor chain, so we're going to capture them here and pass them
 		// to the implementation.
-		sender, receiver, clientVisibleError := protocolHandler.NewStream(w, r.WithContext(ctx))
+		sender, receiver, clientVisibleError := protocolHandler.NewStream(responseWriter, request.WithContext(ctx))
 		// If NewStream errored and the protocol doesn't want the error sent to
 		// the client, sender and/or receiver may be nil. We still want the
 		// error to be seen by interceptors, so we provide no-op Sender and
 		// Receiver implementations.
 		if clientVisibleError != nil && sender == nil {
-			sender = newNopSender(h.spec, w.Header(), make(http.Header))
+			sender = newNopSender(h.spec, responseWriter.Header(), make(http.Header))
 		}
 		if clientVisibleError != nil && receiver == nil {
-			receiver = newNopReceiver(h.spec, r.Header, r.Trailer)
+			receiver = newNopReceiver(h.spec, request.Header, request.Trailer)
 		}
 		if ic := h.interceptor; ic != nil {
 			// Unary interceptors were handled in NewUnaryHandler.
@@ -230,7 +230,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.implementation(ctx, sender, receiver, clientVisibleError)
 		return
 	}
-	h.failNegotiation(w, http.StatusUnsupportedMediaType)
+	h.failNegotiation(responseWriter, http.StatusUnsupportedMediaType)
 }
 
 func (h *Handler) failNegotiation(w http.ResponseWriter, code int) {
