@@ -22,6 +22,7 @@ linters-settings:
     ignore-decls:
       - T any
       - i int
+      - wg sync.WaitGroup
 linters:
   enable-all: true
   disable:
