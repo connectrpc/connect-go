@@ -60,7 +60,7 @@ generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/li
 		xargs $(BIN)/license-header \
 			--license-type apache \
 			--copyright-holder "Buf Technologies, Inc." \
-			--year-range "$(COPYRIGHT_YEARS)" \
+			--year-range "$(COPYRIGHT_YEARS)"
 
 .PHONY: upgrade
 upgrade: ## Upgrade dependencies
