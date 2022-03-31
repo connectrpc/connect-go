@@ -161,10 +161,10 @@ func TestServer(t *testing.T) {
 				failNoHTTP2(t, stream)
 				return
 			}
-			var waitGroup sync.WaitGroup
-			waitGroup.Add(2)
+			var wg sync.WaitGroup
+			wg.Add(2)
 			go func() {
-				defer waitGroup.Done()
+				defer wg.Done()
 				for i, n := range send {
 					err := stream.Send(&pingv1.CumSumRequest{Number: n})
 					assert.Nil(t, err, assert.Sprintf("send error #%d", i))
@@ -172,7 +172,7 @@ func TestServer(t *testing.T) {
 				assert.Nil(t, stream.CloseSend())
 			}()
 			go func() {
-				defer waitGroup.Done()
+				defer wg.Done()
 				for {
 					msg, err := stream.Receive()
 					if errors.Is(err, io.EOF) {
@@ -183,7 +183,7 @@ func TestServer(t *testing.T) {
 				}
 				assert.Nil(t, stream.CloseReceive())
 			}()
-			waitGroup.Wait()
+			wg.Wait()
 			assert.Equal(t, got, expect)
 			assert.Equal(t, stream.ResponseHeader().Get(handlerHeader), headerValue)
 			assert.Equal(t, stream.ResponseTrailer().Get(handlerTrailer), trailerValue)
