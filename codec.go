@@ -83,13 +83,13 @@ func (c *protoJSONCodec) Marshal(message any) ([]byte, error) {
 	return options.Marshal(protoMessage)
 }
 
-func (c *protoJSONCodec) Unmarshal(bs []byte, message any) error {
+func (c *protoJSONCodec) Unmarshal(binary []byte, message any) error {
 	protoMessage, ok := message.(proto.Message)
 	if !ok {
 		return errNotProto(message)
 	}
 	var options protojson.UnmarshalOptions
-	return options.Unmarshal(bs, protoMessage)
+	return options.Unmarshal(binary, protoMessage)
 }
 
 // readOnlyCodecs is a read-only interface to a map of named codecs.
