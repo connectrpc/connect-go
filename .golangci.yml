@@ -25,22 +25,22 @@ linters-settings:
 linters:
   enable-all: true
   disable:
-    - wrapcheck     # don't _always_ need to wrap errors
-    - funlen        # rely on code review to limit function length
-    - wsl           # generous whitespace violates house style
-    - gocognit      # dubious "cognitive overhead" quantification
-    - golint        # deprecated by Go team
-    - lll           # don't want hard limits for line length
-    - maligned      # readability trumps efficient struct packing
     - cyclop        # covered by gocyclo
+    - funlen        # rely on code review to limit function length
+    - gocognit      # dubious "cognitive overhead" quantification
+    - gofumpt       # prefer standard gofmt
+    - golint        # deprecated by Go team
+    - gomnd         # some unnamed constants are okay
+    - interfacer    # deprecated by author
+    - ireturn       # "accept interfaces, return structs" isn't ironclad
+    - lll           # don't want hard limits for line length
+    - maintidx      # covered by gocyclo
+    - maligned      # readability trumps efficient struct packing
     - nlreturn      # generous whitespace violates house style
     - scopelint     # deprecated by author
-    - interfacer    # deprecated by author
-    - gofumpt       # prefer standard gofmt
-    - ireturn       # "accept interfaces, return structs" isn't ironclad
     - testpackage   # internal tests are fine
-    - gomnd         # some unnamed constants are okay
-    - maintidx      # covered by gocyclo
+    - wrapcheck     # don't _always_ need to wrap errors
+    - wsl           # generous whitespace violates house style
 issues:
   exclude:
     # Don't ban use of fmt.Errorf to create new errors, but the remaining
