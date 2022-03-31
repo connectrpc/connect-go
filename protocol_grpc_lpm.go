@@ -132,22 +132,22 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 	// unsigned integer used as a set of bitwise flags, and a four-byte unsigned
 	// integer indicating the message length.
 	prefixes := make([]byte, 5)
-	n, err := u.reader.Read(prefixes)
+	prefixBytesRead, err := u.reader.Read(prefixes)
 	switch {
 	case (err == nil || errors.Is(err, io.EOF)) &&
-		n == 5 &&
+		prefixBytesRead == 5 &&
 		(prefixes[0]&flagLPMTrailer != flagLPMTrailer) &&
 		isSizeZeroPrefix(prefixes):
 		// Successfully read prefix, LPM isn't a trailers block, and expect no
 		// additional data, so there's nothing left to do - the zero value of the
 		// msg is correct.
 		return nil
-	case err != nil && errors.Is(err, io.EOF) && n == 0:
+	case err != nil && errors.Is(err, io.EOF) && prefixBytesRead == 0:
 		// The stream ended cleanly. That's expected, but we need to propagate them
 		// to the user so that they know that the stream has ended. We shouldn't
 		// add any alarming text about protocol errors, though.
 		return NewError(CodeUnknown, err)
-	case err != nil || n < 5:
+	case err != nil || prefixBytesRead < 5:
 		// Something else has gone wrong - the stream didn't end cleanly.
 		return errorf(
 			CodeInvalidArgument,
@@ -181,11 +181,11 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 		// forever if the LPM is malformed.
 		remaining := size
 		for remaining > 0 {
-			n, err = u.reader.Read(raw[size-remaining : size])
+			bytesRead, err := u.reader.Read(raw[size-remaining : size])
 			if err != nil && !errors.Is(err, io.EOF) {
 				return errorf(CodeUnknown, "error reading length-prefixed message data: %w", err)
 			}
-			if errors.Is(err, io.EOF) && n == 0 {
+			if errors.Is(err, io.EOF) && prefixBytesRead == 0 {
 				// We've gotten zero-length chunk of data. Message is likely malformed,
 				// don't wait for additional chunks.
 				return errorf(
@@ -195,7 +195,7 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 					size-remaining,
 				)
 			}
-			remaining -= n
+			remaining -= bytesRead
 		}
 	}
 
