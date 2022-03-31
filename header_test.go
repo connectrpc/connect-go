@@ -26,14 +26,14 @@ import (
 
 func TestBinaryEncodingQuick(t *testing.T) {
 	t.Parallel()
-	roundtrip := func(bs []byte) bool {
-		encoded := EncodeBinaryHeader(bs)
+	roundtrip := func(binary []byte) bool {
+		encoded := EncodeBinaryHeader(binary)
 		decoded, err := DecodeBinaryHeader(encoded)
 		if err != nil {
 			// We want to abort immediately. Don't use our assert package.
 			t.Fatalf("decode error: %v", err)
 		}
-		return bytes.Equal(decoded, bs)
+		return bytes.Equal(decoded, binary)
 	}
 	if err := quick.Check(roundtrip, nil /* config */); err != nil {
 		t.Error(err)
