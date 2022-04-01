@@ -53,11 +53,12 @@ lintfix: $(BIN)/buf ## Automatically fix some lint errors
 generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
 	rm -rf internal/gen
 	PATH=$(BIN) $(BIN)/buf generate
-	@$(BIN)/license-header \
-		--license-type apache \
-		--copyright-holder "Buf Technologies, Inc." \
-		--year-range "$(COPYRIGHT_YEARS)" \
-		$(shell git ls-files) $(shell git ls-files --exclude-standard --others)
+	{ git ls-files && git ls-files --exclude-standard --others; } | \
+		grep -vF '/testdata/' | sort -u | \
+		xargs $(BIN)/license-header \
+			--license-type apache \
+			--copyright-holder "Buf Technologies, Inc." \
+			--year-range "$(COPYRIGHT_YEARS)"
 
 .PHONY: upgrade
 upgrade: ## Upgrade dependencies
