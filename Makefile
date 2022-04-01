@@ -53,10 +53,8 @@ lintfix: $(BIN)/buf ## Automatically fix some lint errors
 generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
 	rm -rf internal/gen
 	PATH=$(BIN) $(BIN)/buf generate
-	{ \
-		git ls-files \
-		git ls-files --exclude-standard --others \
-	} | grep -vF '/testdata/' | sort -u | \
+	{ git ls-files && git ls-files --exclude-standard --others; } | \
+		grep -vF '/testdata/' | sort -u | \
 		xargs $(BIN)/license-header \
 			--license-type apache \
 			--copyright-holder "Buf Technologies, Inc." \
