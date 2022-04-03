@@ -104,15 +104,11 @@ type protocolClientParams struct {
 // Client is the client side of a protocol. HTTP clients typically use a single
 // protocol, codec, and compressor to send requests.
 type protocolClient interface {
-	// WriteRequestHeader writes any protocol-specific request headers.
-	WriteRequestHeader(http.Header)
-
 	// NewStream constructs a Sender and Receiver for the message exchange.
 	//
-	// Implementations should assume that the supplied HTTP headers have already
-	// been populated by WriteRequestHeader. When constructing a stream for a
-	// unary call, implementations may assume that the Sender's Send and Close
-	// methods return before the Receiver's Receive or Close methods are called.
+	// When constructing a stream for a unary call, implementations may assume
+	// that the Sender's Send and Close methods return before the Receiver's
+	// Receive or Close methods are called.
 	NewStream(context.Context, Specification, http.Header) (Sender, Receiver)
 }
 

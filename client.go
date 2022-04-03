@@ -73,7 +73,6 @@ func (c *Client[Req, Res]) CallUnary(
 	// To make the specification visible to the full interceptor chain (as though
 	// it were supplied by the caller), we'll add it here.
 	req.spec = unarySpec
-	c.protocolClient.WriteRequestHeader(req.Header())
 	sender, receiver := c.protocolClient.NewStream(ctx, unarySpec, req.Header())
 	var stream UnaryStream = &clientUnaryStream[Res]{
 		sender:   sender,
@@ -131,7 +130,6 @@ func (c *Client[Req, Res]) newStream(ctx context.Context, streamType StreamType)
 		ctx = ic.WrapStreamContext(ctx)
 	}
 	header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
-	c.protocolClient.WriteRequestHeader(header)
 	sender, receiver := c.protocolClient.NewStream(ctx, c.config.newSpecification(streamType), header)
 	if ic := c.config.Interceptor; ic != nil {
 		sender = ic.WrapStreamSender(ctx, sender)

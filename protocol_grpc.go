@@ -219,7 +219,11 @@ type grpcClient struct {
 	wrapErrorInterceptor Interceptor
 }
 
-func (g *grpcClient) WriteRequestHeader(header http.Header) {
+func (g *grpcClient) NewStream(
+	ctx context.Context,
+	spec Specification,
+	header http.Header,
+) (Sender, Receiver) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
 	header["User-Agent"] = []string{userAgent()}
@@ -234,13 +238,6 @@ func (g *grpcClient) WriteRequestHeader(header http.Header) {
 		// No HTTP trailers in gRPC-Web.
 		header["Te"] = []string{"trailers"}
 	}
-}
-
-func (g *grpcClient) NewStream(
-	ctx context.Context,
-	spec Specification,
-	header http.Header,
-) (Sender, Receiver) {
 	// In a typical HTTP/1.1 request, we'd put the body into a bytes.Buffer, hand
 	// the buffer to http.NewRequest, and fire off the request with
 	// httpClient.Do. That won't work here because we're establishing a stream -
