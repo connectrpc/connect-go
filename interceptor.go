@@ -14,26 +14,27 @@
 
 package connect
 
-import (
-	"context"
-)
+import "context"
 
-// UnaryFunc is the generic signature of a unary RPC. Interceptors wrap Funcs.
+// A UnaryStream sends one message and receives either a response or an error.
+// Interceptors wrap UnaryStreams.
 //
 // The type of the request and response structs depend on the codec being used.
 // When using protobuf, request.Any() and response.Any() will always be
 // proto.Message implementations.
-type UnaryFunc func(context.Context, AnyRequest) (AnyResponse, error)
+type UnaryStream interface {
+	Call(context.Context, AnyRequest) (AnyResponse, error)
+	Spec() Specification
+}
 
 // An Interceptor adds logic to a generated handler or client, like the
 // decorators or middleware you may have seen in other libraries. Interceptors
 // may replace the context, mutate the request, mutate the response, handle the
-// returned error, retry, recover from panics, emit logs and metrics, or do
-// nearly anything else.
+// returned error, retry, recover from panics, or do nearly anything else.
 type Interceptor interface {
-	// WrapUnary adds logic to a unary procedure. The returned UnaryFunc must be safe
-	// to call concurrently.
-	WrapUnary(UnaryFunc) UnaryFunc
+	// WrapUnary adds logic to a unary procedure. The returned UnaryStream must
+	// be safe to call concurrently.
+	WrapUnary(UnaryStream) UnaryStream
 
 	// WrapStreamContext, WrapStreamSender, and WrapStreamReceiver work together
 	// to add logic to streaming procedures. Stream interceptors work in phases.
@@ -62,13 +63,24 @@ type Interceptor interface {
 	WrapStreamReceiver(context.Context, Receiver) Receiver
 }
 
+// UnaryCall is an alias for the type signature of UnaryStream.Call.
+//
+// Unary interceptors are common, and this alias makes both the definition and
+// implementations of UnaryInterceptorFunc more readable.
+type UnaryCall = func(context.Context, AnyRequest) (AnyResponse, error)
+
 // UnaryInterceptorFunc is a simple Interceptor implementation that only
 // wraps unary RPCs. It has no effect on client, server, or bidirectional
 // streaming RPCs.
-type UnaryInterceptorFunc func(UnaryFunc) UnaryFunc
+type UnaryInterceptorFunc func(UnaryCall) UnaryCall
 
-// WrapUnary implements Interceptor by applying the interceptor function.
-func (f UnaryInterceptorFunc) WrapUnary(next UnaryFunc) UnaryFunc { return f(next) }
+// WrapUnary implements Interceptor by wrapping UnaryStream.Call.
+func (f UnaryInterceptorFunc) WrapUnary(next UnaryStream) UnaryStream {
+	return &wrappedUnaryStream{
+		wrap:   f,
+		stream: next,
+	}
+}
 
 // WrapStreamContext implements Interceptor with a no-op.
 func (f UnaryInterceptorFunc) WrapStreamContext(ctx context.Context) context.Context {
@@ -83,6 +95,19 @@ func (f UnaryInterceptorFunc) WrapStreamSender(_ context.Context, sender Sender)
 // WrapStreamReceiver implements Interceptor with a no-op.
 func (f UnaryInterceptorFunc) WrapStreamReceiver(_ context.Context, receiver Receiver) Receiver {
 	return receiver
+}
+
+type wrappedUnaryStream struct {
+	wrap   UnaryInterceptorFunc
+	stream UnaryStream
+}
+
+func (s *wrappedUnaryStream) Call(ctx context.Context, req AnyRequest) (AnyResponse, error) {
+	return s.wrap(s.stream.Call)(ctx, req)
+}
+
+func (s *wrappedUnaryStream) Spec() Specification {
+	return s.stream.Spec()
 }
 
 // A chain composes multiple interceptors into one.
@@ -106,7 +131,7 @@ func newChain(interceptors []Interceptor) *chain {
 	return &chain
 }
 
-func (c *chain) WrapUnary(next UnaryFunc) UnaryFunc {
+func (c *chain) WrapUnary(next UnaryStream) UnaryStream {
 	for _, interceptor := range c.interceptors {
 		next = interceptor.WrapUnary(next)
 	}

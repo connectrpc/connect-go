@@ -32,7 +32,6 @@ import (
 // options.
 type Client[Req, Res any] struct {
 	config         *clientConfiguration
-	callUnary      func(context.Context, *Request[Req]) (*Response[Res], error)
 	protocolClient protocolClient
 }
 
@@ -59,51 +58,8 @@ func NewClient[Req, Res any](
 	if protocolErr != nil {
 		return nil, protocolErr
 	}
-	// Rather than applying unary interceptors along the hot path, we can do it
-	// once at client creation.
-	unarySpec := config.newSpecification(StreamTypeUnary)
-	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
-		sender, receiver := protocolClient.NewStream(ctx, unarySpec, request.Header())
-		// Send always returns an io.EOF unless the error is from the client-side.
-		// We want the user to continue to call Receive in those cases to get the
-		// full error from the server-side.
-		if err := sender.Send(request.Any()); err != nil && !errors.Is(err, io.EOF) {
-			_ = sender.Close(err)
-			_ = receiver.Close()
-			return nil, err
-		}
-		if err := sender.Close(nil); err != nil {
-			_ = receiver.Close()
-			return nil, err
-		}
-		response, err := receiveUnaryResponse[Res](receiver)
-		if err != nil {
-			_ = receiver.Close()
-			return nil, err
-		}
-		return response, receiver.Close()
-	})
-	if ic := config.Interceptor; ic != nil {
-		unaryFunc = ic.WrapUnary(unaryFunc)
-	}
-	callUnary := func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
-		// To make the specification and RPC headers visible to the full interceptor
-		// chain (as though they were supplied by the caller), we'll add them here.
-		request.spec = unarySpec
-		protocolClient.WriteRequestHeader(request.Header())
-		response, err := unaryFunc(ctx, request)
-		if err != nil {
-			return nil, err
-		}
-		typed, ok := response.(*Response[Res])
-		if !ok {
-			return nil, errorf(CodeInternal, "unexpected client response type %T", response)
-		}
-		return typed, nil
-	}
 	return &Client[Req, Res]{
 		config:         config,
-		callUnary:      callUnary,
 		protocolClient: protocolClient,
 	}, nil
 }
@@ -113,7 +69,28 @@ func (c *Client[Req, Res]) CallUnary(
 	ctx context.Context,
 	req *Request[Req],
 ) (*Response[Res], error) {
-	return c.callUnary(ctx, req)
+	unarySpec := c.config.newSpecification(StreamTypeUnary)
+	// To make the specification visible to the full interceptor chain (as though
+	// it were supplied by the caller), we'll add it here.
+	req.spec = unarySpec
+	c.protocolClient.WriteRequestHeader(req.Header())
+	sender, receiver := c.protocolClient.NewStream(ctx, unarySpec, req.Header())
+	var stream UnaryStream = &clientUnaryStream[Res]{
+		sender:   sender,
+		receiver: receiver,
+	}
+	if ic := c.config.Interceptor; ic != nil {
+		stream = ic.WrapUnary(stream)
+	}
+	res, err := stream.Call(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	typed, ok := res.(*Response[Res])
+	if !ok {
+		return nil, errorf(CodeInternal, "unexpected client response type %T", res)
+	}
+	return typed, nil
 }
 
 // CallClientStream calls a client streaming procedure.
@@ -222,4 +199,34 @@ func (c *clientConfiguration) newSpecification(t StreamType) Specification {
 		Procedure:  c.Procedure,
 		IsClient:   true,
 	}
+}
+
+type clientUnaryStream[Res any] struct {
+	sender   Sender
+	receiver Receiver
+}
+
+func (s *clientUnaryStream[Res]) Call(ctx context.Context, req AnyRequest) (AnyResponse, error) {
+	// Send always returns an io.EOF unless the error is from the client-side.
+	// We want the user to continue to call Receive in those cases to get the
+	// full error from the server-side.
+	if err := s.sender.Send(req.Any()); err != nil && !errors.Is(err, io.EOF) {
+		_ = s.sender.Close(err)
+		_ = s.receiver.Close()
+		return nil, err
+	}
+	if err := s.sender.Close(nil); err != nil {
+		_ = s.receiver.Close()
+		return nil, err
+	}
+	res, err := receiveUnaryResponse[Res](s.receiver)
+	if err != nil {
+		_ = s.receiver.Close()
+		return nil, err
+	}
+	return res, s.receiver.Close()
+}
+
+func (s *clientUnaryStream[Res]) Spec() Specification {
+	return s.sender.Spec()
 }

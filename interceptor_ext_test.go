@@ -225,17 +225,12 @@ func newHeaderInterceptor(
 	return &interceptor
 }
 
-func (h *headerInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
-	call := func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-		h.inspectRequestHeader(req.Spec(), req.Header())
-		res, err := next(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		h.inspectResponseHeader(req.Spec(), res.Header())
-		return res, nil
+func (h *headerInterceptor) WrapUnary(next connect.UnaryStream) connect.UnaryStream {
+	return &headerInspectingUnaryStream{
+		stream:                next,
+		inspectRequestHeader:  h.inspectRequestHeader,
+		inspectResponseHeader: h.inspectResponseHeader,
 	}
-	return connect.UnaryFunc(call)
 }
 
 func (h *headerInterceptor) WrapStreamContext(ctx context.Context) context.Context {
@@ -260,6 +255,26 @@ func (h *headerInterceptor) WrapStreamReceiver(ctx context.Context, receiver con
 		return &headerInspectingReceiver{Receiver: receiver, inspect: h.inspectResponseHeader}
 	}
 	return &headerInspectingReceiver{Receiver: receiver, inspect: h.inspectRequestHeader}
+}
+
+type headerInspectingUnaryStream struct {
+	stream                connect.UnaryStream
+	inspectRequestHeader  func(connect.Specification, http.Header)
+	inspectResponseHeader func(connect.Specification, http.Header)
+}
+
+func (s *headerInspectingUnaryStream) Call(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+	s.inspectRequestHeader(req.Spec(), req.Header())
+	res, err := s.stream.Call(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	s.inspectResponseHeader(req.Spec(), res.Header())
+	return res, nil
+}
+
+func (s *headerInspectingUnaryStream) Spec() connect.Specification {
+	return s.stream.Spec()
 }
 
 type headerInspectingSender struct {
@@ -299,13 +314,9 @@ type assertCalledInterceptor struct {
 	called *bool
 }
 
-func (i *assertCalledInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
-	return connect.UnaryFunc(
-		func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			*i.called = true
-			return next(ctx, req)
-		},
-	)
+func (i *assertCalledInterceptor) WrapUnary(next connect.UnaryStream) connect.UnaryStream {
+	*i.called = true
+	return next
 }
 
 func (i *assertCalledInterceptor) WrapStreamContext(ctx context.Context) context.Context {

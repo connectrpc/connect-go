@@ -61,31 +61,15 @@ func NewUnaryHandler[Req, Res any](
 				request = receiveUnaryRequestMetadata[Req](receiver)
 			}
 		}
-
-		untyped := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
-			if clientVisibleError != nil {
-				// We've already encountered an error, short-circuit before calling the
-				// handler's implementation.
-				return nil, clientVisibleError
-			}
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			typed, ok := request.(*Request[Req])
-			if !ok {
-				return nil, errorf(CodeInternal, "unexpected handler request type %T", request)
-			}
-			res, err := unary(ctx, typed)
-			if err != nil {
-				return nil, err
-			}
-			return res, nil
-		})
-		if ic := config.Interceptor; ic != nil {
-			untyped = ic.WrapUnary(untyped)
+		var stream UnaryStream = &handlerUnaryStream[Req, Res]{
+			clientVisibleError: clientVisibleError,
+			unary:              unary,
+			spec:               sender.Spec(),
 		}
-
-		response, err := untyped(ctx, request)
+		if ic := config.Interceptor; ic != nil {
+			stream = ic.WrapUnary(stream)
+		}
+		response, err := stream.Call(ctx, request)
 		if err != nil {
 			_ = sender.Close(err)
 			return
@@ -320,4 +304,34 @@ func newStreamHandler(
 		},
 		protocolHandlers: config.newProtocolHandlers(streamType),
 	}
+}
+
+type handlerUnaryStream[Req, Res any] struct {
+	clientVisibleError error
+	unary              func(context.Context, *Request[Req]) (*Response[Res], error)
+	spec               Specification
+}
+
+func (s *handlerUnaryStream[Req, Res]) Call(ctx context.Context, request AnyRequest) (AnyResponse, error) {
+	if s.clientVisibleError != nil {
+		// We've already encountered an error, short-circuit before calling the
+		// handler's implementation.
+		return nil, s.clientVisibleError
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	typed, ok := request.(*Request[Req])
+	if !ok {
+		return nil, errorf(CodeInternal, "unexpected handler request type %T", request)
+	}
+	res, err := s.unary(ctx, typed)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (s *handlerUnaryStream[Req, Res]) Spec() Specification {
+	return s.spec
 }

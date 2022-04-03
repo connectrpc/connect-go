@@ -27,8 +27,8 @@ import (
 func ExampleInterceptor() {
 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 	loggingInterceptor := connect.UnaryInterceptorFunc(
-		func(next connect.UnaryFunc) connect.UnaryFunc {
-			return connect.UnaryFunc(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		func(next connect.UnaryCall) connect.UnaryCall {
+			return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 				logger.Println("calling:", req.Spec().Procedure)
 				logger.Println("request:", req.Any())
 				res, err := next(ctx, req)
@@ -38,7 +38,7 @@ func ExampleInterceptor() {
 					logger.Println("response:", res.Any())
 				}
 				return res, err
-			})
+			}
 		},
 	)
 	client, err := pingv1connect.NewPingServiceClient(
@@ -65,23 +65,23 @@ func ExampleInterceptor() {
 func ExampleWithInterceptors() {
 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 	outer := connect.UnaryInterceptorFunc(
-		func(next connect.UnaryFunc) connect.UnaryFunc {
-			return connect.UnaryFunc(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		func(next connect.UnaryCall) connect.UnaryCall {
+			return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 				logger.Println("outer interceptor: before call")
 				res, err := next(ctx, req)
 				logger.Println("outer interceptor: after call")
 				return res, err
-			})
+			}
 		},
 	)
 	inner := connect.UnaryInterceptorFunc(
-		func(next connect.UnaryFunc) connect.UnaryFunc {
-			return connect.UnaryFunc(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		func(next connect.UnaryCall) connect.UnaryCall {
+			return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 				logger.Println("inner interceptor: before call")
 				res, err := next(ctx, req)
 				logger.Println("inner interceptor: after call")
 				return res, err
-			})
+			}
 		},
 	)
 	client, err := pingv1connect.NewPingServiceClient(
