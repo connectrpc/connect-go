@@ -332,19 +332,6 @@ func TestServer(t *testing.T) {
 	})
 }
 
-type pluggablePingServer struct {
-	pingv1connect.UnimplementedPingServiceHandler
-
-	ping func(context.Context, *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error)
-}
-
-func (p *pluggablePingServer) Ping(
-	ctx context.Context,
-	req *connect.Request[pingv1.PingRequest],
-) (*connect.Response[pingv1.PingResponse], error) {
-	return p.ping(ctx, req)
-}
-
 func TestHeaderBasic(t *testing.T) {
 	t.Parallel()
 	const (
@@ -373,6 +360,19 @@ func TestHeaderBasic(t *testing.T) {
 	res, err := client.Ping(context.Background(), req)
 	assert.Nil(t, err)
 	assert.Equal(t, res.Header().Get(key), hval)
+}
+
+type pluggablePingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+
+	ping func(context.Context, *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error)
+}
+
+func (p *pluggablePingServer) Ping(
+	ctx context.Context,
+	req *connect.Request[pingv1.PingRequest],
+) (*connect.Response[pingv1.PingResponse], error) {
+	return p.ping(ctx, req)
 }
 
 func failNoHTTP2(tb testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]) {
