@@ -17,6 +17,7 @@ package connect
 import (
 	"errors"
 	"net/http"
+	"time"
 )
 
 // Thankfully, the handler stream is much simpler than the client. net/http
@@ -34,9 +35,11 @@ func newHandlerStream(
 	requestCompressionPools compressionPool,
 	responseCompressionPools compressionPool,
 ) (*handlerSender, *handlerReceiver) {
+	now := time.Now()
 	sender := &handlerSender{
-		spec: spec,
-		web:  web,
+		start: now,
+		spec:  spec,
+		web:   web,
 		marshaler: marshaler{
 			writer:           responseWriter,
 			compressionPool:  responseCompressionPools,
@@ -49,7 +52,8 @@ func newHandlerStream(
 		trailer:  make(http.Header),
 	}
 	receiver := &handlerReceiver{
-		spec: spec,
+		start: now,
+		spec:  spec,
 		unmarshaler: unmarshaler{
 			web:             web,
 			reader:          request.Body,
@@ -63,7 +67,9 @@ func newHandlerStream(
 }
 
 type handlerSender struct {
+	start       time.Time
 	spec        Specification
+	stats       Statistics
 	web         bool
 	marshaler   marshaler
 	protobuf    Codec // for errors
@@ -71,6 +77,7 @@ type handlerSender struct {
 	header      http.Header
 	trailer     http.Header
 	wroteToBody bool
+	closed      bool
 }
 
 var _ Sender = (*handlerSender)(nil)
@@ -81,15 +88,21 @@ func (hs *handlerSender) Send(message any) error {
 		mergeHeaders(hs.writer.Header(), hs.header)
 		hs.wroteToBody = true
 	}
-	if err := hs.marshaler.Marshal(message); err != nil {
+	sizes, err := hs.marshaler.Marshal(message)
+	if err != nil {
 		return err // already coded
 	}
+	sizes.AddTo(&hs.stats)
 	// don't return typed nils
 	return nil
 }
 
 func (hs *handlerSender) Close(err error) error {
-	defer hs.flush()
+	defer func() {
+		hs.flush()
+		hs.closed = true
+		hs.stats.Latency = time.Since(hs.start)
+	}()
 	// If we haven't written the headers yet, do so.
 	if !hs.wroteToBody {
 		mergeHeaders(hs.writer.Header(), hs.header)
@@ -134,6 +147,13 @@ func (hs *handlerSender) Spec() Specification {
 	return hs.spec
 }
 
+func (hs *handlerSender) Stats() Statistics {
+	if !hs.closed {
+		hs.stats.Latency = time.Since(hs.start)
+	}
+	return hs.stats
+}
+
 func (hs *handlerSender) Header() http.Header {
 	return hs.header
 }
@@ -149,15 +169,19 @@ func (hs *handlerSender) flush() {
 }
 
 type handlerReceiver struct {
+	start       time.Time
 	spec        Specification
+	stats       Statistics
 	unmarshaler unmarshaler
 	request     *http.Request
+	closed      bool
 }
 
 var _ Receiver = (*handlerReceiver)(nil)
 
 func (hr *handlerReceiver) Receive(message any) error {
-	if err := hr.unmarshaler.Unmarshal(message); err != nil {
+	sizes, err := hr.unmarshaler.Unmarshal(message)
+	if err != nil {
 		if errors.Is(err, errGotWebTrailers) {
 			if hr.request.Trailer == nil {
 				hr.request.Trailer = hr.unmarshaler.WebTrailer()
@@ -167,6 +191,7 @@ func (hr *handlerReceiver) Receive(message any) error {
 		}
 		return err // already coded
 	}
+	sizes.AddTo(&hr.stats)
 	// don't return typed nils
 	return nil
 }
@@ -178,6 +203,10 @@ func (hr *handlerReceiver) Close() error {
 	// a well-intentioned client may just not expect the server to be returning
 	// an error for a streaming RPC. Better to accept that we can't always reuse
 	// TCP connections.
+	defer func() {
+		hr.closed = true
+		hr.stats.Latency = time.Since(hr.start)
+	}()
 	if err := hr.request.Body.Close(); err != nil {
 		if connectErr, ok := asError(err); ok {
 			return connectErr
@@ -189,6 +218,13 @@ func (hr *handlerReceiver) Close() error {
 
 func (hr *handlerReceiver) Spec() Specification {
 	return hr.spec
+}
+
+func (hr *handlerReceiver) Stats() Statistics {
+	if !hr.closed {
+		hr.stats.Latency = time.Since(hr.start)
+	}
+	return hr.stats
 }
 
 func (hr *handlerReceiver) Header() http.Header {

@@ -81,6 +81,7 @@ func (c *Client[Req, Res]) CallUnary(
 	if ic := c.config.Interceptor; ic != nil {
 		stream = ic.WrapUnary(stream)
 	}
+	defer stream.Close()
 	res, err := stream.Call(ctx, req)
 	if err != nil {
 		return nil, err
@@ -225,6 +226,14 @@ func (s *clientUnaryStream[Res]) Call(ctx context.Context, req AnyRequest) (AnyR
 	return res, s.receiver.Close()
 }
 
+func (s *clientUnaryStream[Res]) Close() {
+	// Nothing to do: closing a unary stream is just a hook for interceptors.
+}
+
 func (s *clientUnaryStream[Res]) Spec() Specification {
 	return s.sender.Spec()
+}
+
+func (s *clientUnaryStream[Res]) Stats() (sent, received Statistics) {
+	return s.sender.Stats(), s.receiver.Stats()
 }

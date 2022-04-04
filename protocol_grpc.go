@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 type protocolGRPC struct {
@@ -253,6 +254,7 @@ func (g *grpcClient) NewStream(
 	pipeReader, pipeWriter := io.Pipe()
 	duplex := &duplexClientStream{
 		ctx:          ctx,
+		start:        time.Now(),
 		httpClient:   g.httpClient,
 		url:          g.procedureURL,
 		spec:         spec,

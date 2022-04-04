@@ -24,7 +24,9 @@ import "context"
 // proto.Message implementations.
 type UnaryStream interface {
 	Call(context.Context, AnyRequest) (AnyResponse, error)
+	Close()
 	Spec() Specification
+	Stats() (sent, received Statistics)
 }
 
 // An Interceptor adds logic to a generated handler or client, like the
@@ -77,8 +79,8 @@ type UnaryInterceptorFunc func(UnaryCall) UnaryCall
 // WrapUnary implements Interceptor by wrapping UnaryStream.Call.
 func (f UnaryInterceptorFunc) WrapUnary(next UnaryStream) UnaryStream {
 	return &wrappedUnaryStream{
-		wrap:   f,
-		stream: next,
+		UnaryStream: next,
+		wrap:        f,
 	}
 }
 
@@ -98,16 +100,13 @@ func (f UnaryInterceptorFunc) WrapStreamReceiver(_ context.Context, receiver Rec
 }
 
 type wrappedUnaryStream struct {
-	wrap   UnaryInterceptorFunc
-	stream UnaryStream
+	UnaryStream
+
+	wrap UnaryInterceptorFunc
 }
 
 func (s *wrappedUnaryStream) Call(ctx context.Context, req AnyRequest) (AnyResponse, error) {
-	return s.wrap(s.stream.Call)(ctx, req)
-}
-
-func (s *wrappedUnaryStream) Spec() Specification {
-	return s.stream.Spec()
+	return s.wrap(s.UnaryStream.Call)(ctx, req)
 }
 
 // A chain composes multiple interceptors into one.

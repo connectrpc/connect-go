@@ -64,11 +64,13 @@ func NewUnaryHandler[Req, Res any](
 		var stream UnaryStream = &handlerUnaryStream[Req, Res]{
 			clientVisibleError: clientVisibleError,
 			unary:              unary,
-			spec:               sender.Spec(),
+			sender:             sender,
+			receiver:           receiver,
 		}
 		if ic := config.Interceptor; ic != nil {
 			stream = ic.WrapUnary(stream)
 		}
+		defer stream.Close()
 		response, err := stream.Call(ctx, request)
 		if err != nil {
 			_ = sender.Close(err)
@@ -309,7 +311,8 @@ func newStreamHandler(
 type handlerUnaryStream[Req, Res any] struct {
 	clientVisibleError error
 	unary              func(context.Context, *Request[Req]) (*Response[Res], error)
-	spec               Specification
+	sender             Sender
+	receiver           Receiver
 }
 
 func (s *handlerUnaryStream[Req, Res]) Call(ctx context.Context, request AnyRequest) (AnyResponse, error) {
@@ -332,6 +335,14 @@ func (s *handlerUnaryStream[Req, Res]) Call(ctx context.Context, request AnyRequ
 	return res, nil
 }
 
+func (s *handlerUnaryStream[Req, Res]) Close() {
+	// Nothing to do: closing a unary stream is just a hook for interceptors.
+}
+
 func (s *handlerUnaryStream[Req, Res]) Spec() Specification {
-	return s.spec
+	return s.sender.Spec()
+}
+
+func (s *handlerUnaryStream[Req, Res]) Stats() (sent, received Statistics) {
+	return s.sender.Stats(), s.receiver.Stats()
 }

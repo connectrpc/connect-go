@@ -38,6 +38,7 @@ var _ Sender = (*clientSender)(nil)
 func (cs *clientSender) Send(m any) error      { return cs.stream.Send(m) }
 func (cs *clientSender) Close(err error) error { return cs.stream.CloseSend(err) }
 func (cs *clientSender) Spec() Specification   { return cs.stream.Spec() }
+func (cs *clientSender) Stats() Statistics     { return cs.stream.SendStats() }
 func (cs *clientSender) Header() http.Header   { return cs.stream.Header() }
 func (cs *clientSender) Trailer() http.Header  { return cs.stream.Trailer() }
 
@@ -53,6 +54,7 @@ var _ Receiver = (*clientReceiver)(nil)
 func (cr *clientReceiver) Receive(m any) error  { return cr.stream.Receive(m) }
 func (cr *clientReceiver) Close() error         { return cr.stream.CloseReceive() }
 func (cr *clientReceiver) Spec() Specification  { return cr.stream.Spec() }
+func (cr *clientReceiver) Stats() Statistics    { return cr.stream.ReceiveStats() }
 func (cr *clientReceiver) Header() http.Header  { return cr.stream.ResponseHeader() }
 func (cr *clientReceiver) Trailer() http.Header { return cr.stream.ResponseTrailer() }
 
@@ -65,6 +67,7 @@ func (cr *clientReceiver) Trailer() http.Header { return cr.stream.ResponseTrail
 // many more comments than usual.
 type duplexClientStream struct {
 	ctx          context.Context
+	start        time.Time
 	httpClient   HTTPClient
 	url          string
 	spec         Specification
@@ -79,6 +82,8 @@ type duplexClientStream struct {
 	marshaler   marshaler
 	header      http.Header
 	trailer     http.Header
+	sendClosed  bool
+	sendStats   Statistics
 
 	// receive goroutine
 	web              bool
@@ -89,6 +94,8 @@ type duplexClientStream struct {
 	responseReady    chan struct{}
 	unmarshaler      unmarshaler
 	compressionPools readOnlyCompressionPools
+	receiveClosed    bool
+	receiveStats     Statistics
 
 	errMu       sync.Mutex
 	requestErr  error
@@ -97,6 +104,20 @@ type duplexClientStream struct {
 
 func (cs *duplexClientStream) Spec() Specification {
 	return cs.spec
+}
+
+func (cs *duplexClientStream) SendStats() Statistics {
+	if !cs.sendClosed {
+		cs.sendStats.Latency = time.Since(cs.start)
+	}
+	return cs.sendStats
+}
+
+func (cs *duplexClientStream) ReceiveStats() Statistics {
+	if !cs.receiveClosed {
+		cs.receiveStats.Latency = time.Since(cs.start)
+	}
+	return cs.receiveStats
 }
 
 func (cs *duplexClientStream) Header() http.Header {
@@ -117,18 +138,23 @@ func (cs *duplexClientStream) Send(message any) error {
 	// Calling Marshal writes data to the send stream. It's safe to do this while
 	// makeRequest is running, because we're writing to our side of the pipe
 	// (which is safe to do while net/http reads from the other side).
-	if err := cs.marshaler.Marshal(message); err != nil {
-		if !errors.Is(err, io.ErrClosedPipe) {
-			return err
-		}
+	sizes, err := cs.marshaler.Marshal(message)
+	if err != nil && !errors.Is(err, io.ErrClosedPipe) {
+		return err
+	} else if err != nil {
 		// In all other cases, we return a io.EOF, similar to gRPC and the user
 		// will get the state of the stream through Receive.
 		return NewError(CodeUnknown, io.EOF)
 	}
+	sizes.AddTo(&cs.sendStats)
 	return nil
 }
 
 func (cs *duplexClientStream) CloseSend(_ error) error {
+	defer func() {
+		cs.sendClosed = true
+		cs.sendStats.Latency = time.Since(cs.start)
+	}()
 	// Even if Send was never called, we need to make an HTTP request. This ensures
 	// that we've sent any headers to the server and that we got an HTTP response body
 	// from the server for Receive to unmarshal from if called.
@@ -177,7 +203,7 @@ func (cs *duplexClientStream) Receive(message any) error {
 		return err
 	}
 	// Consume one message from the response stream.
-	err := cs.unmarshaler.Unmarshal(message)
+	sizes, err := cs.unmarshaler.Unmarshal(message)
 	if err != nil {
 		// If we can't read this LPM, see if the server sent an explicit error in
 		// trailers. First, we need to read the body to EOF.
@@ -202,10 +228,15 @@ func (cs *duplexClientStream) Receive(message any) error {
 		cs.setResponseError(err)
 		return err
 	}
+	sizes.AddTo(&cs.receiveStats)
 	return nil
 }
 
 func (cs *duplexClientStream) CloseReceive() error {
+	defer func() {
+		cs.receiveClosed = true
+		cs.receiveStats.Latency = time.Since(cs.start)
+	}()
 	<-cs.responseReady
 	if cs.response == nil {
 		return nil

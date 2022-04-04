@@ -227,7 +227,7 @@ func newHeaderInterceptor(
 
 func (h *headerInterceptor) WrapUnary(next connect.UnaryStream) connect.UnaryStream {
 	return &headerInspectingUnaryStream{
-		stream:                next,
+		UnaryStream:           next,
 		inspectRequestHeader:  h.inspectRequestHeader,
 		inspectResponseHeader: h.inspectResponseHeader,
 	}
@@ -258,23 +258,20 @@ func (h *headerInterceptor) WrapStreamReceiver(ctx context.Context, receiver con
 }
 
 type headerInspectingUnaryStream struct {
-	stream                connect.UnaryStream
+	connect.UnaryStream
+
 	inspectRequestHeader  func(connect.Specification, http.Header)
 	inspectResponseHeader func(connect.Specification, http.Header)
 }
 
 func (s *headerInspectingUnaryStream) Call(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 	s.inspectRequestHeader(req.Spec(), req.Header())
-	res, err := s.stream.Call(ctx, req)
+	res, err := s.UnaryStream.Call(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	s.inspectResponseHeader(req.Spec(), res.Header())
 	return res, nil
-}
-
-func (s *headerInspectingUnaryStream) Spec() connect.Specification {
-	return s.stream.Spec()
 }
 
 type headerInspectingSender struct {

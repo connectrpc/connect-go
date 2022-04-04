@@ -25,6 +25,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 )
 
 // Version is the semantic version of the connect module.
@@ -72,6 +73,7 @@ type Sender interface {
 	Close(error) error
 
 	Spec() Specification
+	Stats() Statistics
 	Header() http.Header
 	Trailer() http.Header
 }
@@ -86,6 +88,7 @@ type Receiver interface {
 	Close() error
 
 	Spec() Specification
+	Stats() Statistics
 	Header() http.Header
 	// Trailers are populated only after Receive returns an error.
 	Trailer() http.Header
@@ -218,6 +221,24 @@ type Specification struct {
 	StreamType StreamType
 	Procedure  string // for example, "/acme.foo.v1.FooService/Bar"
 	IsClient   bool   // otherwise we're in a handler
+}
+
+// Statistics tracks cumulative statistics for a Sender or Receiver.
+type Statistics struct {
+	Messages         uint          // no. messages sent/received
+	WireSize         uint          // bytes written/read, possibly compressed
+	UncompressedSize uint          // bytes written/read, uncompressed
+	Latency          time.Duration // duration since stream start
+}
+
+// Sub computes the delta between two Statistics.
+func (s Statistics) Sub(other Statistics) Statistics {
+	return Statistics{
+		Messages:         s.Messages - other.Messages,
+		WireSize:         s.WireSize - other.WireSize,
+		UncompressedSize: s.UncompressedSize - other.UncompressedSize,
+		Latency:          s.Latency - other.Latency,
+	}
 }
 
 // receiveUnaryRequest unmarshals a message from a Receiver, then envelopes

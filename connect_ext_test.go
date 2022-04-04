@@ -362,6 +362,120 @@ func TestHeaderBasic(t *testing.T) {
 	assert.Equal(t, res.Header().Get(key), hval)
 }
 
+func TestStatisticsInterceptor(t *testing.T) {
+	t.Parallel()
+
+	handlerMetrics := &metricsInterceptor{}
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(
+		pingServer{},
+		connect.WithCompressMinBytes(128),
+		connect.WithInterceptors(handlerMetrics),
+	))
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	defer server.Close()
+
+	clientMetrics := &metricsInterceptor{}
+	client, err := pingv1connect.NewPingServiceClient(
+		server.Client(),
+		server.URL,
+		connect.WithGRPC(),
+		connect.WithRequestCompression("gzip"),
+		connect.WithCompressMinBytes(128),
+		connect.WithInterceptors(clientMetrics),
+	)
+	assert.Nil(t, err)
+
+	t.Run("unary", func(t *testing.T) {
+		_, err = client.Ping(
+			context.Background(),
+			connect.NewRequest(&pingv1.PingRequest{
+				Text: strings.Repeat("compressible", 128),
+			}),
+		)
+		assert.Nil(t, err)
+
+		assertCorrect := func(tb testing.TB, stats connect.Statistics) {
+			tb.Helper()
+			t.Logf("%+v", stats)
+			assert.Equal(tb, stats.Messages, 1)
+			assert.True(tb, stats.WireSize > 0)
+			assert.True(tb, stats.UncompressedSize > 0)
+			assert.True(tb, stats.Latency > 0)
+			assert.True(tb, stats.UncompressedSize > stats.WireSize)
+		}
+		t.Run("handler sent", func(t *testing.T) {
+			t.Parallel()
+			assertCorrect(t, handlerMetrics.UnarySent)
+		})
+		t.Run("handler received", func(t *testing.T) {
+			t.Parallel()
+			assertCorrect(t, handlerMetrics.UnaryReceived)
+		})
+		t.Run("client sent", func(t *testing.T) {
+			t.Parallel()
+			assertCorrect(t, clientMetrics.UnarySent)
+		})
+		t.Run("client received", func(t *testing.T) {
+			t.Parallel()
+			assertCorrect(t, clientMetrics.UnaryReceived)
+		})
+	})
+	t.Run("bidi", func(t *testing.T) {
+		stream := client.CumSum(context.Background())
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 10; i++ {
+				err := stream.Send(&pingv1.CumSumRequest{Number: 42})
+				assert.Nil(t, err)
+			}
+			assert.Nil(t, stream.CloseSend())
+		}()
+		go func() {
+			defer wg.Done()
+			for {
+				_, err := stream.Receive()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				assert.Nil(t, err)
+			}
+			assert.Nil(t, stream.CloseReceive())
+		}()
+		wg.Wait()
+
+		assertCorrect := func(tb testing.TB, stats connect.Statistics) {
+			tb.Helper()
+			assert.Equal(tb, handlerMetrics.StreamSent.Messages, 10)
+			assert.True(tb, handlerMetrics.StreamSent.WireSize > 0)
+			assert.True(tb, handlerMetrics.StreamSent.UncompressedSize > 0)
+			assert.True(tb, handlerMetrics.StreamSent.Latency > 0)
+			// These messages are too small to compress.
+			assert.Equal(tb, handlerMetrics.StreamSent.UncompressedSize, handlerMetrics.StreamSent.WireSize)
+		}
+		t.Run("handler sent", func(t *testing.T) {
+			t.Parallel()
+			assertCorrect(t, handlerMetrics.StreamSent)
+		})
+		t.Run("handler received", func(t *testing.T) {
+			t.Parallel()
+			assertCorrect(t, handlerMetrics.StreamReceived)
+		})
+		t.Run("client sent", func(t *testing.T) {
+			t.Parallel()
+			assertCorrect(t, clientMetrics.StreamSent)
+		})
+		t.Run("client received", func(t *testing.T) {
+			t.Parallel()
+			assertCorrect(t, clientMetrics.StreamReceived)
+		})
+	})
+}
+
 type pluggablePingServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
 
@@ -514,4 +628,70 @@ func (p pingServer) CumSum(
 			return err
 		}
 	}
+}
+
+type metricsInterceptor struct {
+	UnarySent, UnaryReceived   connect.Statistics
+	StreamSent, StreamReceived connect.Statistics
+}
+
+func (i *metricsInterceptor) WrapUnary(unary connect.UnaryStream) connect.UnaryStream {
+	return &metricsUnaryStream{
+		UnaryStream: unary,
+		sent:        &i.UnarySent,
+		received:    &i.UnaryReceived,
+	}
+}
+
+func (i *metricsInterceptor) WrapStreamContext(ctx context.Context) context.Context {
+	return ctx
+}
+
+func (i *metricsInterceptor) WrapStreamSender(_ context.Context, sender connect.Sender) connect.Sender {
+	return &metricsSender{
+		Sender: sender,
+		sent:   &i.StreamSent,
+	}
+}
+
+func (i *metricsInterceptor) WrapStreamReceiver(_ context.Context, receiver connect.Receiver) connect.Receiver {
+	return &metricsReceiver{
+		Receiver: receiver,
+		received: &i.StreamReceived,
+	}
+}
+
+type metricsUnaryStream struct {
+	connect.UnaryStream
+
+	sent, received *connect.Statistics
+}
+
+func (s *metricsUnaryStream) Close() {
+	s.UnaryStream.Close()
+	*s.sent, *s.received = s.UnaryStream.Stats()
+}
+
+type metricsSender struct {
+	connect.Sender
+
+	sent *connect.Statistics
+}
+
+func (s *metricsSender) Close(err error) error {
+	closeErr := s.Sender.Close(err)
+	*s.sent = s.Sender.Stats()
+	return closeErr
+}
+
+type metricsReceiver struct {
+	connect.Receiver
+
+	received *connect.Statistics
+}
+
+func (r *metricsReceiver) Close() error {
+	closeErr := r.Receiver.Close()
+	*r.received = r.Receiver.Stats()
+	return closeErr
 }

@@ -46,6 +46,10 @@ func (n *nopSender) Spec() Specification {
 	return n.spec
 }
 
+func (n *nopSender) Stats() Statistics {
+	return Statistics{}
+}
+
 func (n *nopSender) Send(_ any) error {
 	return nil
 }
@@ -72,6 +76,10 @@ func newNopReceiver(spec Specification, header, trailer http.Header) *nopReceive
 
 func (n *nopReceiver) Spec() Specification {
 	return n.spec
+}
+
+func (n *nopReceiver) Stats() Statistics {
+	return Statistics{}
 }
 
 func (n *nopReceiver) Header() http.Header {
