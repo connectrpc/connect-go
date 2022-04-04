@@ -28,8 +28,8 @@ git remote add upstream https://github.com/bufbuild/connect.git
 git fetch upstream
 ```
 
-Make sure that the tests and the linters pass (you'll need `bash`, `curl`, and
-the latest stable Go release installed):
+Make sure that the tests and the linters pass (you'll need `bash` and the
+latest stable Go release installed):
 
 ```
 make 
