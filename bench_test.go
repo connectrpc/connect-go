@@ -1,17 +1,3 @@
-// Copyright 2021-2022 Buf Technologies, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package connect_test
 
 import (
@@ -75,12 +61,15 @@ func BenchmarkREST(b *testing.B) {
 		Number int `json:"number"`
 	}
 
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		defer io.Copy(io.Discard, r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		var body io.Reader = r.Body
-		if r.Header.Get("Content-Encoding") == "gzip" {
+	handler := func(writer http.ResponseWriter, req *http.Request) {
+		defer req.Body.Close()
+		defer func() {
+			_, err := io.Copy(io.Discard, req.Body)
+			assert.Nil(b, err, assert.Sprintf("copy error: %v", err))
+		}()
+		writer.Header().Set("Content-Type", "application/json")
+		var body io.Reader = req.Body
+		if req.Header.Get("Content-Encoding") == "gzip" {
 			gr, err := gzip.NewReader(body)
 			if err != nil {
 				b.Fatalf("get gzip reader: %v", err)
@@ -88,10 +77,10 @@ func BenchmarkREST(b *testing.B) {
 			defer gr.Close()
 			body = gr
 		}
-		var out io.Writer = w
-		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			w.Header().Set("Content-Encoding", "gzip")
-			gw := gzip.NewWriter(w)
+		var out io.Writer = writer
+		if strings.Contains(req.Header.Get("Accept-Encoding"), "gzip") {
+			writer.Header().Set("Content-Encoding", "gzip")
+			gw := gzip.NewWriter(writer)
 			defer gw.Close()
 			out = gw
 		}
@@ -99,15 +88,16 @@ func BenchmarkREST(b *testing.B) {
 		if err != nil {
 			b.Fatalf("read body: %v", err)
 		}
-		var req ping
-		if err := json.Unmarshal(raw, &req); err != nil {
+		var pingReq ping
+		if err := json.Unmarshal(raw, &pingReq); err != nil {
 			b.Fatalf("json unmarshal: %v", err)
 		}
-		bs, err := json.Marshal(&req)
+		bs, err := json.Marshal(&pingReq)
 		if err != nil {
 			b.Fatalf("json marshal: %v", err)
 		}
-		out.Write(bs)
+		_, err = out.Write(bs)
+		assert.Nil(b, err, assert.Sprintf("write err: %v", err))
 	}
 
 	server := httptest.NewUnstartedServer(http.HandlerFunc(handler))
@@ -142,7 +132,10 @@ func BenchmarkREST(b *testing.B) {
 				if err != nil {
 					b.Fatalf("do request: %v", err)
 				}
-				defer io.Copy(io.Discard, res.Body)
+				defer func() {
+					_, err := io.Copy(io.Discard, res.Body)
+					assert.Nil(b, err, assert.Sprintf("copy error: %v", err))
+				}()
 				if res.StatusCode != http.StatusOK {
 					b.Fatalf("response status: %v", res.Status)
 				}
