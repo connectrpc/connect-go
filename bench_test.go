@@ -45,7 +45,7 @@ func BenchmarkConnect(b *testing.B) {
 
 	doer := server.Client()
 	httpTransport, ok := doer.Transport.(*http.Transport)
-	assert.True(b, ok, assert.Sprintf("expected HTTP client to have *http.Transport as RoundTripper"))
+	assert.True(b, ok)
 	httpTransport.DisableCompression = true
 
 	client, err := pingv1connect.NewPingServiceClient(
@@ -55,7 +55,8 @@ func BenchmarkConnect(b *testing.B) {
 		connect.WithGzip(),
 		connect.WithGzipRequests(),
 	)
-	assert.Nil(b, err, assert.Sprintf("client construction error"))
+	assert.Nil(b, err)
+	pingRequest := &pingv1.PingRequest{Number: 42}
 	b.ResetTimer()
 
 	b.Run("unary", func(b *testing.B) {
@@ -63,7 +64,7 @@ func BenchmarkConnect(b *testing.B) {
 			for pb.Next() {
 				_, _ = client.Ping(
 					context.Background(),
-					connect.NewRequest(&pingv1.PingRequest{Number: 42}),
+					connect.NewRequest(pingRequest),
 				)
 			}
 		})
@@ -79,7 +80,7 @@ func BenchmarkREST(b *testing.B) {
 		defer req.Body.Close()
 		defer func() {
 			_, err := io.Copy(io.Discard, req.Body)
-			assert.Nil(b, err, assert.Sprintf("copy error: %v", err))
+			assert.Nil(b, err)
 		}()
 		writer.Header().Set("Content-Type", "application/json")
 		var body io.Reader = req.Body
@@ -111,7 +112,7 @@ func BenchmarkREST(b *testing.B) {
 			b.Fatalf("json marshal: %v", err)
 		}
 		_, err = out.Write(bs)
-		assert.Nil(b, err, assert.Sprintf("write err: %v", err))
+		assert.Nil(b, err)
 	}
 
 	server := httptest.NewUnstartedServer(http.HandlerFunc(handler))
@@ -148,7 +149,7 @@ func BenchmarkREST(b *testing.B) {
 				}
 				defer func() {
 					_, err := io.Copy(io.Discard, res.Body)
-					assert.Nil(b, err, assert.Sprintf("copy error: %v", err))
+					assert.Nil(b, err)
 				}()
 				if res.StatusCode != http.StatusOK {
 					b.Fatalf("response status: %v", res.Status)
