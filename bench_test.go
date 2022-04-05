@@ -131,6 +131,7 @@ func BenchmarkREST(b *testing.B) {
 }
 
 func unaryRESTIteration(b *testing.B, client *http.Client, url string) {
+	b.Helper()
 	rawRequestBody := bytes.NewBuffer(nil)
 	compressedRequestBody := gzip.NewWriter(rawRequestBody)
 	encoder := json.NewEncoder(compressedRequestBody)
