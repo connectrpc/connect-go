@@ -149,6 +149,7 @@ const (
 	maxCode Code = CodeUnauthenticated
 )
 
+// String implements fmt.Stringer, returning a PascalCase string.
 func (c Code) String() string {
 	switch c {
 	case CodeCanceled:
@@ -185,6 +186,49 @@ func (c Code) String() string {
 		return "Unauthenticated"
 	}
 	return fmt.Sprintf("Code(%d)", c)
+}
+
+// AllCapsString is similar to String, but returns the SHOUTY_SNAKE_CASE
+// strings from the gRPC specification. Note that the specification translates
+// CodeCanceled to the British "CANCELLED".
+//
+// See https://github.com/grpc/grpc/blob/master/doc/statuscodes.md for details.
+func (c Code) AllCapsString() string {
+	switch c {
+	case CodeCanceled:
+		return "CANCELLED"
+	case CodeUnknown:
+		return "UNKNOWN"
+	case CodeInvalidArgument:
+		return "INVALID_ARGUMENT"
+	case CodeDeadlineExceeded:
+		return "DEADLINE_EXCEEDED"
+	case CodeNotFound:
+		return "NOT_FOUND"
+	case CodeAlreadyExists:
+		return "ALREADY_EXISTS"
+	case CodePermissionDenied:
+		return "PERMISSION_DENIED"
+	case CodeResourceExhausted:
+		return "RESOURCE_EXHAUSTED"
+	case CodeFailedPrecondition:
+		return "FAILED_PRECONDITION"
+	case CodeAborted:
+		return "ABORTED"
+	case CodeOutOfRange:
+		return "OUT_OF_RANGE"
+	case CodeUnimplemented:
+		return "UNIMPLEMENTED"
+	case CodeInternal:
+		return "INTERNAL"
+	case CodeUnavailable:
+		return "UNAVAILABLE"
+	case CodeDataLoss:
+		return "DATA_LOSS"
+	case CodeUnauthenticated:
+		return "UNAUTHENTICATED"
+	}
+	return fmt.Sprintf("CODE_%d", c)
 }
 
 // CodeOf returns the error's status code if it is or wraps a *connect.Error

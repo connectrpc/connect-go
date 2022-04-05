@@ -27,13 +27,21 @@ func TestCode(t *testing.T) {
 	for code := minCode; code <= maxCode; code++ {
 		valid = append(valid, code)
 	}
-	// Ensures that we don't forget to update the mapping in the Stringer
-	// implementation.
+	invalid := Code(999)
+	assert.True(t, invalid > maxCode)
+	assert.True(t, strings.HasPrefix(invalid.String(), "Code("))
+	assert.True(t, strings.HasPrefix(invalid.AllCapsString(), "CODE_"))
+	// Ensures that we don't forget to update the mapping in these methods.
 	for _, code := range valid {
 		assert.False(
 			t,
-			strings.Contains(code.String(), "("),
-			assert.Sprintf("update Code.String() method for new code %v", code),
+			strings.HasPrefix(code.String(), "Code("),
+			assert.Sprintf("update Code.String() for new code %v", code),
+		)
+		assert.False(
+			t,
+			strings.HasPrefix(code.AllCapsString(), "CODE_"),
+			assert.Sprintf("update Code.AllCapsString() for new code %v", code),
 		)
 	}
 }
