@@ -64,13 +64,12 @@ func (cr *clientReceiver) Trailer() http.Header { return cr.stream.ResponseTrail
 // request/response code. Since this is the most complex code in connect, it has
 // many more comments than usual.
 type duplexClientStream struct {
-	ctx          context.Context
-	httpClient   HTTPClient
-	url          string
-	spec         Specification
-	maxReadBytes int64
-	codec        Codec
-	protobuf     Codec // for errors
+	ctx        context.Context
+	httpClient HTTPClient
+	url        string
+	spec       Specification
+	codec      Codec
+	protobuf   Codec // for errors
 
 	// send: guarded by prepareOnce because we can't initialize this state until
 	// the first call to Send.
@@ -334,7 +333,6 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	mergeHeaders(cs.responseHeader, res.Header)
 	cs.unmarshaler = unmarshaler{
 		reader:          res.Body,
-		max:             cs.maxReadBytes,
 		codec:           cs.codec,
 		compressionPool: cs.compressionPools.Get(compression),
 		web:             cs.web,

@@ -35,7 +35,6 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 		web:              g.web,
 		codecs:           params.Codecs,
 		compressionPools: params.CompressionPools,
-		maxRequestBytes:  params.MaxRequestBytes,
 		minCompressBytes: params.CompressMinBytes,
 		accept:           acceptPostValue(g.web, params.Codecs),
 	}
@@ -57,7 +56,6 @@ func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, 
 		compressionPools: params.CompressionPools,
 		codec:            params.Codec,
 		protobuf:         params.Protobuf,
-		maxResponseBytes: params.MaxResponseBytes,
 		minCompressBytes: params.CompressMinBytes,
 		httpClient:       params.HTTPClient,
 		procedureURL:     params.URL,
@@ -69,7 +67,6 @@ type grpcHandler struct {
 	web              bool
 	codecs           readOnlyCodecs
 	compressionPools readOnlyCompressionPools
-	maxRequestBytes  int64
 	minCompressBytes int
 	accept           string
 }
@@ -171,7 +168,6 @@ func (g *grpcHandler) NewStream(
 		g.web,
 		responseWriter,
 		request,
-		g.maxRequestBytes,
 		g.minCompressBytes,
 		clientCodec,
 		g.codecs.Protobuf(), // for errors
@@ -212,7 +208,6 @@ type grpcClient struct {
 	compressionPools     readOnlyCompressionPools
 	codec                Codec
 	protobuf             Codec
-	maxResponseBytes     int64
 	minCompressBytes     int
 	httpClient           HTTPClient
 	procedureURL         string
@@ -255,14 +250,13 @@ func (g *grpcClient) NewStream(
 	// the response stream.
 	pipeReader, pipeWriter := io.Pipe()
 	duplex := &duplexClientStream{
-		ctx:          ctx,
-		httpClient:   g.httpClient,
-		url:          g.procedureURL,
-		spec:         spec,
-		maxReadBytes: g.maxResponseBytes,
-		codec:        g.codec,
-		protobuf:     g.protobuf,
-		writer:       pipeWriter,
+		ctx:        ctx,
+		httpClient: g.httpClient,
+		url:        g.procedureURL,
+		spec:       spec,
+		codec:      g.codec,
+		protobuf:   g.protobuf,
+		writer:     pipeWriter,
 		marshaler: marshaler{
 			writer:           pipeWriter,
 			compressionPool:  g.compressionPools.Get(g.compressionName),
