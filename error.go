@@ -70,14 +70,22 @@ func NewError(c Code, underlying error) *Error {
 }
 
 func (e *Error) Error() string {
-	var text string
-	if e.err != nil {
-		text = e.err.Error()
-	}
-	if text == "" {
+	message := e.Message()
+	if message == "" {
 		return e.code.String()
 	}
-	return e.code.String() + ": " + text
+	return e.code.String() + ": " + message
+}
+
+// Message returns the underlying error message.
+//
+// This may be empty if the original error was composed with a status
+// code and a nil error.
+func (e *Error) Message() string {
+	if e.err != nil {
+		return e.err.Error()
+	}
+	return ""
 }
 
 // Unwrap implements errors.Wrapper, which allows errors.Is and errors.As
