@@ -56,7 +56,6 @@ func BenchmarkConnect(b *testing.B) {
 		connect.WithGzipRequests(),
 	)
 	assert.Nil(b, err)
-	pingRequest := &pingv1.PingRequest{Number: 42}
 	b.ResetTimer()
 
 	b.Run("unary", func(b *testing.B) {
@@ -64,7 +63,7 @@ func BenchmarkConnect(b *testing.B) {
 			for pb.Next() {
 				_, _ = client.Ping(
 					context.Background(),
-					connect.NewRequest(pingRequest),
+					connect.NewRequest(&pingv1.PingRequest{Number: 42}),
 				)
 			}
 		})
