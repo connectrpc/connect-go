@@ -51,7 +51,7 @@ func TestErrorFormatting(t *testing.T) {
 		CodeUnavailable.String(),
 	)
 	got := NewError(CodeUnavailable, errors.New("foo")).Error()
-	assert.False(t, strings.Contains(got, CodeUnavailable.String()))
+	assert.True(t, strings.Contains(got, CodeUnavailable.String()))
 	assert.True(t, strings.Contains(got, "foo"))
 }
 
@@ -64,6 +64,17 @@ func TestErrorCode(t *testing.T) {
 	connectErr, ok := asError(err)
 	assert.True(t, ok)
 	assert.Equal(t, connectErr.Code(), CodeUnavailable)
+}
+
+func TestErrorMessage(t *testing.T) {
+	t.Parallel()
+	err := fmt.Errorf(
+		"another: %w",
+		NewError(CodeUnavailable, errors.New("foo")),
+	)
+	connectErr, ok := asError(err)
+	assert.True(t, ok)
+	assert.Equal(t, connectErr.Message(), "foo")
 }
 
 func TestCodeOf(t *testing.T) {
