@@ -21,7 +21,7 @@ import (
 	"connectrpc.com/connect"
 )
 
-func ExampleMessage() {
+func ExampleError_Message() {
 	err := fmt.Errorf(
 		"another: %w",
 		connect.NewError(connect.CodeUnavailable, errors.New("failed to foo")),
