@@ -267,7 +267,7 @@ func TestServer(t *testing.T) {
 			ok := errors.As(err, &connectErr)
 			assert.True(t, ok, assert.Sprintf("conversion to *connect.Error"))
 			assert.Equal(t, connectErr.Code(), connect.CodeResourceExhausted)
-			assert.Equal(t, connectErr.Error(), "ResourceExhausted: "+errorMessage)
+			assert.Equal(t, connectErr.Error(), errorMessage)
 			assert.Zero(t, connectErr.Details())
 			assert.Equal(t, connectErr.Meta().Get(handlerHeader), headerValue)
 			assert.Equal(t, connectErr.Meta().Get(handlerTrailer), trailerValue)

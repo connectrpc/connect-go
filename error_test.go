@@ -51,7 +51,7 @@ func TestErrorFormatting(t *testing.T) {
 		CodeUnavailable.String(),
 	)
 	got := NewError(CodeUnavailable, errors.New("foo")).Error()
-	assert.True(t, strings.Contains(got, CodeUnavailable.String()))
+	assert.False(t, strings.Contains(got, CodeUnavailable.String()))
 	assert.True(t, strings.Contains(got, "foo"))
 }
 

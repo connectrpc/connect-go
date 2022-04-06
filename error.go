@@ -70,14 +70,10 @@ func NewError(c Code, underlying error) *Error {
 }
 
 func (e *Error) Error() string {
-	var text string
-	if e.err != nil {
-		text = e.err.Error()
+	if e.err != nil && e.err.Error() != "" {
+		return e.err.Error()
 	}
-	if text == "" {
-		return e.code.String()
-	}
-	return e.code.String() + ": " + text
+	return e.code.String()
 }
 
 // Unwrap implements errors.Wrapper, which allows errors.Is and errors.As
