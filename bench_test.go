@@ -43,13 +43,13 @@ func BenchmarkConnect(b *testing.B) {
 	server.StartTLS()
 	defer server.Close()
 
-	doer := server.Client()
-	httpTransport, ok := doer.Transport.(*http.Transport)
+	client := server.Client()
+	httpTransport, ok := client.Transport.(*http.Transport)
 	assert.True(b, ok)
 	httpTransport.DisableCompression = true
 
 	client, err := pingv1connect.NewPingServiceClient(
-		server.Client(),
+		client,
 		server.URL,
 		connect.WithGRPC(),
 		connect.WithGzip(),
