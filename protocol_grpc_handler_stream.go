@@ -27,7 +27,6 @@ func newHandlerStream(
 	web bool,
 	responseWriter http.ResponseWriter,
 	request *http.Request,
-	maxReadBytes int64,
 	compressMinBytes int,
 	codec Codec,
 	protobuf Codec, // for errors
@@ -53,7 +52,6 @@ func newHandlerStream(
 		unmarshaler: unmarshaler{
 			web:             web,
 			reader:          request.Body,
-			max:             maxReadBytes,
 			compressionPool: requestCompressionPools,
 			codec:           codec,
 		},

@@ -48,7 +48,6 @@ type protocolHandlerParams struct {
 	Spec             Specification
 	Codecs           readOnlyCodecs
 	CompressionPools readOnlyCompressionPools
-	MaxRequestBytes  int64
 	CompressMinBytes int
 }
 
@@ -91,7 +90,6 @@ type protocolClientParams struct {
 	CompressionName  string
 	CompressionPools readOnlyCompressionPools
 	Codec            Codec
-	MaxResponseBytes int64
 	CompressMinBytes int
 	HTTPClient       HTTPClient
 	URL              string

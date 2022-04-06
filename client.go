@@ -51,7 +51,6 @@ func NewClient[Req, Res any](
 		CompressionPools: newReadOnlyCompressionPools(config.CompressionPools),
 		Codec:            config.Codec,
 		Protobuf:         config.protobuf(),
-		MaxResponseBytes: config.MaxResponseBytes,
 		CompressMinBytes: config.CompressMinBytes,
 		HTTPClient:       httpClient,
 		URL:              url,
@@ -166,7 +165,6 @@ func (c *Client[Req, Res]) newStream(ctx context.Context, streamType StreamType)
 type clientConfiguration struct {
 	Protocol               protocol
 	Procedure              string
-	MaxResponseBytes       int64
 	CompressMinBytes       int
 	Interceptor            Interceptor
 	CompressionPools       map[string]compressionPool

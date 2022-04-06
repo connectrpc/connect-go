@@ -244,7 +244,6 @@ func (h *Handler) failNegotiation(w http.ResponseWriter, code int) {
 type handlerConfiguration struct {
 	CompressionPools map[string]compressionPool
 	Codecs           map[string]Codec
-	MaxRequestBytes  int64
 	CompressMinBytes int
 	Interceptor      Interceptor
 	Procedure        string
@@ -293,7 +292,6 @@ func (c *handlerConfiguration) newProtocolHandlers(streamType StreamType) []prot
 			Spec:             c.newSpecification(streamType),
 			Codecs:           codecs,
 			CompressionPools: compressors,
-			MaxRequestBytes:  c.MaxRequestBytes,
 			CompressMinBytes: c.CompressMinBytes,
 		}))
 	}
