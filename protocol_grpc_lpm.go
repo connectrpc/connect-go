@@ -119,7 +119,6 @@ func (m *marshaler) writeGRPCPrefix(compressed, trailer bool, size int) *Error {
 
 type unmarshaler struct {
 	reader          io.Reader
-	max             int64
 	codec           Codec
 	compressionPool compressionPool
 
@@ -169,8 +168,6 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 	size := int(binary.BigEndian.Uint32(prefixes[1:5]))
 	if size < 0 {
 		return errorf(CodeInvalidArgument, "message size %d overflowed uint32", size)
-	} else if u.max > 0 && int64(size) > u.max {
-		return errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", size, u.max)
 	}
 	// OPT: easy opportunity to pool buffers and grab the underlying byte slice
 	raw := make([]byte, size)

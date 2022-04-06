@@ -51,8 +51,7 @@ func Example_handler() {
 	// (for example, net/http's StripPrefix).
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(
-		&ExamplePingServer{},                // our business logic
-		connect.WithReadMaxBytes(1024*1024), // limit request size
+		&ExamplePingServer{}, // our business logic
 	))
 	// You can serve gRPC's health and server reflection APIs using
 	// github.com/bufbuild/connect-grpchealth-go and github.com/bufbuild/connect-grpcreflect-go.

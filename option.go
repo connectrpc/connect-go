@@ -231,19 +231,6 @@ func WithProtoJSONCodec() Option {
 	return WithCodec(&protoJSONCodec{})
 }
 
-// WithReadMaxBytes limits the performance impact of pathologically large
-// messages sent by the other party. For handlers, WithReadMaxBytes limits the size
-// of message that the client can send. For clients, WithReadMaxBytes limits the
-// size of message that the server can respond with. Limits are applied before
-// decompression and apply to each Protobuf message, not to the stream as a
-// whole.
-//
-// Setting WithReadMaxBytes to zero allows any message size. Both clients and
-// handlers default to allowing any request size.
-func WithReadMaxBytes(n int64) Option {
-	return &readMaxBytesOption{n}
-}
-
 type clientOptionsOption struct {
 	options []ClientOption
 }
@@ -361,18 +348,6 @@ func (o *optionsOption) applyToHandler(config *handlerConfiguration) {
 	for _, option := range o.options {
 		option.applyToHandler(config)
 	}
-}
-
-type readMaxBytesOption struct {
-	Max int64
-}
-
-func (o *readMaxBytesOption) applyToClient(config *clientConfiguration) {
-	config.MaxResponseBytes = o.Max
-}
-
-func (o *readMaxBytesOption) applyToHandler(config *handlerConfiguration) {
-	config.MaxRequestBytes = o.Max
 }
 
 type requestCompressionOption struct {
