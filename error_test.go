@@ -66,17 +66,6 @@ func TestErrorCode(t *testing.T) {
 	assert.Equal(t, connectErr.Code(), CodeUnavailable)
 }
 
-func TestErrorMessage(t *testing.T) {
-	t.Parallel()
-	err := fmt.Errorf(
-		"another: %w",
-		NewError(CodeUnavailable, errors.New("foo")),
-	)
-	connectErr, ok := asError(err)
-	assert.True(t, ok)
-	assert.Equal(t, connectErr.Message(), "foo")
-}
-
 func TestCodeOf(t *testing.T) {
 	t.Parallel()
 	assert.Equal(
