@@ -22,10 +22,10 @@ import (
 )
 
 func ExampleMessage() {
-	err := connect.NewError(connect.CodeUnavailable, fmt.Errorf(
+	err := fmt.Errorf(
 		"another: %w",
 		connect.NewError(connect.CodeUnavailable, errors.New("failed to foo")),
-	))
+	)
 	if connectErr := (&connect.Error{}); errors.As(err, &connectErr) {
 		fmt.Println("underlying error message:", connectErr.Message())
 	}
