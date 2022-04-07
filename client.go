@@ -34,6 +34,7 @@ type Client[Req, Res any] struct {
 	config         *clientConfiguration
 	callUnary      func(context.Context, *Request[Req]) (*Response[Res], error)
 	protocolClient protocolClient
+	warnIfError    func(error)
 }
 
 // NewClient constructs a new Client.
@@ -46,6 +47,7 @@ func NewClient[Req, Res any](
 	if err != nil {
 		return nil, err
 	}
+	warnIfError := newWarnIfError(config.Warn)
 	protocolClient, protocolErr := config.Protocol.NewClient(&protocolClientParams{
 		CompressionName:  config.RequestCompressionName,
 		CompressionPools: newReadOnlyCompressionPools(config.CompressionPools),
@@ -67,17 +69,17 @@ func NewClient[Req, Res any](
 		// We want the user to continue to call Receive in those cases to get the
 		// full error from the server-side.
 		if err := sender.Send(request.Any()); err != nil && !errors.Is(err, io.EOF) {
-			_ = sender.Close(err)
-			_ = receiver.Close()
+			warnIfError(sender.Close(err))
+			warnIfError(receiver.Close())
 			return nil, err
 		}
 		if err := sender.Close(nil); err != nil {
-			_ = receiver.Close()
+			warnIfError(receiver.Close())
 			return nil, err
 		}
 		response, err := receiveUnaryResponse[Res](receiver)
 		if err != nil {
-			_ = receiver.Close()
+			warnIfError(receiver.Close())
 			return nil, err
 		}
 		return response, receiver.Close()
@@ -104,6 +106,7 @@ func NewClient[Req, Res any](
 		config:         config,
 		callUnary:      callUnary,
 		protocolClient: protocolClient,
+		warnIfError:    warnIfError,
 	}, nil
 }
 
@@ -132,8 +135,8 @@ func (c *Client[Req, Res]) CallServerStream(
 	// We want the user to continue to call Receive in those cases to get the
 	// full error from the server-side.
 	if err := sender.Send(req.Msg); err != nil && !errors.Is(err, io.EOF) {
-		_ = sender.Close(err)
-		_ = receiver.Close()
+		c.warnIfError(sender.Close(err))
+		c.warnIfError(receiver.Close())
 		return nil, err
 	}
 	if err := sender.Close(nil); err != nil {

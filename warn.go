@@ -19,3 +19,11 @@ import "log"
 func defaultWarn(err error) {
 	log.Printf("warn: %v", err) // nolint:forbidigo
 }
+
+func newWarnIfError(warn func(error)) func(error) {
+	return func(err error) {
+		if err != nil {
+			warn(err)
+		}
+	}
+}

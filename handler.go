@@ -28,8 +28,9 @@ import (
 type Handler struct {
 	spec             Specification
 	interceptor      Interceptor
-	implementation   func(context.Context, Sender, Receiver, error /* client-visible */)
+	implementation   func(context.Context, Sender, Receiver, error /* client-visible */, func(error))
 	protocolHandlers []protocolHandler
+	warnIfError      func(error)
 }
 
 // NewUnaryHandler constructs a Handler for a request-response procedure.
@@ -40,8 +41,16 @@ func NewUnaryHandler[Req, Res any](
 ) *Handler {
 	config := newHandlerConfiguration(procedure, options)
 	// Given a (possibly failed) stream, how should we call the unary function?
-	implementation := func(ctx context.Context, sender Sender, receiver Receiver, clientVisibleError error) {
-		defer receiver.Close()
+	implementation := func(
+		ctx context.Context,
+		sender Sender,
+		receiver Receiver,
+		clientVisibleError error,
+		warnIfError func(error),
+	) {
+		defer func() {
+			warnIfError(receiver.Close())
+		}()
 
 		var request *Request[Req]
 		if clientVisibleError != nil {
@@ -87,12 +96,13 @@ func NewUnaryHandler[Req, Res any](
 
 		response, err := untyped(ctx, request)
 		if err != nil {
-			_ = sender.Close(err)
+			warnIfError(sender.Close(err))
 			return
 		}
 		mergeHeaders(sender.Header(), response.Header())
 		mergeHeaders(sender.Trailer(), response.Trailer())
-		_ = sender.Close(sender.Send(response.Any()))
+		closeErr := sender.Close(sender.Send(response.Any()))
+		warnIfError(closeErr)
 	}
 
 	protocolHandlers := config.newProtocolHandlers(StreamTypeUnary)
@@ -101,6 +111,7 @@ func NewUnaryHandler[Req, Res any](
 		interceptor:      nil, // already applied
 		implementation:   implementation,
 		protocolHandlers: protocolHandlers,
+		warnIfError:      newWarnIfError(config.Warn),
 	}
 }
 
@@ -113,11 +124,11 @@ func NewClientStreamHandler[Req, Res any](
 	return newStreamHandler(
 		procedure,
 		StreamTypeClient,
-		func(ctx context.Context, sender Sender, receiver Receiver) {
+		func(ctx context.Context, sender Sender, receiver Receiver, warnIfError func(error)) {
 			stream := NewClientStream[Req, Res](sender, receiver)
 			err := implementation(ctx, stream)
-			_ = receiver.Close()
-			_ = sender.Close(err)
+			warnIfError(receiver.Close())
+			warnIfError(sender.Close(err))
 		},
 		options...,
 	)
@@ -132,20 +143,20 @@ func NewServerStreamHandler[Req, Res any](
 	return newStreamHandler(
 		procedure,
 		StreamTypeServer,
-		func(ctx context.Context, sender Sender, receiver Receiver) {
+		func(ctx context.Context, sender Sender, receiver Receiver, warnIfError func(error)) {
 			stream := NewServerStream[Res](sender)
 			req, err := receiveUnaryRequest[Req](receiver)
 			if err != nil {
-				_ = receiver.Close()
-				_ = sender.Close(err)
+				warnIfError(receiver.Close())
+				warnIfError(sender.Close(err))
 				return
 			}
 			if err := receiver.Close(); err != nil {
-				_ = sender.Close(err)
+				warnIfError(sender.Close(err))
 				return
 			}
 			err = implementation(ctx, req, stream)
-			_ = sender.Close(err)
+			warnIfError(sender.Close(err))
 		},
 		options...,
 	)
@@ -160,11 +171,11 @@ func NewBidiStreamHandler[Req, Res any](
 	return newStreamHandler(
 		procedure,
 		StreamTypeBidi,
-		func(ctx context.Context, sender Sender, receiver Receiver) {
+		func(ctx context.Context, sender Sender, receiver Receiver, warnIfError func(error)) {
 			stream := NewBidiStream[Req, Res](sender, receiver)
 			err := implementation(ctx, stream)
-			_ = receiver.Close()
-			_ = sender.Close(err)
+			warnIfError(receiver.Close())
+			warnIfError(sender.Close(err))
 		},
 		options...,
 	)
@@ -227,7 +238,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 			sender = ic.WrapStreamSender(ctx, sender)
 			receiver = ic.WrapStreamReceiver(ctx, receiver)
 		}
-		h.implementation(ctx, sender, receiver, clientVisibleError)
+		h.implementation(ctx, sender, receiver, clientVisibleError, h.warnIfError)
 		return
 	}
 	h.failNegotiation(responseWriter, http.StatusUnsupportedMediaType)
@@ -303,21 +314,22 @@ func (c *handlerConfiguration) newProtocolHandlers(streamType StreamType) []prot
 func newStreamHandler(
 	procedure string,
 	streamType StreamType,
-	implementation func(context.Context, Sender, Receiver),
+	implementation func(context.Context, Sender, Receiver, func(error)),
 	options ...HandlerOption,
 ) *Handler {
 	config := newHandlerConfiguration(procedure, options)
 	return &Handler{
 		spec:        config.newSpecification(streamType),
 		interceptor: config.Interceptor,
-		implementation: func(ctx context.Context, sender Sender, receiver Receiver, clientVisibleErr error) {
+		implementation: func(ctx context.Context, sender Sender, receiver Receiver, clientVisibleErr error, warnIfError func(error)) {
 			if clientVisibleErr != nil {
-				_ = receiver.Close()
-				_ = sender.Close(clientVisibleErr)
+				warnIfError(receiver.Close())
+				warnIfError(sender.Close(clientVisibleErr))
 				return
 			}
-			implementation(ctx, sender, receiver)
+			implementation(ctx, sender, receiver, warnIfError)
 		},
 		protocolHandlers: config.newProtocolHandlers(streamType),
+		warnIfError:      newWarnIfError(config.Warn),
 	}
 }
