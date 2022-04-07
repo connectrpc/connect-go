@@ -121,7 +121,7 @@ func (c *Client[Req, Res]) CallUnary(
 // CallClientStream calls a client streaming procedure.
 func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamForClient[Req, Res] {
 	sender, receiver := c.newStream(ctx, StreamTypeClient)
-	return NewClientStreamForClient[Req, Res](sender, receiver)
+	return newClientStreamForClient[Req, Res](sender, receiver)
 }
 
 // CallServerStream calls a server streaming procedure.
@@ -142,13 +142,13 @@ func (c *Client[Req, Res]) CallServerStream(
 	if err := sender.Close(nil); err != nil {
 		return nil, err
 	}
-	return NewServerStreamForClient[Res](receiver), nil
+	return newServerStreamForClient[Res](receiver), nil
 }
 
 // CallBidiStream calls a bidirectional streaming procedure.
 func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForClient[Req, Res] {
 	sender, receiver := c.newStream(ctx, StreamTypeBidi)
-	return NewBidiStreamForClient[Req, Res](sender, receiver)
+	return newBidiStreamForClient[Req, Res](sender, receiver)
 }
 
 func (c *Client[Req, Res]) newStream(ctx context.Context, streamType StreamType) (Sender, Receiver) {
