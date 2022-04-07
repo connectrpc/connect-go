@@ -38,7 +38,7 @@ var errGotWebTrailers = errorf(
 
 type marshaler struct {
 	writer           io.Writer
-	compressionPool  compressionPool
+	compressionPool  *compressionPool
 	codec            Codec
 	compressMinBytes int
 }
@@ -72,16 +72,16 @@ func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
 	}
 	// OPT: easy opportunity to pool buffers
 	data := bytes.NewBuffer(make([]byte, 0, len(message)))
-	compressor, err := m.compressionPool.GetWriter(data)
+	compressor, err := m.compressionPool.GetCompressor(data)
 	if err != nil {
 		return errorf(CodeUnknown, "get compressor: %w", err)
 	}
 
 	if _, err := compressor.Write(message); err != nil { // returns uncompressed size, which isn't useful
-		_ = m.compressionPool.PutWriter(compressor)
+		_ = m.compressionPool.PutCompressor(compressor)
 		return errorf(CodeInternal, "couldn't compress data: %w", err)
 	}
-	if err := m.compressionPool.PutWriter(compressor); err != nil {
+	if err := m.compressionPool.PutCompressor(compressor); err != nil {
 		return errorf(CodeInternal, "couldn't close compressor: %w", err)
 	}
 	if err := m.writeGRPCPrefix(true /* compressed */, trailer, data.Len()); err != nil {
@@ -120,7 +120,7 @@ func (m *marshaler) writeGRPCPrefix(compressed, trailer bool, size int) *Error {
 type unmarshaler struct {
 	reader          io.Reader
 	codec           Codec
-	compressionPool compressionPool
+	compressionPool *compressionPool
 
 	web        bool
 	webTrailer http.Header
@@ -204,16 +204,18 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 	}
 
 	if size > 0 && compressed {
-		decompressor, err := u.compressionPool.GetReader(bytes.NewReader(raw))
+		decompressor, err := u.compressionPool.GetDecompressor(bytes.NewReader(raw))
 		if err != nil {
 			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
 		}
-		// TODO: handle error with user-provided observability hook (#179)
-		defer u.compressionPool.PutReader(decompressor) // nolint:errcheck
 		// OPT: easy opportunity to pool buffers
 		decompressed := bytes.NewBuffer(make([]byte, 0, len(raw)))
 		if _, err := decompressed.ReadFrom(decompressor); err != nil {
+			_ = u.compressionPool.PutDecompressor(decompressor)
 			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
+		}
+		if err := u.compressionPool.PutDecompressor(decompressor); err != nil {
+			return errorf(CodeUnknown, "recycle decompressor: %w", err)
 		}
 		raw = decompressed.Bytes()
 	}

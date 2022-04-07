@@ -30,8 +30,8 @@ func newHandlerStream(
 	compressMinBytes int,
 	codec Codec,
 	protobuf Codec, // for errors
-	requestCompressionPools compressionPool,
-	responseCompressionPools compressionPool,
+	requestCompressionPools *compressionPool,
+	responseCompressionPools *compressionPool,
 ) (*handlerSender, *handlerReceiver) {
 	sender := &handlerSender{
 		spec: spec,
