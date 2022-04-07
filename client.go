@@ -170,6 +170,7 @@ type clientConfiguration struct {
 	CompressionPools       map[string]compressionPool
 	Codec                  Codec
 	RequestCompressionName string
+	Warn                   func(error)
 }
 
 func newClientConfiguration(url string, options []ClientOption) (*clientConfiguration, *Error) {
@@ -177,6 +178,7 @@ func newClientConfiguration(url string, options []ClientOption) (*clientConfigur
 	config := clientConfiguration{
 		Procedure:        protoPath,
 		CompressionPools: make(map[string]compressionPool),
+		Warn:             defaultWarn,
 	}
 	WithProtoBinaryCodec().applyToClient(&config)
 	WithGzip().applyToClient(&config)

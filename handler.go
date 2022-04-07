@@ -249,6 +249,7 @@ type handlerConfiguration struct {
 	Procedure        string
 	HandleGRPC       bool
 	HandleGRPCWeb    bool
+	Warn             func(error)
 }
 
 func newHandlerConfiguration(procedure string, options []HandlerOption) *handlerConfiguration {
@@ -259,6 +260,7 @@ func newHandlerConfiguration(procedure string, options []HandlerOption) *handler
 		Codecs:           make(map[string]Codec),
 		HandleGRPC:       true,
 		HandleGRPCWeb:    true,
+		Warn:             defaultWarn,
 	}
 	WithProtoBinaryCodec().applyToHandler(&config)
 	WithProtoJSONCodec().applyToHandler(&config)

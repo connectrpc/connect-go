@@ -231,6 +231,20 @@ func WithProtoJSONCodec() Option {
 	return WithCodec(&protoJSONCodec{})
 }
 
+// WithWarn sets the function used to log non-critical internal errors. These
+// errors don't impact the server's ability to respond to clients, but do
+// indicate a potential problem. For example, Connect handlers use the supplied
+// function to log any errors encountered when closing HTTP response bodies.
+//
+// A typical warn function might log the error, send it to an exception
+// reporting system like Sentry, collect metrics, or all of the above. If no
+// warn function is supplied, Connect uses the standard library's log.Printf.
+//
+// Warn functions must be safe to call concurrently.
+func WithWarn(warn func(error)) Option {
+	return &warnOption{warn}
+}
+
 type clientOptionsOption struct {
 	options []ClientOption
 }
@@ -356,4 +370,16 @@ type requestCompressionOption struct {
 
 func (o *requestCompressionOption) applyToClient(config *clientConfiguration) {
 	config.RequestCompressionName = o.Name
+}
+
+type warnOption struct {
+	Warn func(error)
+}
+
+func (o *warnOption) applyToClient(config *clientConfiguration) {
+	config.Warn = o.Warn
+}
+
+func (o *warnOption) applyToHandler(config *handlerConfiguration) {
+	config.Warn = o.Warn
 }
