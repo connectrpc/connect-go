@@ -100,16 +100,20 @@ func (hs *handlerSender) Close(err error) error {
 	if marshalErr := grpcErrorToTrailer(mergedTrailers, hs.protobuf, err); marshalErr != nil {
 		return marshalErr
 	}
-	if hs.web {
-		// We're using gRPC-Web, so we write trailing metadata to the HTTP body.
-		//
-		// If we haven't written to the body, we're sending what gRPC calls a
+	if hs.web && !hs.wroteToBody {
+		// We're using gRPC-Web and we haven't yet written to the body. Since we're
+		// not sending any response messages, the gRPC specification calls this a
 		// "trailers-only" response. Under those circumstances, the gRPC-Web spec
 		// says that implementations _may_ send trailing metadata as HTTP headers
-		// instead. We're not going to do that because Envoy, the reference
-		// implementation, doesn't. The gRPC-Web spec is explicitly a description
-		// of the reference implementations rather than a proper specification, so
-		// we should prioritize emulating Envoy.
+		// instead. The gRPC-Web spec is explicitly a description of the reference
+		// implementations rather than a proper specification, so we're going to
+		// emulate Envoy and put the trailing metadata in the HTTP headers.
+		mergeHeaders(hs.writer.Header(), mergedTrailers)
+		return nil
+	}
+	if hs.web {
+		// We're using gRPC-Web and we've already sent the headers, so we write
+		// trailing metadata to the HTTP body.
 		if err := hs.marshaler.MarshalWebTrailers(mergedTrailers); err != nil {
 			return err
 		}
@@ -124,6 +128,9 @@ func (hs *handlerSender) Close(err error) error {
 	// by writing to the headers map with a special prefix. This is purely an
 	// implementation detail, so we should hide it and _not_ mutate the
 	// user-visible headers.
+	//
+	// Note that this is _very_ finicky, and it's impossible to test with a
+	// net/http client. Breaking this logic breaks Envoy's gRPC-Web translation.
 	for key, values := range mergedTrailers {
 		for _, value := range values {
 			hs.writer.Header().Add(http.TrailerPrefix+key, value)
