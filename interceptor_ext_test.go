@@ -49,6 +49,7 @@ func TestHandlerStreamErrors(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(
 		pingServer{},
+		failOnWarning(t),
 		connect.WithInterceptors(&assertCalledInterceptor{&called}),
 	))
 	server := httptest.NewServer(mux)
@@ -174,6 +175,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	mux.Handle(
 		pingv1connect.NewPingServiceHandler(
 			pingServer{},
+			failOnWarning(t),
 			handlerOnion,
 		),
 	)
@@ -183,6 +185,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	client, err := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL,
+		failOnWarning(t),
 		connect.WithGRPC(),
 		clientOnion,
 	)

@@ -22,13 +22,22 @@ import (
 
 // ClientStreamForClient is the client's view of a client streaming RPC.
 type ClientStreamForClient[Req, Res any] struct {
-	sender   Sender
-	receiver Receiver
+	sender      Sender
+	receiver    Receiver
+	warnIfError func(error)
 }
 
 // newClientStreamForClient constructs the client's view of a client streaming RPC.
-func newClientStreamForClient[Req, Res any](s Sender, r Receiver) *ClientStreamForClient[Req, Res] {
-	return &ClientStreamForClient[Req, Res]{sender: s, receiver: r}
+func newClientStreamForClient[Req, Res any](
+	s Sender,
+	r Receiver,
+	warnIfError func(error),
+) *ClientStreamForClient[Req, Res] {
+	return &ClientStreamForClient[Req, Res]{
+		sender:      s,
+		receiver:    r,
+		warnIfError: warnIfError,
+	}
 }
 
 // RequestHeader returns the request headers. Headers are sent to the server with the
@@ -55,7 +64,7 @@ func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Response[Res], err
 	}
 	res, err := receiveUnaryResponse[Res](c.receiver)
 	if err != nil {
-		_ = c.receiver.Close()
+		c.warnIfError(c.receiver.Close())
 		return nil, err
 	}
 	if err := c.receiver.Close(); err != nil {

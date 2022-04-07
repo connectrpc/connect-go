@@ -64,12 +64,13 @@ func (cr *clientReceiver) Trailer() http.Header { return cr.stream.ResponseTrail
 // request/response code. Since this is the most complex code in connect, it has
 // many more comments than usual.
 type duplexClientStream struct {
-	ctx        context.Context
-	httpClient HTTPClient
-	url        string
-	spec       Specification
-	codec      Codec
-	protobuf   Codec // for errors
+	ctx         context.Context
+	httpClient  HTTPClient
+	url         string
+	spec        Specification
+	codec       Codec
+	protobuf    Codec // for errors
+	warnIfError func(error)
 
 	// send: guarded by prepareOnce because we can't initialize this state until
 	// the first call to Send.
@@ -148,7 +149,7 @@ func (cs *duplexClientStream) CloseSend(_ error) error {
 	if cs.web {
 		if err := cs.marshaler.MarshalWebTrailers(cs.trailer); err != nil {
 			if !errors.Is(err, io.ErrClosedPipe) {
-				_ = cs.writer.Close()
+				cs.warnIfError(cs.writer.Close())
 				return err
 			}
 		}
@@ -180,7 +181,7 @@ func (cs *duplexClientStream) Receive(message any) error {
 	if err != nil {
 		// If we can't read this LPM, see if the server sent an explicit error in
 		// trailers. First, we need to read the body to EOF.
-		discard(cs.response.Body)
+		cs.warnIfError(discard(cs.response.Body))
 		mergeHeaders(cs.responseTrailer, cs.response.Trailer)
 		if errors.Is(err, errGotWebTrailers) {
 			mergeHeaders(cs.responseTrailer, cs.unmarshaler.WebTrailer())
@@ -209,7 +210,9 @@ func (cs *duplexClientStream) CloseReceive() error {
 	if cs.response == nil {
 		return nil
 	}
-	discard(cs.response.Body)
+	if err := discard(cs.response.Body); err != nil {
+		return NewError(CodeUnknown, err)
+	}
 	if err := cs.response.Body.Close(); err != nil {
 		return NewError(CodeUnknown, err)
 	}
@@ -319,7 +322,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 		mergeHeaders(cs.responseTrailer, res.Header)
 		cs.responseTrailer.Del("Content-Type")
 		// If we get some actual HTTP trailers, treat those as trailing metadata too.
-		discard(res.Body)
+		cs.warnIfError(discard(res.Body))
 		mergeHeaders(cs.responseTrailer, res.Trailer)
 		// Merge HTTP headers and trailers into the error metadata.
 		err.meta = res.Header.Clone()
@@ -335,6 +338,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 		reader:          res.Body,
 		codec:           cs.codec,
 		compressionPool: cs.compressionPools.Get(compression),
+		warnIfError:     cs.warnIfError,
 		web:             cs.web,
 	}
 }
@@ -369,9 +373,10 @@ func (cs *duplexClientStream) setError(err error, isRequest bool) {
 	// the first are no-ops), so it's okay for us to call this even though
 	// net/http sometimes closes the reader too.
 	//
-	// It's safe to ignore the returned error here. Under the hood, Close calls
-	// CloseWithError, which is documented to always return nil.
-	_ = cs.reader.Close()
+	// Under the hood, reader.Close calls reader.CloseWithError, which is
+	// documented to always return nil. Out of an abundance of caution, we'll
+	// pass the result to warnIfError anyways.
+	cs.warnIfError(cs.reader.Close())
 }
 
 func (cs *duplexClientStream) getRequestError() error {

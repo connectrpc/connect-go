@@ -41,6 +41,7 @@ type marshaler struct {
 	compressionPool  compressionPool
 	codec            Codec
 	compressMinBytes int
+	warnIfError      func(error)
 }
 
 func (m *marshaler) Marshal(message any) *Error {
@@ -78,7 +79,7 @@ func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
 	}
 
 	if _, err := compressor.Write(message); err != nil { // returns uncompressed size, which isn't useful
-		_ = m.compressionPool.PutWriter(compressor)
+		m.warnIfError(m.compressionPool.PutWriter(compressor))
 		return errorf(CodeInternal, "couldn't compress data: %w", err)
 	}
 	if err := m.compressionPool.PutWriter(compressor); err != nil {
@@ -121,6 +122,7 @@ type unmarshaler struct {
 	reader          io.Reader
 	codec           Codec
 	compressionPool compressionPool
+	warnIfError     func(error)
 
 	web        bool
 	webTrailer http.Header
@@ -208,8 +210,9 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 		if err != nil {
 			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
 		}
-		// TODO: handle error with user-provided observability hook (#179)
-		defer u.compressionPool.PutReader(decompressor) // nolint:errcheck
+		defer func() {
+			u.warnIfError(u.compressionPool.PutReader(decompressor))
+		}()
 		// OPT: easy opportunity to pool buffers
 		decompressed := bytes.NewBuffer(make([]byte, 0, len(raw)))
 		if _, err := decompressed.ReadFrom(decompressor); err != nil {

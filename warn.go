@@ -14,12 +14,19 @@
 
 package connect
 
-import "log"
+import (
+	"log"
+)
 
+// defaultWarn is the default function used to log warnings. Users can replace
+// it with WithWarn.
 func defaultWarn(err error) {
 	log.Printf("warn: %v", err) // nolint:forbidigo
 }
 
+// newWarnIfError wraps a log function to automatically ignore nil errors. This
+// cleans up the code handling errors quite a bit - it doesn't need to name and
+// nil-check tons of errors.
 func newWarnIfError(warn func(error)) func(error) {
 	return func(err error) {
 		if err != nil {

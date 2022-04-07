@@ -56,6 +56,7 @@ func NewClient[Req, Res any](
 		CompressMinBytes: config.CompressMinBytes,
 		HTTPClient:       httpClient,
 		URL:              url,
+		WarnIfError:      warnIfError,
 	})
 	if protocolErr != nil {
 		return nil, protocolErr
@@ -121,7 +122,7 @@ func (c *Client[Req, Res]) CallUnary(
 // CallClientStream calls a client streaming procedure.
 func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamForClient[Req, Res] {
 	sender, receiver := c.newStream(ctx, StreamTypeClient)
-	return newClientStreamForClient[Req, Res](sender, receiver)
+	return newClientStreamForClient[Req, Res](sender, receiver, c.warnIfError)
 }
 
 // CallServerStream calls a server streaming procedure.

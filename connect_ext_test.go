@@ -276,7 +276,12 @@ func TestServer(t *testing.T) {
 	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) { // nolint:thelper
 		run := func(t *testing.T, opts ...connect.ClientOption) {
 			t.Helper()
-			client, err := pingv1connect.NewPingServiceClient(server.Client(), server.URL, opts...)
+			client, err := pingv1connect.NewPingServiceClient(
+				server.Client(),
+				server.URL,
+				failOnWarning(t),
+				connect.WithClientOptions(opts...),
+			)
 			assert.Nil(t, err)
 			testPing(t, client)
 			testSum(t, client)
@@ -314,6 +319,7 @@ func TestServer(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(
 		pingServer{checkMetadata: true},
+		failOnWarning(t),
 	))
 
 	t.Run("http1", func(t *testing.T) {
@@ -514,4 +520,15 @@ func (p pingServer) CumSum(
 			return err
 		}
 	}
+}
+
+func failOnWarning(tb testing.TB) connect.Option {
+	tb.Helper()
+	return connect.WithWarn(func(err error) {
+		tb.Helper()
+		// It's difficult to isolate the source of test failures with just a log
+		// line. Life's much easier with a test-failing panic and a full stack
+		// trace.
+		panic(fmt.Sprintf("warn: %v", err)) // nolint: forbidigo
+	})
 }

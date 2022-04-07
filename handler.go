@@ -175,7 +175,13 @@ func NewBidiStreamHandler[Req, Res any](
 			stream := newBidiStream[Req, Res](sender, receiver)
 			err := implementation(ctx, stream)
 			warnIfError(receiver.Close())
-			warnIfError(sender.Close(err))
+			senderCloseErr := sender.Close(err)
+			// If the context is canceled or the deadline has passed, we expect the
+			// HTTP stream to be closed and the sender.Close call to fail. This isn't
+			// unexpected and shouldn't be treated as a warning.
+			if ctxErr := ctx.Err(); ctxErr == nil && senderCloseErr != nil {
+				warnIfError(senderCloseErr)
+			}
 		},
 		options...,
 	)
@@ -306,6 +312,7 @@ func (c *handlerConfiguration) newProtocolHandlers(streamType StreamType) []prot
 			Codecs:           codecs,
 			CompressionPools: compressors,
 			CompressMinBytes: c.CompressMinBytes,
+			WarnIfError:      newWarnIfError(c.Warn),
 		}))
 	}
 	return handlers

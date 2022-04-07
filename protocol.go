@@ -49,6 +49,7 @@ type protocolHandlerParams struct {
 	Codecs           readOnlyCodecs
 	CompressionPools readOnlyCompressionPools
 	CompressMinBytes int
+	WarnIfError      func(error)
 }
 
 // Handler is the server side of a protocol. HTTP handlers typically support
@@ -93,6 +94,7 @@ type protocolClientParams struct {
 	CompressMinBytes int
 	HTTPClient       HTTPClient
 	URL              string
+	WarnIfError      func(error)
 
 	// The gRPC family of protocols always needs access to a Protobuf codec to
 	// marshal and unmarshal errors.

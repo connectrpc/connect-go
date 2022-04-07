@@ -32,6 +32,7 @@ func newHandlerStream(
 	protobuf Codec, // for errors
 	requestCompressionPools compressionPool,
 	responseCompressionPools compressionPool,
+	warnIfError func(error),
 ) (*handlerSender, *handlerReceiver) {
 	sender := &handlerSender{
 		spec: spec,
@@ -41,6 +42,7 @@ func newHandlerStream(
 			compressionPool:  responseCompressionPools,
 			codec:            codec,
 			compressMinBytes: compressMinBytes,
+			warnIfError:      warnIfError,
 		},
 		protobuf: protobuf,
 		writer:   responseWriter,
@@ -54,6 +56,7 @@ func newHandlerStream(
 			reader:          request.Body,
 			compressionPool: requestCompressionPools,
 			codec:           codec,
+			warnIfError:     warnIfError,
 		},
 		request: request,
 	}

@@ -33,6 +33,12 @@ func TestGRPCHandlerSender(t *testing.T) {
 			marshaler: marshaler{
 				writer: responseWriter,
 				codec:  protobufCodec,
+				warnIfError: func(err error) {
+					if err == nil {
+						return
+					}
+					t.Errorf("warn: %v", err)
+				},
 			},
 			protobuf: protobufCodec,
 			writer:   responseWriter,

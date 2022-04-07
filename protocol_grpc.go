@@ -37,6 +37,7 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 		compressionPools: params.CompressionPools,
 		minCompressBytes: params.CompressMinBytes,
 		accept:           acceptPostValue(g.web, params.Codecs),
+		warnIfError:      params.WarnIfError,
 	}
 }
 
@@ -59,6 +60,7 @@ func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, 
 		minCompressBytes: params.CompressMinBytes,
 		httpClient:       params.HTTPClient,
 		procedureURL:     params.URL,
+		warnIfError:      params.WarnIfError,
 	}, nil
 }
 
@@ -69,6 +71,7 @@ type grpcHandler struct {
 	compressionPools readOnlyCompressionPools
 	minCompressBytes int
 	accept           string
+	warnIfError      func(error)
 }
 
 func (g *grpcHandler) ShouldHandleMethod(method string) bool {
@@ -173,6 +176,7 @@ func (g *grpcHandler) NewStream(
 		g.codecs.Protobuf(), // for errors
 		g.compressionPools.Get(requestCompression),
 		g.compressionPools.Get(responseCompression),
+		g.warnIfError,
 	))
 	// We can't return failed as-is: a nil *Error is non-nil when returned as an
 	// error interface.
@@ -180,7 +184,7 @@ func (g *grpcHandler) NewStream(
 		// Negotiation failed, so we can't establish a stream. To make the
 		// request's HTTP trailers visible to interceptors, we should try to read
 		// the body to EOF.
-		discard(request.Body)
+		g.warnIfError(discard(request.Body))
 		return sender, receiver, failed
 	}
 	return sender, receiver, nil
@@ -212,6 +216,7 @@ type grpcClient struct {
 	httpClient           HTTPClient
 	procedureURL         string
 	wrapErrorInterceptor Interceptor
+	warnIfError          func(error)
 }
 
 func (g *grpcClient) WriteRequestHeader(header http.Header) {
@@ -250,18 +255,20 @@ func (g *grpcClient) NewStream(
 	// the response stream.
 	pipeReader, pipeWriter := io.Pipe()
 	duplex := &duplexClientStream{
-		ctx:        ctx,
-		httpClient: g.httpClient,
-		url:        g.procedureURL,
-		spec:       spec,
-		codec:      g.codec,
-		protobuf:   g.protobuf,
-		writer:     pipeWriter,
+		ctx:         ctx,
+		httpClient:  g.httpClient,
+		url:         g.procedureURL,
+		spec:        spec,
+		codec:       g.codec,
+		protobuf:    g.protobuf,
+		warnIfError: g.warnIfError,
+		writer:      pipeWriter,
 		marshaler: marshaler{
 			writer:           pipeWriter,
 			compressionPool:  g.compressionPools.Get(g.compressionName),
 			codec:            g.codec,
 			compressMinBytes: g.minCompressBytes,
+			warnIfError:      g.warnIfError,
 		},
 		header:           header,
 		trailer:          make(http.Header),
