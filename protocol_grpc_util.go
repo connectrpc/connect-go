@@ -86,7 +86,7 @@ func contentTypeFromCodecName(web bool, name string) string {
 	return typeDefaultGRPCPrefix + name
 }
 
-func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) error {
+func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Codec, err error) error {
 	const (
 		statusKey  = "Grpc-Status"
 		messageKey = "Grpc-Message"
@@ -110,7 +110,7 @@ func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) error {
 		return errorf(CodeInternal, "couldn't marshal protobuf status: %w", err)
 	}
 	trailer.Set(statusKey, code)
-	trailer.Set(messageKey, percentEncode(status.Message))
+	trailer.Set(messageKey, percentEncode(bufferPool, status.Message))
 	trailer.Set(detailsKey, EncodeBinaryHeader(bin))
 	return nil
 }

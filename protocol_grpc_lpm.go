@@ -16,7 +16,6 @@ package connect
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -41,6 +40,7 @@ type marshaler struct {
 	compressionPool  *compressionPool
 	codec            Codec
 	compressMinBytes int
+	bufferPool       *bufferPool
 }
 
 func (m *marshaler) Marshal(message any) *Error {
@@ -52,8 +52,8 @@ func (m *marshaler) Marshal(message any) *Error {
 }
 
 func (m *marshaler) MarshalWebTrailers(trailer http.Header) *Error {
-	// OPT: easy opportunity to pool buffers
-	raw := bytes.NewBuffer(nil)
+	raw := m.bufferPool.Get()
+	defer m.bufferPool.Put(raw)
 	if err := trailer.Write(raw); err != nil {
 		return errorf(CodeInternal, "couldn't format trailers: %w", err)
 	}
@@ -70,8 +70,8 @@ func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
 		}
 		return nil
 	}
-	// OPT: easy opportunity to pool buffers
-	data := bytes.NewBuffer(make([]byte, 0, len(message)))
+	data := m.bufferPool.Get()
+	defer m.bufferPool.Put(data)
 	compressor, err := m.compressionPool.GetCompressor(data)
 	if err != nil {
 		return errorf(CodeUnknown, "get compressor: %w", err)
@@ -121,9 +121,9 @@ type unmarshaler struct {
 	reader          io.Reader
 	codec           Codec
 	compressionPool *compressionPool
-
-	web        bool
-	webTrailer http.Header
+	bufferPool      *bufferPool
+	web             bool
+	webTrailer      http.Header
 }
 
 func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
@@ -169,8 +169,8 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 	if size < 0 {
 		return errorf(CodeInvalidArgument, "message size %d overflowed uint32", size)
 	}
-	// OPT: easy opportunity to pool buffers and grab the underlying byte slice
-	raw := make([]byte, size)
+	raw := u.bufferPool.Get()
+	defer u.bufferPool.Put(raw)
 	if size > 0 {
 		// At layer 7, we don't know exactly what's happening down in L4. Large
 		// length-prefixed messages may arrive in chunks, so we may need to read
@@ -178,7 +178,7 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 		// forever if the LPM is malformed.
 		remaining := size
 		for remaining > 0 {
-			bytesRead, err := u.reader.Read(raw[size-remaining : size])
+			bytesRead, err := u.reader.Read(raw.Bytes()[size-remaining : size])
 			if err != nil && !errors.Is(err, io.EOF) {
 				return errorf(CodeUnknown, "error reading length-prefixed message data: %w", err)
 			}
@@ -204,12 +204,12 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 	}
 
 	if size > 0 && compressed {
-		decompressor, err := u.compressionPool.GetDecompressor(bytes.NewReader(raw))
+		decompressor, err := u.compressionPool.GetDecompressor(raw)
 		if err != nil {
 			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
 		}
-		// OPT: easy opportunity to pool buffers
-		decompressed := bytes.NewBuffer(make([]byte, 0, len(raw)))
+		decompressed := u.bufferPool.Get()
+		defer u.bufferPool.Put(decompressed)
 		if _, err := decompressed.ReadFrom(decompressor); err != nil {
 			_ = u.compressionPool.PutDecompressor(decompressor)
 			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
@@ -217,22 +217,22 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 		if err := u.compressionPool.PutDecompressor(decompressor); err != nil {
 			return errorf(CodeUnknown, "recycle decompressor: %w", err)
 		}
-		raw = decompressed.Bytes()
+		raw = decompressed
 	}
 
 	if isWebTrailer {
 		// Per the gRPC-Web specification, trailers should be encoded as an HTTP/1
 		// headers block _without_ the terminating newline. To make the headers
 		// parseable by net/textproto, we need to add the newline.
-		raw = append(raw, '\n') // nolint:makezero
-		bufferedReader := bufio.NewReader(bytes.NewReader(raw))
+		raw.WriteRune('\n')
+		bufferedReader := bufio.NewReader(raw)
 		mimeReader := textproto.NewReader(bufferedReader)
 		mimeHeader, err := mimeReader.ReadMIMEHeader()
 		if err != nil {
 			return errorf(
 				CodeInvalidArgument,
 				"gRPC-Web protocol error: received invalid trailers %q: %w",
-				string(raw),
+				raw.String(),
 				err,
 			)
 		}
@@ -240,7 +240,7 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 		return errGotWebTrailers
 	}
 
-	if err := u.codec.Unmarshal(raw, message); err != nil {
+	if err := u.codec.Unmarshal(raw.Bytes(), message); err != nil {
 		return errorf(CodeInvalidArgument, "can't unmarshal into %T: %w", message, err)
 	}
 

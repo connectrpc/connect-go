@@ -28,16 +28,19 @@ func TestGRPCHandlerSender(t *testing.T) {
 	newSender := func(web bool) *handlerSender {
 		responseWriter := httptest.NewRecorder()
 		protobufCodec := &protoBinaryCodec{}
+		bufferPool := newBufferPool()
 		return &handlerSender{
 			web: web,
 			marshaler: marshaler{
-				writer: responseWriter,
-				codec:  protobufCodec,
+				writer:     responseWriter,
+				codec:      protobufCodec,
+				bufferPool: bufferPool,
 			},
-			protobuf: protobufCodec,
-			writer:   responseWriter,
-			header:   make(http.Header),
-			trailer:  make(http.Header),
+			protobuf:   protobufCodec,
+			writer:     responseWriter,
+			header:     make(http.Header),
+			trailer:    make(http.Header),
+			bufferPool: bufferPool,
 		}
 	}
 	t.Run("web", func(t *testing.T) {
