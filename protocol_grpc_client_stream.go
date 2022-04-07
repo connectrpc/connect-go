@@ -180,7 +180,7 @@ func (cs *duplexClientStream) Receive(message any) error {
 	if err != nil {
 		// If we can't read this LPM, see if the server sent an explicit error in
 		// trailers. First, we need to read the body to EOF.
-		discard(cs.response.Body)
+		_ = discard(cs.response.Body)
 		mergeHeaders(cs.responseTrailer, cs.response.Trailer)
 		if errors.Is(err, errGotWebTrailers) {
 			mergeHeaders(cs.responseTrailer, cs.unmarshaler.WebTrailer())
@@ -209,7 +209,9 @@ func (cs *duplexClientStream) CloseReceive() error {
 	if cs.response == nil {
 		return nil
 	}
-	discard(cs.response.Body)
+	if err := discard(cs.response.Body); err != nil {
+		return NewError(CodeUnknown, err)
+	}
 	if err := cs.response.Body.Close(); err != nil {
 		return NewError(CodeUnknown, err)
 	}
@@ -319,7 +321,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 		mergeHeaders(cs.responseTrailer, res.Header)
 		cs.responseTrailer.Del("Content-Type")
 		// If we get some actual HTTP trailers, treat those as trailing metadata too.
-		discard(res.Body)
+		_ = discard(res.Body)
 		mergeHeaders(cs.responseTrailer, res.Trailer)
 		// Merge HTTP headers and trailers into the error metadata.
 		err.meta = res.Header.Clone()

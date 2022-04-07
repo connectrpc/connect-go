@@ -180,7 +180,7 @@ func (g *grpcHandler) NewStream(
 		// Negotiation failed, so we can't establish a stream. To make the
 		// request's HTTP trailers visible to interceptors, we should try to read
 		// the body to EOF.
-		discard(request.Body)
+		_ = discard(request.Body)
 		return sender, receiver, failed
 	}
 	return sender, receiver, nil
