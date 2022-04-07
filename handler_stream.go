@@ -28,8 +28,8 @@ type ClientStream[Req, Res any] struct {
 	err      error
 }
 
-// NewClientStream constructs the handler's view of a client streaming RPC.
-func NewClientStream[Req, Res any](s Sender, r Receiver) *ClientStream[Req, Res] {
+// newClientStream constructs the handler's view of a client streaming RPC.
+func newClientStream[Req, Res any](s Sender, r Receiver) *ClientStream[Req, Res] {
 	return &ClientStream[Req, Res]{sender: s, receiver: r}
 }
 
@@ -72,14 +72,8 @@ func (c *ClientStream[Req, Res]) SendAndClose(envelope *Response[Res]) error {
 	if err := c.receiver.Close(); err != nil {
 		return err
 	}
-	sendHeader := c.sender.Header()
-	for k, v := range envelope.header {
-		sendHeader[k] = append(sendHeader[k], v...)
-	}
-	sendTrailer := c.sender.Trailer()
-	for k, v := range envelope.trailer {
-		sendTrailer[k] = append(sendTrailer[k], v...)
-	}
+	mergeHeaders(c.sender.Header(), envelope.header)
+	mergeHeaders(c.sender.Trailer(), envelope.trailer)
 	return c.sender.Send(envelope.Msg)
 }
 
@@ -88,8 +82,8 @@ type ServerStream[Res any] struct {
 	sender Sender
 }
 
-// NewServerStream constructs the handler's view of a server streaming RPC.
-func NewServerStream[Res any](s Sender) *ServerStream[Res] {
+// newServerStream constructs the handler's view of a server streaming RPC.
+func newServerStream[Res any](s Sender) *ServerStream[Res] {
 	return &ServerStream[Res]{sender: s}
 }
 
@@ -117,8 +111,8 @@ type BidiStream[Req, Res any] struct {
 	receiver Receiver
 }
 
-// NewBidiStream constructs the handler's view of a bidirectional streaming RPC.
-func NewBidiStream[Req, Res any](s Sender, r Receiver) *BidiStream[Req, Res] {
+// newBidiStream constructs the handler's view of a bidirectional streaming RPC.
+func newBidiStream[Req, Res any](s Sender, r Receiver) *BidiStream[Req, Res] {
 	return &BidiStream[Req, Res]{sender: s, receiver: r}
 }
 
