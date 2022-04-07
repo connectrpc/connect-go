@@ -114,10 +114,10 @@ func WithCodec(codec Codec) Option {
 // using both WithCompression and WithRequestCompression.
 //
 // Calling WithCompression with an empty name or nil constructors is a no-op.
-func WithCompression[D Decompressor, C Compressor](
+func WithCompression(
 	name string,
-	newDecompressor func() D,
-	newCompressor func() C,
+	newDecompressor func() Decompressor,
+	newCompressor func() Compressor,
 ) Option {
 	return &compressionOption{
 		Name:            name,
@@ -149,8 +149,8 @@ func WithCompressMinBytes(min int) Option {
 func WithGzip() Option {
 	return WithCompression(
 		compressionGzip,
-		func() *gzip.Reader { return &gzip.Reader{} },
-		func() *gzip.Writer { return gzip.NewWriter(ioutil.Discard) },
+		func() Decompressor { return &gzip.Reader{} },
+		func() Compressor { return gzip.NewWriter(ioutil.Discard) },
 	)
 }
 
@@ -261,7 +261,7 @@ func (o *codecOption) applyToHandler(config *handlerConfiguration) {
 
 type compressionOption struct {
 	Name            string
-	CompressionPool compressionPool
+	CompressionPool *compressionPool
 }
 
 func (o *compressionOption) applyToClient(config *clientConfiguration) {
@@ -272,7 +272,7 @@ func (o *compressionOption) applyToHandler(config *handlerConfiguration) {
 	o.apply(config.CompressionPools)
 }
 
-func (o *compressionOption) apply(m map[string]compressionPool) {
+func (o *compressionOption) apply(m map[string]*compressionPool) {
 	if o.Name == "" || o.CompressionPool == nil {
 		return
 	}

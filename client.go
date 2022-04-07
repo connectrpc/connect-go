@@ -167,7 +167,7 @@ type clientConfiguration struct {
 	Procedure              string
 	CompressMinBytes       int
 	Interceptor            Interceptor
-	CompressionPools       map[string]compressionPool
+	CompressionPools       map[string]*compressionPool
 	Codec                  Codec
 	RequestCompressionName string
 }
@@ -176,7 +176,7 @@ func newClientConfiguration(url string, options []ClientOption) (*clientConfigur
 	protoPath := extractProtobufPath(url)
 	config := clientConfiguration{
 		Procedure:        protoPath,
-		CompressionPools: make(map[string]compressionPool),
+		CompressionPools: make(map[string]*compressionPool),
 	}
 	WithProtoBinaryCodec().applyToClient(&config)
 	WithGzip().applyToClient(&config)

@@ -15,7 +15,7 @@
 package connect
 
 import (
-	"fmt"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -54,19 +54,16 @@ type Compressor interface {
 	Reset(io.Writer)
 }
 
-type compressionPool interface {
-	GetReader(io.Reader) (io.Reader, error)
-	PutReader(io.Reader) error
-
-	GetWriter(io.Writer) (io.Writer, error)
-	PutWriter(io.Writer) error
+type compressionPool struct {
+	decompressors sync.Pool
+	compressors   sync.Pool
 }
 
-func newCompressionPool[D Decompressor, C Compressor](
-	newDecompressor func() D,
-	newCompressor func() C,
-) compressionPool {
-	return &typedCompressionPool[D, C]{
+func newCompressionPool(
+	newDecompressor func() Decompressor,
+	newCompressor func() Compressor,
+) *compressionPool {
+	return &compressionPool{
 		decompressors: sync.Pool{
 			New: func() any { return newDecompressor() },
 		},
@@ -76,26 +73,15 @@ func newCompressionPool[D Decompressor, C Compressor](
 	}
 }
 
-type typedCompressionPool[D Decompressor, C Compressor] struct {
-	decompressors sync.Pool
-	compressors   sync.Pool
-}
-
-func (c *typedCompressionPool[D, C]) GetReader(reader io.Reader) (io.Reader, error) {
-	decompressor, ok := c.decompressors.Get().(D)
+func (c *compressionPool) GetDecompressor(reader io.Reader) (Decompressor, error) {
+	decompressor, ok := c.decompressors.Get().(Decompressor)
 	if !ok {
-		var expected D
-		return nil, fmt.Errorf("expected %T, got incorrect type from pool", expected)
+		return nil, errors.New("expected Decompressor, got incorrect type from pool")
 	}
 	return decompressor, decompressor.Reset(reader)
 }
 
-func (c *typedCompressionPool[D, C]) PutReader(reader io.Reader) error {
-	decompressor, ok := reader.(D)
-	if !ok {
-		var expected D
-		return fmt.Errorf("expected %T, got %T", expected, reader)
-	}
+func (c *compressionPool) PutDecompressor(decompressor Decompressor) error {
 	if err := decompressor.Close(); err != nil {
 		return err
 	}
@@ -110,22 +96,16 @@ func (c *typedCompressionPool[D, C]) PutReader(reader io.Reader) error {
 	return nil
 }
 
-func (c *typedCompressionPool[D, C]) GetWriter(writer io.Writer) (io.Writer, error) {
-	compressor, ok := c.compressors.Get().(C)
+func (c *compressionPool) GetCompressor(writer io.Writer) (Compressor, error) {
+	compressor, ok := c.compressors.Get().(Compressor)
 	if !ok {
-		var expected C
-		return nil, fmt.Errorf("expected %T, got incorrect type from pool", expected)
+		return nil, errors.New("expected Compressor, got incorrect type from pool")
 	}
 	compressor.Reset(writer)
 	return compressor, nil
 }
 
-func (c *typedCompressionPool[D, C]) PutWriter(writer io.Writer) error {
-	compressor, ok := writer.(C)
-	if !ok {
-		var expected C
-		return fmt.Errorf("expected %T, got %T", expected, writer)
-	}
+func (c *compressionPool) PutCompressor(compressor Compressor) error {
 	if err := compressor.Close(); err != nil {
 		return err
 	}
@@ -137,13 +117,13 @@ func (c *typedCompressionPool[D, C]) PutWriter(writer io.Writer) error {
 // readOnlyCompressionPools is a read-only interface to a map of named
 // compressionPools.
 type readOnlyCompressionPools interface {
-	Get(string) compressionPool
+	Get(string) *compressionPool
 	Contains(string) bool
 	// Wordy, but clarifies how this is different from readOnlyCodecs.Names().
 	CommaSeparatedNames() string
 }
 
-func newReadOnlyCompressionPools(pools map[string]compressionPool) readOnlyCompressionPools {
+func newReadOnlyCompressionPools(pools map[string]*compressionPool) readOnlyCompressionPools {
 	known := make([]string, 0, len(pools))
 	for name := range pools {
 		known = append(known, name)
@@ -155,11 +135,11 @@ func newReadOnlyCompressionPools(pools map[string]compressionPool) readOnlyCompr
 }
 
 type namedCompressionPools struct {
-	nameToPools         map[string]compressionPool
+	nameToPools         map[string]*compressionPool
 	commaSeparatedNames string
 }
 
-func (m *namedCompressionPools) Get(name string) compressionPool {
+func (m *namedCompressionPools) Get(name string) *compressionPool {
 	if name == "" || name == compressionIdentity {
 		return nil
 	}

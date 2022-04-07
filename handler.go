@@ -242,7 +242,7 @@ func (h *Handler) failNegotiation(w http.ResponseWriter, code int) {
 }
 
 type handlerConfiguration struct {
-	CompressionPools map[string]compressionPool
+	CompressionPools map[string]*compressionPool
 	Codecs           map[string]Codec
 	CompressMinBytes int
 	Interceptor      Interceptor
@@ -255,7 +255,7 @@ func newHandlerConfiguration(procedure string, options []HandlerOption) *handler
 	protoPath := extractProtobufPath(procedure)
 	config := handlerConfiguration{
 		Procedure:        protoPath,
-		CompressionPools: make(map[string]compressionPool),
+		CompressionPools: make(map[string]*compressionPool),
 		Codecs:           make(map[string]Codec),
 		HandleGRPC:       true,
 		HandleGRPCWeb:    true,
