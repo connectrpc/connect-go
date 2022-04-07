@@ -148,13 +148,14 @@ func statusFromError(err error) (*statusv1.Status, *Error) {
 	return status, nil
 }
 
-func discard(reader io.Reader) {
+func discard(reader io.Reader) error {
 	if lr, ok := reader.(*io.LimitedReader); ok {
-		_, _ = io.Copy(io.Discard, lr)
-		return
+		_, err := io.Copy(io.Discard, lr)
+		return err
 	}
 	// We don't want to get stuck throwing data away forever, so limit how much
 	// we're willing to do here: at most, we'll copy 4 MiB.
 	lr := &io.LimitedReader{R: reader, N: 1024 * 1024 * 4}
-	_, _ = io.Copy(io.Discard, lr)
+	_, err := io.Copy(io.Discard, lr)
+	return err
 }
