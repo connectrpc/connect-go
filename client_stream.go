@@ -26,11 +26,6 @@ type ClientStreamForClient[Req, Res any] struct {
 	receiver Receiver
 }
 
-// NewClientStreamForClient constructs the client's view of a client streaming RPC.
-func NewClientStreamForClient[Req, Res any](s Sender, r Receiver) *ClientStreamForClient[Req, Res] {
-	return &ClientStreamForClient[Req, Res]{sender: s, receiver: r}
-}
-
 // RequestHeader returns the request headers. Headers are sent to the server with the
 // first call to Send.
 func (c *ClientStreamForClient[Req, Res]) RequestHeader() http.Header {
@@ -69,12 +64,6 @@ type ServerStreamForClient[Res any] struct {
 	receiver Receiver
 	msg      Res
 	err      error
-}
-
-// NewServerStreamForClient constructs the client's view of a server streaming
-// RPC.
-func NewServerStreamForClient[Res any](r Receiver) *ServerStreamForClient[Res] {
-	return &ServerStreamForClient[Res]{receiver: r}
 }
 
 // Receive advances the stream to the next message, which will then be
@@ -126,11 +115,6 @@ func (s *ServerStreamForClient[Res]) Close() error {
 type BidiStreamForClient[Req, Res any] struct {
 	sender   Sender
 	receiver Receiver
-}
-
-// NewBidiStreamForClient constructs the client's view of a bidirectional streaming RPC.
-func NewBidiStreamForClient[Req, Res any](s Sender, r Receiver) *BidiStreamForClient[Req, Res] {
-	return &BidiStreamForClient[Req, Res]{sender: s, receiver: r}
 }
 
 // RequestHeader returns the request headers. Headers are sent with the first

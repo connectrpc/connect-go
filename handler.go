@@ -114,7 +114,7 @@ func NewClientStreamHandler[Req, Res any](
 		procedure,
 		StreamTypeClient,
 		func(ctx context.Context, sender Sender, receiver Receiver) {
-			stream := NewClientStream[Req, Res](sender, receiver)
+			stream := &ClientStream[Req, Res]{sender: sender, receiver: receiver}
 			err := implementation(ctx, stream)
 			_ = receiver.Close()
 			_ = sender.Close(err)
@@ -133,7 +133,7 @@ func NewServerStreamHandler[Req, Res any](
 		procedure,
 		StreamTypeServer,
 		func(ctx context.Context, sender Sender, receiver Receiver) {
-			stream := NewServerStream[Res](sender)
+			stream := &ServerStream[Res]{sender: sender}
 			req, err := receiveUnaryRequest[Req](receiver)
 			if err != nil {
 				_ = receiver.Close()
@@ -161,7 +161,7 @@ func NewBidiStreamHandler[Req, Res any](
 		procedure,
 		StreamTypeBidi,
 		func(ctx context.Context, sender Sender, receiver Receiver) {
-			stream := NewBidiStream[Req, Res](sender, receiver)
+			stream := &BidiStream[Req, Res]{sender: sender, receiver: receiver}
 			err := implementation(ctx, stream)
 			_ = receiver.Close()
 			_ = sender.Close(err)
