@@ -110,7 +110,11 @@ func (hs *handlerSender) Close(err error) error {
 		// implementation, doesn't. The gRPC-Web spec is explicitly a description
 		// of the reference implementations rather than a proper specification, so
 		// we should prioritize emulating Envoy.
-		return hs.marshaler.MarshalWebTrailers(mergedTrailers)
+		if err := hs.marshaler.MarshalWebTrailers(mergedTrailers); err != nil {
+			return err
+		}
+		// Don't return typed nils.
+		return nil
 	}
 	// We're using standard gRPC. Even if we haven't written to the body and
 	// we're sending a "trailers-only" response, we must send trailing metadata
