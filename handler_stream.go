@@ -70,14 +70,8 @@ func (c *ClientStream[Req, Res]) SendAndClose(envelope *Response[Res]) error {
 	if err := c.receiver.Close(); err != nil {
 		return err
 	}
-	sendHeader := c.sender.Header()
-	for k, v := range envelope.header {
-		sendHeader[k] = append(sendHeader[k], v...)
-	}
-	sendTrailer := c.sender.Trailer()
-	for k, v := range envelope.trailer {
-		sendTrailer[k] = append(sendTrailer[k], v...)
-	}
+	mergeHeaders(c.sender.Header(), envelope.header)
+	mergeHeaders(c.sender.Trailer(), envelope.trailer)
 	return c.sender.Send(envelope.Msg)
 }
 
