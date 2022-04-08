@@ -39,7 +39,10 @@ func newBufferPool() *bufferPool {
 }
 
 func (b *bufferPool) Get() *bytes.Buffer {
-	return b.Pool.Get().(*bytes.Buffer)
+	if buf, ok := b.Pool.Get().(*bytes.Buffer); ok {
+		return buf
+	}
+	return bytes.NewBuffer(make([]byte, 0, initialBufferSize))
 }
 
 func (b *bufferPool) Put(buffer *bytes.Buffer) {
