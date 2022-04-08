@@ -21,6 +21,9 @@ import (
 )
 
 // ClientStream is the handler's view of a client streaming RPC.
+//
+// It's constructed as part of Handler invocation, but doesn't currently have
+// an exported constructor.
 type ClientStream[Req, Res any] struct {
 	sender   Sender
 	receiver Receiver
@@ -79,6 +82,9 @@ func (c *ClientStream[Req, Res]) SendAndClose(envelope *Response[Res]) error {
 }
 
 // ServerStream is the handler's view of a server streaming RPC.
+//
+// It's constructed as part of Handler invocation, but doesn't currently have
+// an exported constructor.
 type ServerStream[Res any] struct {
 	sender Sender
 }
@@ -102,6 +108,9 @@ func (s *ServerStream[Res]) Send(msg *Res) error {
 }
 
 // BidiStream is the handler's view of a bidirectional streaming RPC.
+//
+// It's constructed as part of Handler invocation, but doesn't currently have
+// an exported constructor.
 type BidiStream[Req, Res any] struct {
 	sender   Sender
 	receiver Receiver

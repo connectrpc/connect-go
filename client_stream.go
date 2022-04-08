@@ -21,6 +21,9 @@ import (
 )
 
 // ClientStreamForClient is the client's view of a client streaming RPC.
+//
+// It's returned from Client.CallClientStream, but doesn't currently have an
+// exported constructor function.
 type ClientStreamForClient[Req, Res any] struct {
 	sender   Sender
 	receiver Receiver
@@ -60,6 +63,9 @@ func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Response[Res], err
 }
 
 // ServerStreamForClient is the client's view of a server streaming RPC.
+//
+// It's returned from Client.CallServerStream, but doesn't currently have an
+// exported constructor function.
 type ServerStreamForClient[Res any] struct {
 	receiver Receiver
 	msg      Res
@@ -112,6 +118,9 @@ func (s *ServerStreamForClient[Res]) Close() error {
 }
 
 // BidiStreamForClient is the client's view of a bidirectional streaming RPC.
+//
+// It's returned from Client.CallBidiStream, but doesn't currently have an
+// exported constructor function.
 type BidiStreamForClient[Req, Res any] struct {
 	sender   Sender
 	receiver Receiver
