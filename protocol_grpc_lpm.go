@@ -182,7 +182,7 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 			if err != nil && !errors.Is(err, io.EOF) {
 				return errorf(CodeUnknown, "error reading length-prefixed message data: %w", err)
 			}
-			if errors.Is(err, io.EOF) && prefixBytesRead == 0 {
+			if errors.Is(err, io.EOF) && bytesRead == 0 {
 				// We've gotten zero-length chunk of data. Message is likely malformed,
 				// don't wait for additional chunks.
 				return errorf(
