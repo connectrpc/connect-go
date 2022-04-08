@@ -21,7 +21,7 @@ import (
 
 const (
 	initialBufferSize    = 512
-	maxRecycleBufferSize = 1024 * 1024 // if >1MiB, don't hold onto a buffer
+	maxRecycleBufferSize = 8 * 1024 * 1024 // if >8MiB, don't hold onto a buffer
 )
 
 type bufferPool struct {
