@@ -177,8 +177,10 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 	if size < 0 {
 		return errorf(CodeInvalidArgument, "message size %d overflowed uint32", size)
 	}
-	raw := u.bufferPool.Get()
-	defer u.bufferPool.Put(raw)
+	rawBuffer := u.bufferPool.Get()
+	defer u.bufferPool.Put(rawBuffer)
+	rawBuffer.Grow(size)
+	raw := rawBuffer.Bytes()[0:size]
 	if size > 0 {
 		// At layer 7, we don't know exactly what's happening down in L4. Large
 		// length-prefixed messages may arrive in chunks, so we may need to read
@@ -186,7 +188,7 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 		// forever if the LPM is malformed.
 		remaining := size
 		for remaining > 0 {
-			bytesRead, err := u.reader.Read(raw.Bytes()[size-remaining : size])
+			bytesRead, err := u.reader.Read(raw[size-remaining : size])
 			if err != nil && !errors.Is(err, io.EOF) {
 				return errorf(CodeUnknown, "error reading length-prefixed message data: %w", err)
 			}
@@ -212,7 +214,7 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 	}
 
 	if size > 0 && compressed {
-		decompressor, err := u.compressionPool.GetDecompressor(raw)
+		decompressor, err := u.compressionPool.GetDecompressor(bytes.NewReader(raw))
 		if err != nil {
 			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
 		}
@@ -225,22 +227,22 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 		if err := u.compressionPool.PutDecompressor(decompressor); err != nil {
 			return errorf(CodeUnknown, "recycle decompressor: %w", err)
 		}
-		raw = decompressed
+		raw = decompressed.Bytes()
 	}
 
 	if isWebTrailer {
 		// Per the gRPC-Web specification, trailers should be encoded as an HTTP/1
 		// headers block _without_ the terminating newline. To make the headers
 		// parseable by net/textproto, we need to add the newline.
-		raw.WriteRune('\n')
-		bufferedReader := bufio.NewReader(raw)
+		raw = append(raw, '\n')
+		bufferedReader := bufio.NewReader(bytes.NewReader(raw))
 		mimeReader := textproto.NewReader(bufferedReader)
 		mimeHeader, err := mimeReader.ReadMIMEHeader()
 		if err != nil {
 			return errorf(
 				CodeInvalidArgument,
 				"gRPC-Web protocol error: received invalid trailers %q: %w",
-				raw.String(),
+				string(raw),
 				err,
 			)
 		}
@@ -248,7 +250,7 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 		return errGotWebTrailers
 	}
 
-	if err := u.codec.Unmarshal(raw.Bytes(), message); err != nil {
+	if err := u.codec.Unmarshal(raw, message); err != nil {
 		return errorf(CodeInvalidArgument, "can't unmarshal into %T: %w", message, err)
 	}
 
