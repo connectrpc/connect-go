@@ -249,6 +249,7 @@ type handlerConfiguration struct {
 	Procedure        string
 	HandleGRPC       bool
 	HandleGRPCWeb    bool
+	BufferPool       *bufferPool
 }
 
 func newHandlerConfiguration(procedure string, options []HandlerOption) *handlerConfiguration {
@@ -259,6 +260,7 @@ func newHandlerConfiguration(procedure string, options []HandlerOption) *handler
 		Codecs:           make(map[string]Codec),
 		HandleGRPC:       true,
 		HandleGRPCWeb:    true,
+		BufferPool:       newBufferPool(),
 	}
 	WithProtoBinaryCodec().applyToHandler(&config)
 	WithProtoJSONCodec().applyToHandler(&config)
@@ -293,6 +295,7 @@ func (c *handlerConfiguration) newProtocolHandlers(streamType StreamType) []prot
 			Codecs:           codecs,
 			CompressionPools: compressors,
 			CompressMinBytes: c.CompressMinBytes,
+			BufferPool:       c.BufferPool,
 		}))
 	}
 	return handlers

@@ -32,6 +32,7 @@ func newHandlerStream(
 	protobuf Codec, // for errors
 	requestCompressionPools *compressionPool,
 	responseCompressionPools *compressionPool,
+	bufferPool *bufferPool,
 ) (*handlerSender, *handlerReceiver) {
 	sender := &handlerSender{
 		spec: spec,
@@ -41,11 +42,13 @@ func newHandlerStream(
 			compressionPool:  responseCompressionPools,
 			codec:            codec,
 			compressMinBytes: compressMinBytes,
+			bufferPool:       bufferPool,
 		},
-		protobuf: protobuf,
-		writer:   responseWriter,
-		header:   make(http.Header),
-		trailer:  make(http.Header),
+		protobuf:   protobuf,
+		writer:     responseWriter,
+		header:     make(http.Header),
+		trailer:    make(http.Header),
+		bufferPool: bufferPool,
 	}
 	receiver := &handlerReceiver{
 		spec: spec,
@@ -54,6 +57,7 @@ func newHandlerStream(
 			reader:          request.Body,
 			compressionPool: requestCompressionPools,
 			codec:           codec,
+			bufferPool:      bufferPool,
 		},
 		request: request,
 	}
@@ -69,6 +73,7 @@ type handlerSender struct {
 	header      http.Header
 	trailer     http.Header
 	wroteToBody bool
+	bufferPool  *bufferPool
 }
 
 var _ Sender = (*handlerSender)(nil)
@@ -97,7 +102,7 @@ func (hs *handlerSender) Close(err error) error {
 	// mutate the trailers map that the user sees.
 	mergedTrailers := make(http.Header, len(hs.trailer)+2) // always make space for status & message
 	mergeHeaders(mergedTrailers, hs.trailer)
-	if marshalErr := grpcErrorToTrailer(mergedTrailers, hs.protobuf, err); marshalErr != nil {
+	if marshalErr := grpcErrorToTrailer(hs.bufferPool, mergedTrailers, hs.protobuf, err); marshalErr != nil {
 		return marshalErr
 	}
 	if hs.web && !hs.wroteToBody {

@@ -42,12 +42,13 @@ func TestBinaryEncodingQuick(t *testing.T) {
 
 func TestPercentEncodingQuick(t *testing.T) {
 	t.Parallel()
+	pool := newBufferPool()
 	roundtrip := func(input string) bool {
 		if !utf8.ValidString(input) {
 			return true
 		}
-		encoded := percentEncode(input)
-		decoded := percentDecode(encoded)
+		encoded := percentEncode(pool, input)
+		decoded := percentDecode(pool, encoded)
 		return decoded == input
 	}
 	if err := quick.Check(roundtrip, nil /* config */); err != nil {
@@ -57,11 +58,12 @@ func TestPercentEncodingQuick(t *testing.T) {
 
 func TestPercentEncoding(t *testing.T) {
 	t.Parallel()
+	pool := newBufferPool()
 	roundtrip := func(input string) {
 		assert.True(t, utf8.ValidString(input), assert.Sprintf("input invalid UTF-8"))
-		encoded := percentEncode(input)
+		encoded := percentEncode(pool, input)
 		t.Logf("%q encoded as %q", input, encoded)
-		decoded := percentDecode(encoded)
+		decoded := percentDecode(pool, encoded)
 		assert.Equal(t, decoded, input)
 	}
 

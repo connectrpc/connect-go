@@ -41,6 +41,7 @@ type marshaler struct {
 	compressionPool  *compressionPool
 	codec            Codec
 	compressMinBytes int
+	bufferPool       *bufferPool
 }
 
 func (m *marshaler) Marshal(message any) *Error {
@@ -48,36 +49,43 @@ func (m *marshaler) Marshal(message any) *Error {
 	if err != nil {
 		return errorf(CodeInternal, "couldn't marshal message: %w", err)
 	}
-	return m.writeLPM(false /* trailer */, raw)
+	// We can't avoid allocating the byte slice, so we may as well reuse it once
+	// we're done with it.
+	buffer := bytes.NewBuffer(raw)
+	defer m.bufferPool.Put(buffer)
+	return m.writeLPM(false /* trailer */, buffer)
 }
 
 func (m *marshaler) MarshalWebTrailers(trailer http.Header) *Error {
-	// OPT: easy opportunity to pool buffers
-	raw := bytes.NewBuffer(nil)
+	raw := m.bufferPool.Get()
+	defer m.bufferPool.Put(raw)
 	if err := trailer.Write(raw); err != nil {
 		return errorf(CodeInternal, "couldn't format trailers: %w", err)
 	}
-	return m.writeLPM(true /* trailer */, raw.Bytes())
+	return m.writeLPM(true /* trailer */, raw)
 }
 
-func (m *marshaler) writeLPM(trailer bool, message []byte) *Error {
-	if m.compressionPool == nil || len(message) < m.compressMinBytes {
-		if err := m.writeGRPCPrefix(false /* compressed */, trailer, len(message)); err != nil {
+// writeLPM writes the message as a gRPC length-prefixed message, compressing
+// as necessary. It doesn't retain any references to the supplied buffer or
+// its underlying data.
+func (m *marshaler) writeLPM(trailer bool, message *bytes.Buffer) *Error {
+	if m.compressionPool == nil || message.Len() < m.compressMinBytes {
+		if err := m.writeGRPCPrefix(false /* compressed */, trailer, message.Len()); err != nil {
 			return err // already enriched
 		}
-		if _, err := m.writer.Write(message); err != nil {
+		if _, err := io.Copy(m.writer, message); err != nil {
 			return errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
 		}
 		return nil
 	}
-	// OPT: easy opportunity to pool buffers
-	data := bytes.NewBuffer(make([]byte, 0, len(message)))
+	data := m.bufferPool.Get()
+	defer m.bufferPool.Put(data)
 	compressor, err := m.compressionPool.GetCompressor(data)
 	if err != nil {
 		return errorf(CodeUnknown, "get compressor: %w", err)
 	}
 
-	if _, err := compressor.Write(message); err != nil { // returns uncompressed size, which isn't useful
+	if _, err := io.Copy(compressor, message); err != nil { // returns uncompressed size, which isn't useful
 		_ = m.compressionPool.PutCompressor(compressor)
 		return errorf(CodeInternal, "couldn't compress data: %w", err)
 	}
@@ -121,9 +129,9 @@ type unmarshaler struct {
 	reader          io.Reader
 	codec           Codec
 	compressionPool *compressionPool
-
-	web        bool
-	webTrailer http.Header
+	bufferPool      *bufferPool
+	web             bool
+	webTrailer      http.Header
 }
 
 func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
@@ -169,8 +177,17 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 	if size < 0 {
 		return errorf(CodeInvalidArgument, "message size %d overflowed uint32", size)
 	}
-	// OPT: easy opportunity to pool buffers and grab the underlying byte slice
-	raw := make([]byte, size)
+	rawBuffer := u.bufferPool.Get()
+	defer u.bufferPool.Put(rawBuffer)
+	rawBuffer.Grow(size)
+	raw := rawBuffer.Bytes()[0:size]
+	// We're careful to read fill this slice, but zero'ing it is a nice extra
+	// layer of safety.
+	// Do not change zero'ing mechanism: this form is specially recognized
+	// by the compiler per https://golang.org/cl/137880043.
+	for i := range raw {
+		raw[i] = 0
+	}
 	if size > 0 {
 		// At layer 7, we don't know exactly what's happening down in L4. Large
 		// length-prefixed messages may arrive in chunks, so we may need to read
@@ -208,8 +225,8 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 		if err != nil {
 			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
 		}
-		// OPT: easy opportunity to pool buffers
-		decompressed := bytes.NewBuffer(make([]byte, 0, len(raw)))
+		decompressed := u.bufferPool.Get()
+		defer u.bufferPool.Put(decompressed)
 		if _, err := decompressed.ReadFrom(decompressor); err != nil {
 			_ = u.compressionPool.PutDecompressor(decompressor)
 			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
@@ -224,7 +241,7 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 		// Per the gRPC-Web specification, trailers should be encoded as an HTTP/1
 		// headers block _without_ the terminating newline. To make the headers
 		// parseable by net/textproto, we need to add the newline.
-		raw = append(raw, '\n') // nolint:makezero
+		raw = append(raw, '\n')
 		bufferedReader := bufio.NewReader(bytes.NewReader(raw))
 		mimeReader := textproto.NewReader(bufferedReader)
 		mimeHeader, err := mimeReader.ReadMIMEHeader()
