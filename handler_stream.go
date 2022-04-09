@@ -21,16 +21,14 @@ import (
 )
 
 // ClientStream is the handler's view of a client streaming RPC.
+//
+// It's constructed as part of Handler invocation, but doesn't currently have
+// an exported constructor.
 type ClientStream[Req, Res any] struct {
 	sender   Sender
 	receiver Receiver
 	msg      Req
 	err      error
-}
-
-// NewClientStream constructs the handler's view of a client streaming RPC.
-func NewClientStream[Req, Res any](s Sender, r Receiver) *ClientStream[Req, Res] {
-	return &ClientStream[Req, Res]{sender: s, receiver: r}
 }
 
 // RequestHeader returns the headers received from the client.
@@ -78,13 +76,11 @@ func (c *ClientStream[Req, Res]) SendAndClose(envelope *Response[Res]) error {
 }
 
 // ServerStream is the handler's view of a server streaming RPC.
+//
+// It's constructed as part of Handler invocation, but doesn't currently have
+// an exported constructor.
 type ServerStream[Res any] struct {
 	sender Sender
-}
-
-// NewServerStream constructs the handler's view of a server streaming RPC.
-func NewServerStream[Res any](s Sender) *ServerStream[Res] {
-	return &ServerStream[Res]{sender: s}
 }
 
 // ResponseHeader returns the response headers. Headers are sent with the first
@@ -106,14 +102,12 @@ func (s *ServerStream[Res]) Send(msg *Res) error {
 }
 
 // BidiStream is the handler's view of a bidirectional streaming RPC.
+//
+// It's constructed as part of Handler invocation, but doesn't currently have
+// an exported constructor.
 type BidiStream[Req, Res any] struct {
 	sender   Sender
 	receiver Receiver
-}
-
-// NewBidiStream constructs the handler's view of a bidirectional streaming RPC.
-func NewBidiStream[Req, Res any](s Sender, r Receiver) *BidiStream[Req, Res] {
-	return &BidiStream[Req, Res]{sender: s, receiver: r}
 }
 
 // RequestHeader returns the headers received from the client.

@@ -7,6 +7,10 @@ linters-settings:
     struct-patterns:
       # No zero values for param structs.
       - 'connectrpc.com/connect.*[pP]arams'
+      # No zero values for ClientStream, ServerStream, and friends.
+      - 'connectrpc.com/connect.ClientStream*'
+      - 'connectrpc.com/connect.ServerStream*'
+      - 'connectrpc.com/connect.BidiStream*'
   forbidigo:
     forbid:
       - '^fmt\.Print'
