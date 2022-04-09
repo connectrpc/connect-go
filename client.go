@@ -54,6 +54,7 @@ func NewClient[Req, Res any](
 		CompressMinBytes: config.CompressMinBytes,
 		HTTPClient:       httpClient,
 		URL:              url,
+		BufferPool:       config.BufferPool,
 	})
 	if protocolErr != nil {
 		return nil, protocolErr
@@ -170,6 +171,7 @@ type clientConfiguration struct {
 	CompressionPools       map[string]*compressionPool
 	Codec                  Codec
 	RequestCompressionName string
+	BufferPool             *bufferPool
 }
 
 func newClientConfiguration(url string, options []ClientOption) (*clientConfiguration, *Error) {
@@ -177,6 +179,7 @@ func newClientConfiguration(url string, options []ClientOption) (*clientConfigur
 	config := clientConfiguration{
 		Procedure:        protoPath,
 		CompressionPools: make(map[string]*compressionPool),
+		BufferPool:       newBufferPool(),
 	}
 	WithProtoBinaryCodec().applyToClient(&config)
 	WithGzip().applyToClient(&config)

@@ -15,7 +15,6 @@
 package connect
 
 import (
-	"bytes"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -58,12 +57,12 @@ func DecodeBinaryHeader(data string) ([]byte, error) {
 // References:
 //   https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#responses
 //   https://datatracker.ietf.org/doc/html/rfc3986#section-2.1
-func percentEncode(msg string) string {
+func percentEncode(bufferPool *bufferPool, msg string) string {
 	for i := 0; i < len(msg); i++ {
 		// Characters that need to be escaped are defined in gRPC's HTTP/2 spec.
 		// They're different from the generic set defined in RFC 3986.
 		if c := msg[i]; c < ' ' || c > '~' || c == '%' {
-			return percentEncodeSlow(msg, i)
+			return percentEncodeSlow(bufferPool, msg, i)
 		}
 	}
 	return msg
@@ -71,9 +70,9 @@ func percentEncode(msg string) string {
 
 // msg needs some percent-escaping. Bytes before offset don't require
 // percent-encoding, so they can be copied to the output as-is.
-func percentEncodeSlow(msg string, offset int) string {
-	// OPT: easy opportunity to pool buffers
-	out := bytes.NewBuffer(make([]byte, 0, len(msg)))
+func percentEncodeSlow(bufferPool *bufferPool, msg string, offset int) string {
+	out := bufferPool.Get()
+	defer bufferPool.Put(out)
 	out.WriteString(msg[:offset])
 	for i := offset; i < len(msg); i++ {
 		c := msg[i]
@@ -86,10 +85,10 @@ func percentEncodeSlow(msg string, offset int) string {
 	return out.String()
 }
 
-func percentDecode(encoded string) string {
+func percentDecode(bufferPool *bufferPool, encoded string) string {
 	for i := 0; i < len(encoded); i++ {
 		if c := encoded[i]; c == '%' && i+2 < len(encoded) {
-			return percentDecodeSlow(encoded, i)
+			return percentDecodeSlow(bufferPool, encoded, i)
 		}
 	}
 	return encoded
@@ -97,9 +96,9 @@ func percentDecode(encoded string) string {
 
 // Similar to percentEncodeSlow: encoded is percent-encoded, and needs to be
 // decoded byte-by-byte starting at offset.
-func percentDecodeSlow(encoded string, offset int) string {
-	// OPT: easy opportunity to pool buffers
-	out := bytes.NewBuffer(make([]byte, 0, len(encoded)))
+func percentDecodeSlow(bufferPool *bufferPool, encoded string, offset int) string {
+	out := bufferPool.Get()
+	defer bufferPool.Put(out)
 	out.WriteString(encoded[:offset])
 	for i := offset; i < len(encoded); i++ {
 		c := encoded[i]

@@ -37,6 +37,7 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 		compressionPools: params.CompressionPools,
 		minCompressBytes: params.CompressMinBytes,
 		accept:           acceptPostValue(g.web, params.Codecs),
+		bufferPool:       params.BufferPool,
 	}
 }
 
@@ -59,6 +60,7 @@ func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, 
 		minCompressBytes: params.CompressMinBytes,
 		httpClient:       params.HTTPClient,
 		procedureURL:     params.URL,
+		bufferPool:       params.BufferPool,
 	}, nil
 }
 
@@ -69,6 +71,7 @@ type grpcHandler struct {
 	compressionPools readOnlyCompressionPools
 	minCompressBytes int
 	accept           string
+	bufferPool       *bufferPool
 }
 
 func (g *grpcHandler) ShouldHandleMethod(method string) bool {
@@ -173,6 +176,7 @@ func (g *grpcHandler) NewStream(
 		g.codecs.Protobuf(), // for errors
 		g.compressionPools.Get(requestCompression),
 		g.compressionPools.Get(responseCompression),
+		g.bufferPool,
 	))
 	// We can't return failed as-is: a nil *Error is non-nil when returned as an
 	// error interface.
@@ -212,6 +216,7 @@ type grpcClient struct {
 	httpClient           HTTPClient
 	procedureURL         string
 	wrapErrorInterceptor Interceptor
+	bufferPool           *bufferPool
 }
 
 func (g *grpcClient) WriteRequestHeader(header http.Header) {
@@ -262,6 +267,7 @@ func (g *grpcClient) NewStream(
 			compressionPool:  g.compressionPools.Get(g.compressionName),
 			codec:            g.codec,
 			compressMinBytes: g.minCompressBytes,
+			bufferPool:       g.bufferPool,
 		},
 		header:           header,
 		trailer:          make(http.Header),
@@ -270,6 +276,7 @@ func (g *grpcClient) NewStream(
 		responseHeader:   make(http.Header),
 		responseTrailer:  make(http.Header),
 		compressionPools: g.compressionPools,
+		bufferPool:       g.bufferPool,
 		responseReady:    make(chan struct{}),
 	}
 	return g.wrapStream(&clientSender{duplex}, &clientReceiver{duplex})

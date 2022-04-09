@@ -88,6 +88,7 @@ type duplexClientStream struct {
 	responseReady    chan struct{}
 	unmarshaler      unmarshaler
 	compressionPools readOnlyCompressionPools
+	bufferPool       *bufferPool
 
 	errMu       sync.Mutex
 	requestErr  error
@@ -185,7 +186,7 @@ func (cs *duplexClientStream) Receive(message any) error {
 		if errors.Is(err, errGotWebTrailers) {
 			mergeHeaders(cs.responseTrailer, cs.unmarshaler.WebTrailer())
 		}
-		if serverErr := extractError(cs.protobuf, cs.responseTrailer); serverErr != nil {
+		if serverErr := extractError(cs.bufferPool, cs.protobuf, cs.responseTrailer); serverErr != nil {
 			// This is expected from a protocol perspective, but receiving trailers
 			// means that we're _not_ getting a message. For users to realize that
 			// the stream has ended, Receive must return an error.
@@ -312,7 +313,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	// DATA frames have been sent on the stream - isn't standard HTTP/2
 	// semantics, so net/http doesn't know anything about it. To us, then, these
 	// trailers-only responses actually appear as headers-only responses.
-	if err := extractError(cs.protobuf, res.Header); err != nil {
+	if err := extractError(cs.bufferPool, cs.protobuf, res.Header); err != nil {
 		// Per the specification, only the HTTP status code and Content-Type should
 		// be treated as headers. The rest should be treated as trailing metadata.
 		if contentType := res.Header.Get("Content-Type"); contentType != "" {
@@ -338,6 +339,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 		codec:           cs.codec,
 		compressionPool: cs.compressionPools.Get(compression),
 		web:             cs.web,
+		bufferPool:      cs.bufferPool,
 	}
 }
 
@@ -395,7 +397,7 @@ func (cs *duplexClientStream) getRequestOrResponseError() error {
 // binary Protobuf format, even if the messages in the request/response stream
 // use a different codec. Consequently, this function needs a Protobuf codec to
 // unmarshal error information in the headers.
-func extractError(protobuf Codec, trailer http.Header) *Error {
+func extractError(bufferPool *bufferPool, protobuf Codec, trailer http.Header) *Error {
 	codeHeader := trailer.Get("Grpc-Status")
 	if codeHeader == "" || codeHeader == "0" {
 		return nil
@@ -405,7 +407,7 @@ func extractError(protobuf Codec, trailer http.Header) *Error {
 	if err != nil {
 		return errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
 	}
-	message := percentDecode(trailer.Get("Grpc-Message"))
+	message := percentDecode(bufferPool, trailer.Get("Grpc-Message"))
 	retErr := NewError(Code(code), errors.New(message))
 
 	detailsBinaryEncoded := trailer.Get("Grpc-Status-Details-Bin")
