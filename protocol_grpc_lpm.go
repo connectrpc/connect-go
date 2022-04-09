@@ -181,6 +181,11 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 	defer u.bufferPool.Put(rawBuffer)
 	rawBuffer.Grow(size)
 	raw := rawBuffer.Bytes()[0:size]
+	// We're careful to read fill this slice, but zero'ing it is a nice extra
+	// layer of safety.
+	for i := range raw {
+		raw[i] = 0
+	}
 	if size > 0 {
 		// At layer 7, we don't know exactly what's happening down in L4. Large
 		// length-prefixed messages may arrive in chunks, so we may need to read
