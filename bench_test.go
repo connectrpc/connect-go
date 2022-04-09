@@ -56,6 +56,7 @@ func BenchmarkConnect(b *testing.B) {
 		connect.WithGzipRequests(),
 	)
 	assert.Nil(b, err)
+	twoMiB := strings.Repeat("a", 2*1024*1024)
 	b.ResetTimer()
 
 	b.Run("unary", func(b *testing.B) {
@@ -63,7 +64,7 @@ func BenchmarkConnect(b *testing.B) {
 			for pb.Next() {
 				_, _ = client.Ping(
 					context.Background(),
-					connect.NewRequest(&pingv1.PingRequest{Number: 42}),
+					connect.NewRequest(&pingv1.PingRequest{Text: twoMiB}),
 				)
 			}
 		})
@@ -71,7 +72,7 @@ func BenchmarkConnect(b *testing.B) {
 }
 
 type ping struct {
-	Number int `json:"number"`
+	Text string `json:"text"`
 }
 
 func BenchmarkREST(b *testing.B) {
@@ -118,23 +119,24 @@ func BenchmarkREST(b *testing.B) {
 	server.EnableHTTP2 = true
 	server.StartTLS()
 	defer server.Close()
+	twoMiB := strings.Repeat("a", 2*1024*1024)
 	b.ResetTimer()
 
 	b.Run("unary", func(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				unaryRESTIteration(b, server.Client(), server.URL)
+				unaryRESTIteration(b, server.Client(), server.URL, twoMiB)
 			}
 		})
 	})
 }
 
-func unaryRESTIteration(b *testing.B, client *http.Client, url string) {
+func unaryRESTIteration(b *testing.B, client *http.Client, url string, text string) {
 	b.Helper()
 	rawRequestBody := bytes.NewBuffer(nil)
 	compressedRequestBody := gzip.NewWriter(rawRequestBody)
 	encoder := json.NewEncoder(compressedRequestBody)
-	if err := encoder.Encode(&ping{42}); err != nil {
+	if err := encoder.Encode(&ping{text}); err != nil {
 		b.Fatalf("marshal request: %v", err)
 	}
 	compressedRequestBody.Close()
