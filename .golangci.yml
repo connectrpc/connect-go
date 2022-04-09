@@ -7,6 +7,10 @@ linters-settings:
     struct-patterns:
       # No zero values for param structs.
       - 'github.com/bufbuild/connect-go.*[pP]arams'
+      # No zero values for ClientStream, ServerStream, and friends.
+      - 'github.com/bufbuild/connect-go.ClientStream*'
+      - 'github.com/bufbuild/connect-go.ServerStream*'
+      - 'github.com/bufbuild/connect-go.BidiStream*'
   forbidigo:
     forbid:
       - '^fmt\.Print'
