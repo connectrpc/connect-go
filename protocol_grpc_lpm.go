@@ -183,6 +183,8 @@ func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
 	raw := rawBuffer.Bytes()[0:size]
 	// We're careful to read fill this slice, but zero'ing it is a nice extra
 	// layer of safety.
+	// Do not change zero'ing mechanism: this form is specially recognized
+	// by the compiler per https://golang.org/cl/137880043.
 	for i := range raw {
 		raw[i] = 0
 	}
