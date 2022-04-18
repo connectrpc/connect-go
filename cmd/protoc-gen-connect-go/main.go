@@ -62,7 +62,7 @@ const (
 	generatedFilenameExtension = ".connect.go"
 	generatedPackageSuffix     = "connect"
 
-	usage = "See https://docs.bufconnect.com for how to use this plugin.\n\nFlags:\n  -h, --help\tPrint this help and exit.\n      --version\tPrint the version and exit."
+	usage = "See the docs for how to use this plugin.\n\nFlags:\n  -h, --help\tPrint this help and exit.\n      --version\tPrint the version and exit."
 
 	commentWidth = 97 // leave room for "// "
 )
