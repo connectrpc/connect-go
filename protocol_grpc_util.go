@@ -146,7 +146,7 @@ func statusFromError(err error) (*statusv1.Status, error) {
 			anyProtoDetail, err := anypb.New(detail)
 			if err != nil {
 				return nil, fmt.Errorf(
-					"can't create an *anypb.Any from %v (type %T): %v",
+					"can't create an *anypb.Any from %v (type %T): %w",
 					detail, detail, err,
 				)
 			}
