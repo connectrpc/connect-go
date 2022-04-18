@@ -378,7 +378,6 @@ func TestMarshalStatusError(t *testing.T) {
 
 	assertInternalError := func(tb testing.TB, opts ...connect.ClientOption) {
 		tb.Helper()
-		tb.Skip("TODO: error is just Unknown: EOF")
 		client, err := pingv1connect.NewPingServiceClient(server.Client(), server.URL, opts...)
 		assert.Nil(tb, err)
 		req := connect.NewRequest(&pingv1.FailRequest{Code: int32(connect.CodeResourceExhausted)})

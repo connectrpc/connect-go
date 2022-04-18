@@ -86,7 +86,7 @@ func contentTypeFromCodecName(web bool, name string) string {
 	return typeDefaultGRPCPrefix + name
 }
 
-func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Codec, err error) error {
+func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Codec, err error) {
 	const (
 		statusKey  = "Grpc-Status"
 		messageKey = "Grpc-Message"
@@ -95,27 +95,39 @@ func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Co
 	if err == nil {
 		trailer.Set(statusKey, "0") // zero is the gRPC OK status
 		trailer.Set(messageKey, "")
-		return nil
+		return
+	}
+	status, statusErr := statusFromError(err)
+	if statusErr != nil {
+		trailer.Set(
+			statusKey,
+			strconv.FormatInt(int64(CodeInternal), 10 /* base */),
+		)
+		trailer.Set(messageKey, statusErr.Error())
+		return
+	}
+	code := strconv.Itoa(int(status.Code))
+	bin, binErr := protobuf.Marshal(status)
+	if binErr != nil {
+		trailer.Set(
+			statusKey,
+			strconv.FormatInt(int64(CodeInternal), 10 /* base */),
+		)
+		trailer.Set(
+			messageKey,
+			fmt.Sprintf("marshal protobuf status: %v", binErr),
+		)
+		return
 	}
 	if connectErr, ok := asError(err); ok {
 		mergeHeaders(trailer, connectErr.meta)
 	}
-	status, statusErr := statusFromError(err)
-	if statusErr != nil {
-		return statusErr
-	}
-	code := strconv.Itoa(int(status.Code))
-	bin, err := protobuf.Marshal(status)
-	if err != nil {
-		return errorf(CodeInternal, "couldn't marshal protobuf status: %w", err)
-	}
 	trailer.Set(statusKey, code)
 	trailer.Set(messageKey, percentEncode(bufferPool, status.Message))
 	trailer.Set(detailsKey, EncodeBinaryHeader(bin))
-	return nil
 }
 
-func statusFromError(err error) (*statusv1.Status, *Error) {
+func statusFromError(err error) (*statusv1.Status, error) {
 	status := &statusv1.Status{
 		Code:    int32(CodeUnknown),
 		Message: err.Error(),
@@ -133,8 +145,7 @@ func statusFromError(err error) (*statusv1.Status, *Error) {
 			// attempting an upcast to interface{ AsAny() *anypb.Any }?
 			anyProtoDetail, err := anypb.New(detail)
 			if err != nil {
-				return nil, errorf(
-					CodeInternal,
+				return nil, fmt.Errorf(
 					"can't create an *anypb.Any from %v (type %T): %v",
 					detail, detail, err,
 				)
