@@ -29,6 +29,7 @@ import (
 	"github.com/bufbuild/connect-go/internal/assert"
 	"github.com/bufbuild/connect-go/internal/gen/connect/connect/ping/v1/pingv1connect"
 	pingv1 "github.com/bufbuild/connect-go/internal/gen/go/connect/ping/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 const errorMessage = "oh no"
@@ -360,6 +361,60 @@ func TestHeaderBasic(t *testing.T) {
 	res, err := client.Ping(context.Background(), req)
 	assert.Nil(t, err)
 	assert.Equal(t, res.Header().Get(key), hval)
+}
+
+func TestMarshalStatusError(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(
+		pingServer{},
+		connect.WithCodec(failCodec{}),
+	))
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	defer server.Close()
+
+	assertInternalError := func(tb testing.TB, opts ...connect.ClientOption) {
+		tb.Helper()
+		tb.Skip("TODO: error is just Unknown: EOF")
+		client, err := pingv1connect.NewPingServiceClient(server.Client(), server.URL, opts...)
+		assert.Nil(tb, err)
+		req := connect.NewRequest(&pingv1.FailRequest{Code: int32(connect.CodeResourceExhausted)})
+		_, err = client.Fail(context.Background(), req)
+		tb.Log(err)
+		assert.NotNil(t, err)
+		var connectErr *connect.Error
+		ok := errors.As(err, &connectErr)
+		assert.True(t, ok)
+		assert.Equal(t, connectErr.Code(), connect.CodeInternal)
+		assert.True(
+			t,
+			strings.HasSuffix(connectErr.Message(), ": boom"),
+		)
+	}
+
+	assertInternalError(t, connect.WithGRPC())
+	assertInternalError(t, connect.WithGRPCWeb())
+}
+
+type failCodec struct{}
+
+func (c failCodec) Name() string {
+	return "proto"
+}
+
+func (c failCodec) Marshal(message any) ([]byte, error) {
+	return nil, errors.New("boom")
+}
+
+func (c failCodec) Unmarshal(data []byte, message any) error {
+	protoMessage, ok := message.(proto.Message)
+	if !ok {
+		return fmt.Errorf("not protobuf: %T", message)
+	}
+	return proto.Unmarshal(data, protoMessage)
 }
 
 type pluggablePingServer struct {
