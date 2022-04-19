@@ -102,9 +102,7 @@ func (hs *handlerSender) Close(err error) error {
 	// mutate the trailers map that the user sees.
 	mergedTrailers := make(http.Header, len(hs.trailer)+2) // always make space for status & message
 	mergeHeaders(mergedTrailers, hs.trailer)
-	if marshalErr := grpcErrorToTrailer(hs.bufferPool, mergedTrailers, hs.protobuf, err); marshalErr != nil {
-		return marshalErr
-	}
+	grpcErrorToTrailer(hs.bufferPool, mergedTrailers, hs.protobuf, err)
 	if hs.web && !hs.wroteToBody {
 		// We're using gRPC-Web and we haven't yet written to the body. Since we're
 		// not sending any response messages, the gRPC specification calls this a
