@@ -284,6 +284,15 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 		cs.setResponseError(errorf(httpToCode(res.StatusCode), "HTTP status %v", res.Status))
 		return
 	}
+	if (cs.spec.StreamType&StreamTypeBidi) == StreamTypeBidi && res.ProtoMajor < 2 {
+		// If we somehow dialed an HTTP/1.x server, fail with an explicit message
+		// rather than returning a more cryptic error later on.
+		cs.setResponseError(errorf(
+			CodeUnimplemented,
+			"response from %q is HTTP/1.x: bidi streams require at least HTTP/2",
+			cs.url,
+		))
+	}
 	compression := res.Header.Get("Grpc-Encoding")
 	if compression == "" || compression == compressionIdentity {
 		compression = compressionIdentity
