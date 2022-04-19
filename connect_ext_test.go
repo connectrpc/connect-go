@@ -398,6 +398,34 @@ func TestMarshalStatusError(t *testing.T) {
 	assertInternalError(t, connect.WithGRPCWeb())
 }
 
+func TestBidiRequiresHTTP2(t *testing.T) {
+	t.Parallel()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := io.WriteString(w, "hello world")
+		assert.Nil(t, err)
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	client, err := pingv1connect.NewPingServiceClient(
+		server.Client(),
+		server.URL,
+		connect.WithGRPC(),
+	)
+	assert.Nil(t, err)
+	stream := client.CumSum(context.Background())
+	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{}))
+	assert.Nil(t, stream.CloseSend())
+	_, err = stream.Receive()
+	assert.NotNil(t, err)
+	var connectErr *connect.Error
+	assert.True(t, errors.As(err, &connectErr))
+	assert.Equal(t, connectErr.Code(), connect.CodeUnimplemented)
+	assert.True(
+		t,
+		strings.HasSuffix(connectErr.Message(), ": bidi streams require at least HTTP/2"),
+	)
+}
+
 type failCodec struct{}
 
 func (c failCodec) Name() string {
