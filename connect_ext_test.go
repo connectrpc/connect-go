@@ -277,8 +277,7 @@ func TestServer(t *testing.T) {
 	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) { // nolint:thelper
 		run := func(t *testing.T, opts ...connect.ClientOption) {
 			t.Helper()
-			client, err := pingv1connect.NewPingServiceClient(server.Client(), server.URL, opts...)
-			assert.Nil(t, err)
+			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, opts...)
 			testPing(t, client)
 			testSum(t, client)
 			testCountUp(t, client)
@@ -354,8 +353,7 @@ func TestHeaderBasic(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	client, err := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPC())
-	assert.Nil(t, err)
+	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPC())
 	req := connect.NewRequest(&pingv1.PingRequest{})
 	req.Header().Set(key, cval)
 	res, err := client.Ping(context.Background(), req)
@@ -378,10 +376,9 @@ func TestMarshalStatusError(t *testing.T) {
 
 	assertInternalError := func(tb testing.TB, opts ...connect.ClientOption) {
 		tb.Helper()
-		client, err := pingv1connect.NewPingServiceClient(server.Client(), server.URL, opts...)
-		assert.Nil(tb, err)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, opts...)
 		req := connect.NewRequest(&pingv1.FailRequest{Code: int32(connect.CodeResourceExhausted)})
-		_, err = client.Fail(context.Background(), req)
+		_, err := client.Fail(context.Background(), req)
 		tb.Log(err)
 		assert.NotNil(t, err)
 		var connectErr *connect.Error
@@ -406,16 +403,15 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
-	client, err := pingv1connect.NewPingServiceClient(
+	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL,
 		connect.WithGRPC(),
 	)
-	assert.Nil(t, err)
 	stream := client.CumSum(context.Background())
 	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{}))
 	assert.Nil(t, stream.CloseSend())
-	_, err = stream.Receive()
+	_, err := stream.Receive()
 	assert.NotNil(t, err)
 	var connectErr *connect.Error
 	assert.True(t, errors.As(err, &connectErr))

@@ -28,10 +28,10 @@ import (
 )
 
 // This is a compile-time assertion to ensure that this generated file and the connect package are
-// compatible. If you get a compiler error that this constant isn't defined, this code was generated
-// with a version of connect newer than the one compiled into your binary. You can fix the problem
-// by either regenerating this code with an older version of connect or updating the connect version
-// compiled into your binary.
+// compatible. If you get a compiler error that this constant is not defined, this code was
+// generated with a version of connect newer than the one compiled into your binary. You can fix the
+// problem by either regenerating this code with an older version of connect or updating the connect
+// version compiled into your binary.
 const _ = connect_go.IsAtLeastVersion0_0_1
 
 const (
@@ -60,55 +60,35 @@ type PingServiceClient interface {
 //
 // The URL supplied here should be the base URL for the gRPC server (for example,
 // http://api.acme.com or https://acme.com/grpc).
-func NewPingServiceClient(httpClient connect_go.HTTPClient, baseURL string, opts ...connect_go.ClientOption) (PingServiceClient, error) {
+func NewPingServiceClient(httpClient connect_go.HTTPClient, baseURL string, opts ...connect_go.ClientOption) PingServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
-	pingClient, err := connect_go.NewClient[v1.PingRequest, v1.PingResponse](
-		httpClient,
-		baseURL+"/connect.ping.v1.PingService/Ping",
-		opts...,
-	)
-	if err != nil {
-		return nil, err
-	}
-	failClient, err := connect_go.NewClient[v1.FailRequest, v1.FailResponse](
-		httpClient,
-		baseURL+"/connect.ping.v1.PingService/Fail",
-		opts...,
-	)
-	if err != nil {
-		return nil, err
-	}
-	sumClient, err := connect_go.NewClient[v1.SumRequest, v1.SumResponse](
-		httpClient,
-		baseURL+"/connect.ping.v1.PingService/Sum",
-		opts...,
-	)
-	if err != nil {
-		return nil, err
-	}
-	countUpClient, err := connect_go.NewClient[v1.CountUpRequest, v1.CountUpResponse](
-		httpClient,
-		baseURL+"/connect.ping.v1.PingService/CountUp",
-		opts...,
-	)
-	if err != nil {
-		return nil, err
-	}
-	cumSumClient, err := connect_go.NewClient[v1.CumSumRequest, v1.CumSumResponse](
-		httpClient,
-		baseURL+"/connect.ping.v1.PingService/CumSum",
-		opts...,
-	)
-	if err != nil {
-		return nil, err
-	}
 	return &pingServiceClient{
-		ping:    pingClient,
-		fail:    failClient,
-		sum:     sumClient,
-		countUp: countUpClient,
-		cumSum:  cumSumClient,
-	}, nil
+		ping: connect_go.NewClient[v1.PingRequest, v1.PingResponse](
+			httpClient,
+			baseURL+"/connect.ping.v1.PingService/Ping",
+			opts...,
+		),
+		fail: connect_go.NewClient[v1.FailRequest, v1.FailResponse](
+			httpClient,
+			baseURL+"/connect.ping.v1.PingService/Fail",
+			opts...,
+		),
+		sum: connect_go.NewClient[v1.SumRequest, v1.SumResponse](
+			httpClient,
+			baseURL+"/connect.ping.v1.PingService/Sum",
+			opts...,
+		),
+		countUp: connect_go.NewClient[v1.CountUpRequest, v1.CountUpResponse](
+			httpClient,
+			baseURL+"/connect.ping.v1.PingService/CountUp",
+			opts...,
+		),
+		cumSum: connect_go.NewClient[v1.CumSumRequest, v1.CumSumResponse](
+			httpClient,
+			baseURL+"/connect.ping.v1.PingService/CumSum",
+			opts...,
+		),
+	}
 }
 
 // pingServiceClient implements PingServiceClient.
@@ -198,21 +178,21 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect_go.HandlerOpt
 type UnimplementedPingServiceHandler struct{}
 
 func (UnimplementedPingServiceHandler) Ping(context.Context, *connect_go.Request[v1.PingRequest]) (*connect_go.Response[v1.PingResponse], error) {
-	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.ping.v1.PingService.Ping isn't implemented"))
+	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.ping.v1.PingService.Ping is not implemented"))
 }
 
 func (UnimplementedPingServiceHandler) Fail(context.Context, *connect_go.Request[v1.FailRequest]) (*connect_go.Response[v1.FailResponse], error) {
-	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.ping.v1.PingService.Fail isn't implemented"))
+	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.ping.v1.PingService.Fail is not implemented"))
 }
 
 func (UnimplementedPingServiceHandler) Sum(context.Context, *connect_go.ClientStream[v1.SumRequest, v1.SumResponse]) error {
-	return connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.ping.v1.PingService.Sum isn't implemented"))
+	return connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.ping.v1.PingService.Sum is not implemented"))
 }
 
 func (UnimplementedPingServiceHandler) CountUp(context.Context, *connect_go.Request[v1.CountUpRequest], *connect_go.ServerStream[v1.CountUpResponse]) error {
-	return connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.ping.v1.PingService.CountUp isn't implemented"))
+	return connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.ping.v1.PingService.CountUp is not implemented"))
 }
 
 func (UnimplementedPingServiceHandler) CumSum(context.Context, *connect_go.BidiStream[v1.CumSumRequest, v1.CumSumResponse]) error {
-	return connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.ping.v1.PingService.CumSum isn't implemented"))
+	return connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.ping.v1.PingService.CumSum is not implemented"))
 }
