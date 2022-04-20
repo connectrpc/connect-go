@@ -34,6 +34,7 @@ type Client[Req, Res any] struct {
 	config         *clientConfiguration
 	callUnary      func(context.Context, *Request[Req]) (*Response[Res], error)
 	protocolClient protocolClient
+	err            error
 }
 
 // NewClient constructs a new Client.
@@ -41,12 +42,15 @@ func NewClient[Req, Res any](
 	httpClient HTTPClient,
 	url string,
 	options ...ClientOption,
-) (*Client[Req, Res], error) {
+) *Client[Req, Res] {
+	client := &Client[Req, Res]{}
 	config, err := newClientConfiguration(url, options)
 	if err != nil {
-		return nil, err
+		client.err = err
+		return client
 	}
-	protocolClient, protocolErr := config.Protocol.NewClient(&protocolClientParams{
+	client.config = config
+	protocolClient, protocolErr := client.config.Protocol.NewClient(&protocolClientParams{
 		CompressionName:  config.RequestCompressionName,
 		CompressionPools: newReadOnlyCompressionPools(config.CompressionPools),
 		Codec:            config.Codec,
@@ -57,8 +61,10 @@ func NewClient[Req, Res any](
 		BufferPool:       config.BufferPool,
 	})
 	if protocolErr != nil {
-		return nil, protocolErr
+		client.err = protocolErr
+		return client
 	}
+	client.protocolClient = protocolClient
 	// Rather than applying unary interceptors along the hot path, we can do it
 	// once at client creation.
 	unarySpec := config.newSpecification(StreamTypeUnary)
@@ -86,7 +92,7 @@ func NewClient[Req, Res any](
 	if ic := config.Interceptor; ic != nil {
 		unaryFunc = ic.WrapUnary(unaryFunc)
 	}
-	callUnary := func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
+	client.callUnary = func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
 		// To make the specification and RPC headers visible to the full interceptor
 		// chain (as though they were supplied by the caller), we'll add them here.
 		request.spec = unarySpec
@@ -101,11 +107,7 @@ func NewClient[Req, Res any](
 		}
 		return typed, nil
 	}
-	return &Client[Req, Res]{
-		config:         config,
-		callUnary:      callUnary,
-		protocolClient: protocolClient,
-	}, nil
+	return client
 }
 
 // CallUnary calls a request-response procedure.
@@ -113,11 +115,17 @@ func (c *Client[Req, Res]) CallUnary(
 	ctx context.Context,
 	req *Request[Req],
 ) (*Response[Res], error) {
+	if c.err != nil {
+		return nil, c.err
+	}
 	return c.callUnary(ctx, req)
 }
 
 // CallClientStream calls a client streaming procedure.
 func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamForClient[Req, Res] {
+	if c.err != nil {
+		return &ClientStreamForClient[Req, Res]{err: c.err}
+	}
 	sender, receiver := c.newStream(ctx, StreamTypeClient)
 	return &ClientStreamForClient[Req, Res]{sender: sender, receiver: receiver}
 }
@@ -127,6 +135,9 @@ func (c *Client[Req, Res]) CallServerStream(
 	ctx context.Context,
 	req *Request[Req],
 ) (*ServerStreamForClient[Res], error) {
+	if c.err != nil {
+		return nil, c.err
+	}
 	sender, receiver := c.newStream(ctx, StreamTypeServer)
 	mergeHeaders(sender.Header(), req.header)
 	// Send always returns an io.EOF unless the error is from the client-side.
@@ -145,6 +156,9 @@ func (c *Client[Req, Res]) CallServerStream(
 
 // CallBidiStream calls a bidirectional streaming procedure.
 func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForClient[Req, Res] {
+	if c.err != nil {
+		return &BidiStreamForClient[Req, Res]{err: c.err}
+	}
 	sender, receiver := c.newStream(ctx, StreamTypeBidi)
 	return &BidiStreamForClient[Req, Res]{sender: sender, receiver: receiver}
 }

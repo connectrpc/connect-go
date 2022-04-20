@@ -133,7 +133,7 @@ func generatePreamble(g *protogen.GeneratedFile, file *protogen.File) {
 	g.P()
 	wrapComments(g, "This is a compile-time assertion to ensure that this generated file ",
 		"and the connect package are compatible. If you get a compiler error that this constant ",
-		"isn't defined, this code was generated with a version of connect newer than the one ",
+		"is not defined, this code was generated with a version of connect newer than the one ",
 		"compiled into your binary. You can fix the problem by either regenerating this code ",
 		"with an older version of connect or updating the connect version compiled into your binary.")
 	g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion0_0_1"))
@@ -199,10 +199,11 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 		deprecated(g)
 	}
 	g.P("func ", names.ClientConstructor, " (httpClient ", connectPackage.Ident("HTTPClient"),
-		", baseURL string, opts ...", clientOption, ") (", names.Client, ", error) {")
+		", baseURL string, opts ...", clientOption, ") ", names.Client, " {")
 	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
+	g.P("return &", names.ClientImpl, "{")
 	for _, method := range service.Methods {
-		g.P(unexport(method.GoName), "Client, err := ",
+		g.P(unexport(method.GoName), ": ",
 			connectPackage.Ident("NewClient"),
 			"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]",
 			"(",
@@ -210,16 +211,9 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 		g.P("httpClient,")
 		g.P(`baseURL + "`, procedureName(method), `",`)
 		g.P("opts...,")
-		g.P(")")
-		g.P("if err != nil {")
-		g.P("return nil, err")
-		g.P("}")
+		g.P("),")
 	}
-	g.P("return &", names.ClientImpl, "{")
-	for _, method := range service.Methods {
-		g.P(unexport(method.GoName), ": ", unexport(method.GoName), "Client,")
-	}
-	g.P("}, nil")
+	g.P("}")
 	g.P("}")
 	g.P()
 
@@ -359,11 +353,11 @@ func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, servic
 		if method.Desc.IsStreamingServer() || method.Desc.IsStreamingClient() {
 			g.P("return ", connectPackage.Ident("NewError"), "(",
 				connectPackage.Ident("CodeUnimplemented"), ", ", errorsPackage.Ident("New"),
-				`("`, method.Desc.FullName(), ` isn't implemented"))`)
+				`("`, method.Desc.FullName(), ` is not implemented"))`)
 		} else {
 			g.P("return nil, ", connectPackage.Ident("NewError"), "(",
 				connectPackage.Ident("CodeUnimplemented"), ", ", errorsPackage.Ident("New"),
-				`("`, method.Desc.FullName(), ` isn't implemented"))`)
+				`("`, method.Desc.FullName(), ` is not implemented"))`)
 		}
 		g.P("}")
 		g.P()

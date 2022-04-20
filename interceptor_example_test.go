@@ -41,16 +41,12 @@ func ExampleInterceptor() {
 			})
 		},
 	)
-	client, err := pingv1connect.NewPingServiceClient(
+	client := pingv1connect.NewPingServiceClient(
 		examplePingServer.Client(),
 		examplePingServer.URL(),
 		connect.WithGRPC(),
 		connect.WithInterceptors(loggingInterceptor),
 	)
-	if err != nil {
-		logger.Println("error:", err)
-		return
-	}
 	if _, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 42})); err != nil {
 		logger.Println("error:", err)
 		return
@@ -84,16 +80,12 @@ func ExampleWithInterceptors() {
 			})
 		},
 	)
-	client, err := pingv1connect.NewPingServiceClient(
+	client := pingv1connect.NewPingServiceClient(
 		examplePingServer.Client(),
 		examplePingServer.URL(),
 		connect.WithGRPC(),
 		connect.WithInterceptors(outer, inner),
 	)
-	if err != nil {
-		logger.Println("error:", err)
-		return
-	}
 	if _, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{})); err != nil {
 		logger.Println("error:", err)
 		return
