@@ -29,8 +29,9 @@ import (
 
 func TestClientStreamErrors(t *testing.T) {
 	t.Parallel()
-	_, err := pingv1connect.NewPingServiceClient(http.DefaultClient, "INVALID_URL", connect.WithGRPC())
+	_, err := pingv1connect.NewPingServiceClient(http.DefaultClient, "INVALID_URL", connect.WithGRPC()).Ping(context.Background(), nil)
 	assert.NotNil(t, err)
+	assert.Match(t, err.Error(), "missing scheme")
 	// We don't even get to calling methods on the client, so there's no question
 	// of interceptors running. Once we're calling methods on the client, all
 	// errors are visible to interceptors.
@@ -180,17 +181,14 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	client, err := pingv1connect.NewPingServiceClient(
+	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL,
 		connect.WithGRPC(),
 		clientOnion,
 	)
+	_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
 	assert.Nil(t, err)
-
-	_, err = client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
-	assert.Nil(t, err)
-
 	_, err = client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
 	assert.Nil(t, err)
 }

@@ -59,15 +59,11 @@ func Example_client() {
 	// client that communicate over in-memory pipes. Don't do this in production!
 	httpClient = examplePingServer.Client()
 
-	client, err := pingv1connect.NewPingServiceClient(
+	client := pingv1connect.NewPingServiceClient(
 		httpClient,
 		examplePingServer.URL(),
 		connect.WithGRPC(),
 	)
-	if err != nil {
-		logger.Println("error:", err)
-		return
-	}
 	res, err := client.Ping(
 		context.Background(),
 		connect.NewRequest(&pingv1.PingRequest{Number: 42}),

@@ -27,6 +27,8 @@ import (
 type ClientStreamForClient[Req, Res any] struct {
 	sender   Sender
 	receiver Receiver
+	// Error from client construction. If non-nil, return for all calls.
+	err error
 }
 
 // RequestHeader returns the request headers. Headers are sent to the server with the
@@ -42,12 +44,18 @@ func (c *ClientStreamForClient[Req, Res]) RequestHeader() http.Header {
 // Clients should check for case using the standard library's errors.Is and
 // unmarshal the error using CloseAndReceive.
 func (c *ClientStreamForClient[Req, Res]) Send(msg *Req) error {
+	if c.err != nil {
+		return c.err
+	}
 	return c.sender.Send(msg)
 }
 
 // CloseAndReceive closes the send side of the stream and waits for the
 // response.
 func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Response[Res], error) {
+	if c.err != nil {
+		return nil, c.err
+	}
 	if err := c.sender.Close(nil); err != nil {
 		return nil, err
 	}
@@ -124,6 +132,8 @@ func (s *ServerStreamForClient[Res]) Close() error {
 type BidiStreamForClient[Req, Res any] struct {
 	sender   Sender
 	receiver Receiver
+	// Error from client construction. If non-nil, return for all calls.
+	err error
 }
 
 // RequestHeader returns the request headers. Headers are sent with the first
@@ -139,17 +149,26 @@ func (b *BidiStreamForClient[Req, Res]) RequestHeader() http.Header {
 // Clients should check for case using the standard library's errors.Is and
 // unmarshal the error using Receive.
 func (b *BidiStreamForClient[Req, Res]) Send(msg *Req) error {
+	if b.err != nil {
+		return b.err
+	}
 	return b.sender.Send(msg)
 }
 
 // CloseSend closes the send side of the stream.
 func (b *BidiStreamForClient[Req, Res]) CloseSend() error {
+	if b.err != nil {
+		return b.err
+	}
 	return b.sender.Close(nil)
 }
 
 // Receive a message. When the server is done sending messages and no other
 // errors have occurred, Receive will return an error that wraps io.EOF.
 func (b *BidiStreamForClient[Req, Res]) Receive() (*Res, error) {
+	if b.err != nil {
+		return nil, b.err
+	}
 	var res Res
 	if err := b.receiver.Receive(&res); err != nil {
 		return nil, err
@@ -159,6 +178,9 @@ func (b *BidiStreamForClient[Req, Res]) Receive() (*Res, error) {
 
 // CloseReceive closes the receive side of the stream.
 func (b *BidiStreamForClient[Req, Res]) CloseReceive() error {
+	if b.err != nil {
+		return b.err
+	}
 	return b.receiver.Close()
 }
 

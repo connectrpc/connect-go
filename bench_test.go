@@ -48,14 +48,13 @@ func BenchmarkConnect(b *testing.B) {
 	assert.True(b, ok)
 	httpTransport.DisableCompression = true
 
-	client, err := pingv1connect.NewPingServiceClient(
+	client := pingv1connect.NewPingServiceClient(
 		httpClient,
 		server.URL,
 		connect.WithGRPC(),
 		connect.WithGzip(),
 		connect.WithGzipRequests(),
 	)
-	assert.Nil(b, err)
 	twoMiB := strings.Repeat("a", 2*1024*1024)
 	b.ResetTimer()
 
