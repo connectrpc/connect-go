@@ -43,11 +43,11 @@ func (c *ClientStreamForClient[Req, Res]) RequestHeader() http.Header {
 // If the server returns an error, Send returns an error that wraps io.EOF.
 // Clients should check for case using the standard library's errors.Is and
 // unmarshal the error using CloseAndReceive.
-func (c *ClientStreamForClient[Req, Res]) Send(msg *Req) error {
+func (c *ClientStreamForClient[Req, Res]) Send(request *Req) error {
 	if c.err != nil {
 		return c.err
 	}
-	return c.sender.Send(msg)
+	return c.sender.Send(request)
 }
 
 // CloseAndReceive closes the send side of the stream and waits for the
@@ -59,7 +59,7 @@ func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Response[Res], err
 	if err := c.sender.Close(nil); err != nil {
 		return nil, err
 	}
-	res, err := receiveUnaryResponse[Res](c.receiver)
+	response, err := receiveUnaryResponse[Res](c.receiver)
 	if err != nil {
 		_ = c.receiver.Close()
 		return nil, err
@@ -67,7 +67,7 @@ func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Response[Res], err
 	if err := c.receiver.Close(); err != nil {
 		return nil, err
 	}
-	return res, nil
+	return response, nil
 }
 
 // ServerStreamForClient is the client's view of a server streaming RPC.
@@ -169,11 +169,11 @@ func (b *BidiStreamForClient[Req, Res]) Receive() (*Res, error) {
 	if b.err != nil {
 		return nil, b.err
 	}
-	var res Res
-	if err := b.receiver.Receive(&res); err != nil {
+	var msg Res
+	if err := b.receiver.Receive(&msg); err != nil {
 		return nil, err
 	}
-	return &res, nil
+	return &msg, nil
 }
 
 // CloseReceive closes the receive side of the stream.

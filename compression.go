@@ -123,19 +123,19 @@ type readOnlyCompressionPools interface {
 	CommaSeparatedNames() string
 }
 
-func newReadOnlyCompressionPools(pools map[string]*compressionPool) readOnlyCompressionPools {
-	known := make([]string, 0, len(pools))
-	for name := range pools {
-		known = append(known, name)
+func newReadOnlyCompressionPools(nameToPool map[string]*compressionPool) readOnlyCompressionPools {
+	knownNames := make([]string, 0, len(nameToPool))
+	for name := range nameToPool {
+		knownNames = append(knownNames, name)
 	}
 	return &namedCompressionPools{
-		nameToPools:         pools,
-		commaSeparatedNames: strings.Join(known, ","),
+		nameToPool:          nameToPool,
+		commaSeparatedNames: strings.Join(knownNames, ","),
 	}
 }
 
 type namedCompressionPools struct {
-	nameToPools         map[string]*compressionPool
+	nameToPool          map[string]*compressionPool
 	commaSeparatedNames string
 }
 
@@ -143,11 +143,11 @@ func (m *namedCompressionPools) Get(name string) *compressionPool {
 	if name == "" || name == compressionIdentity {
 		return nil
 	}
-	return m.nameToPools[name]
+	return m.nameToPool[name]
 }
 
 func (m *namedCompressionPools) Contains(name string) bool {
-	_, ok := m.nameToPools[name]
+	_, ok := m.nameToPool[name]
 	return ok
 }
 

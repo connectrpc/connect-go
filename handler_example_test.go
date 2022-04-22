@@ -33,12 +33,14 @@ type ExamplePingServer struct {
 // Ping implements pingv1connect.PingServiceHandler.
 func (*ExamplePingServer) Ping(
 	_ context.Context,
-	req *connect.Request[pingv1.PingRequest],
+	request *connect.Request[pingv1.PingRequest],
 ) (*connect.Response[pingv1.PingResponse], error) {
-	return connect.NewResponse(&pingv1.PingResponse{
-		Number: req.Msg.Number,
-		Text:   req.Msg.Text,
-	}), nil
+	return connect.NewResponse(
+		&pingv1.PingResponse{
+			Number: request.Msg.Number,
+			Text:   request.Msg.Text,
+		},
+	), nil
 }
 
 func Example_handler() {
@@ -50,9 +52,11 @@ func Example_handler() {
 	// Handlers, so they're compatible with most Go HTTP routers and middleware
 	// (for example, net/http's StripPrefix).
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(
-		&ExamplePingServer{}, // our business logic
-	))
+	mux.Handle(
+		pingv1connect.NewPingServiceHandler(
+			&ExamplePingServer{}, // our business logic
+		),
+	)
 	// You can serve gRPC's health and server reflection APIs using
 	// github.com/bufbuild/connect-grpchealth-go and github.com/bufbuild/connect-grpcreflect-go.
 
@@ -64,7 +68,7 @@ func Example_handler() {
 	//
 	// If you're not familiar with the many timeouts exposed by net/http, start with
 	// https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts/.
-	srv := &http.Server{
+	server := &http.Server{
 		Addr:           ":http",
 		Handler:        mux,
 		ReadTimeout:    2500 * time.Millisecond,
@@ -73,5 +77,5 @@ func Example_handler() {
 	}
 	// You could also use golang.org/x/net/http2/h2c to serve gRPC requests
 	// without TLS.
-	_ = srv.ListenAndServeTLS("internal/testdata/server.crt", "internal/testdata/server.key")
+	_ = server.ListenAndServeTLS("internal/testdata/server.crt", "internal/testdata/server.key")
 }
