@@ -18,11 +18,11 @@ import (
 	"strings"
 )
 
-// extractProtobufPath returns the trailing portion of the URL's path,
+// extractProtoPath returns the trailing portion of the URL's path,
 // corresponding to the Protobuf package, service, and method. It always starts
 // with a slash. Within connect, we use this as (1) Specification.Procedure and
 // (2) the path when mounting handlers on muxes.
-func extractProtobufPath(url string) string {
+func extractProtoPath(url string) string {
 	segments := strings.Split(url, "/")
 	var pkg, method string
 	if len(segments) > 0 {

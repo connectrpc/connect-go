@@ -31,35 +31,33 @@ import (
 // explicitly choose a protocol with either the WithGRPC or WithGRPCWeb
 // options.
 type Client[Req, Res any] struct {
-	config         *clientConfiguration
+	config         *clientConfig
 	callUnary      func(context.Context, *Request[Req]) (*Response[Res], error)
 	protocolClient protocolClient
 	err            error
 }
 
 // NewClient constructs a new Client.
-func NewClient[Req, Res any](
-	httpClient HTTPClient,
-	url string,
-	options ...ClientOption,
-) *Client[Req, Res] {
+func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...ClientOption) *Client[Req, Res] {
 	client := &Client[Req, Res]{}
-	config, err := newClientConfiguration(url, options)
+	config, err := newClientConfig(url, options)
 	if err != nil {
 		client.err = err
 		return client
 	}
 	client.config = config
-	protocolClient, protocolErr := client.config.Protocol.NewClient(&protocolClientParams{
-		CompressionName:  config.RequestCompressionName,
-		CompressionPools: newReadOnlyCompressionPools(config.CompressionPools),
-		Codec:            config.Codec,
-		Protobuf:         config.protobuf(),
-		CompressMinBytes: config.CompressMinBytes,
-		HTTPClient:       httpClient,
-		URL:              url,
-		BufferPool:       config.BufferPool,
-	})
+	protocolClient, protocolErr := client.config.Protocol.NewClient(
+		&protocolClientParams{
+			CompressionName:  config.RequestCompressionName,
+			CompressionPools: newReadOnlyCompressionPools(config.CompressionPools),
+			Codec:            config.Codec,
+			Protobuf:         config.protobuf(),
+			CompressMinBytes: config.CompressMinBytes,
+			HTTPClient:       httpClient,
+			URL:              url,
+			BufferPool:       config.BufferPool,
+		},
+	)
 	if protocolErr != nil {
 		client.err = protocolErr
 		return client
@@ -89,8 +87,8 @@ func NewClient[Req, Res any](
 		}
 		return response, receiver.Close()
 	})
-	if ic := config.Interceptor; ic != nil {
-		unaryFunc = ic.WrapUnary(unaryFunc)
+	if interceptor := config.Interceptor; interceptor != nil {
+		unaryFunc = interceptor.WrapUnary(unaryFunc)
 	}
 	client.callUnary = func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
 		// To make the specification and RPC headers visible to the full interceptor
@@ -111,14 +109,11 @@ func NewClient[Req, Res any](
 }
 
 // CallUnary calls a request-response procedure.
-func (c *Client[Req, Res]) CallUnary(
-	ctx context.Context,
-	req *Request[Req],
-) (*Response[Res], error) {
+func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
 	if c.err != nil {
 		return nil, c.err
 	}
-	return c.callUnary(ctx, req)
+	return c.callUnary(ctx, request)
 }
 
 // CallClientStream calls a client streaming procedure.
@@ -131,19 +126,16 @@ func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamFo
 }
 
 // CallServerStream calls a server streaming procedure.
-func (c *Client[Req, Res]) CallServerStream(
-	ctx context.Context,
-	req *Request[Req],
-) (*ServerStreamForClient[Res], error) {
+func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Request[Req]) (*ServerStreamForClient[Res], error) {
 	if c.err != nil {
 		return nil, c.err
 	}
 	sender, receiver := c.newStream(ctx, StreamTypeServer)
-	mergeHeaders(sender.Header(), req.header)
+	mergeHeaders(sender.Header(), request.header)
 	// Send always returns an io.EOF unless the error is from the client-side.
 	// We want the user to continue to call Receive in those cases to get the
 	// full error from the server-side.
-	if err := sender.Send(req.Msg); err != nil && !errors.Is(err, io.EOF) {
+	if err := sender.Send(request.Msg); err != nil && !errors.Is(err, io.EOF) {
 		_ = sender.Close(err)
 		_ = receiver.Close()
 		return nil, err
@@ -164,20 +156,20 @@ func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForCli
 }
 
 func (c *Client[Req, Res]) newStream(ctx context.Context, streamType StreamType) (Sender, Receiver) {
-	if ic := c.config.Interceptor; ic != nil {
-		ctx = ic.WrapStreamContext(ctx)
+	if interceptor := c.config.Interceptor; interceptor != nil {
+		ctx = interceptor.WrapStreamContext(ctx)
 	}
 	header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
 	c.protocolClient.WriteRequestHeader(header)
 	sender, receiver := c.protocolClient.NewStream(ctx, c.config.newSpecification(streamType), header)
-	if ic := c.config.Interceptor; ic != nil {
-		sender = ic.WrapStreamSender(ctx, sender)
-		receiver = ic.WrapStreamReceiver(ctx, receiver)
+	if interceptor := c.config.Interceptor; interceptor != nil {
+		sender = interceptor.WrapStreamSender(ctx, sender)
+		receiver = interceptor.WrapStreamReceiver(ctx, receiver)
 	}
 	return sender, receiver
 }
 
-type clientConfiguration struct {
+type clientConfig struct {
 	Protocol               protocol
 	Procedure              string
 	CompressMinBytes       int
@@ -188,9 +180,9 @@ type clientConfiguration struct {
 	BufferPool             *bufferPool
 }
 
-func newClientConfiguration(url string, options []ClientOption) (*clientConfiguration, *Error) {
-	protoPath := extractProtobufPath(url)
-	config := clientConfiguration{
+func newClientConfig(url string, options []ClientOption) (*clientConfig, *Error) {
+	protoPath := extractProtoPath(url)
+	config := clientConfig{
 		Procedure:        protoPath,
 		CompressionPools: make(map[string]*compressionPool),
 		BufferPool:       newBufferPool(),
@@ -206,7 +198,7 @@ func newClientConfiguration(url string, options []ClientOption) (*clientConfigur
 	return &config, nil
 }
 
-func (c *clientConfiguration) validate() *Error {
+func (c *clientConfig) validate() *Error {
 	if c.Codec == nil || c.Codec.Name() == "" {
 		return errorf(CodeUnknown, "no codec configured")
 	}
@@ -224,14 +216,14 @@ func (c *clientConfiguration) validate() *Error {
 	return nil
 }
 
-func (c *clientConfiguration) protobuf() Codec {
+func (c *clientConfig) protobuf() Codec {
 	if c.Codec.Name() == codecNameProto {
 		return c.Codec
 	}
 	return &protoBinaryCodec{}
 }
 
-func (c *clientConfiguration) newSpecification(t StreamType) Specification {
+func (c *clientConfig) newSpecification(t StreamType) Specification {
 	return Specification{
 		StreamType: t,
 		Procedure:  c.Procedure,

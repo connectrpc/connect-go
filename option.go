@@ -24,7 +24,7 @@ import (
 // In addition to any options grouped in the documentation below, remember that
 // Options are also valid ClientOptions.
 type ClientOption interface {
-	applyToClient(*clientConfiguration)
+	applyToClient(*clientConfig)
 }
 
 // WithClientOptions composes multiple ClientOptions into one.
@@ -67,7 +67,7 @@ func WithRequestCompression(name string) ClientOption {
 // In addition to any options grouped in the documentation below, remember that
 // all Options are also HandlerOptions.
 type HandlerOption interface {
-	applyToHandler(*handlerConfiguration)
+	applyToHandler(*handlerConfig)
 }
 
 // WithHandlerOptions composes multiple HandlerOptions into one.
@@ -235,7 +235,7 @@ type clientOptionsOption struct {
 	options []ClientOption
 }
 
-func (o *clientOptionsOption) applyToClient(config *clientConfiguration) {
+func (o *clientOptionsOption) applyToClient(config *clientConfig) {
 	for _, option := range o.options {
 		option.applyToClient(config)
 	}
@@ -245,14 +245,14 @@ type codecOption struct {
 	Codec Codec
 }
 
-func (o *codecOption) applyToClient(config *clientConfiguration) {
+func (o *codecOption) applyToClient(config *clientConfig) {
 	if o.Codec == nil || o.Codec.Name() == "" {
 		return
 	}
 	config.Codec = o.Codec
 }
 
-func (o *codecOption) applyToHandler(config *handlerConfiguration) {
+func (o *codecOption) applyToHandler(config *handlerConfig) {
 	if o.Codec == nil || o.Codec.Name() == "" {
 		return
 	}
@@ -264,11 +264,11 @@ type compressionOption struct {
 	CompressionPool *compressionPool
 }
 
-func (o *compressionOption) applyToClient(config *clientConfiguration) {
+func (o *compressionOption) applyToClient(config *clientConfig) {
 	o.apply(config.CompressionPools)
 }
 
-func (o *compressionOption) applyToHandler(config *handlerConfiguration) {
+func (o *compressionOption) applyToHandler(config *handlerConfig) {
 	o.apply(config.CompressionPools)
 }
 
@@ -283,11 +283,11 @@ type compressMinBytesOption struct {
 	Min int
 }
 
-func (o *compressMinBytesOption) applyToClient(config *clientConfiguration) {
+func (o *compressMinBytesOption) applyToClient(config *clientConfig) {
 	config.CompressMinBytes = o.Min
 }
 
-func (o *compressMinBytesOption) applyToHandler(config *handlerConfiguration) {
+func (o *compressMinBytesOption) applyToHandler(config *handlerConfig) {
 	config.CompressMinBytes = o.Min
 }
 
@@ -295,7 +295,7 @@ type handlerOptionsOption struct {
 	options []HandlerOption
 }
 
-func (o *handlerOptionsOption) applyToHandler(config *handlerConfiguration) {
+func (o *handlerOptionsOption) applyToHandler(config *handlerConfig) {
 	for _, option := range o.options {
 		option.applyToHandler(config)
 	}
@@ -305,7 +305,7 @@ type grpcOption struct {
 	web bool
 }
 
-func (o *grpcOption) applyToClient(config *clientConfiguration) {
+func (o *grpcOption) applyToClient(config *clientConfig) {
 	config.Protocol = &protocolGRPC{web: o.web}
 }
 
@@ -313,11 +313,11 @@ type interceptorsOption struct {
 	Interceptors []Interceptor
 }
 
-func (o *interceptorsOption) applyToClient(config *clientConfiguration) {
+func (o *interceptorsOption) applyToClient(config *clientConfig) {
 	config.Interceptor = o.chainWith(config.Interceptor)
 }
 
-func (o *interceptorsOption) applyToHandler(config *handlerConfiguration) {
+func (o *interceptorsOption) applyToHandler(config *handlerConfig) {
 	config.Interceptor = o.chainWith(config.Interceptor)
 }
 
@@ -338,13 +338,13 @@ type optionsOption struct {
 	options []Option
 }
 
-func (o *optionsOption) applyToClient(config *clientConfiguration) {
+func (o *optionsOption) applyToClient(config *clientConfig) {
 	for _, option := range o.options {
 		option.applyToClient(config)
 	}
 }
 
-func (o *optionsOption) applyToHandler(config *handlerConfiguration) {
+func (o *optionsOption) applyToHandler(config *handlerConfig) {
 	for _, option := range o.options {
 		option.applyToHandler(config)
 	}
@@ -354,6 +354,6 @@ type requestCompressionOption struct {
 	Name string
 }
 
-func (o *requestCompressionOption) applyToClient(config *clientConfiguration) {
+func (o *requestCompressionOption) applyToClient(config *clientConfig) {
 	config.RequestCompressionName = o.Name
 }
