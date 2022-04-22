@@ -28,16 +28,16 @@ func ExampleInterceptor() {
 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 	loggingInterceptor := connect.UnaryInterceptorFunc(
 		func(next connect.UnaryFunc) connect.UnaryFunc {
-			return connect.UnaryFunc(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-				logger.Println("calling:", req.Spec().Procedure)
-				logger.Println("request:", req.Any())
-				res, err := next(ctx, req)
+			return connect.UnaryFunc(func(ctx context.Context, request connect.AnyRequest) (connect.AnyResponse, error) {
+				logger.Println("calling:", request.Spec().Procedure)
+				logger.Println("request:", request.Any())
+				response, err := next(ctx, request)
 				if err != nil {
 					logger.Println("error:", err)
 				} else {
-					logger.Println("response:", res.Any())
+					logger.Println("response:", response.Any())
 				}
-				return res, err
+				return response, err
 			})
 		},
 	)

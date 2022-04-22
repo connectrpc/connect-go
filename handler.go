@@ -38,7 +38,7 @@ func NewUnaryHandler[Req, Res any](
 	unary func(context.Context, *Request[Req]) (*Response[Res], error),
 	options ...HandlerOption,
 ) *Handler {
-	config := newHandlerConfiguration(procedure, options)
+	config := newHandlerConfig(procedure, options)
 	// Given a (possibly failed) stream, how should we call the unary function?
 	implementation := func(ctx context.Context, sender Sender, receiver Receiver, clientVisibleError error) {
 		defer receiver.Close()
@@ -81,8 +81,8 @@ func NewUnaryHandler[Req, Res any](
 			}
 			return res, nil
 		})
-		if ic := config.Interceptor; ic != nil {
-			untyped = ic.WrapUnary(untyped)
+		if interceptor := config.Interceptor; interceptor != nil {
+			untyped = interceptor.WrapUnary(untyped)
 		}
 
 		response, err := untyped(ctx, request)
@@ -134,7 +134,7 @@ func NewServerStreamHandler[Req, Res any](
 		StreamTypeServer,
 		func(ctx context.Context, sender Sender, receiver Receiver) {
 			stream := &ServerStream[Res]{sender: sender}
-			req, err := receiveUnaryRequest[Req](receiver)
+			request, err := receiveUnaryRequest[Req](receiver)
 			if err != nil {
 				_ = receiver.Close()
 				_ = sender.Close(err)
@@ -144,7 +144,7 @@ func NewServerStreamHandler[Req, Res any](
 				_ = sender.Close(err)
 				return
 			}
-			err = implementation(ctx, req, stream)
+			err = implementation(ctx, request, stream)
 			_ = sender.Close(err)
 		},
 		options...,
@@ -222,10 +222,10 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 		if clientVisibleError != nil && receiver == nil {
 			receiver = newNopReceiver(h.spec, request.Header, request.Trailer)
 		}
-		if ic := h.interceptor; ic != nil {
+		if interceptor := h.interceptor; interceptor != nil {
 			// Unary interceptors were handled in NewUnaryHandler.
-			sender = ic.WrapStreamSender(ctx, sender)
-			receiver = ic.WrapStreamReceiver(ctx, receiver)
+			sender = interceptor.WrapStreamSender(ctx, sender)
+			receiver = interceptor.WrapStreamReceiver(ctx, receiver)
 		}
 		h.implementation(ctx, sender, receiver, clientVisibleError)
 		return
@@ -241,7 +241,7 @@ func (h *Handler) failNegotiation(w http.ResponseWriter, code int) {
 	w.WriteHeader(code)
 }
 
-type handlerConfiguration struct {
+type handlerConfig struct {
 	CompressionPools map[string]*compressionPool
 	Codecs           map[string]Codec
 	CompressMinBytes int
@@ -252,9 +252,9 @@ type handlerConfiguration struct {
 	BufferPool       *bufferPool
 }
 
-func newHandlerConfiguration(procedure string, options []HandlerOption) *handlerConfiguration {
-	protoPath := extractProtobufPath(procedure)
-	config := handlerConfiguration{
+func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig {
+	protoPath := extractProtoPath(procedure)
+	config := handlerConfig{
 		Procedure:        protoPath,
 		CompressionPools: make(map[string]*compressionPool),
 		Codecs:           make(map[string]Codec),
@@ -271,14 +271,14 @@ func newHandlerConfiguration(procedure string, options []HandlerOption) *handler
 	return &config
 }
 
-func (c *handlerConfiguration) newSpecification(streamType StreamType) Specification {
+func (c *handlerConfig) newSpecification(streamType StreamType) Specification {
 	return Specification{
 		Procedure:  c.Procedure,
 		StreamType: streamType,
 	}
 }
 
-func (c *handlerConfiguration) newProtocolHandlers(streamType StreamType) []protocolHandler {
+func (c *handlerConfig) newProtocolHandlers(streamType StreamType) []protocolHandler {
 	var protocols []protocol
 	if c.HandleGRPC {
 		protocols = append(protocols, &protocolGRPC{web: false})
@@ -307,7 +307,7 @@ func newStreamHandler(
 	implementation func(context.Context, Sender, Receiver),
 	options ...HandlerOption,
 ) *Handler {
-	config := newHandlerConfiguration(procedure, options)
+	config := newHandlerConfig(procedure, options)
 	return &Handler{
 		spec:        config.newSpecification(streamType),
 		interceptor: config.Interceptor,

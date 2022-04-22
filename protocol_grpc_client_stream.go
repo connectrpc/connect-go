@@ -257,15 +257,15 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 		}
 	}
 
-	req, err := http.NewRequestWithContext(cs.ctx, http.MethodPost, cs.url, cs.reader)
+	request, err := http.NewRequestWithContext(cs.ctx, http.MethodPost, cs.url, cs.reader)
 	if err != nil {
 		cs.setRequestError(errorf(CodeUnknown, "construct *http.Request: %w", err))
 		close(prepared)
 		return
 	}
-	req.Header = cs.header
+	request.Header = cs.header
 	if cs.trailer != nil && !cs.web {
-		req.Trailer = cs.trailer
+		request.Trailer = cs.trailer
 	}
 
 	// At this point, we've caught all the errors we can - it's time to send data
@@ -274,17 +274,17 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 
 	// Once we send a message to the server, they send a message back and
 	// establish the receive side of the stream.
-	res, err := cs.httpClient.Do(req)
+	response, err := cs.httpClient.Do(request)
 	if err != nil {
 		cs.setResponseError(err)
 		return
 	}
 
-	if res.StatusCode != http.StatusOK {
-		cs.setResponseError(errorf(httpToCode(res.StatusCode), "HTTP status %v", res.Status))
+	if response.StatusCode != http.StatusOK {
+		cs.setResponseError(errorf(httpToCode(response.StatusCode), "HTTP status %v", response.Status))
 		return
 	}
-	if (cs.spec.StreamType&StreamTypeBidi) == StreamTypeBidi && res.ProtoMajor < 2 {
+	if (cs.spec.StreamType&StreamTypeBidi) == StreamTypeBidi && response.ProtoMajor < 2 {
 		// If we somehow dialed an HTTP/1.x server, fail with an explicit message
 		// rather than returning a more cryptic error later on.
 		cs.setResponseError(errorf(
@@ -293,7 +293,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 			cs.url,
 		))
 	}
-	compression := res.Header.Get("Grpc-Encoding")
+	compression := response.Header.Get("Grpc-Encoding")
 	if compression == "" || compression == compressionIdentity {
 		compression = compressionIdentity
 	} else if !cs.compressionPools.Contains(compression) {
@@ -322,29 +322,29 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	// DATA frames have been sent on the stream - isn't standard HTTP/2
 	// semantics, so net/http doesn't know anything about it. To us, then, these
 	// trailers-only responses actually appear as headers-only responses.
-	if err := extractError(cs.bufferPool, cs.protobuf, res.Header); err != nil {
+	if err := extractError(cs.bufferPool, cs.protobuf, response.Header); err != nil {
 		// Per the specification, only the HTTP status code and Content-Type should
 		// be treated as headers. The rest should be treated as trailing metadata.
-		if contentType := res.Header.Get("Content-Type"); contentType != "" {
+		if contentType := response.Header.Get("Content-Type"); contentType != "" {
 			cs.responseHeader.Set("Content-Type", contentType)
 		}
-		mergeHeaders(cs.responseTrailer, res.Header)
+		mergeHeaders(cs.responseTrailer, response.Header)
 		cs.responseTrailer.Del("Content-Type")
 		// If we get some actual HTTP trailers, treat those as trailing metadata too.
-		_ = discard(res.Body)
-		mergeHeaders(cs.responseTrailer, res.Trailer)
+		_ = discard(response.Body)
+		mergeHeaders(cs.responseTrailer, response.Trailer)
 		// Merge HTTP headers and trailers into the error metadata.
-		err.meta = res.Header.Clone()
-		mergeHeaders(err.meta, res.Trailer)
+		err.meta = response.Header.Clone()
+		mergeHeaders(err.meta, response.Trailer)
 		cs.setResponseError(err)
 		return
 	}
 	// Success! We got a response with valid headers and no error, so there's
 	// probably a message waiting in the stream.
-	cs.response = res
-	mergeHeaders(cs.responseHeader, res.Header)
+	cs.response = response
+	mergeHeaders(cs.responseHeader, response.Header)
 	cs.unmarshaler = unmarshaler{
-		reader:          res.Body,
+		reader:          response.Body,
 		codec:           cs.codec,
 		compressionPool: cs.compressionPools.Get(compression),
 		web:             cs.web,

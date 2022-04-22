@@ -75,38 +75,38 @@ type ping struct {
 }
 
 func BenchmarkREST(b *testing.B) {
-	handler := func(writer http.ResponseWriter, req *http.Request) {
-		defer req.Body.Close()
+	handler := func(writer http.ResponseWriter, request *http.Request) {
+		defer request.Body.Close()
 		defer func() {
-			_, err := io.Copy(io.Discard, req.Body)
+			_, err := io.Copy(io.Discard, request.Body)
 			assert.Nil(b, err)
 		}()
 		writer.Header().Set("Content-Type", "application/json")
-		var body io.Reader = req.Body
-		if req.Header.Get("Content-Encoding") == "gzip" {
-			gr, err := gzip.NewReader(body)
+		var body io.Reader = request.Body
+		if request.Header.Get("Content-Encoding") == "gzip" {
+			gzipReader, err := gzip.NewReader(body)
 			if err != nil {
 				b.Fatalf("get gzip reader: %v", err)
 			}
-			defer gr.Close()
-			body = gr
+			defer gzipReader.Close()
+			body = gzipReader
 		}
 		var out io.Writer = writer
-		if strings.Contains(req.Header.Get("Accept-Encoding"), "gzip") {
+		if strings.Contains(request.Header.Get("Accept-Encoding"), "gzip") {
 			writer.Header().Set("Content-Encoding", "gzip")
-			gw := gzip.NewWriter(writer)
-			defer gw.Close()
-			out = gw
+			gzipWriter := gzip.NewWriter(writer)
+			defer gzipWriter.Close()
+			out = gzipWriter
 		}
 		raw, err := io.ReadAll(body)
 		if err != nil {
 			b.Fatalf("read body: %v", err)
 		}
-		var pingReq ping
-		if err := json.Unmarshal(raw, &pingReq); err != nil {
+		var pingRequest ping
+		if err := json.Unmarshal(raw, &pingRequest); err != nil {
 			b.Fatalf("json unmarshal: %v", err)
 		}
-		bs, err := json.Marshal(&pingReq)
+		bs, err := json.Marshal(&pingRequest)
 		if err != nil {
 			b.Fatalf("json marshal: %v", err)
 		}
@@ -151,18 +151,18 @@ func unaryRESTIteration(b *testing.B, client *http.Client, url string, text stri
 	request.Header.Set("Content-Encoding", "gzip")
 	request.Header.Set("Accept-Encoding", "gzip")
 	request.Header.Set("Content-Type", "application/json")
-	res, err := client.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		b.Fatalf("do request: %v", err)
 	}
 	defer func() {
-		_, err := io.Copy(io.Discard, res.Body)
+		_, err := io.Copy(io.Discard, response.Body)
 		assert.Nil(b, err)
 	}()
-	if res.StatusCode != http.StatusOK {
-		b.Fatalf("response status: %v", res.Status)
+	if response.StatusCode != http.StatusOK {
+		b.Fatalf("response status: %v", response.Status)
 	}
-	uncompressed, err := gzip.NewReader(res.Body)
+	uncompressed, err := gzip.NewReader(response.Body)
 	if err != nil {
 		b.Fatalf("uncompress response: %v", err)
 	}
