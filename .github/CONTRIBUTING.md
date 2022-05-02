@@ -22,9 +22,9 @@ you to accept the CLA when you open your pull request.
 ```
 mkdir -p $GOPATH/src/github.com/bufbuild
 cd $GOPATH/src/github.com/bufbuild
-git clone git@github.com:your_github_username/connect.git
-cd connect
-git remote add upstream https://github.com/bufbuild/connect.git
+git clone git@github.com:your_github_username/connect-go.git
+cd connect-go
+git remote add upstream https://connectrpc.com/connect.git
 git fetch upstream
 ```
 
@@ -40,7 +40,7 @@ make
 Start by creating a new branch for your changes:
 
 ```
-cd $GOPATH/src/github.com/bufbuild/connect
+cd $GOPATH/src/connectrpc.com/connect
 git checkout main
 git fetch upstream
 git rebase upstream/main
@@ -70,7 +70,7 @@ We're much more likely to approve your changes if you:
 * Write a [good commit message][commit-message].
 * Maintain backward compatibility.
 
-[fork]: https://github.com/bufbuild/connect/fork
-[open-issue]: https://github.com/bufbuild/connect/issues/new
+[fork]: https://connectrpc.com/connect/fork
+[open-issue]: https://connectrpc.com/connect/issues/new
 [cla]: TODO
 [commit-message]: http://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html
