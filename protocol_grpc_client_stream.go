@@ -37,7 +37,7 @@ var _ Sender = (*clientSender)(nil)
 
 func (cs *clientSender) Send(m any) error      { return cs.stream.Send(m) }
 func (cs *clientSender) Close(err error) error { return cs.stream.CloseSend(err) }
-func (cs *clientSender) Spec() Specification   { return cs.stream.Spec() }
+func (cs *clientSender) Spec() Spec            { return cs.stream.Spec() }
 func (cs *clientSender) Header() http.Header   { return cs.stream.Header() }
 func (cs *clientSender) Trailer() http.Header  { return cs.stream.Trailer() }
 
@@ -52,7 +52,7 @@ var _ Receiver = (*clientReceiver)(nil)
 
 func (cr *clientReceiver) Receive(m any) error  { return cr.stream.Receive(m) }
 func (cr *clientReceiver) Close() error         { return cr.stream.CloseReceive() }
-func (cr *clientReceiver) Spec() Specification  { return cr.stream.Spec() }
+func (cr *clientReceiver) Spec() Spec           { return cr.stream.Spec() }
 func (cr *clientReceiver) Header() http.Header  { return cr.stream.ResponseHeader() }
 func (cr *clientReceiver) Trailer() http.Header { return cr.stream.ResponseTrailer() }
 
@@ -67,7 +67,7 @@ type duplexClientStream struct {
 	ctx        context.Context
 	httpClient HTTPClient
 	url        string
-	spec       Specification
+	spec       Spec
 	codec      Codec
 	protobuf   Codec // for errors
 
@@ -95,7 +95,7 @@ type duplexClientStream struct {
 	responseErr error
 }
 
-func (cs *duplexClientStream) Spec() Specification {
+func (cs *duplexClientStream) Spec() Spec {
 	return cs.spec
 }
 

@@ -65,7 +65,7 @@ func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, 
 }
 
 type grpcHandler struct {
-	spec             Specification
+	spec             Spec
 	web              bool
 	codecs           readOnlyCodecs
 	compressionPools readOnlyCompressionPools
@@ -238,7 +238,7 @@ func (g *grpcClient) WriteRequestHeader(header http.Header) {
 
 func (g *grpcClient) NewStream(
 	ctx context.Context,
-	spec Specification,
+	spec Spec,
 	header http.Header,
 ) (Sender, Receiver) {
 	// In a typical HTTP/1.1 request, we'd put the body into a bytes.Buffer, hand
