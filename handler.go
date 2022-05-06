@@ -26,7 +26,7 @@ import (
 // Protobuf and JSON codecs. They support gzip compression using the standard
 // library's compress/gzip.
 type Handler struct {
-	spec             Specification
+	spec             Spec
 	interceptor      Interceptor
 	implementation   func(context.Context, Sender, Receiver, error /* client-visible */)
 	protocolHandlers []protocolHandler
@@ -97,7 +97,7 @@ func NewUnaryHandler[Req, Res any](
 
 	protocolHandlers := config.newProtocolHandlers(StreamTypeUnary)
 	return &Handler{
-		spec:             config.newSpecification(StreamTypeUnary),
+		spec:             config.newSpec(StreamTypeUnary),
 		interceptor:      nil, // already applied
 		implementation:   implementation,
 		protocolHandlers: protocolHandlers,
@@ -271,8 +271,8 @@ func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig 
 	return &config
 }
 
-func (c *handlerConfig) newSpecification(streamType StreamType) Specification {
-	return Specification{
+func (c *handlerConfig) newSpec(streamType StreamType) Spec {
+	return Spec{
 		Procedure:  c.Procedure,
 		StreamType: streamType,
 	}
@@ -291,7 +291,7 @@ func (c *handlerConfig) newProtocolHandlers(streamType StreamType) []protocolHan
 	compressors := newReadOnlyCompressionPools(c.CompressionPools)
 	for _, protocol := range protocols {
 		handlers = append(handlers, protocol.NewHandler(&protocolHandlerParams{
-			Spec:             c.newSpecification(streamType),
+			Spec:             c.newSpec(streamType),
 			Codecs:           codecs,
 			CompressionPools: compressors,
 			CompressMinBytes: c.CompressMinBytes,
@@ -309,7 +309,7 @@ func newStreamHandler(
 ) *Handler {
 	config := newHandlerConfig(procedure, options)
 	return &Handler{
-		spec:        config.newSpecification(streamType),
+		spec:        config.newSpec(streamType),
 		interceptor: config.Interceptor,
 		implementation: func(ctx context.Context, sender Sender, receiver Receiver, clientVisibleErr error) {
 			if clientVisibleErr != nil {

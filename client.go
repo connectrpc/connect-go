@@ -65,7 +65,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 	client.protocolClient = protocolClient
 	// Rather than applying unary interceptors along the hot path, we can do it
 	// once at client creation.
-	unarySpec := config.newSpecification(StreamTypeUnary)
+	unarySpec := config.newSpec(StreamTypeUnary)
 	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
 		sender, receiver := protocolClient.NewStream(ctx, unarySpec, request.Header())
 		// Send always returns an io.EOF unless the error is from the client-side.
@@ -161,7 +161,7 @@ func (c *Client[Req, Res]) newStream(ctx context.Context, streamType StreamType)
 	}
 	header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
 	c.protocolClient.WriteRequestHeader(header)
-	sender, receiver := c.protocolClient.NewStream(ctx, c.config.newSpecification(streamType), header)
+	sender, receiver := c.protocolClient.NewStream(ctx, c.config.newSpec(streamType), header)
 	if interceptor := c.config.Interceptor; interceptor != nil {
 		sender = interceptor.WrapStreamSender(ctx, sender)
 		receiver = interceptor.WrapStreamReceiver(ctx, receiver)
@@ -223,8 +223,8 @@ func (c *clientConfig) protobuf() Codec {
 	return &protoBinaryCodec{}
 }
 
-func (c *clientConfig) newSpecification(t StreamType) Specification {
-	return Specification{
+func (c *clientConfig) newSpec(t StreamType) Spec {
+	return Spec{
 		StreamType: t,
 		Procedure:  c.Procedure,
 		IsClient:   true,
