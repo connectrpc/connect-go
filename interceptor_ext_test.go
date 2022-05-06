@@ -91,8 +91,8 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	t.Parallel()
 	// Helper function: returns a function that asserts that there's some value
 	// set for header "expect", and adds a value for header "add".
-	newInspector := func(expect, add string) func(connect.Specification, http.Header) {
-		return func(spec connect.Specification, header http.Header) {
+	newInspector := func(expect, add string) func(connect.Spec, http.Header) {
+		return func(spec connect.Spec, header http.Header) {
 			if expect != "" {
 				assert.NotZero(
 					t,
@@ -111,7 +111,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	}
 	// Helper function: asserts that there's a value present for header keys
 	// "one", "two", "three", and "four".
-	assertAllPresent := func(spec connect.Specification, header http.Header) {
+	assertAllPresent := func(spec connect.Spec, header http.Header) {
 		for _, key := range []string{"one", "two", "three", "four"} {
 			assert.NotZero(
 				t,
@@ -141,7 +141,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	clientOnion := connect.WithInterceptors(
 		newHeaderInterceptor(
 			// 1 (start). request: should see protocol-related headers
-			func(_ connect.Specification, h http.Header) {
+			func(_ connect.Spec, h http.Header) {
 				assert.NotZero(t, h.Get("Grpc-Accept-Encoding"))
 			},
 			// 12 (end). response: check "one"-"four"
@@ -200,25 +200,25 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 // It's useful as a testing harness to make sure that we're chaining
 // interceptors in the correct order.
 type headerInterceptor struct {
-	inspectRequestHeader  func(connect.Specification, http.Header)
-	inspectResponseHeader func(connect.Specification, http.Header)
+	inspectRequestHeader  func(connect.Spec, http.Header)
+	inspectResponseHeader func(connect.Spec, http.Header)
 }
 
 // newHeaderInterceptor constructs a headerInterceptor. Nil function pointers
 // are treated as no-ops.
 func newHeaderInterceptor(
-	inspectRequestHeader func(connect.Specification, http.Header),
-	inspectResponseHeader func(connect.Specification, http.Header),
+	inspectRequestHeader func(connect.Spec, http.Header),
+	inspectResponseHeader func(connect.Spec, http.Header),
 ) *headerInterceptor {
 	interceptor := headerInterceptor{
 		inspectRequestHeader:  inspectRequestHeader,
 		inspectResponseHeader: inspectResponseHeader,
 	}
 	if interceptor.inspectRequestHeader == nil {
-		interceptor.inspectRequestHeader = func(_ connect.Specification, _ http.Header) {}
+		interceptor.inspectRequestHeader = func(_ connect.Spec, _ http.Header) {}
 	}
 	if interceptor.inspectResponseHeader == nil {
-		interceptor.inspectResponseHeader = func(_ connect.Specification, _ http.Header) {}
+		interceptor.inspectResponseHeader = func(_ connect.Spec, _ http.Header) {}
 	}
 	return &interceptor
 }
@@ -264,7 +264,7 @@ type headerInspectingSender struct {
 	connect.Sender
 
 	called  bool // senders don't need to be thread-safe
-	inspect func(connect.Specification, http.Header)
+	inspect func(connect.Spec, http.Header)
 }
 
 func (s *headerInspectingSender) Send(m any) error {
@@ -279,7 +279,7 @@ type headerInspectingReceiver struct {
 	connect.Receiver
 
 	called  bool // receivers don't need to be thread-safe
-	inspect func(connect.Specification, http.Header)
+	inspect func(connect.Spec, http.Header)
 }
 
 func (r *headerInspectingReceiver) Receive(m any) error {

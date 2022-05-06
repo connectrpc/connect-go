@@ -65,7 +65,7 @@ type Sender interface {
 	Send(any) error
 	Close(error) error
 
-	Spec() Specification
+	Spec() Spec
 	Header() http.Header
 	Trailer() http.Header
 }
@@ -79,7 +79,7 @@ type Receiver interface {
 	Receive(any) error
 	Close() error
 
-	Spec() Specification
+	Spec() Spec
 	Header() http.Header
 	// Trailers are populated only after Receive returns an error.
 	Trailer() http.Header
@@ -91,7 +91,7 @@ type Receiver interface {
 type Request[T any] struct {
 	Msg *T
 
-	spec   Specification
+	spec   Spec
 	header http.Header
 }
 
@@ -110,8 +110,8 @@ func (r *Request[_]) Any() any {
 	return r.Msg
 }
 
-// Spec returns the Specification for this RPC.
-func (r *Request[_]) Spec() Specification {
+// Spec returns a description of this RPC.
+func (r *Request[_]) Spec() Spec {
 	return r.spec
 }
 
@@ -134,7 +134,7 @@ func (e *Request[_]) internalOnly() {}
 // AnyRequest.
 type AnyRequest interface {
 	Any() any
-	Spec() Specification
+	Spec() Spec
 	Header() http.Header
 
 	internalOnly()
@@ -207,8 +207,8 @@ type HTTPClient interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// Specification is a description of a client call or a handler invocation.
-type Specification struct {
+// Spec is a description of a client call or a handler invocation.
+type Spec struct {
 	StreamType StreamType
 	Procedure  string // for example, "/acme.foo.v1.FooService/Bar"
 	IsClient   bool   // otherwise we're in a handler

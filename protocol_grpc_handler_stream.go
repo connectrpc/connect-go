@@ -23,7 +23,7 @@ import (
 // gives us the request body and response writer at the same time, so we don't
 // need to worry about concurrency.
 func newHandlerStream(
-	spec Specification,
+	spec Spec,
 	web bool,
 	responseWriter http.ResponseWriter,
 	request *http.Request,
@@ -65,7 +65,7 @@ func newHandlerStream(
 }
 
 type handlerSender struct {
-	spec        Specification
+	spec        Spec
 	web         bool
 	marshaler   marshaler
 	protobuf    Codec // for errors
@@ -142,7 +142,7 @@ func (hs *handlerSender) Close(err error) error {
 	return nil
 }
 
-func (hs *handlerSender) Spec() Specification {
+func (hs *handlerSender) Spec() Spec {
 	return hs.spec
 }
 
@@ -161,7 +161,7 @@ func (hs *handlerSender) flush() {
 }
 
 type handlerReceiver struct {
-	spec        Specification
+	spec        Spec
 	unmarshaler unmarshaler
 	request     *http.Request
 }
@@ -199,7 +199,7 @@ func (hr *handlerReceiver) Close() error {
 	return nil
 }
 
-func (hr *handlerReceiver) Spec() Specification {
+func (hr *handlerReceiver) Spec() Spec {
 	return hr.spec
 }
 

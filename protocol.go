@@ -42,10 +42,10 @@ type protocol interface {
 // HandlerParams are the arguments provided to a Protocol's NewHandler
 // method, bundled into a struct to allow backward-compatible argument
 // additions. Protocol implementations should take care to use the supplied
-// Specification rather than constructing their own, since new fields may have
-// been added.
+// Spec rather than constructing their own, since new fields may have been
+// added.
 type protocolHandlerParams struct {
-	Spec             Specification
+	Spec             Spec
 	Codecs           readOnlyCodecs
 	CompressionPools readOnlyCompressionPools
 	CompressMinBytes int
@@ -85,8 +85,8 @@ type protocolHandler interface {
 
 // ClientParams are the arguments provided to a Protocol's NewClient method,
 // bundled into a struct to allow backward-compatible argument additions.
-// Protocol implementations should take care to use the supplied Specification
-// rather than constructing their own, since new fields may have been added.
+// Protocol implementations should take care to use the supplied Spec rather
+// than constructing their own, since new fields may have been added.
 type protocolClientParams struct {
 	CompressionName  string
 	CompressionPools readOnlyCompressionPools
@@ -112,7 +112,7 @@ type protocolClient interface {
 	// been populated by WriteRequestHeader. When constructing a stream for a
 	// unary call, implementations may assume that the Sender's Send and Close
 	// methods return before the Receiver's Receive or Close methods are called.
-	NewStream(context.Context, Specification, http.Header) (Sender, Receiver)
+	NewStream(context.Context, Spec, http.Header) (Sender, Receiver)
 }
 
 // errorTranslatingSender wraps a Sender to ensure that we always return coded
