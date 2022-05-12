@@ -30,13 +30,24 @@ type protocolGRPC struct {
 
 // NewHandler implements protocol, so it must return an interface.
 func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler {
+	bare, prefix := typeDefaultGRPC, typeDefaultGRPCPrefix
+	if g.web {
+		bare, prefix = typeWebGRPC, typeWebGRPCPrefix
+	}
+	contentTypes := make(map[string]struct{})
+	for _, name := range params.Codecs.Names() {
+		contentTypes[prefix+name] = struct{}{}
+	}
+	if params.Codecs.Get(codecNameProto) != nil {
+		contentTypes[bare] = struct{}{}
+	}
 	return &grpcHandler{
 		spec:             params.Spec,
 		web:              g.web,
 		codecs:           params.Codecs,
 		compressionPools: params.CompressionPools,
 		minCompressBytes: params.CompressMinBytes,
-		accept:           acceptPostValue(g.web, params.Codecs),
+		accept:           contentTypes,
 		bufferPool:       params.BufferPool,
 	}
 }
@@ -70,25 +81,26 @@ type grpcHandler struct {
 	codecs           readOnlyCodecs
 	compressionPools readOnlyCompressionPools
 	minCompressBytes int
-	accept           string
+	accept           map[string]struct{}
 	bufferPool       *bufferPool
 }
 
-func (g *grpcHandler) ShouldHandleMethod(method string) bool {
-	return method == http.MethodPost
+func (g *grpcHandler) ContentTypes() map[string]struct{} {
+	return g.accept
 }
 
-func (g *grpcHandler) ShouldHandleContentType(contentType string) bool {
-	codecName := codecFromContentType(g.web, contentType)
-	if codecName == "" {
-		return false // not a gRPC content-type
+func (g *grpcHandler) SetTimeout(request *http.Request) (context.Context, context.CancelFunc, error) {
+	timeout, err := parseTimeout(request.Header.Get("Grpc-Timeout"))
+	if err != nil && !errors.Is(err, errNoTimeout) {
+		// Errors here indicate that the client sent an invalid timeout header, so
+		// the error text is safe to send back.
+		return nil, nil, NewError(CodeInvalidArgument, err)
+	} else if err != nil {
+		// err wraps errNoTimeout, nothing to do.
+		return request.Context(), nil, nil
 	}
-	return g.codecs.Get(codecName) != nil
-}
-
-func (g *grpcHandler) WriteAccept(header http.Header) {
-	addCommaSeparatedHeader(header, "Allow", http.MethodPost)
-	addCommaSeparatedHeader(header, "Accept-Post", g.accept)
+	ctx, cancel := context.WithTimeout(request.Context(), timeout)
+	return ctx, cancel, nil
 }
 
 func (g *grpcHandler) NewStream(
@@ -104,17 +116,6 @@ func (g *grpcHandler) NewStream(
 	// possible). We'll collect any such errors here; once we return, the Handler
 	// will send the error to the client.
 	var failed *Error
-
-	timeout, err := parseTimeout(request.Header.Get("Grpc-Timeout"))
-	if err != nil && !errors.Is(err, errNoTimeout) {
-		// Errors here indicate that the client sent an invalid timeout header, so
-		// the error text is safe to send back.
-		failed = NewError(CodeInvalidArgument, err)
-	} else if err == nil {
-		ctx, cancel := context.WithTimeout(request.Context(), timeout)
-		defer cancel()
-		request = request.WithContext(ctx)
-	} // else err wraps errNoTimeout, nothing to do
 
 	requestCompression := compressionIdentity
 	if msgEncoding := request.Header.Get("Grpc-Encoding"); msgEncoding != "" && msgEncoding != compressionIdentity {

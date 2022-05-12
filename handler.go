@@ -30,6 +30,7 @@ type Handler struct {
 	interceptor      Interceptor
 	implementation   func(context.Context, Sender, Receiver, error /* client-visible */)
 	protocolHandlers []protocolHandler
+	acceptPost       string // Accept-Post header
 }
 
 // NewUnaryHandler constructs a Handler for a request-response procedure.
@@ -101,6 +102,7 @@ func NewUnaryHandler[Req, Res any](
 		interceptor:      nil, // already applied
 		implementation:   implementation,
 		protocolHandlers: protocolHandlers,
+		acceptPost:       sortedAcceptPostValue(protocolHandlers),
 	}
 }
 
@@ -178,31 +180,31 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	// okay if we can't re-use the connection.
 	isBidi := (h.spec.StreamType & StreamTypeBidi) == StreamTypeBidi
 	if isBidi && request.ProtoMajor < 2 {
-		h.failNegotiation(responseWriter, http.StatusHTTPVersionNotSupported)
+		responseWriter.WriteHeader(http.StatusHTTPVersionNotSupported)
 		return
 	}
 
-	methodHandlers := make([]protocolHandler, 0, len(h.protocolHandlers))
-	for _, protocolHandler := range h.protocolHandlers {
-		if protocolHandler.ShouldHandleMethod(request.Method) {
-			methodHandlers = append(methodHandlers, protocolHandler)
-		}
-	}
-	if len(methodHandlers) == 0 {
+	// The gRPC-HTTP2, gRPC-Web, and Connect protocols are all POST-only.
+	if request.Method != http.MethodPost {
 		// grpc-go returns a 500 here, but interoperability with non-gRPC HTTP
 		// clients is better if we return a 405.
-		h.failNegotiation(responseWriter, http.StatusMethodNotAllowed)
+		responseWriter.Header().Set("Allow", http.MethodPost)
+		responseWriter.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
-	// TODO: for GETs, we should parse the Accept header and offer each handler
-	// each content-type.
 	contentType := request.Header.Get("Content-Type")
-	for _, protocolHandler := range methodHandlers {
-		if !protocolHandler.ShouldHandleContentType(contentType) {
+	for _, protocolHandler := range h.protocolHandlers {
+		if _, ok := protocolHandler.ContentTypes()[contentType]; !ok {
 			continue
 		}
-		ctx := request.Context()
+		ctx, cancel, timeoutErr := protocolHandler.SetTimeout(request)
+		if timeoutErr != nil {
+			ctx = request.Context()
+		}
+		if cancel != nil {
+			defer cancel()
+		}
 		if ic := h.interceptor; ic != nil {
 			ctx = ic.WrapStreamContext(ctx)
 		}
@@ -211,11 +213,17 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 		// timeout or an unavailable codec. We'd like those errors to be visible to
 		// the interceptor chain, so we're going to capture them here and pass them
 		// to the implementation.
-		sender, receiver, clientVisibleError := protocolHandler.NewStream(responseWriter, request.WithContext(ctx))
-		// If NewStream errored and the protocol doesn't want the error sent to
-		// the client, sender and/or receiver may be nil. We still want the
-		// error to be seen by interceptors, so we provide no-op Sender and
-		// Receiver implementations.
+		sender, receiver, clientVisibleError := protocolHandler.NewStream(
+			responseWriter,
+			request.WithContext(ctx),
+		)
+		if timeoutErr != nil {
+			clientVisibleError = timeoutErr
+		}
+		// If NewStream or SetTimeout errored and the protocol doesn't want the
+		// error sent to the client, sender and/or receiver may be nil. We still
+		// want the error to be seen by interceptors, so we provide no-op Sender
+		// and Receiver implementations.
 		if clientVisibleError != nil && sender == nil {
 			sender = newNopSender(h.spec, responseWriter.Header(), make(http.Header))
 		}
@@ -230,15 +238,8 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 		h.implementation(ctx, sender, receiver, clientVisibleError)
 		return
 	}
-	h.failNegotiation(responseWriter, http.StatusUnsupportedMediaType)
-}
-
-func (h *Handler) failNegotiation(w http.ResponseWriter, code int) {
-	// None of the registered protocols is able to serve the request.
-	for _, ph := range h.protocolHandlers {
-		ph.WriteAccept(w.Header())
-	}
-	w.WriteHeader(code)
+	responseWriter.Header().Set("Accept-Post", h.acceptPost)
+	responseWriter.WriteHeader(http.StatusUnsupportedMediaType)
 }
 
 type handlerConfig struct {
@@ -308,6 +309,7 @@ func newStreamHandler(
 	options ...HandlerOption,
 ) *Handler {
 	config := newHandlerConfig(procedure, options)
+	protocolHandlers := config.newProtocolHandlers(streamType)
 	return &Handler{
 		spec:        config.newSpec(streamType),
 		interceptor: config.Interceptor,
@@ -319,6 +321,7 @@ func newStreamHandler(
 			}
 			implementation(ctx, sender, receiver)
 		},
-		protocolHandlers: config.newProtocolHandlers(streamType),
+		protocolHandlers: protocolHandlers,
+		acceptPost:       sortedAcceptPostValue(protocolHandlers),
 	}
 }

@@ -16,7 +16,10 @@ package connect
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"sort"
+	"strings"
 )
 
 // A Protocol defines the HTTP semantics to use when sending and receiving
@@ -55,18 +58,17 @@ type protocolHandlerParams struct {
 // Handler is the server side of a protocol. HTTP handlers typically support
 // multiple protocols, codecs, and compressors.
 type protocolHandler interface {
-	// ShouldHandleMethod and ShouldHandleContentType check whether the protocol
-	// can serve requests with a given HTTP method and Content-Type. NewStream
-	// may assume that any checks in ShouldHandleMethod and
-	// ShouldHandleContentType have passed.
-	ShouldHandleMethod(string) bool
-	ShouldHandleContentType(string) bool
+	// ContentTypes is the set of HTTP Content-Types that the protocol can
+	// handle.
+	ContentTypes() map[string]struct{}
 
-	// If no protocol can serve a request, each protocol's WriteAccept method has
-	// a chance to write to the response headers. Protocols should write their
-	// supported HTTP methods to the Allow header, and they may write their
-	// supported content-types to the Accept-Post or Accept-Patch headers.
-	WriteAccept(http.Header)
+	// ParseTimeout runs before NewStream. Implementations may inspect the HTTP
+	// request, parse any timeout set by the client, and return a modified
+	// context and cancellation function.
+	//
+	// If the client didn't send a timeout, SetTimeout should return the
+	// request's context, a nil cancellation function, and a nil error.
+	SetTimeout(*http.Request) (context.Context, context.CancelFunc, error)
 
 	// NewStream constructs a Sender and Receiver for the message exchange.
 	//
@@ -154,4 +156,40 @@ func (r *errorTranslatingReceiver) Receive(msg any) error {
 
 func (r *errorTranslatingReceiver) Close() error {
 	return r.fromWire(r.Receiver.Close())
+}
+
+func sortedAcceptPostValue(handlers []protocolHandler) string {
+	var max int
+	for _, handler := range handlers {
+		max += len(handler.ContentTypes())
+	}
+	seen := make(map[string]struct{}, max)
+	accept := make([]string, 0, max)
+	for _, handler := range handlers {
+		for contentType := range handler.ContentTypes() {
+			if _, ok := seen[contentType]; ok {
+				continue
+			}
+			seen[contentType] = struct{}{}
+			accept = append(accept, contentType)
+		}
+	}
+	sort.Strings(accept)
+	return strings.Join(accept, ", ")
+}
+
+func isCommaOrSpace(c rune) bool {
+	return c == ',' || c == ' '
+}
+
+func discard(reader io.Reader) error {
+	if lr, ok := reader.(*io.LimitedReader); ok {
+		_, err := io.Copy(io.Discard, lr)
+		return err
+	}
+	// We don't want to get stuck throwing data away forever, so limit how much
+	// we're willing to do here: at most, we'll copy 4 MiB.
+	lr := &io.LimitedReader{R: reader, N: 1024 * 1024 * 4}
+	_, err := io.Copy(io.Discard, lr)
+	return err
 }

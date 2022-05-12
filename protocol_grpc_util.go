@@ -16,7 +16,6 @@ package connect
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -43,25 +42,6 @@ const (
 //   User-Agent → "grpc-" Language ?("-" Variant) "/" Version ?( " ("  *(AdditionalProperty ";") ")" )
 func userAgent() string {
 	return fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())
-}
-
-func isCommaOrSpace(c rune) bool {
-	return c == ',' || c == ' '
-}
-
-func acceptPostValue(web bool, codecs readOnlyCodecs) string {
-	bare, prefix := typeDefaultGRPC, typeDefaultGRPCPrefix
-	if web {
-		bare, prefix = typeWebGRPC, typeWebGRPCPrefix
-	}
-	names := codecs.Names()
-	for i, name := range names {
-		names[i] = prefix + name
-	}
-	if codecs.Get(codecNameProto) != nil {
-		names = append(names, bare)
-	}
-	return strings.Join(names, ",")
 }
 
 func codecFromContentType(web bool, contentType string) string {
@@ -157,16 +137,4 @@ func statusFromError(err error) (*statusv1.Status, error) {
 		}
 	}
 	return status, nil
-}
-
-func discard(reader io.Reader) error {
-	if lr, ok := reader.(*io.LimitedReader); ok {
-		_, err := io.Copy(io.Discard, lr)
-		return err
-	}
-	// We don't want to get stuck throwing data away forever, so limit how much
-	// we're willing to do here: at most, we'll copy 4 MiB.
-	lr := &io.LimitedReader{R: reader, N: 1024 * 1024 * 4}
-	_, err := io.Copy(io.Discard, lr)
-	return err
 }

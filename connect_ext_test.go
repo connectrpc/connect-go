@@ -373,7 +373,6 @@ func TestHeaderBasic(t *testing.T) {
 }
 
 func TestTimeoutParsing(t *testing.T) {
-	t.Skip("TODO: timeouts aren't propagated into user code")
 	t.Parallel()
 	const timeout = 10 * time.Minute
 	pingServer := &pluggablePingServer{
