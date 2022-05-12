@@ -59,7 +59,17 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, response.Header().Get(handlerHeader), headerValue)
 			assert.Equal(t, response.Trailer().Get(handlerTrailer), trailerValue)
 		})
-		t.Run("large ping", func(t *testing.T) {
+		t.Run("zero_ping", func(t *testing.T) {
+			request := connect.NewRequest(&pingv1.PingRequest{})
+			request.Header().Set(clientHeader, headerValue)
+			response, err := client.Ping(context.Background(), request)
+			assert.Nil(t, err)
+			var expect pingv1.PingResponse
+			assert.Equal(t, response.Msg, &expect)
+			assert.Equal(t, response.Header().Get(handlerHeader), headerValue)
+			assert.Equal(t, response.Trailer().Get(handlerTrailer), trailerValue)
+		})
+		t.Run("large_ping", func(t *testing.T) {
 			// Using a large payload splits the request and response over multiple
 			// packets, ensuring that we're managing HTTP readers and writers
 			// correctly.
