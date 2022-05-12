@@ -75,7 +75,7 @@ type duplexClientStream struct {
 	// the first call to Send.
 	prepareOnce sync.Once
 	writer      *io.PipeWriter
-	marshaler   marshaler
+	marshaler   grpcMarshaler
 	header      http.Header
 	trailer     http.Header
 
@@ -86,7 +86,7 @@ type duplexClientStream struct {
 	responseHeader   http.Header
 	responseTrailer  http.Header
 	responseReady    chan struct{}
-	unmarshaler      unmarshaler
+	unmarshaler      grpcUnmarshaler
 	compressionPools readOnlyCompressionPools
 	bufferPool       *bufferPool
 
@@ -183,7 +183,7 @@ func (cs *duplexClientStream) Receive(message any) error {
 		// trailers. First, we need to read the body to EOF.
 		_ = discard(cs.response.Body)
 		mergeHeaders(cs.responseTrailer, cs.response.Trailer)
-		if errors.Is(err, errGotWebTrailers) {
+		if errors.Is(err, errSpecialEnvelope) {
 			mergeHeaders(cs.responseTrailer, cs.unmarshaler.WebTrailer())
 		}
 		if serverErr := extractError(cs.bufferPool, cs.protobuf, cs.responseTrailer); serverErr != nil {
@@ -343,12 +343,14 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	// probably a message waiting in the stream.
 	cs.response = response
 	mergeHeaders(cs.responseHeader, response.Header)
-	cs.unmarshaler = unmarshaler{
-		reader:          response.Body,
-		codec:           cs.codec,
-		compressionPool: cs.compressionPools.Get(compression),
-		web:             cs.web,
-		bufferPool:      cs.bufferPool,
+	cs.unmarshaler = grpcUnmarshaler{
+		envelopeReader: envelopeReader{
+			reader:          response.Body,
+			codec:           cs.codec,
+			compressionPool: cs.compressionPools.Get(compression),
+			bufferPool:      cs.bufferPool,
+		},
+		web: cs.web,
 	}
 }
 

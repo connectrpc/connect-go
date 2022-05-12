@@ -262,12 +262,14 @@ func (g *grpcClient) NewStream(
 		codec:      g.codec,
 		protobuf:   g.protobuf,
 		writer:     pipeWriter,
-		marshaler: marshaler{
-			writer:           pipeWriter,
-			compressionPool:  g.compressionPools.Get(g.compressionName),
-			codec:            g.codec,
-			compressMinBytes: g.minCompressBytes,
-			bufferPool:       g.bufferPool,
+		marshaler: grpcMarshaler{
+			envelopeWriter: envelopeWriter{
+				writer:           pipeWriter,
+				compressionPool:  g.compressionPools.Get(g.compressionName),
+				codec:            g.codec,
+				compressMinBytes: g.minCompressBytes,
+				bufferPool:       g.bufferPool,
+			},
 		},
 		header:           header,
 		trailer:          make(http.Header),

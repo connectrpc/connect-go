@@ -37,12 +37,14 @@ func newHandlerStream(
 	sender := &handlerSender{
 		spec: spec,
 		web:  web,
-		marshaler: marshaler{
-			writer:           responseWriter,
-			compressionPool:  responseCompressionPools,
-			codec:            codec,
-			compressMinBytes: compressMinBytes,
-			bufferPool:       bufferPool,
+		marshaler: grpcMarshaler{
+			envelopeWriter: envelopeWriter{
+				writer:           responseWriter,
+				compressionPool:  responseCompressionPools,
+				codec:            codec,
+				compressMinBytes: compressMinBytes,
+				bufferPool:       bufferPool,
+			},
 		},
 		protobuf:   protobuf,
 		writer:     responseWriter,
@@ -52,12 +54,14 @@ func newHandlerStream(
 	}
 	receiver := &handlerReceiver{
 		spec: spec,
-		unmarshaler: unmarshaler{
-			web:             web,
-			reader:          request.Body,
-			compressionPool: requestCompressionPools,
-			codec:           codec,
-			bufferPool:      bufferPool,
+		unmarshaler: grpcUnmarshaler{
+			envelopeReader: envelopeReader{
+				reader:          request.Body,
+				codec:           codec,
+				compressionPool: requestCompressionPools,
+				bufferPool:      bufferPool,
+			},
+			web: web,
 		},
 		request: request,
 	}
@@ -67,7 +71,7 @@ func newHandlerStream(
 type handlerSender struct {
 	spec        Spec
 	web         bool
-	marshaler   marshaler
+	marshaler   grpcMarshaler
 	protobuf    Codec // for errors
 	writer      http.ResponseWriter
 	header      http.Header
@@ -162,7 +166,7 @@ func (hs *handlerSender) flush() {
 
 type handlerReceiver struct {
 	spec        Spec
-	unmarshaler unmarshaler
+	unmarshaler grpcUnmarshaler
 	request     *http.Request
 }
 
@@ -170,7 +174,7 @@ var _ Receiver = (*handlerReceiver)(nil)
 
 func (hr *handlerReceiver) Receive(message any) error {
 	if err := hr.unmarshaler.Unmarshal(message); err != nil {
-		if errors.Is(err, errGotWebTrailers) {
+		if errors.Is(err, errSpecialEnvelope) {
 			if hr.request.Trailer == nil {
 				hr.request.Trailer = hr.unmarshaler.WebTrailer()
 			} else {
