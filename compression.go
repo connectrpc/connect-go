@@ -15,6 +15,7 @@
 package connect
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"strings"
@@ -73,7 +74,37 @@ func newCompressionPool(
 	}
 }
 
-func (c *compressionPool) GetDecompressor(reader io.Reader) (Decompressor, error) {
+func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer) *Error {
+	decompressor, err := c.getDecompressor(src)
+	if err != nil {
+		return errorf(CodeInvalidArgument, "get decompressor: %w", err)
+	}
+	if _, err := dst.ReadFrom(decompressor); err != nil {
+		_ = c.putDecompressor(decompressor)
+		return errorf(CodeInvalidArgument, "decompress: %w", err)
+	}
+	if err := c.putDecompressor(decompressor); err != nil {
+		return errorf(CodeUnknown, "recycle decompressor: %w", err)
+	}
+	return nil
+}
+
+func (c *compressionPool) Compress(dst *bytes.Buffer, src *bytes.Buffer) *Error {
+	compressor, err := c.getCompressor(dst)
+	if err != nil {
+		return errorf(CodeUnknown, "get compressor: %w", err)
+	}
+	if _, err := io.Copy(compressor, src); err != nil {
+		_ = c.putCompressor(compressor)
+		return errorf(CodeInternal, "compress: %w", err)
+	}
+	if err := c.putCompressor(compressor); err != nil {
+		return errorf(CodeInternal, "recycle compressor: %w", err)
+	}
+	return nil
+}
+
+func (c *compressionPool) getDecompressor(reader io.Reader) (Decompressor, error) {
 	decompressor, ok := c.decompressors.Get().(Decompressor)
 	if !ok {
 		return nil, errors.New("expected Decompressor, got incorrect type from pool")
@@ -81,7 +112,7 @@ func (c *compressionPool) GetDecompressor(reader io.Reader) (Decompressor, error
 	return decompressor, decompressor.Reset(reader)
 }
 
-func (c *compressionPool) PutDecompressor(decompressor Decompressor) error {
+func (c *compressionPool) putDecompressor(decompressor Decompressor) error {
 	if err := decompressor.Close(); err != nil {
 		return err
 	}
@@ -96,7 +127,7 @@ func (c *compressionPool) PutDecompressor(decompressor Decompressor) error {
 	return nil
 }
 
-func (c *compressionPool) GetCompressor(writer io.Writer) (Compressor, error) {
+func (c *compressionPool) getCompressor(writer io.Writer) (Compressor, error) {
 	compressor, ok := c.compressors.Get().(Compressor)
 	if !ok {
 		return nil, errors.New("expected Compressor, got incorrect type from pool")
@@ -105,7 +136,7 @@ func (c *compressionPool) GetCompressor(writer io.Writer) (Compressor, error) {
 	return compressor, nil
 }
 
-func (c *compressionPool) PutCompressor(compressor Compressor) error {
+func (c *compressionPool) putCompressor(compressor Compressor) error {
 	if err := compressor.Close(); err != nil {
 		return err
 	}

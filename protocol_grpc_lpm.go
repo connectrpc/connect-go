@@ -16,266 +16,68 @@ package connect
 
 import (
 	"bufio"
-	"bytes"
-	"encoding/binary"
 	"errors"
-	"io"
 	"net/http"
 	"net/textproto"
 )
 
-const (
-	flagLPMCompressed = 0b00000001
-	flagLPMTrailer    = 0b10000000
-)
+const flagLPMTrailer = 0b10000000
 
-var errGotWebTrailers = errorf(
-	CodeUnknown,
-	"end of message stream, next block of data is gRPC-Web trailers: %w",
-	// User code checks for end of stream with errors.Is(err, io.EOF).
-	io.EOF,
-)
-
-type marshaler struct {
-	writer           io.Writer
-	compressionPool  *compressionPool
-	codec            Codec
-	compressMinBytes int
-	bufferPool       *bufferPool
+type grpcMarshaler struct {
+	envelopeWriter
 }
 
-func (m *marshaler) Marshal(message any) *Error {
-	raw, err := m.codec.Marshal(message)
-	if err != nil {
-		return errorf(CodeInternal, "couldn't marshal message: %w", err)
-	}
-	// We can't avoid allocating the byte slice, so we may as well reuse it once
-	// we're done with it.
-	buffer := bytes.NewBuffer(raw)
-	defer m.bufferPool.Put(buffer)
-	return m.writeLPM(false /* trailer */, buffer)
-}
-
-func (m *marshaler) MarshalWebTrailers(trailer http.Header) *Error {
-	raw := m.bufferPool.Get()
-	defer m.bufferPool.Put(raw)
+func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *Error {
+	raw := m.envelopeWriter.bufferPool.Get()
+	defer m.envelopeWriter.bufferPool.Put(raw)
 	if err := trailer.Write(raw); err != nil {
-		return errorf(CodeInternal, "couldn't format trailers: %w", err)
+		return errorf(CodeInternal, "format trailers: %w", err)
 	}
-	return m.writeLPM(true /* trailer */, raw)
+	return m.Write(&envelope{
+		Data:  raw,
+		Flags: flagLPMTrailer,
+	})
 }
 
-// writeLPM writes the message as a gRPC length-prefixed message, compressing
-// as necessary. It doesn't retain any references to the supplied buffer or
-// its underlying data.
-func (m *marshaler) writeLPM(trailer bool, message *bytes.Buffer) *Error {
-	if m.compressionPool == nil || message.Len() < m.compressMinBytes {
-		if err := m.writeGRPCPrefix(false /* compressed */, trailer, message.Len()); err != nil {
-			return err // already enriched
-		}
-		if _, err := io.Copy(m.writer, message); err != nil {
-			return errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
-		}
+type grpcUnmarshaler struct {
+	envelopeReader envelopeReader
+	web            bool
+	webTrailer     http.Header
+}
+
+func (u *grpcUnmarshaler) Unmarshal(message any) *Error {
+	err := u.envelopeReader.Unmarshal(message)
+	if err == nil {
 		return nil
 	}
-	data := m.bufferPool.Get()
-	defer m.bufferPool.Put(data)
-	compressor, err := m.compressionPool.GetCompressor(data)
-	if err != nil {
-		return errorf(CodeUnknown, "get compressor: %w", err)
+	if !errors.Is(err, errSpecialEnvelope) {
+		return err
+	}
+	env := u.envelopeReader.last
+	if !u.web || !env.IsSet(flagLPMTrailer) {
+		return errorf(CodeUnknown, "protocol error: invalid envelope flags %d", env.Flags)
 	}
 
-	if _, err := io.Copy(compressor, message); err != nil { // returns uncompressed size, which isn't useful
-		_ = m.compressionPool.PutCompressor(compressor)
-		return errorf(CodeInternal, "couldn't compress data: %w", err)
+	// Per the gRPC-Web specification, trailers should be encoded as an HTTP/1
+	// headers block _without_ the terminating newline. To make the headers
+	// parseable by net/textproto, we need to add the newline.
+	if err := env.Data.WriteByte('\n'); err != nil {
+		return errorf(CodeUnknown, "unmarshal web trailers: %w", err)
 	}
-	if err := m.compressionPool.PutCompressor(compressor); err != nil {
-		return errorf(CodeInternal, "couldn't close compressor: %w", err)
-	}
-	if err := m.writeGRPCPrefix(true /* compressed */, trailer, data.Len()); err != nil {
-		return err // already enriched
-	}
-	if _, err := io.Copy(m.writer, data); err != nil {
-		if connectErr, ok := asError(err); ok {
-			return connectErr
-		}
-		return errorf(CodeUnknown, "couldn't write message of length-prefixed message: %w", err)
-	}
-	return nil
-}
-
-func (m *marshaler) writeGRPCPrefix(compressed, trailer bool, size int) *Error {
-	prefixes := [5]byte{}
-	// The first byte of the prefix is a set of bitwise flags. The least
-	// significant bit indicates that the message is compressed, and the most
-	// significant bit indicates that it's a block of gRPC-Web trailers.
-	if compressed {
-		prefixes[0] = flagLPMCompressed
-	}
-	if trailer {
-		prefixes[0] |= flagLPMTrailer
-	}
-	binary.BigEndian.PutUint32(prefixes[1:5], uint32(size))
-	if _, err := m.writer.Write(prefixes[:]); err != nil {
-		if connectErr, ok := asError(err); ok {
-			return connectErr
-		}
-		return errorf(CodeUnknown, "couldn't write prefix of length-prefixed message: %w", err)
-	}
-	return nil
-}
-
-type unmarshaler struct {
-	reader          io.Reader
-	codec           Codec
-	compressionPool *compressionPool
-	bufferPool      *bufferPool
-	web             bool
-	webTrailer      http.Header
-}
-
-func (u *unmarshaler) Unmarshal(message any) (retErr *Error) {
-	// Each length-prefixed message starts with 5 bytes of metadata: a one-byte
-	// unsigned integer used as a set of bitwise flags, and a four-byte unsigned
-	// integer indicating the message length.
-	prefixes := make([]byte, 5)
-	prefixBytesRead, err := u.reader.Read(prefixes)
-	switch {
-	case (err == nil || errors.Is(err, io.EOF)) &&
-		prefixBytesRead == 5 &&
-		(prefixes[0]&flagLPMTrailer != flagLPMTrailer) &&
-		isSizeZeroPrefix(prefixes):
-		// Successfully read prefix, LPM isn't a trailers block, and expect no
-		// additional data, so there's nothing left to do - the zero value of the
-		// msg is correct.
-		return nil
-	case err != nil && errors.Is(err, io.EOF) && prefixBytesRead == 0:
-		// The stream ended cleanly. That's expected, but we need to propagate them
-		// to the user so that they know that the stream has ended. We shouldn't
-		// add any alarming text about protocol errors, though.
-		return NewError(CodeUnknown, err)
-	case err != nil || prefixBytesRead < 5:
-		// Something else has gone wrong - the stream didn't end cleanly.
+	bufferedReader := bufio.NewReader(env.Data)
+	mimeReader := textproto.NewReader(bufferedReader)
+	mimeHeader, mimeErr := mimeReader.ReadMIMEHeader()
+	if mimeErr != nil {
 		return errorf(
 			CodeInvalidArgument,
-			"gRPC protocol error: incomplete length-prefixed message prefix: %w", err,
+			"gRPC-Web protocol error: received invalid trailers: %w",
+			mimeErr,
 		)
 	}
-
-	// The first byte of the prefix is a set of bitwise flags.
-	flags := prefixes[0]
-	// The least significant bit is the flag for compression.
-	compressed := (flags&flagLPMCompressed == flagLPMCompressed)
-	// The most significant bit is the flag for gRPC-Web trailers.
-	isWebTrailer := u.web && (flags&flagLPMTrailer == flagLPMTrailer)
-	// We could check to make sure that the remaining bits are zero, but any
-	// non-zero bits are likely flags from a future protocol revision. In a sane
-	// world, any new flags would be backward-compatible and safe to ignore.
-	// Let's be optimistic!
-
-	size := int(binary.BigEndian.Uint32(prefixes[1:5]))
-	if size < 0 {
-		return errorf(CodeInvalidArgument, "message size %d overflowed uint32", size)
-	}
-	rawBuffer := u.bufferPool.Get()
-	defer u.bufferPool.Put(rawBuffer)
-	rawBuffer.Grow(size)
-	raw := rawBuffer.Bytes()[0:size]
-	// We're careful to read fill this slice, but zero'ing it is a nice extra
-	// layer of safety.
-	// Do not change zero'ing mechanism: this form is specially recognized
-	// by the compiler per https://golang.org/cl/137880043.
-	for i := range raw {
-		raw[i] = 0
-	}
-	if size > 0 {
-		// At layer 7, we don't know exactly what's happening down in L4. Large
-		// length-prefixed messages may arrive in chunks, so we may need to read
-		// the request body past EOF. We also need to take care that we don't retry
-		// forever if the LPM is malformed.
-		remaining := size
-		for remaining > 0 {
-			bytesRead, err := u.reader.Read(raw[size-remaining : size])
-			if err != nil && !errors.Is(err, io.EOF) {
-				return errorf(CodeUnknown, "error reading length-prefixed message data: %w", err)
-			}
-			if errors.Is(err, io.EOF) && bytesRead == 0 {
-				// We've gotten zero-length chunk of data. Message is likely malformed,
-				// don't wait for additional chunks.
-				return errorf(
-					CodeInvalidArgument,
-					"gRPC protocol error: promised %d bytes in length-prefixed message, got %d bytes",
-					size,
-					size-remaining,
-				)
-			}
-			remaining -= bytesRead
-		}
-	}
-
-	if compressed && u.compressionPool == nil {
-		return errorf(
-			CodeInvalidArgument,
-			"gRPC protocol error: sent compressed message without Grpc-Encoding header",
-		)
-	}
-
-	if size > 0 && compressed {
-		decompressor, err := u.compressionPool.GetDecompressor(bytes.NewReader(raw))
-		if err != nil {
-			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
-		}
-		decompressed := u.bufferPool.Get()
-		defer u.bufferPool.Put(decompressed)
-		if _, err := decompressed.ReadFrom(decompressor); err != nil {
-			_ = u.compressionPool.PutDecompressor(decompressor)
-			return errorf(CodeInvalidArgument, "can't decompress: %w", err)
-		}
-		if err := u.compressionPool.PutDecompressor(decompressor); err != nil {
-			return errorf(CodeUnknown, "recycle decompressor: %w", err)
-		}
-		raw = decompressed.Bytes()
-	}
-
-	if isWebTrailer {
-		// Per the gRPC-Web specification, trailers should be encoded as an HTTP/1
-		// headers block _without_ the terminating newline. To make the headers
-		// parseable by net/textproto, we need to add the newline.
-		raw = append(raw, '\n')
-		bufferedReader := bufio.NewReader(bytes.NewReader(raw))
-		mimeReader := textproto.NewReader(bufferedReader)
-		mimeHeader, err := mimeReader.ReadMIMEHeader()
-		if err != nil {
-			return errorf(
-				CodeInvalidArgument,
-				"gRPC-Web protocol error: received invalid trailers %q: %w",
-				string(raw),
-				err,
-			)
-		}
-		u.webTrailer = http.Header(mimeHeader)
-		return errGotWebTrailers
-	}
-
-	if err := u.codec.Unmarshal(raw, message); err != nil {
-		return errorf(CodeInvalidArgument, "can't unmarshal into %T: %w", message, err)
-	}
-
-	return nil
+	u.webTrailer = http.Header(mimeHeader)
+	return errSpecialEnvelope
 }
 
-func (u *unmarshaler) WebTrailer() http.Header {
+func (u *grpcUnmarshaler) WebTrailer() http.Header {
 	return u.webTrailer
-}
-
-func isSizeZeroPrefix(prefix []byte) bool {
-	if len(prefix) != 5 {
-		return false
-	}
-	for i := 1; i < 5; i++ {
-		if prefix[i] != 0 {
-			return false
-		}
-	}
-	return true
 }

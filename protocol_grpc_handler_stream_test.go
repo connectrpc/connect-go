@@ -31,10 +31,12 @@ func TestGRPCHandlerSender(t *testing.T) {
 		bufferPool := newBufferPool()
 		return &handlerSender{
 			web: web,
-			marshaler: marshaler{
-				writer:     responseWriter,
-				codec:      protobufCodec,
-				bufferPool: bufferPool,
+			marshaler: grpcMarshaler{
+				envelopeWriter: envelopeWriter{
+					writer:     responseWriter,
+					codec:      protobufCodec,
+					bufferPool: bufferPool,
+				},
 			},
 			protobuf:   protobufCodec,
 			writer:     responseWriter,
