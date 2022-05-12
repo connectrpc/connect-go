@@ -21,7 +21,6 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
-	"time"
 
 	statusv1 "connectrpc.com/connect/internal/gen/go/connectext/grpc/status/v1"
 )
@@ -248,14 +247,6 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	// This runs concurrently with Send and CloseSend. Receive and CloseReceive
 	// wait on cs.responseReady, so we can't race with them.
 	defer close(cs.responseReady)
-
-	if deadline, ok := cs.ctx.Deadline(); ok {
-		if encodedDeadline, err := encodeTimeout(time.Until(deadline)); err == nil {
-			// Tests verify that the error in encodeTimeout is unreachable, so we
-			// should be safe without observability for the error case.
-			cs.header["Grpc-Timeout"] = []string{encodedDeadline}
-		}
-	}
 
 	request, err := http.NewRequestWithContext(cs.ctx, http.MethodPost, cs.url, cs.reader)
 	if err != nil {

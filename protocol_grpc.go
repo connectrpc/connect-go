@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 type protocolGRPC struct {
@@ -242,6 +243,13 @@ func (g *grpcClient) NewStream(
 	spec Spec,
 	header http.Header,
 ) (Sender, Receiver) {
+	if deadline, ok := ctx.Deadline(); ok {
+		if encodedDeadline, err := encodeTimeout(time.Until(deadline)); err == nil {
+			// Tests verify that the error in encodeTimeout is unreachable, so we
+			// should be safe without observability for the error case.
+			header["Grpc-Timeout"] = []string{encodedDeadline}
+		}
+	}
 	// In a typical HTTP/1.1 request, we'd put the body into a bytes.Buffer, hand
 	// the buffer to http.NewRequest, and fire off the request with
 	// httpClient.Do. That won't work here because we're establishing a stream -
