@@ -22,6 +22,8 @@ import (
 	"strings"
 )
 
+const discardLimit = 1024 * 1024 * 4 // 4MiB
+
 // A Protocol defines the HTTP semantics to use when sending and receiving
 // messages. It ties together codecs, compressors, and net/http to produce
 // Senders and Receivers.
@@ -183,8 +185,8 @@ func discard(reader io.Reader) error {
 		return err
 	}
 	// We don't want to get stuck throwing data away forever, so limit how much
-	// we're willing to do here: at most, we'll copy 4 MiB.
-	lr := &io.LimitedReader{R: reader, N: 1024 * 1024 * 4}
+	// we're willing to do here.
+	lr := &io.LimitedReader{R: reader, N: discardLimit}
 	_, err := io.Copy(io.Discard, lr)
 	return err
 }
