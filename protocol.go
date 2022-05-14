@@ -159,20 +159,15 @@ func (r *errorTranslatingReceiver) Close() error {
 }
 
 func sortedAcceptPostValue(handlers []protocolHandler) string {
-	var max int
-	for _, handler := range handlers {
-		max += len(handler.ContentTypes())
-	}
-	seen := make(map[string]struct{}, max)
-	accept := make([]string, 0, max)
+	contentTypes := make(map[string]struct{})
 	for _, handler := range handlers {
 		for contentType := range handler.ContentTypes() {
-			if _, ok := seen[contentType]; ok {
-				continue
-			}
-			seen[contentType] = struct{}{}
-			accept = append(accept, contentType)
+			contentTypes[contentType] = struct{}{}
 		}
+	}
+	accept := make([]string, 0, len(contentTypes))
+	for ct := range contentTypes {
+		accept = append(accept, ct)
 	}
 	sort.Strings(accept)
 	return strings.Join(accept, ", ")
