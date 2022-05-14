@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
@@ -59,7 +60,17 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, response.Header().Get(handlerHeader), headerValue)
 			assert.Equal(t, response.Trailer().Get(handlerTrailer), trailerValue)
 		})
-		t.Run("large ping", func(t *testing.T) {
+		t.Run("zero_ping", func(t *testing.T) {
+			request := connect.NewRequest(&pingv1.PingRequest{})
+			request.Header().Set(clientHeader, headerValue)
+			response, err := client.Ping(context.Background(), request)
+			assert.Nil(t, err)
+			var expect pingv1.PingResponse
+			assert.Equal(t, response.Msg, &expect)
+			assert.Equal(t, response.Header().Get(handlerHeader), headerValue)
+			assert.Equal(t, response.Trailer().Get(handlerTrailer), trailerValue)
+		})
+		t.Run("large_ping", func(t *testing.T) {
 			// Using a large payload splits the request and response over multiple
 			// packets, ensuring that we're managing HTTP readers and writers
 			// correctly.
@@ -359,6 +370,31 @@ func TestHeaderBasic(t *testing.T) {
 	response, err := client.Ping(context.Background(), request)
 	assert.Nil(t, err)
 	assert.Equal(t, response.Header().Get(key), hval)
+}
+
+func TestTimeoutParsing(t *testing.T) {
+	t.Parallel()
+	const timeout = 10 * time.Minute
+	pingServer := &pluggablePingServer{
+		ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+			deadline, ok := ctx.Deadline()
+			assert.True(t, ok)
+			remaining := time.Until(deadline)
+			assert.True(t, remaining > 0)
+			assert.True(t, remaining <= timeout)
+			return connect.NewResponse(&pingv1.PingResponse{}), nil
+		},
+	}
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPC())
+	_, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
+	assert.Nil(t, err)
 }
 
 func TestMarshalStatusError(t *testing.T) {
