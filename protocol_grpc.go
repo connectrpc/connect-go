@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -33,7 +34,32 @@ import (
 const (
 	grpcHeaderCompression   = "Grpc-Encoding"
 	grpcFlagEnvelopeTrailer = 0b10000000
+	// gRPC's timeout microformat is oddly complex.
+	grpcTimeoutMaxHours = math.MaxInt64 / int64(time.Hour) // how many hours fit into a time.Duration?
+	grpcMaxTimeoutChars = 8                                // from gRPC protocol
 )
+
+var (
+	errNoTimeout     = errors.New("no timeout")
+	grpcTimeoutUnits = []struct {
+		size time.Duration
+		char byte
+	}{
+		{time.Nanosecond, 'n'},
+		{time.Microsecond, 'u'},
+		{time.Millisecond, 'm'},
+		{time.Second, 'S'},
+		{time.Minute, 'M'},
+		{time.Hour, 'H'},
+	}
+	grpcTimeoutUnitLookup = make(map[byte]time.Duration)
+)
+
+func init() {
+	for _, pair := range grpcTimeoutUnits {
+		grpcTimeoutUnitLookup[pair.char] = pair.size
+	}
+}
 
 type protocolGRPC struct {
 	web bool
@@ -87,7 +113,7 @@ func (g *grpcHandler) ContentTypes() map[string]struct{} {
 }
 
 func (g *grpcHandler) SetTimeout(request *http.Request) (context.Context, context.CancelFunc, error) {
-	timeout, err := parseTimeout(request.Header.Get("Grpc-Timeout"))
+	timeout, err := grpcParseTimeout(request.Header.Get("Grpc-Timeout"))
 	if err != nil && !errors.Is(err, errNoTimeout) {
 		// Errors here indicate that the client sent an invalid timeout header, so
 		// the error text is safe to send back.
@@ -233,7 +259,7 @@ func (g *grpcClient) NewStream(
 	header http.Header,
 ) (Sender, Receiver) {
 	if deadline, ok := ctx.Deadline(); ok {
-		if encodedDeadline, err := encodeTimeout(time.Until(deadline)); err == nil {
+		if encodedDeadline, err := grpcEncodeTimeout(time.Until(deadline)); err == nil {
 			// Tests verify that the error in encodeTimeout is unreachable, so we
 			// should be safe without observability for the error case.
 			header["Grpc-Timeout"] = []string{encodedDeadline}
@@ -897,4 +923,42 @@ func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.H
 	}
 
 	return retErr
+}
+
+func grpcParseTimeout(timeout string) (time.Duration, error) {
+	if timeout == "" {
+		return 0, errNoTimeout
+	}
+	unit, ok := grpcTimeoutUnitLookup[timeout[len(timeout)-1]]
+	if !ok {
+		return 0, fmt.Errorf("gRPC protocol error: timeout %q has invalid unit", timeout)
+	}
+	num, err := strconv.ParseInt(timeout[:len(timeout)-1], 10 /* base */, 64 /* bitsize */)
+	if err != nil || num < 0 {
+		return 0, fmt.Errorf("gRPC protocol error: invalid timeout %q", timeout)
+	}
+	if num > 99999999 { // timeout must be ASCII string of at most 8 digits
+		return 0, fmt.Errorf("gRPC protocol error: timeout %q is too long", timeout)
+	}
+	if unit == time.Hour && num > grpcTimeoutMaxHours {
+		// Timeout is effectively unbounded, so ignore it. The grpc-go
+		// implementation does the same thing.
+		return 0, errNoTimeout
+	}
+	return time.Duration(num) * unit, nil
+}
+
+func grpcEncodeTimeout(timeout time.Duration) (string, error) {
+	if timeout <= 0 {
+		return "0n", nil
+	}
+	for _, pair := range grpcTimeoutUnits {
+		digits := strconv.FormatInt(int64(timeout/pair.size), 10 /* base */)
+		if len(digits) < grpcMaxTimeoutChars {
+			return digits + string(pair.char), nil
+		}
+	}
+	// The max time.Duration is smaller than the maximum expressible gRPC
+	// timeout, so we shouldn't ever reach this case.
+	return "", errNoTimeout
 }
