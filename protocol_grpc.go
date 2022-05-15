@@ -24,23 +24,29 @@ import (
 	"net/http"
 	"net/textproto"
 	"net/url"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	statusv1 "connectrpc.com/connect/internal/gen/go/connectext/grpc/status/v1"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 const (
 	grpcHeaderCompression   = "Grpc-Encoding"
 	grpcFlagEnvelopeTrailer = 0b10000000
-	// gRPC's timeout microformat is oddly complex.
+
 	grpcTimeoutMaxHours = math.MaxInt64 / int64(time.Hour) // how many hours fit into a time.Duration?
 	grpcMaxTimeoutChars = 8                                // from gRPC protocol
+
+	grpcContentTypeDefault    = "application/grpc"
+	grpcWebContentTypeDefault = "application/grpc-web"
+	grpcContentTypePrefix     = grpcContentTypeDefault + "+"
+	grpcWebContentTypePrefix  = grpcWebContentTypeDefault + "+"
 )
 
 var (
-	errNoTimeout     = errors.New("no timeout")
 	grpcTimeoutUnits = []struct {
 		size time.Duration
 		char byte
@@ -67,9 +73,9 @@ type protocolGRPC struct {
 
 // NewHandler implements protocol, so it must return an interface.
 func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler {
-	bare, prefix := typeDefaultGRPC, typeDefaultGRPCPrefix
+	bare, prefix := grpcContentTypeDefault, grpcContentTypePrefix
 	if g.web {
-		bare, prefix = typeWebGRPC, typeWebGRPCPrefix
+		bare, prefix = grpcWebContentTypeDefault, grpcWebContentTypePrefix
 	}
 	contentTypes := make(map[string]struct{})
 	for _, name := range params.Codecs.Names() {
@@ -961,4 +967,109 @@ func grpcEncodeTimeout(timeout time.Duration) (string, error) {
 	// The max time.Duration is smaller than the maximum expressible gRPC
 	// timeout, so we shouldn't ever reach this case.
 	return "", errNoTimeout
+}
+
+// userAgent follows https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents.
+//
+//   While the protocol does not require a user-agent to function it is recommended
+//   that clients provide a structured user-agent string that provides a basic
+//   description of the calling library, version & platform to facilitate issue diagnosis
+//   in heterogeneous environments. The following structure is recommended to library developers:
+//
+//   User-Agent → "grpc-" Language ?("-" Variant) "/" Version ?( " ("  *(AdditionalProperty ";") ")" )
+func userAgent() string {
+	return fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())
+}
+
+func codecFromContentType(web bool, contentType string) string {
+	if (!web && contentType == grpcContentTypeDefault) || (web && contentType == grpcWebContentTypeDefault) {
+		// implicitly protobuf
+		return codecNameProto
+	}
+	prefix := grpcContentTypePrefix
+	if web {
+		prefix = grpcWebContentTypePrefix
+	}
+	if !strings.HasPrefix(contentType, prefix) {
+		return ""
+	}
+	return strings.TrimPrefix(contentType, prefix)
+}
+
+func contentTypeFromCodecName(web bool, name string) string {
+	if web {
+		return grpcWebContentTypePrefix + name
+	}
+	return grpcContentTypePrefix + name
+}
+
+func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Codec, err error) {
+	const (
+		statusKey  = "Grpc-Status"
+		messageKey = "Grpc-Message"
+		detailsKey = "Grpc-Status-Details-Bin"
+	)
+	if err == nil {
+		trailer.Set(statusKey, "0") // zero is the gRPC OK status
+		trailer.Set(messageKey, "")
+		return
+	}
+	status, statusErr := statusFromError(err)
+	if statusErr != nil {
+		trailer.Set(
+			statusKey,
+			strconv.FormatInt(int64(CodeInternal), 10 /* base */),
+		)
+		trailer.Set(messageKey, statusErr.Error())
+		return
+	}
+	code := strconv.Itoa(int(status.Code))
+	bin, binErr := protobuf.Marshal(status)
+	if binErr != nil {
+		trailer.Set(
+			statusKey,
+			strconv.FormatInt(int64(CodeInternal), 10 /* base */),
+		)
+		trailer.Set(
+			messageKey,
+			fmt.Sprintf("marshal protobuf status: %v", binErr),
+		)
+		return
+	}
+	if connectErr, ok := asError(err); ok {
+		mergeHeaders(trailer, connectErr.meta)
+	}
+	trailer.Set(statusKey, code)
+	trailer.Set(messageKey, percentEncode(bufferPool, status.Message))
+	trailer.Set(detailsKey, EncodeBinaryHeader(bin))
+}
+
+func statusFromError(err error) (*statusv1.Status, error) {
+	status := &statusv1.Status{
+		Code:    int32(CodeUnknown),
+		Message: err.Error(),
+	}
+	if connectErr, ok := asError(err); ok {
+		status.Code = int32(connectErr.Code())
+		for _, detail := range connectErr.details {
+			// If the detail is already a protobuf Any, we're golden.
+			if anyProtoDetail, ok := detail.(*anypb.Any); ok {
+				status.Details = append(status.Details, anyProtoDetail)
+				continue
+			}
+			// Otherwise, we convert it to an Any.
+			anyProtoDetail, err := anypb.New(detail)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"can't create an *anypb.Any from %v (type %T): %w",
+					detail, detail, err,
+				)
+			}
+			status.Details = append(status.Details, anyProtoDetail)
+		}
+		if underlyingErr := connectErr.Unwrap(); underlyingErr != nil {
+			status.Message = underlyingErr.Error() // don't repeat code
+		}
+	}
+	return status, nil
 }
