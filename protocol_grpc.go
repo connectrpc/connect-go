@@ -47,13 +47,9 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 		contentTypes[bare] = struct{}{}
 	}
 	return &grpcHandler{
-		spec:             params.Spec,
-		web:              g.web,
-		codecs:           params.Codecs,
-		compressionPools: params.CompressionPools,
-		minCompressBytes: params.CompressMinBytes,
-		accept:           contentTypes,
-		bufferPool:       params.BufferPool,
+		protocolHandlerParams: *params,
+		web:                   g.web,
+		accept:                contentTypes,
 	}
 }
 
@@ -68,26 +64,16 @@ func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, 
 		return nil, NewError(CodeUnknown, err)
 	}
 	return &grpcClient{
-		web:              g.web,
-		compressionName:  params.CompressionName,
-		compressionPools: params.CompressionPools,
-		codec:            params.Codec,
-		protobuf:         params.Protobuf,
-		minCompressBytes: params.CompressMinBytes,
-		httpClient:       params.HTTPClient,
-		procedureURL:     params.URL,
-		bufferPool:       params.BufferPool,
+		protocolClientParams: *params,
+		web:                  g.web,
 	}, nil
 }
 
 type grpcHandler struct {
-	spec             Spec
-	web              bool
-	codecs           readOnlyCodecs
-	compressionPools readOnlyCompressionPools
-	minCompressBytes int
-	accept           map[string]struct{}
-	bufferPool       *bufferPool
+	protocolHandlerParams
+
+	web    bool
+	accept map[string]struct{}
 }
 
 func (g *grpcHandler) ContentTypes() map[string]struct{} {
@@ -114,7 +100,7 @@ func (g *grpcHandler) NewStream(
 ) (Sender, Receiver, error) {
 	codecName := codecFromContentType(g.web, request.Header.Get("Content-Type"))
 	// ShouldHandleContentType guarantees that this is non-nil
-	clientCodec := g.codecs.Get(codecName)
+	clientCodec := g.Codecs.Get(codecName)
 
 	// We need to parse metadata before entering the interceptor stack, but we'd
 	// like to report errors to the client in a format they understand (if
@@ -126,7 +112,7 @@ func (g *grpcHandler) NewStream(
 	if msgEncoding := request.Header.Get("Grpc-Encoding"); msgEncoding != "" && msgEncoding != compressionIdentity {
 		// We default to identity, so we only care if the client sends something
 		// other than the empty string or compressIdentity.
-		if g.compressionPools.Contains(msgEncoding) {
+		if g.CompressionPools.Contains(msgEncoding) {
 			requestCompression = msgEncoding
 		} else if failed == nil {
 			// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
@@ -135,7 +121,7 @@ func (g *grpcHandler) NewStream(
 			failed = errorf(
 				CodeUnimplemented,
 				"unknown compression %q: accepted grpc-encoding values are %v",
-				msgEncoding, g.compressionPools.CommaSeparatedNames(),
+				msgEncoding, g.CompressionPools.CommaSeparatedNames(),
 			)
 		}
 	}
@@ -149,7 +135,7 @@ func (g *grpcHandler) NewStream(
 	if responseCompression == compressionIdentity {
 		if acceptEncoding := request.Header.Get("Grpc-Accept-Encoding"); acceptEncoding != "" {
 			for _, name := range strings.FieldsFunc(acceptEncoding, isCommaOrSpace) {
-				if g.compressionPools.Contains(name) {
+				if g.CompressionPools.Contains(name) {
 					// We found a mutually supported compression algorithm. Unlike standard
 					// HTTP, there's no preference weighting, so can bail out immediately.
 					responseCompression = name
@@ -167,22 +153,22 @@ func (g *grpcHandler) NewStream(
 	// Since we know that these header keys are already in canonical form, we can
 	// skip the normalization in Header.Set.
 	responseWriter.Header()["Content-Type"] = []string{request.Header.Get("Content-Type")}
-	responseWriter.Header()["Grpc-Accept-Encoding"] = []string{g.compressionPools.CommaSeparatedNames()}
+	responseWriter.Header()["Grpc-Accept-Encoding"] = []string{g.CompressionPools.CommaSeparatedNames()}
 	if responseCompression != compressionIdentity {
 		responseWriter.Header()["Grpc-Encoding"] = []string{responseCompression}
 	}
 
 	sender, receiver := g.wrapStream(newHandlerStream(
-		g.spec,
+		g.Spec,
 		g.web,
 		responseWriter,
 		request,
-		g.minCompressBytes,
+		g.CompressMinBytes,
 		clientCodec,
-		g.codecs.Protobuf(), // for errors
-		g.compressionPools.Get(requestCompression),
-		g.compressionPools.Get(responseCompression),
-		g.bufferPool,
+		g.Codecs.Protobuf(), // for errors
+		g.CompressionPools.Get(requestCompression),
+		g.CompressionPools.Get(responseCompression),
+		g.BufferPool,
 	))
 	// We can't return failed as-is: a nil *Error is non-nil when returned as an
 	// error interface.
@@ -213,27 +199,20 @@ func (g *grpcHandler) wrapStream(sender Sender, receiver Receiver) (Sender, Rece
 }
 
 type grpcClient struct {
-	web                  bool
-	compressionName      string
-	compressionPools     readOnlyCompressionPools
-	codec                Codec
-	protobuf             Codec
-	minCompressBytes     int
-	httpClient           HTTPClient
-	procedureURL         string
-	wrapErrorInterceptor Interceptor
-	bufferPool           *bufferPool
+	protocolClientParams
+
+	web bool
 }
 
 func (g *grpcClient) WriteRequestHeader(header http.Header) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
 	header["User-Agent"] = []string{userAgent()}
-	header["Content-Type"] = []string{contentTypeFromCodecName(g.web, g.codec.Name())}
-	if g.compressionName != "" && g.compressionName != compressionIdentity {
-		header["Grpc-Encoding"] = []string{g.compressionName}
+	header["Content-Type"] = []string{contentTypeFromCodecName(g.web, g.Codec.Name())}
+	if g.CompressionName != "" && g.CompressionName != compressionIdentity {
+		header["Grpc-Encoding"] = []string{g.CompressionName}
 	}
-	if acceptCompression := g.compressionPools.CommaSeparatedNames(); acceptCompression != "" {
+	if acceptCompression := g.CompressionPools.CommaSeparatedNames(); acceptCompression != "" {
 		header["Grpc-Accept-Encoding"] = []string{acceptCompression}
 	}
 	if !g.web {
@@ -256,8 +235,8 @@ func (g *grpcClient) NewStream(
 	}
 	duplexCall := newDuplexHTTPCall(
 		ctx,
-		g.httpClient,
-		g.procedureURL,
+		g.HTTPClient,
+		g.URL,
 		spec,
 		header,
 	)
@@ -271,19 +250,19 @@ func (g *grpcClient) NewStream(
 			marshaler: grpcMarshaler{
 				envelopeWriter: envelopeWriter{
 					writer:           duplexCall,
-					compressionPool:  g.compressionPools.Get(g.compressionName),
-					codec:            g.codec,
-					compressMinBytes: g.minCompressBytes,
-					bufferPool:       g.bufferPool,
+					compressionPool:  g.CompressionPools.Get(g.CompressionName),
+					codec:            g.Codec,
+					compressMinBytes: g.CompressMinBytes,
+					bufferPool:       g.BufferPool,
 				},
 			},
 		}
 		webReceiver := &grpcWebClientReceiver{
 			spec:             spec,
-			bufferPool:       g.bufferPool,
-			compressionPools: g.compressionPools,
-			codec:            g.codec,
-			protobuf:         g.protobuf,
+			bufferPool:       g.BufferPool,
+			compressionPools: g.CompressionPools,
+			codec:            g.Codec,
+			protobuf:         g.Protobuf,
 			header:           make(http.Header),
 			trailer:          make(http.Header),
 			duplexCall:       duplexCall,
@@ -297,19 +276,19 @@ func (g *grpcClient) NewStream(
 			marshaler: grpcMarshaler{
 				envelopeWriter: envelopeWriter{
 					writer:           duplexCall,
-					compressionPool:  g.compressionPools.Get(g.compressionName),
-					codec:            g.codec,
-					compressMinBytes: g.minCompressBytes,
-					bufferPool:       g.bufferPool,
+					compressionPool:  g.CompressionPools.Get(g.CompressionName),
+					codec:            g.Codec,
+					compressMinBytes: g.CompressMinBytes,
+					bufferPool:       g.BufferPool,
 				},
 			},
 		}
 		grpcReceiver := &grpcClientReceiver{
 			spec:             spec,
-			bufferPool:       g.bufferPool,
-			compressionPools: g.compressionPools,
-			codec:            g.codec,
-			protobuf:         g.protobuf,
+			bufferPool:       g.BufferPool,
+			compressionPools: g.CompressionPools,
+			codec:            g.Codec,
+			protobuf:         g.Protobuf,
 			header:           make(http.Header),
 			trailer:          make(http.Header),
 			duplexCall:       duplexCall,
