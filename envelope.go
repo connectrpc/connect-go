@@ -59,7 +59,7 @@ type envelopeWriter struct {
 func (w *envelopeWriter) Marshal(message any) *Error {
 	raw, err := w.codec.Marshal(message)
 	if err != nil {
-		return errorf(CodeInternal, "couldn't marshal message: %w", err)
+		return errorf(CodeInternal, "marshal message: %w", err)
 	}
 	// We can't avoid allocating the byte slice, so we may as well reuse it once
 	// we're done with it.
