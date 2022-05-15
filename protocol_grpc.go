@@ -21,8 +21,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
+
+	statusv1 "github.com/bufbuild/connect-go/internal/gen/go/connectext/grpc/status/v1"
 )
 
 const (
@@ -378,7 +381,7 @@ func (r *grpcClientReceiver) Receive(message any) error {
 	// need to read the body to EOF.
 	_ = discard(r.duplexCall)
 	mergeHeaders(r.trailer, r.duplexCall.ResponseTrailer())
-	if serverErr := extractError(r.bufferPool, r.protobuf, r.trailer); serverErr != nil {
+	if serverErr := grpcErrorFromTrailer(r.bufferPool, r.protobuf, r.trailer); serverErr != nil {
 		// This is expected from a protocol perspective, but receiving trailers
 		// means that we're _not_ getting a message. For users to realize that
 		// the stream has ended, Receive must return an error.
@@ -492,7 +495,7 @@ func (r *grpcWebClientReceiver) Receive(message any) error {
 	}
 	// See if the server sent an explicit error in the gRPC-Web trailers.
 	mergeHeaders(r.trailer, unmarshaler.WebTrailer())
-	if serverErr := extractError(r.bufferPool, r.protobuf, r.trailer); serverErr != nil {
+	if serverErr := grpcErrorFromTrailer(r.bufferPool, r.protobuf, r.trailer); serverErr != nil {
 		// This is expected from a protocol perspective, but receiving a block of
 		// trailers means that we're _not_ getting a standard message. For users to
 		// realize that the stream has ended, Receive must return an error.
@@ -561,7 +564,7 @@ func grpcValidateResponse(
 	}
 	// When there's no body, gRPC and gRPC-Web servers may send error information
 	// in the HTTP headers.
-	if err := extractError(bufferPool, protobuf, response.Header); err != nil {
+	if err := grpcErrorFromTrailer(bufferPool, protobuf, response.Header); err != nil {
 		// Per the specification, only the HTTP status code and Content-Type should
 		// be treated as headers. The rest should be treated as trailing metadata.
 		if contentType := response.Header.Get("Content-Type"); contentType != "" {
@@ -605,4 +608,42 @@ func grpcHTTPToCode(httpCode int) Code {
 	default:
 		return CodeUnknown
 	}
+}
+
+// The gRPC wire protocol specifies that errors should be serialized using the
+// binary Protobuf format, even if the messages in the request/response stream
+// use a different codec. Consequently, this function needs a Protobuf codec to
+// unmarshal error information in the headers.
+func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.Header) *Error {
+	codeHeader := trailer.Get("Grpc-Status")
+	if codeHeader == "" || codeHeader == "0" {
+		return nil
+	}
+
+	code, err := strconv.ParseUint(codeHeader, 10 /* base */, 32 /* bitsize */)
+	if err != nil {
+		return errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
+	}
+	message := percentDecode(bufferPool, trailer.Get("Grpc-Message"))
+	retErr := NewError(Code(code), errors.New(message))
+
+	detailsBinaryEncoded := trailer.Get("Grpc-Status-Details-Bin")
+	if len(detailsBinaryEncoded) > 0 {
+		detailsBinary, err := DecodeBinaryHeader(detailsBinaryEncoded)
+		if err != nil {
+			return errorf(CodeUnknown, "server returned invalid grpc-status-details-bin trailer: %w", err)
+		}
+		var status statusv1.Status
+		if err := protobuf.Unmarshal(detailsBinary, &status); err != nil {
+			return errorf(CodeUnknown, "server returned invalid protobuf for error details: %w", err)
+		}
+		for _, d := range status.Details {
+			retErr.details = append(retErr.details, d)
+		}
+		// Prefer the Protobuf-encoded data to the headers (grpc-go does this too).
+		retErr.code = Code(status.Code)
+		retErr.err = errors.New(status.Message)
+	}
+
+	return retErr
 }
