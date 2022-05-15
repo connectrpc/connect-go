@@ -64,7 +64,7 @@ issues:
       path: example_init_test.go
     # We need to initialize a global map from a slice.
     - linters: [gochecknoinits, gochecknoglobals]
-      path: protocol_grpc_timeout.go
+      path: protocol_grpc.go
     # We purposefully do an ineffectual assignment for an example.
     - linters: [ineffassign]
       path: client_example_test.go
