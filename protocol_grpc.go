@@ -118,7 +118,7 @@ func (g *grpcHandler) ContentTypes() map[string]struct{} {
 	return g.accept
 }
 
-func (g *grpcHandler) SetTimeout(request *http.Request) (context.Context, context.CancelFunc, error) {
+func (*grpcHandler) SetTimeout(request *http.Request) (context.Context, context.CancelFunc, error) {
 	timeout, err := grpcParseTimeout(request.Header.Get(grpcHeaderTimeout))
 	if err != nil && !errors.Is(err, errNoTimeout) {
 		// Errors here indicate that the client sent an invalid timeout header, so
