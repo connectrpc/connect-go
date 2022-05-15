@@ -137,51 +137,18 @@ func (g *grpcHandler) NewStream(
 	request *http.Request,
 ) (Sender, Receiver, error) {
 	codecName := grpcCodecFromContentType(g.web, request.Header.Get(headerContentType))
-	// ShouldHandleContentType guarantees that this is non-nil
+	// handler.go guarantees that this is not nil.
 	clientCodec := g.Codecs.Get(codecName)
 
 	// We need to parse metadata before entering the interceptor stack, but we'd
 	// like to report errors to the client in a format they understand (if
 	// possible). We'll collect any such errors here; once we return, the Handler
 	// will send the error to the client.
-	var failed *Error
-
-	requestCompression := compressionIdentity
-	if msgEncoding := request.Header.Get(grpcHeaderCompression); msgEncoding != "" && msgEncoding != compressionIdentity {
-		// We default to identity, so we only care if the client sends something
-		// other than the empty string or compressIdentity.
-		if g.CompressionPools.Contains(msgEncoding) {
-			requestCompression = msgEncoding
-		} else if failed == nil {
-			// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
-			// should return CodeUnimplemented and specify acceptable compression(s)
-			// (in addition to setting the Grpc-Accept-Encoding header).
-			failed = errorf(
-				CodeUnimplemented,
-				"unknown compression %q: accepted grpc-encoding values are %v",
-				msgEncoding, g.CompressionPools.CommaSeparatedNames(),
-			)
-		}
-	}
-	// Support asymmetric compression, following
-	// https://github.com/grpc/grpc/blob/master/doc/compression.md. (The grpc-go
-	// implementation doesn't read the "grpc-accept-encoding" header and doesn't
-	// support asymmetry.)
-	responseCompression := requestCompression
-	// If we're not already planning to compress the response, check whether the
-	// client requested a compression algorithm we support.
-	if responseCompression == compressionIdentity {
-		if acceptEncoding := request.Header.Get(grpcHeaderAcceptCompression); acceptEncoding != "" {
-			for _, name := range strings.FieldsFunc(acceptEncoding, isCommaOrSpace) {
-				if g.CompressionPools.Contains(name) {
-					// We found a mutually supported compression algorithm. Unlike standard
-					// HTTP, there's no preference weighting, so can bail out immediately.
-					responseCompression = name
-					break
-				}
-			}
-		}
-	}
+	requestCompression, responseCompression, failed := negotiateCompression(
+		g.CompressionPools,
+		request.Header.Get(grpcHeaderCompression),
+		request.Header.Get(grpcHeaderAcceptCompression),
+	)
 
 	// We must write any remaining headers here:
 	// (1) any writes to the stream will implicitly send the headers, so we

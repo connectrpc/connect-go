@@ -216,3 +216,48 @@ func validateRequestURL(uri string) *Error {
 	}
 	return NewError(CodeUnknown, err)
 }
+
+// negotiateCompression determines and validates the request compression and
+// response compression using the available compressors and protocol-specific
+// Content-Encoding and Accept-Encoding headers.
+func negotiateCompression(
+	availableCompressors readOnlyCompressionPools,
+	sent, accept string,
+) (requestCompression, responseCompression string, clientVisibleErr *Error) {
+	requestCompression = compressionIdentity
+	if sent != "" && sent != compressionIdentity {
+		// We default to identity, so we only care if the client sends something
+		// other than the empty string or compressIdentity.
+		if availableCompressors.Contains(sent) {
+			requestCompression = sent
+		} else {
+			// To comply with
+			// https://github.com/grpc/grpc/blob/master/doc/compression.md and the
+			// Connect protocol, we should return CodeUnimplemented and specify
+			// acceptable compression(s) (in addition to setting the a
+			// protocol-specific accept-encoding header).
+			return "", "", errorf(
+				CodeUnimplemented,
+				"unknown compression %q: supported encodings are %v",
+				sent, availableCompressors.CommaSeparatedNames(),
+			)
+		}
+	}
+	// Support asymmetric compression. This logic follows
+	// https://github.com/grpc/grpc/blob/master/doc/compression.md and common
+	// sense.
+	responseCompression = requestCompression
+	// If we're not already planning to compress the response, check whether the
+	// client requested a compression algorithm we support.
+	if responseCompression == compressionIdentity && accept != "" {
+		for _, name := range strings.FieldsFunc(accept, isCommaOrSpace) {
+			if availableCompressors.Contains(name) {
+				// We found a mutually supported compression algorithm. Unlike standard
+				// HTTP, there's no preference weighting, so can bail out immediately.
+				responseCompression = name
+				break
+			}
+		}
+	}
+	return requestCompression, responseCompression, nil
+}
