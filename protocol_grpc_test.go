@@ -25,11 +25,11 @@ import (
 
 func TestGRPCHandlerSender(t *testing.T) {
 	t.Parallel()
-	newSender := func(web bool) *handlerSender {
+	newSender := func(web bool) *grpcHandlerSender {
 		responseWriter := httptest.NewRecorder()
 		protobufCodec := &protoBinaryCodec{}
 		bufferPool := newBufferPool()
-		return &handlerSender{
+		return &grpcHandlerSender{
 			web: web,
 			marshaler: grpcMarshaler{
 				envelopeWriter: envelopeWriter{
