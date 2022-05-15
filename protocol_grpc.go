@@ -163,7 +163,7 @@ func (g *grpcHandler) NewStream(
 		responseWriter.Header()[grpcHeaderCompression] = []string{responseCompression}
 	}
 
-	sender, receiver := g.wrapStream(newGRPCHandlerStream(
+	sender, receiver := wrapHandlerStreamWithCodedErrors(newGRPCHandlerStream(
 		g.Spec,
 		g.web,
 		responseWriter,
@@ -185,22 +185,6 @@ func (g *grpcHandler) NewStream(
 		return sender, receiver, failed
 	}
 	return sender, receiver, nil
-}
-
-// wrapStream ensures that we (1) automatically code context-related errors
-// correctly when writing them to the network, and (2) return *Errors from all
-// exported APIs.
-func (g *grpcHandler) wrapStream(sender Sender, receiver Receiver) (Sender, Receiver) {
-	wrappedSender := &errorTranslatingSender{
-		Sender:   sender,
-		toWire:   wrapIfContextError,
-		fromWire: wrapIfUncoded,
-	}
-	wrappedReceiver := &errorTranslatingReceiver{
-		Receiver: receiver,
-		fromWire: wrapIfUncoded,
-	}
-	return wrappedSender, wrappedReceiver
 }
 
 type grpcClient struct {
@@ -301,21 +285,7 @@ func (g *grpcClient) NewStream(
 		receiver = grpcReceiver
 		duplexCall.SetValidateResponse(grpcReceiver.validateResponse)
 	}
-	return g.wrapStream(sender, receiver)
-}
-
-// wrapStream ensures that we always return *Errors from public APIs.
-func (g *grpcClient) wrapStream(sender Sender, receiver Receiver) (Sender, Receiver) {
-	wrappedSender := &errorTranslatingSender{
-		Sender:   sender,
-		toWire:   func(err error) error { return err }, // no-op
-		fromWire: wrapIfUncoded,
-	}
-	wrappedReceiver := &errorTranslatingReceiver{
-		Receiver: receiver,
-		fromWire: wrapIfUncoded,
-	}
-	return wrappedSender, wrappedReceiver
+	return wrapClientStreamWithCodedErrors(sender, receiver)
 }
 
 type grpcClientSender struct {
