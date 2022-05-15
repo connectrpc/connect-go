@@ -544,7 +544,7 @@ func grpcValidateResponse(
 	protobuf Codec,
 ) *Error {
 	if response.StatusCode != http.StatusOK {
-		return errorf(httpToCode(response.StatusCode), "HTTP status %v", response.Status)
+		return errorf(grpcHTTPToCode(response.StatusCode), "HTTP status %v", response.Status)
 	}
 	if compression := response.Header.Get(grpcHeaderCompression); compression != "" &&
 		compression != compressionIdentity &&
@@ -580,4 +580,29 @@ func grpcValidateResponse(
 	// The response is valid, so we should expose the headers.
 	mergeHeaders(header, response.Header)
 	return nil
+}
+
+func grpcHTTPToCode(httpCode int) Code {
+	// https://github.com/grpc/grpc/blob/master/doc/http-grpc-status-mapping.md
+	// Note that this is not just the inverse of the gRPC-to-HTTP mapping.
+	switch httpCode {
+	case 400:
+		return CodeInternal
+	case 401:
+		return CodeUnauthenticated
+	case 403:
+		return CodePermissionDenied
+	case 404:
+		return CodeUnimplemented
+	case 429:
+		return CodeUnavailable
+	case 502:
+		return CodeUnavailable
+	case 503:
+		return CodeUnavailable
+	case 504:
+		return CodeUnavailable
+	default:
+		return CodeUnknown
+	}
 }
