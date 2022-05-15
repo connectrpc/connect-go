@@ -32,8 +32,19 @@ func TestCode(t *testing.T) {
 	for _, code := range valid {
 		assert.False(
 			t,
-			strings.Contains(code.String(), "("),
+			strings.HasPrefix(code.String(), "code_"),
 			assert.Sprintf("update Code.String() method for new code %v", code),
 		)
+		assertCodeRoundTrips(t, code)
 	}
+	assertCodeRoundTrips(t, Code(999))
+}
+
+func assertCodeRoundTrips(tb testing.TB, code Code) {
+	tb.Helper()
+	encoded, err := code.MarshalText()
+	assert.Nil(tb, err)
+	var decoded Code
+	assert.Nil(tb, decoded.UnmarshalText(encoded))
+	assert.Equal(tb, decoded, code)
 }

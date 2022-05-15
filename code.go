@@ -16,6 +16,8 @@ package connect
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 )
 
 // A Code is one of gRPC's canonical status codes. There are no user-defined
@@ -152,39 +154,108 @@ const (
 func (c Code) String() string {
 	switch c {
 	case CodeCanceled:
-		return "Canceled"
+		return "canceled"
 	case CodeUnknown:
-		return "Unknown"
+		return "unknown"
 	case CodeInvalidArgument:
-		return "InvalidArgument"
+		return "invalid_argument"
 	case CodeDeadlineExceeded:
-		return "DeadlineExceeded"
+		return "deadline_exceeded"
 	case CodeNotFound:
-		return "NotFound"
+		return "not_found"
 	case CodeAlreadyExists:
-		return "AlreadyExists"
+		return "already_exists"
 	case CodePermissionDenied:
-		return "PermissionDenied"
+		return "permission_denied"
 	case CodeResourceExhausted:
-		return "ResourceExhausted"
+		return "resource_exhausted"
 	case CodeFailedPrecondition:
-		return "FailedPrecondition"
+		return "failed_precondition"
 	case CodeAborted:
-		return "Aborted"
+		return "aborted"
 	case CodeOutOfRange:
-		return "OutOfRange"
+		return "out_of_range"
 	case CodeUnimplemented:
-		return "Unimplemented"
+		return "unimplemented"
 	case CodeInternal:
-		return "Internal"
+		return "internal"
 	case CodeUnavailable:
-		return "Unavailable"
+		return "unavailable"
 	case CodeDataLoss:
-		return "DataLoss"
+		return "data_loss"
 	case CodeUnauthenticated:
-		return "Unauthenticated"
+		return "unauthenticated"
 	}
-	return fmt.Sprintf("Code(%d)", c)
+	return fmt.Sprintf("code_%d", c)
+}
+
+func (c Code) MarshalText() ([]byte, error) {
+	return []byte(c.String()), nil
+}
+
+func (c *Code) UnmarshalText(data []byte) error {
+	dataStr := string(data)
+	switch dataStr {
+	case "canceled":
+		*c = CodeCanceled
+		return nil
+	case "unknown":
+		*c = CodeUnknown
+		return nil
+	case "invalid_argument":
+		*c = CodeInvalidArgument
+		return nil
+	case "deadline_exceeded":
+		*c = CodeDeadlineExceeded
+		return nil
+	case "not_found":
+		*c = CodeNotFound
+		return nil
+	case "already_exists":
+		*c = CodeAlreadyExists
+		return nil
+	case "permission_denied":
+		*c = CodePermissionDenied
+		return nil
+	case "resource_exhausted":
+		*c = CodeResourceExhausted
+		return nil
+	case "failed_precondition":
+		*c = CodeFailedPrecondition
+		return nil
+	case "aborted":
+		*c = CodeAborted
+		return nil
+	case "out_of_range":
+		*c = CodeOutOfRange
+		return nil
+	case "unimplemented":
+		*c = CodeUnimplemented
+		return nil
+	case "internal":
+		*c = CodeInternal
+		return nil
+	case "unavailable":
+		*c = CodeUnavailable
+		return nil
+	case "data_loss":
+		*c = CodeDataLoss
+		return nil
+	case "unauthenticated":
+		*c = CodeUnauthenticated
+		return nil
+	}
+	// Ensure that non-canonical codes round-trip through MarshalText and
+	// UnmarshalText.
+	if strings.HasPrefix(dataStr, "code_") {
+		dataStr = strings.TrimPrefix(dataStr, "code_")
+		code, err := strconv.ParseInt(dataStr, 10 /* base */, 64 /* bitsize */)
+		if err == nil && (code < int64(minCode) || code > int64(maxCode)) {
+			*c = Code(code)
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid code %q", dataStr)
 }
 
 // CodeOf returns the error's status code if it is or wraps a *connect.Error
