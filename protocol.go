@@ -170,6 +170,37 @@ func (r *errorTranslatingReceiver) Close() error {
 	return r.fromWire(r.Receiver.Close())
 }
 
+// wrapHandlerStreamWithCodedErrors ensures that we (1) automatically code
+// context-related errors correctly when writing them to the network, and (2)
+// return *Errors from all exported APIs.
+func wrapHandlerStreamWithCodedErrors(sender Sender, receiver Receiver) (Sender, Receiver) {
+	wrappedSender := &errorTranslatingSender{
+		Sender:   sender,
+		toWire:   wrapIfContextError,
+		fromWire: wrapIfUncoded,
+	}
+	wrappedReceiver := &errorTranslatingReceiver{
+		Receiver: receiver,
+		fromWire: wrapIfUncoded,
+	}
+	return wrappedSender, wrappedReceiver
+}
+
+// wrapClientStreamWithCodedErrors ensures that we always return *Errors from
+// public APIs.
+func wrapClientStreamWithCodedErrors(sender Sender, receiver Receiver) (Sender, Receiver) {
+	wrappedSender := &errorTranslatingSender{
+		Sender:   sender,
+		toWire:   func(err error) error { return err }, // no-op
+		fromWire: wrapIfUncoded,
+	}
+	wrappedReceiver := &errorTranslatingReceiver{
+		Receiver: receiver,
+		fromWire: wrapIfUncoded,
+	}
+	return wrappedSender, wrappedReceiver
+}
+
 func sortedAcceptPostValue(handlers []protocolHandler) string {
 	contentTypes := make(map[string]struct{})
 	for _, handler := range handlers {
