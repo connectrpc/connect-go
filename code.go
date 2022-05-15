@@ -195,28 +195,3 @@ func CodeOf(err error) Code {
 	}
 	return CodeUnknown
 }
-
-func httpToCode(httpCode int) Code {
-	// https://github.com/grpc/grpc/blob/master/doc/http-grpc-status-mapping.md
-	// Note that this is not just the inverse of the gRPC-to-HTTP mapping.
-	switch httpCode {
-	case 400:
-		return CodeInternal
-	case 401:
-		return CodeUnauthenticated
-	case 403:
-		return CodePermissionDenied
-	case 404:
-		return CodeUnimplemented
-	case 429:
-		return CodeUnavailable
-	case 502:
-		return CodeUnavailable
-	case 503:
-		return CodeUnavailable
-	case 504:
-		return CodeUnavailable
-	default:
-		return CodeUnknown
-	}
-}
