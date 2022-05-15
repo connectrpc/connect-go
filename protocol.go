@@ -23,7 +23,12 @@ import (
 	"strings"
 )
 
-const discardLimit = 1024 * 1024 * 4 // 4MiB
+const (
+	headerContentType = "Content-Type"
+	headerUserAgent   = "User-Agent"
+
+	discardLimit = 1024 * 1024 * 4 // 4MiB
+)
 
 var errNoTimeout = errors.New("no timeout")
 
