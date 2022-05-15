@@ -25,6 +25,10 @@ import (
 	"time"
 )
 
+const (
+	grpcHeaderCompression = "Grpc-Encoding"
+)
+
 type protocolGRPC struct {
 	web bool
 }
@@ -250,47 +254,70 @@ func (g *grpcClient) NewStream(
 			header["Grpc-Timeout"] = []string{encodedDeadline}
 		}
 	}
-	// In a typical HTTP/1.1 request, we'd put the body into a bytes.Buffer, hand
-	// the buffer to http.NewRequest, and fire off the request with
-	// httpClient.Do. That won't work here because we're establishing a stream -
-	// we don't even have all the data we'll eventually send. Instead, we use
-	// io.Pipe as the request body.
-	//
-	// net/http will own the read side of the pipe, and we'll hold onto the write
-	// side. Writes to pipeWriter will block until net/http pulls the data from pipeReader and
-	// puts it onto the network - there's no buffer between the two. (The two
-	// sides of the pipe are meant to be used concurrently.) Once the server gets
-	// the first Protobuf message that we send, it'll send back headers and start
-	// the response stream.
-	pipeReader, pipeWriter := io.Pipe()
-	duplex := &duplexClientStream{
-		ctx:        ctx,
-		httpClient: g.httpClient,
-		url:        g.procedureURL,
-		spec:       spec,
-		codec:      g.codec,
-		protobuf:   g.protobuf,
-		writer:     pipeWriter,
-		marshaler: grpcMarshaler{
-			envelopeWriter: envelopeWriter{
-				writer:           pipeWriter,
-				compressionPool:  g.compressionPools.Get(g.compressionName),
-				codec:            g.codec,
-				compressMinBytes: g.minCompressBytes,
-				bufferPool:       g.bufferPool,
+	duplexCall := newDuplexHTTPCall(
+		ctx,
+		g.httpClient,
+		g.procedureURL,
+		spec,
+		header,
+	)
+	var sender Sender
+	var receiver Receiver
+	if g.web {
+		sender = &grpcWebClientSender{
+			spec:       spec,
+			duplexCall: duplexCall,
+			trailer:    make(http.Header),
+			marshaler: grpcMarshaler{
+				envelopeWriter: envelopeWriter{
+					writer:           duplexCall,
+					compressionPool:  g.compressionPools.Get(g.compressionName),
+					codec:            g.codec,
+					compressMinBytes: g.minCompressBytes,
+					bufferPool:       g.bufferPool,
+				},
 			},
-		},
-		header:           header,
-		trailer:          make(http.Header),
-		web:              g.web,
-		reader:           pipeReader,
-		responseHeader:   make(http.Header),
-		responseTrailer:  make(http.Header),
-		compressionPools: g.compressionPools,
-		bufferPool:       g.bufferPool,
-		responseReady:    make(chan struct{}),
+		}
+		webReceiver := &grpcWebClientReceiver{
+			spec:             spec,
+			bufferPool:       g.bufferPool,
+			compressionPools: g.compressionPools,
+			codec:            g.codec,
+			protobuf:         g.protobuf,
+			header:           make(http.Header),
+			trailer:          make(http.Header),
+			duplexCall:       duplexCall,
+		}
+		receiver = webReceiver
+		duplexCall.SetValidateResponse(webReceiver.validateResponse)
+	} else {
+		sender = &grpcClientSender{
+			spec:       spec,
+			duplexCall: duplexCall,
+			marshaler: grpcMarshaler{
+				envelopeWriter: envelopeWriter{
+					writer:           duplexCall,
+					compressionPool:  g.compressionPools.Get(g.compressionName),
+					codec:            g.codec,
+					compressMinBytes: g.minCompressBytes,
+					bufferPool:       g.bufferPool,
+				},
+			},
+		}
+		grpcReceiver := &grpcClientReceiver{
+			spec:             spec,
+			bufferPool:       g.bufferPool,
+			compressionPools: g.compressionPools,
+			codec:            g.codec,
+			protobuf:         g.protobuf,
+			header:           make(http.Header),
+			trailer:          make(http.Header),
+			duplexCall:       duplexCall,
+		}
+		receiver = grpcReceiver
+		duplexCall.SetValidateResponse(grpcReceiver.validateResponse)
 	}
-	return g.wrapStream(&clientSender{duplex}, &clientReceiver{duplex})
+	return g.wrapStream(sender, receiver)
 }
 
 // wrapStream ensures that we always return *Errors from public APIs.
@@ -305,4 +332,273 @@ func (g *grpcClient) wrapStream(sender Sender, receiver Receiver) (Sender, Recei
 		fromWire: wrapIfUncoded,
 	}
 	return wrappedSender, wrappedReceiver
+}
+
+type grpcClientSender struct {
+	spec       Spec
+	duplexCall *duplexHTTPCall
+	marshaler  grpcMarshaler
+}
+
+func (s *grpcClientSender) Spec() Spec {
+	return s.spec
+}
+
+func (s *grpcClientSender) Header() http.Header {
+	return s.duplexCall.Header()
+}
+
+func (s *grpcClientSender) Trailer() http.Header {
+	return s.duplexCall.Trailer()
+}
+
+func (s *grpcClientSender) Send(message any) error {
+	// Don't return typed nils.
+	if err := s.marshaler.Marshal(message); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *grpcClientSender) Close(_ error) error {
+	return s.duplexCall.CloseWrite()
+}
+
+type grpcClientReceiver struct {
+	spec             Spec
+	bufferPool       *bufferPool
+	compressionPools readOnlyCompressionPools
+	codec            Codec
+	protobuf         Codec // for errors
+	header           http.Header
+	trailer          http.Header
+	duplexCall       *duplexHTTPCall
+}
+
+func (r *grpcClientReceiver) Spec() Spec {
+	return r.spec
+}
+
+func (r *grpcClientReceiver) Header() http.Header {
+	r.duplexCall.BlockUntilResponseReady()
+	return r.header
+}
+
+func (r *grpcClientReceiver) Trailer() http.Header {
+	r.duplexCall.BlockUntilResponseReady()
+	return r.trailer
+}
+
+func (r *grpcClientReceiver) Receive(message any) error {
+	unmarshaler := r.unmarshaler()
+	err := (&unmarshaler).Unmarshal(message)
+	if err == nil {
+		return nil
+	}
+	// See if the server sent an explicit error in the HTTP trailers. First, we
+	// need to read the body to EOF.
+	_ = discard(r.duplexCall)
+	mergeHeaders(r.trailer, r.duplexCall.ResponseTrailer())
+	if serverErr := extractError(r.bufferPool, r.protobuf, r.trailer); serverErr != nil {
+		// This is expected from a protocol perspective, but receiving trailers
+		// means that we're _not_ getting a message. For users to realize that
+		// the stream has ended, Receive must return an error.
+		serverErr.meta = r.Header().Clone()
+		mergeHeaders(serverErr.meta, r.trailer)
+		r.duplexCall.SetError(serverErr)
+		return serverErr
+	}
+	// There's no error in the trailers, so this was probably an error
+	// converting the bytes to a message, an error reading from the network, or
+	// just an EOF. We're going to return it to the user, but we also want to
+	// setResponseError so Send errors out.
+	r.duplexCall.SetError(err)
+	return err
+}
+
+func (r *grpcClientReceiver) Close() error {
+	return r.duplexCall.CloseRead()
+}
+
+func (r *grpcClientReceiver) unmarshaler() grpcUnmarshaler {
+	// Blocks until response is ready.
+	compression := r.duplexCall.ResponseHeader().Get(grpcHeaderCompression)
+	// On the hot path, pass values up the stack.
+	return grpcUnmarshaler{
+		web: false,
+		envelopeReader: envelopeReader{
+			reader:          r.duplexCall,
+			codec:           r.codec,
+			compressionPool: r.compressionPools.Get(compression),
+			bufferPool:      r.bufferPool,
+		},
+	}
+}
+
+// validateResponse is called by duplexHTTPCall in a separate goroutine.
+func (r *grpcClientReceiver) validateResponse(response *http.Response) *Error {
+	return grpcValidateResponse(
+		response,
+		r.header,
+		r.trailer,
+		r.compressionPools,
+		r.bufferPool,
+		r.protobuf,
+	)
+}
+
+type grpcWebClientSender struct {
+	spec       Spec
+	duplexCall *duplexHTTPCall
+	trailer    http.Header
+	marshaler  grpcMarshaler
+}
+
+func (s *grpcWebClientSender) Spec() Spec {
+	return s.spec
+}
+
+func (s *grpcWebClientSender) Header() http.Header {
+	return s.duplexCall.Header()
+}
+
+func (s *grpcWebClientSender) Trailer() http.Header {
+	return s.trailer
+}
+
+func (s *grpcWebClientSender) Send(message any) error {
+	// Don't return typed nils.
+	if err := s.marshaler.Marshal(message); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *grpcWebClientSender) Close(_ error) error {
+	if err := s.marshaler.MarshalWebTrailers(s.trailer); err != nil && !errors.Is(err, io.EOF) {
+		_ = s.duplexCall.CloseWrite()
+		return err
+	}
+	return s.duplexCall.CloseWrite()
+}
+
+type grpcWebClientReceiver struct {
+	spec             Spec
+	bufferPool       *bufferPool
+	compressionPools readOnlyCompressionPools
+	codec            Codec
+	protobuf         Codec // for errors
+	header           http.Header
+	trailer          http.Header
+	duplexCall       *duplexHTTPCall
+}
+
+func (r *grpcWebClientReceiver) Spec() Spec {
+	return r.spec
+}
+
+func (r *grpcWebClientReceiver) Header() http.Header {
+	return r.header
+}
+
+func (r *grpcWebClientReceiver) Trailer() http.Header {
+	return r.trailer
+}
+
+func (r *grpcWebClientReceiver) Receive(message any) error {
+	unmarshaler := r.unmarshaler()
+	err := unmarshaler.Unmarshal(message)
+	if err == nil {
+		return nil
+	}
+	// See if the server sent an explicit error in the gRPC-Web trailers.
+	mergeHeaders(r.trailer, unmarshaler.WebTrailer())
+	if serverErr := extractError(r.bufferPool, r.protobuf, r.trailer); serverErr != nil {
+		// This is expected from a protocol perspective, but receiving a block of
+		// trailers means that we're _not_ getting a standard message. For users to
+		// realize that the stream has ended, Receive must return an error.
+		serverErr.meta = r.Header().Clone()
+		mergeHeaders(serverErr.meta, r.trailer)
+		r.duplexCall.SetError(serverErr)
+		return serverErr
+	}
+	r.duplexCall.SetError(err)
+	return err
+}
+
+func (r *grpcWebClientReceiver) Close() error {
+	return r.duplexCall.CloseRead()
+}
+
+func (r *grpcWebClientReceiver) unmarshaler() grpcUnmarshaler {
+	// Blocks until response is ready.
+	compression := r.duplexCall.ResponseHeader().Get(grpcHeaderCompression)
+	// On the hot path, pass values up the stack.
+	return grpcUnmarshaler{
+		web: true,
+		envelopeReader: envelopeReader{
+			reader:          r.duplexCall,
+			codec:           r.codec,
+			compressionPool: r.compressionPools.Get(compression),
+			bufferPool:      r.bufferPool,
+		},
+	}
+}
+
+// validateResponse is called by duplexHTTPCall in a separate goroutine.
+func (r *grpcWebClientReceiver) validateResponse(response *http.Response) *Error {
+	return grpcValidateResponse(
+		response,
+		r.header,
+		r.trailer,
+		r.compressionPools,
+		r.bufferPool,
+		r.protobuf,
+	)
+}
+
+func grpcValidateResponse(
+	response *http.Response,
+	header, trailer http.Header,
+	availableCompressors readOnlyCompressionPools,
+	bufferPool *bufferPool,
+	protobuf Codec,
+) *Error {
+	if response.StatusCode != http.StatusOK {
+		return errorf(httpToCode(response.StatusCode), "HTTP status %v", response.Status)
+	}
+	if compression := response.Header.Get(grpcHeaderCompression); compression != "" &&
+		compression != compressionIdentity &&
+		!availableCompressors.Contains(compression) {
+		// Per https://github.com/grpc/grpc/blob/master/doc/compression.md, we
+		// should return CodeInternal and specify acceptable compression(s) (in
+		// addition to setting the Grpc-Accept-Encoding header).
+		return errorf(
+			CodeInternal,
+			"unknown encoding %q: accepted grpc-encoding values are %v",
+			compression,
+			availableCompressors.CommaSeparatedNames(),
+		)
+	}
+	// When there's no body, gRPC and gRPC-Web servers may send error information
+	// in the HTTP headers.
+	if err := extractError(bufferPool, protobuf, response.Header); err != nil {
+		// Per the specification, only the HTTP status code and Content-Type should
+		// be treated as headers. The rest should be treated as trailing metadata.
+		if contentType := response.Header.Get("Content-Type"); contentType != "" {
+			header.Set("Content-Type", contentType)
+		}
+		mergeHeaders(trailer, response.Header)
+		trailer.Del("Content-Type")
+		// If we get some actual HTTP trailers, treat those as trailing metadata too.
+		_ = discard(response.Body)
+		mergeHeaders(trailer, response.Trailer)
+		// Merge HTTP headers and trailers into the error metadata.
+		err.meta = response.Header.Clone()
+		mergeHeaders(err.meta, response.Trailer)
+		return err
+	}
+	// The response is valid, so we should expose the headers.
+	mergeHeaders(header, response.Header)
+	return nil
 }

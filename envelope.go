@@ -190,6 +190,9 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		return NewError(CodeUnknown, err)
 	case err != nil || prefixBytesRead < 5:
 		// Something else has gone wrong - the stream didn't end cleanly.
+		if connectErr, ok := asError(err); ok {
+			return connectErr
+		}
 		return errorf(
 			CodeInvalidArgument,
 			"protocol error: incomplete envelope: %w", err,
