@@ -16,6 +16,7 @@ package connect
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"sort"
@@ -23,6 +24,8 @@ import (
 )
 
 const discardLimit = 1024 * 1024 * 4 // 4MiB
+
+var errNoTimeout = errors.New("no timeout")
 
 // A Protocol defines the HTTP semantics to use when sending and receiving
 // messages. It ties together codecs, compressors, and net/http to produce
