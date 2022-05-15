@@ -16,10 +16,14 @@ package connect
 
 import (
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/quick"
+	"time"
 
+	"connectrpc.com/connect/internal/assert"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -67,5 +71,55 @@ func testGRPCHandlerSenderMetadata(t *testing.T, sender Sender) {
 	}
 	if diff := cmp.Diff(expectTrailers, sender.Trailer()); diff != "" {
 		t.Errorf("trailers changed:\n%s", diff)
+	}
+}
+
+func TestGRPCParseTimeout(t *testing.T) {
+	t.Parallel()
+	_, err := grpcParseTimeout("")
+	assert.True(t, errors.Is(err, errNoTimeout))
+
+	_, err = grpcParseTimeout("foo")
+	assert.NotNil(t, err)
+	_, err = grpcParseTimeout("12xS")
+	assert.NotNil(t, err)
+	_, err = grpcParseTimeout("999999999n") // 9 digits
+	assert.NotNil(t, err)
+	assert.False(t, errors.Is(err, errNoTimeout))
+	_, err = grpcParseTimeout("99999999H") // 8 digits but overflows time.Duration
+	assert.True(t, errors.Is(err, errNoTimeout))
+
+	duration, err := grpcParseTimeout("45S")
+	assert.Nil(t, err)
+	assert.Equal(t, duration, 45*time.Second)
+
+	const long = "99999999S"
+	duration, err = grpcParseTimeout(long) // 8 digits, shouldn't overflow
+	assert.Nil(t, err)
+	assert.Equal(t, duration, 99999999*time.Second)
+}
+
+func TestGRPCEncodeTimeout(t *testing.T) {
+	t.Parallel()
+	timeout, err := grpcEncodeTimeout(time.Hour + time.Second)
+	assert.Nil(t, err)
+	assert.Equal(t, timeout, "3601000m")
+	timeout, err = grpcEncodeTimeout(time.Duration(math.MaxInt64))
+	assert.Nil(t, err)
+	assert.Equal(t, timeout, "2562047H")
+	timeout, err = grpcEncodeTimeout(-1 * time.Hour)
+	assert.Nil(t, err)
+	assert.Equal(t, timeout, "0n")
+}
+
+func TestGRPCEncodeTimeoutQuick(t *testing.T) {
+	t.Parallel()
+	// Ensure that the error case is actually unreachable.
+	encode := func(d time.Duration) bool {
+		_, err := grpcEncodeTimeout(d)
+		return err == nil
+	}
+	if err := quick.Check(encode, nil); err != nil {
+		t.Error(err)
 	}
 }
