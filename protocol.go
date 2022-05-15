@@ -17,8 +17,10 @@ package connect
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 )
@@ -197,4 +199,20 @@ func discard(reader io.Reader) error {
 	lr := &io.LimitedReader{R: reader, N: discardLimit}
 	_, err := io.Copy(io.Discard, lr)
 	return err
+}
+
+func validateRequestURL(uri string) *Error {
+	_, err := url.ParseRequestURI(uri)
+	if err == nil {
+		return nil
+	}
+	if !strings.Contains(uri, "://") {
+		// URL doesn't have a scheme, so the user is likely accustomed to
+		// grpc-go's APIs.
+		err = fmt.Errorf(
+			"URL %q missing scheme: use http:// or https:// (unlike grpc-go)",
+			uri,
+		)
+	}
+	return NewError(CodeUnknown, err)
 }
