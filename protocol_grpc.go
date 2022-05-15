@@ -34,7 +34,13 @@ import (
 )
 
 const (
-	grpcHeaderCompression   = "Grpc-Encoding"
+	grpcHeaderCompression       = "Grpc-Encoding"
+	grpcHeaderAcceptCompression = "Grpc-Accept-Encoding"
+	grpcHeaderTimeout           = "Grpc-Timeout"
+	grpcHeaderStatus            = "Grpc-Status"
+	grpcHeaderMessage           = "Grpc-Message"
+	grpcHeaderDetails           = "Grpc-Status-Details-Bin"
+
 	grpcFlagEnvelopeTrailer = 0b10000000
 
 	grpcTimeoutMaxHours = math.MaxInt64 / int64(time.Hour) // how many hours fit into a time.Duration?
@@ -119,7 +125,7 @@ func (g *grpcHandler) ContentTypes() map[string]struct{} {
 }
 
 func (g *grpcHandler) SetTimeout(request *http.Request) (context.Context, context.CancelFunc, error) {
-	timeout, err := grpcParseTimeout(request.Header.Get("Grpc-Timeout"))
+	timeout, err := grpcParseTimeout(request.Header.Get(grpcHeaderTimeout))
 	if err != nil && !errors.Is(err, errNoTimeout) {
 		// Errors here indicate that the client sent an invalid timeout header, so
 		// the error text is safe to send back.
@@ -136,7 +142,7 @@ func (g *grpcHandler) NewStream(
 	responseWriter http.ResponseWriter,
 	request *http.Request,
 ) (Sender, Receiver, error) {
-	codecName := codecFromContentType(g.web, request.Header.Get("Content-Type"))
+	codecName := grpcCodecFromContentType(g.web, request.Header.Get(headerContentType))
 	// ShouldHandleContentType guarantees that this is non-nil
 	clientCodec := g.Codecs.Get(codecName)
 
@@ -147,7 +153,7 @@ func (g *grpcHandler) NewStream(
 	var failed *Error
 
 	requestCompression := compressionIdentity
-	if msgEncoding := request.Header.Get("Grpc-Encoding"); msgEncoding != "" && msgEncoding != compressionIdentity {
+	if msgEncoding := request.Header.Get(grpcHeaderCompression); msgEncoding != "" && msgEncoding != compressionIdentity {
 		// We default to identity, so we only care if the client sends something
 		// other than the empty string or compressIdentity.
 		if g.CompressionPools.Contains(msgEncoding) {
@@ -171,7 +177,7 @@ func (g *grpcHandler) NewStream(
 	// If we're not already planning to compress the response, check whether the
 	// client requested a compression algorithm we support.
 	if responseCompression == compressionIdentity {
-		if acceptEncoding := request.Header.Get("Grpc-Accept-Encoding"); acceptEncoding != "" {
+		if acceptEncoding := request.Header.Get(grpcHeaderAcceptCompression); acceptEncoding != "" {
 			for _, name := range strings.FieldsFunc(acceptEncoding, isCommaOrSpace) {
 				if g.CompressionPools.Contains(name) {
 					// We found a mutually supported compression algorithm. Unlike standard
@@ -190,10 +196,10 @@ func (g *grpcHandler) NewStream(
 	//
 	// Since we know that these header keys are already in canonical form, we can
 	// skip the normalization in Header.Set.
-	responseWriter.Header()["Content-Type"] = []string{request.Header.Get("Content-Type")}
-	responseWriter.Header()["Grpc-Accept-Encoding"] = []string{g.CompressionPools.CommaSeparatedNames()}
+	responseWriter.Header()[headerContentType] = []string{request.Header.Get(headerContentType)}
+	responseWriter.Header()[grpcHeaderAcceptCompression] = []string{g.CompressionPools.CommaSeparatedNames()}
 	if responseCompression != compressionIdentity {
-		responseWriter.Header()["Grpc-Encoding"] = []string{responseCompression}
+		responseWriter.Header()[grpcHeaderCompression] = []string{responseCompression}
 	}
 
 	sender, receiver := g.wrapStream(newGRPCHandlerStream(
@@ -245,13 +251,13 @@ type grpcClient struct {
 func (g *grpcClient) WriteRequestHeader(header http.Header) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
-	header["User-Agent"] = []string{userAgent()}
-	header["Content-Type"] = []string{contentTypeFromCodecName(g.web, g.Codec.Name())}
+	header[headerUserAgent] = []string{grpcUserAgent()}
+	header[headerContentType] = []string{grpcContentTypeFromCodecName(g.web, g.Codec.Name())}
 	if g.CompressionName != "" && g.CompressionName != compressionIdentity {
-		header["Grpc-Encoding"] = []string{g.CompressionName}
+		header[grpcHeaderCompression] = []string{g.CompressionName}
 	}
 	if acceptCompression := g.CompressionPools.CommaSeparatedNames(); acceptCompression != "" {
-		header["Grpc-Accept-Encoding"] = []string{acceptCompression}
+		header[grpcHeaderAcceptCompression] = []string{acceptCompression}
 	}
 	if !g.web {
 		// No HTTP trailers in gRPC-Web.
@@ -268,7 +274,7 @@ func (g *grpcClient) NewStream(
 		if encodedDeadline, err := grpcEncodeTimeout(time.Until(deadline)); err == nil {
 			// Tests verify that the error in encodeTimeout is unreachable, so we
 			// should be safe without observability for the error case.
-			header["Grpc-Timeout"] = []string{encodedDeadline}
+			header[grpcHeaderTimeout] = []string{encodedDeadline}
 		}
 	}
 	duplexCall := newDuplexHTTPCall(
@@ -850,11 +856,11 @@ func grpcValidateResponse(
 	if err := grpcErrorFromTrailer(bufferPool, protobuf, response.Header); err != nil {
 		// Per the specification, only the HTTP status code and Content-Type should
 		// be treated as headers. The rest should be treated as trailing metadata.
-		if contentType := response.Header.Get("Content-Type"); contentType != "" {
-			header.Set("Content-Type", contentType)
+		if contentType := response.Header.Get(headerContentType); contentType != "" {
+			header.Set(headerContentType, contentType)
 		}
 		mergeHeaders(trailer, response.Header)
-		trailer.Del("Content-Type")
+		trailer.Del(headerContentType)
 		// If we get some actual HTTP trailers, treat those as trailing metadata too.
 		_ = discard(response.Body)
 		mergeHeaders(trailer, response.Trailer)
@@ -898,7 +904,7 @@ func grpcHTTPToCode(httpCode int) Code {
 // use a different codec. Consequently, this function needs a Protobuf codec to
 // unmarshal error information in the headers.
 func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.Header) *Error {
-	codeHeader := trailer.Get("Grpc-Status")
+	codeHeader := trailer.Get(grpcHeaderStatus)
 	if codeHeader == "" || codeHeader == "0" {
 		return nil
 	}
@@ -907,10 +913,10 @@ func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.H
 	if err != nil {
 		return errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
 	}
-	message := percentDecode(bufferPool, trailer.Get("Grpc-Message"))
+	message := percentDecode(bufferPool, trailer.Get(grpcHeaderMessage))
 	retErr := NewError(Code(code), errors.New(message))
 
-	detailsBinaryEncoded := trailer.Get("Grpc-Status-Details-Bin")
+	detailsBinaryEncoded := trailer.Get(grpcHeaderDetails)
 	if len(detailsBinaryEncoded) > 0 {
 		detailsBinary, err := DecodeBinaryHeader(detailsBinaryEncoded)
 		if err != nil {
@@ -969,7 +975,8 @@ func grpcEncodeTimeout(timeout time.Duration) (string, error) {
 	return "", errNoTimeout
 }
 
-// userAgent follows https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents.
+// grpcUserAgent follows
+// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents:
 //
 //   While the protocol does not require a user-agent to function it is recommended
 //   that clients provide a structured user-agent string that provides a basic
@@ -977,11 +984,11 @@ func grpcEncodeTimeout(timeout time.Duration) (string, error) {
 //   in heterogeneous environments. The following structure is recommended to library developers:
 //
 //   User-Agent → "grpc-" Language ?("-" Variant) "/" Version ?( " ("  *(AdditionalProperty ";") ")" )
-func userAgent() string {
+func grpcUserAgent() string {
 	return fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())
 }
 
-func codecFromContentType(web bool, contentType string) string {
+func grpcCodecFromContentType(web bool, contentType string) string {
 	if (!web && contentType == grpcContentTypeDefault) || (web && contentType == grpcWebContentTypeDefault) {
 		// implicitly protobuf
 		return codecNameProto
@@ -996,7 +1003,7 @@ func codecFromContentType(web bool, contentType string) string {
 	return strings.TrimPrefix(contentType, prefix)
 }
 
-func contentTypeFromCodecName(web bool, name string) string {
+func grpcContentTypeFromCodecName(web bool, name string) string {
 	if web {
 		return grpcWebContentTypePrefix + name
 	}
@@ -1004,34 +1011,29 @@ func contentTypeFromCodecName(web bool, name string) string {
 }
 
 func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Codec, err error) {
-	const (
-		statusKey  = "Grpc-Status"
-		messageKey = "Grpc-Message"
-		detailsKey = "Grpc-Status-Details-Bin"
-	)
 	if err == nil {
-		trailer.Set(statusKey, "0") // zero is the gRPC OK status
-		trailer.Set(messageKey, "")
+		trailer.Set(grpcHeaderStatus, "0") // zero is the gRPC OK status
+		trailer.Set(grpcHeaderMessage, "")
 		return
 	}
-	status, statusErr := statusFromError(err)
+	status, statusErr := grpcStatusFromError(err)
 	if statusErr != nil {
 		trailer.Set(
-			statusKey,
+			grpcHeaderStatus,
 			strconv.FormatInt(int64(CodeInternal), 10 /* base */),
 		)
-		trailer.Set(messageKey, statusErr.Error())
+		trailer.Set(grpcHeaderMessage, statusErr.Error())
 		return
 	}
 	code := strconv.Itoa(int(status.Code))
 	bin, binErr := protobuf.Marshal(status)
 	if binErr != nil {
 		trailer.Set(
-			statusKey,
+			grpcHeaderStatus,
 			strconv.FormatInt(int64(CodeInternal), 10 /* base */),
 		)
 		trailer.Set(
-			messageKey,
+			grpcHeaderMessage,
 			fmt.Sprintf("marshal protobuf status: %v", binErr),
 		)
 		return
@@ -1039,12 +1041,12 @@ func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Co
 	if connectErr, ok := asError(err); ok {
 		mergeHeaders(trailer, connectErr.meta)
 	}
-	trailer.Set(statusKey, code)
-	trailer.Set(messageKey, percentEncode(bufferPool, status.Message))
-	trailer.Set(detailsKey, EncodeBinaryHeader(bin))
+	trailer.Set(grpcHeaderStatus, code)
+	trailer.Set(grpcHeaderMessage, percentEncode(bufferPool, status.Message))
+	trailer.Set(grpcHeaderDetails, EncodeBinaryHeader(bin))
 }
 
-func statusFromError(err error) (*statusv1.Status, error) {
+func grpcStatusFromError(err error) (*statusv1.Status, error) {
 	status := &statusv1.Status{
 		Code:    int32(CodeUnknown),
 		Message: err.Error(),
