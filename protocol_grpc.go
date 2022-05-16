@@ -924,9 +924,6 @@ func grpcCodecFromContentType(web bool, contentType string) string {
 	if web {
 		prefix = grpcWebContentTypePrefix
 	}
-	if !strings.HasPrefix(contentType, prefix) {
-		return ""
-	}
 	return strings.TrimPrefix(contentType, prefix)
 }
 
