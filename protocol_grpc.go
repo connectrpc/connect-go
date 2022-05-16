@@ -819,11 +819,7 @@ func grpcHTTPToCode(httpCode int) Code {
 		return CodeUnimplemented
 	case 429:
 		return CodeUnavailable
-	case 502:
-		return CodeUnavailable
-	case 503:
-		return CodeUnavailable
-	case 504:
+	case 502, 503, 504:
 		return CodeUnavailable
 	default:
 		return CodeUnknown
