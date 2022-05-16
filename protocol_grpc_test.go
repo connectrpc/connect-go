@@ -64,12 +64,16 @@ func testGRPCHandlerSenderMetadata(t *testing.T, sender Sender) {
 	// trailers.
 	t.Helper()
 	expectHeaders := sender.Header().Clone()
-	expectTrailers := sender.Trailer().Clone()
+	originalTrailers, hasOriginalTrailers := sender.Trailer()
+	assert.True(t, hasOriginalTrailers)
+	expectTrailers := originalTrailers.Clone()
 	sender.Close(NewError(CodeUnavailable, errors.New("oh no")))
 	if diff := cmp.Diff(expectHeaders, sender.Header()); diff != "" {
 		t.Errorf("headers changed:\n%s", diff)
 	}
-	if diff := cmp.Diff(expectTrailers, sender.Trailer()); diff != "" {
+	gotTrailers, hasGotTrailers := sender.Trailer()
+	assert.True(t, hasGotTrailers)
+	if diff := cmp.Diff(expectTrailers, gotTrailers); diff != "" {
 		t.Errorf("trailers changed:\n%s", diff)
 	}
 }
