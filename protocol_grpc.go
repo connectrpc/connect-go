@@ -19,7 +19,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"net/textproto"
@@ -229,23 +228,21 @@ func (g *grpcClient) NewStream(
 		spec,
 		header,
 	)
-	var sender Sender
+	sender := &grpcClientSender{
+		spec:       spec,
+		duplexCall: duplexCall,
+		marshaler: grpcMarshaler{
+			envelopeWriter: envelopeWriter{
+				writer:           duplexCall,
+				compressionPool:  g.CompressionPools.Get(g.CompressionName),
+				codec:            g.Codec,
+				compressMinBytes: g.CompressMinBytes,
+				bufferPool:       g.BufferPool,
+			},
+		},
+	}
 	var receiver Receiver
 	if g.web {
-		sender = &grpcWebClientSender{
-			spec:       spec,
-			duplexCall: duplexCall,
-			trailer:    make(http.Header),
-			marshaler: grpcMarshaler{
-				envelopeWriter: envelopeWriter{
-					writer:           duplexCall,
-					compressionPool:  g.CompressionPools.Get(g.CompressionName),
-					codec:            g.Codec,
-					compressMinBytes: g.CompressMinBytes,
-					bufferPool:       g.BufferPool,
-				},
-			},
-		}
 		webReceiver := &grpcWebClientReceiver{
 			spec:             spec,
 			bufferPool:       g.BufferPool,
@@ -259,19 +256,6 @@ func (g *grpcClient) NewStream(
 		receiver = webReceiver
 		duplexCall.SetValidateResponse(webReceiver.validateResponse)
 	} else {
-		sender = &grpcClientSender{
-			spec:       spec,
-			duplexCall: duplexCall,
-			marshaler: grpcMarshaler{
-				envelopeWriter: envelopeWriter{
-					writer:           duplexCall,
-					compressionPool:  g.CompressionPools.Get(g.CompressionName),
-					codec:            g.Codec,
-					compressMinBytes: g.CompressMinBytes,
-					bufferPool:       g.BufferPool,
-				},
-			},
-		}
 		grpcReceiver := &grpcClientReceiver{
 			spec:             spec,
 			bufferPool:       g.BufferPool,
@@ -288,6 +272,9 @@ func (g *grpcClient) NewStream(
 	return wrapClientStreamWithCodedErrors(sender, receiver)
 }
 
+// grpcClientSender works for both gRPC and gRPC-Web. From our perspective, the
+// protocols differ only in how trailers are sent, and clients aren't allowed
+// to send trailers.
 type grpcClientSender struct {
 	spec       Spec
 	duplexCall *duplexHTTPCall
@@ -302,8 +289,8 @@ func (s *grpcClientSender) Header() http.Header {
 	return s.duplexCall.Header()
 }
 
-func (s *grpcClientSender) Trailer() http.Header {
-	return s.duplexCall.Trailer()
+func (s *grpcClientSender) Trailer() (http.Header, bool) {
+	return nil, false
 }
 
 func (s *grpcClientSender) Send(message any) error {
@@ -399,41 +386,6 @@ func (r *grpcClientReceiver) validateResponse(response *http.Response) *Error {
 		r.bufferPool,
 		r.protobuf,
 	)
-}
-
-type grpcWebClientSender struct {
-	spec       Spec
-	duplexCall *duplexHTTPCall
-	trailer    http.Header
-	marshaler  grpcMarshaler
-}
-
-func (s *grpcWebClientSender) Spec() Spec {
-	return s.spec
-}
-
-func (s *grpcWebClientSender) Header() http.Header {
-	return s.duplexCall.Header()
-}
-
-func (s *grpcWebClientSender) Trailer() http.Header {
-	return s.trailer
-}
-
-func (s *grpcWebClientSender) Send(message any) error {
-	// Don't return typed nils.
-	if err := s.marshaler.Marshal(message); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (s *grpcWebClientSender) Close(_ error) error {
-	if err := s.marshaler.MarshalWebTrailers(s.trailer); err != nil && !errors.Is(err, io.EOF) {
-		_ = s.duplexCall.CloseWrite()
-		return err
-	}
-	return s.duplexCall.CloseWrite()
 }
 
 type grpcWebClientReceiver struct {
@@ -595,8 +547,8 @@ func (hs *grpcHandlerSender) Header() http.Header {
 	return hs.header
 }
 
-func (hs *grpcHandlerSender) Trailer() http.Header {
-	return hs.trailer
+func (hs *grpcHandlerSender) Trailer() (http.Header, bool) {
+	return hs.trailer, true
 }
 
 func (hs *grpcHandlerSender) flush() {

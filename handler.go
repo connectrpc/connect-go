@@ -92,7 +92,9 @@ func NewUnaryHandler[Req, Res any](
 			return
 		}
 		mergeHeaders(sender.Header(), response.Header())
-		mergeHeaders(sender.Trailer(), response.Trailer())
+		if trailers, ok := sender.Trailer(); ok {
+			mergeHeaders(trailers, response.Trailer())
+		}
 		_ = sender.Close(sender.Send(response.Any()))
 	}
 

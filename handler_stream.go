@@ -71,7 +71,9 @@ func (c *ClientStream[Req, Res]) SendAndClose(envelope *Response[Res]) error {
 		return err
 	}
 	mergeHeaders(c.sender.Header(), envelope.header)
-	mergeHeaders(c.sender.Trailer(), envelope.trailer)
+	if trailer, ok := c.sender.Trailer(); ok {
+		mergeHeaders(trailer, envelope.trailer)
+	}
 	return c.sender.Send(envelope.Msg)
 }
 
@@ -92,7 +94,10 @@ func (s *ServerStream[Res]) ResponseHeader() http.Header {
 // ResponseTrailer returns the response trailers. Handlers may write to the
 // response trailers at any time before returning.
 func (s *ServerStream[Res]) ResponseTrailer() http.Header {
-	return s.sender.Trailer()
+	if trailers, ok := s.sender.Trailer(); ok {
+		return trailers
+	}
+	return make(http.Header)
 }
 
 // Send a message to the client. The first call to Send also sends the response
@@ -134,7 +139,10 @@ func (b *BidiStream[Req, Res]) ResponseHeader() http.Header {
 // ResponseTrailer returns the response trailers. Handlers may write to the
 // response trailers at any time before returning.
 func (b *BidiStream[Req, Res]) ResponseTrailer() http.Header {
-	return b.sender.Trailer()
+	if trailers, ok := b.sender.Trailer(); ok {
+		return trailers
+	}
+	return make(http.Header)
 }
 
 // Send a message to the client. The first call to Send also sends the response

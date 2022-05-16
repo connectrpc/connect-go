@@ -38,8 +38,8 @@ func (n *nopSender) Header() http.Header {
 	return n.header
 }
 
-func (n *nopSender) Trailer() http.Header {
-	return n.trailer
+func (n *nopSender) Trailer() (http.Header, bool) {
+	return n.trailer, true
 }
 
 func (n *nopSender) Spec() Spec {
