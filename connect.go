@@ -52,9 +52,8 @@ const (
 // Send. Any subsequent mutations to the headers are effectively no-ops.
 //
 // Handler-side Senders may mutate trailers until calling Close, when the
-// trailers are written to the network. Clients should avoid sending trailers:
-// usage is nuanced, protocol-specific, and will likely create
-// incompatibilities with other gRPC implementations.
+// trailers are written to the network. Clients may not send trailers, since
+// the gRPC, gRPC-Web, and Connect protocols all forbid it.
 //
 // Once servers return an error, they're not interested in receiving additional
 // messages and clients should stop sending them. Client-side Senders indicate
@@ -67,7 +66,7 @@ type Sender interface {
 
 	Spec() Spec
 	Header() http.Header
-	Trailer() http.Header
+	Trailer() (http.Header, bool)
 }
 
 // Receiver is the readable side of a bidirectional stream of messages.
