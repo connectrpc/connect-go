@@ -117,7 +117,10 @@ func (s *ServerStreamForClient[Res]) ResponseHeader() http.Header {
 // ResponseTrailer returns the trailers received from the server. Trailers
 // aren't fully populated until Receive() returns an error wrapping io.EOF.
 func (s *ServerStreamForClient[Res]) ResponseTrailer() http.Header {
-	return s.receiver.Trailer()
+	if trailer, ok := s.receiver.Trailer(); ok {
+		return trailer
+	}
+	return make(http.Header)
 }
 
 // Close the receive side of the stream.
@@ -193,5 +196,8 @@ func (b *BidiStreamForClient[Req, Res]) ResponseHeader() http.Header {
 // ResponseTrailer returns the trailers received from the server. Trailers
 // aren't fully populated until Receive() returns an error wrapping io.EOF.
 func (b *BidiStreamForClient[Req, Res]) ResponseTrailer() http.Header {
-	return b.receiver.Trailer()
+	if trailer, ok := b.receiver.Trailer(); ok {
+		return trailer
+	}
+	return make(http.Header)
 }

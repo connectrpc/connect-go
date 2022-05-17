@@ -325,9 +325,9 @@ func (r *grpcClientReceiver) Header() http.Header {
 	return r.header
 }
 
-func (r *grpcClientReceiver) Trailer() http.Header {
+func (r *grpcClientReceiver) Trailer() (http.Header, bool) {
 	r.duplexCall.BlockUntilResponseReady()
-	return r.trailer
+	return r.trailer, true
 }
 
 func (r *grpcClientReceiver) Receive(message any) error {
@@ -407,8 +407,8 @@ func (r *grpcWebClientReceiver) Header() http.Header {
 	return r.header
 }
 
-func (r *grpcWebClientReceiver) Trailer() http.Header {
-	return r.trailer
+func (r *grpcWebClientReceiver) Trailer() (http.Header, bool) {
+	return r.trailer, true
 }
 
 func (r *grpcWebClientReceiver) Receive(message any) error {
@@ -602,8 +602,8 @@ func (hr *grpcHandlerReceiver) Header() http.Header {
 	return hr.request.Header
 }
 
-func (hr *grpcHandlerReceiver) Trailer() http.Header {
-	return hr.request.Trailer
+func (hr *grpcHandlerReceiver) Trailer() (http.Header, bool) {
+	return nil, false
 }
 
 type grpcMarshaler struct {
