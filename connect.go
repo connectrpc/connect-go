@@ -74,6 +74,8 @@ type Sender interface {
 //
 // Receiver implementations provided by this module guarantee that all returned
 // errors can be cast to *Error using errors.As.
+//
+// Only client-side Receivers may read trailers.
 type Receiver interface {
 	Receive(any) error
 	Close() error
@@ -81,7 +83,7 @@ type Receiver interface {
 	Spec() Spec
 	Header() http.Header
 	// Trailers are populated only after Receive returns an error.
-	Trailer() http.Header
+	Trailer() (http.Header, bool)
 }
 
 // Request is a wrapper around a generated request message. It provides
@@ -251,9 +253,12 @@ func receiveUnaryResponse[T any](receiver Receiver) (*Response[T], error) {
 	} else if err != nil && !errors.Is(err, io.EOF) {
 		return nil, NewError(CodeUnknown, err)
 	}
-	return &Response[T]{
-		Msg:     &msg,
-		header:  receiver.Header(),
-		trailer: receiver.Trailer(),
-	}, nil
+	response := &Response[T]{
+		Msg:    &msg,
+		header: receiver.Header(),
+	}
+	if trailer, ok := receiver.Trailer(); ok {
+		response.trailer = trailer
+	}
+	return response, nil
 }
