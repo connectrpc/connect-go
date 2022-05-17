@@ -78,8 +78,8 @@ func (n *nopReceiver) Header() http.Header {
 	return n.header
 }
 
-func (n *nopReceiver) Trailer() http.Header {
-	return n.trailer
+func (n *nopReceiver) Trailer() (http.Header, bool) {
+	return n.trailer, true
 }
 
 func (n *nopReceiver) Receive(_ any) error {
