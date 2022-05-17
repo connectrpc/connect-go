@@ -929,6 +929,7 @@ func grpcStatusFromError(err error) (*statusv1.Status, error) {
 	}
 	if connectErr, ok := asError(err); ok {
 		status.Code = int32(connectErr.Code())
+		status.Message = connectErr.Message()
 		for _, detail := range connectErr.details {
 			// If the detail is already a protobuf Any, we're golden.
 			if anyProtoDetail, ok := detail.(*anypb.Any); ok {
@@ -944,9 +945,6 @@ func grpcStatusFromError(err error) (*statusv1.Status, error) {
 				)
 			}
 			status.Details = append(status.Details, anyProtoDetail)
-		}
-		if underlyingErr := connectErr.Unwrap(); underlyingErr != nil {
-			status.Message = underlyingErr.Error() // don't repeat code
 		}
 	}
 	return status, nil
