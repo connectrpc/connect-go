@@ -28,7 +28,6 @@ import (
 	"time"
 
 	statusv1 "github.com/bufbuild/connect-go/internal/gen/go/connectext/grpc/status/v1"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 const (
@@ -930,22 +929,11 @@ func grpcStatusFromError(err error) (*statusv1.Status, error) {
 	if connectErr, ok := asError(err); ok {
 		status.Code = int32(connectErr.Code())
 		status.Message = connectErr.Message()
-		for _, detail := range connectErr.details {
-			// If the detail is already a protobuf Any, we're golden.
-			if anyProtoDetail, ok := detail.(*anypb.Any); ok {
-				status.Details = append(status.Details, anyProtoDetail)
-				continue
-			}
-			// Otherwise, we convert it to an Any.
-			anyProtoDetail, err := anypb.New(detail)
-			if err != nil {
-				return nil, fmt.Errorf(
-					"can't create an *anypb.Any from %v (type %T): %w",
-					detail, detail, err,
-				)
-			}
-			status.Details = append(status.Details, anyProtoDetail)
+		details, err := connectErr.detailsAsAny()
+		if err != nil {
+			return nil, err
 		}
+		status.Details = details
 	}
 	return status, nil
 }

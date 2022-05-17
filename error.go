@@ -22,6 +22,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // An ErrorDetail is a self-describing Protobuf message attached to an *Error.
@@ -122,6 +123,29 @@ func (e *Error) Meta() http.Header {
 		e.meta = make(http.Header)
 	}
 	return e.meta
+}
+
+func (e *Error) detailsAsAny() ([]*anypb.Any, error) {
+	anys := make([]*anypb.Any, 0, len(e.details))
+	for _, detail := range e.details {
+		// If the detail is already a protobuf Any, we're golden.
+		if anyProtoDetail, ok := detail.(*anypb.Any); ok {
+			anys = append(anys, anyProtoDetail)
+			continue
+		}
+		// Otherwise, we convert it to an Any.
+		anyProtoDetail, err := anypb.New(detail)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"can't create an *anypb.Any from %v (type %T): %w",
+				detail,
+				detail,
+				err,
+			)
+		}
+		anys = append(anys, anyProtoDetail)
+	}
+	return anys, nil
 }
 
 // errorf calls fmt.Errorf with the supplied template and arguments, then wraps
