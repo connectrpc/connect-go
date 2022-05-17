@@ -192,7 +192,7 @@ type grpcClient struct {
 	web bool
 }
 
-func (g *grpcClient) WriteRequestHeader(header http.Header) {
+func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
 	header[headerUserAgent] = []string{grpcUserAgent()}
