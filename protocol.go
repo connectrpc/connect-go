@@ -118,7 +118,7 @@ type protocolClientParams struct {
 // protocol, codec, and compressor to send requests.
 type protocolClient interface {
 	// WriteRequestHeader writes any protocol-specific request headers.
-	WriteRequestHeader(http.Header)
+	WriteRequestHeader(StreamType, http.Header)
 
 	// NewStream constructs a Sender and Receiver for the message exchange.
 	//

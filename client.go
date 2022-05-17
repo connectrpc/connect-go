@@ -94,7 +94,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		// To make the specification and RPC headers visible to the full interceptor
 		// chain (as though they were supplied by the caller), we'll add them here.
 		request.spec = unarySpec
-		protocolClient.WriteRequestHeader(request.Header())
+		protocolClient.WriteRequestHeader(StreamTypeUnary, request.Header())
 		response, err := unaryFunc(ctx, request)
 		if err != nil {
 			return nil, err
@@ -160,7 +160,7 @@ func (c *Client[Req, Res]) newStream(ctx context.Context, streamType StreamType)
 		ctx = interceptor.WrapStreamContext(ctx)
 	}
 	header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
-	c.protocolClient.WriteRequestHeader(header)
+	c.protocolClient.WriteRequestHeader(streamType, header)
 	sender, receiver := c.protocolClient.NewStream(ctx, c.config.newSpec(streamType), header)
 	if interceptor := c.config.Interceptor; interceptor != nil {
 		sender = interceptor.WrapStreamSender(ctx, sender)
