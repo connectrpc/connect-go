@@ -134,10 +134,6 @@ func (g *grpcHandler) NewStream(
 	responseWriter http.ResponseWriter,
 	request *http.Request,
 ) (Sender, Receiver, error) {
-	codecName := grpcCodecFromContentType(g.web, request.Header.Get(headerContentType))
-	// handler.go guarantees that this is not nil.
-	clientCodec := g.Codecs.Get(codecName)
-
 	// We need to parse metadata before entering the interceptor stack, but we'd
 	// like to report errors to the client in a format they understand (if
 	// possible). We'll collect any such errors here; once we return, the Handler
@@ -161,14 +157,15 @@ func (g *grpcHandler) NewStream(
 		responseWriter.Header()[grpcHeaderCompression] = []string{responseCompression}
 	}
 
+	codecName := grpcCodecFromContentType(g.web, request.Header.Get(headerContentType))
 	sender, receiver := wrapHandlerStreamWithCodedErrors(newGRPCHandlerStream(
 		g.Spec,
 		g.web,
 		responseWriter,
 		request,
 		g.CompressMinBytes,
-		clientCodec,
-		g.Codecs.Protobuf(), // for errors
+		g.Codecs.Get(codecName), // handler.go guarantees that this is not nil
+		g.Codecs.Protobuf(),     // for errors
 		g.CompressionPools.Get(requestCompression),
 		g.CompressionPools.Get(responseCompression),
 		g.BufferPool,
