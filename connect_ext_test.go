@@ -295,30 +295,52 @@ func TestServer(t *testing.T) {
 			testCumSum(t, client, bidi)
 			testErrors(t, client)
 		}
-		t.Run("identity", func(t *testing.T) {
-			run(t, connect.WithGRPC())
+		t.Run("connect", func(t *testing.T) {
+			t.Run("proto", func(t *testing.T) {
+				run(t)
+			})
+			t.Run("proto_gzip", func(t *testing.T) {
+				run(t, connect.WithGzipRequests())
+			})
+			t.Run("json_gzip", func(t *testing.T) {
+				run(
+					t,
+					connect.WithProtoJSONCodec(),
+					connect.WithGzipRequests(),
+				)
+			})
 		})
-		t.Run("gzip", func(t *testing.T) {
-			run(t, connect.WithGRPC(), connect.WithGzipRequests())
+		t.Run("grpc", func(t *testing.T) {
+			t.Run("proto", func(t *testing.T) {
+				run(t, connect.WithGRPC())
+			})
+			t.Run("proto_gzip", func(t *testing.T) {
+				run(t, connect.WithGRPC(), connect.WithGzipRequests())
+			})
+			t.Run("json_gzip", func(t *testing.T) {
+				run(
+					t,
+					connect.WithGRPC(),
+					connect.WithProtoJSONCodec(),
+					connect.WithGzipRequests(),
+				)
+			})
 		})
-		t.Run("json_gzip", func(t *testing.T) {
-			run(
-				t,
-				connect.WithGRPC(),
-				connect.WithProtoJSONCodec(),
-				connect.WithGzipRequests(),
-			)
-		})
-		t.Run("web", func(t *testing.T) {
-			run(t, connect.WithGRPCWeb())
-		})
-		t.Run("web_json_gzip", func(t *testing.T) {
-			run(
-				t,
-				connect.WithGRPCWeb(),
-				connect.WithProtoJSONCodec(),
-				connect.WithGzipRequests(),
-			)
+		t.Run("grpcweb", func(t *testing.T) {
+			t.Run("proto", func(t *testing.T) {
+				run(t, connect.WithGRPCWeb())
+			})
+			t.Run("proto_gzip", func(t *testing.T) {
+				run(t, connect.WithGRPCWeb(), connect.WithGzipRequests())
+			})
+			t.Run("json_gzip", func(t *testing.T) {
+				run(
+					t,
+					connect.WithGRPCWeb(),
+					connect.WithProtoJSONCodec(),
+					connect.WithGzipRequests(),
+				)
+			})
 		})
 	}
 
