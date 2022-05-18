@@ -135,17 +135,15 @@ func (g *grpcHandler) NewStream(
 	responseWriter http.ResponseWriter,
 	request *http.Request,
 ) (Sender, Receiver, error) {
-	// We need to parse metadata before entering the interceptor stack, but we'd
-	// like to report errors to the client in a format they understand (if
-	// possible). We'll collect any such errors here; once we return, the Handler
-	// will send the error to the client.
+	// We need to parse metadata before entering the interceptor stack; we'll
+	// send the error to the client later on.
 	requestCompression, responseCompression, failed := negotiateCompression(
 		g.CompressionPools,
 		request.Header.Get(grpcHeaderCompression),
 		request.Header.Get(grpcHeaderAcceptCompression),
 	)
 
-	// We must write any remaining headers here:
+	// Write any remaining headers here:
 	// (1) any writes to the stream will implicitly send the headers, so we
 	// should get all of gRPC's required response headers ready.
 	// (2) interceptors should be able to see these headers.
@@ -171,8 +169,6 @@ func (g *grpcHandler) NewStream(
 		g.CompressionPools.Get(responseCompression),
 		g.BufferPool,
 	))
-	// We can't return failed as-is: a nil *Error is non-nil when returned as an
-	// error interface.
 	if failed != nil {
 		// Negotiation failed, so we can't establish a stream. To make the
 		// request's HTTP trailers visible to interceptors, we should try to read
@@ -201,7 +197,8 @@ func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {
 		header[grpcHeaderAcceptCompression] = []string{acceptCompression}
 	}
 	if !g.web {
-		// No HTTP trailers in gRPC-Web.
+		// The gRPC-HTTP2 specification requires this - it flushes out proxies that
+		// don't support HTTP trailers.
 		header["Te"] = []string{"trailers"}
 	}
 }
@@ -214,7 +211,7 @@ func (g *grpcClient) NewStream(
 	if deadline, ok := ctx.Deadline(); ok {
 		if encodedDeadline, err := grpcEncodeTimeout(time.Until(deadline)); err == nil {
 			// Tests verify that the error in encodeTimeout is unreachable, so we
-			// should be safe without observability for the error case.
+			// don't need to handle the error case.
 			header[grpcHeaderTimeout] = []string{encodedDeadline}
 		}
 	}
@@ -291,11 +288,10 @@ func (s *grpcClientSender) Trailer() (http.Header, bool) {
 }
 
 func (s *grpcClientSender) Send(message any) error {
-	// Don't return typed nils.
 	if err := s.marshaler.Marshal(message); err != nil {
 		return err
 	}
-	return nil
+	return nil // no typed nils
 }
 
 func (s *grpcClientSender) Close(_ error) error {
@@ -479,10 +475,9 @@ func (hs *grpcHandlerSender) Send(message any) error {
 		hs.wroteToBody = true
 	}
 	if err := hs.marshaler.Marshal(message); err != nil {
-		return err // already coded
+		return err
 	}
-	// don't return typed nils
-	return nil
+	return nil // no typed nils
 }
 
 func (hs *grpcHandlerSender) Close(err error) error {
@@ -492,8 +487,8 @@ func (hs *grpcHandlerSender) Close(err error) error {
 		mergeHeaders(hs.writer.Header(), hs.header)
 	}
 	// gRPC always sends the error's code, message, details, and metadata as
-	// trailers. Future protocols may not do this, though, so we don't want to
-	// mutate the trailers map that the user sees.
+	// trailing metadata. The Connect protocol doesn't do this, so we don't want
+	// to mutate the trailers map that the user sees.
 	mergedTrailers := make(http.Header, len(hs.trailer)+2) // always make space for status & message
 	mergeHeaders(mergedTrailers, hs.trailer)
 	grpcErrorToTrailer(hs.bufferPool, mergedTrailers, hs.protobuf, err)
@@ -502,9 +497,9 @@ func (hs *grpcHandlerSender) Close(err error) error {
 		// not sending any response messages, the gRPC specification calls this a
 		// "trailers-only" response. Under those circumstances, the gRPC-Web spec
 		// says that implementations _may_ send trailing metadata as HTTP headers
-		// instead. The gRPC-Web spec is explicitly a description of the reference
-		// implementations rather than a proper specification, so we're going to
-		// emulate Envoy and put the trailing metadata in the HTTP headers.
+		// instead. Envoy is the canonical implementation of the gRPC-Web protocol,
+		// so we emulate Envoy's behavior and put the trailing metadata in the HTTP
+		// headers.
 		mergeHeaders(hs.writer.Header(), mergedTrailers)
 		return nil
 	}
@@ -514,20 +509,20 @@ func (hs *grpcHandlerSender) Close(err error) error {
 		if err := hs.marshaler.MarshalWebTrailers(mergedTrailers); err != nil {
 			return err
 		}
-		// Don't return typed nils.
-		return nil
+		return nil // no typed nils
 	}
 	// We're using standard gRPC. Even if we haven't written to the body and
 	// we're sending a "trailers-only" response, we must send trailing metadata
 	// as HTTP trailers. (If we had frame-level control of the HTTP/2 layer, we
-	// could send a single HEADER frame and no DATA frames, but net/http doesn't
-	// expose APIs that low-level.) In net/http's ResponseWriter API, we do that
-	// by writing to the headers map with a special prefix. This is purely an
-	// implementation detail, so we should hide it and _not_ mutate the
-	// user-visible headers.
+	// could send trailers-only responses as a single HEADER frame and no DATA
+	// frames, but net/http doesn't expose APIs that low-level.) In net/http's
+	// ResponseWriter API, we send HTTP trailers by writing to the headers map
+	// with a special prefix. This prefixing is an implementation detail, so we
+	// should hide it and _not_ mutate the user-visible headers.
 	//
-	// Note that this is _very_ finicky, and it's impossible to test with a
-	// net/http client. Breaking this logic breaks Envoy's gRPC-Web translation.
+	// Note that this is _very_ finicky and difficult to test with net/http,
+	// since correctness depends on low-level framing details. Breaking this
+	// logic breaks Envoy's gRPC-Web translation.
 	for key, values := range mergedTrailers {
 		for _, value := range values {
 			hs.writer.Header().Add(http.TrailerPrefix+key, value)
@@ -571,8 +566,7 @@ func (hr *grpcHandlerReceiver) Receive(message any) error {
 		}
 		return err // already coded
 	}
-	// don't return typed nils
-	return nil
+	return nil // no typed nils
 }
 
 func (hr *grpcHandlerReceiver) Close() error {
@@ -841,7 +835,7 @@ func grpcEncodeTimeout(timeout time.Duration) (string, error) {
 		}
 	}
 	// The max time.Duration is smaller than the maximum expressible gRPC
-	// timeout, so we shouldn't ever reach this case.
+	// timeout, so we can't reach this case.
 	return "", errNoTimeout
 }
 
