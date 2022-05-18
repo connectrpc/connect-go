@@ -150,10 +150,11 @@ func (g *grpcHandler) NewStream(
 	//
 	// Since we know that these header keys are already in canonical form, we can
 	// skip the normalization in Header.Set.
-	responseWriter.Header()[headerContentType] = []string{request.Header.Get(headerContentType)}
-	responseWriter.Header()[grpcHeaderAcceptCompression] = []string{g.CompressionPools.CommaSeparatedNames()}
+	header := responseWriter.Header()
+	header[headerContentType] = []string{request.Header.Get(headerContentType)}
+	header[grpcHeaderAcceptCompression] = []string{g.CompressionPools.CommaSeparatedNames()}
 	if responseCompression != compressionIdentity {
-		responseWriter.Header()[grpcHeaderCompression] = []string{responseCompression}
+		header[grpcHeaderCompression] = []string{responseCompression}
 	}
 
 	codecName := grpcCodecFromContentType(g.web, request.Header.Get(headerContentType))
@@ -241,11 +242,18 @@ func (g *grpcClient) NewStream(
 			spec:             spec,
 			bufferPool:       g.BufferPool,
 			compressionPools: g.CompressionPools,
-			codec:            g.Codec,
 			protobuf:         g.Protobuf,
 			header:           make(http.Header),
 			trailer:          make(http.Header),
 			duplexCall:       duplexCall,
+			unmarshaler: grpcUnmarshaler{
+				web: true,
+				envelopeReader: envelopeReader{
+					reader:     duplexCall,
+					codec:      g.Codec,
+					bufferPool: g.BufferPool,
+				},
+			},
 		}
 		receiver = webReceiver
 		duplexCall.SetValidateResponse(webReceiver.validateResponse)
@@ -254,11 +262,18 @@ func (g *grpcClient) NewStream(
 			spec:             spec,
 			bufferPool:       g.BufferPool,
 			compressionPools: g.CompressionPools,
-			codec:            g.Codec,
 			protobuf:         g.Protobuf,
 			header:           make(http.Header),
 			trailer:          make(http.Header),
 			duplexCall:       duplexCall,
+			unmarshaler: grpcUnmarshaler{
+				web: false,
+				envelopeReader: envelopeReader{
+					reader:     duplexCall,
+					codec:      g.Codec,
+					bufferPool: g.BufferPool,
+				},
+			},
 		}
 		receiver = grpcReceiver
 		duplexCall.SetValidateResponse(grpcReceiver.validateResponse)
@@ -300,13 +315,13 @@ func (s *grpcClientSender) Close(_ error) error {
 
 type grpcClientReceiver struct {
 	spec             Spec
-	bufferPool       *bufferPool
 	compressionPools readOnlyCompressionPools
-	codec            Codec
+	bufferPool       *bufferPool
 	protobuf         Codec // for errors
 	header           http.Header
 	trailer          http.Header
 	duplexCall       *duplexHTTPCall
+	unmarshaler      grpcUnmarshaler
 }
 
 func (r *grpcClientReceiver) Spec() Spec {
@@ -324,8 +339,8 @@ func (r *grpcClientReceiver) Trailer() (http.Header, bool) {
 }
 
 func (r *grpcClientReceiver) Receive(message any) error {
-	unmarshaler := r.unmarshaler()
-	err := (&unmarshaler).Unmarshal(message)
+	r.duplexCall.BlockUntilResponseReady()
+	err := r.unmarshaler.Unmarshal(message)
 	if err == nil {
 		return nil
 	}
@@ -354,42 +369,32 @@ func (r *grpcClientReceiver) Close() error {
 	return r.duplexCall.CloseRead()
 }
 
-func (r *grpcClientReceiver) unmarshaler() grpcUnmarshaler {
-	// Blocks until response is ready.
-	compression := r.duplexCall.ResponseHeader().Get(grpcHeaderCompression)
-	// On the hot path, pass values up the stack.
-	return grpcUnmarshaler{
-		web: false,
-		envelopeReader: envelopeReader{
-			reader:          r.duplexCall,
-			codec:           r.codec,
-			compressionPool: r.compressionPools.Get(compression),
-			bufferPool:      r.bufferPool,
-		},
-	}
-}
-
 // validateResponse is called by duplexHTTPCall in a separate goroutine.
 func (r *grpcClientReceiver) validateResponse(response *http.Response) *Error {
-	return grpcValidateResponse(
+	if err := grpcValidateResponse(
 		response,
 		r.header,
 		r.trailer,
 		r.compressionPools,
 		r.bufferPool,
 		r.protobuf,
-	)
+	); err != nil {
+		return err
+	}
+	compression := response.Header.Get(grpcHeaderCompression)
+	r.unmarshaler.envelopeReader.compressionPool = r.compressionPools.Get(compression)
+	return nil
 }
 
 type grpcWebClientReceiver struct {
 	spec             Spec
 	bufferPool       *bufferPool
 	compressionPools readOnlyCompressionPools
-	codec            Codec
 	protobuf         Codec // for errors
 	header           http.Header
 	trailer          http.Header
 	duplexCall       *duplexHTTPCall
+	unmarshaler      grpcUnmarshaler
 }
 
 func (r *grpcWebClientReceiver) Spec() Spec {
@@ -405,13 +410,13 @@ func (r *grpcWebClientReceiver) Trailer() (http.Header, bool) {
 }
 
 func (r *grpcWebClientReceiver) Receive(message any) error {
-	unmarshaler := r.unmarshaler()
-	err := unmarshaler.Unmarshal(message)
+	r.duplexCall.BlockUntilResponseReady()
+	err := r.unmarshaler.Unmarshal(message)
 	if err == nil {
 		return nil
 	}
 	// See if the server sent an explicit error in the gRPC-Web trailers.
-	mergeHeaders(r.trailer, unmarshaler.WebTrailer())
+	mergeHeaders(r.trailer, r.unmarshaler.WebTrailer())
 	if serverErr := grpcErrorFromTrailer(r.bufferPool, r.protobuf, r.trailer); serverErr != nil {
 		// This is expected from a protocol perspective, but receiving a block of
 		// trailers means that we're _not_ getting a standard message. For users to
@@ -429,31 +434,21 @@ func (r *grpcWebClientReceiver) Close() error {
 	return r.duplexCall.CloseRead()
 }
 
-func (r *grpcWebClientReceiver) unmarshaler() grpcUnmarshaler {
-	// Blocks until response is ready.
-	compression := r.duplexCall.ResponseHeader().Get(grpcHeaderCompression)
-	// On the hot path, pass values up the stack.
-	return grpcUnmarshaler{
-		web: true,
-		envelopeReader: envelopeReader{
-			reader:          r.duplexCall,
-			codec:           r.codec,
-			compressionPool: r.compressionPools.Get(compression),
-			bufferPool:      r.bufferPool,
-		},
-	}
-}
-
 // validateResponse is called by duplexHTTPCall in a separate goroutine.
 func (r *grpcWebClientReceiver) validateResponse(response *http.Response) *Error {
-	return grpcValidateResponse(
+	if err := grpcValidateResponse(
 		response,
 		r.header,
 		r.trailer,
 		r.compressionPools,
 		r.bufferPool,
 		r.protobuf,
-	)
+	); err != nil {
+		return err
+	}
+	compression := response.Header.Get(grpcHeaderCompression)
+	r.unmarshaler.envelopeReader.compressionPool = r.compressionPools.Get(compression)
+	return nil
 }
 
 type grpcHandlerSender struct {
@@ -543,16 +538,56 @@ func (hs *grpcHandlerSender) Trailer() (http.Header, bool) {
 	return hs.trailer, true
 }
 
-func (hs *grpcHandlerSender) flush() {
-	if f, ok := hs.writer.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
 type grpcHandlerReceiver struct {
 	spec        Spec
 	unmarshaler grpcUnmarshaler
 	request     *http.Request
+}
+
+func newGRPCHandlerStream(
+	spec Spec,
+	web bool,
+	responseWriter http.ResponseWriter,
+	request *http.Request,
+	compressMinBytes int,
+	codec Codec,
+	protobuf Codec, // for errors
+	requestCompressionPools *compressionPool,
+	responseCompressionPools *compressionPool,
+	bufferPool *bufferPool,
+) (*grpcHandlerSender, *grpcHandlerReceiver) {
+	sender := &grpcHandlerSender{
+		spec: spec,
+		web:  web,
+		marshaler: grpcMarshaler{
+			envelopeWriter: envelopeWriter{
+				writer:           responseWriter,
+				compressionPool:  responseCompressionPools,
+				codec:            codec,
+				compressMinBytes: compressMinBytes,
+				bufferPool:       bufferPool,
+			},
+		},
+		protobuf:   protobuf,
+		writer:     responseWriter,
+		header:     make(http.Header),
+		trailer:    make(http.Header),
+		bufferPool: bufferPool,
+	}
+	receiver := &grpcHandlerReceiver{
+		spec: spec,
+		unmarshaler: grpcUnmarshaler{
+			envelopeReader: envelopeReader{
+				reader:          request.Body,
+				codec:           codec,
+				compressionPool: requestCompressionPools,
+				bufferPool:      bufferPool,
+			},
+			web: web,
+		},
+		request: request,
+	}
+	return sender, receiver
 }
 
 func (hr *grpcHandlerReceiver) Receive(message any) error {
@@ -641,52 +676,6 @@ func (u *grpcUnmarshaler) Unmarshal(message any) *Error {
 
 func (u *grpcUnmarshaler) WebTrailer() http.Header {
 	return u.webTrailer
-}
-
-func newGRPCHandlerStream(
-	spec Spec,
-	web bool,
-	responseWriter http.ResponseWriter,
-	request *http.Request,
-	compressMinBytes int,
-	codec Codec,
-	protobuf Codec, // for errors
-	requestCompressionPools *compressionPool,
-	responseCompressionPools *compressionPool,
-	bufferPool *bufferPool,
-) (*grpcHandlerSender, *grpcHandlerReceiver) {
-	sender := &grpcHandlerSender{
-		spec: spec,
-		web:  web,
-		marshaler: grpcMarshaler{
-			envelopeWriter: envelopeWriter{
-				writer:           responseWriter,
-				compressionPool:  responseCompressionPools,
-				codec:            codec,
-				compressMinBytes: compressMinBytes,
-				bufferPool:       bufferPool,
-			},
-		},
-		protobuf:   protobuf,
-		writer:     responseWriter,
-		header:     make(http.Header),
-		trailer:    make(http.Header),
-		bufferPool: bufferPool,
-	}
-	receiver := &grpcHandlerReceiver{
-		spec: spec,
-		unmarshaler: grpcUnmarshaler{
-			envelopeReader: envelopeReader{
-				reader:          request.Body,
-				codec:           codec,
-				compressionPool: requestCompressionPools,
-				bufferPool:      bufferPool,
-			},
-			web: web,
-		},
-		request: request,
-	}
-	return sender, receiver
 }
 
 func grpcValidateResponse(
