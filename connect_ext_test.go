@@ -431,6 +431,21 @@ func TestMarshalStatusError(t *testing.T) {
 	assertInternalError(t, connect.WithGRPCWeb())
 }
 
+func TestUnavailableIfHostInvalid(t *testing.T) {
+	t.Parallel()
+	client := pingv1connect.NewPingServiceClient(
+		http.DefaultClient,
+		"https://api.invalid/",
+		connect.WithGRPC(),
+	)
+	_, err := client.Ping(
+		context.Background(),
+		connect.NewRequest(&pingv1.PingRequest{}),
+	)
+	assert.NotNil(t, err)
+	assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
+}
+
 func TestBidiRequiresHTTP2(t *testing.T) {
 	t.Parallel()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
