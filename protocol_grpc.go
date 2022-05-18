@@ -722,12 +722,9 @@ func grpcValidateResponse(
 		}
 		mergeHeaders(trailer, response.Header)
 		trailer.Del(headerContentType)
-		// If we get some actual HTTP trailers, treat those as trailing metadata too.
-		_ = discard(response.Body)
-		mergeHeaders(trailer, response.Trailer)
-		// Merge HTTP headers and trailers into the error metadata.
-		err.meta = response.Header.Clone()
-		mergeHeaders(err.meta, response.Trailer)
+		// Also set the error metadata
+		err.meta = header.Clone()
+		mergeHeaders(err.meta, trailer)
 		return err
 	}
 	// The response is valid, so we should expose the headers.
