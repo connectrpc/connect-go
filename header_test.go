@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"testing"
 	"testing/quick"
-	"unicode/utf8"
 
 	"github.com/bufbuild/connect-go/internal/assert"
 )
@@ -38,39 +37,6 @@ func TestBinaryEncodingQuick(t *testing.T) {
 	if err := quick.Check(roundtrip, nil /* config */); err != nil {
 		t.Error(err)
 	}
-}
-
-func TestPercentEncodingQuick(t *testing.T) {
-	t.Parallel()
-	pool := newBufferPool()
-	roundtrip := func(input string) bool {
-		if !utf8.ValidString(input) {
-			return true
-		}
-		encoded := percentEncode(pool, input)
-		decoded := percentDecode(pool, encoded)
-		return decoded == input
-	}
-	if err := quick.Check(roundtrip, nil /* config */); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestPercentEncoding(t *testing.T) {
-	t.Parallel()
-	pool := newBufferPool()
-	roundtrip := func(input string) {
-		assert.True(t, utf8.ValidString(input), assert.Sprintf("input invalid UTF-8"))
-		encoded := percentEncode(pool, input)
-		t.Logf("%q encoded as %q", input, encoded)
-		decoded := percentDecode(pool, encoded)
-		assert.Equal(t, decoded, input)
-	}
-
-	roundtrip("foo")
-	roundtrip("foo bar")
-	roundtrip(`foo%bar`)
-	roundtrip("fiancée")
 }
 
 func TestHeaderMerge(t *testing.T) {
