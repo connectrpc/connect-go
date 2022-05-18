@@ -581,13 +581,7 @@ func (hr *grpcHandlerReceiver) Close() error {
 	// a well-intentioned client may just not expect the server to be returning
 	// an error for a streaming RPC. Better to accept that we can't always reuse
 	// TCP connections.
-	if err := hr.request.Body.Close(); err != nil {
-		if connectErr, ok := asError(err); ok {
-			return connectErr
-		}
-		return NewError(CodeUnknown, err)
-	}
-	return nil
+	return hr.request.Body.Close()
 }
 
 func (hr *grpcHandlerReceiver) Spec() Spec {
