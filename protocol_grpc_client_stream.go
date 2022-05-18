@@ -276,7 +276,7 @@ func (cs *duplexClientStream) makeRequest(prepared chan struct{}) {
 	// establish the receive side of the stream.
 	response, err := cs.httpClient.Do(request)
 	if err != nil {
-		cs.setResponseError(NewError(CodeUnavailable, err))
+		cs.setResponseError(err)
 		return
 	}
 
