@@ -386,7 +386,7 @@ func TestHeaderBasic(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPC())
+	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
 	request := connect.NewRequest(&pingv1.PingRequest{})
 	request.Header().Set(key, cval)
 	response, err := client.Ping(context.Background(), request)
@@ -414,12 +414,12 @@ func TestTimeoutParsing(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPC())
+	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
 	_, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
 	assert.Nil(t, err)
 }
 
-func TestMarshalStatusError(t *testing.T) {
+func TestGRPCMarshalStatusError(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
@@ -449,6 +449,8 @@ func TestMarshalStatusError(t *testing.T) {
 		)
 	}
 
+	// Only applies to gRPC protocols, where we're marshaling the Status protobuf
+	// message to binary.
 	assertInternalError(t, connect.WithGRPC())
 	assertInternalError(t, connect.WithGRPCWeb())
 }
@@ -458,7 +460,6 @@ func TestUnavailableIfHostInvalid(t *testing.T) {
 	client := pingv1connect.NewPingServiceClient(
 		http.DefaultClient,
 		"https://api.invalid/",
-		connect.WithGRPC(),
 	)
 	_, err := client.Ping(
 		context.Background(),
@@ -479,7 +480,6 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL,
-		connect.WithGRPC(),
 	)
 	stream := client.CumSum(context.Background())
 	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{}))
