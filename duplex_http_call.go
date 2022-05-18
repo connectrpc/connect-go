@@ -77,7 +77,7 @@ func newDuplexHTTPCall(
 		// network. Exhaust the sync.Once immediately and short-circuit Read and
 		// Write by setting an error.
 		client.sendRequestOnce.Do(func() {})
-		connectErr := errorf(CodeUnknown, "construct *http.Request: %w", err)
+		connectErr := errorf(CodeUnavailable, "construct *http.Request: %w", err)
 		client.SetError(connectErr)
 	}
 	return client
@@ -235,7 +235,7 @@ func (d *duplexHTTPCall) makeRequest() {
 	// establish the receive side of the stream.
 	response, err := d.httpClient.Do(d.request)
 	if err != nil {
-		d.SetError(err)
+		d.SetError(NewError(CodeUnavailable, err))
 		return
 	}
 	d.response = response
