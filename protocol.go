@@ -292,3 +292,9 @@ func negotiateCompression(
 	}
 	return requestCompression, responseCompression, nil
 }
+
+func flushResponseWriter(w http.ResponseWriter) {
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
