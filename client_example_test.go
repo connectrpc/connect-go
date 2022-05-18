@@ -59,10 +59,11 @@ func Example_client() {
 	// client that communicate over in-memory pipes. Don't do this in production!
 	httpClient = examplePingServer.Client()
 
+	// By default, clients use the Connect protocol. Add connect.WithGRPC() or
+	// connect.WithGRPCWeb() to switch protocols.
 	client := pingv1connect.NewPingServiceClient(
 		httpClient,
 		examplePingServer.URL(),
-		connect.WithGRPC(),
 	)
 	response, err := client.Ping(
 		context.Background(),
@@ -76,6 +77,6 @@ func Example_client() {
 	logger.Println("response message:", response.Msg)
 
 	// Output:
-	// response content-type: application/grpc+proto
+	// response content-type: application/proto
 	// response message: number:42
 }

@@ -29,7 +29,9 @@ import (
 
 func TestClientStreamErrors(t *testing.T) {
 	t.Parallel()
-	_, err := pingv1connect.NewPingServiceClient(http.DefaultClient, "INVALID_URL", connect.WithGRPC()).Ping(context.Background(), nil)
+	_, err := pingv1connect.
+		NewPingServiceClient(http.DefaultClient, "INVALID_URL").
+		Ping(context.Background(), nil)
 	assert.NotNil(t, err)
 	assert.Match(t, err.Error(), "missing scheme")
 	// We don't even get to calling methods on the client, so there's no question
@@ -142,7 +144,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 		newHeaderInterceptor(
 			// 1 (start). request: should see protocol-related headers
 			func(_ connect.Spec, h http.Header) {
-				assert.NotZero(t, h.Get("Grpc-Accept-Encoding"))
+				assert.NotZero(t, h.Get("Content-Type"))
 			},
 			// 12 (end). response: check "one"-"four"
 			assertAllPresent,
@@ -184,7 +186,6 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL,
-		connect.WithGRPC(),
 		clientOnion,
 	)
 	_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
