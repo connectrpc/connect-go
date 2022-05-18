@@ -469,7 +469,7 @@ type grpcHandlerSender struct {
 }
 
 func (hs *grpcHandlerSender) Send(message any) error {
-	defer hs.flush()
+	defer flushResponseWriter(hs.writer)
 	if !hs.wroteToBody {
 		mergeHeaders(hs.writer.Header(), hs.header)
 		hs.wroteToBody = true
@@ -481,7 +481,7 @@ func (hs *grpcHandlerSender) Send(message any) error {
 }
 
 func (hs *grpcHandlerSender) Close(err error) error {
-	defer hs.flush()
+	defer flushResponseWriter(hs.writer)
 	// If we haven't written the headers yet, do so.
 	if !hs.wroteToBody {
 		mergeHeaders(hs.writer.Header(), hs.header)
