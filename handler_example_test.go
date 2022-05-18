@@ -50,7 +50,8 @@ func Example_handler() {
 
 	// protoc-gen-connect-go generates constructors that return plain net/http
 	// Handlers, so they're compatible with most Go HTTP routers and middleware
-	// (for example, net/http's StripPrefix).
+	// (for example, net/http's StripPrefix). Each handler automatically supports
+	// the Connect, gRPC, and gRPC-Web protocols.
 	mux := http.NewServeMux()
 	mux.Handle(
 		pingv1connect.NewPingServiceHandler(
