@@ -245,7 +245,7 @@ func validateRequestURL(uri string) *Error {
 			uri,
 		)
 	}
-	return NewError(CodeUnknown, err)
+	return NewError(CodeUnavailable, err)
 }
 
 // negotiateCompression determines and validates the request compression and

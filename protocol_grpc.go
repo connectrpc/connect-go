@@ -616,22 +616,22 @@ func (u *grpcUnmarshaler) Unmarshal(message any) *Error {
 	}
 	env := u.envelopeReader.last
 	if !u.web || !env.IsSet(grpcFlagEnvelopeTrailer) {
-		return errorf(CodeUnknown, "protocol error: invalid envelope flags %d", env.Flags)
+		return errorf(CodeInternal, "protocol error: invalid envelope flags %d", env.Flags)
 	}
 
 	// Per the gRPC-Web specification, trailers should be encoded as an HTTP/1
 	// headers block _without_ the terminating newline. To make the headers
 	// parseable by net/textproto, we need to add the newline.
 	if err := env.Data.WriteByte('\n'); err != nil {
-		return errorf(CodeUnknown, "unmarshal web trailers: %w", err)
+		return errorf(CodeInternal, "unmarshal web trailers: %w", err)
 	}
 	bufferedReader := bufio.NewReader(env.Data)
 	mimeReader := textproto.NewReader(bufferedReader)
 	mimeHeader, mimeErr := mimeReader.ReadMIMEHeader()
 	if mimeErr != nil {
 		return errorf(
-			CodeInvalidArgument,
-			"gRPC-Web protocol error: received invalid trailers: %w",
+			CodeInternal,
+			"gRPC-Web protocol error: trailers invalid: %w",
 			mimeErr,
 		)
 	}
@@ -707,7 +707,7 @@ func grpcValidateResponse(
 		// addition to setting the Grpc-Accept-Encoding header).
 		return errorf(
 			CodeInternal,
-			"unknown encoding %q: accepted grpc-encoding values are %v",
+			"unknown encoding %q: accepted encodings are %v",
 			compression,
 			availableCompressors.CommaSeparatedNames(),
 		)
@@ -765,7 +765,7 @@ func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.H
 
 	code, err := strconv.ParseUint(codeHeader, 10 /* base */, 32 /* bitsize */)
 	if err != nil {
-		return errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
+		return errorf(CodeInternal, "gRPC protocol error: invalid error code %q", codeHeader)
 	}
 	message := grpcPercentDecode(bufferPool, trailer.Get(grpcHeaderMessage))
 	retErr := NewError(Code(code), errors.New(message))
@@ -774,11 +774,11 @@ func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.H
 	if len(detailsBinaryEncoded) > 0 {
 		detailsBinary, err := DecodeBinaryHeader(detailsBinaryEncoded)
 		if err != nil {
-			return errorf(CodeUnknown, "server returned invalid grpc-status-details-bin trailer: %w", err)
+			return errorf(CodeInternal, "server returned invalid grpc-status-details-bin trailer: %w", err)
 		}
 		var status statusv1.Status
 		if err := protobuf.Unmarshal(detailsBinary, &status); err != nil {
-			return errorf(CodeUnknown, "server returned invalid protobuf for error details: %w", err)
+			return errorf(CodeInternal, "server returned invalid protobuf for error details: %w", err)
 		}
 		for _, d := range status.Details {
 			retErr.details = append(retErr.details, d)
