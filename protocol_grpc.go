@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	statusv1 "connectrpc.com/connect/internal/gen/go/connectext/grpc/status/v1"
 )
@@ -782,7 +783,7 @@ func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.H
 	if err != nil {
 		return errorf(CodeUnknown, "gRPC protocol error: got invalid error code %q", codeHeader)
 	}
-	message := percentDecode(bufferPool, trailer.Get(grpcHeaderMessage))
+	message := grpcPercentDecode(bufferPool, trailer.Get(grpcHeaderMessage))
 	retErr := NewError(Code(code), errors.New(message))
 
 	detailsBinaryEncoded := trailer.Get(grpcHeaderDetails)
@@ -888,7 +889,10 @@ func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Co
 			grpcHeaderStatus,
 			strconv.FormatInt(int64(CodeInternal), 10 /* base */),
 		)
-		trailer.Set(grpcHeaderMessage, statusErr.Error())
+		trailer.Set(
+			grpcHeaderMessage,
+			grpcPercentEncode(bufferPool, statusErr.Error()),
+		)
 		return
 	}
 	code := strconv.Itoa(int(status.Code))
@@ -900,7 +904,10 @@ func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Co
 		)
 		trailer.Set(
 			grpcHeaderMessage,
-			fmt.Sprintf("marshal protobuf status: %v", binErr),
+			grpcPercentEncode(
+				bufferPool,
+				fmt.Sprintf("marshal protobuf status: %v", binErr),
+			),
 		)
 		return
 	}
@@ -908,7 +915,7 @@ func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Co
 		mergeHeaders(trailer, connectErr.meta)
 	}
 	trailer.Set(grpcHeaderStatus, code)
-	trailer.Set(grpcHeaderMessage, percentEncode(bufferPool, status.Message))
+	trailer.Set(grpcHeaderMessage, grpcPercentEncode(bufferPool, status.Message))
 	trailer.Set(grpcHeaderDetails, EncodeBinaryHeader(bin))
 }
 
@@ -927,4 +934,75 @@ func grpcStatusFromError(err error) (*statusv1.Status, error) {
 		status.Details = details
 	}
 	return status, nil
+}
+
+// grpcPercentEncode follows RFC 3986 Section 2.1 and the gRPC HTTP/2 spec.
+// It's a variant of URL-encoding with fewer reserved characters. It's intended
+// to take UTF-8 encoded text and escape non-ASCII bytes so that they're valid
+// HTTP/1 headers, while still maximizing readability of the data on the wire.
+//
+// The grpc-message trailer (used for human-readable error messages) should be
+// percent-encoded.
+//
+// References:
+//   https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#responses
+//   https://datatracker.ietf.org/doc/html/rfc3986#section-2.1
+func grpcPercentEncode(bufferPool *bufferPool, msg string) string {
+	for i := 0; i < len(msg); i++ {
+		// Characters that need to be escaped are defined in gRPC's HTTP/2 spec.
+		// They're different from the generic set defined in RFC 3986.
+		if c := msg[i]; c < ' ' || c > '~' || c == '%' {
+			return grpcPercentEncodeSlow(bufferPool, msg, i)
+		}
+	}
+	return msg
+}
+
+// msg needs some percent-escaping. Bytes before offset don't require
+// percent-encoding, so they can be copied to the output as-is.
+func grpcPercentEncodeSlow(bufferPool *bufferPool, msg string, offset int) string {
+	out := bufferPool.Get()
+	defer bufferPool.Put(out)
+	out.WriteString(msg[:offset])
+	for i := offset; i < len(msg); i++ {
+		c := msg[i]
+		if c < ' ' || c > '~' || c == '%' {
+			out.WriteString(fmt.Sprintf("%%%02X", c))
+			continue
+		}
+		out.WriteByte(c)
+	}
+	return out.String()
+}
+
+func grpcPercentDecode(bufferPool *bufferPool, encoded string) string {
+	for i := 0; i < len(encoded); i++ {
+		if c := encoded[i]; c == '%' && i+2 < len(encoded) {
+			return grpcPercentDecodeSlow(bufferPool, encoded, i)
+		}
+	}
+	return encoded
+}
+
+// Similar to percentEncodeSlow: encoded is percent-encoded, and needs to be
+// decoded byte-by-byte starting at offset.
+func grpcPercentDecodeSlow(bufferPool *bufferPool, encoded string, offset int) string {
+	out := bufferPool.Get()
+	defer bufferPool.Put(out)
+	out.WriteString(encoded[:offset])
+	for i := offset; i < len(encoded); i++ {
+		c := encoded[i]
+		if c != '%' || i+2 >= len(encoded) {
+			out.WriteByte(c)
+			continue
+		}
+		parsed, err := strconv.ParseUint(encoded[i+1:i+3], 16 /* hex */, 8 /* bitsize */)
+		if err != nil {
+			out.WriteRune(utf8.RuneError)
+		} else {
+			out.WriteByte(byte(parsed))
+		}
+		i += 2
+	}
+	return out.String()
 }

@@ -22,6 +22,7 @@ import (
 	"testing"
 	"testing/quick"
 	"time"
+	"unicode/utf8"
 
 	"connectrpc.com/connect/internal/assert"
 	"github.com/google/go-cmp/cmp"
@@ -126,4 +127,37 @@ func TestGRPCEncodeTimeoutQuick(t *testing.T) {
 	if err := quick.Check(encode, nil); err != nil {
 		t.Error(err)
 	}
+}
+
+func TestGRPCPercentEncodingQuick(t *testing.T) {
+	t.Parallel()
+	pool := newBufferPool()
+	roundtrip := func(input string) bool {
+		if !utf8.ValidString(input) {
+			return true
+		}
+		encoded := grpcPercentEncode(pool, input)
+		decoded := grpcPercentDecode(pool, encoded)
+		return decoded == input
+	}
+	if err := quick.Check(roundtrip, nil /* config */); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestGRPCPercentEncoding(t *testing.T) {
+	t.Parallel()
+	pool := newBufferPool()
+	roundtrip := func(input string) {
+		assert.True(t, utf8.ValidString(input), assert.Sprintf("input invalid UTF-8"))
+		encoded := grpcPercentEncode(pool, input)
+		t.Logf("%q encoded as %q", input, encoded)
+		decoded := grpcPercentDecode(pool, encoded)
+		assert.Equal(t, decoded, input)
+	}
+
+	roundtrip("foo")
+	roundtrip("foo bar")
+	roundtrip(`foo%bar`)
+	roundtrip("fiancée")
 }
