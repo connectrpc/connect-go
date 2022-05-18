@@ -187,12 +187,12 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 
 	// Client constructor.
 	wrapComments(g, names.ClientConstructor, " constructs a client for the ", service.Desc.FullName(),
-		" service. By default, it uses the binary Protobuf Codec, ",
+		" service. By default, it uses the Connect protocol with the binary Protobuf Codec, ",
 		"asks for gzipped responses, and sends uncompressed requests. ",
-		"It doesn't have a default protocol; you must supply either the connect.WithGRPC() or ",
+		"To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or ",
 		"connect.WithGRPCWeb() options.")
 	g.P("//")
-	wrapComments(g, "The URL supplied here should be the base URL for the gRPC server ",
+	wrapComments(g, "The URL supplied here should be the base URL for the Connect or gRPC server ",
 		"(for example, http://api.acme.com or https://acme.com/grpc).")
 	if isDeprecatedService(service) {
 		g.P("//")
@@ -311,8 +311,8 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 	wrapComments(g, names.ServerConstructor, " builds an HTTP handler from the service implementation.",
 		" It returns the path on which to mount the handler and the handler itself.")
 	g.P("//")
-	wrapComments(g, "By default, handlers support the gRPC and gRPC-Web protocols with ",
-		"the binary Protobuf and JSON codecs.")
+	wrapComments(g, "By default, handlers support the Connect, gRPC, and gRPC-Web protocols with ",
+		"the binary Protobuf and JSON codecs. They also support gzip compression.")
 	if isDeprecatedService(service) {
 		g.P("//")
 		deprecated(g)
