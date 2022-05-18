@@ -557,13 +557,6 @@ type grpcHandlerReceiver struct {
 
 func (hr *grpcHandlerReceiver) Receive(message any) error {
 	if err := hr.unmarshaler.Unmarshal(message); err != nil {
-		if errors.Is(err, errSpecialEnvelope) {
-			if hr.request.Trailer == nil {
-				hr.request.Trailer = hr.unmarshaler.WebTrailer()
-			} else {
-				mergeHeaders(hr.request.Trailer, hr.unmarshaler.WebTrailer())
-			}
-		}
 		return err // already coded
 	}
 	return nil // no typed nils
