@@ -235,7 +235,11 @@ func (d *duplexHTTPCall) makeRequest() {
 	// establish the receive side of the stream.
 	response, err := d.httpClient.Do(d.request)
 	if err != nil {
-		d.SetError(NewError(CodeUnavailable, err))
+		err = wrapIfContextError(err)
+		if _, ok := AsError(err); !ok {
+			err = NewError(CodeUnavailable, err)
+		}
+		d.SetError(err)
 		return
 	}
 	d.response = response
