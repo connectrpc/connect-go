@@ -265,20 +265,20 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named b
 	if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
 		// bidi streaming
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
-			"*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClient")) +
+			"*" + g.QualifiedGoIdent(connectPackage.Ident("ClientBidiStream")) +
 			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
 	}
 	if method.Desc.IsStreamingClient() {
 		// client streaming
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
-			"*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClient")) +
+			"*" + g.QualifiedGoIdent(connectPackage.Ident("ClientClientStream")) +
 			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
 	}
 	if method.Desc.IsStreamingServer() {
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
 			", " + reqName + " *" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
 			g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
-			"(*" + g.QualifiedGoIdent(connectPackage.Ident("ServerStreamForClient")) +
+			"(*" + g.QualifiedGoIdent(connectPackage.Ident("ClientServerStream")) +
 			"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
 			", error)"
 	}

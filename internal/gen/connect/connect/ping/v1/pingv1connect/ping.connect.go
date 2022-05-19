@@ -46,11 +46,11 @@ type PingServiceClient interface {
 	// Fail always fails.
 	Fail(context.Context, *connect_go.Request[v1.FailRequest]) (*connect_go.Response[v1.FailResponse], error)
 	// Sum calculates the sum of the numbers sent on the stream.
-	Sum(context.Context) *connect_go.ClientStreamForClient[v1.SumRequest, v1.SumResponse]
+	Sum(context.Context) *connect_go.ClientClientStream[v1.SumRequest, v1.SumResponse]
 	// CountUp returns a stream of the numbers up to the given request.
-	CountUp(context.Context, *connect_go.Request[v1.CountUpRequest]) (*connect_go.ServerStreamForClient[v1.CountUpResponse], error)
+	CountUp(context.Context, *connect_go.Request[v1.CountUpRequest]) (*connect_go.ClientServerStream[v1.CountUpResponse], error)
 	// CumSum determines the cumulative sum of all the numbers sent on the stream.
-	CumSum(context.Context) *connect_go.BidiStreamForClient[v1.CumSumRequest, v1.CumSumResponse]
+	CumSum(context.Context) *connect_go.ClientBidiStream[v1.CumSumRequest, v1.CumSumResponse]
 }
 
 // NewPingServiceClient constructs a client for the connect.ping.v1.PingService service. By default,
@@ -111,17 +111,17 @@ func (c *pingServiceClient) Fail(ctx context.Context, req *connect_go.Request[v1
 }
 
 // Sum calls connect.ping.v1.PingService.Sum.
-func (c *pingServiceClient) Sum(ctx context.Context) *connect_go.ClientStreamForClient[v1.SumRequest, v1.SumResponse] {
+func (c *pingServiceClient) Sum(ctx context.Context) *connect_go.ClientClientStream[v1.SumRequest, v1.SumResponse] {
 	return c.sum.CallClientStream(ctx)
 }
 
 // CountUp calls connect.ping.v1.PingService.CountUp.
-func (c *pingServiceClient) CountUp(ctx context.Context, req *connect_go.Request[v1.CountUpRequest]) (*connect_go.ServerStreamForClient[v1.CountUpResponse], error) {
+func (c *pingServiceClient) CountUp(ctx context.Context, req *connect_go.Request[v1.CountUpRequest]) (*connect_go.ClientServerStream[v1.CountUpResponse], error) {
 	return c.countUp.CallServerStream(ctx, req)
 }
 
 // CumSum calls connect.ping.v1.PingService.CumSum.
-func (c *pingServiceClient) CumSum(ctx context.Context) *connect_go.BidiStreamForClient[v1.CumSumRequest, v1.CumSumResponse] {
+func (c *pingServiceClient) CumSum(ctx context.Context) *connect_go.ClientBidiStream[v1.CumSumRequest, v1.CumSumResponse] {
 	return c.cumSum.CallBidiStream(ctx)
 }
 
