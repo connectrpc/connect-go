@@ -186,8 +186,8 @@ func newClientConfig(url string, options []ClientOption) (*clientConfig, *Error)
 		CompressionPools: make(map[string]*compressionPool),
 		BufferPool:       newBufferPool(),
 	}
-	WithProtoBinaryCodec().applyToClient(&config)
-	WithGzip().applyToClient(&config)
+	withProtoBinaryCodec().applyToClient(&config)
+	withGzip().applyToClient(&config)
 	for _, opt := range options {
 		opt.applyToClient(&config)
 	}
