@@ -115,16 +115,16 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 }
 
 // CallClientStream calls a client streaming procedure.
-func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamForClient[Req, Res] {
+func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientClientStream[Req, Res] {
 	if c.err != nil {
-		return &ClientStreamForClient[Req, Res]{err: c.err}
+		return &ClientClientStream[Req, Res]{err: c.err}
 	}
 	sender, receiver := c.newStream(ctx, StreamTypeClient)
-	return &ClientStreamForClient[Req, Res]{sender: sender, receiver: receiver}
+	return &ClientClientStream[Req, Res]{sender: sender, receiver: receiver}
 }
 
 // CallServerStream calls a server streaming procedure.
-func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Request[Req]) (*ServerStreamForClient[Res], error) {
+func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Request[Req]) (*ClientServerStream[Res], error) {
 	if c.err != nil {
 		return nil, c.err
 	}
@@ -141,16 +141,16 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 	if err := sender.Close(nil); err != nil {
 		return nil, err
 	}
-	return &ServerStreamForClient[Res]{receiver: receiver}, nil
+	return &ClientServerStream[Res]{receiver: receiver}, nil
 }
 
 // CallBidiStream calls a bidirectional streaming procedure.
-func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForClient[Req, Res] {
+func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *ClientBidiStream[Req, Res] {
 	if c.err != nil {
-		return &BidiStreamForClient[Req, Res]{err: c.err}
+		return &ClientBidiStream[Req, Res]{err: c.err}
 	}
 	sender, receiver := c.newStream(ctx, StreamTypeBidi)
-	return &BidiStreamForClient[Req, Res]{sender: sender, receiver: receiver}
+	return &ClientBidiStream[Req, Res]{sender: sender, receiver: receiver}
 }
 
 func (c *Client[Req, Res]) newStream(ctx context.Context, streamType StreamType) (Sender, Receiver) {
