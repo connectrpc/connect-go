@@ -300,13 +300,13 @@ func TestServer(t *testing.T) {
 				run(t)
 			})
 			t.Run("proto_gzip", func(t *testing.T) {
-				run(t, connect.WithGzipRequests())
+				run(t, connect.WithSendGzip())
 			})
 			t.Run("json_gzip", func(t *testing.T) {
 				run(
 					t,
-					connect.WithProtoJSONCodec(),
-					connect.WithGzipRequests(),
+					connect.WithProtoJSON(),
+					connect.WithSendGzip(),
 				)
 			})
 		})
@@ -315,14 +315,14 @@ func TestServer(t *testing.T) {
 				run(t, connect.WithGRPC())
 			})
 			t.Run("proto_gzip", func(t *testing.T) {
-				run(t, connect.WithGRPC(), connect.WithGzipRequests())
+				run(t, connect.WithGRPC(), connect.WithSendGzip())
 			})
 			t.Run("json_gzip", func(t *testing.T) {
 				run(
 					t,
 					connect.WithGRPC(),
-					connect.WithProtoJSONCodec(),
-					connect.WithGzipRequests(),
+					connect.WithProtoJSON(),
+					connect.WithSendGzip(),
 				)
 			})
 		})
@@ -331,14 +331,14 @@ func TestServer(t *testing.T) {
 				run(t, connect.WithGRPCWeb())
 			})
 			t.Run("proto_gzip", func(t *testing.T) {
-				run(t, connect.WithGRPCWeb(), connect.WithGzipRequests())
+				run(t, connect.WithGRPCWeb(), connect.WithSendGzip())
 			})
 			t.Run("json_gzip", func(t *testing.T) {
 				run(
 					t,
 					connect.WithGRPCWeb(),
-					connect.WithProtoJSONCodec(),
-					connect.WithGzipRequests(),
+					connect.WithProtoJSON(),
+					connect.WithSendGzip(),
 				)
 			})
 		})

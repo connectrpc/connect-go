@@ -52,8 +52,7 @@ func BenchmarkConnect(b *testing.B) {
 		httpClient,
 		server.URL,
 		connect.WithGRPC(),
-		connect.WithGzip(),
-		connect.WithGzipRequests(),
+		connect.WithSendGzip(),
 	)
 	twoMiB := strings.Repeat("a", 2*1024*1024)
 	b.ResetTimer()
