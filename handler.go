@@ -265,9 +265,9 @@ func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig 
 		HandleGRPCWeb:    true,
 		BufferPool:       newBufferPool(),
 	}
-	WithProtoBinaryCodec().applyToHandler(&config)
-	WithProtoJSONCodec().applyToHandler(&config)
-	WithGzip().applyToHandler(&config)
+	withProtoBinaryCodec().applyToHandler(&config)
+	withProtoJSONCodec().applyToHandler(&config)
+	withGzip().applyToHandler(&config)
 	for _, opt := range options {
 		opt.applyToHandler(&config)
 	}

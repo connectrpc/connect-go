@@ -27,6 +27,26 @@ type ClientOption interface {
 	applyToClient(*clientConfig)
 }
 
+// WithAcceptCompression makes a compression algorithm available to a client.
+// Clients ask servers to compress responses using any of the registered
+// algorithms. It's safe to use this option liberally: servers will ignore any
+// compression algorithms they don't support. To compress requests, pair this
+// option with WithSendCompression.
+//
+// Clients accept gzipped requests by default, using a compressor backed by the
+// standard library's gzip package with the default compression level. Use
+// WithSendGzip to compress requests with gzip.
+func WithAcceptCompression(
+	name string,
+	newDecompressor func() Decompressor,
+	newCompressor func() Compressor,
+) ClientOption {
+	return &compressionOption{
+		Name:            name,
+		CompressionPool: newCompressionPool(newDecompressor, newCompressor),
+	}
+}
+
 // WithClientOptions composes multiple ClientOptions into one.
 func WithClientOptions(options ...ClientOption) ClientOption {
 	return &clientOptionsOption{options}
@@ -42,24 +62,33 @@ func WithGRPCWeb() ClientOption {
 	return &grpcOption{web: true}
 }
 
-// WithGzipRequests configures the client to gzip requests. It requires that
-// the client already have a registered gzip compressor (via either WithGzip or
-// WithCompressor).
-//
-// Because some servers don't support gzip, clients default to sending
-// uncompressed requests.
-func WithGzipRequests() ClientOption {
-	return WithRequestCompression(compressionGzip)
+// WithProtoJSON configures a client to send JSON-encoded data instead of
+// binary Protobuf. It uses the standard Protobuf JSON mapping as implemented
+// by google.golang.org/protobuf/encoding/protojson: fields are named using
+// lowerCamelCase, zero values are omitted, missing required fields are errors,
+// enums are emitted as strings, etc.
+func WithProtoJSON() ClientOption {
+	return WithCodec(&protoJSONCodec{})
 }
 
-// WithRequestCompression configures the client to use the specified algorithm to
+// WithSendCompression configures the client to use the specified algorithm to
 // compress request messages. If the algorithm has not been registered using
-// WithCompression, the generated client constructor will return an error.
+// WithAcceptCompression, the client will return errors at runtime.
 //
 // Because some servers don't support compression, clients default to sending
 // uncompressed requests.
-func WithRequestCompression(name string) ClientOption {
-	return &requestCompressionOption{Name: name}
+func WithSendCompression(name string) ClientOption {
+	return &sendCompressionOption{Name: name}
+}
+
+// WithSendGzip configures the client to gzip requests. Since clients have
+// access to a gzip compressor by default, WithSendGzip doesn't require
+// WithSendCompresion.
+//
+// Some servers don't support gzip, so clients default to sending uncompressed
+// requests.
+func WithSendGzip() ClientOption {
+	return WithSendCompression(compressionGzip)
 }
 
 // A HandlerOption configures a Handler.
@@ -68,6 +97,27 @@ func WithRequestCompression(name string) ClientOption {
 // all Options are also HandlerOptions.
 type HandlerOption interface {
 	applyToHandler(*handlerConfig)
+}
+
+// WithCompression configures handlers to support a compression algorithm.
+// Clients may send messages compressed with that algorithm and/or request
+// compressed responses. The Compressors and Decompressors produced by the
+// supplied constructors must use the same algorithm. Internally, Connect pools
+// compressors and decompressors.
+//
+// By default, handlers support gzip using the standard library's gzip package
+// at the default compression level.
+//
+// Calling WithCompression with an empty name or nil constructors is a no-op.
+func WithCompression(
+	name string,
+	newDecompressor func() Decompressor,
+	newCompressor func() Compressor,
+) HandlerOption {
+	return &compressionOption{
+		Name:            name,
+		CompressionPool: newCompressionPool(newDecompressor, newCompressor),
+	}
 }
 
 // WithHandlerOptions composes multiple HandlerOptions into one.
@@ -83,46 +133,18 @@ type Option interface {
 }
 
 // WithCodec registers a serialization method with a client or handler.
-// Registering a codec with an empty name is a no-op.
-//
-// Typically, generated code automatically supplies this option with the
-// appropriate codec(s). For example, handlers generated from Protobuf schemas
-// using protoc-gen-connect-go automatically register binary and JSON codecs.
-// Users with more specialized needs may override the default codecs by
-// registering a new codec under the same name.
-//
 // Handlers may have multiple codecs registered, and use whichever the client
 // chooses. Clients may only have a single codec.
+//
+// By default, handlers and clients support binary Protocol Buffer data using
+// google.golang.org/protobuf/proto. Handlers also support JSON by default,
+// using the standard Protobuf JSON mapping. Users with more specialized needs
+// may override the default codecs by registering a new codec under the "proto"
+// or "json" names.
+//
+// Registering a codec with an empty name is a no-op.
 func WithCodec(codec Codec) Option {
 	return &codecOption{Codec: codec}
-}
-
-// WithCompression configures client and server compression strategies. The
-// Compressors and Decompressors produced by the supplied constructors must use
-// the same algorithm.
-//
-// For handlers, WithCompression registers a compression algorithm. Clients may
-// send messages compressed with that algorithm and/or request compressed
-// responses.
-//
-// For clients, WithCompression serves two purposes. First, the client
-// asks servers to compress responses using any of the registered algorithms.
-// (gRPC's compression negotiation is complex, but most of Google's gRPC server
-// implementations won't compress responses unless the request is compressed.)
-// Second, it makes all the registered algorithms available for use with
-// WithRequestCompression. Note that actually compressing requests requires
-// using both WithCompression and WithRequestCompression.
-//
-// Calling WithCompression with an empty name or nil constructors is a no-op.
-func WithCompression(
-	name string,
-	newDecompressor func() Decompressor,
-	newCompressor func() Compressor,
-) Option {
-	return &compressionOption{
-		Name:            name,
-		CompressionPool: newCompressionPool(newDecompressor, newCompressor),
-	}
 }
 
 // WithCompressMinBytes sets a minimum size threshold for compression:
@@ -134,24 +156,6 @@ func WithCompression(
 // messages usually isn't worth the small reduction in network I/O.
 func WithCompressMinBytes(min int) Option {
 	return &compressMinBytesOption{Min: min}
-}
-
-// WithGzip registers a gzip compressor backed by the standard library's gzip
-// package with the default compression level.
-//
-// Handlers with this option applied accept gzipped requests and can send
-// gzipped responses. Clients with this option applied request gzipped
-// responses, but don't automatically send gzipped requests (since the server
-// may not support them). Use WithGzipRequests to gzip requests.
-//
-// Handlers and clients generated by protoc-gen-connect-go apply WithGzip by
-// default.
-func WithGzip() Option {
-	return WithCompression(
-		compressionGzip,
-		func() Decompressor { return &gzip.Reader{} },
-		func() Compressor { return gzip.NewWriter(ioutil.Discard) },
-	)
 }
 
 // WithInterceptors configures a client or handler's interceptor stack. Repeated
@@ -206,29 +210,6 @@ func WithInterceptors(interceptors ...Interceptor) Option {
 // WithOptions composes multiple Options into one.
 func WithOptions(options ...Option) Option {
 	return &optionsOption{options}
-}
-
-// WithProtoBinaryCodec registers a binary Protocol Buffers codec that uses
-// google.golang.org/protobuf/proto.
-//
-// Handlers and clients generated by protoc-gen-connect-go have
-// WithProtoBinaryCodec applied by default. To replace the default binary Protobuf
-// codec (with vtprotobuf, for example), apply WithCodec with a Codec whose
-// name is "proto".
-func WithProtoBinaryCodec() Option {
-	return WithCodec(&protoBinaryCodec{})
-}
-
-// WithProtoJSONCodec registers a codec that serializes Protocol Buffers
-// messages as JSON. It uses the standard Protobuf JSON mapping as implemented
-// by google.golang.org/protobuf/encoding/protojson: fields are named using
-// lowerCamelCase, zero values are omitted, missing required fields are errors,
-// enums are emitted as strings, etc.
-//
-// Handlers generated by protoc-gen-connect-go have WithProtoJSONCodec
-// applied by default.
-func WithProtoJSONCodec() Option {
-	return WithCodec(&protoJSONCodec{})
 }
 
 type clientOptionsOption struct {
@@ -350,10 +331,28 @@ func (o *optionsOption) applyToHandler(config *handlerConfig) {
 	}
 }
 
-type requestCompressionOption struct {
+type sendCompressionOption struct {
 	Name string
 }
 
-func (o *requestCompressionOption) applyToClient(config *clientConfig) {
+func (o *sendCompressionOption) applyToClient(config *clientConfig) {
 	config.RequestCompressionName = o.Name
+}
+
+func withGzip() Option {
+	return &compressionOption{
+		Name: compressionGzip,
+		CompressionPool: newCompressionPool(
+			func() Decompressor { return &gzip.Reader{} },
+			func() Compressor { return gzip.NewWriter(ioutil.Discard) },
+		),
+	}
+}
+
+func withProtoBinaryCodec() Option {
+	return WithCodec(&protoBinaryCodec{})
+}
+
+func withProtoJSONCodec() HandlerOption {
+	return WithCodec(&protoJSONCodec{})
 }
