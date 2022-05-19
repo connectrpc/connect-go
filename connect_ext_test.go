@@ -90,6 +90,14 @@ func TestServer(t *testing.T) {
 			)
 			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
 		})
+		t.Run("ping_timout", func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+			defer cancel()
+			request := connect.NewRequest(&pingv1.PingRequest{})
+			request.Header().Set(clientHeader, headerValue)
+			_, err := client.Ping(ctx, request)
+			assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded)
+		})
 	}
 	testSum := func(t *testing.T, client pingv1connect.PingServiceClient) { // nolint:thelper
 		t.Run("sum", func(t *testing.T) {
