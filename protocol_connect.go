@@ -347,7 +347,7 @@ func (s *connectClientSender) Send(message any) error {
 	if err := s.marshaler.Marshal(message); err != nil {
 		return err
 	}
-	return nil // no typed nils
+	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
 func (s *connectClientSender) Close(err error) error {
@@ -442,7 +442,7 @@ func (s *connectStreamingHandlerSender) Send(message any) error {
 	if err := s.marshaler.Marshal(message); err != nil {
 		return err
 	}
-	return nil // no typed nils
+	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
 func (s *connectStreamingHandlerSender) Close(err error) error {
@@ -450,7 +450,7 @@ func (s *connectStreamingHandlerSender) Close(err error) error {
 	if err := s.marshaler.MarshalEndStream(err, s.trailer); err != nil {
 		return err
 	}
-	return nil // no typed nils
+	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
 func (s *connectStreamingHandlerSender) Spec() Spec {
@@ -477,7 +477,7 @@ func (r *connectStreamingHandlerReceiver) Receive(message any) error {
 		// errSpecialEnvelope.
 		return err
 	}
-	return nil // no typed nils
+	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
 func (r *connectStreamingHandlerReceiver) Close() error {
@@ -614,7 +614,7 @@ func (s *connectUnaryHandlerSender) Send(message any) error {
 	if err := s.marshaler.Marshal(message); err != nil {
 		return err
 	}
-	return nil // no typed nils
+	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
 func (s *connectUnaryHandlerSender) Close(err error) error {
@@ -675,7 +675,7 @@ func (r *connectUnaryHandlerReceiver) Receive(message any) error {
 	if err := r.unmarshaler.Unmarshal(message); err != nil {
 		return err
 	}
-	return nil // no typed nils
+	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
 func (r *connectUnaryHandlerReceiver) Close() error {
