@@ -261,7 +261,7 @@ func (c *Code) UnmarshalText(data []byte) error {
 // CodeOf returns the error's status code if it is or wraps a *connect.Error
 // and CodeUnknown otherwise.
 func CodeOf(err error) Code {
-	if connectErr, ok := asError(err); ok {
+	if connectErr, ok := AsError(err); ok {
 		return connectErr.Code()
 	}
 	return CodeUnknown

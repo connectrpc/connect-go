@@ -93,7 +93,7 @@ func (w *envelopeWriter) write(env *envelope) *Error {
 	prefix[0] = env.Flags
 	binary.BigEndian.PutUint32(prefix[1:5], uint32(env.Data.Len()))
 	if _, err := w.writer.Write(prefix[:]); err != nil {
-		if connectErr, ok := asError(err); ok {
+		if connectErr, ok := AsError(err); ok {
 			return connectErr
 		}
 		return errorf(CodeUnknown, "write envelope: %w", err)
@@ -190,7 +190,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		return NewError(CodeUnknown, err)
 	case err != nil || prefixBytesRead < 5:
 		// Something else has gone wrong - the stream didn't end cleanly.
-		if connectErr, ok := asError(err); ok {
+		if connectErr, ok := AsError(err); ok {
 			return connectErr
 		}
 		return errorf(
