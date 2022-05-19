@@ -425,7 +425,7 @@ func (r *connectStreamingClientReceiver) validateResponse(response *http.Respons
 			r.compressionPools.CommaSeparatedNames(),
 		)
 	}
-	r.unmarshaler.envelopeReader.compressionPool = r.compressionPools.Get(compression)
+	r.unmarshaler.compressionPool = r.compressionPools.Get(compression)
 	mergeHeaders(r.header, response.Header)
 	return nil
 }
