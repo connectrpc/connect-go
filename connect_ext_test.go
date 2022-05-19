@@ -526,7 +526,7 @@ func (p *pluggablePingServer) Ping(
 	return p.ping(ctx, request)
 }
 
-func failNoHTTP2(tb testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]) {
+func failNoHTTP2(tb testing.TB, stream *connect.ClientBidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) {
 	tb.Helper()
 	if err := stream.Send(&pingv1.CumSumRequest{}); err != nil {
 		assert.ErrorIs(tb, err, io.EOF)
