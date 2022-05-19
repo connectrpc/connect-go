@@ -3,8 +3,8 @@ module github.com/bufbuild/connect-go
 go 1.18
 
 require (
-	github.com/google/go-cmp v0.5.7
+	github.com/google/go-cmp v0.5.8
 	google.golang.org/protobuf v1.28.0
 )
 
-require golang.org/x/xerrors v0.0.0-20220411194840-2f41105eb62f // indirect
+require golang.org/x/xerrors v0.0.0-20220517211312-f3a8303e98df // indirect
