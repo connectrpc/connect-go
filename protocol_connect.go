@@ -488,7 +488,7 @@ func (r *connectStreamingHandlerReceiver) Close() error {
 	// an error for a streaming RPC. Better to accept that we can't always reuse
 	// TCP connections.
 	if err := r.request.Body.Close(); err != nil {
-		if connectErr, ok := asError(err); ok {
+		if connectErr, ok := AsError(err); ok {
 			return connectErr
 		}
 		return NewError(CodeUnknown, err)
@@ -628,7 +628,7 @@ func (s *connectUnaryHandlerSender) Close(err error) error {
 	s.responseWriter.Header().Set(headerContentType, connectUnaryContentTypeJSON)
 	s.responseWriter.WriteHeader(connectCodeToHTTP(CodeOf(err)))
 	var wire *connectWireError
-	if connectErr, ok := asError(err); ok {
+	if connectErr, ok := AsError(err); ok {
 		wire = (*connectWireError)(connectErr)
 	} else {
 		wire = (*connectWireError)(NewError(CodeUnknown, err))
@@ -644,7 +644,7 @@ func (s *connectUnaryHandlerSender) Close(err error) error {
 func (s *connectUnaryHandlerSender) writeHeader(err error) {
 	header := s.responseWriter.Header()
 	if err != nil {
-		if connectErr, ok := asError(err); ok {
+		if connectErr, ok := AsError(err); ok {
 			mergeHeaders(header, connectErr.meta)
 		}
 	}
@@ -689,7 +689,7 @@ type connectStreamingMarshaler struct {
 func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Header) *Error {
 	end := &connectEndStreamMessage{Trailer: trailer}
 	if err != nil {
-		if connectErr, ok := asError(err); ok {
+		if connectErr, ok := AsError(err); ok {
 			mergeHeaders(end.Trailer, connectErr.meta)
 			end.Error = (*connectWireError)(connectErr)
 		} else {
@@ -776,7 +776,7 @@ func (m *connectUnaryMarshaler) Marshal(message any) *Error {
 
 func (m *connectUnaryMarshaler) write(data []byte) *Error {
 	if _, err := m.writer.Write(data); err != nil {
-		if connectErr, ok := asError(err); ok {
+		if connectErr, ok := AsError(err); ok {
 			return connectErr
 		}
 		return errorf(CodeUnknown, "write message: %w", err)
@@ -805,7 +805,7 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 	defer u.bufferPool.Put(data)
 	// ReadFrom ignores io.EOF, so any error here is real.
 	if _, err := data.ReadFrom(u.reader); err != nil {
-		if connectErr, ok := asError(err); ok {
+		if connectErr, ok := AsError(err); ok {
 			return connectErr
 		}
 		return errorf(CodeUnknown, "read message: %w", err)
@@ -831,7 +831,7 @@ func (e *connectWireError) MarshalJSON() ([]byte, error) {
 		Code:    CodeUnknown.String(),
 		Message: (*Error)(e).Error(),
 	}
-	if connectErr, ok := asError((*Error)(e)); ok {
+	if connectErr, ok := AsError((*Error)(e)); ok {
 		wire.Code = connectErr.Code().String()
 		wire.Message = connectErr.Message()
 		details, err := connectErr.detailsAsAny()
