@@ -306,7 +306,7 @@ func (s *grpcClientSender) Send(message any) error {
 	if err := s.marshaler.Marshal(message); err != nil {
 		return err
 	}
-	return nil // no typed nils
+	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
 func (s *grpcClientSender) Close(_ error) error {
@@ -472,7 +472,7 @@ func (hs *grpcHandlerSender) Send(message any) error {
 	if err := hs.marshaler.Marshal(message); err != nil {
 		return err
 	}
-	return nil // no typed nils
+	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
 func (hs *grpcHandlerSender) Close(err error) error {
@@ -504,7 +504,7 @@ func (hs *grpcHandlerSender) Close(err error) error {
 		if err := hs.marshaler.MarshalWebTrailers(mergedTrailers); err != nil {
 			return err
 		}
-		return nil // no typed nils
+		return nil // must be a literal nil: nil *Error is a non-nil error
 	}
 	// We're using standard gRPC. Even if we haven't written to the body and
 	// we're sending a "trailers-only" response, we must send trailing metadata
@@ -594,7 +594,7 @@ func (hr *grpcHandlerReceiver) Receive(message any) error {
 	if err := hr.unmarshaler.Unmarshal(message); err != nil {
 		return err // already coded
 	}
-	return nil // no typed nils
+	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
 func (hr *grpcHandlerReceiver) Close() error {
