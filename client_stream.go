@@ -20,11 +20,11 @@ import (
 	"net/http"
 )
 
-// ClientClientStream is the client's view of a client streaming RPC.
+// ClientStreamForClient is the client's view of a client streaming RPC.
 //
 // It's returned from Client.CallClientStream, but doesn't currently have an
 // exported constructor function.
-type ClientClientStream[Req, Res any] struct {
+type ClientStreamForClient[Req, Res any] struct {
 	sender   Sender
 	receiver Receiver
 	// Error from client construction. If non-nil, return for all calls.
@@ -33,7 +33,7 @@ type ClientClientStream[Req, Res any] struct {
 
 // RequestHeader returns the request headers. Headers are sent to the server with the
 // first call to Send.
-func (c *ClientClientStream[Req, Res]) RequestHeader() http.Header {
+func (c *ClientStreamForClient[Req, Res]) RequestHeader() http.Header {
 	return c.sender.Header()
 }
 
@@ -43,7 +43,7 @@ func (c *ClientClientStream[Req, Res]) RequestHeader() http.Header {
 // If the server returns an error, Send returns an error that wraps io.EOF.
 // Clients should check for case using the standard library's errors.Is and
 // unmarshal the error using CloseAndReceive.
-func (c *ClientClientStream[Req, Res]) Send(request *Req) error {
+func (c *ClientStreamForClient[Req, Res]) Send(request *Req) error {
 	if c.err != nil {
 		return c.err
 	}
@@ -52,7 +52,7 @@ func (c *ClientClientStream[Req, Res]) Send(request *Req) error {
 
 // CloseAndReceive closes the send side of the stream and waits for the
 // response.
-func (c *ClientClientStream[Req, Res]) CloseAndReceive() (*Response[Res], error) {
+func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Response[Res], error) {
 	if c.err != nil {
 		return nil, c.err
 	}
@@ -70,11 +70,11 @@ func (c *ClientClientStream[Req, Res]) CloseAndReceive() (*Response[Res], error)
 	return response, nil
 }
 
-// ClientServerStream is the client's view of a server streaming RPC.
+// ServerStreamForClient is the client's view of a server streaming RPC.
 //
 // It's returned from Client.CallServerStream, but doesn't currently have an
 // exported constructor function.
-type ClientServerStream[Res any] struct {
+type ServerStreamForClient[Res any] struct {
 	receiver Receiver
 	msg      Res
 	err      error
@@ -85,7 +85,7 @@ type ClientServerStream[Res any] struct {
 // either by reaching the end or by encountering an unexpected error. After
 // Receive returns false, the Err method will return any unexpected error
 // encountered.
-func (s *ClientServerStream[Res]) Receive() bool {
+func (s *ServerStreamForClient[Res]) Receive() bool {
 	if s.err != nil {
 		return false
 	}
@@ -96,12 +96,12 @@ func (s *ClientServerStream[Res]) Receive() bool {
 // Msg returns the most recent message unmarshaled by a call to Receive. The
 // returned message points to data that will be overwritten by the next call to
 // Receive.
-func (s *ClientServerStream[Res]) Msg() *Res {
+func (s *ServerStreamForClient[Res]) Msg() *Res {
 	return &s.msg
 }
 
 // Err returns the first non-EOF error that was encountered by Receive.
-func (s *ClientServerStream[Res]) Err() error {
+func (s *ServerStreamForClient[Res]) Err() error {
 	if s.err == nil || errors.Is(s.err, io.EOF) {
 		return nil
 	}
@@ -110,13 +110,13 @@ func (s *ClientServerStream[Res]) Err() error {
 
 // ResponseHeader returns the headers received from the server. It blocks until
 // the first call to Receive returns.
-func (s *ClientServerStream[Res]) ResponseHeader() http.Header {
+func (s *ServerStreamForClient[Res]) ResponseHeader() http.Header {
 	return s.receiver.Header()
 }
 
 // ResponseTrailer returns the trailers received from the server. Trailers
 // aren't fully populated until Receive() returns an error wrapping io.EOF.
-func (s *ClientServerStream[Res]) ResponseTrailer() http.Header {
+func (s *ServerStreamForClient[Res]) ResponseTrailer() http.Header {
 	if trailer, ok := s.receiver.Trailer(); ok {
 		return trailer
 	}
@@ -124,15 +124,15 @@ func (s *ClientServerStream[Res]) ResponseTrailer() http.Header {
 }
 
 // Close the receive side of the stream.
-func (s *ClientServerStream[Res]) Close() error {
+func (s *ServerStreamForClient[Res]) Close() error {
 	return s.receiver.Close()
 }
 
-// ClientBidiStream is the client's view of a bidirectional streaming RPC.
+// BidiStreamForClient is the client's view of a bidirectional streaming RPC.
 //
 // It's returned from Client.CallBidiStream, but doesn't currently have an
 // exported constructor function.
-type ClientBidiStream[Req, Res any] struct {
+type BidiStreamForClient[Req, Res any] struct {
 	sender   Sender
 	receiver Receiver
 	// Error from client construction. If non-nil, return for all calls.
@@ -141,7 +141,7 @@ type ClientBidiStream[Req, Res any] struct {
 
 // RequestHeader returns the request headers. Headers are sent with the first
 // call to Send.
-func (b *ClientBidiStream[Req, Res]) RequestHeader() http.Header {
+func (b *BidiStreamForClient[Req, Res]) RequestHeader() http.Header {
 	return b.sender.Header()
 }
 
@@ -151,7 +151,7 @@ func (b *ClientBidiStream[Req, Res]) RequestHeader() http.Header {
 // If the server returns an error, Send returns an error that wraps io.EOF.
 // Clients should check for case using the standard library's errors.Is and
 // unmarshal the error using Receive.
-func (b *ClientBidiStream[Req, Res]) Send(msg *Req) error {
+func (b *BidiStreamForClient[Req, Res]) Send(msg *Req) error {
 	if b.err != nil {
 		return b.err
 	}
@@ -159,7 +159,7 @@ func (b *ClientBidiStream[Req, Res]) Send(msg *Req) error {
 }
 
 // CloseSend closes the send side of the stream.
-func (b *ClientBidiStream[Req, Res]) CloseSend() error {
+func (b *BidiStreamForClient[Req, Res]) CloseSend() error {
 	if b.err != nil {
 		return b.err
 	}
@@ -168,7 +168,7 @@ func (b *ClientBidiStream[Req, Res]) CloseSend() error {
 
 // Receive a message. When the server is done sending messages and no other
 // errors have occurred, Receive will return an error that wraps io.EOF.
-func (b *ClientBidiStream[Req, Res]) Receive() (*Res, error) {
+func (b *BidiStreamForClient[Req, Res]) Receive() (*Res, error) {
 	if b.err != nil {
 		return nil, b.err
 	}
@@ -180,7 +180,7 @@ func (b *ClientBidiStream[Req, Res]) Receive() (*Res, error) {
 }
 
 // CloseReceive closes the receive side of the stream.
-func (b *ClientBidiStream[Req, Res]) CloseReceive() error {
+func (b *BidiStreamForClient[Req, Res]) CloseReceive() error {
 	if b.err != nil {
 		return b.err
 	}
@@ -189,13 +189,13 @@ func (b *ClientBidiStream[Req, Res]) CloseReceive() error {
 
 // ResponseHeader returns the headers received from the server. It blocks until
 // the first call to Receive returns.
-func (b *ClientBidiStream[Req, Res]) ResponseHeader() http.Header {
+func (b *BidiStreamForClient[Req, Res]) ResponseHeader() http.Header {
 	return b.receiver.Header()
 }
 
 // ResponseTrailer returns the trailers received from the server. Trailers
 // aren't fully populated until Receive() returns an error wrapping io.EOF.
-func (b *ClientBidiStream[Req, Res]) ResponseTrailer() http.Header {
+func (b *BidiStreamForClient[Req, Res]) ResponseTrailer() http.Header {
 	if trailer, ok := b.receiver.Trailer(); ok {
 		return trailer
 	}
