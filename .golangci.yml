@@ -3,14 +3,14 @@ run:
 linters-settings:
   errcheck:
     check-type-assertions: true
-  exhaustivestruct:
-    struct-patterns:
+  exhaustruct:
+    include:
       # No zero values for param structs.
-      - 'connectrpc.com/connect.*[pP]arams'
+      - 'github\.com/bufbuild/connect-go\..*[pP]arams'
       # No zero values for ClientStream, ServerStream, and friends.
-      - 'connectrpc.com/connect.ClientStream*'
-      - 'connectrpc.com/connect.ServerStream*'
-      - 'connectrpc.com/connect.BidiStream*'
+      - 'github\.com/bufbuild/connect-go\.ClientStream.*'
+      - 'github\.com/bufbuild/connect-go\.ServerStream.*'
+      - 'github\.com/bufbuild/connect-go\.BidiStream.*'
   forbidigo:
     forbid:
       - '^fmt\.Print'
@@ -30,22 +30,23 @@ linters-settings:
 linters:
   enable-all: true
   disable:
-    - cyclop        # covered by gocyclo
-    - funlen        # rely on code review to limit function length
-    - gocognit      # dubious "cognitive overhead" quantification
-    - gofumpt       # prefer standard gofmt
-    - golint        # deprecated by Go team
-    - gomnd         # some unnamed constants are okay
-    - interfacer    # deprecated by author
-    - ireturn       # "accept interfaces, return structs" isn't ironclad
-    - lll           # don't want hard limits for line length
-    - maintidx      # covered by gocyclo
-    - maligned      # readability trumps efficient struct packing
-    - nlreturn      # generous whitespace violates house style
-    - scopelint     # deprecated by author
-    - testpackage   # internal tests are fine
-    - wrapcheck     # don't _always_ need to wrap errors
-    - wsl           # generous whitespace violates house style
+    - cyclop            # covered by gocyclo
+    - exhaustivestruct  # replaced by exhaustruct
+    - funlen            # rely on code review to limit function length
+    - gocognit          # dubious "cognitive overhead" quantification
+    - gofumpt           # prefer standard gofmt
+    - golint            # deprecated by Go team
+    - gomnd             # some unnamed constants are okay
+    - interfacer        # deprecated by author
+    - ireturn           # "accept interfaces, return structs" isn't ironclad
+    - lll               # don't want hard limits for line length
+    - maintidx          # covered by gocyclo
+    - maligned          # readability trumps efficient struct packing
+    - nlreturn          # generous whitespace violates house style
+    - scopelint         # deprecated by author
+    - testpackage       # internal tests are fine
+    - wrapcheck         # don't _always_ need to wrap errors
+    - wsl               # generous whitespace violates house style
 issues:
   exclude:
     # Don't ban use of fmt.Errorf to create new errors, but the remaining
