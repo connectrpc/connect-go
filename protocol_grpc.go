@@ -884,7 +884,7 @@ func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Co
 		)
 		return
 	}
-	if connectErr, ok := AsError(err); ok {
+	if connectErr, ok := asError(err); ok {
 		mergeHeaders(trailer, connectErr.meta)
 	}
 	trailer.Set(grpcHeaderStatus, code)
@@ -897,7 +897,7 @@ func grpcStatusFromError(err error) (*statusv1.Status, error) {
 		Code:    int32(CodeUnknown),
 		Message: err.Error(),
 	}
-	if connectErr, ok := AsError(err); ok {
+	if connectErr, ok := asError(err); ok {
 		status.Code = int32(connectErr.Code())
 		status.Message = connectErr.Message()
 		details, err := connectErr.detailsAsAny()
