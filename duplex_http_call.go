@@ -236,7 +236,7 @@ func (d *duplexHTTPCall) makeRequest() {
 	response, err := d.httpClient.Do(d.request)
 	if err != nil {
 		err = wrapIfContextError(err)
-		if _, ok := AsError(err); !ok {
+		if _, ok := asError(err); !ok {
 			err = NewError(CodeUnavailable, err)
 		}
 		d.SetError(err)
