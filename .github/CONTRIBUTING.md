@@ -9,11 +9,9 @@ pull request review much smoother. In your issue, pull request, and any other
 communications, please remember to treat your fellow contributors with
 respect!
 
-<!-- TODO: CLA
 Note that you'll need to sign [Buf's Contributor License Agreement][cla]
 before we can accept any of your contributions. If necessary, a bot will remind
 you to accept the CLA when you open your pull request.
--->
 
 ## Setup
 
@@ -72,5 +70,5 @@ We're much more likely to approve your changes if you:
 
 [fork]: https://github.com/bufbuild/connect-go/fork
 [open-issue]: https://github.com/bufbuild/connect-go/issues/new
-[cla]: TODO
+[cla]: https://cla-assistant.io/bufbuild/connect-go
 [commit-message]: http://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html
