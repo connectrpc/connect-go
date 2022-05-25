@@ -70,13 +70,6 @@ func NewError(c Code, underlying error) *Error {
 	return &Error{code: c, err: underlying}
 }
 
-// AsError uses errors.As to unwrap any error and look for an *Error.
-func AsError(err error) (*Error, bool) {
-	var connectErr *Error
-	ok := errors.As(err, &connectErr)
-	return connectErr, ok
-}
-
 func (e *Error) Error() string {
 	message := e.Message()
 	if message == "" {
@@ -164,6 +157,13 @@ func errorf(c Code, template string, args ...any) *Error {
 	return NewError(c, fmt.Errorf(template, args...))
 }
 
+// asError uses errors.As to unwrap any error and look for a connect *Error.
+func asError(err error) (*Error, bool) {
+	var connectErr *Error
+	ok := errors.As(err, &connectErr)
+	return connectErr, ok
+}
+
 // wrapIfUncoded ensures that all errors are wrapped. It leaves already-wrapped
 // errors unchanged, uses wrapIfContextError to apply codes to context.Canceled
 // and context.DeadlineExceeded, and falls back to wrapping other errors with
@@ -173,7 +173,7 @@ func wrapIfUncoded(err error) error {
 		return nil
 	}
 	maybeCodedErr := wrapIfContextError(err)
-	if _, ok := AsError(maybeCodedErr); ok {
+	if _, ok := asError(maybeCodedErr); ok {
 		return maybeCodedErr
 	}
 	return NewError(CodeUnknown, maybeCodedErr)
@@ -183,7 +183,7 @@ func wrapIfUncoded(err error) error {
 // context.Canceled and context.DeadlineExceeded errors, but only if they
 // haven't already been wrapped.
 func wrapIfContextError(err error) error {
-	if _, ok := AsError(err); ok {
+	if _, ok := asError(err); ok {
 		return err
 	}
 	if errors.Is(err, context.Canceled) {

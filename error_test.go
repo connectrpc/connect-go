@@ -61,7 +61,7 @@ func TestErrorCode(t *testing.T) {
 		"another: %w",
 		NewError(CodeUnavailable, errors.New("foo")),
 	)
-	connectErr, ok := AsError(err)
+	connectErr, ok := asError(err)
 	assert.True(t, ok)
 	assert.Equal(t, connectErr.Code(), CodeUnavailable)
 }
