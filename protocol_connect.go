@@ -42,7 +42,7 @@ const (
 
 	connectUnaryContentTypePrefix     = "application/"
 	connectUnaryContentTypeJSON       = connectUnaryContentTypePrefix + "json"
-	connectStreamingContentTypePrefix = "application/connectstream+"
+	connectStreamingContentTypePrefix = "application/connect+"
 )
 
 type protocolConnect struct{}
