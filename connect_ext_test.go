@@ -607,11 +607,11 @@ func (p pingServer) Fail(ctx context.Context, request *connect.Request[pingv1.Fa
 
 func (p pingServer) Sum(
 	ctx context.Context,
-	stream *connect.ClientStream[pingv1.SumRequest, pingv1.SumResponse],
-) error {
+	stream *connect.ClientStream[pingv1.SumRequest],
+) (*connect.Response[pingv1.SumResponse], error) {
 	if p.checkMetadata {
 		if err := expectMetadata(stream.RequestHeader(), "header", clientHeader, headerValue); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	var sum int64
@@ -619,12 +619,12 @@ func (p pingServer) Sum(
 		sum += stream.Msg().Number
 	}
 	if stream.Err() != nil {
-		return stream.Err()
+		return nil, stream.Err()
 	}
 	response := connect.NewResponse(&pingv1.SumResponse{Sum: sum})
 	response.Header().Set(handlerHeader, headerValue)
 	response.Trailer().Set(handlerTrailer, trailerValue)
-	return stream.SendAndClose(response)
+	return response, nil
 }
 
 func (p pingServer) CountUp(
