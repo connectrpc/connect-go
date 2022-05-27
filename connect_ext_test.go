@@ -28,8 +28,8 @@ import (
 
 	"github.com/bufbuild/connect-go"
 	"github.com/bufbuild/connect-go/internal/assert"
-	"github.com/bufbuild/connect-go/internal/gen/connect/connect/ping/v1/pingv1connect"
 	pingv1 "github.com/bufbuild/connect-go/internal/gen/go/connect/ping/v1"
+	"github.com/bufbuild/connect-go/internal/gen/go/connect/ping/v1/pingv1connect"
 	"google.golang.org/protobuf/proto"
 )
 

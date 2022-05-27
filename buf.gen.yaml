@@ -8,5 +8,5 @@ plugins:
     out: internal/gen/go
     opt: paths=source_relative
   - name: connect-go
-    out: internal/gen/connect
+    out: internal/gen/go
     opt: paths=source_relative
