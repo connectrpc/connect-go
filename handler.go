@@ -111,17 +111,29 @@ func NewUnaryHandler[Req, Res any](
 // NewClientStreamHandler constructs a Handler for a client streaming procedure.
 func NewClientStreamHandler[Req, Res any](
 	procedure string,
-	implementation func(context.Context, *ClientStream[Req, Res]) error,
+	implementation func(context.Context, *ClientStream[Req]) (*Response[Res], error),
 	options ...HandlerOption,
 ) *Handler {
 	return newStreamHandler(
 		procedure,
 		StreamTypeClient,
 		func(ctx context.Context, sender Sender, receiver Receiver) {
-			stream := &ClientStream[Req, Res]{sender: sender, receiver: receiver}
-			err := implementation(ctx, stream)
-			_ = receiver.Close()
-			_ = sender.Close(err)
+			stream := &ClientStream[Req]{receiver: receiver}
+			res, err := implementation(ctx, stream)
+			if err != nil {
+				_ = receiver.Close()
+				_ = sender.Close(err)
+				return
+			}
+			if err := receiver.Close(); err != nil {
+				_ = sender.Close(err)
+				return
+			}
+			mergeHeaders(sender.Header(), res.header)
+			if trailer, ok := sender.Trailer(); ok {
+				mergeHeaders(trailer, res.trailer)
+			}
+			_ = sender.Close(sender.Send(res.Msg))
 		},
 		options...,
 	)

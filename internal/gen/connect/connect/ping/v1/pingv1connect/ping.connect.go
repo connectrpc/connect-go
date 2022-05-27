@@ -132,7 +132,7 @@ type PingServiceHandler interface {
 	// Fail always fails.
 	Fail(context.Context, *connect_go.Request[v1.FailRequest]) (*connect_go.Response[v1.FailResponse], error)
 	// Sum calculates the sum of the numbers sent on the stream.
-	Sum(context.Context, *connect_go.ClientStream[v1.SumRequest, v1.SumResponse]) error
+	Sum(context.Context, *connect_go.ClientStream[v1.SumRequest]) (*connect_go.Response[v1.SumResponse], error)
 	// CountUp returns a stream of the numbers up to the given request.
 	CountUp(context.Context, *connect_go.Request[v1.CountUpRequest], *connect_go.ServerStream[v1.CountUpResponse]) error
 	// CumSum determines the cumulative sum of all the numbers sent on the stream.
@@ -185,8 +185,8 @@ func (UnimplementedPingServiceHandler) Fail(context.Context, *connect_go.Request
 	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.ping.v1.PingService.Fail is not implemented"))
 }
 
-func (UnimplementedPingServiceHandler) Sum(context.Context, *connect_go.ClientStream[v1.SumRequest, v1.SumResponse]) error {
-	return connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.ping.v1.PingService.Sum is not implemented"))
+func (UnimplementedPingServiceHandler) Sum(context.Context, *connect_go.ClientStream[v1.SumRequest]) (*connect_go.Response[v1.SumResponse], error) {
+	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.ping.v1.PingService.Sum is not implemented"))
 }
 
 func (UnimplementedPingServiceHandler) CountUp(context.Context, *connect_go.Request[v1.CountUpRequest], *connect_go.ServerStream[v1.CountUpResponse]) error {
