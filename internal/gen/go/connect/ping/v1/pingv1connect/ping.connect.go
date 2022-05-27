@@ -22,7 +22,7 @@ import (
 	context "context"
 	errors "errors"
 	connect_go "github.com/bufbuild/connect-go"
-	v1 "github.com/bufbuild/connect-go/internal/gen/go/connect/ping/v1"
+	v1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
 	http "net/http"
 	strings "strings"
 )

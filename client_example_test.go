@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/bufbuild/connect-go"
-	pingv1 "github.com/bufbuild/connect-go/internal/gen/go/connect/ping/v1"
-	"github.com/bufbuild/connect-go/internal/gen/go/connect/ping/v1/pingv1connect"
+	pingv1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
+	"github.com/bufbuild/connect-go/internal/gen/connect/ping/v1/pingv1connect"
 )
 
 func Example_client() {

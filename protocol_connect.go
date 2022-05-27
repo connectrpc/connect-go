@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	errorv1 "github.com/bufbuild/connect-go/internal/gen/go/connect/error/v1"
+	errorv1 "github.com/bufbuild/connect-go/internal/gen/connect/error/v1"
 )
 
 const (

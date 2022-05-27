@@ -2,11 +2,11 @@ version: v1
 managed:
   enabled: true
   go_package_prefix:
-    default: github.com/bufbuild/connect-go/internal/gen/go
+    default: github.com/bufbuild/connect-go/internal/gen
 plugins:
   - name: go
-    out: internal/gen/go
+    out: internal/gen
     opt: paths=source_relative
   - name: connect-go
-    out: internal/gen/go
+    out: internal/gen
     opt: paths=source_relative
