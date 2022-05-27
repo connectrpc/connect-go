@@ -237,6 +237,7 @@ func (d *duplexHTTPCall) makeRequest() {
 	if err != nil {
 		err = wrapIfContextError(err)
 		err = wrapIfLikelyH2CNotConfiguredError(err)
+		err = wrapIfLikelyWithGRPCNotUsedError(err)
 		if _, ok := asError(err); !ok {
 			err = NewError(CodeUnavailable, err)
 		}
