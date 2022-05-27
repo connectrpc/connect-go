@@ -22,7 +22,7 @@ import (
 	"net/http/httptest"
 	"sync"
 
-	"connectrpc.com/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
 
 var examplePingServer *inMemoryServer

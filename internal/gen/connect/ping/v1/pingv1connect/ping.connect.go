@@ -22,7 +22,7 @@ import (
 	context "context"
 	errors "errors"
 	connect_go "connectrpc.com/connect"
-	v1 "connectrpc.com/connect/internal/gen/go/connect/ping/v1"
+	v1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	http "net/http"
 	strings "strings"
 )

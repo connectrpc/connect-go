@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	errorv1 "connectrpc.com/connect/internal/gen/go/connect/error/v1"
+	errorv1 "connectrpc.com/connect/internal/gen/connect/error/v1"
 )
 
 const (

@@ -20,8 +20,8 @@ import (
 	"os"
 
 	"connectrpc.com/connect"
-	"connectrpc.com/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
-	pingv1 "connectrpc.com/connect/internal/gen/go/connect/ping/v1"
+	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
+	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
 
 func ExampleInterceptor() {

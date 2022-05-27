@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"connectrpc.com/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
-	pingv1 "connectrpc.com/connect/internal/gen/go/connect/ping/v1"
+	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
+	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
 
 // ExamplePingServer implements some trivial business logic. The Protobuf
