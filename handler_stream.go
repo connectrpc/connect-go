@@ -24,15 +24,14 @@ import (
 //
 // It's constructed as part of Handler invocation, but doesn't currently have
 // an exported constructor.
-type ClientStream[Req, Res any] struct {
-	sender   Sender
+type ClientStream[Req any] struct {
 	receiver Receiver
 	msg      Req
 	err      error
 }
 
 // RequestHeader returns the headers received from the client.
-func (c *ClientStream[Req, Res]) RequestHeader() http.Header {
+func (c *ClientStream[Req]) RequestHeader() http.Header {
 	return c.receiver.Header()
 }
 
@@ -41,7 +40,7 @@ func (c *ClientStream[Req, Res]) RequestHeader() http.Header {
 // either by reaching the end or by encountering an unexpected error. After
 // Receive returns false, the Err method will return any unexpected error
 // encountered.
-func (c *ClientStream[Req, Res]) Receive() bool {
+func (c *ClientStream[Req]) Receive() bool {
 	if c.err != nil {
 		return false
 	}
@@ -52,29 +51,16 @@ func (c *ClientStream[Req, Res]) Receive() bool {
 // Msg returns the most recent message unmarshaled by a call to Receive. The
 // returned message points to data that will be overwritten by the next call to
 // Receive.
-func (c *ClientStream[Req, Res]) Msg() *Req {
+func (c *ClientStream[Req]) Msg() *Req {
 	return &c.msg
 }
 
 // Err returns the first non-EOF error that was encountered by Receive.
-func (c *ClientStream[Req, Res]) Err() error {
+func (c *ClientStream[Req]) Err() error {
 	if c.err == nil || errors.Is(c.err, io.EOF) {
 		return nil
 	}
 	return c.err
-}
-
-// SendAndClose closes the receive side of the stream, then sends a response
-// back to the client.
-func (c *ClientStream[Req, Res]) SendAndClose(envelope *Response[Res]) error {
-	if err := c.receiver.Close(); err != nil {
-		return err
-	}
-	mergeHeaders(c.sender.Header(), envelope.header)
-	if trailer, ok := c.sender.Trailer(); ok {
-		mergeHeaders(trailer, envelope.trailer)
-	}
-	return c.sender.Send(envelope.Msg)
 }
 
 // ServerStream is the handler's view of a server streaming RPC.

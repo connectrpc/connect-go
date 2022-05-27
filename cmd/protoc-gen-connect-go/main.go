@@ -350,7 +350,7 @@ func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, servic
 	g.P()
 	for _, method := range service.Methods {
 		g.P("func (", names.UnimplementedServer, ") ", serverSignature(g, method), "{")
-		if method.Desc.IsStreamingServer() || method.Desc.IsStreamingClient() {
+		if method.Desc.IsStreamingServer() {
 			g.P("return ", connectPackage.Ident("NewError"), "(",
 				connectPackage.Ident("CodeUnimplemented"), ", ", errorsPackage.Ident("New"),
 				`("`, method.Desc.FullName(), ` is not implemented"))`)
@@ -387,8 +387,8 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 		// client streaming
 		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ", " +
 			streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStream")) +
-			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
-			") error"
+			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + "]" +
+			") (*" + g.QualifiedGoIdent(connectPackage.Ident("Response")) + "[" + g.QualifiedGoIdent(method.Output.GoIdent) + "] ,error)"
 	}
 	if method.Desc.IsStreamingServer() {
 		// server streaming
