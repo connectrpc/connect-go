@@ -215,6 +215,7 @@ func wrapIfLikelyH2CNotConfiguredError(err error) error {
 	}
 	// net/http code has been investigated and there is no typing of any of these errors
 	// they are all created with fmt.Errorf
+	// grpc-go returns the first error 2/3-3/4 of the time, and the second error 1/4-1/3 of the time
 	if errString := err.Error(); strings.HasPrefix(errString, `Post "`) &&
 		(strings.Contains(errString, `net/http: HTTP/1.x transport connection broken: malformed HTTP response`) ||
 			strings.HasSuffix(errString, `write: broken pipe`)) {
