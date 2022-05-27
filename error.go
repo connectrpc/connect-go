@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -183,6 +184,9 @@ func wrapIfUncoded(err error) error {
 // context.Canceled and context.DeadlineExceeded errors, but only if they
 // haven't already been wrapped.
 func wrapIfContextError(err error) error {
+	if err == nil {
+		return nil
+	}
 	if _, ok := asError(err); ok {
 		return err
 	}
@@ -191,6 +195,22 @@ func wrapIfContextError(err error) error {
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return NewError(CodeDeadlineExceeded, err)
+	}
+	return err
+}
+
+func wrapIfLikelyH2CNotConfiguredError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := asError(err); ok {
+		return err
+	}
+	// net/http code has been investigated and there is no typing of any of these errors
+	// they are all created with fmt.Errorf
+	if errString := err.Error(); strings.HasPrefix(errString, `Post "`) && (strings.Contains(errString, `net/http: HTTP/1.x transport connection broken: malformed HTTP response`) || strings.HasSuffix(errString, `write: broken pipe`)) {
+		return fmt.Errorf("You likely have not configured h2c, see https://connect.build/docs/common-errors: %w", err)
+
 	}
 	return err
 }
