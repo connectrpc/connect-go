@@ -5,17 +5,41 @@ Connect
 [![Report Card](https://goreportcard.com/badge/github.com/bufbuild/connect-go)](https://goreportcard.com/report/github.com/bufbuild/connect-go)
 [![GoDoc](https://pkg.go.dev/badge/github.com/bufbuild/connect-go.svg)](https://pkg.go.dev/github.com/bufbuild/connect-go)
 
-Connect is a small framework for building HTTP APIs. You write a short API
-definition file and implement your application logic, and Connect generates
-code to handle marshaling, routing, error handling, and content type
-negotiation. It also generates an idiomatic, type-safe client.
+Connect is a slim library for building browser and gRPC-compatible HTTP APIs.
+You write a short [Protocol Buffer][protobuf] schema and implement your
+application logic, and Connect generates code to handle marshaling, routing,
+error handling, and content type negotiation. It also generates an idiomatic,
+type-safe client. Handlers and clients support three protocols: gRPC, gRPC-Web,
+and Connect's own protocol.
 
-Connect is wire compatible with the [gRPC][grpc] protocol, including streaming.
-Connect servers interoperate seamlessly with generated clients in [more than a
-dozen languages][grpc-implementations], command-line tools like [grpcurl],
-and proxies like [Envoy][envoy] and [gRPC-Gateway][grpc-gateway]. They also
-support gRPC-Web natively, so they can serve browser traffic without a
-translating proxy. Connect clients work with any gRPC or gRPC-Web server.
+The [Connect protocol][protocol] is a simple, POST-only protocol that works
+over HTTP/1.1 or HTTP/2. It takes the best portions of gRPC and gRPC-Web,
+including streaming, and packages them into a protocol that works equally well
+in browsers, monoliths, and microservices. Calling a Connect API is a cURL
+one-liner:
+
+```
+$ curl --json '{"sentence": "I feel happy."}' \
+    https://demo.connect.build/buf.connect.demo.eliza.v1.ElizaService/Say
+
+{"sentence": "Feeling happy? Tell me more."}
+```
+
+Handlers and clients also support the gRPC and gRPC-Web protocols, including
+streaming, headers, trailers, and error details. gRPC-compatible [server
+reflection][] and [health checks][] are available as standalone packages.
+Instead of cURL, we could call our API with `grpcurl`:
+
+```
+$ grpcurl \
+    -d '{"sentence": "I feel happy."}' \
+    demo.connect.build:443 \
+    buf.connect.demo.eliza.v1.ElizaService/Say
+
+{
+  "sentence": "Feeling happy? Tell me more."
+}
+```
 
 Under the hood, Connect is just [Protocol Buffers][protobuf] and the standard
 library: no custom HTTP implementation, no new name resolution or load
@@ -23,14 +47,14 @@ balancing APIs, and no surprises. Everything you already know about `net/http`
 still applies, and any package that works with an `http.Server`, `http.Client`,
 or `http.Handler` also works with Connect.
 
-For more on Connect, including a walkthrough and a comparison to alternatives,
-see the [docs].
+For more on Connect, including a walkthrough, FAQ, and migration guide, see the
+[docs].
 
 ## A small example
 
 Curious what all this looks like in practice? From a [Protobuf
 schema](internal/proto/connect/ping/v1/ping.proto), we generate [a small RPC
-package](internal/gen/connect/connect/ping/v1/pingv1connect/ping.connect.go). Using that
+package](internal/gen/connect/ping/v1/pingv1connect/ping.connect.go). Using that
 package, we can build a server:
 
 ```go
@@ -43,6 +67,8 @@ import (
   "github.com/bufbuild/connect-go"
   "github.com/bufbuild/connect-go/internal/gen/connect/connect/ping/v1/pingv1connect"
   pingv1 "github.com/bufbuild/connect-go/internal/gen/go/connect/ping/v1"
+  "golang.org/x/net/http2"
+  "golang.org/x/net/http2/h2c"
 )
 
 type PingServer struct {
@@ -51,7 +77,8 @@ type PingServer struct {
 
 func (ps *PingServer) Ping(
   ctx context.Context,
-  req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+  req *connect.Request[pingv1.PingRequest],
+) (*connect.Response[pingv1.PingResponse], error) {
   // connect.Request and connect.Response give you direct access to headers and
   // trailers. No context-based nonsense!
   log.Println(req.Header().Get("Some-Header"))
@@ -61,7 +88,6 @@ func (ps *PingServer) Ping(
     Number: req.Msg.Number,
   })
   res.Header().Set("Some-Other-Header", "hello!")
-  res.Trailer().Set("Some-Trailer", "goodbye!")
   return res, nil
 }
 
@@ -70,12 +96,17 @@ func main() {
   // The generated constructors return a path and a plain net/http
   // handler.
   mux.Handle(pingv1.NewPingServiceHandler(&PingServer{}))
-  http.ListenAndServeTLS(":8081", "server.crt", "server.key", mux)
+  http.ListenAndServe(
+    "localhost:8080",
+    // For gRPC clients, it's convenient to support HTTP/2 without TLS. You can
+    // avoid x/net/http2 by using http.ListenAndServeTLS.
+    h2c.NewHandler(mux, &http2.Server{}),
+  )
 }
 ```
 
-With that server running, you can make requests with any gRPC client. Using
-Connect,
+With that server running, you can make requests with any gRPC or Connect
+client. To write a client using `connect-go`,
 
 ```go
 package main
@@ -92,7 +123,7 @@ import (
 func main() {
   client, err := pingv1connect.NewPingServiceClient(
     http.DefaultClient,
-    "https://localhost:8081/",
+    "https://localhost:8080/",
   )
   if err != nil {
     log.Fatalln(err)
@@ -107,23 +138,23 @@ func main() {
   }
   log.Println(res.Msg)
   log.Println(res.Header().Get("Some-Other-Header"))
-  log.Println(res.Trailer().Get("Some-Trailer"))
 }
 ```
 
-You can find production-ready examples of [servers][prod-server] and
-[clients][prod-client] in the API documentation.
+Of course, `http.ListenAndServe` and `http.DefaultClient` aren't fit for
+production use! See Connect's [deployment docs][docs-deployment] for a guide to
+configuring timeouts, connection pools, observability, and h2c.
 
 ## Status
 
-Connect is in _beta_: we use it internally, but expect the Go community to
-discover new patterns for working with generics in the coming months. We plan
-to tag a release candidate in July 2022 and stable v1 soon after the Go 1.19
-release.
+This module is a release candidate: we rely on it in production, but expect the
+Go community to discover new patterns for working with generics in the coming
+months. We plan to tag a further release candidates as necessary and a stable
+v1 soon after the Go 1.19 release.
 
 ## Support and versioning
 
-Connect supports:
+`connect-go` supports:
 
 * The [two most recent major releases][go-support-policy] of Go, with a minimum
   of Go 1.18.
@@ -137,15 +168,11 @@ exceptions for deprecated or experimental APIs.
 Offered under the [Apache 2 license][license].
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
-[docs]: https://bufconnect.com
-[envoy]: https://www.envoyproxy.io/
-[godoc]: https://pkg.go.dev/github.com/bufbuild/connect-go
+[docs]: https://connect.build
+[docs-deployment]: https://connect.build/docs/go/deployment
 [go-support-policy]: https://golang.org/doc/devel/release#policy
-[grpc-gateway]: https://grpc-ecosystem.github.io/grpc-gateway/
-[grpc]: https://grpc.io/
-[grpc-implementations]: https://grpc.io/docs/languages/
-[grpcurl]: https://github.com/fullstorydev/grpcurl
 [license]: https://github.com/bufbuild/connect-go/blob/main/LICENSE.txt
-[prod-client]: https://pkg.go.dev/github.com/bufbuild/connect-go#example-Client
-[prod-server]: https://pkg.go.dev/github.com/bufbuild/connect-go#example-package
 [protobuf]: https://developers.google.com/protocol-buffers
+[protocol]: https://connect.build/docs/protocol
+[server reflection]: https://github.com/bufbuild/connect-grpcreflect-go
+[health checks]: https://github.com/bufbuild/connect-grpchealth-go

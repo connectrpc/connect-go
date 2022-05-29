@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package connect is an RPC framework built on Protocol Buffers and net/http.
-// It's wire-compatible with gRPC and gRPC-Web, including support for
-// streaming.
+// Package connect is a slim RPC framework built on Protocol Buffers and
+// net/http. In addition to its own protocol, Connect handlers and clients are
+// wire-compatible with gRPC and gRPC-Web, including streaming.
 //
 // This documentation is intended to explain each type and function in
-// isolation. For walkthroughs, comparisons to grpc-go, and other narrative
-// docs, see https://bufconnect.com.
+// isolation. For walkthroughs, FAQs, and other narrative docs, see
+// https://connect.build.
 package connect
 
 import (
