@@ -44,23 +44,22 @@ type ErrorDetail interface {
 	UnmarshalTo(proto.Message) error
 }
 
-// An Error captures three key pieces of information: a Code, an underlying Go
-// error, and an optional collection of arbitrary Protobuf messages called
-// "details" (more on those below). Servers send the code, the underlying
-// error's Error() output, and details over the wire to clients. Remember that
-// the underlying error's message will be sent to clients - take care not to
-// leak sensitive information from public APIs!
+// An Error captures four key pieces of information: a Code, an underlying Go
+// error, a map of metadata, and an optional collection of arbitrary Protobuf
+// messages called "details" (more on those below). Servers send the code, the
+// underlying error's Error() output, the metadata, and details over the wire
+// to clients. Remember that the underlying error's message will be sent to
+// clients - take care not to leak sensitive information from public APIs!
 //
 // Service implementations and interceptors should return errors that can be
 // cast to an *Error (using the standard library's errors.As). If the returned
 // error can't be cast to an *Error, connect will use CodeUnknown and the
 // returned error's message.
 //
-// Error details were introduced before gRPC adopted a formal proposal process,
-// so they're not clearly documented anywhere and may differ slightly between
-// implementations. Roughly, they're an optional mechanism for servers,
-// middleware, and proxies to attach arbitrary Protobuf messages to the error
-// code and message.
+// Error details are an optional mechanism for servers, interceptors, and
+// proxies to attach arbitrary Protobuf messages to the error code and message.
+// They're a clearer and more performant alternative to HTTP header
+// microformats. See https://connect.build/docs/go/errors for more details.
 type Error struct {
 	code    Code
 	err     error
@@ -81,10 +80,8 @@ func (e *Error) Error() string {
 	return e.code.String() + ": " + message
 }
 
-// Message returns the underlying error message.
-//
-// This may be empty if the original error was composed with a status
-// code and a nil error.
+// Message returns the underlying error message. It may be empty if the
+// original error was created with a status code and a nil error.
 func (e *Error) Message() string {
 	if e.err != nil {
 		return e.err.Error()

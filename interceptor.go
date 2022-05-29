@@ -21,7 +21,7 @@ import (
 // UnaryFunc is the generic signature of a unary RPC. Interceptors wrap Funcs.
 //
 // The type of the request and response structs depend on the codec being used.
-// When using protobuf, request.Any() and response.Any() will always be
+// When using Protobuf, request.Any() and response.Any() will always be
 // proto.Message implementations.
 type UnaryFunc func(context.Context, AnyRequest) (AnyResponse, error)
 
