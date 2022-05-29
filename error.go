@@ -19,11 +19,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/anypb"
 )
+
+const commonErrorsURL = "https://connect.build/docs/go/common-errors"
 
 // An ErrorDetail is a self-describing Protobuf message attached to an *Error.
 // Error details are sent over the network to clients, which can then work with
@@ -183,6 +186,9 @@ func wrapIfUncoded(err error) error {
 // context.Canceled and context.DeadlineExceeded errors, but only if they
 // haven't already been wrapped.
 func wrapIfContextError(err error) error {
+	if err == nil {
+		return nil
+	}
 	if _, ok := asError(err); ok {
 		return err
 	}
@@ -191,6 +197,56 @@ func wrapIfContextError(err error) error {
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return NewError(CodeDeadlineExceeded, err)
+	}
+	return err
+}
+
+// wrapIfLikelyWithGRPCNotUsedError adds a wrapping error that has a message
+// telling the caller that they likely need to use h2c but are using a raw http.Client{}.
+//
+// This happens when running a gRPC-only server.
+// This is fragile and may break over time, and this should be considered a best-effort.
+func wrapIfLikelyH2CNotConfiguredError(request *http.Request, err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := asError(err); ok {
+		return err
+	}
+	if url := request.URL; url != nil && url.Scheme != "http" {
+		// If the scheme is not http, we definitely do not have an h2c error, so just return.
+		return err
+	}
+	// net/http code has been investigated and there is no typing of any of these errors
+	// they are all created with fmt.Errorf
+	// grpc-go returns the first error 2/3-3/4 of the time, and the second error 1/4-1/3 of the time
+	if errString := err.Error(); strings.HasPrefix(errString, `Post "`) &&
+		(strings.Contains(errString, `net/http: HTTP/1.x transport connection broken: malformed HTTP response`) ||
+			strings.HasSuffix(errString, `write: broken pipe`)) {
+		return fmt.Errorf("possible h2c configuration issue when talking to gRPC server, see %s: %w", commonErrorsURL, err)
+	}
+	return err
+}
+
+// wrapIfLikelyWithGRPCNotUsedError adds a wrapping error that has a message
+// telling the caller that they likely forgot to use connect.WithGRPC().
+//
+// This happens when running a gRPC-only server.
+// This is fragile and may break over time, and this should be considered a best-effort.
+func wrapIfLikelyWithGRPCNotUsedError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := asError(err); ok {
+		return err
+	}
+	// golang.org/x/net code has been investigated and there is no typing of this error
+	// it is created with fmt.Errorf
+	// http2/transport.go:573:	return nil, fmt.Errorf("http2: Transport: cannot retry err [%v] after Request.Body was written; define Request.GetBody to avoid this error", err)
+	if errString := err.Error(); strings.HasPrefix(errString, `Post "`) &&
+		strings.Contains(errString, `http2: Transport: cannot retry err`) &&
+		strings.HasSuffix(errString, `after Request.Body was written; define Request.GetBody to avoid this error`) {
+		return fmt.Errorf("possible missing connect.WithGPRC() client option when talking to gRPC server, see %s: %w", commonErrorsURL, err)
 	}
 	return err
 }
