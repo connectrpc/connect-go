@@ -13,12 +13,13 @@
 // limitations under the License.
 
 // Package connect is a slim RPC framework built on Protocol Buffers and
-// net/http. In addition to its own protocol, Connect handlers and clients are
-// wire-compatible with gRPC and gRPC-Web, including streaming.
+// net/http. In addition to supporting its own protocol, Connect handlers and
+// clients are wire-compatible with gRPC and gRPC-Web, including streaming.
 //
 // This documentation is intended to explain each type and function in
 // isolation. For walkthroughs, FAQs, and other narrative docs, see
-// https://connect.build.
+// https://connect.build. For a working demonstration service, see
+// https://github.com/bufbuild/connect-demo.
 package connect
 
 import (
@@ -208,8 +209,8 @@ type AnyResponse interface {
 	internalOnly()
 }
 
-// HTTPClient is the transport-level interface connect expects HTTP clients to
-// implement. The standard library's http.Client implements HTTPClient.
+// HTTPClient is the interface connect expects HTTP clients to implement. The
+// standard library's *http.Client implements HTTPClient.
 type HTTPClient interface {
 	Do(*http.Request) (*http.Response, error)
 }

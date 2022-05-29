@@ -140,7 +140,10 @@ type Option interface {
 // google.golang.org/protobuf/proto. Handlers also support JSON by default,
 // using the standard Protobuf JSON mapping. Users with more specialized needs
 // may override the default codecs by registering a new codec under the "proto"
-// or "json" names.
+// or "json" names. When supplying a custom "proto" codec, keep in mind that
+// some unexported, protocol-specific messages are serialized using Protobuf -
+// take care to fall back to the standard Protobuf implementation if
+// necessary.
 //
 // Registering a codec with an empty name is a no-op.
 func WithCodec(codec Codec) Option {
