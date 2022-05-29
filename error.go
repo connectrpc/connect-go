@@ -41,12 +41,12 @@ type ErrorDetail interface {
 	UnmarshalTo(proto.Message) error
 }
 
-// An Error captures three key pieces of information: a Code, an underlying Go
-// error, and an optional collection of arbitrary Protobuf messages called
-// "details" (more on those below). Servers send the code, the underlying
-// error's Error() output, and details over the wire to clients. Remember that
-// the underlying error's message will be sent to clients - take care not to
-// leak sensitive information from public APIs!
+// An Error captures four key pieces of information: a Code, an underlying Go
+// error, a map of metadata, and an optional collection of arbitrary Protobuf
+// messages called "details" (more on those below). Servers send the code, the
+// underlying error's Error() output, the metadata, and details over the wire
+// to clients. Remember that the underlying error's message will be sent to
+// clients - take care not to leak sensitive information from public APIs!
 //
 // Service implementations and interceptors should return errors that can be
 // cast to an *Error (using the standard library's errors.As). If the returned
@@ -57,7 +57,7 @@ type ErrorDetail interface {
 // so they're not clearly documented anywhere and may differ slightly between
 // implementations. Roughly, they're an optional mechanism for servers,
 // middleware, and proxies to attach arbitrary Protobuf messages to the error
-// code and message.
+// code and message. See https://connect.build/docs/go/errors for more details.
 type Error struct {
 	code    Code
 	err     error
