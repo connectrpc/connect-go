@@ -26,7 +26,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-const commonErrorsURL = "https://connect.build/docs/common-errors"
+const commonErrorsURL = "https://connect.build/docs/go/common-errors"
 
 // An ErrorDetail is a self-describing Protobuf message attached to an *Error.
 // Error details are sent over the network to clients, which can then work with
@@ -206,11 +206,15 @@ func wrapIfContextError(err error) error {
 //
 // This happens when running a gRPC-only server.
 // This is fragile and may break over time, and this should be considered a best-effort.
-func wrapIfLikelyH2CNotConfiguredError(err error) error {
+func wrapIfLikelyH2CNotConfiguredError(request *http.Request, err error) error {
 	if err == nil {
 		return nil
 	}
 	if _, ok := asError(err); ok {
+		return err
+	}
+	if url := request.URL; url != nil && url.Scheme == "https" {
+		// If the scheme is https, we definitely do not have an h2c error, so just return.
 		return err
 	}
 	// net/http code has been investigated and there is no typing of any of these errors
@@ -219,7 +223,7 @@ func wrapIfLikelyH2CNotConfiguredError(err error) error {
 	if errString := err.Error(); strings.HasPrefix(errString, `Post "`) &&
 		(strings.Contains(errString, `net/http: HTTP/1.x transport connection broken: malformed HTTP response`) ||
 			strings.HasSuffix(errString, `write: broken pipe`)) {
-		return fmt.Errorf("you likely have not configured h2c, see %s: %w", commonErrorsURL, err)
+		return fmt.Errorf("possible h2c configuration issue when talking to gRPC server, see %s: %w", commonErrorsURL, err)
 	}
 	return err
 }
@@ -242,7 +246,7 @@ func wrapIfLikelyWithGRPCNotUsedError(err error) error {
 	if errString := err.Error(); strings.HasPrefix(errString, `Post "`) &&
 		strings.Contains(errString, `http2: Transport: cannot retry err`) &&
 		strings.HasSuffix(errString, `after Request.Body was written; define Request.GetBody to avoid this error`) {
-		return fmt.Errorf("you likely are talking to a gRPC server without using the connect.WithGRPC() client option, see %s: %w", commonErrorsURL, err)
+		return fmt.Errorf("possible missing connect.WithGPRC() client option when talking to gRPC server, see %s: %w", commonErrorsURL, err)
 	}
 	return err
 }
