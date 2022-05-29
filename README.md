@@ -8,7 +8,7 @@ Connect
 Connect is a slim library for building browser and gRPC-compatible HTTP APIs.
 You write a short [Protocol Buffer][protobuf] schema and implement your
 application logic, and Connect generates code to handle marshaling, routing,
-error handling, and content type negotiation. It also generates an idiomatic,
+compression, and content type negotiation. It also generates an idiomatic,
 type-safe client. Handlers and clients support three protocols: gRPC, gRPC-Web,
 and Connect's own protocol.
 
@@ -149,8 +149,8 @@ configuring timeouts, connection pools, observability, and h2c.
 
 This module is a release candidate: we rely on it in production, but expect the
 Go community to discover new patterns for working with generics in the coming
-months. We plan to tag a further release candidates as necessary and a stable
-v1 soon after the Go 1.19 release.
+months. We plan to tag further release candidates as necessary and a stable v1
+soon after the Go 1.19 release.
 
 ## Support and versioning
 
@@ -160,8 +160,7 @@ v1 soon after the Go 1.19 release.
   of Go 1.18.
 * [APIv2] of Protocol Buffers in Go (`google.golang.org/protobuf`).
 
-Within those parameters, Connect follows semantic versioning. We make no
-exceptions for deprecated or experimental APIs.
+Within those parameters, Connect follows semantic versioning.
 
 ## Legal
 
