@@ -213,8 +213,8 @@ func wrapIfLikelyH2CNotConfiguredError(request *http.Request, err error) error {
 	if _, ok := asError(err); ok {
 		return err
 	}
-	if url := request.URL; url != nil && url.Scheme == "https" {
-		// If the scheme is https, we definitely do not have an h2c error, so just return.
+	if url := request.URL; url != nil && url.Scheme != "http" {
+		// If the scheme is not http, we definitely do not have an h2c error, so just return.
 		return err
 	}
 	// net/http code has been investigated and there is no typing of any of these errors
