@@ -20,51 +20,37 @@ import (
 	"strings"
 )
 
-// A Code is one of gRPC's canonical status codes. There are no user-defined
-// codes, so only the codes enumerated below are valid.
+// A Code is one of the Connect protocol's error codes. There are no user-defined
+// codes, so only the codes enumerated below are valid. In both name and
+// semantics, these codes also match the gRPC status codes.
 //
-// See the specification at
-// https://github.com/grpc/grpc/blob/master/doc/statuscodes.md for detailed
+// See the specification at https://connectrpc.com/docs/protocol for
 // descriptions of each code and example usage.
 type Code uint32
 
 const (
-	// The zero code is OK, which indicates that the operation was a success. We
-	// don't define a constant for it because it overlaps awkwardly with Go's
-	// error semantics: what does it mean to have a non-nil error with an OK
-	// status?
+	// The zero code in gRPC is OK, which indicates that the operation was a
+	// success. We don't define a constant for it because it overlaps awkwardly
+	// with Go's error semantics: what does it mean to have a non-nil error with
+	// an OK status? (Also, the Connect protocol doesn't use a code for
+	// successes.)
 
 	// CodeCanceled indicates that the operation was canceled, typically by the
 	// caller.
-	//
-	// Note that connect follows the gRPC specification (and some, but not all,
-	// implementations) and uses the British "CANCELLED" as CodeCanceled's string
-	// representation rather than the American "CANCELED".
 	CodeCanceled Code = 1
 
 	// CodeUnknown indicates that the operation failed for an unknown reason.
 	CodeUnknown Code = 2
 
 	// CodeInvalidArgument indicates that client supplied an invalid argument.
-	//
-	// Note that this differs from CodeFailedPrecondition: CodeInvalidArgument
-	// indicates that the argument(s) are problematic regardless of the state of
-	// the system (for example, an invalid URL).
 	CodeInvalidArgument Code = 3
 
 	// CodeDeadlineExceeded indicates that deadline expired before the operation
-	// could complete. For operations that change the state of the system, this
-	// error may be returned even if the operation has completed successfully
-	// (but late).
+	// could complete.
 	CodeDeadlineExceeded Code = 4
 
 	// CodeNotFound indicates that some requested entity (for example, a file or
 	// directory) was not found.
-	//
-	// If an operation is denied for an entire class of users, such as gradual
-	// feature rollout or an undocumented allowlist, CodeNotFound may be used. If
-	// a request is denied for some users within a class of users, such as
-	// user-based access control, CodePermissionDenied must be used.
 	CodeNotFound Code = 5
 
 	// CodeAlreadyExists indicates that client attempted to create an entity (for
@@ -73,13 +59,6 @@ const (
 
 	// CodePermissionDenied indicates that the caller does'nt have permission to
 	// execute the specified operation.
-	//
-	// CodePermissionDenied must not be used for rejections caused by exhausting
-	// some resource (use CodeResourceExhausted instead). CodePermissionDenied
-	// must not be used if the caller can't be identified (use
-	// CodeUnauthenticated instead). This error code doesn't imply that the
-	// request is valid, the requested entity exists, or other preconditions are
-	// satisfied.
 	CodePermissionDenied Code = 7
 
 	// CodeResourceExhausted indicates that some resource has been exhausted. For
@@ -89,41 +68,15 @@ const (
 
 	// CodeFailedPrecondition indicates that the system is not in a state
 	// required for the operation's execution.
-	//
-	// Service implementors can use the following guidelines to decide between
-	// CodeFailedPrecondition, CodeAborted, and CodeUnavailable:
-	//
-	//   - Use CodeUnavailable if the client can retry just the failing call.
-	//   - Use CodeAborted if the client should retry at a higher level. For
-	//   example, if a client-specified test-and-set fails, the client should
-	//   restart the whole read-modify-write sequence.
-	//   - Use CodeFailedPrecondition if the client should not retry until the
-	//   system state has been explicitly fixed. For example, a deleting a
-	//   directory on the filesystem might return CodeFailedPrecondition if the
-	//   directory still contains files, since the client should not retry unless
-	//   they first delete the offending files.
 	CodeFailedPrecondition Code = 9
 
 	// CodeAborted indicates that operation was aborted by the system, usually
 	// because of a concurrency issue such as a sequencer check failure or
 	// transaction abort.
-	//
-	// The documentation for CodeFailedPrecondition includes guidelines for
-	// choosing between CodeFailedPrecondition, CodeAborted, and CodeUnavailable.
 	CodeAborted Code = 10
 
 	// CodeOutOfRange indicates that the operation was attempted past the valid
 	// range (for example, seeking past end-of-file).
-	//
-	// Unlike CodeInvalidArgument, this error indicates a problem that may be
-	// fixed if the system state changes. For example, a 32-bit file system will
-	// generate CodeInvalidArgument if asked to read at an offset that is not in
-	// the range [0,2^32), but it will generate CodeOutOfRange if asked to read
-	// from an offset past the current file size.
-	//
-	// CodeOutOfRange naturally overlaps with CodeFailedPrecondition. Where
-	// possible, use the more specific CodeOutOfRange so that callers who are
-	// iterating through a space can easily detect when they're done.
 	CodeOutOfRange Code = 11
 
 	// CodeUnimplemented indicates that the operation isn't implemented,

@@ -149,8 +149,8 @@ func (b *BidiStreamForClient[Req, Res]) RequestHeader() http.Header {
 // headers.
 //
 // If the server returns an error, Send returns an error that wraps io.EOF.
-// Clients should check for case using the standard library's errors.Is and
-// unmarshal the error using Receive.
+// Clients should check for EOF using the standard library's errors.Is and
+// call Receive to retrieve the error.
 func (b *BidiStreamForClient[Req, Res]) Send(msg *Req) error {
 	if b.err != nil {
 		return b.err

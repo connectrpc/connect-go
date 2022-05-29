@@ -24,7 +24,7 @@ import (
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
 
-func ExampleInterceptor() {
+func ExampleUnaryInterceptorFunc() {
 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 	loggingInterceptor := connect.UnaryInterceptorFunc(
 		func(next connect.UnaryFunc) connect.UnaryFunc {

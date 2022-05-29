@@ -225,6 +225,10 @@ func (c *connectClient) WriteRequestHeader(streamType StreamType, header http.He
 	}
 	acceptCompressionHeader := connectUnaryHeaderAcceptCompression
 	if streamType != StreamTypeUnary {
+		// If we don't set Accept-Encoding, by default http.Client will ask the
+		// server to compress the whole stream. Since we're already compressing
+		// each message, this is a waste.
+		header[connectUnaryHeaderAcceptCompression] = []string{compressionIdentity}
 		acceptCompressionHeader = connectStreamingHeaderAcceptCompression
 		// We only write the request encoding header here for streaming calls,
 		// since the streaming envelope lets us choose whether to compress each

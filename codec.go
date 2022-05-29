@@ -31,18 +31,20 @@ type Codec interface {
 	// Name returns the name of the Codec.
 	//
 	// This may be used as part of the Content-Type within HTTP. For example,
-	// with gRPC this is the content subtype, that is "application/grpc+proto"
-	// will map to the Codec with name "proto".
+	// with gRPC this is the content subtype, so "application/grpc+proto" will
+	// map to the Codec with name "proto".
 	//
-	// Names are expected to not be empty.
+	// Names must not be empty.
 	Name() string
 	// Marshal marshals the given message.
 	//
-	// Marshal may expect a specific type of message, and will error if this type is not given.
+	// Marshal may expect a specific type of message, and will error if this type
+	// is not given.
 	Marshal(any) ([]byte, error)
 	// Marshal unmarshals the given message.
 	//
-	// Unmarshal may expect a specific type of message, and will error if this type is not given.
+	// Unmarshal may expect a specific type of message, and will error if this
+	// type is not given.
 	Unmarshal([]byte, any) error
 }
 
