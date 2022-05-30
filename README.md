@@ -47,8 +47,8 @@ balancing APIs, and no surprises. Everything you already know about `net/http`
 still applies, and any package that works with an `http.Server`, `http.Client`,
 or `http.Handler` also works with Connect.
 
-For more on Connect, including a walkthrough, FAQ, and migration guide, see the
-[docs].
+For more on Connect, including a walkthrough, FAQ, and migration guide, see
+[connect.build][docs] or the [announcement blog post][blog].
 
 ## A small example
 
@@ -145,6 +145,13 @@ Of course, `http.ListenAndServe` and `http.DefaultClient` aren't fit for
 production use! See Connect's [deployment docs][docs-deployment] for a guide to
 configuring timeouts, connection pools, observability, and h2c.
 
+## Ecosystem
+
+* [connect-grpchealth-go]: gRPC-compatible health checks
+* [connect-grpcreflect-go]: gRPC-compatible server reflection
+* [connect-demo]: demonstration service, including bidi streaming
+* [connect-crosstest]: gRPC and gRPC-Web interoperability tests
+
 ## Status
 
 This module is a release candidate: we rely on it in production, but expect the
@@ -167,6 +174,11 @@ Within those parameters, Connect follows semantic versioning.
 Offered under the [Apache 2 license][license].
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
+[blog]: https://buf.build/blog/announcing-connect-a-better-grpc
+[connect-grpchealth-go]: https://github.com/bufbuild/connect-grpchealth-go
+[connect-grpcreflect-go]: https://github.com/bufbuild/connect-grpcreflect-go
+[connect-demo]: https://github.com/bufbuild/connect-demo
+[connect-crosstest]: https://github.com/bufbuild/connect-crosstest
 [docs]: https://connect.build
 [docs-deployment]: https://connect.build/docs/go/deployment
 [go-support-policy]: https://golang.org/doc/devel/release#policy
