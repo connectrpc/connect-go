@@ -47,8 +47,9 @@ balancing APIs, and no surprises. Everything you already know about `net/http`
 still applies, and any package that works with an `http.Server`, `http.Client`,
 or `http.Handler` also works with Connect.
 
-For more on Connect, including a walkthrough, FAQ, and migration guide, see
-[connect.build][docs] or the [announcement blog post][blog].
+For more on Connect, see the [announcement blog post][blog], the documentation
+on [connect.build][docs] (especially the [Getting Started] guide for Go), the
+[demo service][demo], or the [protocol specification][protocol].
 
 ## A small example
 
@@ -174,11 +175,13 @@ Within those parameters, Connect follows semantic versioning.
 Offered under the [Apache 2 license][license].
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
+[Getting Started]: https://connect.build/go/getting-started
 [blog]: https://buf.build/blog/announcing-connect-a-better-grpc
 [connect-grpchealth-go]: https://github.com/bufbuild/connect-grpchealth-go
 [connect-grpcreflect-go]: https://github.com/bufbuild/connect-grpcreflect-go
 [connect-demo]: https://github.com/bufbuild/connect-demo
 [connect-crosstest]: https://github.com/bufbuild/connect-crosstest
+[demo]: https://github.com/bufbuild/connect-demo
 [docs]: https://connect.build
 [docs-deployment]: https://connect.build/docs/go/deployment
 [go-support-policy]: https://golang.org/doc/devel/release#policy
