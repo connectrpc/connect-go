@@ -175,6 +175,10 @@ Offered under the [Apache 2 license][license].
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
 [blog]: https://buf.build/blog/announcing-connect-a-better-grpc
+[connect-grpchealth-go]: https://github.com/bufbuild/connect-grpchealth-go
+[connect-grpcreflect-go]: https://github.com/bufbuild/connect-grpcreflect-go
+[connect-demo]: https://github.com/bufbuild/connect-demo
+[connect-crosstest]: https://github.com/bufbuild/connect-crosstest
 [docs]: https://connect.build
 [docs-deployment]: https://connect.build/docs/go/deployment
 [go-support-policy]: https://golang.org/doc/devel/release#policy
