@@ -19,7 +19,8 @@ in browsers, monoliths, and microservices. Calling a Connect API is a cURL
 one-liner:
 
 ```
-$ curl --json '{"sentence": "I feel happy."}' \
+$ curl --header "Content-Type: application/json" \
+    --data '{"sentence": "I feel happy."}' \
     https://demo.connectrpc.com/buf.connect.demo.eliza.v1.ElizaService/Say
 
 {"sentence": "Feeling happy? Tell me more."}
