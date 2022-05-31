@@ -15,11 +15,13 @@ and Connect's own protocol.
 The [Connect protocol][protocol] is a simple, POST-only protocol that works
 over HTTP/1.1 or HTTP/2. It takes the best portions of gRPC and gRPC-Web,
 including streaming, and packages them into a protocol that works equally well
-in browsers, monoliths, and microservices. Calling a Connect API is a cURL
-one-liner:
+in browsers, monoliths, and microservices. Calling a Connect API is as easy as
+using `curl`:
 
 ```
-$ curl --header "Content-Type: application/json" \
+# Try it out! This is a live demo!
+$ curl \
+    --header "Content-Type: application/json" \
     --data '{"sentence": "I feel happy."}' \
     https://demo.connect.build/buf.connect.demo.eliza.v1.ElizaService/Say
 
@@ -32,7 +34,9 @@ reflection][] and [health checks][] are available as standalone packages.
 Instead of cURL, we could call our API with `grpcurl`:
 
 ```
-$ grpcurl \
+# This is also a live demo!
+$ go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest && \
+  grpcurl \
     -d '{"sentence": "I feel happy."}' \
     demo.connect.build:443 \
     buf.connect.demo.eliza.v1.ElizaService/Say
@@ -151,7 +155,7 @@ configuring timeouts, connection pools, observability, and h2c.
 
 * [connect-grpchealth-go]: gRPC-compatible health checks
 * [connect-grpcreflect-go]: gRPC-compatible server reflection
-* [connect-demo]: demonstration service, including bidi streaming
+* [connect-demo]: demonstration service powering demo.connect.build, including bidi streaming
 * [connect-crosstest]: gRPC and gRPC-Web interoperability tests
 
 ## Status
