@@ -177,7 +177,7 @@ Offered under the [Apache 2 license][license].
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
 [Getting Started]: https://connectrpc.com/go/getting-started
-[blog]: https://buf.build/blog/announcing-connect-a-better-grpc
+[blog]: https://buf.build/blog/connect-a-better-grpc
 [connect-grpchealth-go]: https://github.com/bufbuild/connect-grpchealth-go
 [connect-grpcreflect-go]: https://github.com/bufbuild/connect-grpcreflect-go
 [connect-demo]: https://github.com/bufbuild/connect-demo
