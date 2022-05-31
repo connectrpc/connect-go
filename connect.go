@@ -29,11 +29,14 @@ import (
 )
 
 // Version is the semantic version of the connect module.
-const Version = "0.0.1"
+const Version = "0.1.0"
 
 // These constants are used in compile-time handshakes with connect's generated
 // code.
-const IsAtLeastVersion0_0_1 = true
+const (
+	IsAtLeastVersion0_0_1 = true
+	IsAtLeastVersion0_1_0 = true
+)
 
 // StreamType describes whether the client, server, neither, or both is
 // streaming.
