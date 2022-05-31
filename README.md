@@ -16,10 +16,9 @@ The [Connect protocol][protocol] is a simple, POST-only protocol that works
 over HTTP/1.1 or HTTP/2. It takes the best portions of gRPC and gRPC-Web,
 including streaming, and packages them into a protocol that works equally well
 in browsers, monoliths, and microservices. Calling a Connect API is as easy as
-using `curl`:
+using `curl`. Try it with our live demo:
 
 ```
-# Try it out! This is a live demo!
 curl \
     --header "Content-Type: application/json" \
     --data '{"sentence": "I feel happy."}' \
@@ -32,7 +31,6 @@ reflection][] and [health checks][] are available as standalone packages.
 Instead of cURL, we could call our API with `grpcurl`:
 
 ```
-# This is also a live demo!
 go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
 grpcurl \
     -d '{"sentence": "I feel happy."}' \
