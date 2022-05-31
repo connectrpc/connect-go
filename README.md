@@ -156,10 +156,10 @@ configuring timeouts, connection pools, observability, and h2c.
 
 ## Status
 
-This module is a release candidate: we rely on it in production, but expect the
-Go community to discover new patterns for working with generics in the coming
-months. We plan to tag further release candidates as necessary and a stable v1
-soon after the Go 1.19 release.
+This module is a beta: we rely on it in production, but expect the Go community
+to quickly discover new patterns for working with generics. We plan to make
+backward-incompatible changes as necessary for the next few months, with the
+goal of tagging a stable v1 soon after the Go 1.19 release.
 
 ## Support and versioning
 
