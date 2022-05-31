@@ -20,12 +20,10 @@ using `curl`:
 
 ```
 # Try it out! This is a live demo!
-$ curl \
+curl \
     --header "Content-Type: application/json" \
     --data '{"sentence": "I feel happy."}' \
     https://demo.connect.build/buf.connect.demo.eliza.v1.ElizaService/Say
-
-{"sentence": "Feeling happy? Tell me more."}
 ```
 
 Handlers and clients also support the gRPC and gRPC-Web protocols, including
@@ -35,15 +33,11 @@ Instead of cURL, we could call our API with `grpcurl`:
 
 ```
 # This is also a live demo!
-$ go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest && \
-  grpcurl \
+go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
+grpcurl \
     -d '{"sentence": "I feel happy."}' \
     demo.connect.build:443 \
     buf.connect.demo.eliza.v1.ElizaService/Say
-
-{
-  "sentence": "Feeling happy? Tell me more."
-}
 ```
 
 Under the hood, Connect is just [Protocol Buffers][protobuf] and the standard
