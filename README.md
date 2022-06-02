@@ -171,7 +171,7 @@ Within those parameters, Connect follows semantic versioning.
 Offered under the [Apache 2 license][license].
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
-[Getting Started]: https://connect.build/go/getting-started
+[Getting Started]: https://connect.build/docs/go/getting-started
 [blog]: https://buf.build/blog/connect-a-better-grpc
 [connect-grpchealth-go]: https://github.com/bufbuild/connect-grpchealth-go
 [connect-grpcreflect-go]: https://github.com/bufbuild/connect-grpcreflect-go
@@ -181,7 +181,7 @@ Offered under the [Apache 2 license][license].
 [docs]: https://connect.build
 [docs-deployment]: https://connect.build/docs/go/deployment
 [go-support-policy]: https://golang.org/doc/devel/release#policy
-[license]: https://github.com/bufbuild/connect-go/blob/main/LICENSE.txt
+[license]: https://github.com/bufbuild/connect-go/blob/main/LICENSE
 [protobuf]: https://developers.google.com/protocol-buffers
 [protocol]: https://connect.build/docs/protocol
 [server reflection]: https://github.com/bufbuild/connect-grpcreflect-go
