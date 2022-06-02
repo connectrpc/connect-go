@@ -51,7 +51,7 @@ lintfix: $(BIN)/golangci-lint $(BIN)/buf ## Automatically fix some lint errors
 	$(BIN)/buf format -w .
 
 .PHONY: generate
-generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
+generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header $(BIN)/mdox ## Regenerate code, examples and licenses
 	rm -rf internal/gen
 	PATH=$(BIN) $(BIN)/buf generate
 	@# We want to operate on a list of modified and new files, excluding
@@ -67,6 +67,8 @@ generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/li
 			--license-type apache \
 			--copyright-holder "Buf Technologies, Inc." \
 			--year-range "$(COPYRIGHT_YEARS)"
+	@# README auto-generates examples
+	$(BIN)/mdox fmt -l *.md
 
 .PHONY: upgrade
 upgrade: ## Upgrade dependencies
@@ -94,6 +96,10 @@ $(BIN)/license-header: Makefile
 $(BIN)/golangci-lint: Makefile
 	@mkdir -p $(@D)
 	GOBIN=$(abspath $(@D)) $(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.46.2
+
+$(BIN)/mdox: Makefile
+	@mkdir -p $(@D)
+	GOBIN=$(abspath $(@D)) $(GO) install github.com/bwplotka/mdox@v0.9.0
 
 $(BIN)/protoc-gen-go: Makefile go.mod
 	@mkdir -p $(@D)
