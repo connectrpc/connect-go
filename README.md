@@ -181,7 +181,7 @@ Offered under the [Apache 2 license][license].
 [docs]: https://connect.build
 [docs-deployment]: https://connect.build/docs/go/deployment
 [go-support-policy]: https://golang.org/doc/devel/release#policy
-[license]: https://github.com/bufbuild/connect-go/blob/main/LICENSE.txt
+[license]: https://github.com/bufbuild/connect-go/blob/main/LICENSE
 [protobuf]: https://developers.google.com/protocol-buffers
 [protocol]: https://connect.build/docs/protocol
 [server reflection]: https://github.com/bufbuild/connect-grpcreflect-go
