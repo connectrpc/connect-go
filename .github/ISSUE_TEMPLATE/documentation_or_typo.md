@@ -11,7 +11,7 @@ assignees: ''
 Provide us a link to the location, either on
 [connect.build/docs](https://connect.build/docs) or within this repository.
 
-**What is the issue you see**
+**What is the issue you see?**
 A clear and concise description of what should be changed.
 
 **Additional context**
