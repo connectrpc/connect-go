@@ -51,15 +51,28 @@ func NewUnaryHandler[Req, Res any](
 			// call the wrapped unary Func. To do that safely, we need a useful
 			// Message struct. (Note that we do *not* actually calling the handler's
 			// implementation.)
-			request = receiveUnaryRequestMetadata[Req](receiver)
+			request = &Request[Req]{
+				Msg:    new(Req),
+				spec:   receiver.Spec(),
+				header: receiver.Header(),
+			}
 		} else {
-			var err error
-			request, err = receiveUnaryRequest[Req](receiver)
-			if err != nil {
+			var msg Req
+			if err := receiver.Receive(&msg); err != nil {
 				// Interceptors should see this error too. Just as above, they need a
 				// useful Message.
 				clientVisibleError = err
-				request = receiveUnaryRequestMetadata[Req](receiver)
+				request = &Request[Req]{
+					Msg:    new(Req),
+					spec:   receiver.Spec(),
+					header: receiver.Header(),
+				}
+			} else {
+				request = &Request[Req]{
+					Msg:    &msg,
+					spec:   receiver.Spec(),
+					header: receiver.Header(),
+				}
 			}
 		}
 
@@ -150,8 +163,8 @@ func NewServerStreamHandler[Req, Res any](
 		StreamTypeServer,
 		func(ctx context.Context, sender Sender, receiver Receiver) {
 			stream := &ServerStream[Res]{sender: sender}
-			request, err := receiveUnaryRequest[Req](receiver)
-			if err != nil {
+			var msg Req
+			if err := receiver.Receive(&msg); err != nil {
 				_ = receiver.Close()
 				_ = sender.Close(err)
 				return
@@ -160,7 +173,12 @@ func NewServerStreamHandler[Req, Res any](
 				_ = sender.Close(err)
 				return
 			}
-			err = implementation(ctx, request, stream)
+			request := &Request[Req]{
+				Msg:    &msg,
+				spec:   receiver.Spec(),
+				header: receiver.Header(),
+			}
+			err := implementation(ctx, request, stream)
 			_ = sender.Close(err)
 		},
 		options...,
