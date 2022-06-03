@@ -225,28 +225,6 @@ type Spec struct {
 	IsClient   bool   // otherwise we're in a handler
 }
 
-// receiveUnaryRequest unmarshals a message from a Receiver, then envelopes
-// the message and attaches the Receiver's headers and RPC specification.
-func receiveUnaryRequest[T any](receiver Receiver) (*Request[T], error) {
-	var msg T
-	if err := receiver.Receive(&msg); err != nil {
-		return nil, err
-	}
-	return &Request[T]{
-		Msg:    &msg,
-		spec:   receiver.Spec(),
-		header: receiver.Header(),
-	}, nil
-}
-
-func receiveUnaryRequestMetadata[T any](r Receiver) *Request[T] {
-	return &Request[T]{
-		Msg:    new(T),
-		spec:   r.Spec(),
-		header: r.Header(),
-	}
-}
-
 // receiveUnaryResponse unmarshals a message from a Receiver, then envelopes
 // the message and attaches the Receiver's headers and trailers. It attempts to
 // consume the Receiver and isn't appropriate when receiving multiple messages.
