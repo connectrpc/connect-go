@@ -218,8 +218,6 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 
 	// The gRPC-HTTP2, gRPC-Web, and Connect protocols are all POST-only.
 	if request.Method != http.MethodPost {
-		// grpc-go returns a 500 here, but interoperability with non-gRPC HTTP
-		// clients is better if we return a 405.
 		responseWriter.Header().Set("Allow", http.MethodPost)
 		responseWriter.WriteHeader(http.StatusMethodNotAllowed)
 		return
