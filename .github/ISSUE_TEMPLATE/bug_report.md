@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Let us know about a bug you have found
+about: Let us know about a bug
 title: ''
 labels: bug
 assignees: ''
@@ -8,16 +8,24 @@ assignees: ''
 ---
 
 **Describe the bug**
-Provide us with clear and concise description of what the bug is.
+
+As clearly as you can, please tell us what the bug is.
 
 **To Reproduce**
-Provide us with specific steps to reproduce the behavior. In most cases, we should be able to copy and paste these steps to reproduce the issue you are seeing. In a perfect world, this would look like:
-```go
-mkdir tmp
-cd ./tmp
+
+Help us to reproduce the buggy behavior. Ideally, you'd provide a
+self-contained test that shows us the bug:
+
+```bash
+mkdir tmp && cd ./tmp
 go mod init example
 go get github.com/bufbuild/connect-go
-cat <<EOF > bug_report_test.go
+touch example_test.go
+```
+
+And in `example_test.go`:
+
+```go
 package bugreport
 
 func TestThatReproducesBug(t *testing.T) {
@@ -26,8 +34,12 @@ func TestThatReproducesBug(t *testing.T) {
 ```
 
 **Environment (please complete the following information):**
-- `connect-go` version or commit: [e.g. `v0.1.0` or `5bfc7a1b440ebffdc952d813332e3617ca611395`]
- - `go version`: [e.g. `go version go1.18.3 darwin/amd64`]
+- `connect-go` version or commit: (for example, `v0.1.0` or `5bfc7a1b440ebffdc952d813332e3617ca611395`)
+- `go version`: (for example, `go version go1.18.3 darwin/amd64`)
+- your complete `go.mod`:
+
+```go
+```
 
 **Additional context**
 Add any other context about the problem here.
