@@ -12,28 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package connect
+package connect_test
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/bufbuild/connect-go/internal/assert"
-	pingv1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
+	"github.com/bufbuild/connect-go/internal/gen/connect/ping/v1/pingv1connect"
 )
 
 func TestHandler_ServeHTTP(t *testing.T) {
 	t.Parallel()
-	const procedure = "/connect.ping.v1.PingService/Ping"
-	handler := NewUnaryHandler[pingv1.PingRequest, pingv1.PingResponse](
-		procedure,
-		func(ctx context.Context, req *Request[pingv1.PingRequest]) (*Response[pingv1.PingResponse], error) {
-			return nil, NewError(CodeUnimplemented, nil)
-		})
-	server := httptest.NewServer(handler)
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(
+		pingServer{},
+	))
+	server := httptest.NewServer(mux)
 	client := server.Client()
 	t.Cleanup(func() {
 		server.Close()
@@ -41,7 +38,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("method_not_allowed", func(t *testing.T) {
 		t.Parallel()
-		resp, err := client.Get(server.URL + procedure)
+		resp, err := client.Get(server.URL + "/" + pingv1connect.PingServiceName + "/Ping")
 		assert.Nil(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, resp.StatusCode, http.StatusMethodNotAllowed)
@@ -50,10 +47,19 @@ func TestHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("unsupported_content_type", func(t *testing.T) {
 		t.Parallel()
-		resp, err := client.Post(server.URL+procedure, "application/x-custom-json", strings.NewReader("{}"))
+		resp, err := client.Post(server.URL+"/"+pingv1connect.PingServiceName+"/Ping", "application/x-custom-json", strings.NewReader("{}"))
 		assert.Nil(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, resp.StatusCode, http.StatusUnsupportedMediaType)
-		assert.Equal(t, resp.Header.Get("Accept-Post"), handler.acceptPost)
+		assert.Equal(t, resp.Header.Get("Accept-Post"), strings.Join([]string{
+			"application/grpc",
+			"application/grpc+json",
+			"application/grpc+proto",
+			"application/grpc-web",
+			"application/grpc-web+json",
+			"application/grpc-web+proto",
+			"application/json",
+			"application/proto",
+		}, ", "))
 	})
 }
