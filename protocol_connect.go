@@ -34,7 +34,7 @@ const (
 	connectUnaryHeaderCompression           = "Content-Encoding"
 	connectUnaryHeaderAcceptCompression     = "Accept-Encoding"
 	connectUnaryTrailerPrefix               = "Trailer-"
-	connectStreamingHeaderCompression       = "Connect-Encoding"
+	connectStreamingHeaderCompression       = "Connect-Content-Encoding"
 	connectStreamingHeaderAcceptCompression = "Connect-Accept-Encoding"
 	connectHeaderTimeout                    = "Connect-Timeout-Ms"
 
