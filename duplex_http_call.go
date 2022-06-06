@@ -17,6 +17,7 @@ package connect
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"sync"
@@ -149,6 +150,9 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 		d.SetError(err)
 		return 0, wrapIfContextError(err)
 	}
+	if d.response == nil {
+		return 0, io.EOF
+	}
 	return d.response.Body.Read(data)
 }
 
@@ -164,9 +168,12 @@ func (d *duplexHTTPCall) CloseRead() error {
 }
 
 // ResponseStatusCode is the response's HTTP status code.
-func (d *duplexHTTPCall) ResponseStatusCode() int {
+func (d *duplexHTTPCall) ResponseStatusCode() (int, error) {
 	<-d.responseReady
-	return d.response.StatusCode
+	if d.response == nil {
+		return 0, fmt.Errorf("nil response from %v", d.request.URL)
+	}
+	return d.response.StatusCode, nil
 }
 
 // ResponseHeader returns the response HTTP headers.
@@ -248,7 +255,8 @@ func (d *duplexHTTPCall) makeRequest() {
 	if err := d.validateResponse(response); err != nil {
 		d.SetError(err)
 		return
-	} else if (d.streamType&StreamTypeBidi) == StreamTypeBidi && response.ProtoMajor < 2 {
+	}
+	if (d.streamType&StreamTypeBidi) == StreamTypeBidi && response.ProtoMajor < 2 {
 		// If we somehow dialed an HTTP/1.x server, fail with an explicit message
 		// rather than returning a more cryptic error later on.
 		d.SetError(errorf(
