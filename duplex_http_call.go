@@ -151,7 +151,7 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 		return 0, wrapIfContextError(err)
 	}
 	if d.response == nil {
-		return 0, io.EOF
+		return 0, fmt.Errorf("nil response from %v", d.request.URL)
 	}
 	return d.response.Body.Read(data)
 }
