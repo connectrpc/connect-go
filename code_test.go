@@ -39,8 +39,6 @@ func TestCode(t *testing.T) {
 		assertCodeRoundTrips(t, code)
 	}
 	assertCodeRoundTrips(t, Code(999))
-	var canceledInvalid Code
-	assert.NotNil(t, canceledInvalid.UnmarshalText([]byte("code_"+strconv.Itoa(int(CodeCanceled)))))
 }
 
 func assertCodeRoundTrips(tb testing.TB, code Code) {
@@ -52,6 +50,7 @@ func assertCodeRoundTrips(tb testing.TB, code Code) {
 	assert.Equal(tb, decoded, code)
 	if code >= minCode && code <= maxCode {
 		var invalid Code
+		// For the known codes, we only accept the canonical string representation: "canceled", not "code_1".
 		assert.NotNil(tb, invalid.UnmarshalText([]byte("code_"+strconv.Itoa(int(code)))))
 	}
 }
