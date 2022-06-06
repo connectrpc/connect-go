@@ -34,6 +34,9 @@ type ClientStreamForClient[Req, Res any] struct {
 // RequestHeader returns the request headers. Headers are sent to the server with the
 // first call to Send.
 func (c *ClientStreamForClient[Req, Res]) RequestHeader() http.Header {
+	if c.err != nil {
+		return http.Header{}
+	}
 	return c.sender.Header()
 }
 
@@ -77,7 +80,10 @@ func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Response[Res], err
 type ServerStreamForClient[Res any] struct {
 	receiver Receiver
 	msg      Res
-	err      error
+	// Error from client construction. If non-nil, return for all calls.
+	constructErr error
+	// Error from Receive().
+	receiveErr error
 }
 
 // Receive advances the stream to the next message, which will then be
@@ -86,11 +92,11 @@ type ServerStreamForClient[Res any] struct {
 // Receive returns false, the Err method will return any unexpected error
 // encountered.
 func (s *ServerStreamForClient[Res]) Receive() bool {
-	if s.err != nil {
+	if s.constructErr != nil || s.receiveErr != nil {
 		return false
 	}
-	s.err = s.receiver.Receive(&s.msg)
-	return s.err == nil
+	s.receiveErr = s.receiver.Receive(&s.msg)
+	return s.receiveErr == nil
 }
 
 // Msg returns the most recent message unmarshaled by a call to Receive. The
@@ -102,21 +108,30 @@ func (s *ServerStreamForClient[Res]) Msg() *Res {
 
 // Err returns the first non-EOF error that was encountered by Receive.
 func (s *ServerStreamForClient[Res]) Err() error {
-	if s.err == nil || errors.Is(s.err, io.EOF) {
-		return nil
+	if s.constructErr != nil {
+		return s.constructErr
 	}
-	return s.err
+	if s.receiveErr != nil && !errors.Is(s.receiveErr, io.EOF) {
+		return s.receiveErr
+	}
+	return nil
 }
 
 // ResponseHeader returns the headers received from the server. It blocks until
 // the first call to Receive returns.
 func (s *ServerStreamForClient[Res]) ResponseHeader() http.Header {
+	if s.constructErr != nil {
+		return http.Header{}
+	}
 	return s.receiver.Header()
 }
 
 // ResponseTrailer returns the trailers received from the server. Trailers
 // aren't fully populated until Receive() returns an error wrapping io.EOF.
 func (s *ServerStreamForClient[Res]) ResponseTrailer() http.Header {
+	if s.constructErr != nil {
+		return http.Header{}
+	}
 	if trailer, ok := s.receiver.Trailer(); ok {
 		return trailer
 	}
@@ -125,6 +140,9 @@ func (s *ServerStreamForClient[Res]) ResponseTrailer() http.Header {
 
 // Close the receive side of the stream.
 func (s *ServerStreamForClient[Res]) Close() error {
+	if s.constructErr != nil {
+		return s.constructErr
+	}
 	return s.receiver.Close()
 }
 
@@ -142,6 +160,9 @@ type BidiStreamForClient[Req, Res any] struct {
 // RequestHeader returns the request headers. Headers are sent with the first
 // call to Send.
 func (b *BidiStreamForClient[Req, Res]) RequestHeader() http.Header {
+	if b.err != nil {
+		return http.Header{}
+	}
 	return b.sender.Header()
 }
 
@@ -190,12 +211,18 @@ func (b *BidiStreamForClient[Req, Res]) CloseReceive() error {
 // ResponseHeader returns the headers received from the server. It blocks until
 // the first call to Receive returns.
 func (b *BidiStreamForClient[Req, Res]) ResponseHeader() http.Header {
+	if b.err != nil {
+		return http.Header{}
+	}
 	return b.receiver.Header()
 }
 
 // ResponseTrailer returns the trailers received from the server. Trailers
 // aren't fully populated until Receive() returns an error wrapping io.EOF.
 func (b *BidiStreamForClient[Req, Res]) ResponseTrailer() http.Header {
+	if b.err != nil {
+		return http.Header{}
+	}
 	if trailer, ok := b.receiver.Trailer(); ok {
 		return trailer
 	}
