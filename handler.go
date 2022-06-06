@@ -224,52 +224,56 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	}
 
 	contentType := request.Header.Get("Content-Type")
-	for _, protocolHandler := range h.protocolHandlers {
-		if _, ok := protocolHandler.ContentTypes()[contentType]; !ok {
-			continue
+	var protocolHandler protocolHandler
+	for _, handler := range h.protocolHandlers {
+		if _, ok := handler.ContentTypes()[contentType]; ok {
+			protocolHandler = handler
+			break
 		}
-		ctx, cancel, timeoutErr := protocolHandler.SetTimeout(request)
-		if timeoutErr != nil {
-			ctx = request.Context()
-		}
-		if cancel != nil {
-			defer cancel()
-		}
-		if ic := h.interceptor; ic != nil {
-			ctx = ic.WrapStreamContext(ctx)
-		}
-		// Most errors returned from protocolHandler.NewStream are caused by
-		// invalid requests. For example, the client may have specified an invalid
-		// timeout or an unavailable codec. We'd like those errors to be visible to
-		// the interceptor chain, so we're going to capture them here and pass them
-		// to the implementation.
-		sender, receiver, clientVisibleError := protocolHandler.NewStream(
-			responseWriter,
-			request.WithContext(ctx),
-		)
-		if timeoutErr != nil {
-			clientVisibleError = timeoutErr
-		}
-		// If NewStream or SetTimeout errored and the protocol doesn't want the
-		// error sent to the client, sender and/or receiver may be nil. We still
-		// want the error to be seen by interceptors, so we provide no-op Sender
-		// and Receiver implementations.
-		if clientVisibleError != nil && sender == nil {
-			sender = newNopSender(h.spec, responseWriter.Header(), make(http.Header))
-		}
-		if clientVisibleError != nil && receiver == nil {
-			receiver = newNopReceiver(h.spec, request.Header, request.Trailer)
-		}
-		if interceptor := h.interceptor; interceptor != nil {
-			// Unary interceptors were handled in NewUnaryHandler.
-			sender = interceptor.WrapStreamSender(ctx, sender)
-			receiver = interceptor.WrapStreamReceiver(ctx, receiver)
-		}
-		h.implementation(ctx, sender, receiver, clientVisibleError)
+	}
+	if protocolHandler == nil {
+		responseWriter.Header().Set("Accept-Post", h.acceptPost)
+		responseWriter.WriteHeader(http.StatusUnsupportedMediaType)
 		return
 	}
-	responseWriter.Header().Set("Accept-Post", h.acceptPost)
-	responseWriter.WriteHeader(http.StatusUnsupportedMediaType)
+	ctx, cancel, timeoutErr := protocolHandler.SetTimeout(request)
+	if timeoutErr != nil {
+		ctx = request.Context()
+	}
+	if cancel != nil {
+		defer cancel()
+	}
+	if ic := h.interceptor; ic != nil {
+		ctx = ic.WrapStreamContext(ctx)
+	}
+	// Most errors returned from protocolHandler.NewStream are caused by
+	// invalid requests. For example, the client may have specified an invalid
+	// timeout or an unavailable codec. We'd like those errors to be visible to
+	// the interceptor chain, so we're going to capture them here and pass them
+	// to the implementation.
+	sender, receiver, clientVisibleError := protocolHandler.NewStream(
+		responseWriter,
+		request.WithContext(ctx),
+	)
+	if timeoutErr != nil {
+		clientVisibleError = timeoutErr
+	}
+	// If NewStream or SetTimeout errored and the protocol doesn't want the
+	// error sent to the client, sender and/or receiver may be nil. We still
+	// want the error to be seen by interceptors, so we provide no-op Sender
+	// and Receiver implementations.
+	if clientVisibleError != nil && sender == nil {
+		sender = newNopSender(h.spec, responseWriter.Header(), make(http.Header))
+	}
+	if clientVisibleError != nil && receiver == nil {
+		receiver = newNopReceiver(h.spec, request.Header, request.Trailer)
+	}
+	if interceptor := h.interceptor; interceptor != nil {
+		// Unary interceptors were handled in NewUnaryHandler.
+		sender = interceptor.WrapStreamSender(ctx, sender)
+		receiver = interceptor.WrapStreamReceiver(ctx, receiver)
+	}
+	h.implementation(ctx, sender, receiver, clientVisibleError)
 }
 
 type handlerConfig struct {
