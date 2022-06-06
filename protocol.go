@@ -74,7 +74,7 @@ type protocolHandler interface {
 	// handle.
 	ContentTypes() map[string]struct{}
 
-	// ParseTimeout runs before NewStream. Implementations may inspect the HTTP
+	// SetTimeout runs before NewStream. Implementations may inspect the HTTP
 	// request, parse any timeout set by the client, and return a modified
 	// context and cancellation function.
 	//
