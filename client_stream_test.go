@@ -37,26 +37,26 @@ func TestClientStreamForClient_NoPanics(t *testing.T) {
 func TestServerStreamForClient_NoPanics(t *testing.T) {
 	t.Parallel()
 	initErr := errors.New("client init failure")
-	ss := &ServerStreamForClient[pingv1.PingResponse]{err: initErr}
-	assert.ErrorIs(t, ss.Err(), initErr)
-	assert.ErrorIs(t, ss.Close(), initErr)
-	assert.NotNil(t, ss.Msg())
-	assert.False(t, ss.Receive())
-	assert.Equal(t, ss.ResponseHeader(), http.Header{})
-	assert.Equal(t, ss.ResponseTrailer(), http.Header{})
+	serverStream := &ServerStreamForClient[pingv1.PingResponse]{err: initErr}
+	assert.ErrorIs(t, serverStream.Err(), initErr)
+	assert.ErrorIs(t, serverStream.Close(), initErr)
+	assert.NotNil(t, serverStream.Msg())
+	assert.False(t, serverStream.Receive())
+	assert.Equal(t, serverStream.ResponseHeader(), http.Header{})
+	assert.Equal(t, serverStream.ResponseTrailer(), http.Header{})
 }
 
 func TestBidiStreamForClient_NoPanics(t *testing.T) {
 	t.Parallel()
 	initErr := errors.New("client init failure")
-	bs := &BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]{err: initErr}
-	res, err := bs.Receive()
+	bidiStream := &BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]{err: initErr}
+	res, err := bidiStream.Receive()
 	assert.Nil(t, res)
 	assert.ErrorIs(t, err, initErr)
-	assert.Equal(t, bs.RequestHeader(), http.Header{})
-	assert.Equal(t, bs.ResponseHeader(), http.Header{})
-	assert.Equal(t, bs.ResponseTrailer(), http.Header{})
-	assert.ErrorIs(t, bs.Send(&pingv1.CumSumRequest{}), initErr)
-	assert.ErrorIs(t, bs.CloseReceive(), initErr)
-	assert.ErrorIs(t, bs.CloseSend(), initErr)
+	assert.Equal(t, bidiStream.RequestHeader(), http.Header{})
+	assert.Equal(t, bidiStream.ResponseHeader(), http.Header{})
+	assert.Equal(t, bidiStream.ResponseTrailer(), http.Header{})
+	assert.ErrorIs(t, bidiStream.Send(&pingv1.CumSumRequest{}), initErr)
+	assert.ErrorIs(t, bidiStream.CloseReceive(), initErr)
+	assert.ErrorIs(t, bidiStream.CloseSend(), initErr)
 }
