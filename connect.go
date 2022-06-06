@@ -135,7 +135,7 @@ func (r *Request[_]) Header() http.Header {
 }
 
 // internalOnly implements AnyRequest.
-func (e *Request[_]) internalOnly() {}
+func (r *Request[_]) internalOnly() {}
 
 // AnyRequest is the common method set of all Requests, regardless of type
 // parameter. It's used in unary interceptors.
@@ -196,7 +196,7 @@ func (r *Response[_]) Trailer() http.Header {
 }
 
 // internalOnly implements AnyResponse.
-func (e *Response[_]) internalOnly() {}
+func (r *Response[_]) internalOnly() {}
 
 // AnyResponse is the common method set of all Responses, regardless of type
 // parameter. It's used in unary interceptors.
