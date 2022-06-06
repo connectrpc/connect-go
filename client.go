@@ -46,8 +46,11 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 	client.config = config
 	protocolClient, protocolErr := client.config.Protocol.NewClient(
 		&protocolClientParams{
-			CompressionName:  config.RequestCompressionName,
-			CompressionPools: newReadOnlyCompressionPools(config.CompressionPools),
+			CompressionName: config.RequestCompressionName,
+			CompressionPools: newReadOnlyCompressionPools(
+				config.CompressionPools,
+				config.CompressionNames,
+			),
 			Codec:            config.Codec,
 			Protobuf:         config.protobuf(),
 			CompressMinBytes: config.CompressMinBytes,
@@ -173,6 +176,7 @@ type clientConfig struct {
 	CompressMinBytes       int
 	Interceptor            Interceptor
 	CompressionPools       map[string]*compressionPool
+	CompressionNames       []string
 	Codec                  Codec
 	RequestCompressionName string
 	BufferPool             *bufferPool

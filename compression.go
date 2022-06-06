@@ -154,14 +154,19 @@ type readOnlyCompressionPools interface {
 	CommaSeparatedNames() string
 }
 
-func newReadOnlyCompressionPools(nameToPool map[string]*compressionPool) readOnlyCompressionPools {
-	knownNames := make([]string, 0, len(nameToPool))
-	for name := range nameToPool {
-		knownNames = append(knownNames, name)
+func newReadOnlyCompressionPools(
+	nameToPool map[string]*compressionPool,
+	reversedNames []string,
+) readOnlyCompressionPools {
+	// Client and handler configs keep compression names in registration order,
+	// but we want the last registered to be the most preferred.
+	names := make([]string, 0, len(reversedNames))
+	for i := len(reversedNames) - 1; i >= 0; i-- {
+		names = append(names, reversedNames[i])
 	}
 	return &namedCompressionPools{
 		nameToPool:          nameToPool,
-		commaSeparatedNames: strings.Join(knownNames, ","),
+		commaSeparatedNames: strings.Join(names, ","),
 	}
 }
 
