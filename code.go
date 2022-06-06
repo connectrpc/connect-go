@@ -57,7 +57,7 @@ const (
 	// example, a file or directory) that already exists.
 	CodeAlreadyExists Code = 6
 
-	// CodePermissionDenied indicates that the caller does'nt have permission to
+	// CodePermissionDenied indicates that the caller doesn't have permission to
 	// execute the specified operation.
 	CodePermissionDenied Code = 7
 
@@ -100,8 +100,8 @@ const (
 	// authentication credentials for the operation.
 	CodeUnauthenticated Code = 16
 
-	minCode Code = CodeUnknown
-	maxCode Code = CodeUnauthenticated
+	minCode = CodeCanceled
+	maxCode = CodeUnauthenticated
 )
 
 func (c Code) String() string {

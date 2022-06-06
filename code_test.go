@@ -15,6 +15,7 @@
 package connect
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -38,6 +39,8 @@ func TestCode(t *testing.T) {
 		assertCodeRoundTrips(t, code)
 	}
 	assertCodeRoundTrips(t, Code(999))
+	var canceledInvalid Code
+	assert.NotNil(t, canceledInvalid.UnmarshalText([]byte("code_"+strconv.Itoa(int(CodeCanceled)))))
 }
 
 func assertCodeRoundTrips(tb testing.TB, code Code) {
@@ -47,4 +50,8 @@ func assertCodeRoundTrips(tb testing.TB, code Code) {
 	var decoded Code
 	assert.Nil(tb, decoded.UnmarshalText(encoded))
 	assert.Equal(tb, decoded, code)
+	if code >= minCode && code <= maxCode {
+		var invalid Code
+		assert.NotNil(tb, invalid.UnmarshalText([]byte("code_"+strconv.Itoa(int(code)))))
+	}
 }
