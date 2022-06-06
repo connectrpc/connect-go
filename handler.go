@@ -274,6 +274,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 
 type handlerConfig struct {
 	CompressionPools map[string]*compressionPool
+	CompressionNames []string
 	Codecs           map[string]Codec
 	CompressMinBytes int
 	Interceptor      Interceptor
@@ -319,7 +320,10 @@ func (c *handlerConfig) newProtocolHandlers(streamType StreamType) []protocolHan
 	}
 	handlers := make([]protocolHandler, 0, len(protocols))
 	codecs := newReadOnlyCodecs(c.Codecs)
-	compressors := newReadOnlyCompressionPools(c.CompressionPools)
+	compressors := newReadOnlyCompressionPools(
+		c.CompressionPools,
+		c.CompressionNames,
+	)
 	for _, protocol := range protocols {
 		handlers = append(handlers, protocol.NewHandler(&protocolHandlerParams{
 			Spec:             c.newSpec(streamType),

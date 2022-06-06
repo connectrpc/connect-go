@@ -29,7 +29,10 @@ type ClientOption interface {
 
 // WithAcceptCompression makes a compression algorithm available to a client.
 // Clients ask servers to compress responses using any of the registered
-// algorithms. It's safe to use this option liberally: servers will ignore any
+// algorithms. The first registered algorithm is treated as the least
+// preferred, and the last registered algorithm is the most preferred.
+//
+// It's safe to use this option liberally: servers will ignore any
 // compression algorithms they don't support. To compress requests, pair this
 // option with WithSendCompression.
 //
@@ -251,18 +254,19 @@ type compressionOption struct {
 }
 
 func (o *compressionOption) applyToClient(config *clientConfig) {
-	o.apply(config.CompressionPools)
-}
-
-func (o *compressionOption) applyToHandler(config *handlerConfig) {
-	o.apply(config.CompressionPools)
-}
-
-func (o *compressionOption) apply(m map[string]*compressionPool) {
 	if o.Name == "" || o.CompressionPool == nil {
 		return
 	}
-	m[o.Name] = o.CompressionPool
+	config.CompressionPools[o.Name] = o.CompressionPool
+	config.CompressionNames = append(config.CompressionNames, o.Name)
+}
+
+func (o *compressionOption) applyToHandler(config *handlerConfig) {
+	if o.Name == "" || o.CompressionPool == nil {
+		return
+	}
+	config.CompressionPools[o.Name] = o.CompressionPool
+	config.CompressionNames = append(config.CompressionNames, o.Name)
 }
 
 type compressMinBytesOption struct {
