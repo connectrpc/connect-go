@@ -517,24 +517,26 @@ func TestCompressMinBytes(t *testing.T) {
 	})
 	client := server.Client()
 
-	getPingResponse := func(pingText string) *http.Response {
+	getPingResponse := func(t *testing.T, pingText string) *http.Response {
 		request := &pingv1.PingRequest{Text: pingText}
 		requestBytes, err := proto.Marshal(request)
 		assert.Nil(t, err)
 		response, err := client.Post(server.URL+"/"+pingv1connect.PingServiceName+"/Ping", "application/proto", bytes.NewReader(requestBytes))
 		assert.Nil(t, err)
-		defer response.Body.Close()
+		t.Cleanup(func() {
+			response.Body.Close()
+		})
 		return response
 	}
 
 	t.Run("response_uncompressed", func(t *testing.T) {
 		t.Parallel()
-		assert.False(t, getPingResponse("ping").Uncompressed)
+		assert.False(t, getPingResponse(t, "ping").Uncompressed)
 	})
 
 	t.Run("response_compressed", func(t *testing.T) {
 		t.Parallel()
-		assert.True(t, getPingResponse(strings.Repeat("ping", 2)).Uncompressed)
+		assert.True(t, getPingResponse(t, strings.Repeat("ping", 2)).Uncompressed)
 	})
 }
 
