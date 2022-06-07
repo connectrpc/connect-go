@@ -583,7 +583,6 @@ func TestInvalidHeaderTimeout(t *testing.T) {
 	t.Cleanup(func() {
 		server.Close()
 	})
-
 	getPingResponseWithTimeout := func(t *testing.T, timeout string) *http.Response {
 		t.Helper()
 		request, err := http.NewRequest(http.MethodPost, server.URL+"/"+pingv1connect.PingServiceName+"/Ping", strings.NewReader("{}"))
@@ -597,12 +596,10 @@ func TestInvalidHeaderTimeout(t *testing.T) {
 		})
 		return response
 	}
-
 	t.Run("timeout_non_numeric", func(t *testing.T) {
 		t.Parallel()
 		assert.Equal(t, getPingResponseWithTimeout(t, "10s").StatusCode, http.StatusBadRequest)
 	})
-
 	t.Run("timeout_out_of_range", func(t *testing.T) {
 		t.Parallel()
 		assert.Equal(t, getPingResponseWithTimeout(t, "12345678901").StatusCode, http.StatusBadRequest)
