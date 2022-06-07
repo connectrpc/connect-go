@@ -77,6 +77,8 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		resp, err := client.Do(req)
 		assert.Nil(t, err)
 		defer resp.Body.Close()
+		assert.Equal(t, resp.StatusCode, http.StatusNotFound)
+
 		type errorMessage struct {
 			Code, Message string
 		}
@@ -85,7 +87,6 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, message.Message, `unknown compression "invalid": supported encodings are gzip`)
 		assert.Equal(t, message.Code, connect.CodeUnimplemented.String())
-		assert.Equal(t, resp.StatusCode, http.StatusNotFound)
 	})
 }
 
