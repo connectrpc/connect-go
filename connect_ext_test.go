@@ -575,7 +575,7 @@ func TestCustomCompression(t *testing.T) {
 	assert.Equal(t, response.Msg, &pingv1.PingResponse{Text: request.Text})
 }
 
-func TestConnectTimeout(t *testing.T) {
+func TestInvalidHeaderTimeout(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
