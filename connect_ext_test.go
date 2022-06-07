@@ -547,7 +547,8 @@ func Test_CustomCompression(t *testing.T) {
 	mux := http.NewServeMux()
 	compressionName := "deflate"
 	decompressor := func() connect.Decompressor {
-		return newDeflateReader(http.NoBody)
+		// Need to instantiate with a reader - before decompressing Reset(io.Reader) is called
+		return newDeflateReader(strings.NewReader(""))
 	}
 	compressor := func() connect.Compressor {
 		w, err := flate.NewWriter(&strings.Builder{}, flate.DefaultCompression)
