@@ -518,6 +518,7 @@ func TestCompressMinBytes(t *testing.T) {
 	client := server.Client()
 
 	getPingResponse := func(t *testing.T, pingText string) *http.Response {
+		t.Helper()
 		request := &pingv1.PingRequest{Text: pingText}
 		requestBytes, err := proto.Marshal(request)
 		assert.Nil(t, err)
