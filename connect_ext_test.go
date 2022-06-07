@@ -575,6 +575,40 @@ func Test_CustomCompression(t *testing.T) {
 	assert.Equal(t, response.Msg, &pingv1.PingResponse{Text: request.Text})
 }
 
+func Test_ConnectTimeout(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	server := httptest.NewServer(mux)
+	t.Cleanup(func() {
+		server.Close()
+	})
+
+	getPingResponseWithTimeout := func(t *testing.T, timeout string) *http.Response {
+		t.Helper()
+		request, err := http.NewRequest(http.MethodPost, server.URL+"/"+pingv1connect.PingServiceName+"/Ping", strings.NewReader("{}"))
+		assert.Nil(t, err)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Connect-Timeout-Ms", timeout)
+		response, err := server.Client().Do(request)
+		assert.Nil(t, err)
+		t.Cleanup(func() {
+			response.Body.Close()
+		})
+		return response
+	}
+
+	t.Run("timeout_non_numeric", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, getPingResponseWithTimeout(t, "10s").StatusCode, http.StatusBadRequest)
+	})
+
+	t.Run("timeout_out_of_range", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, getPingResponseWithTimeout(t, "12345678901").StatusCode, http.StatusBadRequest)
+	})
+}
+
 type failCodec struct{}
 
 func (c failCodec) Name() string {
