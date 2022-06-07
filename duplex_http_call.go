@@ -140,7 +140,7 @@ func (d *duplexHTTPCall) Trailer() http.Header {
 func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 	// First, we wait until we've gotten the response headers and established the
 	// server-to-client side of the stream.
-	<-d.responseReady
+	d.BlockUntilResponseReady()
 	if err := d.getError(); err != nil {
 		// The stream is already closed or corrupted.
 		return 0, err
@@ -157,7 +157,7 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 }
 
 func (d *duplexHTTPCall) CloseRead() error {
-	<-d.responseReady
+	d.BlockUntilResponseReady()
 	if d.response == nil {
 		return nil
 	}
@@ -169,7 +169,7 @@ func (d *duplexHTTPCall) CloseRead() error {
 
 // ResponseStatusCode is the response's HTTP status code.
 func (d *duplexHTTPCall) ResponseStatusCode() (int, error) {
-	<-d.responseReady
+	d.BlockUntilResponseReady()
 	if d.response == nil {
 		return 0, fmt.Errorf("nil response from %v", d.request.URL)
 	}
