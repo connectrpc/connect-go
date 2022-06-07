@@ -542,7 +542,7 @@ func TestCompressMinBytes(t *testing.T) {
 	})
 }
 
-func Test_CustomCompression(t *testing.T) {
+func TestCustomCompression(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	compressionName := "deflate"
@@ -575,7 +575,7 @@ func Test_CustomCompression(t *testing.T) {
 	assert.Equal(t, response.Msg, &pingv1.PingResponse{Text: request.Text})
 }
 
-func Test_ConnectTimeout(t *testing.T) {
+func TestConnectTimeout(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
