@@ -15,6 +15,7 @@
 package connect_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -501,6 +502,43 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 		t,
 		strings.HasSuffix(connectErr.Message(), ": bidi streams require at least HTTP/2"),
 	)
+}
+
+func TestCompressMinBytes(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(
+		pingServer{},
+		connect.WithCompressMinBytes(8),
+	))
+	server := httptest.NewServer(mux)
+	t.Cleanup(func() {
+		server.Close()
+	})
+	client := server.Client()
+
+	getPingResponse := func(t *testing.T, pingText string) *http.Response {
+		t.Helper()
+		request := &pingv1.PingRequest{Text: pingText}
+		requestBytes, err := proto.Marshal(request)
+		assert.Nil(t, err)
+		response, err := client.Post(server.URL+"/"+pingv1connect.PingServiceName+"/Ping", "application/proto", bytes.NewReader(requestBytes))
+		assert.Nil(t, err)
+		t.Cleanup(func() {
+			response.Body.Close()
+		})
+		return response
+	}
+
+	t.Run("response_uncompressed", func(t *testing.T) {
+		t.Parallel()
+		assert.False(t, getPingResponse(t, "ping").Uncompressed)
+	})
+
+	t.Run("response_compressed", func(t *testing.T) {
+		t.Parallel()
+		assert.True(t, getPingResponse(t, strings.Repeat("ping", 2)).Uncompressed)
+	})
 }
 
 type failCodec struct{}
