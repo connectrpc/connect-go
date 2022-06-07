@@ -16,6 +16,7 @@ package connect_test
 
 import (
 	"bytes"
+	"compress/flate"
 	"context"
 	"errors"
 	"fmt"
@@ -541,6 +542,38 @@ func TestCompressMinBytes(t *testing.T) {
 	})
 }
 
+func Test_CustomCompression(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	compressionName := "deflate"
+	decompressor := func() connect.Decompressor {
+		return newDeflateReader(http.NoBody)
+	}
+	compressor := func() connect.Compressor {
+		w, err := flate.NewWriter(&strings.Builder{}, flate.DefaultCompression)
+		if err != nil {
+			t.Fatalf("failed to create flate writer: %v", err)
+		}
+		return w
+	}
+	mux.Handle(pingv1connect.NewPingServiceHandler(
+		pingServer{},
+		connect.WithCompression(compressionName, decompressor, compressor),
+	))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := pingv1connect.NewPingServiceClient(server.Client(),
+		server.URL,
+		connect.WithAcceptCompression(compressionName, decompressor, compressor),
+		connect.WithSendCompression(compressionName),
+	)
+	request := &pingv1.PingRequest{Text: "testing 1..2..3.."}
+	response, err := client.Ping(context.Background(), connect.NewRequest(request))
+	assert.Nil(t, err)
+	assert.Equal(t, response.Msg, &pingv1.PingResponse{Text: request.Text})
+}
+
 type failCodec struct{}
 
 func (c failCodec) Name() string {
@@ -714,3 +747,28 @@ func (p pingServer) CumSum(
 		}
 	}
 }
+
+type deflateReader struct {
+	r io.ReadCloser
+}
+
+func newDeflateReader(r io.Reader) *deflateReader {
+	return &deflateReader{r: flate.NewReader(r)}
+}
+
+func (d *deflateReader) Read(p []byte) (int, error) {
+	return d.r.Read(p)
+}
+
+func (d *deflateReader) Close() error {
+	return d.r.Close()
+}
+
+func (d *deflateReader) Reset(reader io.Reader) error {
+	if resetter, ok := d.r.(flate.Resetter); ok {
+		return resetter.Reset(reader, nil)
+	}
+	return fmt.Errorf("flate reader should implement flate.Resetter")
+}
+
+var _ connect.Decompressor = (*deflateReader)(nil)

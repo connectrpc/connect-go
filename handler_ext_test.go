@@ -15,12 +15,16 @@
 package connect_test
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/bufbuild/connect-go"
 	"github.com/bufbuild/connect-go/internal/assert"
+	pingv1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
 	"github.com/bufbuild/connect-go/internal/gen/connect/ping/v1/pingv1connect"
 )
 
@@ -28,8 +32,9 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(
-		pingServer{},
+		successPingServer{},
 	))
+	const pingProcedure = "/" + pingv1connect.PingServiceName + "/Ping"
 	server := httptest.NewServer(mux)
 	client := server.Client()
 	t.Cleanup(func() {
@@ -38,7 +43,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("method_not_allowed", func(t *testing.T) {
 		t.Parallel()
-		resp, err := client.Get(server.URL + "/" + pingv1connect.PingServiceName + "/Ping")
+		resp, err := client.Get(server.URL + pingProcedure)
 		assert.Nil(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, resp.StatusCode, http.StatusMethodNotAllowed)
@@ -47,7 +52,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("unsupported_content_type", func(t *testing.T) {
 		t.Parallel()
-		resp, err := client.Post(server.URL+"/"+pingv1connect.PingServiceName+"/Ping", "application/x-custom-json", strings.NewReader("{}"))
+		resp, err := client.Post(server.URL+pingProcedure, "application/x-custom-json", strings.NewReader("{}"))
 		assert.Nil(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, resp.StatusCode, http.StatusUnsupportedMediaType)
@@ -62,4 +67,32 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			"application/proto",
 		}, ", "))
 	})
+
+	t.Run("unsupported_content_encoding", func(t *testing.T) {
+		t.Parallel()
+		req, err := http.NewRequest(http.MethodPost, server.URL+pingProcedure, strings.NewReader("{}"))
+		assert.Nil(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Encoding", "invalid")
+		resp, err := client.Do(req)
+		assert.Nil(t, err)
+		defer resp.Body.Close()
+		type errorMessage struct {
+			Code, Message string
+		}
+		var message errorMessage
+		err = json.NewDecoder(resp.Body).Decode(&message)
+		assert.Nil(t, err)
+		assert.Equal(t, message.Message, `unknown compression "invalid": supported encodings are gzip`)
+		assert.Equal(t, message.Code, connect.CodeUnimplemented.String())
+		assert.Equal(t, resp.StatusCode, http.StatusNotFound)
+	})
+}
+
+type successPingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (successPingServer) Ping(context.Context, *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	return &connect.Response[pingv1.PingResponse]{}, nil
 }
