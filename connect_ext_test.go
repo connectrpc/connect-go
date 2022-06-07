@@ -46,6 +46,9 @@ const (
 	clientHeader   = "Connect-Client-Header"
 	handlerHeader  = "Connect-Handler-Header"
 	handlerTrailer = "Connect-Handler-Trailer"
+
+	acceptEncoding     = "Accept-Encoding"
+	grpcAcceptEncoding = "Grpc-Accept-Encoding"
 )
 
 func TestServer(t *testing.T) {
@@ -61,6 +64,10 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, response.Msg, expect)
 			assert.Equal(t, response.Header().Get(handlerHeader), headerValue)
 			assert.Equal(t, response.Trailer().Get(handlerTrailer), trailerValue)
+			for _, invalidResponseHeader := range []string{acceptEncoding, grpcAcceptEncoding} {
+				assert.Equal(t, response.Header().Get(invalidResponseHeader), "")
+				assert.Equal(t, response.Trailer().Get(invalidResponseHeader), "")
+			}
 		})
 		t.Run("zero_ping", func(t *testing.T) {
 			request := connect.NewRequest(&pingv1.PingRequest{})

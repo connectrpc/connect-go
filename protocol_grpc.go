@@ -152,7 +152,9 @@ func (g *grpcHandler) NewStream(
 	// skip the normalization in Header.Set.
 	header := responseWriter.Header()
 	header[headerContentType] = []string{request.Header.Get(headerContentType)}
-	header[grpcHeaderAcceptCompression] = []string{g.CompressionPools.CommaSeparatedNames()}
+	if g.Spec.IsClient {
+		header[grpcHeaderAcceptCompression] = []string{g.CompressionPools.CommaSeparatedNames()}
+	}
 	if responseCompression != compressionIdentity {
 		header[grpcHeaderCompression] = []string{responseCompression}
 	}

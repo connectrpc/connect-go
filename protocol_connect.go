@@ -140,7 +140,9 @@ func (h *connectHandler) NewStream(
 			header[connectStreamingHeaderCompression] = []string{responseCompression}
 		}
 	}
-	header[acceptCompressionHeader] = []string{h.CompressionPools.CommaSeparatedNames()}
+	if h.Spec.IsClient {
+		header[acceptCompressionHeader] = []string{h.CompressionPools.CommaSeparatedNames()}
+	}
 
 	codecName := connectCodecFromContentType(
 		h.Spec.StreamType,
