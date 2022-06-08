@@ -203,7 +203,7 @@ func (r *Response[_]) internalOnly() {}
 //
 // To preserve our ability to add methods to this interface without breaking
 // backward compatibility, only types defined in this package can implement
-// AnyRequest.
+// AnyResponse.
 type AnyResponse interface {
 	Any() any
 	Header() http.Header
