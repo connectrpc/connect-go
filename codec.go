@@ -41,7 +41,7 @@ type Codec interface {
 	// Marshal may expect a specific type of message, and will error if this type
 	// is not given.
 	Marshal(any) ([]byte, error)
-	// Marshal unmarshals the given message.
+	// Unmarshal unmarshals the given message.
 	//
 	// Unmarshal may expect a specific type of message, and will error if this
 	// type is not given.
