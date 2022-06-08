@@ -465,6 +465,64 @@ func TestGRPCMarshalStatusError(t *testing.T) {
 	assertInternalError(t, connect.WithGRPCWeb())
 }
 
+func TestGRPCUnaryMissingTrailersError(t *testing.T) {
+	t.Parallel()
+
+	trimTrailers := func(handler http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Header.Del("Te")
+			handler.ServeHTTP(&trimTrailerWriter{w: w}, r)
+		})
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(
+		pingServer{},
+	))
+	server := httptest.NewUnstartedServer(trimTrailers(mux))
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	defer server.Close()
+
+	assertInternalErrorOnSuccessUnary := func(tb testing.TB, opts ...connect.ClientOption) {
+		tb.Helper()
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, opts...)
+		request := connect.NewRequest(&pingv1.PingRequest{Number: 1, Text: "foobar"})
+		_, err := client.Ping(context.Background(), request)
+		tb.Log(err)
+		assert.NotNil(t, err)
+		var connectErr *connect.Error
+		ok := errors.As(err, &connectErr)
+		assert.True(t, ok)
+		assert.Equal(t, connectErr.Code(), connect.CodeInternal)
+		assert.True(
+			t,
+			strings.HasSuffix(connectErr.Message(), "server closed the stream without sending trailers"),
+		)
+	}
+
+	assertInternalErrorOnFailedUnary := func(tb testing.TB, opts ...connect.ClientOption) {
+		tb.Helper()
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, opts...)
+		request := connect.NewRequest(&pingv1.FailRequest{Code: int32(connect.CodeResourceExhausted)})
+		_, err := client.Fail(context.Background(), request)
+		tb.Log(err)
+		assert.NotNil(t, err)
+		var connectErr *connect.Error
+		ok := errors.As(err, &connectErr)
+		assert.True(t, ok)
+		assert.Equal(t, connectErr.Code(), connect.CodeInternal)
+		assert.True(
+			t,
+			strings.HasSuffix(connectErr.Message(), "server closed the stream without sending trailers"),
+		)
+	}
+
+	// Only applies to gRPC protocol.
+	assertInternalErrorOnFailedUnary(t, connect.WithGRPC())
+	assertInternalErrorOnSuccessUnary(t, connect.WithGRPC())
+}
+
 func TestUnavailableIfHostInvalid(t *testing.T) {
 	t.Parallel()
 	client := pingv1connect.NewPingServiceClient(
@@ -804,3 +862,40 @@ func (d *deflateReader) Reset(reader io.Reader) error {
 }
 
 var _ connect.Decompressor = (*deflateReader)(nil)
+
+type trimTrailerWriter struct {
+	w http.ResponseWriter
+}
+
+func (l *trimTrailerWriter) Header() http.Header {
+	return l.w.Header()
+}
+
+// Write writes b to underlying writer and counts written size.
+func (l *trimTrailerWriter) Write(b []byte) (int, error) {
+	l.removeTrailers()
+	return l.w.Write(b)
+}
+
+// WriteHeader writes s to underlying writer and retains the status.
+func (l *trimTrailerWriter) WriteHeader(s int) {
+	l.removeTrailers()
+	l.w.WriteHeader(s)
+}
+
+// Flush implements http.Flusher.
+func (l *trimTrailerWriter) Flush() {
+	l.removeTrailers()
+	if f, ok := l.w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (l *trimTrailerWriter) removeTrailers() {
+	l.w.Header().Del("Trailer")
+	for k := range l.w.Header() {
+		if strings.HasPrefix(k, http.TrailerPrefix) {
+			l.w.Header().Del(k)
+		}
+	}
+}
