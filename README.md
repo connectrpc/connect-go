@@ -59,12 +59,13 @@ package, we can build a server:
 package main
 
 import (
+  "context"
   "log"
   "net/http"
 
   "connectrpc.com/connect"
-  "connectrpc.com/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
-  pingv1 "connectrpc.com/connect/internal/gen/go/connect/ping/v1"
+  pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
+  "connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
   "golang.org/x/net/http2"
   "golang.org/x/net/http2/h2c"
 )
@@ -93,13 +94,14 @@ func main() {
   mux := http.NewServeMux()
   // The generated constructors return a path and a plain net/http
   // handler.
-  mux.Handle(pingv1.NewPingServiceHandler(&PingServer{}))
-  http.ListenAndServe(
+  mux.Handle(pingv1connect.NewPingServiceHandler(&PingServer{}))
+  err := http.ListenAndServe(
     "localhost:8080",
     // For gRPC clients, it's convenient to support HTTP/2 without TLS. You can
     // avoid x/net/http2 by using http.ListenAndServeTLS.
     h2c.NewHandler(mux, &http2.Server{}),
   )
+  log.Fatalf("listen failed: %v", err)
 }
 ```
 
@@ -110,22 +112,20 @@ client. To write a client using `connect-go`,
 package main
 
 import (
+  "context"
   "log"
   "net/http"
 
   "connectrpc.com/connect"
-  "connectrpc.com/connect/internal/gen/connect/connect/ping/v1/pingv1connect"
-  pingv1 "connectrpc.com/connect/internal/gen/go/connect/ping/v1"
+  pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
+  "connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
 
 func main() {
-  client, err := pingv1connect.NewPingServiceClient(
+  client := pingv1connect.NewPingServiceClient(
     http.DefaultClient,
-    "https://localhost:8080/",
+    "http://localhost:8080/",
   )
-  if err != nil {
-    log.Fatalln(err)
-  }
   req := connect.NewRequest(&pingv1.PingRequest{
     Number: 42,
   })
