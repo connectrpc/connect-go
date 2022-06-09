@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/textproto"
@@ -62,7 +63,8 @@ var (
 		{time.Minute, 'M'},
 		{time.Hour, 'H'},
 	}
-	grpcTimeoutUnitLookup = make(map[byte]time.Duration)
+	grpcTimeoutUnitLookup        = make(map[byte]time.Duration)
+	errTrailersWithoutGRPCStatus = errorf(CodeInternal, "gRPC protocol error: no %s trailer", grpcHeaderStatus)
 )
 
 func init() {
@@ -242,7 +244,7 @@ func (g *grpcClient) NewStream(
 	}
 	var receiver Receiver
 	if g.web {
-		webReceiver := &grpcWebClientReceiver{
+		webReceiver := &grpcClientReceiver{
 			spec:             spec,
 			bufferPool:       g.BufferPool,
 			compressionPools: g.CompressionPools,
@@ -257,6 +259,9 @@ func (g *grpcClient) NewStream(
 					codec:      g.Codec,
 					bufferPool: g.BufferPool,
 				},
+			},
+			readTrailers: func(unmarshaler *grpcUnmarshaler, _ *duplexHTTPCall) http.Header {
+				return unmarshaler.WebTrailer()
 			},
 		}
 		receiver = webReceiver
@@ -277,6 +282,11 @@ func (g *grpcClient) NewStream(
 					codec:      g.Codec,
 					bufferPool: g.BufferPool,
 				},
+			},
+			readTrailers: func(_ *grpcUnmarshaler, call *duplexHTTPCall) http.Header {
+				// To access HTTP trailers, we need to read the body to EOF.
+				_ = discard(call)
+				return call.ResponseTrailer()
 			},
 		}
 		receiver = grpcReceiver
@@ -326,6 +336,7 @@ type grpcClientReceiver struct {
 	trailer          http.Header
 	duplexCall       *duplexHTTPCall
 	unmarshaler      grpcUnmarshaler
+	readTrailers     func(*grpcUnmarshaler, *duplexHTTPCall) http.Header
 }
 
 func (r *grpcClientReceiver) Spec() Spec {
@@ -348,11 +359,21 @@ func (r *grpcClientReceiver) Receive(message any) error {
 	if err == nil {
 		return nil
 	}
-	// See if the server sent an explicit error in the HTTP trailers. First, we
-	// need to read the body to EOF.
-	_ = discard(r.duplexCall)
-	mergeHeaders(r.trailer, r.duplexCall.ResponseTrailer())
-	if serverErr := grpcErrorFromTrailer(r.bufferPool, r.protobuf, r.trailer); serverErr != nil {
+	if r.header.Get(grpcHeaderStatus) != "" {
+		// We got what gRPC calls a trailers-only response, which puts the trailing
+		// metadata (including errors) into HTTP headers. validateResponse has
+		// already extracted the error.
+		return err
+	}
+	// See if the server sent an explicit error in the HTTP or gRPC-Web trailers.
+	mergeHeaders(r.trailer, r.readTrailers(&r.unmarshaler, r.duplexCall))
+	serverErr := grpcErrorFromTrailer(r.bufferPool, r.protobuf, r.trailer)
+	if serverErr != nil && (errors.Is(err, io.EOF) || !errors.Is(serverErr, errTrailersWithoutGRPCStatus)) {
+		// We've either:
+		//   - Cleanly read until the end of the response body and *not* received
+		//   gRPC status trailers, which is a protocol error, or
+		//   - Received an explicit error from the server.
+		//
 		// This is expected from a protocol perspective, but receiving trailers
 		// means that we're _not_ getting a message. For users to realize that
 		// the stream has ended, Receive must return an error.
@@ -361,10 +382,9 @@ func (r *grpcClientReceiver) Receive(message any) error {
 		r.duplexCall.SetError(serverErr)
 		return serverErr
 	}
-	// There's no error in the trailers, so this was probably an error
-	// converting the bytes to a message, an error reading from the network, or
-	// just an EOF. We're going to return it to the user, but we also want to
-	// setResponseError so Send errors out.
+	// This was probably an error converting the bytes to a message or an error
+	// reading from the network. We're going to return it to the
+	// user, but we also want to setResponseError so Send errors out.
 	r.duplexCall.SetError(err)
 	return err
 }
@@ -375,71 +395,6 @@ func (r *grpcClientReceiver) Close() error {
 
 // validateResponse is called by duplexHTTPCall in a separate goroutine.
 func (r *grpcClientReceiver) validateResponse(response *http.Response) *Error {
-	if err := grpcValidateResponse(
-		response,
-		r.header,
-		r.trailer,
-		r.compressionPools,
-		r.bufferPool,
-		r.protobuf,
-	); err != nil {
-		return err
-	}
-	compression := response.Header.Get(grpcHeaderCompression)
-	r.unmarshaler.envelopeReader.compressionPool = r.compressionPools.Get(compression)
-	return nil
-}
-
-type grpcWebClientReceiver struct {
-	spec             Spec
-	bufferPool       *bufferPool
-	compressionPools readOnlyCompressionPools
-	protobuf         Codec // for errors
-	header           http.Header
-	trailer          http.Header
-	duplexCall       *duplexHTTPCall
-	unmarshaler      grpcUnmarshaler
-}
-
-func (r *grpcWebClientReceiver) Spec() Spec {
-	return r.spec
-}
-
-func (r *grpcWebClientReceiver) Header() http.Header {
-	return r.header
-}
-
-func (r *grpcWebClientReceiver) Trailer() (http.Header, bool) {
-	return r.trailer, true
-}
-
-func (r *grpcWebClientReceiver) Receive(message any) error {
-	r.duplexCall.BlockUntilResponseReady()
-	err := r.unmarshaler.Unmarshal(message)
-	if err == nil {
-		return nil
-	}
-	// See if the server sent an explicit error in the gRPC-Web trailers.
-	mergeHeaders(r.trailer, r.unmarshaler.WebTrailer())
-	if serverErr := grpcErrorFromTrailer(r.bufferPool, r.protobuf, r.trailer); serverErr != nil {
-		// This is expected from a protocol perspective, but receiving a block of
-		// trailers means that we're _not_ getting a standard message. For users to
-		// realize that the stream has ended, Receive must return an error.
-		serverErr.meta = r.Header().Clone()
-		mergeHeaders(serverErr.meta, r.trailer)
-		r.duplexCall.SetError(serverErr)
-		return serverErr
-	}
-	r.duplexCall.SetError(err)
-	return err
-}
-
-func (r *grpcWebClientReceiver) Close() error {
-	return r.duplexCall.CloseRead()
-}
-
-// validateResponse is called by duplexHTTPCall in a separate goroutine.
-func (r *grpcWebClientReceiver) validateResponse(response *http.Response) *Error {
 	if err := grpcValidateResponse(
 		response,
 		r.header,
@@ -707,7 +662,11 @@ func grpcValidateResponse(
 	}
 	// When there's no body, gRPC and gRPC-Web servers may send error information
 	// in the HTTP headers.
-	if err := grpcErrorFromTrailer(bufferPool, protobuf, response.Header); err != nil {
+	if err := grpcErrorFromTrailer(
+		bufferPool,
+		protobuf,
+		response.Header,
+	); err != nil && !errors.Is(err, errTrailersWithoutGRPCStatus) {
 		// Per the specification, only the HTTP status code and Content-Type should
 		// be treated as headers. The rest should be treated as trailing metadata.
 		if contentType := response.Header.Get(headerContentType); contentType != "" {
@@ -752,7 +711,10 @@ func grpcHTTPToCode(httpCode int) Code {
 // unmarshal error information in the headers.
 func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.Header) *Error {
 	codeHeader := trailer.Get(grpcHeaderStatus)
-	if codeHeader == "" || codeHeader == "0" {
+	if codeHeader == "" {
+		return errTrailersWithoutGRPCStatus
+	}
+	if codeHeader == "0" {
 		return nil
 	}
 

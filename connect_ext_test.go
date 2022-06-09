@@ -59,8 +59,8 @@ func TestServer(t *testing.T) {
 			response, err := client.Ping(context.Background(), request)
 			assert.Nil(t, err)
 			assert.Equal(t, response.Msg, expect)
-			assert.Equal(t, response.Header().Get(handlerHeader), headerValue)
-			assert.Equal(t, response.Trailer().Get(handlerTrailer), trailerValue)
+			assert.Equal(t, response.Header().Values(handlerHeader), []string{headerValue})
+			assert.Equal(t, response.Trailer().Values(handlerTrailer), []string{trailerValue})
 		})
 		t.Run("zero_ping", func(t *testing.T) {
 			request := connect.NewRequest(&pingv1.PingRequest{})
@@ -69,8 +69,8 @@ func TestServer(t *testing.T) {
 			assert.Nil(t, err)
 			var expect pingv1.PingResponse
 			assert.Equal(t, response.Msg, &expect)
-			assert.Equal(t, response.Header().Get(handlerHeader), headerValue)
-			assert.Equal(t, response.Trailer().Get(handlerTrailer), trailerValue)
+			assert.Equal(t, response.Header().Values(handlerHeader), []string{headerValue})
+			assert.Equal(t, response.Trailer().Values(handlerTrailer), []string{trailerValue})
 		})
 		t.Run("large_ping", func(t *testing.T) {
 			// Using a large payload splits the request and response over multiple
@@ -82,8 +82,8 @@ func TestServer(t *testing.T) {
 			response, err := client.Ping(context.Background(), request)
 			assert.Nil(t, err)
 			assert.Equal(t, response.Msg.Text, hellos)
-			assert.Equal(t, response.Header().Get(handlerHeader), headerValue)
-			assert.Equal(t, response.Trailer().Get(handlerTrailer), trailerValue)
+			assert.Equal(t, response.Header().Values(handlerHeader), []string{headerValue})
+			assert.Equal(t, response.Trailer().Values(handlerTrailer), []string{trailerValue})
 		})
 		t.Run("ping_error", func(t *testing.T) {
 			_, err := client.Ping(
@@ -92,7 +92,7 @@ func TestServer(t *testing.T) {
 			)
 			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
 		})
-		t.Run("ping_timout", func(t *testing.T) {
+		t.Run("ping_timeout", func(t *testing.T) {
 			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 			defer cancel()
 			request := connect.NewRequest(&pingv1.PingRequest{})
@@ -116,8 +116,8 @@ func TestServer(t *testing.T) {
 			response, err := stream.CloseAndReceive()
 			assert.Nil(t, err)
 			assert.Equal(t, response.Msg.Sum, expect)
-			assert.Equal(t, response.Header().Get(handlerHeader), headerValue)
-			assert.Equal(t, response.Trailer().Get(handlerTrailer), trailerValue)
+			assert.Equal(t, response.Header().Values(handlerHeader), []string{headerValue})
+			assert.Equal(t, response.Trailer().Values(handlerTrailer), []string{trailerValue})
 		})
 		t.Run("sum_error", func(t *testing.T) {
 			stream := client.Sum(context.Background())
@@ -134,7 +134,7 @@ func TestServer(t *testing.T) {
 			got, err := stream.CloseAndReceive()
 			assert.Nil(t, err)
 			assert.Equal(t, got.Msg, &pingv1.SumResponse{}) // receive header only stream
-			assert.Equal(t, got.Header().Get(handlerHeader), headerValue)
+			assert.Equal(t, got.Header().Values(handlerHeader), []string{headerValue})
 		})
 	}
 	testCountUp := func(t *testing.T, client pingv1connect.PingServiceClient) { // nolint:thelper
@@ -214,8 +214,8 @@ func TestServer(t *testing.T) {
 			}()
 			wg.Wait()
 			assert.Equal(t, got, expect)
-			assert.Equal(t, stream.ResponseHeader().Get(handlerHeader), headerValue)
-			assert.Equal(t, stream.ResponseTrailer().Get(handlerTrailer), trailerValue)
+			assert.Equal(t, stream.ResponseHeader().Values(handlerHeader), []string{headerValue})
+			assert.Equal(t, stream.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
 		})
 		t.Run("cumsum_error", func(t *testing.T) {
 			stream := client.CumSum(context.Background())
@@ -298,8 +298,8 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, connectErr.Code(), connect.CodeResourceExhausted)
 			assert.Equal(t, connectErr.Error(), "resource_exhausted: "+errorMessage)
 			assert.Zero(t, connectErr.Details())
-			assert.Equal(t, connectErr.Meta().Get(handlerHeader), headerValue)
-			assert.Equal(t, connectErr.Meta().Get(handlerTrailer), trailerValue)
+			assert.Equal(t, connectErr.Meta().Values(handlerHeader), []string{headerValue})
+			assert.Equal(t, connectErr.Meta().Values(handlerTrailer), []string{trailerValue})
 		})
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) { // nolint:thelper
@@ -472,7 +472,7 @@ func TestGRPCMarshalStatusError(t *testing.T) {
 	assertInternalError(t, connect.WithGRPCWeb())
 }
 
-func TestGRPCUnaryMissingTrailersError(t *testing.T) {
+func TestGRPCMissingTrailersError(t *testing.T) {
 	t.Parallel()
 
 	trimTrailers := func(handler http.Handler) http.Handler {
@@ -484,50 +484,66 @@ func TestGRPCUnaryMissingTrailersError(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(
-		pingServer{},
+		pingServer{checkMetadata: true},
 	))
 	server := httptest.NewUnstartedServer(trimTrailers(mux))
 	server.EnableHTTP2 = true
 	server.StartTLS()
-	defer server.Close()
+	t.Cleanup(server.Close)
+	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPC())
 
-	assertInternalErrorOnSuccessUnary := func(tb testing.TB, opts ...connect.ClientOption) {
-		tb.Helper()
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, opts...)
+	assertErrorNoTrailers := func(t *testing.T, err error) {
+		t.Helper()
+		assert.NotNil(t, err)
+		var connectErr *connect.Error
+		ok := errors.As(err, &connectErr)
+		assert.True(t, ok)
+		assert.Equal(t, connectErr.Code(), connect.CodeInternal)
+		assert.True(
+			t,
+			strings.HasSuffix(connectErr.Message(), "gRPC protocol error: no Grpc-Status trailer"),
+		)
+	}
+
+	t.Run("ping", func(t *testing.T) {
+		t.Parallel()
 		request := connect.NewRequest(&pingv1.PingRequest{Number: 1, Text: "foobar"})
 		_, err := client.Ping(context.Background(), request)
-		tb.Log(err)
-		assert.NotNil(t, err)
-		var connectErr *connect.Error
-		ok := errors.As(err, &connectErr)
-		assert.True(t, ok)
-		assert.Equal(t, connectErr.Code(), connect.CodeInternal)
-		assert.True(
-			t,
-			strings.HasSuffix(connectErr.Message(), "server closed the stream without sending trailers"),
-		)
-	}
-
-	assertInternalErrorOnFailedUnary := func(tb testing.TB, opts ...connect.ClientOption) {
-		tb.Helper()
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, opts...)
-		request := connect.NewRequest(&pingv1.FailRequest{Code: int32(connect.CodeResourceExhausted)})
-		_, err := client.Fail(context.Background(), request)
-		tb.Log(err)
-		assert.NotNil(t, err)
-		var connectErr *connect.Error
-		ok := errors.As(err, &connectErr)
-		assert.True(t, ok)
-		assert.Equal(t, connectErr.Code(), connect.CodeInternal)
-		assert.True(
-			t,
-			strings.HasSuffix(connectErr.Message(), "server closed the stream without sending trailers"),
-		)
-	}
-
-	// Only applies to gRPC protocol.
-	assertInternalErrorOnFailedUnary(t, connect.WithGRPC())
-	assertInternalErrorOnSuccessUnary(t, connect.WithGRPC())
+		assertErrorNoTrailers(t, err)
+	})
+	t.Run("sum", func(t *testing.T) {
+		t.Parallel()
+		stream := client.Sum(context.Background())
+		err := stream.Send(&pingv1.SumRequest{Number: 1})
+		assert.Nil(t, err)
+		_, err = stream.CloseAndReceive()
+		assertErrorNoTrailers(t, err)
+	})
+	t.Run("count_up", func(t *testing.T) {
+		t.Parallel()
+		stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
+		assert.Nil(t, err)
+		assert.False(t, stream.Receive())
+		assertErrorNoTrailers(t, stream.Err())
+	})
+	t.Run("cumsum", func(t *testing.T) {
+		t.Parallel()
+		stream := client.CumSum(context.Background())
+		err := stream.Send(&pingv1.CumSumRequest{Number: 10})
+		assert.Nil(t, err)
+		_, err = stream.Receive()
+		assertErrorNoTrailers(t, err)
+		assert.Nil(t, stream.CloseReceive())
+	})
+	t.Run("cumsum_empty_stream", func(t *testing.T) {
+		t.Parallel()
+		stream := client.CumSum(context.Background())
+		assert.Nil(t, stream.CloseSend())
+		response, err := stream.Receive()
+		assert.Nil(t, response)
+		assertErrorNoTrailers(t, err)
+		assert.Nil(t, stream.CloseReceive())
+	})
 }
 
 func TestUnavailableIfHostInvalid(t *testing.T) {
