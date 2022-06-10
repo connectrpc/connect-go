@@ -262,8 +262,10 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	// error sent to the client, sender and/or receiver may be nil. We still
 	// want the error to be seen by interceptors, so we provide no-op Sender
 	// and Receiver implementations.
+	sendHTTPInternalError := false
 	if clientVisibleError != nil && sender == nil {
 		sender = newNopSender(h.spec, responseWriter.Header(), make(http.Header))
+		sendHTTPInternalError = true
 	}
 	if clientVisibleError != nil && receiver == nil {
 		receiver = newNopReceiver(h.spec, request.Header, request.Trailer)
@@ -274,6 +276,10 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 		receiver = interceptor.WrapStreamReceiver(ctx, receiver)
 	}
 	h.implementation(ctx, sender, receiver, clientVisibleError)
+	if sendHTTPInternalError {
+		// protocolHandler returned a nil sender, so we can't send a proper HTTP response.
+		responseWriter.WriteHeader(http.StatusInternalServerError)
+	}
 }
 
 type handlerConfig struct {
