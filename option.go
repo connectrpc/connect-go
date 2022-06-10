@@ -16,7 +16,7 @@ package connect
 
 import (
 	"compress/gzip"
-	"io/ioutil"
+	"io"
 )
 
 // A ClientOption configures a connect client.
@@ -353,7 +353,7 @@ func withGzip() Option {
 		Name: compressionGzip,
 		CompressionPool: newCompressionPool(
 			func() Decompressor { return &gzip.Reader{} },
-			func() Compressor { return gzip.NewWriter(ioutil.Discard) },
+			func() Compressor { return gzip.NewWriter(io.Discard) },
 		),
 	}
 }
