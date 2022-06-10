@@ -606,6 +606,30 @@ func TestInvalidHeaderTimeout(t *testing.T) {
 	})
 }
 
+func TestInterceptorReturnsWrongType(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithInterceptors(connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, request connect.AnyRequest) (connect.AnyResponse, error) {
+			if _, err := next(ctx, request); err != nil {
+				return nil, err
+			}
+			return connect.NewResponse(&pingv1.CumSumResponse{
+				Sum: 1,
+			}), nil
+		}
+	})))
+	_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Text: "hello!"}))
+	assert.NotNil(t, err)
+	var connectErr *connect.Error
+	assert.True(t, errors.As(err, &connectErr))
+	assert.Equal(t, connectErr.Code(), connect.CodeInternal)
+	assert.True(t, strings.Contains(connectErr.Message(), "unexpected client response type"))
+}
+
 type failCodec struct{}
 
 func (c failCodec) Name() string {
