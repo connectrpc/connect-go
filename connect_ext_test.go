@@ -171,6 +171,13 @@ func TestServer(t *testing.T) {
 				connect.CodeInvalidArgument,
 			)
 		})
+		t.Run("count_up_timeout", func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+			defer cancel()
+			_, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 1}))
+			assert.NotNil(t, err)
+			assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded)
+		})
 	}
 	testCumSum := func(t *testing.T, client pingv1connect.PingServiceClient, expectSuccess bool) { // nolint:thelper
 		t.Run("cumsum", func(t *testing.T) {
