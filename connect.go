@@ -218,6 +218,18 @@ type HTTPClient interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
+type httpClient struct{ http.RoundTripper }
+
+func (c httpClient) Do(req *http.Request) (*http.Response, error) {
+	return c.RoundTrip(req)
+}
+
+// NewHTTPClient wraps an http.RoundTripper to make it satisfy the HTTPClient
+// interface.
+func NewHTTPClient(rt http.RoundTripper) HTTPClient {
+	return httpClient{rt}
+}
+
 // Spec is a description of a client call or a handler invocation.
 type Spec struct {
 	StreamType StreamType
