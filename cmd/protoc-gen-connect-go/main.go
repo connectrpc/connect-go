@@ -100,12 +100,11 @@ func generate(plugin *protogen.Plugin, file *protogen.File) {
 	}
 	file.GoPackageName += generatedPackageSuffix
 
-	dir := filepath.Dir(file.GeneratedFilenamePrefix)
-	base := filepath.Base(file.GeneratedFilenamePrefix)
-	file.GeneratedFilenamePrefix = filepath.Join(
-		dir,
+	generatedFilenamePrefixToSlash := filepath.ToSlash(file.GeneratedFilenamePrefix)
+	file.GeneratedFilenamePrefix = path.Join(
+		path.Dir(generatedFilenamePrefixToSlash),
 		string(file.GoPackageName),
-		base,
+		path.Base(generatedFilenamePrefixToSlash),
 	)
 	generatedFile := plugin.NewGeneratedFile(
 		file.GeneratedFilenamePrefix+generatedFilenameExtension,
