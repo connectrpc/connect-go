@@ -13,34 +13,23 @@ on:
 permissions: read-all
 jobs:
   ci:
-    runs-on: windows-2019
+    runs-on: windows-latest
     strategy:
       matrix:
         go-version: [1.18.x]
-        include:
-          - go: 1.18.x
-            latest: true
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
         with:
           fetch-depth: 1
       - name: Install Go
-        if: success()
         uses: actions/setup-go@v3
         with:
           go-version: ${{ matrix.go-version }}
       - id: go-cache-paths
-        if: success()
         shell: bash
         run: |
-          echo "::set-output name=go-build::$(go env GOCACHE)"
           echo "::set-output name=go-mod::$(go env GOMODCACHE)"
-      - name: Build Cache
-        uses: actions/cache@v3
-        with:
-          path: ${{ steps.go-cache-paths.outputs.go-build }}
-          key: ${{ runner.os }}-connect-ci-go-build-${{ hashFiles('**/go.sum') }}
       - name: Mod Cache
         uses: actions/cache@v3
         with:
@@ -48,7 +37,6 @@ jobs:
           key: ${{ runner.os }}-connect-ci-go-mod-${{ hashFiles('**/go.sum') }}
       - name: Test
         shell: bash
-        if: success()
         run: |
           go build ./...
           go test -vet=off -race -cover ./...
