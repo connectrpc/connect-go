@@ -93,8 +93,9 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
 		})
 		t.Run("ping_timout", func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 			defer cancel()
+			time.Sleep(time.Millisecond)
 			request := connect.NewRequest(&pingv1.PingRequest{})
 			request.Header().Set(clientHeader, headerValue)
 			_, err := client.Ping(ctx, request)
@@ -172,8 +173,9 @@ func TestServer(t *testing.T) {
 			)
 		})
 		t.Run("count_up_timeout", func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 			defer cancel()
+			time.Sleep(time.Millisecond)
 			_, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 1}))
 			assert.NotNil(t, err)
 			assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded)
