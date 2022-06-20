@@ -1,0 +1,56 @@
+name: windows
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '15 22 * * *'
+  workflow_dispatch: {} # support manual runs
+# Prevent writing to the repository using the CI token.
+# Ref: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#permissions
+permissions: read-all
+jobs:
+  ci:
+    runs-on: windows-2019
+    strategy:
+      matrix:
+        go-version: [1.18.x]
+        include:
+          - go: 1.18.x
+            latest: true
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+      - name: Install Go
+        if: success()
+        uses: actions/setup-go@v3
+        with:
+          go-version: ${{ matrix.go-version }}
+      - id: go-cache-paths
+        if: success()
+        shell: bash
+        run: |
+          echo "::set-output name=go-build::$(go env GOCACHE)"
+          echo "::set-output name=go-mod::$(go env GOMODCACHE)"
+      - name: Build Cache
+        if: success()
+        uses: actions/cache@v3
+        with:
+          path: ${{ steps.go-cache-paths.outputs.go-build }}
+          key: ${{ runner.os }}-connect-ci-go-build-${{ hashFiles('**/go.sum') }}
+      - name: Mod Cache
+        if: success()
+        uses: actions/cache@v3
+        with:
+          path: ${{ steps.go-cache-paths.outputs.go-mod }}
+          key: ${{ runner.os }}-connect-ci-go-mod-${{ hashFiles('**/go.sum') }}
+      - name: Test
+        shell: bash
+        if: success()
+        run: |
+          go build ./...
+          go test -vet=off -race -cover ./...
