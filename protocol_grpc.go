@@ -64,7 +64,7 @@ var (
 		{time.Hour, 'H'},
 	}
 	grpcTimeoutUnitLookup        = make(map[byte]time.Duration)
-	errTrailersWithoutGRPCStatus = errorf(CodeInternal, "gRPC protocol error: no %s trailer", grpcHeaderStatus)
+	errTrailersWithoutGRPCStatus = fmt.Errorf("gRPC protocol error: no %s trailer", grpcHeaderStatus)
 )
 
 func init() {
@@ -712,7 +712,7 @@ func grpcHTTPToCode(httpCode int) Code {
 func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.Header) *Error {
 	codeHeader := trailer.Get(grpcHeaderStatus)
 	if codeHeader == "" {
-		return errTrailersWithoutGRPCStatus
+		return NewError(CodeInternal, errTrailersWithoutGRPCStatus)
 	}
 	if codeHeader == "0" {
 		return nil
