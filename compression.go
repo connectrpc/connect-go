@@ -160,13 +160,13 @@ func newReadOnlyCompressionPools(
 ) readOnlyCompressionPools {
 	// Client and handler configs keep compression names in registration order,
 	// but we want the last registered to be the most preferred.
-	names := make([]string, 0, len(reversedNames))
+	var names orderedSet[string]
 	for i := len(reversedNames) - 1; i >= 0; i-- {
-		names = append(names, reversedNames[i])
+		names.Add(reversedNames[i])
 	}
 	return &namedCompressionPools{
 		nameToPool:          nameToPool,
-		commaSeparatedNames: strings.Join(names, ","),
+		commaSeparatedNames: strings.Join(names.Items(), ","),
 	}
 }
 
@@ -189,4 +189,23 @@ func (m *namedCompressionPools) Contains(name string) bool {
 
 func (m *namedCompressionPools) CommaSeparatedNames() string {
 	return m.commaSeparatedNames
+}
+
+type orderedSet[T comparable] struct {
+	keys  map[T]struct{}
+	items []T
+}
+
+func (s *orderedSet[T]) Add(item T) {
+	if s.keys == nil {
+		s.keys = map[T]struct{}{}
+	}
+	if _, ok := s.keys[item]; !ok {
+		s.keys[item] = struct{}{}
+		s.items = append(s.items, item)
+	}
+}
+
+func (s *orderedSet[T]) Items() []T {
+	return s.items[:]
 }
