@@ -76,6 +76,9 @@ func TestServer(t *testing.T) {
 			// Using a large payload splits the request and response over multiple
 			// packets, ensuring that we're managing HTTP readers and writers
 			// correctly.
+			if testing.Short() {
+				t.Skipf("skipping %s test in short mode", t.Name())
+			}
 			hellos := strings.Repeat("hello", 1024*1024) // ~5mb
 			request := connect.NewRequest(&pingv1.PingRequest{Text: hellos})
 			request.Header().Set(clientHeader, headerValue)
