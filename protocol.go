@@ -90,6 +90,10 @@ type protocolHandler interface {
 	//
 	// In either case, any returned error is passed through the full interceptor
 	// stack.
+	//
+	// TODO: Implementations _must_ return a usable Sender and Receiver, even if
+	// they're also returning an error. If we ever export this interface, we
+	// should revert https://github.com/bufbuild/connect-go/pull/290.
 	NewStream(http.ResponseWriter, *http.Request) (Sender, Receiver, error)
 }
 
