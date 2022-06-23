@@ -15,63 +15,42 @@
 package connect
 
 import (
-	"io"
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/bufbuild/connect-go/internal/assert"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-func TestReadOnlyCompressionPools(t *testing.T) {
+func TestAcceptEncodingOrdering(t *testing.T) {
 	t.Parallel()
-	names := []string{"foo", "foo", "bar", "baz"}
-	compressionPools := map[string]*compressionPool{}
-	compressionNames := []string{}
-	for _, name := range names {
-		name := name
-		compressionPools[name] = newCompressionPool(
-			func() Decompressor { return noopDecompressor{name} },
-			func() Compressor { return noopCompressor{name} },
-		)
-		compressionNames = append(compressionNames, name)
-	}
-	pools := newReadOnlyCompressionPools(
-		compressionPools,
-		compressionNames,
+	const (
+		compressionBrotli = "br"
+		expect            = compressionGzip + "," + compressionBrotli
 	)
-	t.Run("Get", func(t *testing.T) {
-		for _, name := range names {
-			pool := pools.Get(name)
-			compressor := pool.compressors.Get().(noopCompressor)
-			assert.Equal(t, compressor.name, name)
-			pool.compressors.Put(compressor)
-			decompressor := pool.decompressors.Get().(noopDecompressor)
-			assert.Equal(t, decompressor.name, name)
-			pool.decompressors.Put(decompressor)
-		}
+
+	withFakeBrotli, ok := withGzip().(*compressionOption)
+	assert.True(t, ok)
+	withFakeBrotli.Name = compressionBrotli
+
+	var called bool
+	verify := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := r.Header.Get(connectUnaryHeaderAcceptCompression)
+		assert.Equal(t, got, expect)
+		w.WriteHeader(http.StatusOK)
+		called = true
 	})
-	t.Run("Contains", func(t *testing.T) {
-		for _, name := range names {
-			assert.True(t, pools.Contains(name))
-		}
-		assert.False(t, pools.Contains("nope"))
-	})
-	t.Run("CommaSeparatedNames", func(t *testing.T) {
-		assert.Equal(t, pools.CommaSeparatedNames(), "baz,bar,foo") // reversed and deduped
-	})
+	server := httptest.NewServer(verify)
+	defer server.Close()
+
+	client := NewClient[emptypb.Empty, emptypb.Empty](
+		server.Client(),
+		server.URL,
+		withFakeBrotli,
+		withGzip(),
+	)
+	_, _ = client.CallUnary(context.Background(), NewRequest(&emptypb.Empty{}))
+	assert.True(t, called)
 }
-
-type noopCompressor struct{ name string }
-
-func (noopCompressor) Write(p []byte) (int, error) {
-	return len(p), nil
-}
-func (noopCompressor) Close() error    { return nil }
-func (noopCompressor) Reset(io.Writer) {}
-
-type noopDecompressor struct{ name string }
-
-func (noopDecompressor) Read(p []byte) (int, error) {
-	return len(p), nil
-}
-func (noopDecompressor) Close() error          { return nil }
-func (noopDecompressor) Reset(io.Reader) error { return nil }
