@@ -258,16 +258,6 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	if timeoutErr != nil {
 		clientVisibleError = timeoutErr
 	}
-	// If NewStream or SetTimeout errored and the protocol doesn't want the
-	// error sent to the client, sender and/or receiver may be nil. We still
-	// want the error to be seen by interceptors, so we provide no-op Sender
-	// and Receiver implementations.
-	if clientVisibleError != nil && sender == nil {
-		sender = newNopSender(h.spec, responseWriter.Header(), make(http.Header))
-	}
-	if clientVisibleError != nil && receiver == nil {
-		receiver = newNopReceiver(h.spec, request.Header, request.Trailer)
-	}
 	if interceptor := h.interceptor; interceptor != nil {
 		// Unary interceptors were handled in NewUnaryHandler.
 		sender = interceptor.WrapStreamSender(ctx, sender)

@@ -86,14 +86,14 @@ type protocolHandler interface {
 	//
 	// Implementations may decide whether the returned error should be sent to
 	// the client. (For example, it's helpful to send the client a list of
-	// supported compressors if they use an unknown compressor.) If the
-	// implementation returns a non-nil Sender, its Close method will be called.
-	// If the implementation returns a nil Sender, the error won't be sent to the
-	// client.
+	// supported compressors if they use an unknown compressor.)
 	//
 	// In either case, any returned error is passed through the full interceptor
-	// stack. If the implementation returns a nil Sender and/or Receiver, the
-	// interceptors receive no-op implementations.
+	// stack.
+	//
+	// TODO: Implementations _must_ return a usable Sender and Receiver, even if
+	// they're also returning an error. If we ever export this interface, we
+	// should revert https://connectrpc.com/connect/pull/290.
 	NewStream(http.ResponseWriter, *http.Request) (Sender, Receiver, error)
 }
 
