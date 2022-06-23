@@ -161,8 +161,14 @@ func newReadOnlyCompressionPools(
 	// Client and handler configs keep compression names in registration order,
 	// but we want the last registered to be the most preferred.
 	names := make([]string, 0, len(reversedNames))
+	seen := make(map[string]struct{}, len(reversedNames))
 	for i := len(reversedNames) - 1; i >= 0; i-- {
-		names = append(names, reversedNames[i])
+		name := reversedNames[i]
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
 	}
 	return &namedCompressionPools{
 		nameToPool:          nameToPool,
