@@ -17,10 +17,12 @@ package connect_test
 import (
 	"bytes"
 	"compress/flate"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -712,6 +714,202 @@ func TestInterceptorReturnsWrongType(t *testing.T) {
 	assert.True(t, errors.As(err, &connectErr))
 	assert.Equal(t, connectErr.Code(), connect.CodeInternal)
 	assert.True(t, strings.Contains(connectErr.Message(), "unexpected client response type"))
+}
+
+func TestHandlerWithReadMaxBytes(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	readMaxBytes := 1024
+	mux.Handle(pingv1connect.NewPingServiceHandler(
+		pingServer{},
+		connect.WithReadMaxBytes(readMaxBytes),
+	))
+	readMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, compressed bool) {
+		t.Helper()
+		t.Run("equal_read_max", func(t *testing.T) {
+			t.Parallel()
+			// Serializes to exactly readMaxBytes (1024) - no errors expected
+			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("a", 1021)}
+			assert.Equal(t, proto.Size(pingRequest), readMaxBytes)
+			_, err := client.Ping(context.Background(), connect.NewRequest(pingRequest))
+			assert.Nil(t, err)
+		})
+		t.Run("read_max_plus_one", func(t *testing.T) {
+			t.Parallel()
+			// Serializes to readMaxBytes+1 (1025) - expect invalid argument.
+			// This will be over the limit after decompression but under with compression.
+			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("a", 1022)}
+			if compressed {
+				compressedSize := gzipCompressedSize(t, pingRequest)
+				assert.True(t, compressedSize < readMaxBytes, assert.Sprintf("expected compressed size %d < %d", compressedSize, readMaxBytes))
+			}
+			_, err := client.Ping(context.Background(), connect.NewRequest(pingRequest))
+			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
+			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
+			assert.True(t, strings.HasSuffix(err.Error(), fmt.Sprintf("message size %d is larger than configured max %d", proto.Size(pingRequest), readMaxBytes)))
+		})
+		t.Run("read_max_large", func(t *testing.T) {
+			t.Parallel()
+			// Serializes to much larger than readMaxBytes (5 MiB)
+			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("abcde", 1024*1024)}
+			expectedSize := proto.Size(pingRequest)
+			// With gzip request compression, the error should indicate the envelope size (before decompression) is too large.
+			if compressed {
+				expectedSize = gzipCompressedSize(t, pingRequest)
+				assert.True(t, expectedSize > readMaxBytes, assert.Sprintf("expected compressed size %d > %d", expectedSize, readMaxBytes))
+			}
+			_, err := client.Ping(context.Background(), connect.NewRequest(pingRequest))
+			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
+			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
+			assert.Equal(t, err.Error(), fmt.Sprintf("invalid_argument: message size %d is larger than configured max %d", expectedSize, readMaxBytes))
+		})
+	}
+	newHTTP2Server := func(t *testing.T) *httptest.Server {
+		t.Helper()
+		server := httptest.NewUnstartedServer(mux)
+		server.EnableHTTP2 = true
+		server.StartTLS()
+		t.Cleanup(server.Close)
+		return server
+	}
+	t.Run("connect", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
+		readMaxBytesMatrix(t, client, false)
+	})
+	t.Run("connect_gzip", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithSendGzip())
+		readMaxBytesMatrix(t, client, true)
+	})
+	t.Run("grpc", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPC())
+		readMaxBytesMatrix(t, client, false)
+	})
+	t.Run("grpc_gzip", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPC(), connect.WithSendGzip())
+		readMaxBytesMatrix(t, client, true)
+	})
+	t.Run("grpcweb", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPCWeb())
+		readMaxBytesMatrix(t, client, false)
+	})
+	t.Run("grpcweb_gzip", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPCWeb(), connect.WithSendGzip())
+		readMaxBytesMatrix(t, client, true)
+	})
+}
+
+func TestClientWithReadMaxBytes(t *testing.T) {
+	t.Parallel()
+	createServer := func(tb testing.TB, enableCompression bool) *httptest.Server {
+		tb.Helper()
+		mux := http.NewServeMux()
+		var compressionOption connect.HandlerOption
+		if enableCompression {
+			compressionOption = connect.WithCompressMinBytes(1)
+		} else {
+			compressionOption = connect.WithCompressMinBytes(math.MaxInt)
+		}
+		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}, compressionOption))
+		server := httptest.NewUnstartedServer(mux)
+		server.EnableHTTP2 = true
+		server.StartTLS()
+		tb.Cleanup(server.Close)
+		return server
+	}
+	serverUncompressed := createServer(t, false)
+	serverCompressed := createServer(t, true)
+	readMaxBytes := 1024
+	readMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, compressed bool) {
+		t.Helper()
+		t.Run("equal_read_max", func(t *testing.T) {
+			t.Parallel()
+			// Serializes to exactly readMaxBytes (1024) - no errors expected
+			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("a", 1021)}
+			assert.Equal(t, proto.Size(pingRequest), readMaxBytes)
+			_, err := client.Ping(context.Background(), connect.NewRequest(pingRequest))
+			assert.Nil(t, err)
+		})
+		t.Run("read_max_plus_one", func(t *testing.T) {
+			t.Parallel()
+			// Serializes to readMaxBytes+1 (1025) - expect invalid argument.
+			// This will be over the limit after decompression but under with compression.
+			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("a", 1022)}
+			_, err := client.Ping(context.Background(), connect.NewRequest(pingRequest))
+			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
+			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
+			assert.True(t, strings.HasSuffix(err.Error(), fmt.Sprintf("message size %d is larger than configured max %d", proto.Size(pingRequest), readMaxBytes)))
+		})
+		t.Run("read_max_large", func(t *testing.T) {
+			t.Parallel()
+			// Serializes to much larger than readMaxBytes (5 MiB)
+			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("abcde", 1024*1024)}
+			expectedSize := proto.Size(pingRequest)
+			// With gzip response compression, the error should indicate the envelope size (before decompression) is too large.
+			if compressed {
+				expectedSize = gzipCompressedSize(t, pingRequest)
+				assert.True(t, expectedSize > readMaxBytes, assert.Sprintf("expected compressed size %d > %d", expectedSize, readMaxBytes))
+			}
+			assert.True(t, expectedSize > readMaxBytes, assert.Sprintf("expected compressed size %d > %d", expectedSize, readMaxBytes))
+			_, err := client.Ping(context.Background(), connect.NewRequest(pingRequest))
+			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
+			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
+			assert.Equal(t, err.Error(), fmt.Sprintf("invalid_argument: message size %d is larger than configured max %d", expectedSize, readMaxBytes))
+		})
+	}
+	t.Run("connect", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connect.NewPingServiceClient(serverUncompressed.Client(), serverUncompressed.URL, connect.WithReadMaxBytes(readMaxBytes))
+		readMaxBytesMatrix(t, client, false)
+	})
+	t.Run("connect_gzip", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connect.NewPingServiceClient(serverCompressed.Client(), serverCompressed.URL, connect.WithReadMaxBytes(readMaxBytes))
+		readMaxBytesMatrix(t, client, true)
+	})
+	t.Run("grpc", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connect.NewPingServiceClient(serverUncompressed.Client(), serverUncompressed.URL, connect.WithReadMaxBytes(readMaxBytes), connect.WithGRPC())
+		readMaxBytesMatrix(t, client, false)
+	})
+	t.Run("grpc_gzip", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connect.NewPingServiceClient(serverCompressed.Client(), serverCompressed.URL, connect.WithReadMaxBytes(readMaxBytes), connect.WithGRPC())
+		readMaxBytesMatrix(t, client, true)
+	})
+	t.Run("grpcweb", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connect.NewPingServiceClient(serverUncompressed.Client(), serverUncompressed.URL, connect.WithReadMaxBytes(readMaxBytes), connect.WithGRPCWeb())
+		readMaxBytesMatrix(t, client, false)
+	})
+	t.Run("grpcweb_gzip", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connect.NewPingServiceClient(serverCompressed.Client(), serverCompressed.URL, connect.WithReadMaxBytes(readMaxBytes), connect.WithGRPCWeb())
+		readMaxBytesMatrix(t, client, true)
+	})
+}
+
+func gzipCompressedSize(tb testing.TB, message proto.Message) int {
+	tb.Helper()
+	uncompressed, err := proto.Marshal(message)
+	assert.Nil(tb, err)
+	var buf bytes.Buffer
+	gzipWriter := gzip.NewWriter(&buf)
+	_, err = gzipWriter.Write(uncompressed)
+	assert.Nil(tb, err)
+	assert.Nil(tb, gzipWriter.Close())
+	return buf.Len()
 }
 
 type failCodec struct{}
