@@ -171,6 +171,7 @@ func (g *grpcHandler) NewStream(
 		g.CompressionPools.Get(requestCompression),
 		g.CompressionPools.Get(responseCompression),
 		g.BufferPool,
+		g.ReadMaxBytes,
 	))
 	if failed != nil {
 		// Negotiation failed, so we can't establish a stream. To make the
@@ -255,9 +256,10 @@ func (g *grpcClient) NewStream(
 			unmarshaler: grpcUnmarshaler{
 				web: true,
 				envelopeReader: envelopeReader{
-					reader:     duplexCall,
-					codec:      g.Codec,
-					bufferPool: g.BufferPool,
+					reader:       duplexCall,
+					codec:        g.Codec,
+					bufferPool:   g.BufferPool,
+					readMaxBytes: g.ReadMaxBytes,
 				},
 			},
 			readTrailers: func(unmarshaler *grpcUnmarshaler, _ *duplexHTTPCall) http.Header {
@@ -278,9 +280,10 @@ func (g *grpcClient) NewStream(
 			unmarshaler: grpcUnmarshaler{
 				web: false,
 				envelopeReader: envelopeReader{
-					reader:     duplexCall,
-					codec:      g.Codec,
-					bufferPool: g.BufferPool,
+					reader:       duplexCall,
+					codec:        g.Codec,
+					bufferPool:   g.BufferPool,
+					readMaxBytes: g.ReadMaxBytes,
 				},
 			},
 			readTrailers: func(_ *grpcUnmarshaler, call *duplexHTTPCall) http.Header {
@@ -514,6 +517,7 @@ func newGRPCHandlerStream(
 	requestCompressionPools *compressionPool,
 	responseCompressionPools *compressionPool,
 	bufferPool *bufferPool,
+	readMaxBytes int,
 ) (*grpcHandlerSender, *grpcHandlerReceiver) {
 	sender := &grpcHandlerSender{
 		spec: spec,
@@ -541,6 +545,7 @@ func newGRPCHandlerStream(
 				codec:           codec,
 				compressionPool: requestCompressionPools,
 				bufferPool:      bufferPool,
+				readMaxBytes:    readMaxBytes,
 			},
 			web: web,
 		},

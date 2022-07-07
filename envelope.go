@@ -110,6 +110,7 @@ type envelopeReader struct {
 	last            envelope
 	compressionPool *compressionPool
 	bufferPool      *bufferPool
+	readMaxBytes    int
 }
 
 func (r *envelopeReader) Unmarshal(message any) *Error {
@@ -143,7 +144,7 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 		}
 		decompressed := r.bufferPool.Get()
 		defer r.bufferPool.Put(decompressed)
-		if err := r.compressionPool.Decompress(decompressed, data); err != nil {
+		if err := r.compressionPool.Decompress(decompressed, data, r.readMaxBytes); err != nil {
 			return err
 		}
 		data = decompressed
@@ -201,6 +202,13 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 	size := int(binary.BigEndian.Uint32(prefixes[1:5]))
 	if size < 0 {
 		return errorf(CodeInvalidArgument, "message size %d overflowed uint32", size)
+	}
+	if r.readMaxBytes > 0 && size > r.readMaxBytes {
+		_, err := io.CopyN(io.Discard, r.reader, int64(size))
+		if err != nil && !errors.Is(err, io.EOF) {
+			return errorf(CodeUnknown, "read enveloped message: %w", err)
+		}
+		return errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", size, r.readMaxBytes)
 	}
 	if size > 0 {
 		env.Data.Grow(size)

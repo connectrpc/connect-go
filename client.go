@@ -57,6 +57,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 			HTTPClient:       httpClient,
 			URL:              url,
 			BufferPool:       config.BufferPool,
+			ReadMaxBytes:     config.ReadMaxBytes,
 		},
 	)
 	if protocolErr != nil {
@@ -180,6 +181,7 @@ type clientConfig struct {
 	Codec                  Codec
 	RequestCompressionName string
 	BufferPool             *bufferPool
+	ReadMaxBytes           int
 }
 
 func newClientConfig(url string, options []ClientOption) (*clientConfig, *Error) {

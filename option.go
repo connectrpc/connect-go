@@ -164,6 +164,18 @@ func WithCompressMinBytes(min int) Option {
 	return &compressMinBytesOption{Min: min}
 }
 
+// WithReadMaxBytes limits the performance impact of pathologically large
+// messages sent by the other party. For handlers, WithReadMaxBytes limits the size
+// of a message that the client can send. For clients, WithReadMaxBytes limits the
+// size of a message that the server can respond with. Limits apply to each Protobuf
+// message, not to the stream as a whole.
+//
+// Setting WithReadMaxBytes to zero allows any message size. Both clients and
+// handlers default to allowing any request size.
+func WithReadMaxBytes(max int) Option {
+	return &readMaxBytesOption{Max: max}
+}
+
 // WithInterceptors configures a client or handler's interceptor stack. Repeated
 // WithInterceptors options are applied in order, so
 //
@@ -279,6 +291,18 @@ func (o *compressMinBytesOption) applyToClient(config *clientConfig) {
 
 func (o *compressMinBytesOption) applyToHandler(config *handlerConfig) {
 	config.CompressMinBytes = o.Min
+}
+
+type readMaxBytesOption struct {
+	Max int
+}
+
+func (o *readMaxBytesOption) applyToClient(config *clientConfig) {
+	config.ReadMaxBytes = o.Max
+}
+
+func (o *readMaxBytesOption) applyToHandler(config *handlerConfig) {
+	config.ReadMaxBytes = o.Max
 }
 
 type handlerOptionsOption struct {
