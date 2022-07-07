@@ -25,8 +25,7 @@ import (
 // It's returned from Client.CallClientStream, but doesn't currently have an
 // exported constructor function.
 type ClientStreamForClient[Req, Res any] struct {
-	sender   Sender
-	receiver Receiver
+	conn ClientConn
 	// Error from client construction. If non-nil, return for all calls.
 	err error
 }
@@ -37,7 +36,7 @@ func (c *ClientStreamForClient[Req, Res]) RequestHeader() http.Header {
 	if c.err != nil {
 		return http.Header{}
 	}
-	return c.sender.Header()
+	return c.conn.RequestHeader()
 }
 
 // Send a message to the server. The first call to Send also sends the request
@@ -50,7 +49,7 @@ func (c *ClientStreamForClient[Req, Res]) Send(request *Req) error {
 	if c.err != nil {
 		return c.err
 	}
-	return c.sender.Send(request)
+	return c.conn.Send(request)
 }
 
 // CloseAndReceive closes the send side of the stream and waits for the
@@ -59,18 +58,16 @@ func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Response[Res], err
 	if c.err != nil {
 		return nil, c.err
 	}
-	if err := c.sender.Close(nil); err != nil {
+	if err := c.conn.CloseRequest(); err != nil {
+		_ = c.conn.CloseResponse()
 		return nil, err
 	}
-	response, err := receiveUnaryResponse[Res](c.receiver)
+	response, err := receiveUnaryResponse[Res](c.conn)
 	if err != nil {
-		_ = c.receiver.Close()
+		_ = c.conn.CloseResponse()
 		return nil, err
 	}
-	if err := c.receiver.Close(); err != nil {
-		return nil, err
-	}
-	return response, nil
+	return response, c.conn.CloseResponse()
 }
 
 // ServerStreamForClient is the client's view of a server streaming RPC.
@@ -78,11 +75,11 @@ func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Response[Res], err
 // It's returned from Client.CallServerStream, but doesn't currently have an
 // exported constructor function.
 type ServerStreamForClient[Res any] struct {
-	receiver Receiver
-	msg      Res
+	conn ClientConn
+	msg  Res
 	// Error from client construction. If non-nil, return for all calls.
 	constructErr error
-	// Error from Receive().
+	// Error from conn.Receive().
 	receiveErr error
 }
 
@@ -95,7 +92,7 @@ func (s *ServerStreamForClient[Res]) Receive() bool {
 	if s.constructErr != nil || s.receiveErr != nil {
 		return false
 	}
-	s.receiveErr = s.receiver.Receive(&s.msg)
+	s.receiveErr = s.conn.Receive(&s.msg)
 	return s.receiveErr == nil
 }
 
@@ -123,7 +120,7 @@ func (s *ServerStreamForClient[Res]) ResponseHeader() http.Header {
 	if s.constructErr != nil {
 		return http.Header{}
 	}
-	return s.receiver.Header()
+	return s.conn.ResponseHeader()
 }
 
 // ResponseTrailer returns the trailers received from the server. Trailers
@@ -132,10 +129,7 @@ func (s *ServerStreamForClient[Res]) ResponseTrailer() http.Header {
 	if s.constructErr != nil {
 		return http.Header{}
 	}
-	if trailer, ok := s.receiver.Trailer(); ok {
-		return trailer
-	}
-	return make(http.Header)
+	return s.conn.ResponseTrailer()
 }
 
 // Close the receive side of the stream.
@@ -143,7 +137,7 @@ func (s *ServerStreamForClient[Res]) Close() error {
 	if s.constructErr != nil {
 		return s.constructErr
 	}
-	return s.receiver.Close()
+	return s.conn.CloseResponse()
 }
 
 // BidiStreamForClient is the client's view of a bidirectional streaming RPC.
@@ -151,8 +145,7 @@ func (s *ServerStreamForClient[Res]) Close() error {
 // It's returned from Client.CallBidiStream, but doesn't currently have an
 // exported constructor function.
 type BidiStreamForClient[Req, Res any] struct {
-	sender   Sender
-	receiver Receiver
+	conn ClientConn
 	// Error from client construction. If non-nil, return for all calls.
 	err error
 }
@@ -163,7 +156,7 @@ func (b *BidiStreamForClient[Req, Res]) RequestHeader() http.Header {
 	if b.err != nil {
 		return http.Header{}
 	}
-	return b.sender.Header()
+	return b.conn.RequestHeader()
 }
 
 // Send a message to the server. The first call to Send also sends the request
@@ -176,15 +169,15 @@ func (b *BidiStreamForClient[Req, Res]) Send(msg *Req) error {
 	if b.err != nil {
 		return b.err
 	}
-	return b.sender.Send(msg)
+	return b.conn.Send(msg)
 }
 
-// CloseSend closes the send side of the stream.
-func (b *BidiStreamForClient[Req, Res]) CloseSend() error {
+// Close the send side of the stream.
+func (b *BidiStreamForClient[Req, Res]) CloseRequest() error {
 	if b.err != nil {
 		return b.err
 	}
-	return b.sender.Close(nil)
+	return b.conn.CloseRequest()
 }
 
 // Receive a message. When the server is done sending messages and no other
@@ -194,18 +187,18 @@ func (b *BidiStreamForClient[Req, Res]) Receive() (*Res, error) {
 		return nil, b.err
 	}
 	var msg Res
-	if err := b.receiver.Receive(&msg); err != nil {
+	if err := b.conn.Receive(&msg); err != nil {
 		return nil, err
 	}
 	return &msg, nil
 }
 
-// CloseReceive closes the receive side of the stream.
-func (b *BidiStreamForClient[Req, Res]) CloseReceive() error {
+// Close the receive side of the stream.
+func (b *BidiStreamForClient[Req, Res]) CloseResponse() error {
 	if b.err != nil {
 		return b.err
 	}
-	return b.receiver.Close()
+	return b.conn.CloseResponse()
 }
 
 // ResponseHeader returns the headers received from the server. It blocks until
@@ -214,7 +207,7 @@ func (b *BidiStreamForClient[Req, Res]) ResponseHeader() http.Header {
 	if b.err != nil {
 		return http.Header{}
 	}
-	return b.receiver.Header()
+	return b.conn.ResponseHeader()
 }
 
 // ResponseTrailer returns the trailers received from the server. Trailers
@@ -223,8 +216,5 @@ func (b *BidiStreamForClient[Req, Res]) ResponseTrailer() http.Header {
 	if b.err != nil {
 		return http.Header{}
 	}
-	if trailer, ok := b.receiver.Trailer(); ok {
-		return trailer
-	}
-	return make(http.Header)
+	return b.conn.ResponseTrailer()
 }

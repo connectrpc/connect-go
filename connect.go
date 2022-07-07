@@ -49,51 +49,64 @@ const (
 	StreamTypeBidi              = StreamTypeClient | StreamTypeServer
 )
 
-// Sender is the writable side of a bidirectional stream of messages. Sender
-// implementations do not need to be safe for concurrent use.
+// HandlerConn is the server's view of a bidirectional message exchange.
+// Interceptors for streaming handlers may wrap HandlerConns.
 //
-// Sender implementations provided by this module guarantee that all returned
-// errors can be cast to *Error using errors.As. The Close method of Sender
-// implementations provided by this module automatically adds the appropriate
-// codes when passed context.DeadlineExceeded or context.Canceled.
+// Like the standard library's http.ResponseWriter, HandlerConns write response
+// headers to the network with the first call to Send. Any subsequent mutations
+// are effectively no-ops. Handlers may mutate response trailers at any time
+// before returning. When the client has finished sending data, Receive returns
+// an error wrapping io.EOF. Handlers should check for this using the standard
+// library's errors.Is.
 //
-// Like the standard library's http.ResponseWriter, both client- and
-// handler-side Senders write headers to the network with the first call to
-// Send. Any subsequent mutations to the headers are effectively no-ops.
+// HandlerConn implementations provided by this module guarantee that all
+// returned errors can be cast to *Error using the standard library's
+// errors.As.
 //
-// Handler-side Senders may mutate trailers until calling Close, when the
-// trailers are written to the network. Clients may not send trailers, since
-// the gRPC, gRPC-Web, and Connect protocols all forbid it.
-//
-// Once servers return an error, they're not interested in receiving additional
-// messages and clients should stop sending them. Client-side Senders indicate
-// this by returning a wrapped io.EOF from Send. Clients should check for this
-// condition with the standard library's errors.Is and call the receiver's
-// Receive method to unmarshal the error.
-type Sender interface {
-	Send(any) error
-	Close(error) error
-
+// HandlerConn implementations do not need to be safe for concurrent use.
+type HandlerConn interface {
 	Spec() Spec
-	Header() http.Header
-	Trailer() (http.Header, bool)
+
+	Receive(any) error
+	RequestHeader() http.Header
+
+	Send(any) error
+	ResponseHeader() http.Header
+	ResponseTrailer() http.Header
 }
 
-// Receiver is the readable side of a bidirectional stream of messages.
-// Receiver implementations do not need to be safe for concurrent use.
+// ClientConn is the client's view of a bidirectional message exchange.
+// Interceptors for streaming clients may wrap ClientConns.
 //
-// Receiver implementations provided by this module guarantee that all returned
-// errors can be cast to *Error using errors.As.
+// ClientConns write request headers to the network with the first call to
+// Send. Any subsequent mutations are effectively no-ops. When the server is
+// done sending data, the ClientConn's Receive method returns an error wrapping
+// io.EOF. Clients should check for this using the standard library's
+// errors.Is. If the server encounters an error during processing, subsequent
+// calls to the ClientConn's Send method will return an error wrapping io.EOF;
+// clients may then call Receive to unmarshal the error.
 //
-// Only client-side Receivers may read trailers.
-type Receiver interface {
-	Receive(any) error
-	Close() error
-
+// ClientConn implementations provided by this module guarantee that all
+// returned errors can be cast to *Error using the standard library's
+// errors.As.
+//
+// In order to support bidirectional streaming RPCs, all ClientConn
+// implementations must support limited concurrent use. Spec may not race with
+// any other method. Send, RequestHeader, and CloseRequest may race with each
+// other, but not with other methods. Similarly, Receive, ResponseHeader,
+// ResponseTrailer, and CloseResponse may race with each other, but not with
+// other methods.
+type ClientConn interface {
 	Spec() Spec
-	Header() http.Header
-	// Trailers are populated only after Receive returns an error.
-	Trailer() (http.Header, bool)
+
+	Send(any) error
+	RequestHeader() http.Header
+	CloseRequest() error
+
+	Receive(any) error
+	ResponseHeader() http.Header
+	ResponseTrailer() http.Header
+	CloseResponse() error
 }
 
 // Request is a wrapper around a generated request message. It provides
@@ -225,28 +238,33 @@ type Spec struct {
 	IsClient   bool   // otherwise we're in a handler
 }
 
-// receiveUnaryResponse unmarshals a message from a Receiver, then envelopes
-// the message and attaches the Receiver's headers and trailers. It attempts to
-// consume the Receiver and isn't appropriate when receiving multiple messages.
-func receiveUnaryResponse[T any](receiver Receiver) (*Response[T], error) {
+// handlerConnCloser extends HandlerConn with a method for handlers to
+// terminate the message exchange (and optionally send an error to the client).
+type handlerConnCloser interface {
+	HandlerConn
+
+	Close(error) error
+}
+
+// receiveUnaryResponse unmarshals a message from a ClientConn, then envelopes
+// the message and attaches headers and trailers. It attempts to consume the
+// response stream and isn't appropriate when receiving multiple messages.
+func receiveUnaryResponse[T any](conn ClientConn) (*Response[T], error) {
 	var msg T
-	if err := receiver.Receive(&msg); err != nil {
+	if err := conn.Receive(&msg); err != nil {
 		return nil, err
 	}
 	// In a well-formed stream, the response message may be followed by a block
 	// of in-stream trailers or HTTP trailers. To ensure that we receive the
 	// trailers, try to read another message from the stream.
-	if err := receiver.Receive(new(T)); err == nil {
+	if err := conn.Receive(new(T)); err == nil {
 		return nil, NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
 	} else if err != nil && !errors.Is(err, io.EOF) {
 		return nil, NewError(CodeUnknown, err)
 	}
-	response := &Response[T]{
-		Msg:    &msg,
-		header: receiver.Header(),
-	}
-	if trailer, ok := receiver.Trailer(); ok {
-		response.trailer = trailer
-	}
-	return response, nil
+	return &Response[T]{
+		Msg:     &msg,
+		header:  conn.ResponseHeader(),
+		trailer: conn.ResponseTrailer(),
+	}, nil
 }

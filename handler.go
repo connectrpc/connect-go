@@ -27,8 +27,7 @@ import (
 // standard library's compress/gzip.
 type Handler struct {
 	spec             Spec
-	interceptor      Interceptor
-	implementation   func(context.Context, Sender, Receiver, error /* client-visible */)
+	implementation   HandlerConnFunc
 	protocolHandlers []protocolHandler
 	acceptPost       string // Accept-Post header
 }
@@ -39,82 +38,44 @@ func NewUnaryHandler[Req, Res any](
 	unary func(context.Context, *Request[Req]) (*Response[Res], error),
 	options ...HandlerOption,
 ) *Handler {
+	// Wrap the strongly-typed implementation so we can apply interceptors.
+	untyped := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		typed, ok := request.(*Request[Req])
+		if !ok {
+			return nil, errorf(CodeInternal, "unexpected handler request type %T", request)
+		}
+		return unary(ctx, typed)
+	})
 	config := newHandlerConfig(procedure, options)
-	// Given a (possibly failed) stream, how should we call the unary function?
-	implementation := func(ctx context.Context, sender Sender, receiver Receiver, clientVisibleError error) {
-		defer receiver.Close()
-
-		var request *Request[Req]
-		if clientVisibleError != nil {
-			// The protocol implementation failed to establish a stream. To make the
-			// resulting error visible to the interceptor stack, we still want to
-			// call the wrapped unary Func. To do that safely, we need a useful
-			// Message struct. (Note that we do *not* actually calling the handler's
-			// implementation.)
-			request = &Request[Req]{
-				Msg:    new(Req),
-				spec:   receiver.Spec(),
-				header: receiver.Header(),
-			}
-		} else {
-			var msg Req
-			if err := receiver.Receive(&msg); err != nil {
-				// Interceptors should see this error too. Just as above, they need a
-				// useful Message.
-				clientVisibleError = err
-				request = &Request[Req]{
-					Msg:    new(Req),
-					spec:   receiver.Spec(),
-					header: receiver.Header(),
-				}
-			} else {
-				request = &Request[Req]{
-					Msg:    &msg,
-					spec:   receiver.Spec(),
-					header: receiver.Header(),
-				}
-			}
+	if interceptor := config.Interceptor; interceptor != nil {
+		untyped = interceptor.WrapUnary(untyped)
+	}
+	// Given a stream, how should we call the unary function?
+	implementation := func(ctx context.Context, conn HandlerConn) error {
+		var msg Req
+		if err := conn.Receive(&msg); err != nil {
+			return err
 		}
-
-		untyped := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
-			if clientVisibleError != nil {
-				// We've already encountered an error, short-circuit before calling the
-				// handler's implementation.
-				return nil, clientVisibleError
-			}
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			typed, ok := request.(*Request[Req])
-			if !ok {
-				return nil, errorf(CodeInternal, "unexpected handler request type %T", request)
-			}
-			res, err := unary(ctx, typed)
-			if err != nil {
-				return nil, err
-			}
-			return res, nil
-		})
-		if interceptor := config.Interceptor; interceptor != nil {
-			untyped = interceptor.WrapUnary(untyped)
+		request := &Request[Req]{
+			Msg:    &msg,
+			spec:   conn.Spec(),
+			header: conn.RequestHeader(),
 		}
-
 		response, err := untyped(ctx, request)
 		if err != nil {
-			_ = sender.Close(err)
-			return
+			return err
 		}
-		mergeHeaders(sender.Header(), response.Header())
-		if trailers, ok := sender.Trailer(); ok {
-			mergeHeaders(trailers, response.Trailer())
-		}
-		_ = sender.Close(sender.Send(response.Any()))
+		mergeHeaders(conn.ResponseHeader(), response.Header())
+		mergeHeaders(conn.ResponseTrailer(), response.Trailer())
+		return conn.Send(response.Any())
 	}
 
 	protocolHandlers := config.newProtocolHandlers(StreamTypeUnary)
 	return &Handler{
 		spec:             config.newSpec(StreamTypeUnary),
-		interceptor:      nil, // already applied
 		implementation:   implementation,
 		protocolHandlers: protocolHandlers,
 		acceptPost:       sortedAcceptPostValue(protocolHandlers),
@@ -130,23 +91,15 @@ func NewClientStreamHandler[Req, Res any](
 	return newStreamHandler(
 		procedure,
 		StreamTypeClient,
-		func(ctx context.Context, sender Sender, receiver Receiver) {
-			stream := &ClientStream[Req]{receiver: receiver}
+		func(ctx context.Context, conn HandlerConn) error {
+			stream := &ClientStream[Req]{conn: conn}
 			res, err := implementation(ctx, stream)
 			if err != nil {
-				_ = receiver.Close()
-				_ = sender.Close(err)
-				return
+				return err
 			}
-			if err := receiver.Close(); err != nil {
-				_ = sender.Close(err)
-				return
-			}
-			mergeHeaders(sender.Header(), res.header)
-			if trailer, ok := sender.Trailer(); ok {
-				mergeHeaders(trailer, res.trailer)
-			}
-			_ = sender.Close(sender.Send(res.Msg))
+			mergeHeaders(conn.ResponseHeader(), res.header)
+			mergeHeaders(conn.ResponseTrailer(), res.trailer)
+			return conn.Send(res.Msg)
 		},
 		options...,
 	)
@@ -161,25 +114,20 @@ func NewServerStreamHandler[Req, Res any](
 	return newStreamHandler(
 		procedure,
 		StreamTypeServer,
-		func(ctx context.Context, sender Sender, receiver Receiver) {
-			stream := &ServerStream[Res]{sender: sender}
+		func(ctx context.Context, conn HandlerConn) error {
 			var msg Req
-			if err := receiver.Receive(&msg); err != nil {
-				_ = receiver.Close()
-				_ = sender.Close(err)
-				return
+			if err := conn.Receive(&msg); err != nil {
+				return err
 			}
-			if err := receiver.Close(); err != nil {
-				_ = sender.Close(err)
-				return
-			}
-			request := &Request[Req]{
-				Msg:    &msg,
-				spec:   receiver.Spec(),
-				header: receiver.Header(),
-			}
-			err := implementation(ctx, request, stream)
-			_ = sender.Close(err)
+			return implementation(
+				ctx,
+				&Request[Req]{
+					Msg:    &msg,
+					spec:   conn.Spec(),
+					header: conn.RequestHeader(),
+				},
+				&ServerStream[Res]{conn: conn},
+			)
 		},
 		options...,
 	)
@@ -194,11 +142,11 @@ func NewBidiStreamHandler[Req, Res any](
 	return newStreamHandler(
 		procedure,
 		StreamTypeBidi,
-		func(ctx context.Context, sender Sender, receiver Receiver) {
-			stream := &BidiStream[Req, Res]{sender: sender, receiver: receiver}
-			err := implementation(ctx, stream)
-			_ = receiver.Close()
-			_ = sender.Close(err)
+		func(ctx context.Context, conn HandlerConn) error {
+			return implementation(
+				ctx,
+				&BidiStream[Req, Res]{conn: conn},
+			)
 		},
 		options...,
 	)
@@ -223,6 +171,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 		return
 	}
 
+	// Find our implementation of the RPC protocol in use.
 	contentType := request.Header.Get("Content-Type")
 	var protocolHandler protocolHandler
 	for _, handler := range h.protocolHandlers {
@@ -236,6 +185,8 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 		responseWriter.WriteHeader(http.StatusUnsupportedMediaType)
 		return
 	}
+
+	// Establish a stream and serve the RPC.
 	ctx, cancel, timeoutErr := protocolHandler.SetTimeout(request)
 	if timeoutErr != nil {
 		ctx = request.Context()
@@ -243,27 +194,20 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	if cancel != nil {
 		defer cancel()
 	}
-	if ic := h.interceptor; ic != nil {
-		ctx = ic.WrapStreamContext(ctx)
-	}
-	// Most errors returned from protocolHandler.NewStream are caused by
-	// invalid requests. For example, the client may have specified an invalid
-	// timeout or an unavailable codec. We'd like those errors to be visible to
-	// the interceptor chain, so we're going to capture them here and pass them
-	// to the implementation.
-	sender, receiver, clientVisibleError := protocolHandler.NewStream(
+	connCloser, ok := protocolHandler.NewConn(
 		responseWriter,
 		request.WithContext(ctx),
 	)
+	if !ok {
+		// Failed to create stream, usually because client used an unknown
+		// compression algorithm. Nothing further to do.
+		return
+	}
 	if timeoutErr != nil {
-		clientVisibleError = timeoutErr
+		_ = connCloser.Close(timeoutErr)
+		return
 	}
-	if interceptor := h.interceptor; interceptor != nil {
-		// Unary interceptors were handled in NewUnaryHandler.
-		sender = interceptor.WrapStreamSender(ctx, sender)
-		receiver = interceptor.WrapStreamReceiver(ctx, receiver)
-	}
-	h.implementation(ctx, sender, receiver, clientVisibleError)
+	_ = connCloser.Close(h.implementation(ctx, connCloser))
 }
 
 type handlerConfig struct {
@@ -335,22 +279,17 @@ func (c *handlerConfig) newProtocolHandlers(streamType StreamType) []protocolHan
 func newStreamHandler(
 	procedure string,
 	streamType StreamType,
-	implementation func(context.Context, Sender, Receiver),
+	implementation HandlerConnFunc,
 	options ...HandlerOption,
 ) *Handler {
 	config := newHandlerConfig(procedure, options)
+	if ic := config.Interceptor; ic != nil {
+		implementation = ic.WrapStreamingHandler(implementation)
+	}
 	protocolHandlers := config.newProtocolHandlers(streamType)
 	return &Handler{
-		spec:        config.newSpec(streamType),
-		interceptor: config.Interceptor,
-		implementation: func(ctx context.Context, sender Sender, receiver Receiver, clientVisibleErr error) {
-			if clientVisibleErr != nil {
-				_ = receiver.Close()
-				_ = sender.Close(clientVisibleErr)
-				return
-			}
-			implementation(ctx, sender, receiver)
-		},
+		spec:             config.newSpec(streamType),
+		implementation:   implementation,
 		protocolHandlers: protocolHandlers,
 		acceptPost:       sortedAcceptPostValue(protocolHandlers),
 	}

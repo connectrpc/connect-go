@@ -25,14 +25,14 @@ import (
 // It's constructed as part of Handler invocation, but doesn't currently have
 // an exported constructor.
 type ClientStream[Req any] struct {
-	receiver Receiver
-	msg      Req
-	err      error
+	conn HandlerConn
+	msg  Req
+	err  error
 }
 
 // RequestHeader returns the headers received from the client.
 func (c *ClientStream[Req]) RequestHeader() http.Header {
-	return c.receiver.Header()
+	return c.conn.RequestHeader()
 }
 
 // Receive advances the stream to the next message, which will then be
@@ -44,7 +44,7 @@ func (c *ClientStream[Req]) Receive() bool {
 	if c.err != nil {
 		return false
 	}
-	c.err = c.receiver.Receive(&c.msg)
+	c.err = c.conn.Receive(&c.msg)
 	return c.err == nil
 }
 
@@ -68,28 +68,25 @@ func (c *ClientStream[Req]) Err() error {
 // It's constructed as part of Handler invocation, but doesn't currently have
 // an exported constructor.
 type ServerStream[Res any] struct {
-	sender Sender
+	conn HandlerConn
 }
 
 // ResponseHeader returns the response headers. Headers are sent with the first
 // call to Send.
 func (s *ServerStream[Res]) ResponseHeader() http.Header {
-	return s.sender.Header()
+	return s.conn.ResponseHeader()
 }
 
 // ResponseTrailer returns the response trailers. Handlers may write to the
 // response trailers at any time before returning.
 func (s *ServerStream[Res]) ResponseTrailer() http.Header {
-	if trailers, ok := s.sender.Trailer(); ok {
-		return trailers
-	}
-	return make(http.Header)
+	return s.conn.ResponseTrailer()
 }
 
 // Send a message to the client. The first call to Send also sends the response
 // headers.
 func (s *ServerStream[Res]) Send(msg *Res) error {
-	return s.sender.Send(msg)
+	return s.conn.Send(msg)
 }
 
 // BidiStream is the handler's view of a bidirectional streaming RPC.
@@ -97,20 +94,19 @@ func (s *ServerStream[Res]) Send(msg *Res) error {
 // It's constructed as part of Handler invocation, but doesn't currently have
 // an exported constructor.
 type BidiStream[Req, Res any] struct {
-	sender   Sender
-	receiver Receiver
+	conn HandlerConn
 }
 
 // RequestHeader returns the headers received from the client.
 func (b *BidiStream[Req, Res]) RequestHeader() http.Header {
-	return b.receiver.Header()
+	return b.conn.RequestHeader()
 }
 
 // Receive a message. When the client is done sending messages, Receive will
 // return an error that wraps io.EOF.
 func (b *BidiStream[Req, Res]) Receive() (*Req, error) {
 	var req Req
-	if err := b.receiver.Receive(&req); err != nil {
+	if err := b.conn.Receive(&req); err != nil {
 		return nil, err
 	}
 	return &req, nil
@@ -119,20 +115,17 @@ func (b *BidiStream[Req, Res]) Receive() (*Req, error) {
 // ResponseHeader returns the response headers. Headers are sent with the first
 // call to Send.
 func (b *BidiStream[Req, Res]) ResponseHeader() http.Header {
-	return b.sender.Header()
+	return b.conn.ResponseHeader()
 }
 
 // ResponseTrailer returns the response trailers. Handlers may write to the
 // response trailers at any time before returning.
 func (b *BidiStream[Req, Res]) ResponseTrailer() http.Header {
-	if trailers, ok := b.sender.Trailer(); ok {
-		return trailers
-	}
-	return make(http.Header)
+	return b.conn.ResponseTrailer()
 }
 
 // Send a message to the client. The first call to Send also sends the response
 // headers.
 func (b *BidiStream[Req, Res]) Send(msg *Res) error {
-	return b.sender.Send(msg)
+	return b.conn.Send(msg)
 }

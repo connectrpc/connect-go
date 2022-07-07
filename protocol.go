@@ -83,19 +83,8 @@ type protocolHandler interface {
 	// request's context, a nil cancellation function, and a nil error.
 	SetTimeout(*http.Request) (context.Context, context.CancelFunc, error)
 
-	// NewStream constructs a Sender and Receiver for the message exchange.
-	//
-	// Implementations may decide whether the returned error should be sent to
-	// the client. (For example, it's helpful to send the client a list of
-	// supported compressors if they use an unknown compressor.)
-	//
-	// In either case, any returned error is passed through the full interceptor
-	// stack.
-	//
-	// TODO: Implementations _must_ return a usable Sender and Receiver, even if
-	// they're also returning an error. If we ever export this interface, we
-	// should revert https://github.com/bufbuild/connect-go/pull/290.
-	NewStream(http.ResponseWriter, *http.Request) (Sender, Receiver, error)
+	// NewConn constructs a HandlerConn for the message exchange.
+	NewConn(http.ResponseWriter, *http.Request) (handlerConnCloser, bool)
 }
 
 // ClientParams are the arguments provided to a Protocol's NewClient method,
@@ -122,85 +111,84 @@ type protocolClient interface {
 	// WriteRequestHeader writes any protocol-specific request headers.
 	WriteRequestHeader(StreamType, http.Header)
 
-	// NewStream constructs a Sender and Receiver for the message exchange.
+	// NewConn constructs a ClientConn for the message exchange.
 	//
 	// Implementations should assume that the supplied HTTP headers have already
 	// been populated by WriteRequestHeader. When constructing a stream for a
 	// unary call, implementations may assume that the Sender's Send and Close
 	// methods return before the Receiver's Receive or Close methods are called.
-	NewStream(context.Context, Spec, http.Header) (Sender, Receiver)
+	NewConn(context.Context, Spec, http.Header) ClientConn
 }
 
-// errorTranslatingSender wraps a Sender to ensure that we always return coded
-// errors to clients and write coded errors to the network.
+// errorTranslatingHandlerConnCloser wraps a handlerConnCloser to ensure that
+// we always return coded errors to users and write coded errors to the
+// network.
 //
-// This is used in protocol implementations.
-type errorTranslatingSender struct {
-	Sender
+// It's used in protocol implementations.
+type errorTranslatingHandlerConnCloser struct {
+	handlerConnCloser
 
 	toWire   func(error) error
 	fromWire func(error) error
 }
 
-func (s *errorTranslatingSender) Send(msg any) error {
-	return s.fromWire(s.Sender.Send(msg))
+func (hc *errorTranslatingHandlerConnCloser) Send(msg any) error {
+	return hc.fromWire(hc.handlerConnCloser.Send(msg))
 }
 
-func (s *errorTranslatingSender) Close(err error) error {
-	sendErr := s.Sender.Close(s.toWire(err))
-	return s.fromWire(sendErr)
+func (hc *errorTranslatingHandlerConnCloser) Receive(msg any) error {
+	return hc.fromWire(hc.handlerConnCloser.Receive(msg))
 }
 
-// errorTranslatingReceiver wraps a Receiver to make sure that we always return
-// coded errors from clients.
+func (hc *errorTranslatingHandlerConnCloser) Close(err error) error {
+	closeErr := hc.handlerConnCloser.Close(hc.toWire(err))
+	return hc.fromWire(closeErr)
+}
+
+// errorTranslatingClientConn wraps a ClientConn to make sure that we always
+// return coded errors from clients.
 //
-// This is used in protocol implementations.
-type errorTranslatingReceiver struct {
-	Receiver
+// It's used in protocol implementations.
+type errorTranslatingClientConn struct {
+	ClientConn
 
 	fromWire func(error) error
 }
 
-func (r *errorTranslatingReceiver) Receive(msg any) error {
-	if err := r.Receiver.Receive(msg); err != nil {
-		return r.fromWire(err)
-	}
-	return nil
+func (cc *errorTranslatingClientConn) Send(msg any) error {
+	return cc.fromWire(cc.ClientConn.Send(msg))
 }
 
-func (r *errorTranslatingReceiver) Close() error {
-	return r.fromWire(r.Receiver.Close())
+func (cc *errorTranslatingClientConn) Receive(msg any) error {
+	return cc.fromWire(cc.ClientConn.Receive(msg))
 }
 
-// wrapHandlerStreamWithCodedErrors ensures that we (1) automatically code
+func (cc *errorTranslatingClientConn) CloseRequest() error {
+	return cc.fromWire(cc.ClientConn.CloseRequest())
+}
+
+func (cc *errorTranslatingClientConn) CloseResponse() error {
+	return cc.fromWire(cc.ClientConn.CloseResponse())
+}
+
+// wrapHandlerConnWithCodedErrors ensures that we (1) automatically code
 // context-related errors correctly when writing them to the network, and (2)
 // return *Errors from all exported APIs.
-func wrapHandlerStreamWithCodedErrors(sender Sender, receiver Receiver) (Sender, Receiver) {
-	wrappedSender := &errorTranslatingSender{
-		Sender:   sender,
-		toWire:   wrapIfContextError,
-		fromWire: wrapIfUncoded,
+func wrapHandlerConnWithCodedErrors(conn handlerConnCloser) handlerConnCloser {
+	return &errorTranslatingHandlerConnCloser{
+		handlerConnCloser: conn,
+		toWire:            wrapIfContextError,
+		fromWire:          wrapIfUncoded,
 	}
-	wrappedReceiver := &errorTranslatingReceiver{
-		Receiver: receiver,
-		fromWire: wrapIfUncoded,
-	}
-	return wrappedSender, wrappedReceiver
 }
 
-// wrapClientStreamWithCodedErrors ensures that we always return *Errors from
+// wrapClientConnWithCodedErrors ensures that we always return *Errors from
 // public APIs.
-func wrapClientStreamWithCodedErrors(sender Sender, receiver Receiver) (Sender, Receiver) {
-	wrappedSender := &errorTranslatingSender{
-		Sender:   sender,
-		toWire:   func(err error) error { return err }, // no-op
-		fromWire: wrapIfUncoded,
+func wrapClientConnWithCodedErrors(conn ClientConn) ClientConn {
+	return &errorTranslatingClientConn{
+		ClientConn: conn,
+		fromWire:   wrapIfUncoded,
 	}
-	wrappedReceiver := &errorTranslatingReceiver{
-		Receiver: receiver,
-		fromWire: wrapIfUncoded,
-	}
-	return wrappedSender, wrappedReceiver
 }
 
 func sortedAcceptPostValue(handlers []protocolHandler) string {

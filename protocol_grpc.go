@@ -133,10 +133,10 @@ func (*grpcHandler) SetTimeout(request *http.Request) (context.Context, context.
 	return ctx, cancel, nil
 }
 
-func (g *grpcHandler) NewStream(
+func (g *grpcHandler) NewConn(
 	responseWriter http.ResponseWriter,
 	request *http.Request,
-) (Sender, Receiver, error) {
+) (handlerConnCloser, bool) {
 	// We need to parse metadata before entering the interceptor stack; we'll
 	// send the error to the client later on.
 	requestCompression, responseCompression, failed := negotiateCompression(
@@ -160,27 +160,42 @@ func (g *grpcHandler) NewStream(
 	}
 
 	codecName := grpcCodecFromContentType(g.web, request.Header.Get(headerContentType))
-	sender, receiver := wrapHandlerStreamWithCodedErrors(newGRPCHandlerStream(
-		g.Spec,
-		g.web,
-		responseWriter,
-		request,
-		g.CompressMinBytes,
-		g.Codecs.Get(codecName), // handler.go guarantees that this is not nil
-		g.Codecs.Protobuf(),     // for errors
-		g.CompressionPools.Get(requestCompression),
-		g.CompressionPools.Get(responseCompression),
-		g.BufferPool,
-		g.ReadMaxBytes,
-	))
+	codec := g.Codecs.Get(codecName) // handler.go guarantees this is not nil
+	conn := wrapHandlerConnWithCodedErrors(&grpcHandlerConn{
+		spec:       g.Spec,
+		web:        g.web,
+		bufferPool: g.BufferPool,
+		protobuf:   g.Codecs.Protobuf(), // for errors
+		marshaler: grpcMarshaler{
+			envelopeWriter: envelopeWriter{
+				writer:           responseWriter,
+				compressionPool:  g.CompressionPools.Get(responseCompression),
+				codec:            codec,
+				compressMinBytes: g.CompressMinBytes,
+				bufferPool:       g.BufferPool,
+			},
+		},
+		responseWriter:  responseWriter,
+		responseHeader:  make(http.Header),
+		responseTrailer: make(http.Header),
+		request:         request,
+		unmarshaler: grpcUnmarshaler{
+			envelopeReader: envelopeReader{
+				reader:          request.Body,
+				codec:           codec,
+				compressionPool: g.CompressionPools.Get(requestCompression),
+				bufferPool:      g.BufferPool,
+				readMaxBytes:    g.ReadMaxBytes,
+			},
+			web: g.web,
+		},
+	})
 	if failed != nil {
-		// Negotiation failed, so we can't establish a stream. To make the
-		// request's HTTP trailers visible to interceptors, we should try to read
-		// the body to EOF.
-		_ = discard(request.Body)
-		return sender, receiver, failed
+		// Negotiation failed, so we can't establish a stream.
+		_ = conn.Close(failed)
+		return nil, false
 	}
-	return sender, receiver, nil
+	return conn, true
 }
 
 type grpcClient struct {
@@ -211,11 +226,11 @@ func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {
 	}
 }
 
-func (g *grpcClient) NewStream(
+func (g *grpcClient) NewConn(
 	ctx context.Context,
 	spec Spec,
 	header http.Header,
-) (Sender, Receiver) {
+) ClientConn {
 	if deadline, ok := ctx.Deadline(); ok {
 		if encodedDeadline, err := grpcEncodeTimeout(time.Until(deadline)); err == nil {
 			// Tests verify that the error in encodeTimeout is unreachable, so we
@@ -230,9 +245,12 @@ func (g *grpcClient) NewStream(
 		spec,
 		header,
 	)
-	sender := &grpcClientSender{
-		spec:       spec,
-		duplexCall: duplexCall,
+	conn := &grpcClientConn{
+		spec:             spec,
+		duplexCall:       duplexCall,
+		compressionPools: g.CompressionPools,
+		bufferPool:       g.BufferPool,
+		protobuf:         g.Protobuf,
 		marshaler: grpcMarshaler{
 			envelopeWriter: envelopeWriter{
 				writer:           duplexCall,
@@ -242,135 +260,84 @@ func (g *grpcClient) NewStream(
 				bufferPool:       g.BufferPool,
 			},
 		},
+		unmarshaler: grpcUnmarshaler{
+			envelopeReader: envelopeReader{
+				reader:       duplexCall,
+				codec:        g.Codec,
+				bufferPool:   g.BufferPool,
+				readMaxBytes: g.ReadMaxBytes,
+			},
+		},
+		responseHeader:  make(http.Header),
+		responseTrailer: make(http.Header),
 	}
-	var receiver Receiver
+	duplexCall.SetValidateResponse(conn.validateResponse)
 	if g.web {
-		webReceiver := &grpcClientReceiver{
-			spec:             spec,
-			bufferPool:       g.BufferPool,
-			compressionPools: g.CompressionPools,
-			protobuf:         g.Protobuf,
-			header:           make(http.Header),
-			trailer:          make(http.Header),
-			duplexCall:       duplexCall,
-			unmarshaler: grpcUnmarshaler{
-				web: true,
-				envelopeReader: envelopeReader{
-					reader:       duplexCall,
-					codec:        g.Codec,
-					bufferPool:   g.BufferPool,
-					readMaxBytes: g.ReadMaxBytes,
-				},
-			},
-			readTrailers: func(unmarshaler *grpcUnmarshaler, _ *duplexHTTPCall) http.Header {
-				return unmarshaler.WebTrailer()
-			},
+		conn.unmarshaler.web = true
+		conn.readTrailers = func(unmarshaler *grpcUnmarshaler, _ *duplexHTTPCall) http.Header {
+			return unmarshaler.WebTrailer()
 		}
-		receiver = webReceiver
-		duplexCall.SetValidateResponse(webReceiver.validateResponse)
 	} else {
-		grpcReceiver := &grpcClientReceiver{
-			spec:             spec,
-			bufferPool:       g.BufferPool,
-			compressionPools: g.CompressionPools,
-			protobuf:         g.Protobuf,
-			header:           make(http.Header),
-			trailer:          make(http.Header),
-			duplexCall:       duplexCall,
-			unmarshaler: grpcUnmarshaler{
-				web: false,
-				envelopeReader: envelopeReader{
-					reader:       duplexCall,
-					codec:        g.Codec,
-					bufferPool:   g.BufferPool,
-					readMaxBytes: g.ReadMaxBytes,
-				},
-			},
-			readTrailers: func(_ *grpcUnmarshaler, call *duplexHTTPCall) http.Header {
-				// To access HTTP trailers, we need to read the body to EOF.
-				_ = discard(call)
-				return call.ResponseTrailer()
-			},
+		conn.readTrailers = func(_ *grpcUnmarshaler, call *duplexHTTPCall) http.Header {
+			// To access HTTP trailers, we need to read the body to EOF.
+			_ = discard(call)
+			return call.ResponseTrailer()
 		}
-		receiver = grpcReceiver
-		duplexCall.SetValidateResponse(grpcReceiver.validateResponse)
 	}
-	return wrapClientStreamWithCodedErrors(sender, receiver)
+	return wrapClientConnWithCodedErrors(conn)
 }
 
-// grpcClientSender works for both gRPC and gRPC-Web. From our perspective, the
-// protocols differ only in how trailers are sent, and clients aren't allowed
-// to send trailers.
-type grpcClientSender struct {
-	spec       Spec
-	duplexCall *duplexHTTPCall
-	marshaler  grpcMarshaler
+// grpcClientConn works for both gRPC and gRPC-Web.
+type grpcClientConn struct {
+	spec             Spec
+	duplexCall       *duplexHTTPCall
+	compressionPools readOnlyCompressionPools
+	bufferPool       *bufferPool
+	protobuf         Codec // for errors
+	marshaler        grpcMarshaler
+	unmarshaler      grpcUnmarshaler
+	responseHeader   http.Header
+	responseTrailer  http.Header
+	readTrailers     func(*grpcUnmarshaler, *duplexHTTPCall) http.Header
 }
 
-func (s *grpcClientSender) Spec() Spec {
-	return s.spec
+func (cc *grpcClientConn) Spec() Spec {
+	return cc.spec
 }
 
-func (s *grpcClientSender) Header() http.Header {
-	return s.duplexCall.Header()
-}
-
-func (s *grpcClientSender) Trailer() (http.Header, bool) {
-	return nil, false
-}
-
-func (s *grpcClientSender) Send(message any) error {
-	if err := s.marshaler.Marshal(message); err != nil {
+func (cc *grpcClientConn) Send(msg any) error {
+	if err := cc.marshaler.Marshal(msg); err != nil {
 		return err
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
-func (s *grpcClientSender) Close(_ error) error {
-	return s.duplexCall.CloseWrite()
+func (cc *grpcClientConn) RequestHeader() http.Header {
+	return cc.duplexCall.Header()
 }
 
-type grpcClientReceiver struct {
-	spec             Spec
-	compressionPools readOnlyCompressionPools
-	bufferPool       *bufferPool
-	protobuf         Codec // for errors
-	header           http.Header
-	trailer          http.Header
-	duplexCall       *duplexHTTPCall
-	unmarshaler      grpcUnmarshaler
-	readTrailers     func(*grpcUnmarshaler, *duplexHTTPCall) http.Header
+func (cc *grpcClientConn) CloseRequest() error {
+	return cc.duplexCall.CloseWrite()
 }
 
-func (r *grpcClientReceiver) Spec() Spec {
-	return r.spec
-}
-
-func (r *grpcClientReceiver) Header() http.Header {
-	r.duplexCall.BlockUntilResponseReady()
-	return r.header
-}
-
-func (r *grpcClientReceiver) Trailer() (http.Header, bool) {
-	r.duplexCall.BlockUntilResponseReady()
-	return r.trailer, true
-}
-
-func (r *grpcClientReceiver) Receive(message any) error {
-	r.duplexCall.BlockUntilResponseReady()
-	err := r.unmarshaler.Unmarshal(message)
+func (cc *grpcClientConn) Receive(msg any) error {
+	cc.duplexCall.BlockUntilResponseReady()
+	err := cc.unmarshaler.Unmarshal(msg)
 	if err == nil {
 		return nil
 	}
-	if r.header.Get(grpcHeaderStatus) != "" {
+	if cc.responseHeader.Get(grpcHeaderStatus) != "" {
 		// We got what gRPC calls a trailers-only response, which puts the trailing
 		// metadata (including errors) into HTTP headers. validateResponse has
 		// already extracted the error.
 		return err
 	}
 	// See if the server sent an explicit error in the HTTP or gRPC-Web trailers.
-	mergeHeaders(r.trailer, r.readTrailers(&r.unmarshaler, r.duplexCall))
-	serverErr := grpcErrorFromTrailer(r.bufferPool, r.protobuf, r.trailer)
+	mergeHeaders(
+		cc.responseTrailer,
+		cc.readTrailers(&cc.unmarshaler, cc.duplexCall),
+	)
+	serverErr := grpcErrorFromTrailer(cc.bufferPool, cc.protobuf, cc.responseTrailer)
 	if serverErr != nil && (errors.Is(err, io.EOF) || !errors.Is(serverErr, errTrailersWithoutGRPCStatus)) {
 		// We've either:
 		//   - Cleanly read until the end of the response body and *not* received
@@ -380,76 +347,125 @@ func (r *grpcClientReceiver) Receive(message any) error {
 		// This is expected from a protocol perspective, but receiving trailers
 		// means that we're _not_ getting a message. For users to realize that
 		// the stream has ended, Receive must return an error.
-		serverErr.meta = r.Header().Clone()
-		mergeHeaders(serverErr.meta, r.trailer)
-		r.duplexCall.SetError(serverErr)
+		serverErr.meta = cc.responseHeader.Clone()
+		mergeHeaders(serverErr.meta, cc.responseTrailer)
+		cc.duplexCall.SetError(serverErr)
 		return serverErr
 	}
 	// This was probably an error converting the bytes to a message or an error
 	// reading from the network. We're going to return it to the
 	// user, but we also want to setResponseError so Send errors out.
-	r.duplexCall.SetError(err)
+	cc.duplexCall.SetError(err)
 	return err
 }
 
-func (r *grpcClientReceiver) Close() error {
-	return r.duplexCall.CloseRead()
+func (cc *grpcClientConn) ResponseHeader() http.Header {
+	cc.duplexCall.BlockUntilResponseReady()
+	return cc.responseHeader
 }
 
-// validateResponse is called by duplexHTTPCall in a separate goroutine.
-func (r *grpcClientReceiver) validateResponse(response *http.Response) *Error {
+func (cc *grpcClientConn) ResponseTrailer() http.Header {
+	cc.duplexCall.BlockUntilResponseReady()
+	return cc.responseTrailer
+}
+
+func (cc *grpcClientConn) CloseResponse() error {
+	return cc.duplexCall.CloseRead()
+}
+
+func (cc *grpcClientConn) validateResponse(response *http.Response) *Error {
 	if err := grpcValidateResponse(
 		response,
-		r.header,
-		r.trailer,
-		r.compressionPools,
-		r.bufferPool,
-		r.protobuf,
+		cc.responseHeader,
+		cc.responseTrailer,
+		cc.compressionPools,
+		cc.bufferPool,
+		cc.protobuf,
 	); err != nil {
 		return err
 	}
 	compression := response.Header.Get(grpcHeaderCompression)
-	r.unmarshaler.envelopeReader.compressionPool = r.compressionPools.Get(compression)
+	cc.unmarshaler.envelopeReader.compressionPool = cc.compressionPools.Get(compression)
 	return nil
 }
 
-type grpcHandlerSender struct {
-	spec        Spec
-	web         bool
-	marshaler   grpcMarshaler
-	protobuf    Codec // for errors
-	writer      http.ResponseWriter
-	header      http.Header
-	trailer     http.Header
-	wroteToBody bool
-	bufferPool  *bufferPool
+type grpcHandlerConn struct {
+	spec            Spec
+	web             bool
+	bufferPool      *bufferPool
+	protobuf        Codec // for errors
+	marshaler       grpcMarshaler
+	responseWriter  http.ResponseWriter
+	responseHeader  http.Header
+	responseTrailer http.Header
+	wroteToBody     bool
+	request         *http.Request
+	unmarshaler     grpcUnmarshaler
 }
 
-func (hs *grpcHandlerSender) Send(message any) error {
-	defer flushResponseWriter(hs.writer)
-	if !hs.wroteToBody {
-		mergeHeaders(hs.writer.Header(), hs.header)
-		hs.wroteToBody = true
+func (hc *grpcHandlerConn) Spec() Spec {
+	return hc.spec
+}
+
+func (hc *grpcHandlerConn) Receive(msg any) error {
+	if err := hc.unmarshaler.Unmarshal(msg); err != nil {
+		return err // already coded
 	}
-	if err := hs.marshaler.Marshal(message); err != nil {
+	return nil // must be a literal nil: nil *Error is a non-nil error
+}
+
+func (hc *grpcHandlerConn) RequestHeader() http.Header {
+	return hc.request.Header
+}
+
+func (hc *grpcHandlerConn) Send(msg any) error {
+	defer flushResponseWriter(hc.responseWriter)
+	if !hc.wroteToBody {
+		mergeHeaders(hc.responseWriter.Header(), hc.responseHeader)
+		hc.wroteToBody = true
+	}
+	if err := hc.marshaler.Marshal(msg); err != nil {
 		return err
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
-func (hs *grpcHandlerSender) Close(err error) error {
-	defer flushResponseWriter(hs.writer)
+func (hc *grpcHandlerConn) ResponseHeader() http.Header {
+	return hc.responseHeader
+}
+
+func (hc *grpcHandlerConn) ResponseTrailer() http.Header {
+	return hc.responseTrailer
+}
+
+func (hc *grpcHandlerConn) Close(err error) (retErr error) { // nolint:nonamedreturns
+	defer func() {
+		// We don't want to copy unread portions of the body to /dev/null here: if
+		// the client hasn't closed the request body, we'll block until the server
+		// timeout kicks in. This could happen because the client is malicious, but
+		// a well-intentioned client may just not expect the server to be returning
+		// an error for a streaming RPC. Better to accept that we can't always reuse
+		// TCP connections.
+		closeErr := hc.request.Body.Close()
+		if retErr == nil {
+			retErr = closeErr
+		}
+	}()
+	defer flushResponseWriter(hc.responseWriter)
 	// If we haven't written the headers yet, do so.
-	if !hs.wroteToBody {
-		mergeHeaders(hs.writer.Header(), hs.header)
+	if !hc.wroteToBody {
+		mergeHeaders(hc.responseWriter.Header(), hc.responseHeader)
 	}
 	// gRPC always sends the error's code, message, details, and metadata as
 	// trailing metadata. The Connect protocol doesn't do this, so we don't want
 	// to mutate the trailers map that the user sees.
-	mergedTrailers := make(http.Header, len(hs.trailer)+2) // always make space for status & message
-	mergeHeaders(mergedTrailers, hs.trailer)
-	grpcErrorToTrailer(hs.bufferPool, mergedTrailers, hs.protobuf, err)
-	if hs.web && !hs.wroteToBody {
+	mergedTrailers := make(
+		http.Header,
+		len(hc.responseTrailer)+2, // always make space for status & message
+	)
+	mergeHeaders(mergedTrailers, hc.responseTrailer)
+	grpcErrorToTrailer(hc.bufferPool, mergedTrailers, hc.protobuf, err)
+	if hc.web && !hc.wroteToBody {
 		// We're using gRPC-Web and we haven't yet written to the body. Since we're
 		// not sending any response messages, the gRPC specification calls this a
 		// "trailers-only" response. Under those circumstances, the gRPC-Web spec
@@ -457,13 +473,13 @@ func (hs *grpcHandlerSender) Close(err error) error {
 		// instead. Envoy is the canonical implementation of the gRPC-Web protocol,
 		// so we emulate Envoy's behavior and put the trailing metadata in the HTTP
 		// headers.
-		mergeHeaders(hs.writer.Header(), mergedTrailers)
+		mergeHeaders(hc.responseWriter.Header(), mergedTrailers)
 		return nil
 	}
-	if hs.web {
+	if hc.web {
 		// We're using gRPC-Web and we've already sent the headers, so we write
 		// trailing metadata to the HTTP body.
-		if err := hs.marshaler.MarshalWebTrailers(mergedTrailers); err != nil {
+		if err := hc.marshaler.MarshalWebTrailers(mergedTrailers); err != nil {
 			return err
 		}
 		return nil // must be a literal nil: nil *Error is a non-nil error
@@ -482,105 +498,10 @@ func (hs *grpcHandlerSender) Close(err error) error {
 	// logic breaks Envoy's gRPC-Web translation.
 	for key, values := range mergedTrailers {
 		for _, value := range values {
-			hs.writer.Header().Add(http.TrailerPrefix+key, value)
+			hc.responseWriter.Header().Add(http.TrailerPrefix+key, value)
 		}
 	}
 	return nil
-}
-
-func (hs *grpcHandlerSender) Spec() Spec {
-	return hs.spec
-}
-
-func (hs *grpcHandlerSender) Header() http.Header {
-	return hs.header
-}
-
-func (hs *grpcHandlerSender) Trailer() (http.Header, bool) {
-	return hs.trailer, true
-}
-
-type grpcHandlerReceiver struct {
-	spec        Spec
-	unmarshaler grpcUnmarshaler
-	request     *http.Request
-}
-
-func newGRPCHandlerStream(
-	spec Spec,
-	web bool,
-	responseWriter http.ResponseWriter,
-	request *http.Request,
-	compressMinBytes int,
-	codec Codec,
-	protobuf Codec, // for errors
-	requestCompressionPools *compressionPool,
-	responseCompressionPools *compressionPool,
-	bufferPool *bufferPool,
-	readMaxBytes int,
-) (*grpcHandlerSender, *grpcHandlerReceiver) {
-	sender := &grpcHandlerSender{
-		spec: spec,
-		web:  web,
-		marshaler: grpcMarshaler{
-			envelopeWriter: envelopeWriter{
-				writer:           responseWriter,
-				compressionPool:  responseCompressionPools,
-				codec:            codec,
-				compressMinBytes: compressMinBytes,
-				bufferPool:       bufferPool,
-			},
-		},
-		protobuf:   protobuf,
-		writer:     responseWriter,
-		header:     make(http.Header),
-		trailer:    make(http.Header),
-		bufferPool: bufferPool,
-	}
-	receiver := &grpcHandlerReceiver{
-		spec: spec,
-		unmarshaler: grpcUnmarshaler{
-			envelopeReader: envelopeReader{
-				reader:          request.Body,
-				codec:           codec,
-				compressionPool: requestCompressionPools,
-				bufferPool:      bufferPool,
-				readMaxBytes:    readMaxBytes,
-			},
-			web: web,
-		},
-		request: request,
-	}
-	return sender, receiver
-}
-
-func (hr *grpcHandlerReceiver) Receive(message any) error {
-	if err := hr.unmarshaler.Unmarshal(message); err != nil {
-		return err // already coded
-	}
-	return nil // must be a literal nil: nil *Error is a non-nil error
-}
-
-func (hr *grpcHandlerReceiver) Close() error {
-	// We don't want to copy unread portions of the body to /dev/null here: if
-	// the client hasn't closed the request body, we'll block until the server
-	// timeout kicks in. This could happen because the client is malicious, but
-	// a well-intentioned client may just not expect the server to be returning
-	// an error for a streaming RPC. Better to accept that we can't always reuse
-	// TCP connections.
-	return hr.request.Body.Close()
-}
-
-func (hr *grpcHandlerReceiver) Spec() Spec {
-	return hr.spec
-}
-
-func (hr *grpcHandlerReceiver) Header() http.Header {
-	return hr.request.Header
-}
-
-func (hr *grpcHandlerReceiver) Trailer() (http.Header, bool) {
-	return nil, false
 }
 
 type grpcMarshaler struct {

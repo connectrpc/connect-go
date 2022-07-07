@@ -69,25 +69,25 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 	// once at client creation.
 	unarySpec := config.newSpec(StreamTypeUnary)
 	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
-		sender, receiver := protocolClient.NewStream(ctx, unarySpec, request.Header())
+		conn := protocolClient.NewConn(ctx, unarySpec, request.Header())
 		// Send always returns an io.EOF unless the error is from the client-side.
 		// We want the user to continue to call Receive in those cases to get the
 		// full error from the server-side.
-		if err := sender.Send(request.Any()); err != nil && !errors.Is(err, io.EOF) {
-			_ = sender.Close(err)
-			_ = receiver.Close()
+		if err := conn.Send(request.Any()); err != nil && !errors.Is(err, io.EOF) {
+			_ = conn.CloseRequest()
+			_ = conn.CloseResponse()
 			return nil, err
 		}
-		if err := sender.Close(nil); err != nil {
-			_ = receiver.Close()
+		if err := conn.CloseRequest(); err != nil {
+			_ = conn.CloseResponse()
 			return nil, err
 		}
-		response, err := receiveUnaryResponse[Res](receiver)
+		response, err := receiveUnaryResponse[Res](conn)
 		if err != nil {
-			_ = receiver.Close()
+			_ = conn.CloseResponse()
 			return nil, err
 		}
-		return response, receiver.Close()
+		return response, conn.CloseResponse()
 	})
 	if interceptor := config.Interceptor; interceptor != nil {
 		unaryFunc = interceptor.WrapUnary(unaryFunc)
@@ -123,8 +123,7 @@ func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamFo
 	if c.err != nil {
 		return &ClientStreamForClient[Req, Res]{err: c.err}
 	}
-	sender, receiver := c.newStream(ctx, StreamTypeClient)
-	return &ClientStreamForClient[Req, Res]{sender: sender, receiver: receiver}
+	return &ClientStreamForClient[Req, Res]{conn: c.newConn(ctx, StreamTypeClient)}
 }
 
 // CallServerStream calls a server streaming procedure.
@@ -132,20 +131,20 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 	if c.err != nil {
 		return nil, c.err
 	}
-	sender, receiver := c.newStream(ctx, StreamTypeServer)
-	mergeHeaders(sender.Header(), request.header)
+	conn := c.newConn(ctx, StreamTypeServer)
+	mergeHeaders(conn.RequestHeader(), request.header)
 	// Send always returns an io.EOF unless the error is from the client-side.
 	// We want the user to continue to call Receive in those cases to get the
 	// full error from the server-side.
-	if err := sender.Send(request.Msg); err != nil && !errors.Is(err, io.EOF) {
-		_ = sender.Close(err)
-		_ = receiver.Close()
+	if err := conn.Send(request.Msg); err != nil && !errors.Is(err, io.EOF) {
+		_ = conn.CloseRequest()
+		_ = conn.CloseResponse()
 		return nil, err
 	}
-	if err := sender.Close(nil); err != nil {
+	if err := conn.CloseRequest(); err != nil {
 		return nil, err
 	}
-	return &ServerStreamForClient[Res]{receiver: receiver}, nil
+	return &ServerStreamForClient[Res]{conn: conn}, nil
 }
 
 // CallBidiStream calls a bidirectional streaming procedure.
@@ -153,22 +152,19 @@ func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForCli
 	if c.err != nil {
 		return &BidiStreamForClient[Req, Res]{err: c.err}
 	}
-	sender, receiver := c.newStream(ctx, StreamTypeBidi)
-	return &BidiStreamForClient[Req, Res]{sender: sender, receiver: receiver}
+	return &BidiStreamForClient[Req, Res]{conn: c.newConn(ctx, StreamTypeBidi)}
 }
 
-func (c *Client[Req, Res]) newStream(ctx context.Context, streamType StreamType) (Sender, Receiver) {
-	if interceptor := c.config.Interceptor; interceptor != nil {
-		ctx = interceptor.WrapStreamContext(ctx)
+func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType) ClientConn {
+	newConn := func(ctx context.Context, spec Spec) ClientConn {
+		header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
+		c.protocolClient.WriteRequestHeader(streamType, header)
+		return c.protocolClient.NewConn(ctx, spec, header)
 	}
-	header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
-	c.protocolClient.WriteRequestHeader(streamType, header)
-	sender, receiver := c.protocolClient.NewStream(ctx, c.config.newSpec(streamType), header)
 	if interceptor := c.config.Interceptor; interceptor != nil {
-		sender = interceptor.WrapStreamSender(ctx, sender)
-		receiver = interceptor.WrapStreamReceiver(ctx, receiver)
+		newConn = interceptor.WrapStreamingClient(newConn)
 	}
-	return sender, receiver
+	return newConn(ctx, c.config.newSpec(streamType))
 }
 
 type clientConfig struct {

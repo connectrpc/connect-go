@@ -203,7 +203,7 @@ func TestServer(t *testing.T) {
 					err := stream.Send(&pingv1.CumSumRequest{Number: n})
 					assert.Nil(t, err, assert.Sprintf("send error #%d", i))
 				}
-				assert.Nil(t, stream.CloseSend())
+				assert.Nil(t, stream.CloseRequest())
 			}()
 			go func() {
 				defer wg.Done()
@@ -215,7 +215,7 @@ func TestServer(t *testing.T) {
 					assert.Nil(t, err)
 					got = append(got, msg.Sum)
 				}
-				assert.Nil(t, stream.CloseReceive())
+				assert.Nil(t, stream.CloseResponse())
 			}()
 			wg.Wait()
 			assert.Equal(t, got, expect)
@@ -246,11 +246,11 @@ func TestServer(t *testing.T) {
 			}
 			// Deliberately closing with calling Send to test the behavior of Receive.
 			// This test case is based on the grpc interop tests.
-			assert.Nil(t, stream.CloseSend())
+			assert.Nil(t, stream.CloseRequest())
 			response, err := stream.Receive()
 			assert.Nil(t, response)
 			assert.True(t, errors.Is(err, io.EOF))
-			assert.Nil(t, stream.CloseReceive()) // clean-up the stream
+			assert.Nil(t, stream.CloseResponse()) // clean-up the stream
 		})
 		t.Run("cumsum_cancel_after_first_response", func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -538,16 +538,16 @@ func TestGRPCMissingTrailersError(t *testing.T) {
 		assert.Nil(t, err)
 		_, err = stream.Receive()
 		assertErrorNoTrailers(t, err)
-		assert.Nil(t, stream.CloseReceive())
+		assert.Nil(t, stream.CloseResponse())
 	})
 	t.Run("cumsum_empty_stream", func(t *testing.T) {
 		t.Parallel()
 		stream := client.CumSum(context.Background())
-		assert.Nil(t, stream.CloseSend())
+		assert.Nil(t, stream.CloseRequest())
 		response, err := stream.Receive()
 		assert.Nil(t, response)
 		assertErrorNoTrailers(t, err)
-		assert.Nil(t, stream.CloseReceive())
+		assert.Nil(t, stream.CloseResponse())
 	})
 }
 
@@ -579,7 +579,7 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 	)
 	stream := client.CumSum(context.Background())
 	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{}))
-	assert.Nil(t, stream.CloseSend())
+	assert.Nil(t, stream.CloseRequest())
 	_, err := stream.Receive()
 	assert.NotNil(t, err)
 	var connectErr *connect.Error
@@ -949,7 +949,7 @@ func failNoHTTP2(tb testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSu
 		assert.ErrorIs(tb, err, io.EOF)
 		assert.Equal(tb, connect.CodeOf(err), connect.CodeUnknown)
 	}
-	assert.Nil(tb, stream.CloseSend())
+	assert.Nil(tb, stream.CloseRequest())
 	_, err := stream.Receive()
 	assert.NotNil(tb, err) // should be 505
 	assert.True(
@@ -957,7 +957,7 @@ func failNoHTTP2(tb testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSu
 		strings.Contains(err.Error(), "HTTP status 505"),
 		assert.Sprintf("expected 505, got %v", err),
 	)
-	assert.Nil(tb, stream.CloseReceive())
+	assert.Nil(tb, stream.CloseResponse())
 }
 
 func expectClientHeader(check bool, req connect.AnyRequest) error {
