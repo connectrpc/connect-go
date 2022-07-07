@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"math"
 	"strings"
 	"sync"
 )
@@ -74,14 +75,27 @@ func newCompressionPool(
 	}
 }
 
-func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer) *Error {
+func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readMaxBytes int) *Error {
 	decompressor, err := c.getDecompressor(src)
 	if err != nil {
 		return errorf(CodeInvalidArgument, "get decompressor: %w", err)
 	}
-	if _, err := dst.ReadFrom(decompressor); err != nil {
+	reader := io.Reader(decompressor)
+	if readMaxBytes > 0 && readMaxBytes < math.MaxInt64 {
+		reader = io.LimitReader(decompressor, int64(readMaxBytes)+1)
+	}
+	bytesRead, err := dst.ReadFrom(reader)
+	if err != nil {
 		_ = c.putDecompressor(decompressor)
 		return errorf(CodeInvalidArgument, "decompress: %w", err)
+	}
+	if readMaxBytes > 0 && bytesRead > int64(readMaxBytes) {
+		discardedBytes, err := io.Copy(io.Discard, decompressor)
+		_ = c.putDecompressor(decompressor)
+		if err != nil {
+			return errorf(CodeInvalidArgument, "message is larger than configured max %d - unable to determine message size: %w", readMaxBytes, err)
+		}
+		return errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", bytesRead+discardedBytes, readMaxBytes)
 	}
 	if err := c.putDecompressor(decompressor); err != nil {
 		return errorf(CodeUnknown, "recycle decompressor: %w", err)

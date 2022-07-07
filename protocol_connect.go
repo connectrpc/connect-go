@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -169,6 +170,7 @@ func (h *connectHandler) NewStream(
 			codec:           codec,
 			compressionPool: h.CompressionPools.Get(requestCompression),
 			bufferPool:      h.BufferPool,
+			readMaxBytes:    h.ReadMaxBytes,
 		},
 	}
 	if h.Spec.StreamType != StreamTypeUnary {
@@ -195,6 +197,7 @@ func (h *connectHandler) NewStream(
 					codec:           codec,
 					compressionPool: h.CompressionPools.Get(requestCompression),
 					bufferPool:      h.BufferPool,
+					readMaxBytes:    h.ReadMaxBytes,
 				},
 			},
 		}
@@ -283,9 +286,10 @@ func (c *connectClient) NewStream(
 			header:           make(http.Header),
 			trailer:          make(http.Header),
 			unmarshaler: connectUnaryUnmarshaler{
-				reader:     duplexCall,
-				codec:      c.Codec,
-				bufferPool: c.BufferPool,
+				reader:       duplexCall,
+				codec:        c.Codec,
+				bufferPool:   c.BufferPool,
+				readMaxBytes: c.ReadMaxBytes,
 			},
 		}
 		receiver = unaryReceiver
@@ -315,9 +319,10 @@ func (c *connectClient) NewStream(
 			duplexCall:       duplexCall,
 			unmarshaler: connectStreamingUnmarshaler{
 				envelopeReader: envelopeReader{
-					reader:     duplexCall,
-					codec:      c.Codec,
-					bufferPool: c.BufferPool,
+					reader:       duplexCall,
+					codec:        c.Codec,
+					bufferPool:   c.BufferPool,
+					readMaxBytes: c.ReadMaxBytes,
 				},
 			},
 		}
@@ -794,6 +799,7 @@ type connectUnaryUnmarshaler struct {
 	compressionPool *compressionPool
 	bufferPool      *bufferPool
 	alreadyRead     bool
+	readMaxBytes    int
 }
 
 func (u *connectUnaryUnmarshaler) Unmarshal(message any) *Error {
@@ -807,17 +813,30 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 	u.alreadyRead = true
 	data := u.bufferPool.Get()
 	defer u.bufferPool.Put(data)
+	reader := u.reader
+	if u.readMaxBytes > 0 && u.readMaxBytes < math.MaxInt64 {
+		reader = io.LimitReader(u.reader, int64(u.readMaxBytes)+1)
+	}
 	// ReadFrom ignores io.EOF, so any error here is real.
-	if _, err := data.ReadFrom(u.reader); err != nil {
+	bytesRead, err := data.ReadFrom(reader)
+	if err != nil {
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
 		return errorf(CodeUnknown, "read message: %w", err)
 	}
+	if u.readMaxBytes > 0 && bytesRead > int64(u.readMaxBytes) {
+		// Attempt to read to end in order to allow connection re-use
+		discardedBytes, err := io.Copy(io.Discard, u.reader)
+		if err != nil {
+			return errorf(CodeInvalidArgument, "message is larger than configured max %d - unable to determine message size: %w", u.readMaxBytes, err)
+		}
+		return errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", bytesRead+discardedBytes, u.readMaxBytes)
+	}
 	if data.Len() > 0 && u.compressionPool != nil {
 		decompressed := u.bufferPool.Get()
 		defer u.bufferPool.Put(decompressed)
-		if err := u.compressionPool.Decompress(decompressed, data); err != nil {
+		if err := u.compressionPool.Decompress(decompressed, data, u.readMaxBytes); err != nil {
 			return err
 		}
 		data = decompressed
