@@ -17,10 +17,6 @@ jobs:
     strategy:
       matrix:
         go: [1.18.x,1.19.0-rc.1]
-        latest: [false]
-        include:
-          - go: 1.18.x
-            latest: true
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -41,5 +37,5 @@ jobs:
       - name: Lint
         # Often, lint & gofmt guidelines depend on the Go version. To prevent
         # conflicting guidance, run only on the most recent supported version.
-        if: ${{matrix.latest}}
+        if: matrix.go == '1.18.x'
         run: make lint
