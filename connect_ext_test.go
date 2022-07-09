@@ -534,9 +534,10 @@ func TestGRPCMissingTrailersError(t *testing.T) {
 	t.Run("cumsum", func(t *testing.T) {
 		t.Parallel()
 		stream := client.CumSum(context.Background())
-		err := stream.Send(&pingv1.CumSumRequest{Number: 10})
-		assert.Nil(t, err)
-		_, err = stream.Receive()
+		if err := stream.Send(&pingv1.CumSumRequest{Number: 10}); err != nil {
+			assert.ErrorIs(t, err, io.EOF)
+		}
+		_, err := stream.Receive()
 		assertErrorNoTrailers(t, err)
 		assert.Nil(t, stream.CloseResponse())
 	})
