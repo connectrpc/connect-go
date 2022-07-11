@@ -148,29 +148,32 @@ func (h *connectHandler) NewConn(
 		request.Header.Get(headerContentType),
 	)
 	codec := h.Codecs.Get(codecName) // handler.go guarantees this is not nil
-	var conn handlerConnCloser = &connectUnaryHandlerConn{
-		spec:           h.Spec,
-		request:        request,
-		responseWriter: responseWriter,
-		marshaler: connectUnaryMarshaler{
-			writer:           responseWriter,
-			codec:            codec,
-			compressMinBytes: h.CompressMinBytes,
-			compressionName:  responseCompression,
-			compressionPool:  h.CompressionPools.Get(responseCompression),
-			bufferPool:       h.BufferPool,
-			header:           responseWriter.Header(),
-		},
-		unmarshaler: connectUnaryUnmarshaler{
-			reader:          request.Body,
-			codec:           codec,
-			compressionPool: h.CompressionPools.Get(requestCompression),
-			bufferPool:      h.BufferPool,
-			readMaxBytes:    h.ReadMaxBytes,
-		},
-		responseTrailer: make(http.Header),
-	}
-	if h.Spec.StreamType != StreamTypeUnary {
+
+	var conn handlerConnCloser
+	if h.Spec.StreamType == StreamTypeUnary {
+		conn = &connectUnaryHandlerConn{
+			spec:           h.Spec,
+			request:        request,
+			responseWriter: responseWriter,
+			marshaler: connectUnaryMarshaler{
+				writer:           responseWriter,
+				codec:            codec,
+				compressMinBytes: h.CompressMinBytes,
+				compressionName:  responseCompression,
+				compressionPool:  h.CompressionPools.Get(responseCompression),
+				bufferPool:       h.BufferPool,
+				header:           responseWriter.Header(),
+			},
+			unmarshaler: connectUnaryUnmarshaler{
+				reader:          request.Body,
+				codec:           codec,
+				compressionPool: h.CompressionPools.Get(requestCompression),
+				bufferPool:      h.BufferPool,
+				readMaxBytes:    h.ReadMaxBytes,
+			},
+			responseTrailer: make(http.Header),
+		}
+	} else {
 		conn = &connectStreamingHandlerConn{
 			spec:           h.Spec,
 			request:        request,
