@@ -188,7 +188,7 @@ func (h *headerInterceptor) WrapStreamingClient(next connect.ClientConnFunc) con
 			inspectRequestHeader:  h.inspectRequestHeader,
 			inspectResponseHeader: h.inspectResponseHeader,
 		}
-	})
+	}
 }
 
 func (h *headerInterceptor) WrapStreamingHandler(next connect.HandlerConnFunc) connect.HandlerConnFunc {
@@ -198,7 +198,7 @@ func (h *headerInterceptor) WrapStreamingHandler(next connect.HandlerConnFunc) c
 			HandlerConn:           conn,
 			inspectResponseHeader: h.inspectResponseHeader,
 		})
-	})
+	}
 }
 
 type headerInspectingHandlerConn struct {
