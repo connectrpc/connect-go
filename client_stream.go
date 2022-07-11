@@ -193,7 +193,7 @@ func (b *BidiStreamForClient[Req, Res]) Receive() (*Res, error) {
 	return &msg, nil
 }
 
-// Close the receive side of the stream.
+// CloseResponse closes the receive side of the stream.
 func (b *BidiStreamForClient[Req, Res]) CloseResponse() error {
 	if b.err != nil {
 		return b.err
