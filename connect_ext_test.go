@@ -510,6 +510,13 @@ func TestGRPCMissingTrailersError(t *testing.T) {
 		)
 	}
 
+	assertNilOrEOF := func(t *testing.T, err error) {
+		t.Helper()
+		if err != nil {
+			assert.ErrorIs(t, err, io.EOF)
+		}
+	}
+
 	t.Run("ping", func(t *testing.T) {
 		t.Parallel()
 		request := connect.NewRequest(&pingv1.PingRequest{Number: 1, Text: "foobar"})
@@ -520,7 +527,7 @@ func TestGRPCMissingTrailersError(t *testing.T) {
 		t.Parallel()
 		stream := client.Sum(context.Background())
 		err := stream.Send(&pingv1.SumRequest{Number: 1})
-		assert.Nil(t, err)
+		assertNilOrEOF(t, err)
 		_, err = stream.CloseAndReceive()
 		assertErrorNoTrailers(t, err)
 	})
@@ -534,9 +541,7 @@ func TestGRPCMissingTrailersError(t *testing.T) {
 	t.Run("cumsum", func(t *testing.T) {
 		t.Parallel()
 		stream := client.CumSum(context.Background())
-		if err := stream.Send(&pingv1.CumSumRequest{Number: 10}); err != nil {
-			assert.ErrorIs(t, err, io.EOF)
-		}
+		assertNilOrEOF(t, stream.Send(&pingv1.CumSumRequest{Number: 10}))
 		_, err := stream.Receive()
 		assertErrorNoTrailers(t, err)
 		assert.Nil(t, stream.CloseResponse())
