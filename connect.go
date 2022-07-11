@@ -91,18 +91,20 @@ type HandlerConn interface {
 // errors.As.
 //
 // In order to support bidirectional streaming RPCs, all ClientConn
-// implementations must support limited concurrent use. Spec may not race with
-// any other method. Send, RequestHeader, and CloseRequest may race with each
-// other, but not with other methods. Similarly, Receive, ResponseHeader,
-// ResponseTrailer, and CloseResponse may race with each other, but not with
-// other methods.
+// implementations must support limited concurrent use. See the comments on
+// each group of methods for details.
 type ClientConn interface {
+	// Spec must be safe to call concurrently with all other methods.
 	Spec() Spec
 
+	// Send, RequestHeader, and CloseRequest may race with each other, but must
+	// be safe to call concurrently with all other methods.
 	Send(any) error
 	RequestHeader() http.Header
 	CloseRequest() error
 
+	// Receive, ResponseHeader, ResponseTrailer, and CloseResponse may race with
+	// each other, but must be safe to call concurrently with all other methods.
 	Receive(any) error
 	ResponseHeader() http.Header
 	ResponseTrailer() http.Header
