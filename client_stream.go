@@ -172,7 +172,7 @@ func (b *BidiStreamForClient[Req, Res]) Send(msg *Req) error {
 	return b.conn.Send(msg)
 }
 
-// Close the send side of the stream.
+// CloseRequest closes the send side of the stream.
 func (b *BidiStreamForClient[Req, Res]) CloseRequest() error {
 	if b.err != nil {
 		return b.err
