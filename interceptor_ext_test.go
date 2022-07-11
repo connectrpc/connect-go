@@ -192,7 +192,7 @@ func (h *headerInterceptor) WrapStreamingClient(next connect.ClientConnFunc) con
 }
 
 func (h *headerInterceptor) WrapStreamingHandler(next connect.HandlerConnFunc) connect.HandlerConnFunc {
-	return connect.HandlerConnFunc(func(ctx context.Context, conn connect.HandlerConn) error {
+	return func(ctx context.Context, conn connect.HandlerConn) error {
 		h.inspectRequestHeader(conn.Spec(), conn.RequestHeader())
 		return next(ctx, &headerInspectingHandlerConn{
 			HandlerConn:           conn,
