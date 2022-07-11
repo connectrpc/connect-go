@@ -182,7 +182,7 @@ func (h *headerInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc 
 }
 
 func (h *headerInterceptor) WrapStreamingClient(next connect.ClientConnFunc) connect.ClientConnFunc {
-	return connect.ClientConnFunc(func(ctx context.Context, spec connect.Spec) connect.ClientConn {
+	return func(ctx context.Context, spec connect.Spec) connect.ClientConn {
 		return &headerInspectingClientConn{
 			ClientConn:            next(ctx, spec),
 			inspectRequestHeader:  h.inspectRequestHeader,
