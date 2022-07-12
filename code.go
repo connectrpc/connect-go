@@ -142,10 +142,12 @@ func (c Code) String() string {
 	return fmt.Sprintf("code_%d", c)
 }
 
+// MarshalText implements encoding.TextMarshaler.
 func (c Code) MarshalText() ([]byte, error) {
 	return []byte(c.String()), nil
 }
 
+// UnmarshalText implements encoding.TextUnmarshaler.
 func (c *Code) UnmarshalText(data []byte) error {
 	dataStr := string(data)
 	switch dataStr {

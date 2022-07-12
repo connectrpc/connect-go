@@ -19,6 +19,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/quick"
 	"time"
@@ -30,12 +31,21 @@ import (
 
 func TestGRPCHandlerSender(t *testing.T) {
 	t.Parallel()
-	newSender := func(web bool) *grpcHandlerSender {
+	newConn := func(web bool) *grpcHandlerConn {
 		responseWriter := httptest.NewRecorder()
 		protobufCodec := &protoBinaryCodec{}
 		bufferPool := newBufferPool()
-		return &grpcHandlerSender{
-			web: web,
+		request, err := http.NewRequest(
+			http.MethodPost,
+			"https://demo.example.com",
+			strings.NewReader(""),
+		)
+		assert.Nil(t, err)
+		return &grpcHandlerConn{
+			spec:       Spec{},
+			web:        web,
+			bufferPool: bufferPool,
+			protobuf:   protobufCodec,
 			marshaler: grpcMarshaler{
 				envelopeWriter: envelopeWriter{
 					writer:     responseWriter,
@@ -43,37 +53,40 @@ func TestGRPCHandlerSender(t *testing.T) {
 					bufferPool: bufferPool,
 				},
 			},
-			protobuf:   protobufCodec,
-			writer:     responseWriter,
-			header:     make(http.Header),
-			trailer:    make(http.Header),
-			bufferPool: bufferPool,
+			responseWriter:  responseWriter,
+			responseHeader:  make(http.Header),
+			responseTrailer: make(http.Header),
+			request:         request,
+			unmarshaler: grpcUnmarshaler{
+				envelopeReader: envelopeReader{
+					reader:     request.Body,
+					codec:      protobufCodec,
+					bufferPool: bufferPool,
+				},
+			},
 		}
 	}
 	t.Run("web", func(t *testing.T) {
 		t.Parallel()
-		testGRPCHandlerSenderMetadata(t, newSender(true))
+		testGRPCHandlerConnMetadata(t, newConn(true))
 	})
 	t.Run("http2", func(t *testing.T) {
 		t.Parallel()
-		testGRPCHandlerSenderMetadata(t, newSender(false))
+		testGRPCHandlerConnMetadata(t, newConn(false))
 	})
 }
 
-func testGRPCHandlerSenderMetadata(t *testing.T, sender Sender) {
+func testGRPCHandlerConnMetadata(t *testing.T, conn handlerConnCloser) {
 	// Closing the sender shouldn't unpredictably mutate user-visible headers or
 	// trailers.
 	t.Helper()
-	expectHeaders := sender.Header().Clone()
-	originalTrailers, hasOriginalTrailers := sender.Trailer()
-	assert.True(t, hasOriginalTrailers)
-	expectTrailers := originalTrailers.Clone()
-	sender.Close(NewError(CodeUnavailable, errors.New("oh no")))
-	if diff := cmp.Diff(expectHeaders, sender.Header()); diff != "" {
+	expectHeaders := conn.ResponseHeader().Clone()
+	expectTrailers := conn.ResponseTrailer().Clone()
+	conn.Close(NewError(CodeUnavailable, errors.New("oh no")))
+	if diff := cmp.Diff(expectHeaders, conn.ResponseHeader()); diff != "" {
 		t.Errorf("headers changed:\n%s", diff)
 	}
-	gotTrailers, hasGotTrailers := sender.Trailer()
-	assert.True(t, hasGotTrailers)
+	gotTrailers := conn.ResponseTrailer()
 	if diff := cmp.Diff(expectTrailers, gotTrailers); diff != "" {
 		t.Errorf("trailers changed:\n%s", diff)
 	}
