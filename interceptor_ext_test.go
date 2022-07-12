@@ -18,7 +18,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -26,68 +25,6 @@ import (
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
-
-func TestClientStreamErrors(t *testing.T) {
-	t.Parallel()
-	_, err := pingv1connect.
-		NewPingServiceClient(http.DefaultClient, "INVALID_URL").
-		Ping(context.Background(), nil)
-	assert.NotNil(t, err)
-	assert.Match(t, err.Error(), "missing scheme")
-	// We don't even get to calling methods on the client, so there's no question
-	// of interceptors running. Once we're calling methods on the client, all
-	// errors are visible to interceptors.
-}
-
-func TestHandlerStreamErrors(t *testing.T) {
-	t.Parallel()
-	// If we receive an HTTP request and send a response, interceptors should
-	// fire - even if we can't successfully set up a stream. (This is different
-	// from clients, where stream creation fails before any HTTP request is
-	// issued.)
-	var called bool
-	reset := func() {
-		called = false
-	}
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(
-		pingServer{},
-		connect.WithInterceptors(&assertCalledInterceptor{&called}),
-	))
-	server := httptest.NewServer(mux)
-	defer server.Close()
-
-	t.Run("unary", func(t *testing.T) { // nolint:paralleltest
-		defer reset()
-		request, err := http.NewRequest(
-			http.MethodPost,
-			server.URL+"/connect.ping.v1.PingService/Ping",
-			strings.NewReader(""),
-		)
-		assert.Nil(t, err)
-		request.Header.Set("Content-Type", "application/grpc+proto")
-		request.Header.Set("Grpc-Timeout", "INVALID")
-		res, err := server.Client().Do(request)
-		assert.Nil(t, err)
-		assert.Equal(t, res.StatusCode, http.StatusOK)
-		assert.True(t, called)
-	})
-	t.Run("stream", func(t *testing.T) { // nolint:paralleltest
-		defer reset()
-		request, err := http.NewRequest(
-			http.MethodPost,
-			server.URL+"/connect.ping.v1.PingService/CountUp",
-			strings.NewReader(""),
-		)
-		assert.Nil(t, err)
-		request.Header.Set("Content-Type", "application/grpc+proto")
-		request.Header.Set("Grpc-Timeout", "INVALID")
-		res, err := server.Client().Do(request)
-		assert.Nil(t, err)
-		assert.Equal(t, res.StatusCode, http.StatusOK)
-		assert.True(t, called)
-	})
-}
 
 func TestOnionOrderingEndToEnd(t *testing.T) {
 	t.Parallel()
@@ -188,10 +125,18 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 		server.URL,
 		clientOnion,
 	)
+
 	_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
 	assert.Nil(t, err)
-	_, err = client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
+
+	responses, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
 	assert.Nil(t, err)
+	var sum int64
+	for responses.Receive() {
+		sum += responses.Msg().Number
+	}
+	assert.Equal(t, sum, 55)
+	assert.Nil(t, responses.Close())
 }
 
 // headerInterceptor makes it easier to write interceptors that inspect or
@@ -236,84 +181,63 @@ func (h *headerInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc 
 	}
 }
 
-func (h *headerInterceptor) WrapStreamContext(ctx context.Context) context.Context {
-	return ctx
-}
-
-// WrapStreamSender implements Interceptor. Depending on whether it's operating
-// on a client or handler, it wraps the sender with the request- or
-// response-inspecting function.
-func (h *headerInterceptor) WrapStreamSender(ctx context.Context, sender connect.Sender) connect.Sender {
-	if sender.Spec().IsClient {
-		return &headerInspectingSender{Sender: sender, inspect: h.inspectRequestHeader}
-	}
-	return &headerInspectingSender{Sender: sender, inspect: h.inspectResponseHeader}
-}
-
-// WrapStreamReceiver implements Interceptor. Depending on whether it's
-// operating on a client or handler, it wraps the sender with the response- or
-// request-inspecting function.
-func (h *headerInterceptor) WrapStreamReceiver(ctx context.Context, receiver connect.Receiver) connect.Receiver {
-	if receiver.Spec().IsClient {
-		return &headerInspectingReceiver{Receiver: receiver, inspect: h.inspectResponseHeader}
-	}
-	return &headerInspectingReceiver{Receiver: receiver, inspect: h.inspectRequestHeader}
-}
-
-type headerInspectingSender struct {
-	connect.Sender
-
-	called  bool // senders don't need to be thread-safe
-	inspect func(connect.Spec, http.Header)
-}
-
-func (s *headerInspectingSender) Send(m any) error {
-	if !s.called {
-		s.inspect(s.Spec(), s.Header())
-		s.called = true
-	}
-	return s.Sender.Send(m)
-}
-
-type headerInspectingReceiver struct {
-	connect.Receiver
-
-	called  bool // receivers don't need to be thread-safe
-	inspect func(connect.Spec, http.Header)
-}
-
-func (r *headerInspectingReceiver) Receive(m any) error {
-	if !r.called {
-		r.inspect(r.Spec(), r.Header())
-		r.called = true
-	}
-	if err := r.Receiver.Receive(m); err != nil {
-		return err
-	}
-	return nil
-}
-
-type assertCalledInterceptor struct {
-	called *bool
-}
-
-func (i *assertCalledInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
-	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-		*i.called = true
-		return next(ctx, req)
+func (h *headerInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
+		return &headerInspectingClientConn{
+			StreamingClientConn:   next(ctx, spec),
+			inspectRequestHeader:  h.inspectRequestHeader,
+			inspectResponseHeader: h.inspectResponseHeader,
+		}
 	}
 }
 
-func (i *assertCalledInterceptor) WrapStreamContext(ctx context.Context) context.Context {
-	return ctx
+func (h *headerInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
+		h.inspectRequestHeader(conn.Spec(), conn.RequestHeader())
+		return next(ctx, &headerInspectingHandlerConn{
+			StreamingHandlerConn:  conn,
+			inspectResponseHeader: h.inspectResponseHeader,
+		})
+	}
 }
 
-func (i *assertCalledInterceptor) WrapStreamSender(_ context.Context, sender connect.Sender) connect.Sender {
-	*i.called = true
-	return sender
+type headerInspectingHandlerConn struct {
+	connect.StreamingHandlerConn
+
+	inspectedResponse     bool
+	inspectResponseHeader func(connect.Spec, http.Header)
 }
 
-func (i *assertCalledInterceptor) WrapStreamReceiver(_ context.Context, receiver connect.Receiver) connect.Receiver {
-	*i.called = true
-	return receiver
+func (hc *headerInspectingHandlerConn) Send(msg any) error {
+	if !hc.inspectedResponse {
+		hc.inspectResponseHeader(hc.Spec(), hc.ResponseHeader())
+		hc.inspectedResponse = true
+	}
+	return hc.StreamingHandlerConn.Send(msg)
+}
+
+type headerInspectingClientConn struct {
+	connect.StreamingClientConn
+
+	inspectedRequest      bool
+	inspectRequestHeader  func(connect.Spec, http.Header)
+	inspectedResponse     bool
+	inspectResponseHeader func(connect.Spec, http.Header)
+}
+
+func (cc *headerInspectingClientConn) Send(msg any) error {
+	if !cc.inspectedRequest {
+		cc.inspectRequestHeader(cc.Spec(), cc.RequestHeader())
+		cc.inspectedRequest = true
+	}
+	return cc.StreamingClientConn.Send(msg)
+}
+
+func (cc *headerInspectingClientConn) Receive(msg any) error {
+	err := cc.StreamingClientConn.Receive(msg)
+	if !cc.inspectedResponse {
+		cc.inspectResponseHeader(cc.Spec(), cc.ResponseHeader())
+		cc.inspectedResponse = true
+	}
+	return err
 }

@@ -57,8 +57,8 @@ func TestBidiStreamForClient_NoPanics(t *testing.T) {
 	verifyHeaders(t, bidiStream.ResponseHeader())
 	verifyHeaders(t, bidiStream.ResponseTrailer())
 	assert.ErrorIs(t, bidiStream.Send(&pingv1.CumSumRequest{}), initErr)
-	assert.ErrorIs(t, bidiStream.CloseReceive(), initErr)
-	assert.ErrorIs(t, bidiStream.CloseSend(), initErr)
+	assert.ErrorIs(t, bidiStream.CloseRequest(), initErr)
+	assert.ErrorIs(t, bidiStream.CloseResponse(), initErr)
 }
 
 func verifyHeaders(t *testing.T, headers http.Header) {
