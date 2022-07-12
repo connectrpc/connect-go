@@ -25,7 +25,7 @@ import (
 // It's returned from Client.CallClientStream, but doesn't currently have an
 // exported constructor function.
 type ClientStreamForClient[Req, Res any] struct {
-	conn ClientConn
+	conn StreamingClientConn
 	// Error from client construction. If non-nil, return for all calls.
 	err error
 }
@@ -75,7 +75,7 @@ func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Response[Res], err
 // It's returned from Client.CallServerStream, but doesn't currently have an
 // exported constructor function.
 type ServerStreamForClient[Res any] struct {
-	conn ClientConn
+	conn StreamingClientConn
 	msg  Res
 	// Error from client construction. If non-nil, return for all calls.
 	constructErr error
@@ -145,7 +145,7 @@ func (s *ServerStreamForClient[Res]) Close() error {
 // It's returned from Client.CallBidiStream, but doesn't currently have an
 // exported constructor function.
 type BidiStreamForClient[Req, Res any] struct {
-	conn ClientConn
+	conn StreamingClientConn
 	// Error from client construction. If non-nil, return for all calls.
 	err error
 }

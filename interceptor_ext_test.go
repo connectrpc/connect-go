@@ -181,28 +181,28 @@ func (h *headerInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc 
 	}
 }
 
-func (h *headerInterceptor) WrapStreamingClient(next connect.ClientConnFunc) connect.ClientConnFunc {
-	return func(ctx context.Context, spec connect.Spec) connect.ClientConn {
+func (h *headerInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
 		return &headerInspectingClientConn{
-			ClientConn:            next(ctx, spec),
+			StreamingClientConn:   next(ctx, spec),
 			inspectRequestHeader:  h.inspectRequestHeader,
 			inspectResponseHeader: h.inspectResponseHeader,
 		}
 	}
 }
 
-func (h *headerInterceptor) WrapStreamingHandler(next connect.HandlerConnFunc) connect.HandlerConnFunc {
-	return func(ctx context.Context, conn connect.HandlerConn) error {
+func (h *headerInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
 		h.inspectRequestHeader(conn.Spec(), conn.RequestHeader())
 		return next(ctx, &headerInspectingHandlerConn{
-			HandlerConn:           conn,
+			StreamingHandlerConn:  conn,
 			inspectResponseHeader: h.inspectResponseHeader,
 		})
 	}
 }
 
 type headerInspectingHandlerConn struct {
-	connect.HandlerConn
+	connect.StreamingHandlerConn
 
 	inspectedResponse     bool
 	inspectResponseHeader func(connect.Spec, http.Header)
@@ -213,11 +213,11 @@ func (hc *headerInspectingHandlerConn) Send(msg any) error {
 		hc.inspectResponseHeader(hc.Spec(), hc.ResponseHeader())
 		hc.inspectedResponse = true
 	}
-	return hc.HandlerConn.Send(msg)
+	return hc.StreamingHandlerConn.Send(msg)
 }
 
 type headerInspectingClientConn struct {
-	connect.ClientConn
+	connect.StreamingClientConn
 
 	inspectedRequest      bool
 	inspectRequestHeader  func(connect.Spec, http.Header)
@@ -230,11 +230,11 @@ func (cc *headerInspectingClientConn) Send(msg any) error {
 		cc.inspectRequestHeader(cc.Spec(), cc.RequestHeader())
 		cc.inspectedRequest = true
 	}
-	return cc.ClientConn.Send(msg)
+	return cc.StreamingClientConn.Send(msg)
 }
 
 func (cc *headerInspectingClientConn) Receive(msg any) error {
-	err := cc.ClientConn.Receive(msg)
+	err := cc.StreamingClientConn.Receive(msg)
 	if !cc.inspectedResponse {
 		cc.inspectResponseHeader(cc.Spec(), cc.ResponseHeader())
 		cc.inspectedResponse = true

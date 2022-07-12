@@ -18,20 +18,21 @@ import (
 	"context"
 )
 
-// UnaryFunc is the generic signature of a unary RPC. Interceptors wrap Funcs.
+// UnaryFunc is the generic signature of a unary RPC. Interceptors may wrap
+// Funcs.
 //
 // The type of the request and response structs depend on the codec being used.
 // When using Protobuf, request.Any() and response.Any() will always be
 // proto.Message implementations.
 type UnaryFunc func(context.Context, AnyRequest) (AnyResponse, error)
 
-// ClientConnFunc is the generic signature of a streaming RPC from the client's
-// perspective. Interceptors wrap ClientConnFuncs.
-type ClientConnFunc func(context.Context, Spec) ClientConn
+// StreamingClientFunc is the generic signature of a streaming RPC from the client's
+// perspective. Interceptors may wrap StreamingClientFuncs.
+type StreamingClientFunc func(context.Context, Spec) StreamingClientConn
 
-// HandlerConnFunc is the generic signature of a streaming RPC from the
-// handler's perspective. Interceptors wrap HandlerConnFuncs.
-type HandlerConnFunc func(context.Context, HandlerConn) error
+// StreamingHandlerFunc is the generic signature of a streaming RPC from the
+// handler's perspective. Interceptors may wrap StreamingHandlerFuncs.
+type StreamingHandlerFunc func(context.Context, StreamingHandlerConn) error
 
 // An Interceptor adds logic to a generated handler or client, like the
 // decorators or middleware you may have seen in other libraries. Interceptors
@@ -42,8 +43,8 @@ type HandlerConnFunc func(context.Context, HandlerConn) error
 // The returned functions must be safe to call concurrently.
 type Interceptor interface {
 	WrapUnary(UnaryFunc) UnaryFunc
-	WrapStreamingClient(ClientConnFunc) ClientConnFunc
-	WrapStreamingHandler(HandlerConnFunc) HandlerConnFunc
+	WrapStreamingClient(StreamingClientFunc) StreamingClientFunc
+	WrapStreamingHandler(StreamingHandlerFunc) StreamingHandlerFunc
 }
 
 // UnaryInterceptorFunc is a simple Interceptor implementation that only
@@ -54,12 +55,12 @@ type UnaryInterceptorFunc func(UnaryFunc) UnaryFunc
 func (f UnaryInterceptorFunc) WrapUnary(next UnaryFunc) UnaryFunc { return f(next) }
 
 // WrapStreamingClient implements Interceptor with a no-op.
-func (f UnaryInterceptorFunc) WrapStreamingClient(next ClientConnFunc) ClientConnFunc {
+func (f UnaryInterceptorFunc) WrapStreamingClient(next StreamingClientFunc) StreamingClientFunc {
 	return next
 }
 
 // WrapStreamingHandler implements Interceptor with a no-op.
-func (f UnaryInterceptorFunc) WrapStreamingHandler(next HandlerConnFunc) HandlerConnFunc {
+func (f UnaryInterceptorFunc) WrapStreamingHandler(next StreamingHandlerFunc) StreamingHandlerFunc {
 	return next
 }
 
@@ -89,14 +90,14 @@ func (c *chain) WrapUnary(next UnaryFunc) UnaryFunc {
 	return next
 }
 
-func (c *chain) WrapStreamingClient(next ClientConnFunc) ClientConnFunc {
+func (c *chain) WrapStreamingClient(next StreamingClientFunc) StreamingClientFunc {
 	for _, interceptor := range c.interceptors {
 		next = interceptor.WrapStreamingClient(next)
 	}
 	return next
 }
 
-func (c *chain) WrapStreamingHandler(next HandlerConnFunc) HandlerConnFunc {
+func (c *chain) WrapStreamingHandler(next StreamingHandlerFunc) StreamingHandlerFunc {
 	for _, interceptor := range c.interceptors {
 		next = interceptor.WrapStreamingHandler(next)
 	}

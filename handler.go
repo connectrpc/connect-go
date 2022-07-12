@@ -27,7 +27,7 @@ import (
 // standard library's compress/gzip.
 type Handler struct {
 	spec             Spec
-	implementation   HandlerConnFunc
+	implementation   StreamingHandlerFunc
 	protocolHandlers []protocolHandler
 	acceptPost       string // Accept-Post header
 }
@@ -54,7 +54,7 @@ func NewUnaryHandler[Req, Res any](
 		untyped = interceptor.WrapUnary(untyped)
 	}
 	// Given a stream, how should we call the unary function?
-	implementation := func(ctx context.Context, conn HandlerConn) error {
+	implementation := func(ctx context.Context, conn StreamingHandlerConn) error {
 		var msg Req
 		if err := conn.Receive(&msg); err != nil {
 			return err
@@ -91,7 +91,7 @@ func NewClientStreamHandler[Req, Res any](
 	return newStreamHandler(
 		procedure,
 		StreamTypeClient,
-		func(ctx context.Context, conn HandlerConn) error {
+		func(ctx context.Context, conn StreamingHandlerConn) error {
 			stream := &ClientStream[Req]{conn: conn}
 			res, err := implementation(ctx, stream)
 			if err != nil {
@@ -114,7 +114,7 @@ func NewServerStreamHandler[Req, Res any](
 	return newStreamHandler(
 		procedure,
 		StreamTypeServer,
-		func(ctx context.Context, conn HandlerConn) error {
+		func(ctx context.Context, conn StreamingHandlerConn) error {
 			var msg Req
 			if err := conn.Receive(&msg); err != nil {
 				return err
@@ -142,7 +142,7 @@ func NewBidiStreamHandler[Req, Res any](
 	return newStreamHandler(
 		procedure,
 		StreamTypeBidi,
-		func(ctx context.Context, conn HandlerConn) error {
+		func(ctx context.Context, conn StreamingHandlerConn) error {
 			return implementation(
 				ctx,
 				&BidiStream[Req, Res]{conn: conn},
@@ -279,7 +279,7 @@ func (c *handlerConfig) newProtocolHandlers(streamType StreamType) []protocolHan
 func newStreamHandler(
 	procedure string,
 	streamType StreamType,
-	implementation HandlerConnFunc,
+	implementation StreamingHandlerFunc,
 	options ...HandlerOption,
 ) *Handler {
 	config := newHandlerConfig(procedure, options)

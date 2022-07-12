@@ -245,7 +245,7 @@ func (c *connectClient) NewConn(
 	ctx context.Context,
 	spec Spec,
 	header http.Header,
-) ClientConn {
+) StreamingClientConn {
 	if deadline, ok := ctx.Deadline(); ok {
 		millis := int64(time.Until(deadline) / time.Millisecond)
 		if millis > 0 {
@@ -256,7 +256,7 @@ func (c *connectClient) NewConn(
 		}
 	}
 	duplexCall := newDuplexHTTPCall(ctx, c.HTTPClient, c.URL, spec, header)
-	var conn ClientConn
+	var conn StreamingClientConn
 	if spec.StreamType == StreamTypeUnary {
 		unaryConn := &connectUnaryClientConn{
 			spec:             spec,

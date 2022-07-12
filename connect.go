@@ -49,22 +49,22 @@ const (
 	StreamTypeBidi              = StreamTypeClient | StreamTypeServer
 )
 
-// HandlerConn is the server's view of a bidirectional message exchange.
-// Interceptors for streaming handlers may wrap HandlerConns.
+// StreamingHandlerConn is the server's view of a bidirectional message
+// exchange. Interceptors for streaming RPCs may wrap StreamingHandlerConns.
 //
-// Like the standard library's http.ResponseWriter, HandlerConns write response
-// headers to the network with the first call to Send. Any subsequent mutations
-// are effectively no-ops. Handlers may mutate response trailers at any time
-// before returning. When the client has finished sending data, Receive returns
-// an error wrapping io.EOF. Handlers should check for this using the standard
-// library's errors.Is.
+// Like the standard library's http.ResponseWriter, StreamingHandlerConns write
+// response headers to the network with the first call to Send. Any subsequent
+// mutations are effectively no-ops. Handlers may mutate response trailers at
+// any time before returning. When the client has finished sending data,
+// Receive returns an error wrapping io.EOF. Handlers should check for this
+// using the standard library's errors.Is.
 //
-// HandlerConn implementations provided by this module guarantee that all
-// returned errors can be cast to *Error using the standard library's
+// StreamingHandlerConn implementations provided by this module guarantee that
+// all returned errors can be cast to *Error using the standard library's
 // errors.As.
 //
-// HandlerConn implementations do not need to be safe for concurrent use.
-type HandlerConn interface {
+// StreamingHandlerConn implementations do not need to be safe for concurrent use.
+type StreamingHandlerConn interface {
 	Spec() Spec
 
 	Receive(any) error
@@ -75,25 +75,26 @@ type HandlerConn interface {
 	ResponseTrailer() http.Header
 }
 
-// ClientConn is the client's view of a bidirectional message exchange.
-// Interceptors for streaming clients may wrap ClientConns.
+// StreamingClientConn is the client's view of a bidirectional message exchange.
+// Interceptors for streaming RPCs may wrap StreamingClientConns.
 //
-// ClientConns write request headers to the network with the first call to
-// Send. Any subsequent mutations are effectively no-ops. When the server is
-// done sending data, the ClientConn's Receive method returns an error wrapping
-// io.EOF. Clients should check for this using the standard library's
-// errors.Is. If the server encounters an error during processing, subsequent
-// calls to the ClientConn's Send method will return an error wrapping io.EOF;
-// clients may then call Receive to unmarshal the error.
+// StreamingClientConns write request headers to the network with the first
+// call to Send. Any subsequent mutations are effectively no-ops. When the
+// server is done sending data, the StreamingClientConn's Receive method
+// returns an error wrapping io.EOF. Clients should check for this using the
+// standard library's errors.Is. If the server encounters an error during
+// processing, subsequent calls to the StreamingClientConn's Send method will
+// return an error wrapping io.EOF; clients may then call Receive to unmarshal
+// the error.
 //
-// ClientConn implementations provided by this module guarantee that all
-// returned errors can be cast to *Error using the standard library's
+// StreamingClientConn implementations provided by this module guarantee that
+// all returned errors can be cast to *Error using the standard library's
 // errors.As.
 //
-// In order to support bidirectional streaming RPCs, all ClientConn
+// In order to support bidirectional streaming RPCs, all StreamingClientConn
 // implementations must support limited concurrent use. See the comments on
 // each group of methods for details.
-type ClientConn interface {
+type StreamingClientConn interface {
 	// Spec must be safe to call concurrently with all other methods.
 	Spec() Spec
 
@@ -243,15 +244,16 @@ type Spec struct {
 // handlerConnCloser extends HandlerConn with a method for handlers to
 // terminate the message exchange (and optionally send an error to the client).
 type handlerConnCloser interface {
-	HandlerConn
+	StreamingHandlerConn
 
 	Close(error) error
 }
 
-// receiveUnaryResponse unmarshals a message from a ClientConn, then envelopes
-// the message and attaches headers and trailers. It attempts to consume the
-// response stream and isn't appropriate when receiving multiple messages.
-func receiveUnaryResponse[T any](conn ClientConn) (*Response[T], error) {
+// receiveUnaryResponse unmarshals a message from a StreamingClientConn, then
+// envelopes the message and attaches headers and trailers. It attempts to
+// consume the response stream and isn't appropriate when receiving multiple
+// messages.
+func receiveUnaryResponse[T any](conn StreamingClientConn) (*Response[T], error) {
 	var msg T
 	if err := conn.Receive(&msg); err != nil {
 		return nil, err

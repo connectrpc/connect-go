@@ -230,7 +230,7 @@ func (g *grpcClient) NewConn(
 	ctx context.Context,
 	spec Spec,
 	header http.Header,
-) ClientConn {
+) StreamingClientConn {
 	if deadline, ok := ctx.Deadline(); ok {
 		if encodedDeadline, err := grpcEncodeTimeout(time.Until(deadline)); err == nil {
 			// Tests verify that the error in encodeTimeout is unreachable, so we

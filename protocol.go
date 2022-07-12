@@ -111,13 +111,13 @@ type protocolClient interface {
 	// WriteRequestHeader writes any protocol-specific request headers.
 	WriteRequestHeader(StreamType, http.Header)
 
-	// NewConn constructs a ClientConn for the message exchange.
+	// NewConn constructs a StreamingClientConn for the message exchange.
 	//
 	// Implementations should assume that the supplied HTTP headers have already
 	// been populated by WriteRequestHeader. When constructing a stream for a
 	// unary call, implementations may assume that the Sender's Send and Close
 	// methods return before the Receiver's Receive or Close methods are called.
-	NewConn(context.Context, Spec, http.Header) ClientConn
+	NewConn(context.Context, Spec, http.Header) StreamingClientConn
 }
 
 // errorTranslatingHandlerConnCloser wraps a handlerConnCloser to ensure that
@@ -145,30 +145,30 @@ func (hc *errorTranslatingHandlerConnCloser) Close(err error) error {
 	return hc.fromWire(closeErr)
 }
 
-// errorTranslatingClientConn wraps a ClientConn to make sure that we always
+// errorTranslatingClientConn wraps a StreamingClientConn to make sure that we always
 // return coded errors from clients.
 //
 // It's used in protocol implementations.
 type errorTranslatingClientConn struct {
-	ClientConn
+	StreamingClientConn
 
 	fromWire func(error) error
 }
 
 func (cc *errorTranslatingClientConn) Send(msg any) error {
-	return cc.fromWire(cc.ClientConn.Send(msg))
+	return cc.fromWire(cc.StreamingClientConn.Send(msg))
 }
 
 func (cc *errorTranslatingClientConn) Receive(msg any) error {
-	return cc.fromWire(cc.ClientConn.Receive(msg))
+	return cc.fromWire(cc.StreamingClientConn.Receive(msg))
 }
 
 func (cc *errorTranslatingClientConn) CloseRequest() error {
-	return cc.fromWire(cc.ClientConn.CloseRequest())
+	return cc.fromWire(cc.StreamingClientConn.CloseRequest())
 }
 
 func (cc *errorTranslatingClientConn) CloseResponse() error {
-	return cc.fromWire(cc.ClientConn.CloseResponse())
+	return cc.fromWire(cc.StreamingClientConn.CloseResponse())
 }
 
 // wrapHandlerConnWithCodedErrors ensures that we (1) automatically code
@@ -184,10 +184,10 @@ func wrapHandlerConnWithCodedErrors(conn handlerConnCloser) handlerConnCloser {
 
 // wrapClientConnWithCodedErrors ensures that we always return *Errors from
 // public APIs.
-func wrapClientConnWithCodedErrors(conn ClientConn) ClientConn {
+func wrapClientConnWithCodedErrors(conn StreamingClientConn) StreamingClientConn {
 	return &errorTranslatingClientConn{
-		ClientConn: conn,
-		fromWire:   wrapIfUncoded,
+		StreamingClientConn: conn,
+		fromWire:            wrapIfUncoded,
 	}
 }
 

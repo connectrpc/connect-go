@@ -155,8 +155,8 @@ func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForCli
 	return &BidiStreamForClient[Req, Res]{conn: c.newConn(ctx, StreamTypeBidi)}
 }
 
-func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType) ClientConn {
-	newConn := func(ctx context.Context, spec Spec) ClientConn {
+func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType) StreamingClientConn {
+	newConn := func(ctx context.Context, spec Spec) StreamingClientConn {
 		header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
 		c.protocolClient.WriteRequestHeader(streamType, header)
 		return c.protocolClient.NewConn(ctx, spec, header)

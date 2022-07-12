@@ -25,7 +25,7 @@ import (
 // It's constructed as part of Handler invocation, but doesn't currently have
 // an exported constructor.
 type ClientStream[Req any] struct {
-	conn HandlerConn
+	conn StreamingHandlerConn
 	msg  Req
 	err  error
 }
@@ -68,7 +68,7 @@ func (c *ClientStream[Req]) Err() error {
 // It's constructed as part of Handler invocation, but doesn't currently have
 // an exported constructor.
 type ServerStream[Res any] struct {
-	conn HandlerConn
+	conn StreamingHandlerConn
 }
 
 // ResponseHeader returns the response headers. Headers are sent with the first
@@ -94,7 +94,7 @@ func (s *ServerStream[Res]) Send(msg *Res) error {
 // It's constructed as part of Handler invocation, but doesn't currently have
 // an exported constructor.
 type BidiStream[Req, Res any] struct {
-	conn HandlerConn
+	conn StreamingHandlerConn
 }
 
 // RequestHeader returns the headers received from the client.
