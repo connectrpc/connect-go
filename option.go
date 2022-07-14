@@ -132,9 +132,9 @@ func WithHandlerOptions(options ...HandlerOption) HandlerOption {
 
 // WithRecover adds an interceptor that recovers from panics. The supplied
 // function receives the context, Spec, request headers, and the recovered
-// value. It must return an error to send back to the client. It may also log
-// the panic, emit metrics, or execute other error-handling logic. Handler
-// functions must be safe to call concurrently.
+// value. It must return an error to send back to the client and be safe to
+// call concurrently. The function may also log the panic, emit metrics, or
+// execute other error-handling logic.
 //
 // To preserve compatibility with net/http's semantics, this interceptor
 // doesn't handle panics with http.ErrAbortHandler.
