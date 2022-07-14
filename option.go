@@ -16,7 +16,9 @@ package connect
 
 import (
 	"compress/gzip"
+	"context"
 	"io"
+	"net/http"
 )
 
 // A ClientOption configures a connect client.
@@ -126,6 +128,24 @@ func WithCompression(
 // WithHandlerOptions composes multiple HandlerOptions into one.
 func WithHandlerOptions(options ...HandlerOption) HandlerOption {
 	return &handlerOptionsOption{options}
+}
+
+// WithRecover adds an interceptor that recovers from panics. The supplied
+// function receives the context, Spec, request headers, and the recovered
+// value (which may be nil). It must return an error to send back to the
+// client. It may also log the panic, emit metrics, or execute other
+// error-handling logic. Handler functions must be safe to call concurrently.
+//
+// To preserve compatibility with net/http's semantics, this interceptor
+// doesn't handle panics with http.ErrAbortHandler.
+//
+// By default, handlers don't recover from panics. Because the standard
+// library's http.Server recovers from panics by default, this option isn't
+// usually necessary to prevent crashes. Instead, it helps servers collect
+// RPC-specific data during panics and send a more detailed error to
+// clients.
+func WithRecover(handle func(context.Context, Spec, http.Header, any) error) HandlerOption {
+	return WithInterceptors(&recoverHandlerInterceptor{handle: handle})
 }
 
 // Option implements both ClientOption and HandlerOption, so it can be applied
