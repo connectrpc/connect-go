@@ -144,7 +144,7 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 		}
 		decompressed := r.bufferPool.Get()
 		defer r.bufferPool.Put(decompressed)
-		if err := r.compressionPool.Decompress(decompressed, data, r.readMaxBytes); err != nil {
+		if err := r.compressionPool.Decompress(decompressed, data, int64(r.readMaxBytes)); err != nil {
 			return err
 		}
 		data = decompressed
