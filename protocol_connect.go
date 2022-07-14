@@ -770,7 +770,7 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 	data := u.bufferPool.Get()
 	defer u.bufferPool.Put(data)
 	reader := u.reader
-	if u.readMaxBytes > 0 && u.readMaxBytes < math.MaxInt64 {
+	if u.readMaxBytes > 0 && int64(u.readMaxBytes) < math.MaxInt64 {
 		reader = io.LimitReader(u.reader, int64(u.readMaxBytes)+1)
 	}
 	// ReadFrom ignores io.EOF, so any error here is real.

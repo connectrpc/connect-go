@@ -81,7 +81,7 @@ func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readM
 		return errorf(CodeInvalidArgument, "get decompressor: %w", err)
 	}
 	reader := io.Reader(decompressor)
-	if readMaxBytes > 0 && readMaxBytes < math.MaxInt64 {
+	if readMaxBytes > 0 && int64(readMaxBytes) < math.MaxInt64 {
 		reader = io.LimitReader(decompressor, int64(readMaxBytes)+1)
 	}
 	bytesRead, err := dst.ReadFrom(reader)
