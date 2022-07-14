@@ -792,7 +792,7 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 	if data.Len() > 0 && u.compressionPool != nil {
 		decompressed := u.bufferPool.Get()
 		defer u.bufferPool.Put(decompressed)
-		if err := u.compressionPool.Decompress(decompressed, data, u.readMaxBytes); err != nil {
+		if err := u.compressionPool.Decompress(decompressed, data, int64(u.readMaxBytes)); err != nil {
 			return err
 		}
 		data = decompressed

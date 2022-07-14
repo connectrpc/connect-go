@@ -75,21 +75,21 @@ func newCompressionPool(
 	}
 }
 
-func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readMaxBytes int) *Error {
+func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readMaxBytes int64) *Error {
 	decompressor, err := c.getDecompressor(src)
 	if err != nil {
 		return errorf(CodeInvalidArgument, "get decompressor: %w", err)
 	}
 	reader := io.Reader(decompressor)
-	if readMaxBytes > 0 && int64(readMaxBytes) < math.MaxInt64 {
-		reader = io.LimitReader(decompressor, int64(readMaxBytes)+1)
+	if readMaxBytes > 0 && readMaxBytes < math.MaxInt64 {
+		reader = io.LimitReader(decompressor, readMaxBytes+1)
 	}
 	bytesRead, err := dst.ReadFrom(reader)
 	if err != nil {
 		_ = c.putDecompressor(decompressor)
 		return errorf(CodeInvalidArgument, "decompress: %w", err)
 	}
-	if readMaxBytes > 0 && bytesRead > int64(readMaxBytes) {
+	if readMaxBytes > 0 && bytesRead > readMaxBytes {
 		discardedBytes, err := io.Copy(io.Discard, decompressor)
 		_ = c.putDecompressor(decompressor)
 		if err != nil {
