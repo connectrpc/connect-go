@@ -283,7 +283,7 @@ func wrapIfRSTError(err error) error {
 	}
 	msg = strings.TrimSuffix(msg, fromPeerSuffix)
 	i := strings.LastIndex(msg, ";")
-	if i < 0 || i == len(msg) {
+	if i < 0 || i >= len(msg)-1 {
 		return err
 	}
 	msg = msg[i+1:]
