@@ -41,10 +41,13 @@ func (s *panicPingServer) Ping(
 }
 
 func (s *panicPingServer) CountUp(
-	context.Context,
-	*connect.Request[pingv1.CountUpRequest],
-	*connect.ServerStream[pingv1.CountUpResponse],
+	_ context.Context,
+	_ *connect.Request[pingv1.CountUpRequest],
+	stream *connect.ServerStream[pingv1.CountUpResponse],
 ) error {
+	if err := stream.Send(&pingv1.CountUpResponse{}); err != nil {
+		return err
+	}
 	panic(s.panicWith) // nolint:forbidigo
 }
 
@@ -60,14 +63,15 @@ func TestWithRecover(t *testing.T) {
 	}
 	assertNotHandled := func(err error) {
 		t.Helper()
-		if err != nil {
-			assert.NotEqual(t, connect.CodeOf(err), connect.CodeFailedPrecondition)
-		}
+		// When HTTP/2 handlers panic, net/http sends an RST_STREAM frame with code
+		// INTERNAL_ERROR. We should be mapping this back to CodeInternal.
+		assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
 	}
 	drainStream := func(stream *connect.ServerStreamForClient[pingv1.CountUpResponse]) error {
 		t.Helper()
 		defer stream.Close()
-		assert.False(t, stream.Receive())
+		assert.True(t, stream.Receive())  // expect one response msg
+		assert.False(t, stream.Receive()) // expect panic before second response msg
 		return stream.Err()
 	}
 	pinger := &panicPingServer{}

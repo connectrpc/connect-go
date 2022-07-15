@@ -153,7 +153,8 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 	if d.response == nil {
 		return 0, fmt.Errorf("nil response from %v", d.request.URL)
 	}
-	return d.response.Body.Read(data)
+	n, err := d.response.Body.Read(data)
+	return n, wrapIfRSTError(err)
 }
 
 func (d *duplexHTTPCall) CloseRead() error {
@@ -162,9 +163,9 @@ func (d *duplexHTTPCall) CloseRead() error {
 		return nil
 	}
 	if err := discard(d.response.Body); err != nil {
-		return err
+		return wrapIfRSTError(err)
 	}
-	return d.response.Body.Close()
+	return wrapIfRSTError(d.response.Body.Close())
 }
 
 // ResponseStatusCode is the response's HTTP status code.
@@ -245,6 +246,7 @@ func (d *duplexHTTPCall) makeRequest() {
 		err = wrapIfContextError(err)
 		err = wrapIfLikelyH2CNotConfiguredError(d.request, err)
 		err = wrapIfLikelyWithGRPCNotUsedError(err)
+		err = wrapIfRSTError(err)
 		if _, ok := asError(err); !ok {
 			err = NewError(CodeUnavailable, err)
 		}
