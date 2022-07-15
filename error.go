@@ -270,8 +270,8 @@ func wrapIfRSTError(err error) error {
 		return err
 	}
 	if urlErr := new(url.Error); errors.As(err, &urlErr) {
-		// The *url.Error is wrapping a *http.http2StreamError, which is the
-		// vendored x/net/http2.StreamError.
+		// If we get an RST_STREAM error from http.Client.Do, it's wrapped in a
+		// *url.Error.
 		err = urlErr.Unwrap()
 	}
 	msg := err.Error()
