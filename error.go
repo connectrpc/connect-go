@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
@@ -246,4 +247,60 @@ func wrapIfLikelyWithGRPCNotUsedError(err error) error {
 		return fmt.Errorf("possible missing connect.WithGPRC() client option when talking to gRPC server, see %s: %w", commonErrorsURL, err)
 	}
 	return err
+}
+
+// HTTP/2 has its own set of error codes, which it sends in RST_STREAM frames.
+// When the server sends one of these errors, we should map it back into our
+// RPC error codes following
+// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#http2-transport-mapping.
+//
+// This would be vastly simpler if we were using x/net/http2 directly, since
+// the StreamError type is exported. When x/net/http2 gets vendored into
+// net/http, though, all these types become unexported...so we're left with
+// string munging.
+func wrapIfRSTError(err error) error {
+	const (
+		streamErrPrefix = "stream error: "
+		fromPeerSuffix  = "; received from peer"
+	)
+	if err == nil {
+		return nil
+	}
+	if _, ok := asError(err); ok {
+		return err
+	}
+	if urlErr := new(url.Error); errors.As(err, &urlErr) {
+		// The *url.Error is wrapping a *http.http2StreamError, which is the
+		// vendored x/net/http2.StreamError.
+		err = urlErr.Unwrap()
+	}
+	msg := err.Error()
+	if !strings.HasPrefix(msg, streamErrPrefix) {
+		return err
+	}
+	if !strings.HasSuffix(msg, fromPeerSuffix) {
+		return err
+	}
+	msg = strings.TrimSuffix(msg, fromPeerSuffix)
+	i := strings.LastIndex(msg, ";")
+	if i < 0 || i == len(msg) {
+		return err
+	}
+	msg = msg[i+1:]
+	msg = strings.TrimSpace(msg)
+	switch msg {
+	case "NO_ERROR", "PROTOCOL_ERROR", "INTERNAL_ERROR", "FLOW_CONTROL_ERROR",
+		"SETTINGS_TIMEOUT", "FRAME_SIZE_ERROR", "COMPRESSION_ERROR", "CONNECT_ERROR":
+		return NewError(CodeInternal, err)
+	case "REFUSED_STREAM":
+		return NewError(CodeUnavailable, err)
+	case "CANCEL":
+		return NewError(CodeCanceled, err)
+	case "ENHANCE_YOUR_CALM":
+		return NewError(CodeResourceExhausted, fmt.Errorf("bandwidth exhausted: %w", err))
+	case "INADEQUATE_SECURITY":
+		return NewError(CodePermissionDenied, fmt.Errorf("transport protocol insecure: %w", err))
+	default:
+		return err
+	}
 }
