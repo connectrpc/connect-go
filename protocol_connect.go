@@ -802,28 +802,28 @@ func (d *connectWireDetail) MarshalJSON() ([]byte, error) {
 		// lets proxies w/o protobuf descriptors preserve human-readable details.
 		return []byte(d.wireJSON), nil
 	}
-	var codec protoJSONCodec
-	out, err := codec.Marshal(d.pb)
-	if err != nil { // likely no descriptor available, fall back to simpler encoding
-		// Protobuf names are ASCII letters, digits, underscore, and period, none
-		// of which need JSON escaping.
-		out = []byte(`{"@type": "`)
-		out = append(out, strings.TrimPrefix(defaultAnyResolverPrefix, d.pb.TypeUrl)...)
-		out = append(out, '"')
+	wire := struct {
+		Type  string          `json:"type"`
+		Value string          `json:"value"`
+		Debug json.RawMessage `json:"debug,omitempty"`
+	}{
+		Type:  strings.TrimPrefix(d.pb.TypeUrl, defaultAnyResolverPrefix),
+		Value: base64.RawStdEncoding.EncodeToString(d.pb.Value),
 	}
-	// Since we know that the "@value" key and base64-encoded bytes don't need
-	// escaping, it's simplest to work with the output as raw bytes.
-	out = bytes.TrimRight(out, "}")
-	out = append(out, `, "@value": "`...)
-	out = append(out, base64.RawStdEncoding.EncodeToString(d.pb.Value)...)
-	out = append(out, `"}`...)
-	return out, nil
+	// Try to produce debug info, but expect failure when we don't have
+	// descriptors.
+	var codec protoJSONCodec
+	debug, err := codec.Marshal(d.pb)
+	if err == nil && len(debug) > 2 { // don't bother sending `{}`
+		wire.Debug = json.RawMessage(debug)
+	}
+	return json.Marshal(wire)
 }
 
 func (d *connectWireDetail) UnmarshalJSON(data []byte) error {
 	var wire struct {
-		Type  string `json:"@type"`
-		Value []byte `json:"@value"`
+		Type  string `json:"type"`
+		Value string `json:"value"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
@@ -831,10 +831,14 @@ func (d *connectWireDetail) UnmarshalJSON(data []byte) error {
 	if !strings.Contains(wire.Type, "/") {
 		wire.Type = defaultAnyResolverPrefix + wire.Type
 	}
+	decoded, err := DecodeBinaryHeader(wire.Value)
+	if err != nil {
+		return fmt.Errorf("decode base64: %w", err)
+	}
 	*d = connectWireDetail{
 		pb: &anypb.Any{
 			TypeUrl: wire.Type,
-			Value:   wire.Value,
+			Value:   decoded,
 		},
 		wireJSON: string(data),
 	}
