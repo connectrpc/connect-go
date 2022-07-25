@@ -53,10 +53,17 @@ func NewErrorDetail(msg proto.Message) (*ErrorDetail, error) {
 	return &ErrorDetail{pb: pb}, nil
 }
 
-// Type is the fully-qualified name of the Detail's Protobuf message (for
+// Type is the fully-qualified name of the ErrorDetail's Protobuf message (for
 // example, acme.foo.v1.FooDetail).
 func (d *ErrorDetail) Type() string {
 	return strings.TrimPrefix(d.pb.TypeUrl, defaultAnyResolverPrefix)
+}
+
+// Bytes returns a copy of the Protobuf-serialized detail.
+func (d *ErrorDetail) Bytes() []byte {
+	out := make([]byte, len(d.pb.Value))
+	copy(out, d.pb.Value)
+	return out
 }
 
 // Value uses the Protobuf runtime's package-global registry to unmarshal the

@@ -88,6 +88,9 @@ func TestErrorDetails(t *testing.T) {
 	unmarshaled, err := connectErr.Details()[0].Value()
 	assert.Nil(t, err)
 	assert.Equal(t, unmarshaled, proto.Message(second))
+	secondBin, err := proto.Marshal(second)
+	assert.Nil(t, err)
+	assert.Equal(t, detail.Bytes(), secondBin)
 }
 
 func TestErrorIs(t *testing.T) {
