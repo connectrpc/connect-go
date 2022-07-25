@@ -56,6 +56,14 @@ func NewErrorDetail(msg proto.Message) (*ErrorDetail, error) {
 // Type is the fully-qualified name of the ErrorDetail's Protobuf message (for
 // example, acme.foo.v1.FooDetail).
 func (d *ErrorDetail) Type() string {
+	// proto.Any tries to make messages self-describing by using type URLs rather
+	// than plain type names, but there aren't any descriptor registries
+	// deployed. With the current state of the `Any` code, it's not possible to
+	// build a useful type registry either. To hide this from users, we should
+	// trim the static hostname that `Any` adds to the type name.
+	//
+	// If we ever want to support remote registries, we can add an explicit
+	// `TypeURL` method.
 	return strings.TrimPrefix(d.pb.TypeUrl, defaultAnyResolverPrefix)
 }
 
