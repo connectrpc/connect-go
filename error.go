@@ -23,26 +23,62 @@ import (
 	"strings"
 
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-const commonErrorsURL = "https://connectrpc.com/docs/go/common-errors"
+const (
+	commonErrorsURL          = "https://connectrpc.com/docs/go/common-errors"
+	defaultAnyResolverPrefix = "type.googleapis.com/"
+)
 
 // An ErrorDetail is a self-describing Protobuf message attached to an *Error.
 // Error details are sent over the network to clients, which can then work with
-// strongly-typed data rather than trying to parse a complex error message.
+// strongly-typed data rather than trying to parse a complex error message. For
+// example, you might use details to send a localized error message or retry
+// parameters to the client.
 //
-// The ErrorDetail interface is implemented by Protobuf's Any type, provided in
-// Go by the google.golang.org/protobuf/types/known/anypb package. The
-// google.golang.org/genproto/googleapis/rpc/errdetails package contains a
-// variety of Protobuf messages commonly wrapped in anypb.Any and used as error
-// details.
-type ErrorDetail interface {
-	proto.Message
+// The google.golang.org/genproto/googleapis/rpc/errdetails package contains a
+// variety of Protobuf messages commonly used as error details.
+type ErrorDetail struct {
+	pb       *anypb.Any
+	wireJSON string // preserve human-readable JSON
+}
 
-	MessageName() protoreflect.FullName
-	UnmarshalTo(proto.Message) error
+// NewErrorDetail constructs a new error detail.
+func NewErrorDetail(msg proto.Message) (*ErrorDetail, error) {
+	pb, err := anypb.New(msg)
+	if err != nil {
+		return nil, err
+	}
+	return &ErrorDetail{pb: pb}, nil
+}
+
+// Type is the fully-qualified name of the ErrorDetail's Protobuf message (for
+// example, acme.foo.v1.FooDetail).
+func (d *ErrorDetail) Type() string {
+	// proto.Any tries to make messages self-describing by using type URLs rather
+	// than plain type names, but there aren't any descriptor registries
+	// deployed. With the current state of the `Any` code, it's not possible to
+	// build a useful type registry either. To hide this from users, we should
+	// trim the static hostname that `Any` adds to the type name.
+	//
+	// If we ever want to support remote registries, we can add an explicit
+	// `TypeURL` method.
+	return strings.TrimPrefix(d.pb.TypeUrl, defaultAnyResolverPrefix)
+}
+
+// Bytes returns a copy of the Protobuf-serialized detail.
+func (d *ErrorDetail) Bytes() []byte {
+	out := make([]byte, len(d.pb.Value))
+	copy(out, d.pb.Value)
+	return out
+}
+
+// Value uses the Protobuf runtime's package-global registry to unmarshal the
+// Detail into a strongly-typed message. Typically, clients use Go type
+// assertions to cast from the proto.Message interface to concrete types.
+func (d *ErrorDetail) Value() (proto.Message, error) {
+	return d.pb.UnmarshalNew()
 }
 
 // An Error captures four key pieces of information: a Code, an underlying Go
@@ -64,7 +100,7 @@ type ErrorDetail interface {
 type Error struct {
 	code    Code
 	err     error
-	details []ErrorDetail
+	details []*ErrorDetail
 	meta    http.Header
 }
 
@@ -102,12 +138,12 @@ func (e *Error) Code() Code {
 }
 
 // Details returns the error's details.
-func (e *Error) Details() []ErrorDetail {
+func (e *Error) Details() []*ErrorDetail {
 	return e.details
 }
 
-// AddDetail appends a message to the error's details.
-func (e *Error) AddDetail(d ErrorDetail) {
+// AddDetail appends to the error's details.
+func (e *Error) AddDetail(d *ErrorDetail) {
 	e.details = append(e.details, d)
 }
 
@@ -129,27 +165,12 @@ func (e *Error) Meta() http.Header {
 	return e.meta
 }
 
-func (e *Error) detailsAsAny() ([]*anypb.Any, error) {
+func (e *Error) detailsAsAny() []*anypb.Any {
 	anys := make([]*anypb.Any, 0, len(e.details))
 	for _, detail := range e.details {
-		// If the detail is already a protobuf Any, we're golden.
-		if anyProtoDetail, ok := detail.(*anypb.Any); ok {
-			anys = append(anys, anyProtoDetail)
-			continue
-		}
-		// Otherwise, we convert it to an Any.
-		anyProtoDetail, err := anypb.New(detail)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"can't create an *anypb.Any from %v (type %T): %w",
-				detail,
-				detail,
-				err,
-			)
-		}
-		anys = append(anys, anyProtoDetail)
+		anys = append(anys, detail.pb)
 	}
-	return anys, nil
+	return anys
 }
 
 // errorf calls fmt.Errorf with the supplied template and arguments, then wraps

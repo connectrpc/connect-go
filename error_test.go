@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect/internal/assert"
-	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -34,8 +34,8 @@ func TestErrorNilUnderlying(t *testing.T) {
 	assert.Equal(t, err.Error(), CodeUnknown.String())
 	assert.Equal(t, err.Code(), CodeUnknown)
 	assert.Zero(t, err.Details())
-	detail, anyErr := anypb.New(&emptypb.Empty{})
-	assert.Nil(t, anyErr)
+	detail, detailErr := NewErrorDetail(&emptypb.Empty{})
+	assert.Nil(t, detailErr)
 	err.AddDetail(detail)
 	assert.Equal(t, len(err.Details()), 1)
 	err.Meta().Set("foo", "bar")
@@ -79,12 +79,18 @@ func TestCodeOf(t *testing.T) {
 func TestErrorDetails(t *testing.T) {
 	t.Parallel()
 	second := durationpb.New(time.Second)
-	detail, err := anypb.New(second)
+	detail, err := NewErrorDetail(second)
 	assert.Nil(t, err)
 	connectErr := NewError(CodeUnknown, errors.New("error with details"))
 	assert.Zero(t, connectErr.Details())
 	connectErr.AddDetail(detail)
-	assert.Equal(t, connectErr.Details(), []ErrorDetail{detail})
+	assert.Equal(t, len(connectErr.Details()), 1)
+	unmarshaled, err := connectErr.Details()[0].Value()
+	assert.Nil(t, err)
+	assert.Equal(t, unmarshaled, proto.Message(second))
+	secondBin, err := proto.Marshal(second)
+	assert.Nil(t, err)
+	assert.Equal(t, detail.Bytes(), secondBin)
 }
 
 func TestErrorIs(t *testing.T) {

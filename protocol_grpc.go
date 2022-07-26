@@ -662,7 +662,7 @@ func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.H
 			return errorf(CodeInternal, "server returned invalid protobuf for error details: %w", err)
 		}
 		for _, d := range status.Details {
-			retErr.details = append(retErr.details, d)
+			retErr.details = append(retErr.details, &ErrorDetail{pb: d})
 		}
 		// Prefer the Protobuf-encoded data to the headers (grpc-go does this too).
 		retErr.code = Code(status.Code)
@@ -748,18 +748,7 @@ func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Co
 		trailer.Set(grpcHeaderMessage, "")
 		return
 	}
-	status, statusErr := grpcStatusFromError(err)
-	if statusErr != nil {
-		trailer.Set(
-			grpcHeaderStatus,
-			strconv.FormatInt(int64(CodeInternal), 10 /* base */),
-		)
-		trailer.Set(
-			grpcHeaderMessage,
-			grpcPercentEncode(bufferPool, statusErr.Error()),
-		)
-		return
-	}
+	status := grpcStatusFromError(err)
 	code := strconv.Itoa(int(status.Code))
 	bin, binErr := protobuf.Marshal(status)
 	if binErr != nil {
@@ -784,7 +773,7 @@ func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Co
 	trailer.Set(grpcHeaderDetails, EncodeBinaryHeader(bin))
 }
 
-func grpcStatusFromError(err error) (*statusv1.Status, error) {
+func grpcStatusFromError(err error) *statusv1.Status {
 	status := &statusv1.Status{
 		Code:    int32(CodeUnknown),
 		Message: err.Error(),
@@ -792,13 +781,9 @@ func grpcStatusFromError(err error) (*statusv1.Status, error) {
 	if connectErr, ok := asError(err); ok {
 		status.Code = int32(connectErr.Code())
 		status.Message = connectErr.Message()
-		details, err := connectErr.detailsAsAny()
-		if err != nil {
-			return nil, err
-		}
-		status.Details = details
+		status.Details = connectErr.detailsAsAny()
 	}
-	return status, nil
+	return status
 }
 
 // grpcPercentEncode follows RFC 3986 Section 2.1 and the gRPC HTTP/2 spec.
