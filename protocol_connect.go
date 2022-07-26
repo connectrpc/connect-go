@@ -17,6 +17,7 @@ package connect
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	errorv1 "github.com/bufbuild/connect-go/internal/gen/connect/error/v1"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 const (
@@ -393,19 +394,17 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 			compressionPool: cc.compressionPools.Get(compression),
 			bufferPool:      cc.bufferPool,
 		}
-		var serverErr Error
-		if err := unmarshaler.UnmarshalFunc(
-			(*connectWireError)(&serverErr),
-			json.Unmarshal,
-		); err == nil {
-			serverErr.meta = cc.responseHeader.Clone()
-			mergeHeaders(serverErr.meta, cc.responseTrailer)
-			return &serverErr
+		var wireErr connectWireError
+		if err := unmarshaler.UnmarshalFunc(&wireErr, json.Unmarshal); err != nil {
+			return NewError(
+				connectHTTPToCode(response.StatusCode),
+				errors.New(response.Status),
+			)
 		}
-		return NewError(
-			connectHTTPToCode(response.StatusCode),
-			errors.New(response.Status),
-		)
+		serverErr := wireErr.asError()
+		serverErr.meta = cc.responseHeader.Clone()
+		mergeHeaders(serverErr.meta, cc.responseTrailer)
+		return serverErr
 	}
 	cc.unmarshaler.compressionPool = cc.compressionPools.Get(compression)
 	return nil
@@ -554,13 +553,7 @@ func (hc *connectUnaryHandlerConn) Close(err error) error {
 	// In unary Connect, errors always use application/json.
 	hc.responseWriter.Header().Set(headerContentType, connectUnaryContentTypeJSON)
 	hc.responseWriter.WriteHeader(connectCodeToHTTP(CodeOf(err)))
-	var wire *connectWireError
-	if connectErr, ok := asError(err); ok {
-		wire = (*connectWireError)(connectErr)
-	} else {
-		wire = (*connectWireError)(NewError(CodeUnknown, err))
-	}
-	data, marshalErr := json.Marshal(wire)
+	data, marshalErr := json.Marshal(newConnectWireError(err))
 	if marshalErr != nil {
 		_ = hc.request.Body.Close()
 		return errorf(CodeInternal, "marshal error: %w", err)
@@ -654,11 +647,9 @@ type connectStreamingMarshaler struct {
 func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Header) *Error {
 	end := &connectEndStreamMessage{Trailer: trailer}
 	if err != nil {
+		end.Error = newConnectWireError(err)
 		if connectErr, ok := asError(err); ok {
 			mergeHeaders(end.Trailer, connectErr.meta)
-			end.Error = (*connectWireError)(connectErr)
-		} else {
-			end.Error = (*connectWireError)(NewError(CodeUnknown, err))
 		}
 	}
 	data, marshalErr := json.Marshal(end)
@@ -697,7 +688,7 @@ func (u *connectStreamingUnmarshaler) Unmarshal(message any) *Error {
 		return errorf(CodeInternal, "unmarshal end stream message: %w", err)
 	}
 	u.trailer = end.Trailer
-	u.endStreamErr = (*Error)(end.Error)
+	u.endStreamErr = end.Error.asError()
 	return errSpecialEnvelope
 }
 
@@ -803,48 +794,93 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 	return nil
 }
 
-type connectWireError Error
+type connectWireDetail ErrorDetail
 
-func (e *connectWireError) MarshalJSON() ([]byte, error) {
-	wire := &errorv1.Error{
-		Code:    CodeUnknown.String(),
-		Message: (*Error)(e).Error(),
+func (d *connectWireDetail) MarshalJSON() ([]byte, error) {
+	if d.wireJSON != "" {
+		// If we unmarshaled this detail from JSON, return the original data. This
+		// lets proxies w/o protobuf descriptors preserve human-readable details.
+		return []byte(d.wireJSON), nil
 	}
-	if connectErr, ok := asError((*Error)(e)); ok {
-		wire.Code = connectErr.Code().String()
-		wire.Message = connectErr.Message()
-		details, err := connectErr.detailsAsAny()
-		if err != nil {
-			return nil, err
-		}
-		wire.Details = details
+	wire := struct {
+		Type  string          `json:"type"`
+		Value string          `json:"value"`
+		Debug json.RawMessage `json:"debug,omitempty"`
+	}{
+		Type:  strings.TrimPrefix(d.pb.TypeUrl, defaultAnyResolverPrefix),
+		Value: base64.RawStdEncoding.EncodeToString(d.pb.Value),
 	}
-	return (&protoJSONCodec{}).Marshal(wire)
+	// Try to produce debug info, but expect failure when we don't have
+	// descriptors.
+	var codec protoJSONCodec
+	debug, err := codec.Marshal(d.pb)
+	if err == nil && len(debug) > 2 { // don't bother sending `{}`
+		wire.Debug = json.RawMessage(debug)
+	}
+	return json.Marshal(wire)
 }
 
-func (e *connectWireError) UnmarshalJSON(data []byte) error {
-	var wire errorv1.Error
-	if err := (&protoJSONCodec{}).Unmarshal(data, &wire); err != nil {
+func (d *connectWireDetail) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Type  string `json:"type"`
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
-	if wire.Code == "" {
-		return nil
+	if !strings.Contains(wire.Type, "/") {
+		wire.Type = defaultAnyResolverPrefix + wire.Type
 	}
-	var code Code
-	if err := code.UnmarshalText([]byte(wire.Code)); err != nil {
-		return err
+	decoded, err := DecodeBinaryHeader(wire.Value)
+	if err != nil {
+		return fmt.Errorf("decode base64: %w", err)
 	}
-	e.code = code
-	if wire.Message != "" {
-		e.err = errors.New(wire.Message)
-	}
-	if len(wire.Details) > 0 {
-		e.details = make([]ErrorDetail, len(wire.Details))
-		for i, detail := range wire.Details {
-			e.details[i] = detail
-		}
+	*d = connectWireDetail{
+		pb: &anypb.Any{
+			TypeUrl: wire.Type,
+			Value:   decoded,
+		},
+		wireJSON: string(data),
 	}
 	return nil
+}
+
+type connectWireError struct {
+	Code    Code                 `json:"code"`
+	Message string               `json:"message,omitempty"`
+	Details []*connectWireDetail `json:"details,omitempty"`
+}
+
+func newConnectWireError(err error) *connectWireError {
+	wire := &connectWireError{
+		Code:    CodeUnknown,
+		Message: err.Error(),
+	}
+	if connectErr, ok := asError(err); ok {
+		wire.Code = connectErr.Code()
+		wire.Message = connectErr.Message()
+		if len(connectErr.details) > 0 {
+			wire.Details = make([]*connectWireDetail, len(connectErr.details))
+			for i, detail := range connectErr.details {
+				wire.Details[i] = (*connectWireDetail)(detail)
+			}
+		}
+	}
+	return wire
+}
+
+func (e *connectWireError) asError() *Error {
+	if e == nil || e.Code == 0 {
+		return nil
+	}
+	err := NewError(e.Code, errors.New(e.Message))
+	if len(e.Details) > 0 {
+		err.details = make([]*ErrorDetail, len(e.Details))
+		for i, detail := range e.Details {
+			err.details[i] = (*ErrorDetail)(detail)
+		}
+	}
+	return err
 }
 
 type connectEndStreamMessage struct {
