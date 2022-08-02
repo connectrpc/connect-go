@@ -8,9 +8,8 @@ on:
   schedule:
     - cron: '15 22 * * *'
   workflow_dispatch: {} # support manual runs
-# Prevent writing to the repository using the CI token.
-# Ref: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#permissions
-permissions: read-all
+permissions:
+  contents: read
 jobs:
   ci:
     runs-on: ubuntu-latest
