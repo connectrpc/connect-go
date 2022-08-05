@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -54,6 +55,7 @@ type envelopeWriter struct {
 	compressMinBytes int
 	compressionPool  *compressionPool
 	bufferPool       *bufferPool
+	sendMaxBytes     int
 }
 
 func (w *envelopeWriter) Marshal(message any) *Error {
@@ -75,12 +77,18 @@ func (w *envelopeWriter) Write(env *envelope) *Error {
 	if env.IsSet(flagEnvelopeCompressed) ||
 		w.compressionPool == nil ||
 		env.Data.Len() < w.compressMinBytes {
+		if w.sendMaxBytes > 0 && env.Data.Len() > w.sendMaxBytes {
+			return NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", env.Data.Len(), w.sendMaxBytes))
+		}
 		return w.write(env)
 	}
 	data := w.bufferPool.Get()
 	defer w.bufferPool.Put(data)
 	if err := w.compressionPool.Compress(data, env.Data); err != nil {
 		return err
+	}
+	if w.sendMaxBytes > 0 && data.Len() > w.sendMaxBytes {
+		return NewError(CodeResourceExhausted, fmt.Errorf("compressed message size %d exceeds sendMaxBytes %d", data.Len(), w.sendMaxBytes))
 	}
 	return w.write(&envelope{
 		Data:  data,

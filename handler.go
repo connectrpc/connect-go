@@ -221,6 +221,7 @@ type handlerConfig struct {
 	HandleGRPCWeb    bool
 	BufferPool       *bufferPool
 	ReadMaxBytes     int
+	SendMaxBytes     int
 }
 
 func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig {
@@ -271,6 +272,7 @@ func (c *handlerConfig) newProtocolHandlers(streamType StreamType) []protocolHan
 			CompressMinBytes: c.CompressMinBytes,
 			BufferPool:       c.BufferPool,
 			ReadMaxBytes:     c.ReadMaxBytes,
+			SendMaxBytes:     c.SendMaxBytes,
 		}))
 	}
 	return handlers
