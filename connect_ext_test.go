@@ -756,6 +756,9 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 		})
 		t.Run("read_max_large", func(t *testing.T) {
 			t.Parallel()
+			if testing.Short() {
+				t.Skipf("skipping %s test in short mode", t.Name())
+			}
 			// Serializes to much larger than readMaxBytes (5 MiB)
 			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("abcde", 1024*1024)}
 			expectedSize := proto.Size(pingRequest)
@@ -859,6 +862,9 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 		})
 		t.Run("read_max_large", func(t *testing.T) {
 			t.Parallel()
+			if testing.Short() {
+				t.Skipf("skipping %s test in short mode", t.Name())
+			}
 			// Serializes to much larger than readMaxBytes (5 MiB)
 			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("abcde", 1024*1024)}
 			expectedSize := proto.Size(pingRequest)
@@ -939,6 +945,9 @@ func TestHandlerWithSendMaxBytes(t *testing.T) {
 		})
 		t.Run("send_max_large", func(t *testing.T) {
 			t.Parallel()
+			if testing.Short() {
+				t.Skipf("skipping %s test in short mode", t.Name())
+			}
 			// Serializes to much larger than sendMaxBytes (5 MiB)
 			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("abcde", 1024*1024)}
 			expectedSize := proto.Size(pingRequest)
@@ -1016,17 +1025,12 @@ func TestHandlerWithSendMaxBytes(t *testing.T) {
 
 func TestClientWithSendMaxBytes(t *testing.T) {
 	t.Parallel()
-	createServer := func(tb testing.TB) *httptest.Server {
-		tb.Helper()
-		mux := http.NewServeMux()
-		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
-		server := httptest.NewUnstartedServer(mux)
-		server.EnableHTTP2 = true
-		server.StartTLS()
-		tb.Cleanup(server.Close)
-		return server
-	}
-	server := createServer(t)
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
 	sendMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, sendMaxBytes int, compressed bool) {
 		t.Helper()
 		t.Run("equal_send_max", func(t *testing.T) {
@@ -1054,6 +1058,9 @@ func TestClientWithSendMaxBytes(t *testing.T) {
 		})
 		t.Run("send_max_large", func(t *testing.T) {
 			t.Parallel()
+			if testing.Short() {
+				t.Skipf("skipping %s test in short mode", t.Name())
+			}
 			// Serializes to much larger than sendMaxBytes (5 MiB)
 			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("abcde", 1024*1024)}
 			expectedSize := proto.Size(pingRequest)
