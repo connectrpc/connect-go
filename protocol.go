@@ -66,6 +66,7 @@ type protocolHandlerParams struct {
 	CompressMinBytes int
 	BufferPool       *bufferPool
 	ReadMaxBytes     int
+	SendMaxBytes     int
 }
 
 // Handler is the server side of a protocol. HTTP handlers typically support
@@ -100,6 +101,7 @@ type protocolClientParams struct {
 	URL              string
 	BufferPool       *bufferPool
 	ReadMaxBytes     int
+	SendMaxBytes     int
 	// The gRPC family of protocols always needs access to a Protobuf codec to
 	// marshal and unmarshal errors.
 	Protobuf Codec

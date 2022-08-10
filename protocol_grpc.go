@@ -173,6 +173,7 @@ func (g *grpcHandler) NewConn(
 				codec:            codec,
 				compressMinBytes: g.CompressMinBytes,
 				bufferPool:       g.BufferPool,
+				sendMaxBytes:     g.SendMaxBytes,
 			},
 		},
 		responseWriter:  responseWriter,
@@ -258,6 +259,7 @@ func (g *grpcClient) NewConn(
 				codec:            g.Codec,
 				compressMinBytes: g.CompressMinBytes,
 				bufferPool:       g.BufferPool,
+				sendMaxBytes:     g.SendMaxBytes,
 			},
 		},
 		unmarshaler: grpcUnmarshaler{
