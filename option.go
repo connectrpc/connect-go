@@ -196,6 +196,18 @@ func WithReadMaxBytes(max int) Option {
 	return &readMaxBytesOption{Max: max}
 }
 
+// WithSendMaxBytes prevents sending messages too large for the client/handler
+// to handle without significant performance overhead. For handlers, WithSendMaxBytes
+// limits the size of a message that the handler can respond with. For clients,
+// WithSendMaxBytes limits the size of a message that the client can send. Limits
+// apply to each message, not to the stream as a whole.
+//
+// Setting WithSendMaxBytes to zero allows any message size. Both clients and
+// handlers default to allowing any message size.
+func WithSendMaxBytes(max int) Option {
+	return &sendMaxBytesOption{Max: max}
+}
+
 // WithInterceptors configures a client or handler's interceptor stack. Repeated
 // WithInterceptors options are applied in order, so
 //
@@ -323,6 +335,18 @@ func (o *readMaxBytesOption) applyToClient(config *clientConfig) {
 
 func (o *readMaxBytesOption) applyToHandler(config *handlerConfig) {
 	config.ReadMaxBytes = o.Max
+}
+
+type sendMaxBytesOption struct {
+	Max int
+}
+
+func (o *sendMaxBytesOption) applyToClient(config *clientConfig) {
+	config.SendMaxBytes = o.Max
+}
+
+func (o *sendMaxBytesOption) applyToHandler(config *handlerConfig) {
+	config.SendMaxBytes = o.Max
 }
 
 type handlerOptionsOption struct {
