@@ -26,7 +26,7 @@ import (
 // This interceptor uses a somewhat unusual strategy to recover from panics.
 // The standard recovery idiom:
 //
-//   if r := recover(); r != nil { ... }
+//	if r := recover(); r != nil { ... }
 //
 // isn't robust in the face of user error, because it doesn't handle
 // panic(nil). This occasionally happens by mistake, and it's a beast to debug

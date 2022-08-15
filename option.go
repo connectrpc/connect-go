@@ -211,7 +211,7 @@ func WithSendMaxBytes(max int) Option {
 // WithInterceptors configures a client or handler's interceptor stack. Repeated
 // WithInterceptors options are applied in order, so
 //
-//   WithInterceptors(A) + WithInterceptors(B, C) == WithInterceptors(A, B, C)
+//	WithInterceptors(A) + WithInterceptors(B, C) == WithInterceptors(A, B, C)
 //
 // Unary interceptors compose like an onion. The first interceptor provided is
 // the outermost layer of the onion: it acts first on the context and request,
@@ -224,32 +224,32 @@ func WithSendMaxBytes(max int) Option {
 //
 // Applied to client and handler, WithInterceptors(A, B, ..., Y, Z) produces:
 //
-//      client.Send()       client.Receive()
-//            |                   ^
-//            v                   |
-//         A ---                 --- A
-//         B ---                 --- B
-//         : ...                 ... :
-//         Y ---                 --- Y
-//         Z ---                 --- Z
-//            |                   ^
-//            v                   |
-//       = = = = = = = = = = = = = = = =
-//                    network
-//       = = = = = = = = = = = = = = = =
-//            |                   ^
-//            v                   |
-//         A ---                 --- A
-//         B ---                 --- B
-//         : ...                 ... :
-//         Y ---                 --- Y
-//         Z ---                 --- Z
-//            |                   ^
-//            v                   |
-//     handler.Receive()   handler.Send()
-//            |                   ^
-//            |                   |
-//            '-> handler logic >-'
+//	 client.Send()       client.Receive()
+//	       |                   ^
+//	       v                   |
+//	    A ---                 --- A
+//	    B ---                 --- B
+//	    : ...                 ... :
+//	    Y ---                 --- Y
+//	    Z ---                 --- Z
+//	       |                   ^
+//	       v                   |
+//	  = = = = = = = = = = = = = = = =
+//	               network
+//	  = = = = = = = = = = = = = = = =
+//	       |                   ^
+//	       v                   |
+//	    A ---                 --- A
+//	    B ---                 --- B
+//	    : ...                 ... :
+//	    Y ---                 --- Y
+//	    Z ---                 --- Z
+//	       |                   ^
+//	       v                   |
+//	handler.Receive()   handler.Send()
+//	       |                   ^
+//	       |                   |
+//	       '-> handler logic >-'
 //
 // Note that in clients, the Sender handles the request message(s) and the
 // Receiver handles the response message(s). For handlers, it's the reverse.
