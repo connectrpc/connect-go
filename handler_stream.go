@@ -22,7 +22,7 @@ import (
 
 // ClientStream is the handler's view of a client streaming RPC.
 //
-// It's constructed as part of Handler invocation, but doesn't currently have
+// It's constructed as part of [Handler] invocation, but doesn't currently have
 // an exported constructor.
 type ClientStream[Req any] struct {
 	conn StreamingHandlerConn
@@ -65,7 +65,7 @@ func (c *ClientStream[Req]) Err() error {
 
 // ServerStream is the handler's view of a server streaming RPC.
 //
-// It's constructed as part of Handler invocation, but doesn't currently have
+// It's constructed as part of [Handler] invocation, but doesn't currently have
 // an exported constructor.
 type ServerStream[Res any] struct {
 	conn StreamingHandlerConn
@@ -91,7 +91,7 @@ func (s *ServerStream[Res]) Send(msg *Res) error {
 
 // BidiStream is the handler's view of a bidirectional streaming RPC.
 //
-// It's constructed as part of Handler invocation, but doesn't currently have
+// It's constructed as part of [Handler] invocation, but doesn't currently have
 // an exported constructor.
 type BidiStream[Req, Res any] struct {
 	conn StreamingHandlerConn
@@ -103,7 +103,7 @@ func (b *BidiStream[Req, Res]) RequestHeader() http.Header {
 }
 
 // Receive a message. When the client is done sending messages, Receive will
-// return an error that wraps io.EOF.
+// return an error that wraps [io.EOF].
 func (b *BidiStream[Req, Res]) Receive() (*Req, error) {
 	var req Req
 	if err := b.conn.Receive(&req); err != nil {

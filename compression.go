@@ -29,7 +29,7 @@ const (
 )
 
 // A Decompressor is a reusable wrapper that decompresses an underlying data
-// source. The standard library's *gzip.Reader implements Decompressor.
+// source. The standard library's [*gzip.Reader] implements Decompressor.
 type Decompressor interface {
 	io.Reader
 
@@ -43,7 +43,7 @@ type Decompressor interface {
 }
 
 // A Compressor is a reusable wrapper that compresses data written to an
-// underlying sink. The standard library's *gzip.Writer implements Compressor.
+// underlying sink. The standard library's [*gzip.Writer] implements Compressor.
 type Compressor interface {
 	io.Writer
 
