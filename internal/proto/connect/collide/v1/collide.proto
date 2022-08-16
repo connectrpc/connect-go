@@ -20,6 +20,6 @@ message ImportRequest {}
 
 message ImportResponse {}
 
-service Collider {
+service CollideService {
   rpc Import(ImportRequest) returns (ImportResponse) {}
 }

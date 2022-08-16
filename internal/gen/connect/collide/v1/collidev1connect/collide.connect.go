@@ -35,66 +35,66 @@ import (
 const _ = connect_go.IsAtLeastVersion0_1_0
 
 const (
-	// ColliderName is the fully-qualified name of the Collider service.
-	ColliderName = "connect.collide.v1.Collider"
+	// CollideServiceName is the fully-qualified name of the CollideService service.
+	CollideServiceName = "connect.collide.v1.CollideService"
 )
 
-// ColliderClient is a client for the connect.collide.v1.Collider service.
-type ColliderClient interface {
+// CollideServiceClient is a client for the connect.collide.v1.CollideService service.
+type CollideServiceClient interface {
 	Import(context.Context, *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error)
 }
 
-// NewColliderClient constructs a client for the connect.collide.v1.Collider service. By default, it
-// uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and sends
-// uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or
-// connect.WithGRPCWeb() options.
+// NewCollideServiceClient constructs a client for the connect.collide.v1.CollideService service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
 //
 // The URL supplied here should be the base URL for the Connect or gRPC server (for example,
 // http://api.acme.com or https://acme.com/grpc).
-func NewColliderClient(httpClient connect_go.HTTPClient, baseURL string, opts ...connect_go.ClientOption) ColliderClient {
+func NewCollideServiceClient(httpClient connect_go.HTTPClient, baseURL string, opts ...connect_go.ClientOption) CollideServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
-	return &colliderClient{
+	return &collideServiceClient{
 		_import: connect_go.NewClient[v1.ImportRequest, v1.ImportResponse](
 			httpClient,
-			baseURL+"/connect.collide.v1.Collider/Import",
+			baseURL+"/connect.collide.v1.CollideService/Import",
 			opts...,
 		),
 	}
 }
 
-// colliderClient implements ColliderClient.
-type colliderClient struct {
+// collideServiceClient implements CollideServiceClient.
+type collideServiceClient struct {
 	_import *connect_go.Client[v1.ImportRequest, v1.ImportResponse]
 }
 
-// Import calls connect.collide.v1.Collider.Import.
-func (c *colliderClient) Import(ctx context.Context, req *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error) {
+// Import calls connect.collide.v1.CollideService.Import.
+func (c *collideServiceClient) Import(ctx context.Context, req *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error) {
 	return c._import.CallUnary(ctx, req)
 }
 
-// ColliderHandler is an implementation of the connect.collide.v1.Collider service.
-type ColliderHandler interface {
+// CollideServiceHandler is an implementation of the connect.collide.v1.CollideService service.
+type CollideServiceHandler interface {
 	Import(context.Context, *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error)
 }
 
-// NewColliderHandler builds an HTTP handler from the service implementation. It returns the path on
-// which to mount the handler and the handler itself.
+// NewCollideServiceHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
 //
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
-func NewColliderHandler(svc ColliderHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
+func NewCollideServiceHandler(svc CollideServiceHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
 	mux := http.NewServeMux()
-	mux.Handle("/connect.collide.v1.Collider/Import", connect_go.NewUnaryHandler(
-		"/connect.collide.v1.Collider/Import",
+	mux.Handle("/connect.collide.v1.CollideService/Import", connect_go.NewUnaryHandler(
+		"/connect.collide.v1.CollideService/Import",
 		svc.Import,
 		opts...,
 	))
-	return "/connect.collide.v1.Collider/", mux
+	return "/connect.collide.v1.CollideService/", mux
 }
 
-// UnimplementedColliderHandler returns CodeUnimplemented from all methods.
-type UnimplementedColliderHandler struct{}
+// UnimplementedCollideServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedCollideServiceHandler struct{}
 
-func (UnimplementedColliderHandler) Import(context.Context, *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error) {
-	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.collide.v1.Collider.Import is not implemented"))
+func (UnimplementedCollideServiceHandler) Import(context.Context, *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error) {
+	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.collide.v1.CollideService.Import is not implemented"))
 }
