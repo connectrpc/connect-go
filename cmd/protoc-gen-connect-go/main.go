@@ -481,7 +481,18 @@ func deprecated(g *protogen.GeneratedFile) {
 }
 
 func unexport(s string) string {
-	return strings.ToLower(s[:1]) + s[1:]
+	lowercased := strings.ToLower(s[:1]) + s[1:]
+	switch lowercased {
+	// https://go.dev/ref/spec#Keywords
+	case "break", "default", "func", "interface", "select",
+		"case", "defer", "go", "map", "struct",
+		"chan", "else", "goto", "package", "switch",
+		"const", "fallthrough", "if", "range", "type",
+		"continue", "for", "import", "return", "var":
+		return "_" + lowercased
+	default:
+		return lowercased
+	}
 }
 
 type names struct {
