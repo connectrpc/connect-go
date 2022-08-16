@@ -52,6 +52,15 @@ func WithAcceptCompression(
 	}
 }
 
+// WithGzipAcceptEncoding sets the Grpc-Accept-Encoding header to gzip when
+// enabled.
+// Defaults to true in connect.Client config.
+func WithGzipAcceptEncoding(enabled bool) ClientOption {
+	return &defaultAcceptEncodingOption{
+		gzip: enabled,
+	}
+}
+
 // WithClientOptions composes multiple ClientOptions into one.
 func WithClientOptions(options ...ClientOption) ClientOption {
 	return &clientOptionsOption{options}
@@ -365,6 +374,14 @@ type grpcOption struct {
 
 func (o *grpcOption) applyToClient(config *clientConfig) {
 	config.Protocol = &protocolGRPC{web: o.web}
+}
+
+type defaultAcceptEncodingOption struct {
+	gzip bool
+}
+
+func (o *defaultAcceptEncodingOption) applyToClient(config *clientConfig) {
+	config.GzipAcceptEncoding = o.gzip
 }
 
 type interceptorsOption struct {
