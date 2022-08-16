@@ -243,7 +243,7 @@ func validateRequestURL(uri string) *Error {
 // negotiateCompression determines and validates the request compression and
 // response compression using the available compressors and protocol-specific
 // Content-Encoding and Accept-Encoding headers.
-func negotiateCompression( // nolint:nonamedreturns
+func negotiateCompression( //nolint:nonamedreturns
 	availableCompressors readOnlyCompressionPools,
 	sent, accept string,
 ) (requestCompression, responseCompression string, clientVisibleErr *Error) {

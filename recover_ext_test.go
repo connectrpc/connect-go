@@ -37,7 +37,7 @@ func (s *panicPingServer) Ping(
 	context.Context,
 	*connect.Request[pingv1.PingRequest],
 ) (*connect.Response[pingv1.PingResponse], error) {
-	panic(s.panicWith) // nolint:forbidigo
+	panic(s.panicWith) //nolint:forbidigo
 }
 
 func (s *panicPingServer) CountUp(
@@ -48,7 +48,7 @@ func (s *panicPingServer) CountUp(
 	if err := stream.Send(&pingv1.CountUpResponse{}); err != nil {
 		return err
 	}
-	panic(s.panicWith) // nolint:forbidigo
+	panic(s.panicWith) //nolint:forbidigo
 }
 
 func TestWithRecover(t *testing.T) {

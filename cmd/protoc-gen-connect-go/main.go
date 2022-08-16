@@ -116,7 +116,7 @@ func generate(plugin *protogen.Plugin, file *protogen.File) {
 	generatePreamble(generatedFile, file)
 	generateServiceNameConstants(generatedFile, file.Services)
 	for _, service := range file.Services {
-		generateService(generatedFile, file, service)
+		generateService(generatedFile, service)
 	}
 }
 
@@ -152,7 +152,7 @@ func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protoge
 	g.P()
 }
 
-func generateService(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service) {
+func generateService(g *protogen.GeneratedFile, service *protogen.Service) {
 	names := newNames(service)
 	generateClientInterface(g, service, names)
 	generateClientImplementation(g, service, names)
@@ -227,11 +227,11 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 	g.P("}")
 	g.P()
 	for _, method := range service.Methods {
-		generateClientMethod(g, service, method, names)
+		generateClientMethod(g, method, names)
 	}
 }
 
-func generateClientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *protogen.Method, names names) {
+func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, names names) {
 	receiver := names.ClientImpl
 	isStreamingClient := method.Desc.IsStreamingClient()
 	isStreamingServer := method.Desc.IsStreamingServer()

@@ -127,7 +127,7 @@ func (*grpcHandler) SetTimeout(request *http.Request) (context.Context, context.
 		return nil, nil, NewError(CodeInvalidArgument, err)
 	} else if err != nil {
 		// err wraps errNoTimeout, nothing to do.
-		return request.Context(), nil, nil
+		return request.Context(), nil, nil //nolint:nilerr
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), timeout)
 	return ctx, cancel, nil
@@ -440,7 +440,7 @@ func (hc *grpcHandlerConn) ResponseTrailer() http.Header {
 	return hc.responseTrailer
 }
 
-func (hc *grpcHandlerConn) Close(err error) (retErr error) { // nolint:nonamedreturns
+func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 	defer func() {
 		// We don't want to copy unread portions of the body to /dev/null here: if
 		// the client hasn't closed the request body, we'll block until the server
