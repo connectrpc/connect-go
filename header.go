@@ -31,7 +31,7 @@ func EncodeBinaryHeader(data []byte) string {
 // DecodeBinaryHeader base64-decodes the data. It can decode padded or unpadded
 // values. Following usual HTTP semantics, multiple base64-encoded values may
 // be joined with a comma. When receiving such comma-separated values, split
-// them with strings.Split before calling DecodeBinaryHeader.
+// them with [strings.Split] before calling DecodeBinaryHeader.
 //
 // Binary headers sent using the Connect, gRPC, and gRPC-Web protocols have
 // keys ending in "-Bin".

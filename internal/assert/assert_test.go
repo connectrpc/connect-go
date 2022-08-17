@@ -87,7 +87,7 @@ func TestAssertions(t *testing.T) {
 
 	t.Run("panics", func(t *testing.T) {
 		t.Parallel()
-		Panics(t, func() { panic("testing") }) // nolint:forbidigo
+		Panics(t, func() { panic("testing") }) //nolint:forbidigo
 	})
 }
 

@@ -23,7 +23,7 @@ import (
 //
 // The type of the request and response structs depend on the codec being used.
 // When using Protobuf, request.Any() and response.Any() will always be
-// proto.Message implementations.
+// [proto.Message] implementations.
 type UnaryFunc func(context.Context, AnyRequest) (AnyResponse, error)
 
 // StreamingClientFunc is the generic signature of a streaming RPC from the client's
@@ -51,15 +51,15 @@ type Interceptor interface {
 // wraps unary RPCs. It has no effect on streaming RPCs.
 type UnaryInterceptorFunc func(UnaryFunc) UnaryFunc
 
-// WrapUnary implements Interceptor by applying the interceptor function.
+// WrapUnary implements [Interceptor] by applying the interceptor function.
 func (f UnaryInterceptorFunc) WrapUnary(next UnaryFunc) UnaryFunc { return f(next) }
 
-// WrapStreamingClient implements Interceptor with a no-op.
+// WrapStreamingClient implements [Interceptor] with a no-op.
 func (f UnaryInterceptorFunc) WrapStreamingClient(next StreamingClientFunc) StreamingClientFunc {
 	return next
 }
 
-// WrapStreamingHandler implements Interceptor with a no-op.
+// WrapStreamingHandler implements [Interceptor] with a no-op.
 func (f UnaryInterceptorFunc) WrapStreamingHandler(next StreamingHandlerFunc) StreamingHandlerFunc {
 	return next
 }

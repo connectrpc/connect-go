@@ -21,10 +21,10 @@ import (
 	"net/http"
 )
 
-// A ClientOption configures a connect client.
+// A ClientOption configures a [Client].
 //
 // In addition to any options grouped in the documentation below, remember that
-// Options are also valid ClientOptions.
+// any [Option] is also a valid ClientOption.
 type ClientOption interface {
 	applyToClient(*clientConfig)
 }
@@ -36,11 +36,11 @@ type ClientOption interface {
 //
 // It's safe to use this option liberally: servers will ignore any
 // compression algorithms they don't support. To compress requests, pair this
-// option with WithSendCompression.
+// option with [WithSendCompression].
 //
 // Clients accept gzipped requests by default, using a compressor backed by the
-// standard library's gzip package with the default compression level. Use
-// WithSendGzip to compress requests with gzip.
+// standard library's [gzip] package with the default compression level. Use
+// [WithSendGzip] to compress requests with gzip.
 func WithAcceptCompression(
 	name string,
 	newDecompressor func() Decompressor,
@@ -69,7 +69,7 @@ func WithGRPCWeb() ClientOption {
 
 // WithProtoJSON configures a client to send JSON-encoded data instead of
 // binary Protobuf. It uses the standard Protobuf JSON mapping as implemented
-// by google.golang.org/protobuf/encoding/protojson: fields are named using
+// by [google.golang.org/protobuf/encoding/protojson]: fields are named using
 // lowerCamelCase, zero values are omitted, missing required fields are errors,
 // enums are emitted as strings, etc.
 func WithProtoJSON() ClientOption {
@@ -78,7 +78,7 @@ func WithProtoJSON() ClientOption {
 
 // WithSendCompression configures the client to use the specified algorithm to
 // compress request messages. If the algorithm has not been registered using
-// WithAcceptCompression, the client will return errors at runtime.
+// [WithAcceptCompression], the client will return errors at runtime.
 //
 // Because some servers don't support compression, clients default to sending
 // uncompressed requests.
@@ -88,7 +88,7 @@ func WithSendCompression(name string) ClientOption {
 
 // WithSendGzip configures the client to gzip requests. Since clients have
 // access to a gzip compressor by default, WithSendGzip doesn't require
-// WithSendCompresion.
+// [WithSendCompresion].
 //
 // Some servers don't support gzip, so clients default to sending uncompressed
 // requests.
@@ -96,22 +96,22 @@ func WithSendGzip() ClientOption {
 	return WithSendCompression(compressionGzip)
 }
 
-// A HandlerOption configures a Handler.
+// A HandlerOption configures a [Handler].
 //
 // In addition to any options grouped in the documentation below, remember that
-// all Options are also HandlerOptions.
+// any [Option] is also a HandlerOption.
 type HandlerOption interface {
 	applyToHandler(*handlerConfig)
 }
 
 // WithCompression configures handlers to support a compression algorithm.
 // Clients may send messages compressed with that algorithm and/or request
-// compressed responses. The Compressors and Decompressors produced by the
+// compressed responses. The [Compressor] and [Decompressor] produced by the
 // supplied constructors must use the same algorithm. Internally, Connect pools
 // compressors and decompressors.
 //
-// By default, handlers support gzip using the standard library's gzip package
-// at the default compression level.
+// By default, handlers support gzip using the standard library's
+// [compress/gzip] package at the default compression level.
 //
 // Calling WithCompression with an empty name or nil constructors is a no-op.
 func WithCompression(
@@ -131,16 +131,16 @@ func WithHandlerOptions(options ...HandlerOption) HandlerOption {
 }
 
 // WithRecover adds an interceptor that recovers from panics. The supplied
-// function receives the context, Spec, request headers, and the recovered
+// function receives the context, [Spec], request headers, and the recovered
 // value (which may be nil). It must return an error to send back to the
 // client. It may also log the panic, emit metrics, or execute other
 // error-handling logic. Handler functions must be safe to call concurrently.
 //
-// To preserve compatibility with net/http's semantics, this interceptor
-// doesn't handle panics with http.ErrAbortHandler.
+// To preserve compatibility with [net/http]'s semantics, this interceptor
+// doesn't handle panics with [http.ErrAbortHandler].
 //
 // By default, handlers don't recover from panics. Because the standard
-// library's http.Server recovers from panics by default, this option isn't
+// library's [http.Server] recovers from panics by default, this option isn't
 // usually necessary to prevent crashes. Instead, it helps servers collect
 // RPC-specific data during panics and send a more detailed error to
 // clients.
@@ -148,8 +148,8 @@ func WithRecover(handle func(context.Context, Spec, http.Header, any) error) Han
 	return WithInterceptors(&recoverHandlerInterceptor{handle: handle})
 }
 
-// Option implements both ClientOption and HandlerOption, so it can be applied
-// both client-side and server-side.
+// Option implements both [ClientOption] and [HandlerOption], so it can be
+// applied both client-side and server-side.
 type Option interface {
 	ClientOption
 	HandlerOption
@@ -160,7 +160,7 @@ type Option interface {
 // chooses. Clients may only have a single codec.
 //
 // By default, handlers and clients support binary Protocol Buffer data using
-// google.golang.org/protobuf/proto. Handlers also support JSON by default,
+// [google.golang.org/protobuf/proto]. Handlers also support JSON by default,
 // using the standard Protobuf JSON mapping. Users with more specialized needs
 // may override the default codecs by registering a new codec under the "proto"
 // or "json" names. When supplying a custom "proto" codec, keep in mind that
@@ -211,50 +211,50 @@ func WithSendMaxBytes(max int) Option {
 // WithInterceptors configures a client or handler's interceptor stack. Repeated
 // WithInterceptors options are applied in order, so
 //
-//   WithInterceptors(A) + WithInterceptors(B, C) == WithInterceptors(A, B, C)
+//	WithInterceptors(A) + WithInterceptors(B, C) == WithInterceptors(A, B, C)
 //
 // Unary interceptors compose like an onion. The first interceptor provided is
 // the outermost layer of the onion: it acts first on the context and request,
 // and last on the response and error.
 //
 // Stream interceptors also behave like an onion: the first interceptor
-// provided is the first to wrap the context and is the outermost wrapper for
-// the (Sender, Receiver) pair. It's the first to see sent messages and the
-// last to see received messages.
+// provided is the outermost wrapper for the [StreamingClientConn] or
+// [StreamingHandlerConn]. It's the first to see sent messages and the last to
+// see received messages.
 //
 // Applied to client and handler, WithInterceptors(A, B, ..., Y, Z) produces:
 //
-//      client.Send()       client.Receive()
-//            |                   ^
-//            v                   |
-//         A ---                 --- A
-//         B ---                 --- B
-//         : ...                 ... :
-//         Y ---                 --- Y
-//         Z ---                 --- Z
-//            |                   ^
-//            v                   |
-//       = = = = = = = = = = = = = = = =
-//                    network
-//       = = = = = = = = = = = = = = = =
-//            |                   ^
-//            v                   |
-//         A ---                 --- A
-//         B ---                 --- B
-//         : ...                 ... :
-//         Y ---                 --- Y
-//         Z ---                 --- Z
-//            |                   ^
-//            v                   |
-//     handler.Receive()   handler.Send()
-//            |                   ^
-//            |                   |
-//            '-> handler logic >-'
+//	 client.Send()       client.Receive()
+//	       |                   ^
+//	       v                   |
+//	    A ---                 --- A
+//	    B ---                 --- B
+//	    : ...                 ... :
+//	    Y ---                 --- Y
+//	    Z ---                 --- Z
+//	       |                   ^
+//	       v                   |
+//	  = = = = = = = = = = = = = = = =
+//	               network
+//	  = = = = = = = = = = = = = = = =
+//	       |                   ^
+//	       v                   |
+//	    A ---                 --- A
+//	    B ---                 --- B
+//	    : ...                 ... :
+//	    Y ---                 --- Y
+//	    Z ---                 --- Z
+//	       |                   ^
+//	       v                   |
+//	handler.Receive()   handler.Send()
+//	       |                   ^
+//	       |                   |
+//	       '-> handler logic >-'
 //
-// Note that in clients, the Sender handles the request message(s) and the
-// Receiver handles the response message(s). For handlers, it's the reverse.
-// Depending on your interceptor's logic, you may need to wrap one side of the
-// stream on the clients and the other side on handlers.
+// Note that in clients, Send handles the request message(s) and Receive
+// handles the response message(s). For handlers, it's the reverse. Depending
+// on your interceptor's logic, you may need to wrap one method in clients and
+// the other in handlers.
 func WithInterceptors(interceptors ...Interceptor) Option {
 	return &interceptorsOption{interceptors}
 }
