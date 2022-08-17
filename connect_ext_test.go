@@ -675,6 +675,28 @@ func TestCustomCompression(t *testing.T) {
 	assert.Equal(t, response.Msg, &pingv1.PingResponse{Text: request.Text})
 }
 
+func TestClientWithoutGzipSupport(t *testing.T) {
+	// See https://github.com/bufbuild/connect-go/pull/349 for why we want to
+	// support this. TL;DR is that Microsoft's dapr sidecar can't handle
+	// asymmetric compression.
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := pingv1connect.NewPingServiceClient(server.Client(),
+		server.URL,
+		connect.WithAcceptCompression("gzip", nil, nil),
+		connect.WithSendGzip(),
+	)
+	request := &pingv1.PingRequest{Text: "gzip me!"}
+	_, err := client.Ping(context.Background(), connect.NewRequest(request))
+	assert.NotNil(t, err)
+	assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+	assert.True(t, strings.Contains(err.Error(), "unknown compression"))
+}
+
 func TestInvalidHeaderTimeout(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
