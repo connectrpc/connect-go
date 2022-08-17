@@ -36,9 +36,11 @@ type ClientOption interface {
 //
 // It's safe to use this option liberally: servers will ignore any
 // compression algorithms they don't support. To compress requests, pair this
-// option with [WithSendCompression].
+// option with [WithSendCompression]. To remove support for a
+// previously-registered compression algorithm, use WithAcceptCompression with
+// nil decompressor and compressor constructors.
 //
-// Clients accept gzipped requests by default, using a compressor backed by the
+// Clients accept gzipped responses by default, using a compressor backed by the
 // standard library's [gzip] package with the default compression level. Use
 // [WithSendGzip] to compress requests with gzip.
 func WithAcceptCompression(
@@ -46,6 +48,9 @@ func WithAcceptCompression(
 	newDecompressor func() Decompressor,
 	newCompressor func() Compressor,
 ) ClientOption {
+	if newDecompressor == nil && newCompressor == nil {
+		return &compressionOption{Name: name}
+	}
 	return &compressionOption{
 		Name:            name,
 		CompressionPool: newCompressionPool(newDecompressor, newCompressor),
@@ -298,9 +303,12 @@ type compressionOption struct {
 }
 
 func (o *compressionOption) applyToClient(config *clientConfig) {
-	if o.Name != "" && o.CompressionPool == nil {
+	if o.Name == "" {
+		return
+	}
+	if o.CompressionPool == nil {
 		delete(config.CompressionPools, o.Name)
-		names := make([]string, 0)
+		var names []string
 		for _, name := range config.CompressionNames {
 			if name == o.Name {
 				continue
@@ -310,11 +318,6 @@ func (o *compressionOption) applyToClient(config *clientConfig) {
 		config.CompressionNames = names
 		return
 	}
-
-	if o.Name == "" {
-		return
-	}
-
 	config.CompressionPools[o.Name] = o.CompressionPool
 	config.CompressionNames = append(config.CompressionNames, o.Name)
 }

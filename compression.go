@@ -65,9 +65,6 @@ func newCompressionPool(
 	newDecompressor func() Decompressor,
 	newCompressor func() Compressor,
 ) *compressionPool {
-	if newCompressor == nil || newDecompressor == nil {
-		return nil
-	}
 	return &compressionPool{
 		decompressors: sync.Pool{
 			New: func() any { return newDecompressor() },
