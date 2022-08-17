@@ -241,7 +241,7 @@ func (d *duplexHTTPCall) makeRequest() {
 
 	// Once we send a message to the server, they send a message back and
 	// establish the receive side of the stream.
-	response, err := d.httpClient.Do(d.request)
+	response, err := d.httpClient.Do(d.request) //nolint:bodyclose
 	if err != nil {
 		err = wrapIfContextError(err)
 		err = wrapIfLikelyH2CNotConfiguredError(d.request, err)

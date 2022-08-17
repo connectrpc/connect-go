@@ -27,7 +27,7 @@ import (
 //
 // By default, clients use the Connect protocol with the binary Protobuf Codec,
 // ask for gzipped responses, and send uncompressed requests. To use the gRPC
-// or gRPC-Web protocols, use the WithGRPC or WithGRPCWeb options.
+// or gRPC-Web protocols, use the [WithGRPC] or [WithGRPCWeb] options.
 type Client[Req, Res any] struct {
 	config         *clientConfig
 	callUnary      func(context.Context, *Request[Req]) (*Response[Res], error)
