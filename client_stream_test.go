@@ -16,6 +16,7 @@ package connect
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -26,12 +27,15 @@ import (
 func TestClientStreamForClient_NoPanics(t *testing.T) {
 	t.Parallel()
 	initErr := errors.New("client init failure")
-	cs := &ClientStreamForClient[pingv1.PingRequest, pingv1.PingResponse]{err: initErr}
-	assert.ErrorIs(t, cs.Send(&pingv1.PingRequest{}), initErr)
-	verifyHeaders(t, cs.RequestHeader())
-	res, err := cs.CloseAndReceive()
+	clientStream := &ClientStreamForClient[pingv1.PingRequest, pingv1.PingResponse]{err: initErr}
+	assert.ErrorIs(t, clientStream.Send(&pingv1.PingRequest{}), initErr)
+	verifyHeaders(t, clientStream.RequestHeader())
+	res, err := clientStream.CloseAndReceive()
 	assert.Nil(t, res)
 	assert.ErrorIs(t, err, initErr)
+	conn, err := clientStream.Conn()
+	assert.NotNil(t, err)
+	assert.Nil(t, conn)
 }
 
 func TestServerStreamForClient_NoPanics(t *testing.T) {
@@ -44,6 +48,26 @@ func TestServerStreamForClient_NoPanics(t *testing.T) {
 	assert.False(t, serverStream.Receive())
 	verifyHeaders(t, serverStream.ResponseHeader())
 	verifyHeaders(t, serverStream.ResponseTrailer())
+	conn, err := serverStream.Conn()
+	assert.NotNil(t, err)
+	assert.Nil(t, conn)
+}
+
+func TestServerStreamForClient(t *testing.T) {
+	t.Parallel()
+	stream := &ServerStreamForClient[pingv1.PingResponse]{conn: &nopStreamingClientConn{}}
+	// Ensure that each call to Receive allocates a new message. This helps
+	// vtprotobuf, which doesn't automatically zero messages before unmarshaling
+	// (see https://connectrpc.com/connect/issues/345), and it's also
+	// less error-prone for users.
+	assert.True(t, stream.Receive())
+	first := fmt.Sprintf("%p", stream.Msg())
+	assert.True(t, stream.Receive())
+	second := fmt.Sprintf("%p", stream.Msg())
+	assert.NotEqual(t, first, second)
+	conn, err := stream.Conn()
+	assert.Nil(t, err)
+	assert.NotNil(t, conn)
 }
 
 func TestBidiStreamForClient_NoPanics(t *testing.T) {
@@ -59,6 +83,9 @@ func TestBidiStreamForClient_NoPanics(t *testing.T) {
 	assert.ErrorIs(t, bidiStream.Send(&pingv1.CumSumRequest{}), initErr)
 	assert.ErrorIs(t, bidiStream.CloseRequest(), initErr)
 	assert.ErrorIs(t, bidiStream.CloseResponse(), initErr)
+	conn, err := bidiStream.Conn()
+	assert.NotNil(t, err)
+	assert.Nil(t, conn)
 }
 
 func verifyHeaders(t *testing.T, headers http.Header) {
@@ -68,4 +95,12 @@ func verifyHeaders(t *testing.T, headers http.Header) {
 	// Verify set/del don't panic
 	headers.Set("a", "b")
 	headers.Del("a")
+}
+
+type nopStreamingClientConn struct {
+	StreamingClientConn
+}
+
+func (c *nopStreamingClientConn) Receive(msg any) error {
+	return nil
 }
