@@ -169,7 +169,6 @@ func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType) S
 }
 
 type clientConfig struct {
-	GzipAcceptEncoding     bool
 	Protocol               protocol
 	Procedure              string
 	CompressMinBytes       int
@@ -186,18 +185,15 @@ type clientConfig struct {
 func newClientConfig(url string, options []ClientOption) (*clientConfig, *Error) {
 	protoPath := extractProtoPath(url)
 	config := clientConfig{
-		Protocol:           &protocolConnect{},
-		Procedure:          protoPath,
-		CompressionPools:   make(map[string]*compressionPool),
-		BufferPool:         newBufferPool(),
-		GzipAcceptEncoding: true,
+		Protocol:         &protocolConnect{},
+		Procedure:        protoPath,
+		CompressionPools: make(map[string]*compressionPool),
+		BufferPool:       newBufferPool(),
 	}
 	withProtoBinaryCodec().applyToClient(&config)
+	withGzip().applyToClient(&config)
 	for _, opt := range options {
 		opt.applyToClient(&config)
-	}
-	if config.GzipAcceptEncoding {
-		withGzip().applyToClient(&config)
 	}
 	if err := config.validate(); err != nil {
 		return nil, err
