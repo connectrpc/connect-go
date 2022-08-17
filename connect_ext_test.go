@@ -52,7 +52,7 @@ const (
 
 func TestServer(t *testing.T) {
 	t.Parallel()
-	testPing := func(t *testing.T, client pingv1connect.PingServiceClient) { // nolint:thelper
+	testPing := func(t *testing.T, client pingv1connect.PingServiceClient) { //nolint:thelper
 		t.Run("ping", func(t *testing.T) {
 			num := int64(42)
 			request := connect.NewRequest(&pingv1.PingRequest{Number: num})
@@ -106,7 +106,7 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded)
 		})
 	}
-	testSum := func(t *testing.T, client pingv1connect.PingServiceClient) { // nolint:thelper
+	testSum := func(t *testing.T, client pingv1connect.PingServiceClient) { //nolint:thelper
 		t.Run("sum", func(t *testing.T) {
 			const (
 				upTo   = 10
@@ -142,7 +142,7 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, got.Header().Values(handlerHeader), []string{headerValue})
 		})
 	}
-	testCountUp := func(t *testing.T, client pingv1connect.PingServiceClient) { // nolint:thelper
+	testCountUp := func(t *testing.T, client pingv1connect.PingServiceClient) { //nolint:thelper
 		t.Run("count_up", func(t *testing.T) {
 			const upTo = 5
 			got := make([]int64, 0, upTo)
@@ -184,7 +184,7 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded)
 		})
 	}
-	testCumSum := func(t *testing.T, client pingv1connect.PingServiceClient, expectSuccess bool) { // nolint:thelper
+	testCumSum := func(t *testing.T, client pingv1connect.PingServiceClient, expectSuccess bool) { //nolint:thelper
 		t.Run("cumsum", func(t *testing.T) {
 			send := []int64{3, 5, 1}
 			expect := []int64{3, 8, 9}
@@ -287,7 +287,7 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled, assert.Sprintf("%v", err))
 		})
 	}
-	testErrors := func(t *testing.T, client pingv1connect.PingServiceClient) { // nolint:thelper
+	testErrors := func(t *testing.T, client pingv1connect.PingServiceClient) { //nolint:thelper
 		t.Run("errors", func(t *testing.T) {
 			request := connect.NewRequest(&pingv1.FailRequest{
 				Code: int32(connect.CodeResourceExhausted),
@@ -307,7 +307,7 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, connectErr.Meta().Values(handlerTrailer), []string{trailerValue})
 		})
 	}
-	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) { // nolint:thelper
+	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) { //nolint:thelper
 		run := func(t *testing.T, opts ...connect.ClientOption) {
 			t.Helper()
 			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, opts...)
@@ -615,22 +615,30 @@ func TestCompressMinBytes(t *testing.T) {
 		request := &pingv1.PingRequest{Text: pingText}
 		requestBytes, err := proto.Marshal(request)
 		assert.Nil(t, err)
-		response, err := client.Post(server.URL+"/"+pingv1connect.PingServiceName+"/Ping", "application/proto", bytes.NewReader(requestBytes))
+		req, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodPost,
+			server.URL+"/"+pingv1connect.PingServiceName+"/Ping",
+			bytes.NewReader(requestBytes),
+		)
+		assert.Nil(t, err)
+		req.Header.Set("Content-Type", "application/proto")
+		response, err := client.Do(req)
 		assert.Nil(t, err)
 		t.Cleanup(func() {
-			response.Body.Close()
+			assert.Nil(t, response.Body.Close())
 		})
 		return response
 	}
 
 	t.Run("response_uncompressed", func(t *testing.T) {
 		t.Parallel()
-		assert.False(t, getPingResponse(t, "ping").Uncompressed)
+		assert.False(t, getPingResponse(t, "ping").Uncompressed) //nolint:bodyclose
 	})
 
 	t.Run("response_compressed", func(t *testing.T) {
 		t.Parallel()
-		assert.True(t, getPingResponse(t, strings.Repeat("ping", 2)).Uncompressed)
+		assert.True(t, getPingResponse(t, strings.Repeat("ping", 2)).Uncompressed) //nolint:bodyclose
 	})
 }
 
@@ -677,24 +685,29 @@ func TestInvalidHeaderTimeout(t *testing.T) {
 	})
 	getPingResponseWithTimeout := func(t *testing.T, timeout string) *http.Response {
 		t.Helper()
-		request, err := http.NewRequest(http.MethodPost, server.URL+"/"+pingv1connect.PingServiceName+"/Ping", strings.NewReader("{}"))
+		request, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodPost,
+			server.URL+"/"+pingv1connect.PingServiceName+"/Ping",
+			strings.NewReader("{}"),
+		)
 		assert.Nil(t, err)
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Connect-Timeout-Ms", timeout)
 		response, err := server.Client().Do(request)
 		assert.Nil(t, err)
 		t.Cleanup(func() {
-			response.Body.Close()
+			assert.Nil(t, response.Body.Close())
 		})
 		return response
 	}
 	t.Run("timeout_non_numeric", func(t *testing.T) {
 		t.Parallel()
-		assert.Equal(t, getPingResponseWithTimeout(t, "10s").StatusCode, http.StatusBadRequest)
+		assert.Equal(t, getPingResponseWithTimeout(t, "10s").StatusCode, http.StatusBadRequest) //nolint:bodyclose
 	})
 	t.Run("timeout_out_of_range", func(t *testing.T) {
 		t.Parallel()
-		assert.Equal(t, getPingResponseWithTimeout(t, "12345678901").StatusCode, http.StatusBadRequest)
+		assert.Equal(t, getPingResponseWithTimeout(t, "12345678901").StatusCode, http.StatusBadRequest) //nolint:bodyclose
 	})
 }
 

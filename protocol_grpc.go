@@ -127,7 +127,7 @@ func (*grpcHandler) SetTimeout(request *http.Request) (context.Context, context.
 		return nil, nil, NewError(CodeInvalidArgument, err)
 	} else if err != nil {
 		// err wraps errNoTimeout, nothing to do.
-		return request.Context(), nil, nil
+		return request.Context(), nil, nil //nolint:nilerr
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), timeout)
 	return ctx, cancel, nil
@@ -440,7 +440,7 @@ func (hc *grpcHandlerConn) ResponseTrailer() http.Header {
 	return hc.responseTrailer
 }
 
-func (hc *grpcHandlerConn) Close(err error) (retErr error) { // nolint:nonamedreturns
+func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 	defer func() {
 		// We don't want to copy unread portions of the body to /dev/null here: if
 		// the client hasn't closed the request body, we'll block until the server
@@ -715,12 +715,12 @@ func grpcEncodeTimeout(timeout time.Duration) (string, error) {
 // grpcUserAgent follows
 // https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents:
 //
-//   While the protocol does not require a user-agent to function it is recommended
-//   that clients provide a structured user-agent string that provides a basic
-//   description of the calling library, version & platform to facilitate issue diagnosis
-//   in heterogeneous environments. The following structure is recommended to library developers:
+//	While the protocol does not require a user-agent to function it is recommended
+//	that clients provide a structured user-agent string that provides a basic
+//	description of the calling library, version & platform to facilitate issue diagnosis
+//	in heterogeneous environments. The following structure is recommended to library developers:
 //
-//   User-Agent → "grpc-" Language ?("-" Variant) "/" Version ?( " ("  *(AdditionalProperty ";") ")" )
+//	User-Agent → "grpc-" Language ?("-" Variant) "/" Version ?( " ("  *(AdditionalProperty ";") ")" )
 func grpcUserAgent() string {
 	return fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())
 }
@@ -797,8 +797,9 @@ func grpcStatusFromError(err error) *statusv1.Status {
 // percent-encoded.
 //
 // References:
-//   https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#responses
-//   https://datatracker.ietf.org/doc/html/rfc3986#section-2.1
+//
+//	https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#responses
+//	https://datatracker.ietf.org/doc/html/rfc3986#section-2.1
 func grpcPercentEncode(bufferPool *bufferPool, msg string) string {
 	for i := 0; i < len(msg); i++ {
 		// Characters that need to be escaped are defined in gRPC's HTTP/2 spec.

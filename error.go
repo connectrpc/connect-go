@@ -31,13 +31,13 @@ const (
 	defaultAnyResolverPrefix = "type.googleapis.com/"
 )
 
-// An ErrorDetail is a self-describing Protobuf message attached to an *Error.
+// An ErrorDetail is a self-describing Protobuf message attached to an [*Error].
 // Error details are sent over the network to clients, which can then work with
 // strongly-typed data rather than trying to parse a complex error message. For
 // example, you might use details to send a localized error message or retry
 // parameters to the client.
 //
-// The google.golang.org/genproto/googleapis/rpc/errdetails package contains a
+// The [google.golang.org/genproto/googleapis/rpc/errdetails] package contains a
 // variety of Protobuf messages commonly used as error details.
 type ErrorDetail struct {
 	pb       *anypb.Any
@@ -53,7 +53,7 @@ func NewErrorDetail(msg proto.Message) (*ErrorDetail, error) {
 	return &ErrorDetail{pb: pb}, nil
 }
 
-// Type is the fully-qualified name of the ErrorDetail's Protobuf message (for
+// Type is the fully-qualified name of the detail's Protobuf message (for
 // example, acme.foo.v1.FooDetail).
 func (d *ErrorDetail) Type() string {
 	// proto.Any tries to make messages self-describing by using type URLs rather
@@ -81,7 +81,7 @@ func (d *ErrorDetail) Value() (proto.Message, error) {
 	return d.pb.UnmarshalNew()
 }
 
-// An Error captures four key pieces of information: a Code, an underlying Go
+// An Error captures four key pieces of information: a [Code], an underlying Go
 // error, a map of metadata, and an optional collection of arbitrary Protobuf
 // messages called "details" (more on those below). Servers send the code, the
 // underlying error's Error() output, the metadata, and details over the wire
@@ -89,14 +89,16 @@ func (d *ErrorDetail) Value() (proto.Message, error) {
 // clients - take care not to leak sensitive information from public APIs!
 //
 // Service implementations and interceptors should return errors that can be
-// cast to an *Error (using the standard library's errors.As). If the returned
-// error can't be cast to an *Error, connect will use CodeUnknown and the
+// cast to an [*Error] (using the standard library's [errors.As]). If the returned
+// error can't be cast to an [*Error], connect will use [CodeUnknown] and the
 // returned error's message.
 //
 // Error details are an optional mechanism for servers, interceptors, and
 // proxies to attach arbitrary Protobuf messages to the error code and message.
 // They're a clearer and more performant alternative to HTTP header
-// microformats. See https://connectrpc.com/docs/go/errors for more details.
+// microformats. See [the documentation on errors] for more details.
+//
+// [the documentation on errors]: https://connectrpc.com/docs/go/errors
 type Error struct {
 	code    Code
 	err     error
@@ -126,8 +128,7 @@ func (e *Error) Message() string {
 	return ""
 }
 
-// Unwrap implements errors.Wrapper, which allows errors.Is and errors.As
-// access to the underlying error.
+// Unwrap allows [errors.Is] and [errors.As] access to the underlying error.
 func (e *Error) Unwrap() error {
 	return e.err
 }

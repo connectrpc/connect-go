@@ -26,7 +26,7 @@ import (
 // This interceptor uses a somewhat unusual strategy to recover from panics.
 // The standard recovery idiom:
 //
-//   if r := recover(); r != nil { ... }
+//	if r := recover(); r != nil { ... }
 //
 // isn't robust in the face of user error, because it doesn't handle
 // panic(nil). This occasionally happens by mistake, and it's a beast to debug
@@ -39,7 +39,7 @@ type recoverHandlerInterceptor struct {
 }
 
 func (i *recoverHandlerInterceptor) WrapUnary(next UnaryFunc) UnaryFunc {
-	return func(ctx context.Context, req AnyRequest) (_ AnyResponse, retErr error) { // nolint:nonamedreturns
+	return func(ctx context.Context, req AnyRequest) (_ AnyResponse, retErr error) {
 		if req.Spec().IsClient {
 			return next(ctx, req)
 		}
@@ -48,8 +48,8 @@ func (i *recoverHandlerInterceptor) WrapUnary(next UnaryFunc) UnaryFunc {
 			if panicked {
 				r := recover()
 				// net/http checks for ErrAbortHandler with ==, so we should too.
-				if r == http.ErrAbortHandler { // nolint:errorlint,goerr113
-					panic(r) // nolint:forbidigo
+				if r == http.ErrAbortHandler { //nolint:errorlint,goerr113
+					panic(r) //nolint:forbidigo
 				}
 				retErr = i.handle(ctx, req.Spec(), req.Header(), r)
 			}
@@ -61,14 +61,14 @@ func (i *recoverHandlerInterceptor) WrapUnary(next UnaryFunc) UnaryFunc {
 }
 
 func (i *recoverHandlerInterceptor) WrapStreamingHandler(next StreamingHandlerFunc) StreamingHandlerFunc {
-	return func(ctx context.Context, conn StreamingHandlerConn) (retErr error) { // nolint:nonamedreturns
+	return func(ctx context.Context, conn StreamingHandlerConn) (retErr error) {
 		panicked := true
 		defer func() {
 			if panicked {
 				r := recover()
 				// net/http checks for ErrAbortHandler with ==, so we should too.
-				if r == http.ErrAbortHandler { // nolint:errorlint,goerr113
-					panic(r) // nolint:forbidigo
+				if r == http.ErrAbortHandler { //nolint:errorlint,goerr113
+					panic(r) //nolint:forbidigo
 				}
 				retErr = i.handle(ctx, Spec{}, nil, r)
 			}

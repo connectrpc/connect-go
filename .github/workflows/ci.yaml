@@ -32,9 +32,11 @@ jobs:
           key: ${{ runner.os }}-connect-ci-${{ hashFiles('**/go.sum') }}
           restore-keys: ${{ runner.os }}-connect-ci-
       - name: Test
-        run: make test && make checkgenerate
+        run: make test
       - name: Lint
         # Often, lint & gofmt guidelines depend on the Go version. To prevent
         # conflicting guidance, run only on the most recent supported version.
-        if: matrix.go-version == '1.18.x'
-        run: make lint
+        # For the same reason, only check generated code on the most recent
+        # supported version.
+        if: matrix.go-version == '1.19.x'
+        run: make checkgenerate && make lint

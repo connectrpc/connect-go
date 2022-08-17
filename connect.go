@@ -13,13 +13,15 @@
 // limitations under the License.
 
 // Package connect is a slim RPC framework built on Protocol Buffers and
-// net/http. In addition to supporting its own protocol, Connect handlers and
+// [net/http]. In addition to supporting its own protocol, Connect handlers and
 // clients are wire-compatible with gRPC and gRPC-Web, including streaming.
 //
 // This documentation is intended to explain each type and function in
-// isolation. For walkthroughs, FAQs, and other narrative docs, see
-// https://connectrpc.com. For a working demonstration service, see
-// https://github.com/bufbuild/connect-demo.
+// isolation. Walkthroughs, FAQs, and other narrative docs are available on the
+// [Connect website], and there's a working [demonstration service] on Github.
+//
+// [Connect website]: https://connectrpc.com
+// [demonstration service]: https://github.com/bufbuild/connect-demo
 package connect
 
 import (
@@ -52,16 +54,16 @@ const (
 // StreamingHandlerConn is the server's view of a bidirectional message
 // exchange. Interceptors for streaming RPCs may wrap StreamingHandlerConns.
 //
-// Like the standard library's http.ResponseWriter, StreamingHandlerConns write
+// Like the standard library's [http.ResponseWriter], StreamingHandlerConns write
 // response headers to the network with the first call to Send. Any subsequent
 // mutations are effectively no-ops. Handlers may mutate response trailers at
 // any time before returning. When the client has finished sending data,
-// Receive returns an error wrapping io.EOF. Handlers should check for this
-// using the standard library's errors.Is.
+// Receive returns an error wrapping [io.EOF]. Handlers should check for this
+// using the standard library's [errors.Is].
 //
 // StreamingHandlerConn implementations provided by this module guarantee that
-// all returned errors can be cast to *Error using the standard library's
-// errors.As.
+// all returned errors can be cast to [*Error] using the standard library's
+// [errors.As].
 //
 // StreamingHandlerConn implementations do not need to be safe for concurrent use.
 type StreamingHandlerConn interface {
@@ -81,15 +83,15 @@ type StreamingHandlerConn interface {
 // StreamingClientConns write request headers to the network with the first
 // call to Send. Any subsequent mutations are effectively no-ops. When the
 // server is done sending data, the StreamingClientConn's Receive method
-// returns an error wrapping io.EOF. Clients should check for this using the
-// standard library's errors.Is. If the server encounters an error during
+// returns an error wrapping [io.EOF]. Clients should check for this using the
+// standard library's [errors.Is]. If the server encounters an error during
 // processing, subsequent calls to the StreamingClientConn's Send method will
-// return an error wrapping io.EOF; clients may then call Receive to unmarshal
+// return an error wrapping [io.EOF]; clients may then call Receive to unmarshal
 // the error.
 //
 // StreamingClientConn implementations provided by this module guarantee that
-// all returned errors can be cast to *Error using the standard library's
-// errors.As.
+// all returned errors can be cast to [*Error] using the standard library's
+// [errors.As].
 //
 // In order to support bidirectional streaming RPCs, all StreamingClientConn
 // implementations must support limited concurrent use. See the comments on
@@ -132,7 +134,7 @@ func NewRequest[T any](message *T) *Request[T] {
 }
 
 // Any returns the concrete request message as an empty interface, so that
-// *Request implements the AnyRequest interface.
+// *Request implements the [AnyRequest] interface.
 func (r *Request[_]) Any() any {
 	return r.Msg
 }
@@ -153,7 +155,7 @@ func (r *Request[_]) Header() http.Header {
 // internalOnly implements AnyRequest.
 func (r *Request[_]) internalOnly() {}
 
-// AnyRequest is the common method set of all Requests, regardless of type
+// AnyRequest is the common method set of every [Request], regardless of type
 // parameter. It's used in unary interceptors.
 //
 // To preserve our ability to add methods to this interface without breaking
@@ -188,7 +190,7 @@ func NewResponse[T any](message *T) *Response[T] {
 }
 
 // Any returns the concrete response message as an empty interface, so that
-// *Response implements the AnyResponse interface.
+// *Response implements the [AnyResponse] interface.
 func (r *Response[_]) Any() any {
 	return r.Msg
 }
@@ -214,7 +216,7 @@ func (r *Response[_]) Trailer() http.Header {
 // internalOnly implements AnyResponse.
 func (r *Response[_]) internalOnly() {}
 
-// AnyResponse is the common method set of all Responses, regardless of type
+// AnyResponse is the common method set of every [Response], regardless of type
 // parameter. It's used in unary interceptors.
 //
 // To preserve our ability to add methods to this interface without breaking

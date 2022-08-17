@@ -43,7 +43,14 @@ func TestHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("method_not_allowed", func(t *testing.T) {
 		t.Parallel()
-		resp, err := client.Get(server.URL + pingProcedure)
+		request, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodGet,
+			server.URL+pingProcedure,
+			strings.NewReader(""),
+		)
+		assert.Nil(t, err)
+		resp, err := client.Do(request)
 		assert.Nil(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, resp.StatusCode, http.StatusMethodNotAllowed)
@@ -52,7 +59,15 @@ func TestHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("unsupported_content_type", func(t *testing.T) {
 		t.Parallel()
-		resp, err := client.Post(server.URL+pingProcedure, "application/x-custom-json", strings.NewReader("{}"))
+		request, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodPost,
+			server.URL+pingProcedure,
+			strings.NewReader("{}"),
+		)
+		assert.Nil(t, err)
+		request.Header.Set("Content-Type", "application/x-custom-json")
+		resp, err := client.Do(request)
 		assert.Nil(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, resp.StatusCode, http.StatusUnsupportedMediaType)
@@ -70,7 +85,12 @@ func TestHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("unsupported_content_encoding", func(t *testing.T) {
 		t.Parallel()
-		req, err := http.NewRequest(http.MethodPost, server.URL+pingProcedure, strings.NewReader("{}"))
+		req, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodPost,
+			server.URL+pingProcedure,
+			strings.NewReader("{}"),
+		)
 		assert.Nil(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Content-Encoding", "invalid")
