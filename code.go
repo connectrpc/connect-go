@@ -22,10 +22,13 @@ import (
 
 // A Code is one of the Connect protocol's error codes. There are no user-defined
 // codes, so only the codes enumerated below are valid. In both name and
-// semantics, these codes also match the gRPC status codes.
+// semantics, these codes match the gRPC status codes.
 //
-// See the specification at https://connect.build/docs/protocol for
-// descriptions of each code and example usage.
+// The descriptions below are optimized for brevity rather than completeness.
+// See the [Connect protocol specification] for detailed descriptions of each
+// code and example usage.
+//
+// [Connect protocol specification]: https://connect.build/docs/protocol
 type Code uint32
 
 const (
@@ -142,12 +145,12 @@ func (c Code) String() string {
 	return fmt.Sprintf("code_%d", c)
 }
 
-// MarshalText implements encoding.TextMarshaler.
+// MarshalText implements [encoding.TextMarshaler].
 func (c Code) MarshalText() ([]byte, error) {
 	return []byte(c.String()), nil
 }
 
-// UnmarshalText implements encoding.TextUnmarshaler.
+// UnmarshalText implements [encoding.TextUnmarshaler].
 func (c *Code) UnmarshalText(data []byte) error {
 	dataStr := string(data)
 	switch dataStr {
@@ -213,8 +216,8 @@ func (c *Code) UnmarshalText(data []byte) error {
 	return fmt.Errorf("invalid code %q", dataStr)
 }
 
-// CodeOf returns the error's status code if it is or wraps a *connect.Error
-// and CodeUnknown otherwise.
+// CodeOf returns the error's status code if it is or wraps an [*Error] and
+// [CodeUnknown] otherwise.
 func CodeOf(err error) Code {
 	if connectErr, ok := asError(err); ok {
 		return connectErr.Code()

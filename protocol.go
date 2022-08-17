@@ -66,6 +66,7 @@ type protocolHandlerParams struct {
 	CompressMinBytes int
 	BufferPool       *bufferPool
 	ReadMaxBytes     int
+	SendMaxBytes     int
 }
 
 // Handler is the server side of a protocol. HTTP handlers typically support
@@ -100,6 +101,7 @@ type protocolClientParams struct {
 	URL              string
 	BufferPool       *bufferPool
 	ReadMaxBytes     int
+	SendMaxBytes     int
 	// The gRPC family of protocols always needs access to a Protobuf codec to
 	// marshal and unmarshal errors.
 	Protobuf Codec
@@ -241,7 +243,7 @@ func validateRequestURL(uri string) *Error {
 // negotiateCompression determines and validates the request compression and
 // response compression using the available compressors and protocol-specific
 // Content-Encoding and Accept-Encoding headers.
-func negotiateCompression( // nolint:nonamedreturns
+func negotiateCompression( //nolint:nonamedreturns
 	availableCompressors readOnlyCompressionPools,
 	sent, accept string,
 ) (requestCompression, responseCompression string, clientVisibleErr *Error) {

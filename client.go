@@ -27,7 +27,7 @@ import (
 //
 // By default, clients use the Connect protocol with the binary Protobuf Codec,
 // ask for gzipped responses, and send uncompressed requests. To use the gRPC
-// or gRPC-Web protocols, use the WithGRPC or WithGRPCWeb options.
+// or gRPC-Web protocols, use the [WithGRPC] or [WithGRPCWeb] options.
 type Client[Req, Res any] struct {
 	config         *clientConfig
 	callUnary      func(context.Context, *Request[Req]) (*Response[Res], error)
@@ -58,6 +58,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 			URL:              url,
 			BufferPool:       config.BufferPool,
 			ReadMaxBytes:     config.ReadMaxBytes,
+			SendMaxBytes:     config.SendMaxBytes,
 		},
 	)
 	if protocolErr != nil {
@@ -178,6 +179,7 @@ type clientConfig struct {
 	RequestCompressionName string
 	BufferPool             *bufferPool
 	ReadMaxBytes           int
+	SendMaxBytes           int
 }
 
 func newClientConfig(url string, options []ClientOption) (*clientConfig, *Error) {
