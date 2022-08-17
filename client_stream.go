@@ -70,13 +70,19 @@ func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Response[Res], err
 	return response, c.conn.CloseResponse()
 }
 
+// Conn exposes the underlying StreamingClientConn. This may be useful if
+// you'd prefer to wrap the connection in a different high-level API.
+func (c *ClientStreamForClient[Req, Res]) Conn() (StreamingClientConn, error) {
+	return c.conn, c.err
+}
+
 // ServerStreamForClient is the client's view of a server streaming RPC.
 //
 // It's returned from [Client].CallServerStream, but doesn't currently have an
 // exported constructor function.
 type ServerStreamForClient[Res any] struct {
 	conn StreamingClientConn
-	msg  Res
+	msg  *Res
 	// Error from client construction. If non-nil, return for all calls.
 	constructErr error
 	// Error from conn.Receive().
@@ -92,15 +98,17 @@ func (s *ServerStreamForClient[Res]) Receive() bool {
 	if s.constructErr != nil || s.receiveErr != nil {
 		return false
 	}
-	s.receiveErr = s.conn.Receive(&s.msg)
+	s.msg = new(Res)
+	s.receiveErr = s.conn.Receive(s.msg)
 	return s.receiveErr == nil
 }
 
-// Msg returns the most recent message unmarshaled by a call to Receive. The
-// returned message points to data that will be overwritten by the next call to
-// Receive.
+// Msg returns the most recent message unmarshaled by a call to Receive.
 func (s *ServerStreamForClient[Res]) Msg() *Res {
-	return &s.msg
+	if s.msg == nil {
+		s.msg = new(Res)
+	}
+	return s.msg
 }
 
 // Err returns the first non-EOF error that was encountered by Receive.
@@ -138,6 +146,12 @@ func (s *ServerStreamForClient[Res]) Close() error {
 		return s.constructErr
 	}
 	return s.conn.CloseResponse()
+}
+
+// Conn exposes the underlying StreamingClientConn. This may be useful if
+// you'd prefer to wrap the connection in a different high-level API.
+func (s *ServerStreamForClient[Res]) Conn() (StreamingClientConn, error) {
+	return s.conn, s.constructErr
 }
 
 // BidiStreamForClient is the client's view of a bidirectional streaming RPC.
@@ -217,4 +231,10 @@ func (b *BidiStreamForClient[Req, Res]) ResponseTrailer() http.Header {
 		return http.Header{}
 	}
 	return b.conn.ResponseTrailer()
+}
+
+// Conn exposes the underlying StreamingClientConn. This may be useful if
+// you'd prefer to wrap the connection in a different high-level API.
+func (b *BidiStreamForClient[Req, Res]) Conn() (StreamingClientConn, error) {
+	return b.conn, b.err
 }

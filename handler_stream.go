@@ -26,7 +26,7 @@ import (
 // an exported constructor.
 type ClientStream[Req any] struct {
 	conn StreamingHandlerConn
-	msg  Req
+	msg  *Req
 	err  error
 }
 
@@ -44,15 +44,17 @@ func (c *ClientStream[Req]) Receive() bool {
 	if c.err != nil {
 		return false
 	}
-	c.err = c.conn.Receive(&c.msg)
+	c.msg = new(Req)
+	c.err = c.conn.Receive(c.msg)
 	return c.err == nil
 }
 
-// Msg returns the most recent message unmarshaled by a call to Receive. The
-// returned message points to data that will be overwritten by the next call to
-// Receive.
+// Msg returns the most recent message unmarshaled by a call to Receive.
 func (c *ClientStream[Req]) Msg() *Req {
-	return &c.msg
+	if c.msg == nil {
+		c.msg = new(Req)
+	}
+	return c.msg
 }
 
 // Err returns the first non-EOF error that was encountered by Receive.
@@ -61,6 +63,12 @@ func (c *ClientStream[Req]) Err() error {
 		return nil
 	}
 	return c.err
+}
+
+// Conn exposes the underlying StreamingHandlerConn. This may be useful if
+// you'd prefer to wrap the connection in a different high-level API.
+func (c *ClientStream[Req]) Conn() StreamingHandlerConn {
+	return c.conn
 }
 
 // ServerStream is the handler's view of a server streaming RPC.
@@ -87,6 +95,12 @@ func (s *ServerStream[Res]) ResponseTrailer() http.Header {
 // headers.
 func (s *ServerStream[Res]) Send(msg *Res) error {
 	return s.conn.Send(msg)
+}
+
+// Conn exposes the underlying StreamingHandlerConn. This may be useful if
+// you'd prefer to wrap the connection in a different high-level API.
+func (s *ServerStream[Res]) Conn() StreamingHandlerConn {
+	return s.conn
 }
 
 // BidiStream is the handler's view of a bidirectional streaming RPC.
@@ -128,4 +142,10 @@ func (b *BidiStream[Req, Res]) ResponseTrailer() http.Header {
 // headers.
 func (b *BidiStream[Req, Res]) Send(msg *Res) error {
 	return b.conn.Send(msg)
+}
+
+// Conn exposes the underlying StreamingHandlerConn. This may be useful if
+// you'd prefer to wrap the connection in a different high-level API.
+func (b *BidiStream[Req, Res]) Conn() StreamingHandlerConn {
+	return b.conn
 }
