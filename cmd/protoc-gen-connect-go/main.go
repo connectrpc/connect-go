@@ -21,14 +21,14 @@
 //
 //	protoc --go_out=gen --connect-go_out=gen path/to/file.proto
 //
-// With buf, your buf.gen.yaml will look like this:
+// With [buf], your buf.gen.yaml will look like this:
 //
 //	version: v1
 //	plugins:
-//	  name: go
-//	  out: gen
-//	  name: connect-go
-//	  out: gen
+//	  - name: go
+//	    out: gen
+//	  - name: connect-go
+//	    out: gen
 //
 // This generates service definitions for the Protobuf types and services
 // defined by file.proto. If file.proto defines the foov1 Protobuf package, the
@@ -36,6 +36,8 @@
 //
 //	gen/path/to/file.pb.go
 //	gen/path/to/connectfoov1/file.connect.go
+//
+// [buf]: https://buf.build
 package main
 
 import (
