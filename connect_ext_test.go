@@ -410,7 +410,7 @@ func TestConcurrentStreams(t *testing.T) {
 			sum := client.CumSum(context.Background())
 			start.Wait()
 			for i := 0; i < 100; i++ {
-				num := rand.Int63n(1000)
+				num := rand.Int63n(1000) //nolint: gosec
 				total += num
 				if err := sum.Send(&pingv1.CumSumRequest{Number: num}); err != nil {
 					t.Errorf("failed to send request: %v", err)
