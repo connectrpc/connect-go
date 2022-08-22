@@ -414,16 +414,16 @@ func TestConcurrentStreams(t *testing.T) {
 				total += num
 				if err := sum.Send(&pingv1.CumSumRequest{Number: num}); err != nil {
 					t.Errorf("failed to send request: %v", err)
-					return
+					break
 				}
 				resp, err := sum.Receive()
 				if err != nil {
 					t.Errorf("failed to receive from stream: %v", err)
-					return
+					break
 				}
 				if total != resp.Sum {
 					t.Errorf("expected %d == %d", total, resp.Sum)
-					return
+					break
 				}
 			}
 			if err := sum.CloseRequest(); err != nil {
