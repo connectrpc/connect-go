@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -385,6 +386,44 @@ func TestServer(t *testing.T) {
 		defer server.Close()
 		testMatrix(t, server, true /* bidi */)
 	})
+}
+
+func TestConcurrentStreams(t *testing.T) {
+	if testing.Short() {
+		t.Skipf("skipping %s test in short mode", t.Name())
+	}
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	var done sync.WaitGroup
+	var startWg sync.WaitGroup
+	startWg.Add(1)
+	for i := 0; i < 100; i++ {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
+			var total int64
+			sum := client.CumSum(context.Background())
+			startWg.Wait()
+			for i := 0; i < 100; i++ {
+				num := rand.Int63n(1000)
+				total += num
+				assert.Nil(t, sum.Send(&pingv1.CumSumRequest{Number: num}))
+				resp, err := sum.Receive()
+				assert.Nil(t, err)
+				assert.Equal(t, total, resp.Sum)
+			}
+			assert.Nil(t, sum.CloseRequest())
+			assert.Nil(t, sum.CloseResponse())
+		}()
+	}
+	startWg.Done()
+	done.Wait()
 }
 
 func TestHeaderBasic(t *testing.T) {
