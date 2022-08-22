@@ -399,9 +399,8 @@ func TestConcurrentStreams(t *testing.T) {
 	server.EnableHTTP2 = true
 	server.StartTLS()
 	t.Cleanup(server.Close)
-	var done sync.WaitGroup
-	var startWg sync.WaitGroup
-	startWg.Add(1)
+	var done, start sync.WaitGroup
+	start.Add(1)
 	for i := 0; i < 100; i++ {
 		done.Add(1)
 		go func() {
@@ -409,20 +408,33 @@ func TestConcurrentStreams(t *testing.T) {
 			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
 			var total int64
 			sum := client.CumSum(context.Background())
-			startWg.Wait()
+			start.Wait()
 			for i := 0; i < 100; i++ {
 				num := rand.Int63n(1000)
 				total += num
-				assert.Nil(t, sum.Send(&pingv1.CumSumRequest{Number: num}))
+				if err := sum.Send(&pingv1.CumSumRequest{Number: num}); err != nil {
+					t.Errorf("failed to send request: %v", err)
+					return
+				}
 				resp, err := sum.Receive()
-				assert.Nil(t, err)
-				assert.Equal(t, total, resp.Sum)
+				if err != nil {
+					t.Errorf("failed to receive from stream: %v", err)
+					return
+				}
+				if total != resp.Sum {
+					t.Errorf("expected %d == %d", total, resp.Sum)
+					return
+				}
 			}
-			assert.Nil(t, sum.CloseRequest())
-			assert.Nil(t, sum.CloseResponse())
+			if err := sum.CloseRequest(); err != nil {
+				t.Errorf("failed to close request: %v", err)
+			}
+			if err := sum.CloseResponse(); err != nil {
+				t.Errorf("failed to close response: %v", err)
+			}
 		}()
 	}
-	startWg.Done()
+	start.Done()
 	done.Wait()
 }
 
