@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -385,6 +386,56 @@ func TestServer(t *testing.T) {
 		defer server.Close()
 		testMatrix(t, server, true /* bidi */)
 	})
+}
+
+func TestConcurrentStreams(t *testing.T) {
+	if testing.Short() {
+		t.Skipf("skipping %s test in short mode", t.Name())
+	}
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	var done, start sync.WaitGroup
+	start.Add(1)
+	for i := 0; i < 100; i++ {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
+			var total int64
+			sum := client.CumSum(context.Background())
+			start.Wait()
+			for i := 0; i < 100; i++ {
+				num := rand.Int63n(1000) //nolint: gosec
+				total += num
+				if err := sum.Send(&pingv1.CumSumRequest{Number: num}); err != nil {
+					t.Errorf("failed to send request: %v", err)
+					break
+				}
+				resp, err := sum.Receive()
+				if err != nil {
+					t.Errorf("failed to receive from stream: %v", err)
+					break
+				}
+				if total != resp.Sum {
+					t.Errorf("expected %d == %d", total, resp.Sum)
+					break
+				}
+			}
+			if err := sum.CloseRequest(); err != nil {
+				t.Errorf("failed to close request: %v", err)
+			}
+			if err := sum.CloseResponse(); err != nil {
+				t.Errorf("failed to close response: %v", err)
+			}
+		}()
+	}
+	start.Done()
+	done.Wait()
 }
 
 func TestHeaderBasic(t *testing.T) {
