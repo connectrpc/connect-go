@@ -83,3 +83,6 @@ issues:
     - linters:
         - revive
       text: "receiver-naming:.*for invalid-type$"
+    - linters: [gosec]
+      path: connect_ext_test.go
+      text: "G404: Use of weak random number generator.*"
