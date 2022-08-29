@@ -162,8 +162,7 @@ stable v1 in October, soon after the Go 1.19 release.
 
 `connect-go` supports:
 
-* The [two most recent major releases][go-support-policy] of Go, with a minimum
-  of Go 1.18.
+* The [two most recent major releases][go-support-policy] of Go.
 * [APIv2] of Protocol Buffers in Go (`google.golang.org/protobuf`).
 
 Within those parameters, Connect follows semantic versioning.
