@@ -43,11 +43,12 @@ const errorMessage = "oh no"
 // client doesn't set a header, and the server sets headers and trailers on the
 // response.
 const (
-	headerValue    = "some header value"
-	trailerValue   = "some trailer value"
-	clientHeader   = "Connect-Client-Header"
-	handlerHeader  = "Connect-Handler-Header"
-	handlerTrailer = "Connect-Handler-Trailer"
+	headerValue                 = "some header value"
+	trailerValue                = "some trailer value"
+	clientHeader                = "Connect-Client-Header"
+	handlerHeader               = "Connect-Handler-Header"
+	handlerTrailer              = "Connect-Handler-Trailer"
+	clientMiddlewareErrorHeader = "Connect-Trigger-HTTP-Error"
 )
 
 func TestServer(t *testing.T) {
@@ -288,6 +289,19 @@ func TestServer(t *testing.T) {
 		})
 	}
 	testErrors := func(t *testing.T, client pingv1connect.PingServiceClient) { //nolint:thelper
+		assertIsHTTPMiddlewareError := func(tb testing.TB, err error) {
+			tb.Helper()
+			assert.NotNil(tb, err)
+			var connectErr *connect.Error
+			assert.True(tb, errors.As(err, &connectErr))
+			expect := newHTTPMiddlewareError()
+			assert.Equal(tb, connectErr.Code(), expect.Code())
+			assert.Equal(tb, connectErr.Message(), expect.Message())
+			for k, v := range expect.Meta() {
+				assert.Equal(tb, connectErr.Meta().Values(k), v)
+			}
+			assert.Equal(tb, len(connectErr.Details()), len(expect.Details()))
+		}
 		t.Run("errors", func(t *testing.T) {
 			request := connect.NewRequest(&pingv1.FailRequest{
 				Code: int32(connect.CodeResourceExhausted),
@@ -305,6 +319,20 @@ func TestServer(t *testing.T) {
 			assert.Zero(t, connectErr.Details())
 			assert.Equal(t, connectErr.Meta().Values(handlerHeader), []string{headerValue})
 			assert.Equal(t, connectErr.Meta().Values(handlerTrailer), []string{trailerValue})
+		})
+		t.Run("middleware_errors_unary", func(t *testing.T) {
+			request := connect.NewRequest(&pingv1.PingRequest{})
+			request.Header().Set(clientMiddlewareErrorHeader, headerValue)
+			_, err := client.Ping(context.Background(), request)
+			assertIsHTTPMiddlewareError(t, err)
+		})
+		t.Run("middleware_errors_streaming", func(t *testing.T) {
+			request := connect.NewRequest(&pingv1.CountUpRequest{Number: 10})
+			request.Header().Set(clientMiddlewareErrorHeader, headerValue)
+			stream, err := client.CountUp(context.Background(), request)
+			assert.Nil(t, err)
+			assert.False(t, stream.Receive())
+			assertIsHTTPMiddlewareError(t, stream.Err())
 		})
 	}
 	testMatrix := func(t *testing.T, server *httptest.Server, bidi bool) { //nolint:thelper
@@ -367,9 +395,27 @@ func TestServer(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(
+	pingRoute, pingHandler := pingv1connect.NewPingServiceHandler(
 		pingServer{checkMetadata: true},
-	))
+	)
+	errorWriter := connect.NewErrorWriter()
+	// Add some net/http middleware to the ping service so we can also exercise ErrorWriter.
+	mux.Handle(pingRoute, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Header.Get(clientMiddlewareErrorHeader) != "" {
+			defer request.Body.Close()
+			if _, err := io.Copy(io.Discard, request.Body); err != nil {
+				t.Errorf("drain request body: %v", err)
+			}
+			if !errorWriter.IsSupported(request) {
+				t.Errorf("ErrorWriter doesn't support Content-Type %q", request.Header.Get("Content-Type"))
+			}
+			if err := errorWriter.Write(response, request, newHTTPMiddlewareError()); err != nil {
+				t.Errorf("send RPC error from HTTP middleware: %v", err)
+			}
+			return
+		}
+		pingHandler.ServeHTTP(response, request)
+	}))
 
 	t.Run("http1", func(t *testing.T) {
 		t.Parallel()
@@ -1376,4 +1422,10 @@ func (l *trimTrailerWriter) removeTrailers() {
 			l.w.Header().Del(k)
 		}
 	}
+}
+
+func newHTTPMiddlewareError() *connect.Error {
+	err := connect.NewError(connect.CodeResourceExhausted, errors.New("error from HTTP middleware"))
+	err.Meta().Set("Middleware-Foo", "bar")
+	return err
 }

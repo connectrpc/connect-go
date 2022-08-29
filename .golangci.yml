@@ -75,6 +75,9 @@ issues:
     - linters: [varnamelen]
       path: cmd/protoc-gen-connect-go
       text: "parameter name 'g' is too short"
+    # Thorough error logging and timeout config make this example unreadably long.
+    - linters: [errcheck, gosec]
+      path: error_writer_example_test.go
     # It should be crystal clear that Connect uses plain *http.Clients.
     - linters: [revive, stylecheck]
       path: client_example_test.go
