@@ -216,7 +216,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		if err != nil && !errors.Is(err, io.EOF) {
 			return errorf(CodeUnknown, "read enveloped message: %w", err)
 		}
-		return errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", size, r.readMaxBytes)
+		return errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", size, r.readMaxBytes)
 	}
 	if size > 0 {
 		env.Data.Grow(size)

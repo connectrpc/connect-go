@@ -93,9 +93,9 @@ func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readM
 		discardedBytes, err := io.Copy(io.Discard, decompressor)
 		_ = c.putDecompressor(decompressor)
 		if err != nil {
-			return errorf(CodeInvalidArgument, "message is larger than configured max %d - unable to determine message size: %w", readMaxBytes, err)
+			return errorf(CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %w", readMaxBytes, err)
 		}
-		return errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", bytesRead+discardedBytes, readMaxBytes)
+		return errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", bytesRead+discardedBytes, readMaxBytes)
 	}
 	if err := c.putDecompressor(decompressor); err != nil {
 		return errorf(CodeUnknown, "recycle decompressor: %w", err)
