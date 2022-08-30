@@ -78,7 +78,7 @@ func (w *envelopeWriter) Write(env *envelope) *Error {
 		w.compressionPool == nil ||
 		env.Data.Len() < w.compressMinBytes {
 		if w.sendMaxBytes > 0 && env.Data.Len() > w.sendMaxBytes {
-			return NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", env.Data.Len(), w.sendMaxBytes))
+			return errorf(CodeResourceExhausted, "message size %d exceeds sendMaxBytes %d", env.Data.Len(), w.sendMaxBytes)
 		}
 		return w.write(env)
 	}
@@ -88,7 +88,7 @@ func (w *envelopeWriter) Write(env *envelope) *Error {
 		return err
 	}
 	if w.sendMaxBytes > 0 && data.Len() > w.sendMaxBytes {
-		return NewError(CodeResourceExhausted, fmt.Errorf("compressed message size %d exceeds sendMaxBytes %d", data.Len(), w.sendMaxBytes))
+		return errorf(CodeResourceExhausted, "compressed message size %d exceeds sendMaxBytes %d", data.Len(), w.sendMaxBytes)
 	}
 	return w.write(&envelope{
 		Data:  data,
