@@ -951,6 +951,95 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 	})
 }
 
+func TestHandlerWithHTTPMaxBytes(t *testing.T) {
+	// This is similar to Connect's own ReadMaxBytes option, but applied to the
+	// whole stream using the stdlib's http.MaxBytesHandler.
+	t.Parallel()
+	const readMaxBytes = 128
+	mux := http.NewServeMux()
+	pingRoute, pingHandler := pingv1connect.NewPingServiceHandler(pingServer{})
+	mux.Handle(pingRoute, http.MaxBytesHandler(pingHandler, readMaxBytes))
+	run := func(t *testing.T, client pingv1connect.PingServiceClient, compressed bool) {
+		t.Helper()
+		t.Run("below_read_max", func(t *testing.T) {
+			t.Parallel()
+			_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
+			assert.Nil(t, err)
+		})
+		t.Run("just_above_max", func(t *testing.T) {
+			t.Parallel()
+			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("a", readMaxBytes*10)}
+			_, err := client.Ping(context.Background(), connect.NewRequest(pingRequest))
+			if compressed {
+				compressedSize := gzipCompressedSize(t, pingRequest)
+				assert.True(t, compressedSize < readMaxBytes, assert.Sprintf("expected compressed size %d < %d", compressedSize, readMaxBytes))
+				assert.Nil(t, err)
+				return
+			}
+			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
+			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+		})
+		t.Run("read_max_large", func(t *testing.T) {
+			t.Parallel()
+			if testing.Short() {
+				t.Skipf("skipping %s test in short mode", t.Name())
+			}
+			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("abcde", 1024*1024)}
+			if compressed {
+				expectedSize := gzipCompressedSize(t, pingRequest)
+				assert.True(t, expectedSize > readMaxBytes, assert.Sprintf("expected compressed size %d > %d", expectedSize, readMaxBytes))
+			}
+			_, err := client.Ping(context.Background(), connect.NewRequest(pingRequest))
+			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
+			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+		})
+	}
+	newHTTP2Server := func(t *testing.T) *httptest.Server {
+		t.Helper()
+		server := httptest.NewUnstartedServer(mux)
+		server.EnableHTTP2 = true
+		server.StartTLS()
+		t.Cleanup(server.Close)
+		return server
+	}
+	t.Run("connect", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
+		run(t, client, false)
+	})
+	t.Run("connect_gzip", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithSendGzip())
+		run(t, client, true)
+	})
+	t.Run("grpc", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPC())
+		run(t, client, false)
+	})
+	t.Run("grpc_gzip", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPC(), connect.WithSendGzip())
+		run(t, client, true)
+	})
+	t.Run("grpcweb", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPCWeb())
+		run(t, client, false)
+	})
+	t.Run("grpcweb_gzip", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPCWeb(), connect.WithSendGzip())
+		run(t, client, true)
+	})
+}
+
 func TestClientWithReadMaxBytes(t *testing.T) {
 	t.Parallel()
 	createServer := func(tb testing.TB, enableCompression bool) *httptest.Server {

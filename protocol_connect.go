@@ -781,6 +781,10 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
+		situation := fmt.Sprintf("read first %d bytes of message", bytesRead)
+		if readMaxBytesErr := asMaxBytesError(situation, err); readMaxBytesErr != nil {
+			return readMaxBytesErr
+		}
 		return errorf(CodeUnknown, "read message: %w", err)
 	}
 	if u.readMaxBytes > 0 && bytesRead > int64(u.readMaxBytes) {
