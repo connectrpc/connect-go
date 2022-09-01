@@ -787,9 +787,9 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 		// Attempt to read to end in order to allow connection re-use
 		discardedBytes, err := io.Copy(io.Discard, u.reader)
 		if err != nil {
-			return errorf(CodeInvalidArgument, "message is larger than configured max %d - unable to determine message size: %w", u.readMaxBytes, err)
+			return errorf(CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %w", u.readMaxBytes, err)
 		}
-		return errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", bytesRead+discardedBytes, u.readMaxBytes)
+		return errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", bytesRead+discardedBytes, u.readMaxBytes)
 	}
 	if data.Len() > 0 && u.compressionPool != nil {
 		decompressed := u.bufferPool.Get()
