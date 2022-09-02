@@ -24,7 +24,7 @@ import (
 func asMaxBytesError(err error, tmpl string, args ...any) *Error {
 	const expect = "http: request body too large"
 	text := err.Error()
-	if !(text == expect) && !strings.HasSuffix(text, ": "+expect) {
+	if text != expect && !strings.HasSuffix(text, ": "+expect) {
 		return nil
 	}
 	prefix := fmt.Sprintf(tmpl, args...)
