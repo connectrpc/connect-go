@@ -18,13 +18,15 @@ package connect
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 )
 
-func asMaxBytesError(situation string, err error) *Error {
+func asMaxBytesError(err error, tmpl string, args ...any) *Error {
 	var maxBytesErr *http.MaxBytesError
 	if ok := errors.As(err, &maxBytesErr); !ok {
 		return nil
 	}
-	return errorf(CodeResourceExhausted, "%s: exceeded %d byte http.MaxBytesReader limit", situation, maxBytesErr.Limit)
+	prefix := fmt.Sprintf(tmpl, args...)
+	return errorf(CodeResourceExhausted, "%s: exceeded %d byte http.MaxBytesReader limit", prefix, maxBytesErr.Limit)
 }

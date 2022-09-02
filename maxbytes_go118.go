@@ -16,13 +16,17 @@
 
 package connect
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
-func asMaxBytesError(situation string, err error) *Error {
+func asMaxBytesError(err error, tmpl string, args ...any) *Error {
 	const expect = "http: request body too large"
 	text := err.Error()
 	if !(text == expect) && !strings.HasSuffix(text, ": "+expect) {
 		return nil
 	}
-	return errorf(CodeResourceExhausted, "%s: exceeded http.MaxBytesReader limit", situation)
+	prefix := fmt.Sprintf(tmpl, args...)
+	return errorf(CodeResourceExhausted, "%s: exceeded http.MaxBytesReader limit", prefix)
 }

@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 )
 
@@ -202,7 +201,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
-		if maxBytesErr := asMaxBytesError("read 5 byte message prefix", err); maxBytesErr != nil {
+		if maxBytesErr := asMaxBytesError(err, "read 5 byte message prefix"); maxBytesErr != nil {
 			// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.
 			return maxBytesErr
 		}
@@ -232,8 +231,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		for remaining > 0 {
 			bytesRead, err := io.CopyN(env.Data, r.reader, remaining)
 			if err != nil && !errors.Is(err, io.EOF) {
-				situation := fmt.Sprintf("read %d byte message", size)
-				if maxBytesErr := asMaxBytesError(situation, err); maxBytesErr != nil {
+				if maxBytesErr := asMaxBytesError(err, "read %d byte message", size); maxBytesErr != nil {
 					// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.
 					return maxBytesErr
 				}
