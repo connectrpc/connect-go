@@ -197,6 +197,11 @@ func WithCompressMinBytes(min int) Option {
 //
 // Setting WithReadMaxBytes to zero allows any message size. Both clients and
 // handlers default to allowing any request size.
+//
+// Handlers may also use [http.MaxBytesHandler] to limit the total size of the
+// HTTP request stream (rather than the per-message size). Connect handles
+// [http.MaxBytesError] specially, so clients still receive errors with the
+// appropriate error code and informative messages.
 func WithReadMaxBytes(max int) Option {
 	return &readMaxBytesOption{Max: max}
 }
