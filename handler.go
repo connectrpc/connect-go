@@ -16,8 +16,8 @@ package connect
 
 import (
 	"context"
+	"mime"
 	"net/http"
-	"strings"
 )
 
 // A Handler is the server-side implementation of a single RPC defined by a
@@ -174,10 +174,11 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 
 	// Find our implementation of the RPC protocol in use.
 	encodedContentType := request.Header.Get("Content-Type")
-	contentTypeList := strings.Split(encodedContentType, ";")
-	var contentType = encodedContentType
-	if len(contentTypeList) > 1 {
-		contentType = strings.TrimSpace(contentTypeList[0])
+	contentType, _, err := mime.ParseMediaType(encodedContentType)
+	if err != nil {
+		responseWriter.Header().Set("Accept-Post", h.acceptPost)
+		responseWriter.WriteHeader(http.StatusUnsupportedMediaType)
+		return
 	}
 	var protocolHandler protocolHandler
 	for _, handler := range h.protocolHandlers {
