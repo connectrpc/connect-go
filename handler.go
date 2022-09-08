@@ -177,7 +177,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	contentTypeList := strings.Split(encodedContentType, ";")
 	var contentType = encodedContentType
 	if len(contentTypeList) > 1 {
-		contentType = contentTypeList[0]
+		contentType = strings.TrimSpace(contentTypeList[0])
 	}
 	var protocolHandler protocolHandler
 	for _, handler := range h.protocolHandlers {
