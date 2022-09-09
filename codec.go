@@ -111,7 +111,7 @@ var _ Codec = (*protoJSONUTF8Codec)(nil)
 func (c *protoJSONUTF8Codec) Name() string { return codecNameJSONCharsetUTF8 }
 
 func (c *protoJSONUTF8Codec) Marshal(message any) ([]byte, error) {
-	return c.Marshal(message)
+	return c.jsonCodec.Marshal(message)
 }
 
 func (c *protoJSONUTF8Codec) Unmarshal(binary []byte, message any) error {
