@@ -204,6 +204,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	connCloser, ok := protocolHandler.NewConn(
 		responseWriter,
 		request.WithContext(ctx),
+		contentType,
 	)
 	if !ok {
 		// Failed to create stream, usually because client used an unknown

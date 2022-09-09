@@ -85,7 +85,7 @@ type protocolHandler interface {
 	SetTimeout(*http.Request) (context.Context, context.CancelFunc, error)
 
 	// NewConn constructs a HandlerConn for the message exchange.
-	NewConn(http.ResponseWriter, *http.Request) (handlerConnCloser, bool)
+	NewConn(http.ResponseWriter, *http.Request, string) (handlerConnCloser, bool)
 }
 
 // ClientParams are the arguments provided to a Protocol's NewClient method,
