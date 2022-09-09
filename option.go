@@ -455,3 +455,7 @@ func withProtoBinaryCodec() Option {
 func withProtoJSONCodec() HandlerOption {
 	return WithCodec(&protoJSONCodec{})
 }
+
+func withProtoJSONCharsetUTF8Codec() HandlerOption {
+	return WithCodec(newProtoJSONCharsetUTF8Codec())
+}

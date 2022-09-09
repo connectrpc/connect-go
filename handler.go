@@ -174,15 +174,16 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 
 	// Find our implementation of the RPC protocol in use.
 	encodedContentType := request.Header.Get("Content-Type")
-	contentType, _, err := mime.ParseMediaType(encodedContentType)
+	contentType, params, err := mime.ParseMediaType(encodedContentType)
 	if err != nil {
 		responseWriter.Header().Set("Accept-Post", h.acceptPost)
 		responseWriter.WriteHeader(http.StatusUnsupportedMediaType)
 		return
 	}
+	mediaType := mime.FormatMediaType(contentType, params)
 	var protocolHandler protocolHandler
 	for _, handler := range h.protocolHandlers {
-		if _, ok := handler.ContentTypes()[contentType]; ok {
+		if _, ok := handler.ContentTypes()[mediaType]; ok {
 			protocolHandler = handler
 			break
 		}
@@ -244,6 +245,7 @@ func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig 
 	}
 	withProtoBinaryCodec().applyToHandler(&config)
 	withProtoJSONCodec().applyToHandler(&config)
+	withProtoJSONCharsetUTF8Codec().applyToHandler(&config)
 	withGzip().applyToHandler(&config)
 	for _, opt := range options {
 		opt.applyToHandler(&config)

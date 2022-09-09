@@ -74,11 +74,14 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		assert.Equal(t, resp.Header.Get("Accept-Post"), strings.Join([]string{
 			"application/grpc",
 			"application/grpc+json",
+			"application/grpc+json; charset=utf-8",
 			"application/grpc+proto",
 			"application/grpc-web",
 			"application/grpc-web+json",
+			"application/grpc-web+json; charset=utf-8",
 			"application/grpc-web+proto",
 			"application/json",
+			"application/json; charset=utf-8",
 			"application/proto",
 		}, ", "))
 	})
