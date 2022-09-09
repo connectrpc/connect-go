@@ -24,8 +24,8 @@ import (
 const (
 	codecNameProto           = "proto"
 	codecNameJSON            = "json"
-	codecCharsetUTF8         = "charsets=utf-8"
-	codecNameJSONCharsetUTF8 = codecNameJSON + " " + codecCharsetUTF8
+	codecCharsetUTF8         = "charset=utf-8"
+	codecNameJSONCharsetUTF8 = codecNameJSON + "; " + codecCharsetUTF8
 )
 
 // Codec marshals structs (typically generated from a schema) to and from bytes.
