@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"sort"
@@ -289,4 +290,12 @@ func flushResponseWriter(w http.ResponseWriter) {
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+func canonicalizeContentType(ct string) string {
+	base, params, err := mime.ParseMediaType(ct)
+	if err != nil {
+		return ct
+	}
+	return mime.FormatMediaType(base, params)
 }
