@@ -17,7 +17,6 @@ package connect
 import (
 	"encoding/json"
 	"fmt"
-	"mime"
 	"net/http"
 	"strings"
 )
@@ -84,10 +83,7 @@ func NewErrorWriter(opts ...HandlerOption) *ErrorWriter {
 // IsSupported checks whether a request is using one of the ErrorWriter's
 // supported RPC protocols.
 func (w *ErrorWriter) IsSupported(request *http.Request) bool {
-	ctype, _, err := mime.ParseMediaType(request.Header.Get(headerContentType))
-	if err != nil {
-		return false
-	}
+	ctype := canonicalizeContentType(request.Header.Get(headerContentType))
 	_, ok := w.allContentTypes[ctype]
 	return ok
 }
@@ -98,10 +94,7 @@ func (w *ErrorWriter) IsSupported(request *http.Request) bool {
 //
 // Write does not read or close the request body.
 func (w *ErrorWriter) Write(response http.ResponseWriter, request *http.Request, err error) error {
-	ctype, _, parseErr := mime.ParseMediaType(request.Header.Get(headerContentType))
-	if parseErr != nil {
-		return parseErr
-	}
+	ctype := canonicalizeContentType(request.Header.Get(headerContentType))
 	if _, ok := w.unaryConnectContentTypes[ctype]; ok {
 		// Unary errors are always JSON.
 		response.Header().Set(headerContentType, connectUnaryContentTypeJSON)

@@ -136,7 +136,6 @@ func (*grpcHandler) SetTimeout(request *http.Request) (context.Context, context.
 func (g *grpcHandler) NewConn(
 	responseWriter http.ResponseWriter,
 	request *http.Request,
-	contentType string,
 ) (handlerConnCloser, bool) {
 	// We need to parse metadata before entering the interceptor stack; we'll
 	// send the error to the client later on.
@@ -154,13 +153,13 @@ func (g *grpcHandler) NewConn(
 	// Since we know that these header keys are already in canonical form, we can
 	// skip the normalization in Header.Set.
 	header := responseWriter.Header()
-	header[headerContentType] = []string{contentType}
+	header[headerContentType] = []string{request.Header.Get(headerContentType)}
 	header[grpcHeaderAcceptCompression] = []string{g.CompressionPools.CommaSeparatedNames()}
 	if responseCompression != compressionIdentity {
 		header[grpcHeaderCompression] = []string{responseCompression}
 	}
 
-	codecName := grpcCodecFromContentType(g.web, contentType)
+	codecName := grpcCodecFromContentType(g.web, request.Header.Get(headerContentType))
 	codec := g.Codecs.Get(codecName) // handler.go guarantees this is not nil
 	conn := wrapHandlerConnWithCodedErrors(&grpcHandlerConn{
 		spec:       g.Spec,

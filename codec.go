@@ -24,8 +24,7 @@ import (
 const (
 	codecNameProto           = "proto"
 	codecNameJSON            = "json"
-	codecCharsetUTF8         = "charset=utf-8"
-	codecNameJSONCharsetUTF8 = codecNameJSON + "; " + codecCharsetUTF8
+	codecNameJSONCharsetUTF8 = codecNameJSON + "; charset=utf-8"
 )
 
 // Codec marshals structs (typically generated from a schema) to and from bytes.
@@ -72,11 +71,13 @@ func (c *protoBinaryCodec) Unmarshal(data []byte, message any) error {
 	return proto.Unmarshal(data, protoMessage)
 }
 
-type protoJSONCodec struct{}
+type protoJSONCodec struct {
+	name string
+}
 
 var _ Codec = (*protoJSONCodec)(nil)
 
-func (c *protoJSONCodec) Name() string { return codecNameJSON }
+func (c *protoJSONCodec) Name() string { return c.name }
 
 func (c *protoJSONCodec) Marshal(message any) ([]byte, error) {
 	protoMessage, ok := message.(proto.Message)
@@ -94,28 +95,6 @@ func (c *protoJSONCodec) Unmarshal(binary []byte, message any) error {
 	}
 	var options protojson.UnmarshalOptions
 	return options.Unmarshal(binary, protoMessage)
-}
-
-func newProtoJSONCharsetUTF8Codec() Codec {
-	return &protoJSONUTF8Codec{
-		jsonCodec: &protoJSONCodec{},
-	}
-}
-
-type protoJSONUTF8Codec struct {
-	jsonCodec *protoJSONCodec
-}
-
-var _ Codec = (*protoJSONUTF8Codec)(nil)
-
-func (c *protoJSONUTF8Codec) Name() string { return codecNameJSONCharsetUTF8 }
-
-func (c *protoJSONUTF8Codec) Marshal(message any) ([]byte, error) {
-	return c.jsonCodec.Marshal(message)
-}
-
-func (c *protoJSONUTF8Codec) Unmarshal(binary []byte, message any) error {
-	return c.jsonCodec.Unmarshal(binary, message)
 }
 
 // readOnlyCodecs is a read-only interface to a map of named codecs.

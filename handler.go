@@ -16,7 +16,6 @@ package connect
 
 import (
 	"context"
-	"mime"
 	"net/http"
 )
 
@@ -173,17 +172,10 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	}
 
 	// Find our implementation of the RPC protocol in use.
-	encodedContentType := request.Header.Get("Content-Type")
-	contentType, params, err := mime.ParseMediaType(encodedContentType)
-	if err != nil {
-		responseWriter.Header().Set("Accept-Post", h.acceptPost)
-		responseWriter.WriteHeader(http.StatusUnsupportedMediaType)
-		return
-	}
-	mediaType := mime.FormatMediaType(contentType, params)
+	contentType := canonicalizeContentType(request.Header.Get("Content-Type"))
 	var protocolHandler protocolHandler
 	for _, handler := range h.protocolHandlers {
-		if _, ok := handler.ContentTypes()[mediaType]; ok {
+		if _, ok := handler.ContentTypes()[contentType]; ok {
 			protocolHandler = handler
 			break
 		}
@@ -195,6 +187,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	}
 
 	// Establish a stream and serve the RPC.
+	request.Header.Set("Content-Type", contentType) // prefer canonicalized value
 	ctx, cancel, timeoutErr := protocolHandler.SetTimeout(request)
 	if timeoutErr != nil {
 		ctx = request.Context()
@@ -205,7 +198,6 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	connCloser, ok := protocolHandler.NewConn(
 		responseWriter,
 		request.WithContext(ctx),
-		contentType,
 	)
 	if !ok {
 		// Failed to create stream, usually because client used an unknown
@@ -244,8 +236,7 @@ func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig 
 		BufferPool:       newBufferPool(),
 	}
 	withProtoBinaryCodec().applyToHandler(&config)
-	withProtoJSONCodec().applyToHandler(&config)
-	withProtoJSONCharsetUTF8Codec().applyToHandler(&config)
+	withProtoJSONCodecs().applyToHandler(&config)
 	withGzip().applyToHandler(&config)
 	for _, opt := range options {
 		opt.applyToHandler(&config)

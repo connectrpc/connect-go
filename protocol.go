@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"sort"
@@ -85,7 +86,7 @@ type protocolHandler interface {
 	SetTimeout(*http.Request) (context.Context, context.CancelFunc, error)
 
 	// NewConn constructs a HandlerConn for the message exchange.
-	NewConn(http.ResponseWriter, *http.Request, string) (handlerConnCloser, bool)
+	NewConn(http.ResponseWriter, *http.Request) (handlerConnCloser, bool)
 }
 
 // ClientParams are the arguments provided to a Protocol's NewClient method,
@@ -289,4 +290,12 @@ func flushResponseWriter(w http.ResponseWriter) {
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+func canonicalizeContentType(ct string) string {
+	base, params, err := mime.ParseMediaType(ct)
+	if err != nil {
+		return ct
+	}
+	return mime.FormatMediaType(base, params)
 }
