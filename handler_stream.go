@@ -35,6 +35,11 @@ func (c *ClientStream[_]) Spec() Spec {
 	return c.conn.Spec()
 }
 
+// Peer describes the client for this RPC.
+func (c *ClientStream[_]) Peer() Peer {
+	return c.conn.Peer()
+}
+
 // RequestHeader returns the headers received from the client.
 func (c *ClientStream[Req]) RequestHeader() http.Header {
 	return c.conn.RequestHeader()
@@ -119,6 +124,11 @@ type BidiStream[Req, Res any] struct {
 // Spec returns the specification for the RPC.
 func (b *BidiStream[_, _]) Spec() Spec {
 	return b.conn.Spec()
+}
+
+// Peer describes the client for this RPC.
+func (b *BidiStream[_, _]) Peer() Peer {
+	return b.conn.Peer()
 }
 
 // RequestHeader returns the headers received from the client.
