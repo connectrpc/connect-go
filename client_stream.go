@@ -30,6 +30,11 @@ type ClientStreamForClient[Req, Res any] struct {
 	err error
 }
 
+// Spec returns the specification for the RPC.
+func (c *ClientStreamForClient[_, _]) Spec() Spec {
+	return c.conn.Spec()
+}
+
 // RequestHeader returns the request headers. Headers are sent to the server with the
 // first call to Send.
 func (c *ClientStreamForClient[Req, Res]) RequestHeader() http.Header {
@@ -162,6 +167,11 @@ type BidiStreamForClient[Req, Res any] struct {
 	conn StreamingClientConn
 	// Error from client construction. If non-nil, return for all calls.
 	err error
+}
+
+// Spec returns the specification for the RPC.
+func (b *BidiStreamForClient[_, _]) Spec() Spec {
+	return b.conn.Spec()
 }
 
 // RequestHeader returns the request headers. Headers are sent with the first

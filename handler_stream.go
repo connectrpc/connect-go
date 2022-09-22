@@ -30,6 +30,11 @@ type ClientStream[Req any] struct {
 	err  error
 }
 
+// Spec returns the specification for the RPC.
+func (c *ClientStream[_]) Spec() Spec {
+	return c.conn.Spec()
+}
+
 // RequestHeader returns the headers received from the client.
 func (c *ClientStream[Req]) RequestHeader() http.Header {
 	return c.conn.RequestHeader()
@@ -109,6 +114,11 @@ func (s *ServerStream[Res]) Conn() StreamingHandlerConn {
 // an exported constructor.
 type BidiStream[Req, Res any] struct {
 	conn StreamingHandlerConn
+}
+
+// Spec returns the specification for the RPC.
+func (b *BidiStream[_, _]) Spec() Spec {
+	return b.conn.Spec()
 }
 
 // RequestHeader returns the headers received from the client.
