@@ -148,6 +148,8 @@ configuring timeouts, connection pools, observability, and h2c.
 * [connect-grpchealth-go]: gRPC-compatible health checks
 * [connect-grpcreflect-go]: gRPC-compatible server reflection
 * [connect-demo]: demonstration service powering demo.connect.build, including bidi streaming
+* [connect-web]: TypeScript clients for web browsers
+* [Buf Studio]: web UI for ad-hoc RPCs
 * [connect-crosstest]: gRPC and gRPC-Web interoperability tests
 
 ## Status
@@ -160,8 +162,7 @@ stable v1 in October, soon after the Go 1.19 release.
 
 `connect-go` supports:
 
-* The [two most recent major releases][go-support-policy] of Go, with a minimum
-  of Go 1.18.
+* The [two most recent major releases][go-support-policy] of Go.
 * [APIv2] of Protocol Buffers in Go (`google.golang.org/protobuf`).
 
 Within those parameters, Connect follows semantic versioning.
@@ -171,18 +172,20 @@ Within those parameters, Connect follows semantic versioning.
 Offered under the [Apache 2 license][license].
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
+[Buf Studio]: https://studio.buf.build/
 [Getting Started]: https://connect.build/docs/go/getting-started
 [blog]: https://buf.build/blog/connect-a-better-grpc
+[connect-crosstest]: https://github.com/bufbuild/connect-crosstest
+[connect-demo]: https://github.com/bufbuild/connect-demo
 [connect-grpchealth-go]: https://github.com/bufbuild/connect-grpchealth-go
 [connect-grpcreflect-go]: https://github.com/bufbuild/connect-grpcreflect-go
-[connect-demo]: https://github.com/bufbuild/connect-demo
-[connect-crosstest]: https://github.com/bufbuild/connect-crosstest
+[connect-web]: https://www.npmjs.com/package/@bufbuild/connect-web
 [demo]: https://github.com/bufbuild/connect-demo
-[docs]: https://connect.build
 [docs-deployment]: https://connect.build/docs/go/deployment
+[docs]: https://connect.build
 [go-support-policy]: https://golang.org/doc/devel/release#policy
+[health checks]: https://github.com/bufbuild/connect-grpchealth-go
 [license]: https://github.com/bufbuild/connect-go/blob/main/LICENSE
 [protobuf]: https://developers.google.com/protocol-buffers
 [protocol]: https://connect.build/docs/protocol
 [server reflection]: https://github.com/bufbuild/connect-grpcreflect-go
-[health checks]: https://github.com/bufbuild/connect-grpchealth-go

@@ -20,11 +20,11 @@ import (
 )
 
 // A Handler is the server-side implementation of a single RPC defined by a
-// Protocol Buffers service.
+// service schema.
 //
 // By default, Handlers support the Connect, gRPC, and gRPC-Web protocols with
 // the binary Protobuf and JSON codecs. They support gzip compression using the
-// standard library's compress/gzip.
+// standard library's [compress/gzip].
 type Handler struct {
 	spec             Spec
 	implementation   StreamingHandlerFunc
@@ -32,7 +32,7 @@ type Handler struct {
 	acceptPost       string // Accept-Post header
 }
 
-// NewUnaryHandler constructs a Handler for a request-response procedure.
+// NewUnaryHandler constructs a [Handler] for a request-response procedure.
 func NewUnaryHandler[Req, Res any](
 	procedure string,
 	unary func(context.Context, *Request[Req]) (*Response[Res], error),
@@ -82,7 +82,7 @@ func NewUnaryHandler[Req, Res any](
 	}
 }
 
-// NewClientStreamHandler constructs a Handler for a client streaming procedure.
+// NewClientStreamHandler constructs a [Handler] for a client streaming procedure.
 func NewClientStreamHandler[Req, Res any](
 	procedure string,
 	implementation func(context.Context, *ClientStream[Req]) (*Response[Res], error),
@@ -105,7 +105,7 @@ func NewClientStreamHandler[Req, Res any](
 	)
 }
 
-// NewServerStreamHandler constructs a Handler for a server streaming procedure.
+// NewServerStreamHandler constructs a [Handler] for a server streaming procedure.
 func NewServerStreamHandler[Req, Res any](
 	procedure string,
 	implementation func(context.Context, *Request[Req], *ServerStream[Res]) error,
@@ -133,7 +133,7 @@ func NewServerStreamHandler[Req, Res any](
 	)
 }
 
-// NewBidiStreamHandler constructs a Handler for a bidirectional streaming procedure.
+// NewBidiStreamHandler constructs a [Handler] for a bidirectional streaming procedure.
 func NewBidiStreamHandler[Req, Res any](
 	procedure string,
 	implementation func(context.Context, *BidiStream[Req, Res]) error,
@@ -152,7 +152,7 @@ func NewBidiStreamHandler[Req, Res any](
 	)
 }
 
-// ServeHTTP implements http.Handler.
+// ServeHTTP implements [http.Handler].
 func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
 	// We don't need to defer functions  to close the request body or read to
 	// EOF: the stream we construct later on already does that, and we only
@@ -172,7 +172,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	}
 
 	// Find our implementation of the RPC protocol in use.
-	contentType := request.Header.Get("Content-Type")
+	contentType := canonicalizeContentType(request.Header.Get("Content-Type"))
 	var protocolHandler protocolHandler
 	for _, handler := range h.protocolHandlers {
 		if _, ok := handler.ContentTypes()[contentType]; ok {
@@ -187,6 +187,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	}
 
 	// Establish a stream and serve the RPC.
+	request.Header.Set("Content-Type", contentType) // prefer canonicalized value
 	ctx, cancel, timeoutErr := protocolHandler.SetTimeout(request)
 	if timeoutErr != nil {
 		ctx = request.Context()
@@ -221,6 +222,7 @@ type handlerConfig struct {
 	HandleGRPCWeb    bool
 	BufferPool       *bufferPool
 	ReadMaxBytes     int
+	SendMaxBytes     int
 }
 
 func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig {
@@ -234,7 +236,7 @@ func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig 
 		BufferPool:       newBufferPool(),
 	}
 	withProtoBinaryCodec().applyToHandler(&config)
-	withProtoJSONCodec().applyToHandler(&config)
+	withProtoJSONCodecs().applyToHandler(&config)
 	withGzip().applyToHandler(&config)
 	for _, opt := range options {
 		opt.applyToHandler(&config)
@@ -271,6 +273,7 @@ func (c *handlerConfig) newProtocolHandlers(streamType StreamType) []protocolHan
 			CompressMinBytes: c.CompressMinBytes,
 			BufferPool:       c.BufferPool,
 			ReadMaxBytes:     c.ReadMaxBytes,
+			SendMaxBytes:     c.SendMaxBytes,
 		}))
 	}
 	return handlers

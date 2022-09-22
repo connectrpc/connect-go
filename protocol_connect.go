@@ -164,6 +164,7 @@ func (h *connectHandler) NewConn(
 				compressionPool:  h.CompressionPools.Get(responseCompression),
 				bufferPool:       h.BufferPool,
 				header:           responseWriter.Header(),
+				sendMaxBytes:     h.SendMaxBytes,
 			},
 			unmarshaler: connectUnaryUnmarshaler{
 				reader:          request.Body,
@@ -186,6 +187,7 @@ func (h *connectHandler) NewConn(
 					compressMinBytes: h.CompressMinBytes,
 					compressionPool:  h.CompressionPools.Get(responseCompression),
 					bufferPool:       h.BufferPool,
+					sendMaxBytes:     h.SendMaxBytes,
 				},
 			},
 			unmarshaler: connectStreamingUnmarshaler{
@@ -272,6 +274,7 @@ func (c *connectClient) NewConn(
 				compressionPool:  c.CompressionPools.Get(c.CompressionName),
 				bufferPool:       c.BufferPool,
 				header:           duplexCall.Header(),
+				sendMaxBytes:     c.SendMaxBytes,
 			},
 			unmarshaler: connectUnaryUnmarshaler{
 				reader:       duplexCall,
@@ -298,6 +301,7 @@ func (c *connectClient) NewConn(
 					compressMinBytes: c.CompressMinBytes,
 					compressionPool:  c.CompressionPools.Get(c.CompressionName),
 					bufferPool:       c.BufferPool,
+					sendMaxBytes:     c.SendMaxBytes,
 				},
 			},
 			unmarshaler: connectStreamingUnmarshaler{
@@ -708,6 +712,7 @@ type connectUnaryMarshaler struct {
 	compressionPool  *compressionPool
 	bufferPool       *bufferPool
 	header           http.Header
+	sendMaxBytes     int
 }
 
 func (m *connectUnaryMarshaler) Marshal(message any) *Error {
@@ -719,12 +724,18 @@ func (m *connectUnaryMarshaler) Marshal(message any) *Error {
 	uncompressed := bytes.NewBuffer(data)
 	defer m.bufferPool.Put(uncompressed)
 	if len(data) < m.compressMinBytes || m.compressionPool == nil {
+		if m.sendMaxBytes > 0 && len(data) > m.sendMaxBytes {
+			return NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", len(data), m.sendMaxBytes))
+		}
 		return m.write(data)
 	}
 	compressed := m.bufferPool.Get()
 	defer m.bufferPool.Put(compressed)
 	if err := m.compressionPool.Compress(compressed, uncompressed); err != nil {
 		return err
+	}
+	if m.sendMaxBytes > 0 && compressed.Len() > m.sendMaxBytes {
+		return NewError(CodeResourceExhausted, fmt.Errorf("compressed message size %d exceeds sendMaxBytes %d", compressed.Len(), m.sendMaxBytes))
 	}
 	m.header.Set(connectUnaryHeaderCompression, m.compressionName)
 	return m.write(compressed.Bytes())
@@ -770,15 +781,18 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
+		if readMaxBytesErr := asMaxBytesError(err, "read first %d bytes of message", bytesRead); readMaxBytesErr != nil {
+			return readMaxBytesErr
+		}
 		return errorf(CodeUnknown, "read message: %w", err)
 	}
 	if u.readMaxBytes > 0 && bytesRead > int64(u.readMaxBytes) {
 		// Attempt to read to end in order to allow connection re-use
 		discardedBytes, err := io.Copy(io.Discard, u.reader)
 		if err != nil {
-			return errorf(CodeInvalidArgument, "message is larger than configured max %d - unable to determine message size: %w", u.readMaxBytes, err)
+			return errorf(CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %w", u.readMaxBytes, err)
 		}
-		return errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", bytesRead+discardedBytes, u.readMaxBytes)
+		return errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", bytesRead+discardedBytes, u.readMaxBytes)
 	}
 	if data.Len() > 0 && u.compressionPool != nil {
 		decompressed := u.bufferPool.Get()

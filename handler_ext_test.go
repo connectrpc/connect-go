@@ -43,7 +43,14 @@ func TestHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("method_not_allowed", func(t *testing.T) {
 		t.Parallel()
-		resp, err := client.Get(server.URL + pingProcedure)
+		request, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodGet,
+			server.URL+pingProcedure,
+			strings.NewReader(""),
+		)
+		assert.Nil(t, err)
+		resp, err := client.Do(request)
 		assert.Nil(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, resp.StatusCode, http.StatusMethodNotAllowed)
@@ -52,25 +59,73 @@ func TestHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("unsupported_content_type", func(t *testing.T) {
 		t.Parallel()
-		resp, err := client.Post(server.URL+pingProcedure, "application/x-custom-json", strings.NewReader("{}"))
+		request, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodPost,
+			server.URL+pingProcedure,
+			strings.NewReader("{}"),
+		)
+		assert.Nil(t, err)
+		request.Header.Set("Content-Type", "application/x-custom-json")
+		resp, err := client.Do(request)
 		assert.Nil(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, resp.StatusCode, http.StatusUnsupportedMediaType)
 		assert.Equal(t, resp.Header.Get("Accept-Post"), strings.Join([]string{
 			"application/grpc",
 			"application/grpc+json",
+			"application/grpc+json; charset=utf-8",
 			"application/grpc+proto",
 			"application/grpc-web",
 			"application/grpc-web+json",
+			"application/grpc-web+json; charset=utf-8",
 			"application/grpc-web+proto",
 			"application/json",
+			"application/json; charset=utf-8",
 			"application/proto",
 		}, ", "))
 	})
 
+	t.Run("charset_in_content_type_header", func(t *testing.T) {
+		t.Parallel()
+		req, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodPost,
+			server.URL+pingProcedure,
+			strings.NewReader("{}"),
+		)
+		assert.Nil(t, err)
+		req.Header.Set("Content-Type", "application/json;Charset=utf-8")
+		resp, err := client.Do(req)
+		assert.Nil(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, resp.StatusCode, http.StatusOK)
+	})
+
+	t.Run("unsupported_charset", func(t *testing.T) {
+		t.Parallel()
+		req, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodPost,
+			server.URL+pingProcedure,
+			strings.NewReader("{}"),
+		)
+		assert.Nil(t, err)
+		req.Header.Set("Content-Type", "application/json; charset=shift-jis")
+		resp, err := client.Do(req)
+		assert.Nil(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, resp.StatusCode, http.StatusUnsupportedMediaType)
+	})
+
 	t.Run("unsupported_content_encoding", func(t *testing.T) {
 		t.Parallel()
-		req, err := http.NewRequest(http.MethodPost, server.URL+pingProcedure, strings.NewReader("{}"))
+		req, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodPost,
+			server.URL+pingProcedure,
+			strings.NewReader("{}"),
+		)
 		assert.Nil(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Content-Encoding", "invalid")

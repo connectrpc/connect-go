@@ -22,8 +22,9 @@ import (
 )
 
 const (
-	codecNameProto = "proto"
-	codecNameJSON  = "json"
+	codecNameProto           = "proto"
+	codecNameJSON            = "json"
+	codecNameJSONCharsetUTF8 = codecNameJSON + "; charset=utf-8"
 )
 
 // Codec marshals structs (typically generated from a schema) to and from bytes.
@@ -70,11 +71,13 @@ func (c *protoBinaryCodec) Unmarshal(data []byte, message any) error {
 	return proto.Unmarshal(data, protoMessage)
 }
 
-type protoJSONCodec struct{}
+type protoJSONCodec struct {
+	name string
+}
 
 var _ Codec = (*protoJSONCodec)(nil)
 
-func (c *protoJSONCodec) Name() string { return codecNameJSON }
+func (c *protoJSONCodec) Name() string { return c.name }
 
 func (c *protoJSONCodec) Marshal(message any) ([]byte, error) {
 	protoMessage, ok := message.(proto.Message)

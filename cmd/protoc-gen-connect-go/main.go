@@ -19,23 +19,25 @@
 // The 'connect-go' suffix becomes part of the arguments for the Protobuf
 // compiler. To generate the base Go types and Connect code using protoc:
 //
-//	 protoc --go_out=gen --connect-go_out=gen path/to/file.proto
+//	protoc --go_out=gen --connect-go_out=gen path/to/file.proto
 //
-// With buf, your buf.gen.yaml will look like this:
+// With [buf], your buf.gen.yaml will look like this:
 //
-//   version: v1
-//   plugins:
-//     name: go
-//     out: gen
-//     name: connect-go
-//     out: gen
+//	version: v1
+//	plugins:
+//	  - name: go
+//	    out: gen
+//	  - name: connect-go
+//	    out: gen
 //
 // This generates service definitions for the Protobuf types and services
 // defined by file.proto. If file.proto defines the foov1 Protobuf package, the
 // invocations above will write output to:
 //
-//	 gen/path/to/file.pb.go
-//	 gen/path/to/connectfoov1/file.connect.go
+//	gen/path/to/file.pb.go
+//	gen/path/to/connectfoov1/file.connect.go
+//
+// [buf]: https://buf.build
 package main
 
 import (
@@ -116,7 +118,7 @@ func generate(plugin *protogen.Plugin, file *protogen.File) {
 	generatePreamble(generatedFile, file)
 	generateServiceNameConstants(generatedFile, file.Services)
 	for _, service := range file.Services {
-		generateService(generatedFile, file, service)
+		generateService(generatedFile, service)
 	}
 }
 
@@ -152,7 +154,7 @@ func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protoge
 	g.P()
 }
 
-func generateService(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service) {
+func generateService(g *protogen.GeneratedFile, service *protogen.Service) {
 	names := newNames(service)
 	generateClientInterface(g, service, names)
 	generateClientImplementation(g, service, names)
@@ -227,11 +229,11 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 	g.P("}")
 	g.P()
 	for _, method := range service.Methods {
-		generateClientMethod(g, service, method, names)
+		generateClientMethod(g, method, names)
 	}
 }
 
-func generateClientMethod(g *protogen.GeneratedFile, service *protogen.Service, method *protogen.Method, names names) {
+func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, names names) {
 	receiver := names.ClientImpl
 	isStreamingClient := method.Desc.IsStreamingClient()
 	isStreamingServer := method.Desc.IsStreamingServer()
@@ -481,7 +483,18 @@ func deprecated(g *protogen.GeneratedFile) {
 }
 
 func unexport(s string) string {
-	return strings.ToLower(s[:1]) + s[1:]
+	lowercased := strings.ToLower(s[:1]) + s[1:]
+	switch lowercased {
+	// https://go.dev/ref/spec#Keywords
+	case "break", "default", "func", "interface", "select",
+		"case", "defer", "go", "map", "struct",
+		"chan", "else", "goto", "package", "switch",
+		"const", "fallthrough", "if", "range", "type",
+		"continue", "for", "import", "return", "var":
+		return "_" + lowercased
+	default:
+		return lowercased
+	}
 }
 
 type names struct {

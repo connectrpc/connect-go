@@ -54,6 +54,7 @@ type envelopeWriter struct {
 	compressMinBytes int
 	compressionPool  *compressionPool
 	bufferPool       *bufferPool
+	sendMaxBytes     int
 }
 
 func (w *envelopeWriter) Marshal(message any) *Error {
@@ -75,12 +76,18 @@ func (w *envelopeWriter) Write(env *envelope) *Error {
 	if env.IsSet(flagEnvelopeCompressed) ||
 		w.compressionPool == nil ||
 		env.Data.Len() < w.compressMinBytes {
+		if w.sendMaxBytes > 0 && env.Data.Len() > w.sendMaxBytes {
+			return errorf(CodeResourceExhausted, "message size %d exceeds sendMaxBytes %d", env.Data.Len(), w.sendMaxBytes)
+		}
 		return w.write(env)
 	}
 	data := w.bufferPool.Get()
 	defer w.bufferPool.Put(data)
 	if err := w.compressionPool.Compress(data, env.Data); err != nil {
 		return err
+	}
+	if w.sendMaxBytes > 0 && data.Len() > w.sendMaxBytes {
+		return errorf(CodeResourceExhausted, "compressed message size %d exceeds sendMaxBytes %d", data.Len(), w.sendMaxBytes)
 	}
 	return w.write(&envelope{
 		Data:  data,
@@ -194,6 +201,10 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
+		if maxBytesErr := asMaxBytesError(err, "read 5 byte message prefix"); maxBytesErr != nil {
+			// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.
+			return maxBytesErr
+		}
 		return errorf(
 			CodeInvalidArgument,
 			"protocol error: incomplete envelope: %w", err,
@@ -208,7 +219,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		if err != nil && !errors.Is(err, io.EOF) {
 			return errorf(CodeUnknown, "read enveloped message: %w", err)
 		}
-		return errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", size, r.readMaxBytes)
+		return errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", size, r.readMaxBytes)
 	}
 	if size > 0 {
 		env.Data.Grow(size)
@@ -220,6 +231,10 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		for remaining > 0 {
 			bytesRead, err := io.CopyN(env.Data, r.reader, remaining)
 			if err != nil && !errors.Is(err, io.EOF) {
+				if maxBytesErr := asMaxBytesError(err, "read %d byte message", size); maxBytesErr != nil {
+					// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.
+					return maxBytesErr
+				}
 				return errorf(CodeUnknown, "read enveloped message: %w", err)
 			}
 			if errors.Is(err, io.EOF) && bytesRead == 0 {

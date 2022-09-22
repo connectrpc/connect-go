@@ -29,7 +29,7 @@ const (
 )
 
 // A Decompressor is a reusable wrapper that decompresses an underlying data
-// source. The standard library's *gzip.Reader implements Decompressor.
+// source. The standard library's [*gzip.Reader] implements Decompressor.
 type Decompressor interface {
 	io.Reader
 
@@ -43,7 +43,7 @@ type Decompressor interface {
 }
 
 // A Compressor is a reusable wrapper that compresses data written to an
-// underlying sink. The standard library's *gzip.Writer implements Compressor.
+// underlying sink. The standard library's [*gzip.Writer] implements Compressor.
 type Compressor interface {
 	io.Writer
 
@@ -93,9 +93,9 @@ func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readM
 		discardedBytes, err := io.Copy(io.Discard, decompressor)
 		_ = c.putDecompressor(decompressor)
 		if err != nil {
-			return errorf(CodeInvalidArgument, "message is larger than configured max %d - unable to determine message size: %w", readMaxBytes, err)
+			return errorf(CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %w", readMaxBytes, err)
 		}
-		return errorf(CodeInvalidArgument, "message size %d is larger than configured max %d", bytesRead+discardedBytes, readMaxBytes)
+		return errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", bytesRead+discardedBytes, readMaxBytes)
 	}
 	if err := c.putDecompressor(decompressor); err != nil {
 		return errorf(CodeUnknown, "recycle decompressor: %w", err)
