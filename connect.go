@@ -28,6 +28,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 )
 
 // Version is the semantic version of the connect module.
@@ -68,6 +69,7 @@ const (
 // StreamingHandlerConn implementations do not need to be safe for concurrent use.
 type StreamingHandlerConn interface {
 	Spec() Spec
+	Peer() Peer
 
 	Receive(any) error
 	RequestHeader() http.Header
@@ -97,8 +99,9 @@ type StreamingHandlerConn interface {
 // implementations must support limited concurrent use. See the comments on
 // each group of methods for details.
 type StreamingClientConn interface {
-	// Spec must be safe to call concurrently with all other methods.
+	// Spec and Peer must be safe to call concurrently with all other methods.
 	Spec() Spec
+	Peer() Peer
 
 	// Send, RequestHeader, and CloseRequest may race with each other, but must
 	// be safe to call concurrently with all other methods.
@@ -121,6 +124,7 @@ type Request[T any] struct {
 	Msg *T
 
 	spec   Spec
+	peer   Peer
 	header http.Header
 }
 
@@ -144,6 +148,11 @@ func (r *Request[_]) Spec() Spec {
 	return r.spec
 }
 
+// Peer describes the other party for this RPC.
+func (r *Request[_]) Peer() Peer {
+	return r.peer
+}
+
 // Header returns the HTTP headers for this request.
 func (r *Request[_]) Header() http.Header {
 	if r.header == nil {
@@ -164,6 +173,7 @@ func (r *Request[_]) internalOnly() {}
 type AnyRequest interface {
 	Any() any
 	Spec() Spec
+	Peer() Peer
 	Header() http.Header
 
 	internalOnly()
@@ -241,6 +251,21 @@ type Spec struct {
 	StreamType StreamType
 	Procedure  string // for example, "/acme.foo.v1.FooService/Bar"
 	IsClient   bool   // otherwise we're in a handler
+}
+
+// Peer describes the other party to an RPC. When accessed client-side, Addr
+// contains the host or host:port from the server's URL. When accessed
+// server-side, Addr contains the client's address in IP:port format.
+type Peer struct {
+	Addr string
+}
+
+func newPeerFromURL(s string) Peer {
+	u, err := url.Parse(s)
+	if err != nil {
+		return Peer{}
+	}
+	return Peer{Addr: u.Host}
 }
 
 // handlerConnCloser extends HandlerConn with a method for handlers to

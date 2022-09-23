@@ -1431,6 +1431,9 @@ func (p pingServer) Ping(ctx context.Context, request *connect.Request[pingv1.Pi
 	if err := expectClientHeader(p.checkMetadata, request); err != nil {
 		return nil, err
 	}
+	if request.Peer().Addr == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
+	}
 	response := connect.NewResponse(
 		&pingv1.PingResponse{
 			Number: request.Msg.Number,
@@ -1446,6 +1449,9 @@ func (p pingServer) Fail(ctx context.Context, request *connect.Request[pingv1.Fa
 	if err := expectClientHeader(p.checkMetadata, request); err != nil {
 		return nil, err
 	}
+	if request.Peer().Addr == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
+	}
 	err := connect.NewError(connect.Code(request.Msg.Code), errors.New(errorMessage))
 	err.Meta().Set(handlerHeader, headerValue)
 	err.Meta().Set(handlerTrailer, trailerValue)
@@ -1460,6 +1466,9 @@ func (p pingServer) Sum(
 		if err := expectMetadata(stream.RequestHeader(), "header", clientHeader, headerValue); err != nil {
 			return nil, err
 		}
+	}
+	if stream.Peer().Addr == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
 	}
 	var sum int64
 	for stream.Receive() {
@@ -1481,6 +1490,9 @@ func (p pingServer) CountUp(
 ) error {
 	if err := expectClientHeader(p.checkMetadata, request); err != nil {
 		return err
+	}
+	if request.Peer().Addr == "" {
+		return connect.NewError(connect.CodeInternal, errors.New("no peer address"))
 	}
 	if request.Msg.Number <= 0 {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
@@ -1507,6 +1519,9 @@ func (p pingServer) CumSum(
 		if err := expectMetadata(stream.RequestHeader(), "header", clientHeader, headerValue); err != nil {
 			return err
 		}
+	}
+	if stream.Peer().Addr == "" {
+		return connect.NewError(connect.CodeInternal, errors.New("no peer address"))
 	}
 	stream.ResponseHeader().Set(handlerHeader, headerValue)
 	stream.ResponseTrailer().Set(handlerTrailer, trailerValue)

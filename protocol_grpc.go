@@ -163,6 +163,7 @@ func (g *grpcHandler) NewConn(
 	codec := g.Codecs.Get(codecName) // handler.go guarantees this is not nil
 	conn := wrapHandlerConnWithCodedErrors(&grpcHandlerConn{
 		spec:       g.Spec,
+		peer:       Peer{Addr: request.RemoteAddr},
 		web:        g.web,
 		bufferPool: g.BufferPool,
 		protobuf:   g.Codecs.Protobuf(), // for errors
@@ -203,6 +204,10 @@ type grpcClient struct {
 	protocolClientParams
 
 	web bool
+}
+
+func (g *grpcClient) Peer() Peer {
+	return newPeerFromURL(g.URL)
 }
 
 func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {
@@ -248,6 +253,7 @@ func (g *grpcClient) NewConn(
 	)
 	conn := &grpcClientConn{
 		spec:             spec,
+		peer:             g.Peer(),
 		duplexCall:       duplexCall,
 		compressionPools: g.CompressionPools,
 		bufferPool:       g.BufferPool,
@@ -292,6 +298,7 @@ func (g *grpcClient) NewConn(
 // grpcClientConn works for both gRPC and gRPC-Web.
 type grpcClientConn struct {
 	spec             Spec
+	peer             Peer
 	duplexCall       *duplexHTTPCall
 	compressionPools readOnlyCompressionPools
 	bufferPool       *bufferPool
@@ -305,6 +312,10 @@ type grpcClientConn struct {
 
 func (cc *grpcClientConn) Spec() Spec {
 	return cc.spec
+}
+
+func (cc *grpcClientConn) Peer() Peer {
+	return cc.peer
 }
 
 func (cc *grpcClientConn) Send(msg any) error {
@@ -393,6 +404,7 @@ func (cc *grpcClientConn) validateResponse(response *http.Response) *Error {
 
 type grpcHandlerConn struct {
 	spec            Spec
+	peer            Peer
 	web             bool
 	bufferPool      *bufferPool
 	protobuf        Codec // for errors
@@ -407,6 +419,10 @@ type grpcHandlerConn struct {
 
 func (hc *grpcHandlerConn) Spec() Spec {
 	return hc.spec
+}
+
+func (hc *grpcHandlerConn) Peer() Peer {
+	return hc.peer
 }
 
 func (hc *grpcHandlerConn) Receive(msg any) error {
