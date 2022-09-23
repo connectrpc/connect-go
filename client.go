@@ -70,7 +70,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 	// once at client creation.
 	unarySpec := config.newSpec(StreamTypeUnary)
 	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
-		conn := protocolClient.NewConn(ctx, unarySpec, request.Header())
+		conn := client.protocolClient.NewConn(ctx, unarySpec, request.Header())
 		// Send always returns an io.EOF unless the error is from the client-side.
 		// We want the user to continue to call Receive in those cases to get the
 		// full error from the server-side.
@@ -94,9 +94,11 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		unaryFunc = interceptor.WrapUnary(unaryFunc)
 	}
 	client.callUnary = func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
-		// To make the specification and RPC headers visible to the full interceptor
-		// chain (as though they were supplied by the caller), we'll add them here.
+		// To make the specification, peer, and RPC headers visible to the full
+		// interceptor chain (as though they were supplied by the caller), we'll
+		// add them here.
 		request.spec = unarySpec
+		request.peer = client.protocolClient.Peer()
 		protocolClient.WriteRequestHeader(StreamTypeUnary, request.Header())
 		response, err := unaryFunc(ctx, request)
 		if err != nil {

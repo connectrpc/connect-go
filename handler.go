@@ -62,6 +62,7 @@ func NewUnaryHandler[Req, Res any](
 		request := &Request[Req]{
 			Msg:    &msg,
 			spec:   conn.Spec(),
+			peer:   conn.Peer(),
 			header: conn.RequestHeader(),
 		}
 		response, err := untyped(ctx, request)
@@ -124,6 +125,7 @@ func NewServerStreamHandler[Req, Res any](
 				&Request[Req]{
 					Msg:    &msg,
 					spec:   conn.Spec(),
+					peer:   conn.Peer(),
 					header: conn.RequestHeader(),
 				},
 				&ServerStream[Res]{conn: conn},

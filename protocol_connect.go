@@ -151,9 +151,11 @@ func (h *connectHandler) NewConn(
 	codec := h.Codecs.Get(codecName) // handler.go guarantees this is not nil
 
 	var conn handlerConnCloser
+	peer := Peer{Addr: request.RemoteAddr}
 	if h.Spec.StreamType == StreamTypeUnary {
 		conn = &connectUnaryHandlerConn{
 			spec:           h.Spec,
+			peer:           peer,
 			request:        request,
 			responseWriter: responseWriter,
 			marshaler: connectUnaryMarshaler{
@@ -178,6 +180,7 @@ func (h *connectHandler) NewConn(
 	} else {
 		conn = &connectStreamingHandlerConn{
 			spec:           h.Spec,
+			peer:           peer,
 			request:        request,
 			responseWriter: responseWriter,
 			marshaler: connectStreamingMarshaler{
@@ -215,6 +218,10 @@ func (h *connectHandler) NewConn(
 
 type connectClient struct {
 	protocolClientParams
+}
+
+func (c *connectClient) Peer() Peer {
+	return newPeerFromURL(c.URL)
 }
 
 func (c *connectClient) WriteRequestHeader(streamType StreamType, header http.Header) {
@@ -263,6 +270,7 @@ func (c *connectClient) NewConn(
 	if spec.StreamType == StreamTypeUnary {
 		unaryConn := &connectUnaryClientConn{
 			spec:             spec,
+			peer:             c.Peer(),
 			duplexCall:       duplexCall,
 			compressionPools: c.CompressionPools,
 			bufferPool:       c.BufferPool,
@@ -290,6 +298,7 @@ func (c *connectClient) NewConn(
 	} else {
 		streamingConn := &connectStreamingClientConn{
 			spec:             spec,
+			peer:             c.Peer(),
 			duplexCall:       duplexCall,
 			compressionPools: c.CompressionPools,
 			bufferPool:       c.BufferPool,
@@ -323,6 +332,7 @@ func (c *connectClient) NewConn(
 
 type connectUnaryClientConn struct {
 	spec             Spec
+	peer             Peer
 	duplexCall       *duplexHTTPCall
 	compressionPools readOnlyCompressionPools
 	bufferPool       *bufferPool
@@ -334,6 +344,10 @@ type connectUnaryClientConn struct {
 
 func (cc *connectUnaryClientConn) Spec() Spec {
 	return cc.spec
+}
+
+func (cc *connectUnaryClientConn) Peer() Peer {
+	return cc.peer
 }
 
 func (cc *connectUnaryClientConn) Send(msg any) error {
@@ -416,6 +430,7 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 
 type connectStreamingClientConn struct {
 	spec             Spec
+	peer             Peer
 	duplexCall       *duplexHTTPCall
 	compressionPools readOnlyCompressionPools
 	bufferPool       *bufferPool
@@ -428,6 +443,10 @@ type connectStreamingClientConn struct {
 
 func (cc *connectStreamingClientConn) Spec() Spec {
 	return cc.spec
+}
+
+func (cc *connectStreamingClientConn) Peer() Peer {
+	return cc.peer
 }
 
 func (cc *connectStreamingClientConn) Send(msg any) error {
@@ -507,6 +526,7 @@ func (cc *connectStreamingClientConn) validateResponse(response *http.Response) 
 
 type connectUnaryHandlerConn struct {
 	spec            Spec
+	peer            Peer
 	request         *http.Request
 	responseWriter  http.ResponseWriter
 	marshaler       connectUnaryMarshaler
@@ -517,6 +537,10 @@ type connectUnaryHandlerConn struct {
 
 func (hc *connectUnaryHandlerConn) Spec() Spec {
 	return hc.spec
+}
+
+func (hc *connectUnaryHandlerConn) Peer() Peer {
+	return hc.peer
 }
 
 func (hc *connectUnaryHandlerConn) Receive(msg any) error {
@@ -583,6 +607,7 @@ func (hc *connectUnaryHandlerConn) writeResponseHeader(err error) {
 
 type connectStreamingHandlerConn struct {
 	spec            Spec
+	peer            Peer
 	request         *http.Request
 	responseWriter  http.ResponseWriter
 	marshaler       connectStreamingMarshaler
@@ -592,6 +617,10 @@ type connectStreamingHandlerConn struct {
 
 func (hc *connectStreamingHandlerConn) Spec() Spec {
 	return hc.spec
+}
+
+func (hc *connectStreamingHandlerConn) Peer() Peer {
+	return hc.peer
 }
 
 func (hc *connectStreamingHandlerConn) Receive(msg any) error {
