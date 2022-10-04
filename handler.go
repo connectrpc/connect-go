@@ -189,8 +189,8 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	}
 
 	// Establish a stream and serve the RPC.
-	request.Header.Set("Content-Type", contentType) // prefer canonicalized value
-	ctx, cancel, timeoutErr := protocolHandler.SetTimeout(request)
+	request.Header.Set("Content-Type", contentType)                // prefer canonicalized value
+	ctx, cancel, timeoutErr := protocolHandler.SetTimeout(request) //nolint: contextcheck
 	if timeoutErr != nil {
 		ctx = request.Context()
 	}
