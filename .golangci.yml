@@ -81,8 +81,9 @@ issues:
     # It should be crystal clear that Connect uses plain *http.Clients.
     - linters: [revive, stylecheck]
       path: client_example_test.go
-    # Doesn't work with type parameters.
-    # TODO: re-enable when working.
-    - linters:
-        - revive
-      text: "receiver-naming:.*for invalid-type$"
+    # Don't complain about timeout management or lack of output assertions in examples.
+    - linters: [gosec, testableexamples]
+      path: handler_example_test.go
+    # No output assertions needed for these examples.
+    - linters: [testableexamples]
+      path: error_writer_example_test.go
