@@ -147,25 +147,20 @@ configuring timeouts, connection pools, observability, and h2c.
 
 * [connect-grpchealth-go]: gRPC-compatible health checks
 * [connect-grpcreflect-go]: gRPC-compatible server reflection
-* [connect-demo]: demonstration service powering demo.connectrpc.com, including bidi streaming
+* [connect-demo]: service powering demo.connectrpc.com, including bidi streaming
 * [connect-web]: TypeScript clients for web browsers
 * [Buf Studio]: web UI for ad-hoc RPCs
 * [connect-crosstest]: gRPC and gRPC-Web interoperability tests
 
-## Status
+## Status: Stable
 
-This module is a beta: we rely on it in production, but we may make a few
-changes as we gather feedback from early adopters. We're planning to tag a
-stable v1 in October, soon after the Go 1.19 release.
-
-## Support and versioning
-
-`connect-go` supports:
+This module is stable. It supports:
 
 * The [two most recent major releases][go-support-policy] of Go.
 * [APIv2] of Protocol Buffers in Go (`google.golang.org/protobuf`).
 
-Within those parameters, Connect follows semantic versioning.
+Within those parameters, `connect-go` follows semantic versioning. We will
+_not_ make breaking changes in the 1.x series of releases.
 
 ## Legal
 
