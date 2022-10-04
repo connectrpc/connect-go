@@ -31,6 +31,7 @@ linters:
   enable-all: true
   disable:
     - cyclop            # covered by gocyclo
+    - deadcode          # abandoned
     - exhaustivestruct  # replaced by exhaustruct
     - funlen            # rely on code review to limit function length
     - gocognit          # dubious "cognitive overhead" quantification
@@ -46,7 +47,9 @@ linters:
     - nlreturn          # generous whitespace violates house style
     - nosnakecase       # deprecated in https://github.com/golangci/golangci-lint/pull/3065
     - scopelint         # deprecated by author
+    - structcheck       # abandoned
     - testpackage       # internal tests are fine
+    - varcheck          # abandoned
     - wrapcheck         # don't _always_ need to wrap errors
     - wsl               # generous whitespace violates house style
 issues:
