@@ -27,9 +27,9 @@ func (ps *PingServer) Ping(
 func main() {
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(&PingServer{}))
-	err := http.ListenAndServe(
+	err := http.ListenAndServe( //nolint
 		"localhost:8080",
 		h2c.NewHandler(mux, &http2.Server{}),
 	)
-	log.Fatalf("listen failed: %v", err)
+	log.Fatalf("listen failed: %v", err) //nolint
 }
