@@ -16,6 +16,6 @@ func main() {
 		"http://localhost:8080/",
 	)
 	_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
-	log.Println(err)
-	log.Println(connect.IsServerError(err))
+	log.Println(err)                        // unauthenticated: foobar
+	log.Println(connect.IsServerError(err)) // prints true
 }
