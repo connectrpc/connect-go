@@ -420,6 +420,7 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 			)
 		}
 		serverErr := wireErr.asError()
+		serverErr.isServerError = true
 		serverErr.meta = cc.responseHeader.Clone()
 		mergeHeaders(serverErr.meta, cc.responseTrailer)
 		return serverErr
