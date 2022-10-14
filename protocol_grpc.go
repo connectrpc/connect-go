@@ -361,6 +361,7 @@ func (cc *grpcClientConn) Receive(msg any) error {
 		// means that we're _not_ getting a message. For users to realize that
 		// the stream has ended, Receive must return an error.
 		serverErr.meta = cc.responseHeader.Clone()
+		serverErr.isServerError = true
 		mergeHeaders(serverErr.meta, cc.responseTrailer)
 		cc.duplexCall.SetError(serverErr)
 		return serverErr

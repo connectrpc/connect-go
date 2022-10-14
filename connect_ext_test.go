@@ -315,6 +315,8 @@ func TestServer(t *testing.T) {
 			var connectErr *connect.Error
 			ok := errors.As(err, &connectErr)
 			assert.True(t, ok, assert.Sprintf("conversion to *connect.Error"))
+			assert.True(t, connect.IsServerError(err))
+			assert.True(t, connectErr.IsServerError())
 			assert.Equal(t, connectErr.Code(), connect.CodeResourceExhausted)
 			assert.Equal(t, connectErr.Error(), "resource_exhausted: "+errorMessage)
 			assert.Zero(t, connectErr.Details())
