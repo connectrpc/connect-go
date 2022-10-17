@@ -668,7 +668,7 @@ func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.H
 	}
 	message := grpcPercentDecode(bufferPool, trailer.Get(grpcHeaderMessage))
 	retErr := NewError(Code(code), errors.New(message))
-	retErr.isServerErr = true
+	retErr.wireErr = true
 
 	detailsBinaryEncoded := trailer.Get(grpcHeaderDetails)
 	if len(detailsBinaryEncoded) > 0 {

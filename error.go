@@ -100,11 +100,11 @@ func (d *ErrorDetail) Value() (proto.Message, error) {
 //
 // [the documentation on errors]: https://connect.build/docs/go/errors
 type Error struct {
-	code        Code
-	err         error
-	details     []*ErrorDetail
-	meta        http.Header
-	isServerErr bool
+	code    Code
+	err     error
+	details []*ErrorDetail
+	meta    http.Header
+	wireErr bool
 }
 
 // NewError annotates any Go error with a status code.
@@ -112,13 +112,13 @@ func NewError(c Code, underlying error) *Error {
 	return &Error{code: c, err: underlying}
 }
 
-// IsServerErr returns true if the error was produced by the server.
-func IsServerErr(err error) bool {
+// IsWireErr returns true if the error was produced by the server.
+func IsWireErr(err error) bool {
 	se := new(Error)
 	if !errors.As(err, &se) {
 		return false
 	}
-	return se.isServerErr
+	return se.wireErr
 }
 
 func (e *Error) Error() string {
