@@ -361,7 +361,6 @@ func (cc *grpcClientConn) Receive(msg any) error {
 		// means that we're _not_ getting a message. For users to realize that
 		// the stream has ended, Receive must return an error.
 		serverErr.meta = cc.responseHeader.Clone()
-		serverErr.isServerErr = true
 		mergeHeaders(serverErr.meta, cc.responseTrailer)
 		cc.duplexCall.SetError(serverErr)
 		return serverErr
@@ -669,6 +668,7 @@ func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.H
 	}
 	message := grpcPercentDecode(bufferPool, trailer.Get(grpcHeaderMessage))
 	retErr := NewError(Code(code), errors.New(message))
+	retErr.isServerErr = true
 
 	detailsBinaryEncoded := trailer.Get(grpcHeaderDetails)
 	if len(detailsBinaryEncoded) > 0 {
