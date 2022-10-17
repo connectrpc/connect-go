@@ -238,6 +238,7 @@ func TestServer(t *testing.T) {
 			// error.
 			_, err := stream.Receive()
 			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
+			assert.True(t, connect.IsWireErr(err))
 		})
 		t.Run("cumsum_empty_stream", func(t *testing.T) {
 			stream := client.CumSum(context.Background())
@@ -252,6 +253,7 @@ func TestServer(t *testing.T) {
 			response, err := stream.Receive()
 			assert.Nil(t, response)
 			assert.True(t, errors.Is(err, io.EOF))
+			assert.False(t, connect.IsWireErr(err))
 			assert.Nil(t, stream.CloseResponse()) // clean-up the stream
 		})
 		t.Run("cumsum_cancel_after_first_response", func(t *testing.T) {
@@ -276,6 +278,7 @@ func TestServer(t *testing.T) {
 			_, err = stream.Receive()
 			assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
 			assert.Equal(t, got, expect)
+			assert.False(t, connect.IsWireErr(err))
 		})
 		t.Run("cumsum_cancel_before_send", func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -287,6 +290,7 @@ func TestServer(t *testing.T) {
 			// cancellations.
 			err := stream.Send(&pingv1.CumSumRequest{Number: 19})
 			assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled, assert.Sprintf("%v", err))
+			assert.False(t, connect.IsWireErr(err))
 		})
 	}
 	testErrors := func(t *testing.T, client pingv1connect.PingServiceClient) { //nolint:thelper
@@ -315,6 +319,7 @@ func TestServer(t *testing.T) {
 			var connectErr *connect.Error
 			ok := errors.As(err, &connectErr)
 			assert.True(t, ok, assert.Sprintf("conversion to *connect.Error"))
+			assert.True(t, connect.IsWireErr(err))
 			assert.Equal(t, connectErr.Code(), connect.CodeResourceExhausted)
 			assert.Equal(t, connectErr.Error(), "resource_exhausted: "+errorMessage)
 			assert.Zero(t, connectErr.Details())
