@@ -917,6 +917,7 @@ func (e *connectWireError) asError() *Error {
 		return nil
 	}
 	err := NewError(e.Code, errors.New(e.Message))
+	err.wireErr = true
 	if len(e.Details) > 0 {
 		err.details = make([]*ErrorDetail, len(e.Details))
 		for i, detail := range e.Details {
