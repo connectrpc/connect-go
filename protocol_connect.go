@@ -421,7 +421,6 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 		}
 		serverErr := wireErr.asError()
 		serverErr.meta = cc.responseHeader.Clone()
-		serverErr.isServerErr = true
 		mergeHeaders(serverErr.meta, cc.responseTrailer)
 		return serverErr
 	}
@@ -479,7 +478,6 @@ func (cc *connectStreamingClientConn) Receive(msg any) error {
 		// For users to realize that the stream has ended, Receive must return an
 		// error.
 		serverErr.meta = cc.responseHeader.Clone()
-		serverErr.isServerErr = true
 		mergeHeaders(serverErr.meta, cc.responseTrailer)
 		cc.duplexCall.SetError(serverErr)
 		return serverErr
@@ -919,6 +917,7 @@ func (e *connectWireError) asError() *Error {
 		return nil
 	}
 	err := NewError(e.Code, errors.New(e.Message))
+	err.isServerErr = true
 	if len(e.Details) > 0 {
 		err.details = make([]*ErrorDetail, len(e.Details))
 		for i, detail := range e.Details {
