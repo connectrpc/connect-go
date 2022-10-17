@@ -121,11 +121,6 @@ func IsServerErr(err error) bool {
 	return se.isServerErr
 }
 
-// IsServerErr returns true if the error was produced by the server.
-func (e *Error) IsServerErr() bool {
-	return e.isServerErr
-}
-
 func (e *Error) Error() string {
 	message := e.Message()
 	if message == "" {
