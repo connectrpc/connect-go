@@ -112,8 +112,13 @@ func NewError(c Code, underlying error) *Error {
 	return &Error{code: c, err: underlying}
 }
 
-// IsWireErr returns true if the error was produced by the server.
-func IsWireErr(err error) bool {
+// IsWireError checks whether the error was returned by the server, as opposed
+// to being synthesized by the client.
+//
+// Clients may find this useful when deciding how to propagate errors. For
+// example, an RPC-to-HTTP proxy might expose a server-sent CodeUnknown as an
+// HTTP 500 but a client-synthesized CodeUnknown as a 503.
+func IsWireError(err error) bool {
 	se := new(Error)
 	if !errors.As(err, &se) {
 		return false
