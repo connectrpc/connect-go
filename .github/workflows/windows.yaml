@@ -28,7 +28,7 @@ jobs:
       - id: go-cache-paths
         shell: bash
         run: |
-          echo "::set-output name=go-mod::$(go env GOMODCACHE)"
+          echo "go-mod=$(go env GOMODCACHE)" >> $GITHUB_OUTPUT
       - name: Mod Cache
         uses: actions/cache@v3
         with:
