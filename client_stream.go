@@ -184,6 +184,11 @@ func (b *BidiStreamForClient[_, _]) Peer() Peer {
 	return b.conn.Peer()
 }
 
+// SendHeaders sends the request headers.
+func (b *BidiStreamForClient[_, _]) SendHeaders() {
+	b.conn.SendHeaders()
+}
+
 // RequestHeader returns the request headers. Headers are sent with the first
 // call to Send.
 func (b *BidiStreamForClient[Req, Res]) RequestHeader() http.Header {
