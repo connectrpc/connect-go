@@ -357,6 +357,10 @@ func (cc *connectUnaryClientConn) Send(msg any) error {
 	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
+func (cc *connectUnaryClientConn) SendHeaders() {
+	cc.duplexCall.ensureRequestMade()
+}
+
 func (cc *connectUnaryClientConn) RequestHeader() http.Header {
 	return cc.duplexCall.Header()
 }
@@ -454,6 +458,10 @@ func (cc *connectStreamingClientConn) Send(msg any) error {
 		return err
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
+}
+
+func (cc *connectStreamingClientConn) SendHeaders() {
+	cc.duplexCall.ensureRequestMade()
 }
 
 func (cc *connectStreamingClientConn) RequestHeader() http.Header {
