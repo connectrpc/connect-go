@@ -1343,6 +1343,56 @@ func TestClientWithSendMaxBytes(t *testing.T) {
 	})
 }
 
+func TestBidiStreamForClientSendHeaders(t *testing.T) {
+	t.Parallel()
+	run := func(t *testing.T, opts ...connect.ClientOption) {
+		t.Helper()
+		headersSent := make(chan struct{})
+		pingServer := &pluggablePingServer{
+			cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+				close(headersSent)
+				return nil
+			},
+		}
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+		server := httptest.NewUnstartedServer(mux)
+		server.EnableHTTP2 = true
+		server.StartTLS()
+		t.Cleanup(server.Close)
+
+		client := pingv1connect.NewPingServiceClient(
+			server.Client(),
+			server.URL,
+			connect.WithClientOptions(opts...),
+			connect.WithInterceptors(&assertPeerInterceptor{t}),
+		)
+		stream := client.CumSum(context.Background())
+		t.Cleanup(func() {
+			assert.Nil(t, stream.CloseRequest())
+			assert.Nil(t, stream.CloseResponse())
+		})
+		stream.SendHeaders()
+		select {
+		case <-time.After(time.Second):
+			t.Error("timed out to get request headers")
+		case <-headersSent:
+		}
+	}
+	t.Run("connect", func(t *testing.T) {
+		t.Parallel()
+		run(t)
+	})
+	t.Run("grpc", func(t *testing.T) {
+		t.Parallel()
+		run(t, connect.WithGRPC())
+	})
+	t.Run("grpcweb", func(t *testing.T) {
+		t.Parallel()
+		run(t, connect.WithGRPCWeb())
+	})
+}
+
 func gzipCompressedSize(tb testing.TB, message proto.Message) int {
 	tb.Helper()
 	uncompressed, err := proto.Marshal(message)
@@ -1376,7 +1426,8 @@ func (c failCodec) Unmarshal(data []byte, message any) error {
 type pluggablePingServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
 
-	ping func(context.Context, *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error)
+	ping   func(context.Context, *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error)
+	cumSum func(context.Context, *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error
 }
 
 func (p *pluggablePingServer) Ping(
@@ -1384,6 +1435,13 @@ func (p *pluggablePingServer) Ping(
 	request *connect.Request[pingv1.PingRequest],
 ) (*connect.Response[pingv1.PingResponse], error) {
 	return p.ping(ctx, request)
+}
+
+func (p *pluggablePingServer) CumSum(
+	ctx context.Context,
+	stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse],
+) error {
+	return p.cumSum(ctx, stream)
 }
 
 func failNoHTTP2(tb testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]) {
