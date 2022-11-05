@@ -58,6 +58,15 @@ type envelopeWriter struct {
 }
 
 func (w *envelopeWriter) Marshal(message any) *Error {
+	if message == nil {
+		if _, err := w.writer.Write(nil); err != nil {
+			if connectErr, ok := asError(err); ok {
+				return connectErr
+			}
+			return NewError(CodeUnknown, err)
+		}
+		return nil
+	}
 	raw, err := w.codec.Marshal(message)
 	if err != nil {
 		return errorf(CodeInternal, "marshal message: %w", err)
