@@ -103,10 +103,9 @@ type StreamingClientConn interface {
 	Spec() Spec
 	Peer() Peer
 
-	// Send, SendHeaders, RequestHeader, and CloseRequest may race with each other,
-	// but must be safe to call concurrently with all other methods.
+	// Send, RequestHeader, and CloseRequest may race with each other, but must
+	// be safe to call concurrently with all other methods.
 	Send(any) error
-	SendHeaders()
 	RequestHeader() http.Header
 	CloseRequest() error
 

@@ -104,6 +104,9 @@ func (s *ServerStream[Res]) ResponseTrailer() http.Header {
 // Send a message to the client. The first call to Send also sends the response
 // headers.
 func (s *ServerStream[Res]) Send(msg *Res) error {
+	if msg == nil {
+		return s.conn.Send(nil)
+	}
 	return s.conn.Send(msg)
 }
 
@@ -161,6 +164,9 @@ func (b *BidiStream[Req, Res]) ResponseTrailer() http.Header {
 // Send a message to the client. The first call to Send also sends the response
 // headers.
 func (b *BidiStream[Req, Res]) Send(msg *Res) error {
+	if msg == nil {
+		return b.conn.Send(nil)
+	}
 	return b.conn.Send(msg)
 }
 
