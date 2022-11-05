@@ -1343,7 +1343,7 @@ func TestClientWithSendMaxBytes(t *testing.T) {
 	})
 }
 
-func TestBidiStreamForClientSendHeaders(t *testing.T) {
+func TestBidiStreamServerSendsFirstMessage(t *testing.T) {
 	t.Parallel()
 	run := func(t *testing.T, opts ...connect.ClientOption) {
 		t.Helper()
@@ -1372,7 +1372,7 @@ func TestBidiStreamForClientSendHeaders(t *testing.T) {
 			assert.Nil(t, stream.CloseRequest())
 			assert.Nil(t, stream.CloseResponse())
 		})
-		stream.SendHeaders()
+		assert.Nil(t, stream.Send(nil))
 		select {
 		case <-time.After(time.Second):
 			t.Error("timed out to get request headers")

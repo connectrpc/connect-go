@@ -325,10 +325,6 @@ func (cc *grpcClientConn) Send(msg any) error {
 	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
-func (cc *grpcClientConn) SendHeaders() {
-	cc.duplexCall.ensureRequestMade()
-}
-
 func (cc *grpcClientConn) RequestHeader() http.Header {
 	return cc.duplexCall.Header()
 }
