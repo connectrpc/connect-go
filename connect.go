@@ -253,19 +253,26 @@ type Spec struct {
 	IsClient   bool   // otherwise we're in a handler
 }
 
-// Peer describes the other party to an RPC. When accessed client-side, Addr
-// contains the host or host:port from the server's URL. When accessed
-// server-side, Addr contains the client's address in IP:port format.
+// Peer describes the other party to an RPC.
+//
+// When accessed client-side, Addr contains the host or host:port from the
+// server's URL. When accessed server-side, Addr contains the client's address
+// in IP:port format.
+//
+// On both the client and the server, Protocol is the RPC protocol in use.
+// Currently, it's either "grpc", "grpcweb", or "connect", but new values may
+// be added in the future.
 type Peer struct {
-	Addr string
+	Addr     string
+	Protocol string
 }
 
-func newPeerFromURL(s string) Peer {
-	u, err := url.Parse(s)
-	if err != nil {
-		return Peer{}
+func newPeerFromURL(urlString, protocol string) Peer {
+	peer := Peer{Protocol: protocol}
+	if u, err := url.Parse(urlString); err == nil {
+		peer.Addr = u.Host
 	}
-	return Peer{Addr: u.Host}
+	return peer
 }
 
 // handlerConnCloser extends HandlerConn with a method for handlers to

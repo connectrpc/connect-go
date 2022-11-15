@@ -51,6 +51,7 @@ var errNoTimeout = errors.New("no timeout")
 // to separate the protocol-specific portions of connect from the
 // protocol-agnostic plumbing.
 type protocol interface {
+	Name() string
 	NewHandler(*protocolHandlerParams) protocolHandler
 	NewClient(*protocolClientParams) (protocolClient, error)
 }
