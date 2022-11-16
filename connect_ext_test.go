@@ -745,6 +745,35 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 	)
 }
 
+func TestCompressMinBytesClient(t *testing.T) {
+	mux := http.NewServeMux()
+	var contentEncoding string
+	go mux.Handle("/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		contentEncoding = request.Header.Get("Content-Encoding")
+	}),
+	)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	pingclient := pingv1connect.NewPingServiceClient(
+		http.DefaultClient, server.URL,
+		connect.WithSendGzip(),
+		connect.WithCompressMinBytes(8),
+	)
+	t.Run("request_uncompressed", func(t *testing.T) {
+		_, _ = pingclient.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{
+			Text: "ping",
+		}))
+		assert.Equal(t, contentEncoding, "")
+	})
+	t.Run("request_compressed", func(t *testing.T) {
+		_, _ = pingclient.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{
+			Text: strings.Repeat("ping", 2),
+		}))
+		assert.Equal(t, contentEncoding, "gzip")
+	})
+
+}
+
 func TestCompressMinBytes(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
