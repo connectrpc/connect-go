@@ -543,6 +543,24 @@ func TestTimeoutParsing(t *testing.T) {
 	assert.Nil(t, err)
 }
 
+func TestFailCodec(t *testing.T) {
+	t.Parallel()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	client := pingv1connect.NewPingServiceClient(
+		server.Client(),
+		server.URL,
+		connect.WithCodec(failCodec{}),
+	)
+	stream := client.CumSum(context.Background())
+	err := stream.Send(&pingv1.CumSumRequest{})
+	var connectErr *connect.Error
+	assert.NotNil(t, err)
+	assert.True(t, errors.As(err, &connectErr))
+	assert.Equal(t, connectErr.Code(), connect.CodeInternal)
+}
+
 func TestGRPCMarshalStatusError(t *testing.T) {
 	t.Parallel()
 
