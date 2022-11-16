@@ -16,6 +16,8 @@ package connect
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -53,4 +55,47 @@ func TestAcceptEncodingOrdering(t *testing.T) {
 	)
 	_, _ = client.CallUnary(context.Background(), NewRequest(&emptypb.Empty{}))
 	assert.True(t, called)
+}
+
+func TestFailCompression(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	pingclient := NewClient[emptypb.Empty, emptypb.Empty](
+		server.Client(),
+		server.URL,
+		withFailCompression(),
+		WithSendCompression("error"),
+		WithCompressMinBytes(1),
+	)
+	t.Run("request_uncompressed", func(t *testing.T) {
+		t.Parallel()
+		_, err := pingclient.CallUnary(context.Background(), NewRequest(&emptypb.Empty{}))
+		assert.NotEqual(t, err, errors.New(""))
+	})
+}
+
+type failDecompressor struct {
+	Decompressor
+}
+
+type failCompressor struct{}
+
+func (failCompressor) Write([]byte) (int, error) {
+	return 0, errors.New("failCompressor")
+}
+
+func (failCompressor) Close() error {
+	return errors.New("failCompressor")
+}
+
+func (failCompressor) Reset(io.Writer) {}
+
+func withFailCompression() ClientOption {
+	return WithAcceptCompression(
+		"error",
+		func() Decompressor { return &failDecompressor{} },
+		func() Compressor { return &failCompressor{} },
+	)
 }

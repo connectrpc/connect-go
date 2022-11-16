@@ -586,7 +586,6 @@ func TestContextError(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.True(t, errors.As(err, &connectErr))
 	assert.Equal(t, connectErr.Code(), connect.CodeUnknown)
-
 }
 
 func TestGRPCMarshalStatusError(t *testing.T) {
@@ -746,32 +745,39 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 }
 
 func TestCompressMinBytesClient(t *testing.T) {
-	mux := http.NewServeMux()
-	var contentEncoding string
-	go mux.Handle("/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		contentEncoding = request.Header.Get("Content-Encoding")
-	}),
-	)
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	pingclient := pingv1connect.NewPingServiceClient(
-		http.DefaultClient, server.URL,
-		connect.WithSendGzip(),
-		connect.WithCompressMinBytes(8),
-	)
+	t.Parallel()
+	serve := func() (pingv1connect.PingServiceClient, *string) {
+		mux := http.NewServeMux()
+		var contentEncoding string
+		go mux.Handle("/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			contentEncoding = request.Header.Get("Content-Encoding")
+		}),
+		)
+		server := httptest.NewServer(mux)
+		t.Cleanup(server.Close)
+		pingclient := pingv1connect.NewPingServiceClient(
+			http.DefaultClient, server.URL,
+			connect.WithSendGzip(),
+			connect.WithCompressMinBytes(8),
+		)
+		return pingclient, &contentEncoding
+	}
 	t.Run("request_uncompressed", func(t *testing.T) {
+		t.Parallel()
+		pingclient, contentEncoding := serve()
 		_, _ = pingclient.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{
 			Text: "ping",
 		}))
-		assert.Equal(t, contentEncoding, "")
+		assert.Equal(t, *contentEncoding, "")
 	})
 	t.Run("request_compressed", func(t *testing.T) {
+		t.Parallel()
+		pingclient, contentEncoding := serve()
 		_, _ = pingclient.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{
 			Text: strings.Repeat("ping", 2),
 		}))
-		assert.Equal(t, contentEncoding, "gzip")
+		assert.Equal(t, *contentEncoding, "gzip")
 	})
-
 }
 
 func TestCompressMinBytes(t *testing.T) {
@@ -1499,8 +1505,8 @@ func (c failCodec) Unmarshal(data []byte, message any) error {
 }
 
 type errorContext struct {
-	context.Context
-	Error error
+	context.Context //nolint:containedctx
+	Error           error
 }
 
 func (e errorContext) Err() error {
