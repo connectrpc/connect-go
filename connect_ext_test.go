@@ -1678,6 +1678,8 @@ func TestConnectHTTPErrorCodes(t *testing.T) {
 	checkHTTPStatus(t, connect.CodeUnavailable, 503)
 	checkHTTPStatus(t, connect.CodeDataLoss, 500)
 	checkHTTPStatus(t, connect.CodeUnauthenticated, 401)
+	checkHTTPStatus(t, 0, 500)
+	checkHTTPStatus(t, 100, 500)
 }
 
 func TestFailCompression(t *testing.T) {
