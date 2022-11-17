@@ -26,6 +26,14 @@ import (
 	"strings"
 )
 
+// The names of the Connect, gRPC, gRPC-Web protocols (as exposed by
+// [Peer.Protocol]). Additional protocols may be added in the future.
+const (
+	ProtocolConnect = "connect"
+	ProtocolGRPC    = "grpc"
+	ProtocolGRPCWeb = "grpcweb"
+)
+
 const (
 	headerContentType = "Content-Type"
 	headerUserAgent   = "User-Agent"
@@ -51,7 +59,6 @@ var errNoTimeout = errors.New("no timeout")
 // to separate the protocol-specific portions of connect from the
 // protocol-agnostic plumbing.
 type protocol interface {
-	Name() string
 	NewHandler(*protocolHandlerParams) protocolHandler
 	NewClient(*protocolClientParams) (protocolClient, error)
 }

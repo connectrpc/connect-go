@@ -77,13 +77,6 @@ type protocolGRPC struct {
 	web bool
 }
 
-func (g *protocolGRPC) Name() string {
-	if g.web {
-		return "grpcweb"
-	}
-	return "grpc"
-}
-
 // NewHandler implements protocol, so it must return an interface.
 func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler {
 	bare, prefix := grpcContentTypeDefault, grpcContentTypePrefix
@@ -99,7 +92,6 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 	}
 	return &grpcHandler{
 		protocolHandlerParams: *params,
-		protocolName:          g.Name(),
 		web:                   g.web,
 		accept:                contentTypes,
 	}
@@ -112,7 +104,6 @@ func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, 
 	}
 	return &grpcClient{
 		protocolClientParams: *params,
-		protocolName:         g.Name(),
 		web:                  g.web,
 	}, nil
 }
@@ -120,9 +111,8 @@ func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, 
 type grpcHandler struct {
 	protocolHandlerParams
 
-	protocolName string
-	web          bool
-	accept       map[string]struct{}
+	web    bool
+	accept map[string]struct{}
 }
 
 func (g *grpcHandler) ContentTypes() map[string]struct{} {
@@ -171,11 +161,15 @@ func (g *grpcHandler) NewConn(
 
 	codecName := grpcCodecFromContentType(g.web, request.Header.Get(headerContentType))
 	codec := g.Codecs.Get(codecName) // handler.go guarantees this is not nil
+	protocolName := ProtocolGRPC
+	if g.web {
+		protocolName = ProtocolGRPCWeb
+	}
 	conn := wrapHandlerConnWithCodedErrors(&grpcHandlerConn{
 		spec: g.Spec,
 		peer: Peer{
 			Addr:     request.RemoteAddr,
-			Protocol: g.protocolName,
+			Protocol: protocolName,
 		},
 		web:        g.web,
 		bufferPool: g.BufferPool,
@@ -216,12 +210,14 @@ func (g *grpcHandler) NewConn(
 type grpcClient struct {
 	protocolClientParams
 
-	protocolName string
-	web          bool
+	web bool
 }
 
 func (g *grpcClient) Peer() Peer {
-	return newPeerFromURL(g.URL, g.protocolName)
+	if g.web {
+		return newPeerFromURL(g.URL, ProtocolGRPCWeb)
+	}
+	return newPeerFromURL(g.URL, ProtocolGRPC)
 }
 
 func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {

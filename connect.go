@@ -260,8 +260,8 @@ type Spec struct {
 // in IP:port format.
 //
 // On both the client and the server, Protocol is the RPC protocol in use.
-// Currently, it's either "grpc", "grpcweb", or "connect", but new values may
-// be added in the future.
+// Currently, it's either [ProtocolConnect], [ProtocolGRPC], or
+// [ProtocolGRPCWeb], but additional protocols may be added in the future.
 type Peer struct {
 	Addr     string
 	Protocol string

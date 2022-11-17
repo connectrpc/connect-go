@@ -49,10 +49,6 @@ const (
 
 type protocolConnect struct{}
 
-func (*protocolConnect) Name() string {
-	return "connect"
-}
-
 // NewHandler implements protocol, so it must return an interface.
 func (*protocolConnect) NewHandler(params *protocolHandlerParams) protocolHandler {
 	contentTypes := make(map[string]struct{})
@@ -157,7 +153,7 @@ func (h *connectHandler) NewConn(
 	var conn handlerConnCloser
 	peer := Peer{
 		Addr:     request.RemoteAddr,
-		Protocol: (*protocolConnect)(nil).Name(),
+		Protocol: ProtocolConnect,
 	}
 	if h.Spec.StreamType == StreamTypeUnary {
 		conn = &connectUnaryHandlerConn{
@@ -228,7 +224,7 @@ type connectClient struct {
 }
 
 func (c *connectClient) Peer() Peer {
-	return newPeerFromURL(c.URL, (*protocolConnect)(nil).Name())
+	return newPeerFromURL(c.URL, ProtocolConnect)
 }
 
 func (c *connectClient) WriteRequestHeader(streamType StreamType, header http.Header) {
