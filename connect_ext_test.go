@@ -1638,6 +1638,50 @@ func TestStreamForServer(t *testing.T) {
 	})
 }
 
+func TestConnectHTTPErrorCodes(t *testing.T) {
+	t.Parallel()
+	checkHTTPStatus := func(t *testing.T, connectErr connect.Code, wantHttpStatus int) {
+		t.Helper()
+		mux := http.NewServeMux()
+		pluggableServer := &pluggablePingServer{
+			ping: func(_ context.Context, _ *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+				return nil, connect.NewError(connectErr, errors.New("error"))
+			},
+		}
+		mux.Handle(pingv1connect.NewPingServiceHandler(pluggableServer))
+		server := httptest.NewServer(mux)
+		t.Cleanup(server.Close)
+		req, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodPost,
+			server.URL+"/"+pingv1connect.PingServiceName+"/Ping",
+			strings.NewReader("{}"),
+		)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := server.Client().Do(req)
+		assert.Nil(t, err)
+		assert.Equal(t, wantHttpStatus, resp.StatusCode)
+	}
+	checkHTTPStatus(t, connect.CodeDataLoss, 500)
+	checkHTTPStatus(t, connect.CodeDataLoss, 500)
+	checkHTTPStatus(t, connect.CodeCanceled, 408)
+	checkHTTPStatus(t, connect.CodeUnknown, 500)
+	checkHTTPStatus(t, connect.CodeInvalidArgument, 400)
+	checkHTTPStatus(t, connect.CodeDeadlineExceeded, 408)
+	checkHTTPStatus(t, connect.CodeNotFound, 404)
+	checkHTTPStatus(t, connect.CodeAlreadyExists, 409)
+	checkHTTPStatus(t, connect.CodePermissionDenied, 403)
+	checkHTTPStatus(t, connect.CodeResourceExhausted, 429)
+	checkHTTPStatus(t, connect.CodeFailedPrecondition, 412)
+	checkHTTPStatus(t, connect.CodeAborted, 409)
+	checkHTTPStatus(t, connect.CodeOutOfRange, 400)
+	checkHTTPStatus(t, connect.CodeUnimplemented, 404)
+	checkHTTPStatus(t, connect.CodeInternal, 500)
+	checkHTTPStatus(t, connect.CodeUnavailable, 503)
+	checkHTTPStatus(t, connect.CodeDataLoss, 500)
+	checkHTTPStatus(t, connect.CodeUnauthenticated, 401)
+}
+
 func TestFailCompression(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
