@@ -1474,6 +1474,30 @@ func TestBidiStreamServerSendsFirstMessage(t *testing.T) {
 	})
 }
 
+func TestFailCompression(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}, connect.WithErrorCompression()))
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	pingclient := pingv1connect.NewPingServiceClient(
+		server.Client(),
+		server.URL,
+		connect.WithErrorCompression(),
+		connect.WithSendCompression("error"),
+	)
+	_, err := pingclient.Ping(
+		context.Background(),
+		connect.NewRequest(&pingv1.PingRequest{
+			Text: "ping",
+		}),
+	)
+	assert.NotNil(t, err)
+	assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
+}
+
 func gzipCompressedSize(tb testing.TB, message proto.Message) int {
 	tb.Helper()
 	uncompressed, err := proto.Marshal(message)

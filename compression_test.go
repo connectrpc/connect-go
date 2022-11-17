@@ -57,25 +57,6 @@ func TestAcceptEncodingOrdering(t *testing.T) {
 	assert.True(t, called)
 }
 
-func TestFailCompression(t *testing.T) {
-	t.Parallel()
-	mux := http.NewServeMux()
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	pingclient := NewClient[emptypb.Empty, emptypb.Empty](
-		server.Client(),
-		server.URL,
-		withFailCompression(),
-		WithSendCompression("error"),
-		WithCompressMinBytes(1),
-	)
-	t.Run("request_uncompressed", func(t *testing.T) {
-		t.Parallel()
-		_, err := pingclient.CallUnary(context.Background(), NewRequest(&emptypb.Empty{}))
-		assert.NotEqual(t, err, errors.New(""))
-	})
-}
-
 type failDecompressor struct {
 	Decompressor
 }
@@ -92,10 +73,12 @@ func (failCompressor) Close() error {
 
 func (failCompressor) Reset(io.Writer) {}
 
-func withFailCompression() ClientOption {
-	return WithAcceptCompression(
-		"error",
-		func() Decompressor { return &failDecompressor{} },
-		func() Compressor { return &failCompressor{} },
-	)
+func WithErrorCompression() Option {
+	return &compressionOption{
+		Name: "error",
+		CompressionPool: newCompressionPool(
+			func() Decompressor { return &failDecompressor{} },
+			func() Compressor { return &failCompressor{} },
+		),
+	}
 }
