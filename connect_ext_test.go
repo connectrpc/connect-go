@@ -1662,8 +1662,6 @@ func TestConnectHTTPErrorCodes(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, wantHttpStatus, resp.StatusCode)
 	}
-	checkHTTPStatus(t, connect.CodeDataLoss, 500)
-	checkHTTPStatus(t, connect.CodeDataLoss, 500)
 	checkHTTPStatus(t, connect.CodeCanceled, 408)
 	checkHTTPStatus(t, connect.CodeUnknown, 500)
 	checkHTTPStatus(t, connect.CodeInvalidArgument, 400)
