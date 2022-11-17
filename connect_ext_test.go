@@ -570,22 +570,14 @@ func TestContextError(t *testing.T) {
 		server.Client(),
 		server.URL,
 	)
-	wantErr := error(connect.NewError(connect.CodeCanceled, errors.New("fail")))
-	ctx := errorContext{Context: context.Background(), Error: wantErr}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 	stream := client.CumSum(ctx)
 	err := stream.Send(nil)
 	var connectErr *connect.Error
 	assert.NotNil(t, err)
 	assert.True(t, errors.As(err, &connectErr))
 	assert.Equal(t, connectErr.Code(), connect.CodeCanceled)
-
-	wantErr = errors.New("fail")
-	ctx = errorContext{Context: context.Background(), Error: wantErr}
-	stream = client.CumSum(ctx)
-	err = stream.Send(nil)
-	assert.NotNil(t, err)
-	assert.True(t, errors.As(err, &connectErr))
-	assert.Equal(t, connectErr.Code(), connect.CodeUnknown)
 }
 
 func TestGRPCMarshalStatusError(t *testing.T) {
@@ -1526,15 +1518,6 @@ func (c failCodec) Unmarshal(data []byte, message any) error {
 		return fmt.Errorf("not protobuf: %T", message)
 	}
 	return proto.Unmarshal(data, protoMessage)
-}
-
-type errorContext struct {
-	context.Context //nolint:containedctx
-	Error           error
-}
-
-func (e errorContext) Err() error {
-	return e.Error
 }
 
 type pluggablePingServer struct {
