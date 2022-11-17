@@ -1605,6 +1605,37 @@ func TestStreamForServer(t *testing.T) {
 		assert.NotNil(t, res)
 		assert.Equal(t, res.Msg.Sum, 1)
 	})
+	t.Run("client-stream-conn", func(t *testing.T) {
+		t.Parallel()
+		client, server := pintServer(&pluggablePingServer{
+			sum: func(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+				assert.NotNil(t, stream.Conn().Send("not-proto"))
+				return connect.NewResponse(&pingv1.SumResponse{}), nil
+			},
+		})
+		t.Cleanup(server.Close)
+		stream := client.Sum(context.Background())
+		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
+		res, err := stream.CloseAndReceive()
+		assert.Nil(t, err)
+		assert.NotNil(t, res)
+	})
+	t.Run("client-stream-send-msg", func(t *testing.T) {
+		t.Parallel()
+		client, server := pintServer(&pluggablePingServer{
+			sum: func(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+				assert.Nil(t, stream.Conn().Send(&pingv1.SumResponse{Sum: 2}))
+				return connect.NewResponse(&pingv1.SumResponse{}), nil
+			},
+		})
+		t.Cleanup(server.Close)
+		stream := client.Sum(context.Background())
+		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
+		res, err := stream.CloseAndReceive()
+		assert.NotNil(t, err)
+		assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+		assert.Nil(t, res)
+	})
 }
 
 func TestFailCompression(t *testing.T) {
