@@ -738,7 +738,7 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 
 func TestCompressMinBytesClient(t *testing.T) {
 	t.Parallel()
-	serve := func() (pingv1connect.PingServiceClient, *string) {
+	serve := func(request *pingv1.PingRequest) (string, error) {
 		mux := http.NewServeMux()
 		var contentEncoding string
 		go mux.Handle("/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -752,23 +752,24 @@ func TestCompressMinBytesClient(t *testing.T) {
 			connect.WithSendGzip(),
 			connect.WithCompressMinBytes(8),
 		)
-		return pingclient, &contentEncoding
+		_, err := pingclient.Ping(context.Background(), connect.NewRequest(request))
+		return contentEncoding, err
 	}
 	t.Run("request_uncompressed", func(t *testing.T) {
 		t.Parallel()
-		pingclient, contentEncoding := serve()
-		_, _ = pingclient.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{
+		contentEncoding, err := serve(&pingv1.PingRequest{
 			Text: "ping",
-		}))
-		assert.Equal(t, *contentEncoding, "")
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, contentEncoding, "")
 	})
 	t.Run("request_compressed", func(t *testing.T) {
 		t.Parallel()
-		pingclient, contentEncoding := serve()
-		_, _ = pingclient.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{
+		contentEncoding, err := serve(&pingv1.PingRequest{
 			Text: strings.Repeat("ping", 2),
-		}))
-		assert.Equal(t, *contentEncoding, "gzip")
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, contentEncoding, "gzip")
 	})
 }
 
