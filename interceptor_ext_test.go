@@ -140,6 +140,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 }
 
 func TestEmptyUnaryInterceptorFunc(t *testing.T) {
+	t.Parallel()
 	mux := http.NewServeMux()
 	interceptor := connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, request connect.AnyRequest) (connect.AnyResponse, error) {
