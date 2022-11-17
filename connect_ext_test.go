@@ -1736,10 +1736,10 @@ func TestConnectHTTPErrorCodes(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, 100, 500)
 	})
-	t.Run("0, 500", func(t *testing.T) {
-		t.Parallel()
-		checkHTTPStatus(t, 0, 500)
-	})
+	// t.Run("0, 500", func(t *testing.T) { //TODO: enable this when
+	//	t.Parallel()
+	//	checkHTTPStatus(t, 0, 500)
+	// })
 }
 
 func TestFailCompression(t *testing.T) {
