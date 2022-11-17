@@ -139,6 +139,32 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	assert.Nil(t, responses.Close())
 }
 
+func TestEmptyUnaryInterceptorFunc(t *testing.T) {
+	mux := http.NewServeMux()
+	interceptor := connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, request connect.AnyRequest) (connect.AnyResponse, error) {
+			return next(ctx, request)
+		}
+	})
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}, connect.WithInterceptors(interceptor)))
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	connectClient := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithInterceptors(interceptor))
+	_, err := connectClient.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
+	assert.Nil(t, err)
+	sumStream := connectClient.Sum(context.Background())
+	assert.Nil(t, sumStream.Send(&pingv1.SumRequest{Number: 1}))
+	resp, err := sumStream.CloseAndReceive()
+	assert.Nil(t, err)
+	assert.NotNil(t, resp)
+	countUpStream, err := connectClient.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
+	assert.Nil(t, err)
+	for countUpStream.Receive() {
+		assert.NotNil(t, countUpStream.Msg())
+	}
+	defer countUpStream.Close()
+}
+
 // headerInterceptor makes it easier to write interceptors that inspect or
 // mutate HTTP headers. It applies the same logic to unary and streaming
 // procedures, wrapping the send or receive side of the stream as appropriate.
