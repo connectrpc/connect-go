@@ -1467,7 +1467,7 @@ func TestBidiStreamServerSendsFirstMessage(t *testing.T) {
 	})
 }
 
-func TestBidiStream(t *testing.T) {
+func TestStreamForServer(t *testing.T) {
 	t.Parallel()
 	pintServer := func(pingServer pingv1connect.PingServiceHandler) (pingv1connect.PingServiceClient, *httptest.Server) {
 		mux := http.NewServeMux()
@@ -1485,7 +1485,7 @@ func TestBidiStream(t *testing.T) {
 	t.Run("not-proto-message", func(t *testing.T) {
 		client, server := pintServer(&pluggablePingServer{
 			cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
-				return stream.Conn().Send("")
+				return stream.Conn().Send("foobar")
 			},
 		})
 		t.Cleanup(server.Close)
@@ -1494,6 +1494,7 @@ func TestBidiStream(t *testing.T) {
 		_, err := stream.Receive()
 		assert.NotNil(t, err)
 		assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
+		assert.Nil(t, stream.CloseRequest())
 		t.Parallel()
 	})
 	t.Run("nil-message", func(t *testing.T) {
@@ -1508,6 +1509,7 @@ func TestBidiStream(t *testing.T) {
 		_, err := stream.Receive()
 		assert.NotNil(t, err)
 		assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+		assert.Nil(t, stream.CloseRequest())
 		t.Parallel()
 	})
 	t.Run("get-spec", func(t *testing.T) {
@@ -1522,7 +1524,86 @@ func TestBidiStream(t *testing.T) {
 		t.Cleanup(server.Close)
 		stream := client.CumSum(context.Background())
 		assert.Nil(t, stream.Send(nil))
+		assert.Nil(t, stream.CloseRequest())
 		t.Parallel()
+	})
+	t.Run("server-stream", func(t *testing.T) {
+		t.Parallel()
+		client, server := pintServer(&pluggablePingServer{
+			countUp: func(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+				assert.Equal(t, stream.Conn().Spec().StreamType, connect.StreamTypeServer)
+				assert.Equal(t, stream.Conn().Spec().Procedure, "/connect.ping.v1.PingService/CountUp")
+				assert.False(t, stream.Conn().Spec().IsClient)
+				assert.Nil(t, stream.Send(&pingv1.CountUpResponse{Number: 1}))
+				return nil
+			},
+		})
+		t.Cleanup(server.Close)
+		stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
+		assert.Nil(t, err)
+		assert.NotNil(t, stream)
+		assert.Nil(t, stream.Close())
+	})
+	t.Run("server-stream-send", func(t *testing.T) {
+		t.Parallel()
+		client, server := pintServer(&pluggablePingServer{
+			countUp: func(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+				assert.Nil(t, stream.Send(&pingv1.CountUpResponse{Number: 1}))
+				return nil
+			},
+		})
+		t.Cleanup(server.Close)
+		stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
+		assert.Nil(t, err)
+		assert.True(t, stream.Receive())
+		msg := stream.Msg()
+		assert.NotNil(t, msg)
+		assert.Equal(t, msg.Number, 1)
+		assert.Nil(t, stream.Close())
+	})
+	t.Run("server-stream-send-nil", func(t *testing.T) {
+		t.Parallel()
+		client, server := pintServer(&pluggablePingServer{
+			countUp: func(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+				stream.ResponseHeader().Set("foo", "bar")
+				stream.ResponseTrailer().Set("bas", "blah")
+				assert.Nil(t, stream.Send(nil))
+				return nil
+			},
+		})
+		t.Cleanup(server.Close)
+		stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
+		assert.Nil(t, err)
+		assert.False(t, stream.Receive())
+		headers := stream.ResponseHeader()
+		assert.NotNil(t, headers)
+		assert.Equal(t, headers.Get("foo"), "bar")
+		trailers := stream.ResponseTrailer()
+		assert.NotNil(t, trailers)
+		assert.Equal(t, trailers.Get("bas"), "blah")
+		assert.Nil(t, stream.Close())
+	})
+	t.Run("client-stream", func(t *testing.T) {
+		t.Parallel()
+		client, server := pintServer(&pluggablePingServer{
+			sum: func(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+				assert.Equal(t, stream.Spec().StreamType, connect.StreamTypeClient)
+				assert.Equal(t, stream.Spec().Procedure, "/connect.ping.v1.PingService/Sum")
+				assert.False(t, stream.Spec().IsClient)
+				assert.True(t, stream.Receive())
+				msg := stream.Msg()
+				assert.NotNil(t, msg)
+				assert.Equal(t, msg.Number, 1)
+				return connect.NewResponse(&pingv1.SumResponse{Sum: 1}), nil
+			},
+		})
+		t.Cleanup(server.Close)
+		stream := client.Sum(context.Background())
+		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
+		res, err := stream.CloseAndReceive()
+		assert.Nil(t, err)
+		assert.NotNil(t, res)
+		assert.Equal(t, res.Msg.Sum, 1)
 	})
 }
 
@@ -1583,8 +1664,10 @@ func (c failCodec) Unmarshal(data []byte, message any) error {
 type pluggablePingServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
 
-	ping   func(context.Context, *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error)
-	cumSum func(context.Context, *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error
+	ping    func(context.Context, *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error)
+	sum     func(context.Context, *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error)
+	countUp func(context.Context, *connect.Request[pingv1.CountUpRequest], *connect.ServerStream[pingv1.CountUpResponse]) error
+	cumSum  func(context.Context, *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error
 }
 
 func (p *pluggablePingServer) Ping(
@@ -1592,6 +1675,21 @@ func (p *pluggablePingServer) Ping(
 	request *connect.Request[pingv1.PingRequest],
 ) (*connect.Response[pingv1.PingResponse], error) {
 	return p.ping(ctx, request)
+}
+
+func (p *pluggablePingServer) Sum(
+	ctx context.Context,
+	stream *connect.ClientStream[pingv1.SumRequest],
+) (*connect.Response[pingv1.SumResponse], error) {
+	return p.sum(ctx, stream)
+}
+
+func (p *pluggablePingServer) CountUp(
+	ctx context.Context,
+	req *connect.Request[pingv1.CountUpRequest],
+	stream *connect.ServerStream[pingv1.CountUpResponse],
+) error {
+	return p.countUp(ctx, req, stream)
 }
 
 func (p *pluggablePingServer) CumSum(
