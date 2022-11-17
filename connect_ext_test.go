@@ -1467,6 +1467,65 @@ func TestBidiStreamServerSendsFirstMessage(t *testing.T) {
 	})
 }
 
+func TestBidiStream(t *testing.T) {
+	t.Parallel()
+	pintServer := func(pingServer pingv1connect.PingServiceHandler) (pingv1connect.PingServiceClient, *httptest.Server) {
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+		server := httptest.NewUnstartedServer(mux)
+		server.EnableHTTP2 = true
+		server.StartTLS()
+		t.Cleanup(server.Close)
+		client := pingv1connect.NewPingServiceClient(
+			server.Client(),
+			server.URL,
+		)
+		return client, server
+	}
+	t.Run("not-proto-message", func(t *testing.T) {
+		client, server := pintServer(&pluggablePingServer{
+			cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+				return stream.Conn().Send("")
+			},
+		})
+		t.Cleanup(server.Close)
+		stream := client.CumSum(context.Background())
+		assert.Nil(t, stream.Send(nil))
+		_, err := stream.Receive()
+		assert.NotNil(t, err)
+		assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
+		t.Parallel()
+	})
+	t.Run("nil-message", func(t *testing.T) {
+		client, server := pintServer(&pluggablePingServer{
+			cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+				return stream.Send(nil)
+			},
+		})
+		t.Cleanup(server.Close)
+		stream := client.CumSum(context.Background())
+		assert.Nil(t, stream.Send(nil))
+		_, err := stream.Receive()
+		assert.NotNil(t, err)
+		assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+		t.Parallel()
+	})
+	t.Run("get-spec", func(t *testing.T) {
+		client, server := pintServer(&pluggablePingServer{
+			cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+				assert.Equal(t, stream.Spec().StreamType, connect.StreamTypeBidi)
+				assert.Equal(t, stream.Spec().Procedure, "/connect.ping.v1.PingService/CumSum")
+				assert.False(t, stream.Spec().IsClient)
+				return nil
+			},
+		})
+		t.Cleanup(server.Close)
+		stream := client.CumSum(context.Background())
+		assert.Nil(t, stream.Send(nil))
+		t.Parallel()
+	})
+}
+
 func TestFailCompression(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
