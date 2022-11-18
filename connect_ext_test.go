@@ -742,7 +742,7 @@ func TestCompressMinBytesClient(t *testing.T) {
 	assertContentType := func(tb testing.TB, text, expect string) {
 		tb.Helper()
 		mux := http.NewServeMux()
-		go mux.Handle("/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		mux.Handle("/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			assert.Equal(tb, request.Header.Get("Content-Encoding"), expect)
 		}))
 		server := httptest.NewServer(mux)
