@@ -19,6 +19,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/bufbuild/connect-go"
@@ -130,6 +131,110 @@ func TestClientPeer(t *testing.T) {
 	t.Run("grpcweb", func(t *testing.T) {
 		t.Parallel()
 		run(t, connect.WithGRPCWeb())
+	})
+}
+
+func TestConnectHTTPErrorCodes(t *testing.T) {
+	t.Parallel()
+	checkHTTPStatus := func(t *testing.T, connectCode connect.Code, wantHttpStatus int) {
+		t.Helper()
+		mux := http.NewServeMux()
+		pluggableServer := &pluggablePingServer{
+			ping: func(_ context.Context, _ *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+				return nil, connect.NewError(connectCode, errors.New("error"))
+			},
+		}
+		mux.Handle(pingv1connect.NewPingServiceHandler(pluggableServer))
+		server := httptest.NewServer(mux)
+		t.Cleanup(server.Close)
+		req, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodPost,
+			server.URL+"/"+pingv1connect.PingServiceName+"/Ping",
+			strings.NewReader("{}"),
+		)
+		assert.Nil(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := server.Client().Do(req)
+		assert.Nil(t, err)
+		assert.Equal(t, wantHttpStatus, resp.StatusCode)
+		defer resp.Body.Close()
+		connectClient := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
+		connectResp, err := connectClient.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
+		assert.NotNil(t, err)
+		assert.Nil(t, connectResp)
+	}
+	t.Run("CodeCanceled-408", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeCanceled, 408)
+	})
+	t.Run("CodeUnknown-500", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeUnknown, 500)
+	})
+	t.Run("CodeInvalidArgument-400", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeInvalidArgument, 400)
+	})
+	t.Run("CodeDeadlineExceeded-408", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeDeadlineExceeded, 408)
+	})
+	t.Run("CodeNotFound-404", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeNotFound, 404)
+	})
+	t.Run("CodeAlreadyExists-409", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeAlreadyExists, 409)
+	})
+	t.Run("CodePermissionDenied-403", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodePermissionDenied, 403)
+	})
+	t.Run("CodeResourceExhausted-429", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeResourceExhausted, 429)
+	})
+	t.Run("CodeFailedPrecondition-412", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeFailedPrecondition, 412)
+	})
+	t.Run("CodeAborted-409", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeAborted, 409)
+	})
+	t.Run("CodeOutOfRange-400", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeOutOfRange, 400)
+	})
+	t.Run("CodeUnimplemented-404", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeUnimplemented, 404)
+	})
+	t.Run("CodeInternal-500", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeInternal, 500)
+	})
+	t.Run("CodeUnavailable-503", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeUnavailable, 503)
+	})
+	t.Run("CodeDataLoss-500", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeDataLoss, 500)
+	})
+	t.Run("CodeUnauthenticated-401", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, connect.CodeUnauthenticated, 401)
+	})
+	t.Run("100-500", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, 100, 500)
+	})
+	t.Run("0-500", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, 0, 500)
 	})
 }
 
