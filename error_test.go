@@ -38,6 +38,7 @@ func TestErrorNilUnderlying(t *testing.T) {
 	assert.Nil(t, detailErr)
 	err.AddDetail(detail)
 	assert.Equal(t, len(err.Details()), 1)
+	assert.Equal(t, err.Details()[0].Type(), "google.protobuf.Empty")
 	err.Meta().Set("foo", "bar")
 	assert.Equal(t, err.Meta().Get("foo"), "bar")
 	assert.Equal(t, CodeOf(err), CodeUnknown)
