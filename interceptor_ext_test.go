@@ -163,7 +163,7 @@ func TestEmptyUnaryInterceptorFunc(t *testing.T) {
 	for countUpStream.Receive() {
 		assert.NotNil(t, countUpStream.Msg())
 	}
-	defer countUpStream.Close()
+	assert.Nil(t, countUpStream.Close())
 }
 
 // headerInterceptor makes it easier to write interceptors that inspect or
