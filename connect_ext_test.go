@@ -1640,12 +1640,12 @@ func TestStreamForServer(t *testing.T) {
 
 func TestConnectHTTPErrorCodes(t *testing.T) {
 	t.Parallel()
-	checkHTTPStatus := func(t *testing.T, connectErr connect.Code, wantHttpStatus int) {
+	checkHTTPStatus := func(t *testing.T, connectCode connect.Code, wantHttpStatus int) {
 		t.Helper()
 		mux := http.NewServeMux()
 		pluggableServer := &pluggablePingServer{
 			ping: func(_ context.Context, _ *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
-				return nil, connect.NewError(connectErr, errors.New("error"))
+				return nil, connect.NewError(connectCode, errors.New("error"))
 			},
 		}
 		mux.Handle(pingv1connect.NewPingServiceHandler(pluggableServer))
