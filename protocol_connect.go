@@ -925,7 +925,7 @@ func (e *connectWireError) asError() *Error {
 	if e == nil {
 		return nil
 	}
-	if e.Code == 0 {
+	if e.Code < minCode || e.Code > maxCode {
 		e.Code = CodeUnknown
 	}
 	err := NewError(e.Code, errors.New(e.Message))
