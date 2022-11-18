@@ -578,6 +578,7 @@ func TestContextError(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.True(t, errors.As(err, &connectErr))
 	assert.Equal(t, connectErr.Code(), connect.CodeCanceled)
+	assert.False(t, connect.IsWireError(err))
 }
 
 func TestGRPCMarshalStatusError(t *testing.T) {
@@ -1475,7 +1476,6 @@ func TestStreamForServer(t *testing.T) {
 		server := httptest.NewUnstartedServer(mux)
 		server.EnableHTTP2 = true
 		server.StartTLS()
-		t.Cleanup(server.Close)
 		client := pingv1connect.NewPingServiceClient(
 			server.Client(),
 			server.URL,
@@ -1483,6 +1483,7 @@ func TestStreamForServer(t *testing.T) {
 		return client, server
 	}
 	t.Run("not-proto-message", func(t *testing.T) {
+		t.Parallel()
 		client, server := newPingServer(&pluggablePingServer{
 			cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
 				return stream.Conn().Send("foobar")
@@ -1495,9 +1496,9 @@ func TestStreamForServer(t *testing.T) {
 		assert.NotNil(t, err)
 		assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
 		assert.Nil(t, stream.CloseRequest())
-		t.Parallel()
 	})
 	t.Run("nil-message", func(t *testing.T) {
+		t.Parallel()
 		client, server := newPingServer(&pluggablePingServer{
 			cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
 				return stream.Send(nil)
@@ -1510,9 +1511,9 @@ func TestStreamForServer(t *testing.T) {
 		assert.NotNil(t, err)
 		assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
 		assert.Nil(t, stream.CloseRequest())
-		t.Parallel()
 	})
 	t.Run("get-spec", func(t *testing.T) {
+		t.Parallel()
 		client, server := newPingServer(&pluggablePingServer{
 			cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
 				assert.Equal(t, stream.Spec().StreamType, connect.StreamTypeBidi)
@@ -1525,7 +1526,6 @@ func TestStreamForServer(t *testing.T) {
 		stream := client.CumSum(context.Background())
 		assert.Nil(t, stream.Send(nil))
 		assert.Nil(t, stream.CloseRequest())
-		t.Parallel()
 	})
 	t.Run("server-stream", func(t *testing.T) {
 		t.Parallel()
