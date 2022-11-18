@@ -1745,7 +1745,15 @@ func TestConnectHTTPErrorCodes(t *testing.T) {
 func TestFailCompression(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}, connect.WithErrorCompression()))
+	compressorName := "fail"
+	compressor := func() connect.Compressor { return failCompressor{} }
+	decompressor := func() connect.Decompressor { return failDecompressor{} }
+	mux.Handle(
+		pingv1connect.NewPingServiceHandler(
+			pingServer{},
+			connect.WithCompression(compressorName, decompressor, compressor),
+		),
+	)
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
@@ -1753,8 +1761,8 @@ func TestFailCompression(t *testing.T) {
 	pingclient := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL,
-		connect.WithErrorCompression(),
-		connect.WithSendCompression("error"),
+		connect.WithAcceptCompression(compressorName, decompressor, compressor),
+		connect.WithSendCompression(compressorName),
 	)
 	_, err := pingclient.Ping(
 		context.Background(),
@@ -2059,3 +2067,19 @@ func newHTTPMiddlewareError() *connect.Error {
 	err.Meta().Set("Middleware-Foo", "bar")
 	return err
 }
+
+type failDecompressor struct {
+	connect.Decompressor
+}
+
+type failCompressor struct{}
+
+func (failCompressor) Write([]byte) (int, error) {
+	return 0, errors.New("failCompressor")
+}
+
+func (failCompressor) Close() error {
+	return errors.New("failCompressor")
+}
+
+func (failCompressor) Reset(io.Writer) {}

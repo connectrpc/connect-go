@@ -16,8 +16,6 @@ package connect
 
 import (
 	"context"
-	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -55,30 +53,4 @@ func TestAcceptEncodingOrdering(t *testing.T) {
 	)
 	_, _ = client.CallUnary(context.Background(), NewRequest(&emptypb.Empty{}))
 	assert.True(t, called)
-}
-
-type failDecompressor struct {
-	Decompressor
-}
-
-type failCompressor struct{}
-
-func (failCompressor) Write([]byte) (int, error) {
-	return 0, errors.New("failCompressor")
-}
-
-func (failCompressor) Close() error {
-	return errors.New("failCompressor")
-}
-
-func (failCompressor) Reset(io.Writer) {}
-
-func WithErrorCompression() Option {
-	return &compressionOption{
-		Name: "error",
-		CompressionPool: newCompressionPool(
-			func() Decompressor { return &failDecompressor{} },
-			func() Compressor { return &failCompressor{} },
-		),
-	}
 }
