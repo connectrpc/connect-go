@@ -1661,85 +1661,85 @@ func TestConnectHTTPErrorCodes(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := server.Client().Do(req)
 		assert.Nil(t, err)
-		assert.Equal(t, wantHttpStatus, resp.StatusCode)
 		defer resp.Body.Close()
+		assert.Equal(t, wantHttpStatus, resp.StatusCode)
 		connectClient := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
 		connectResp, err := connectClient.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
 		assert.NotNil(t, err)
 		assert.Nil(t, connectResp)
 	}
-	t.Run("connect.CodeCanceled, 408", func(t *testing.T) {
+	t.Run("CodeCanceled-408", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeCanceled, 408)
 	})
-	t.Run("connect.CodeUnknown, 500", func(t *testing.T) {
+	t.Run("CodeUnknown-500", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeUnknown, 500)
 	})
-	t.Run("connect.CodeInvalidArgument, 400", func(t *testing.T) {
+	t.Run("CodeInvalidArgument-400", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeInvalidArgument, 400)
 	})
-	t.Run("connect.CodeDeadlineExceeded, 408", func(t *testing.T) {
+	t.Run("CodeDeadlineExceeded-408", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeDeadlineExceeded, 408)
 	})
-	t.Run("connect.CodeNotFound, 404", func(t *testing.T) {
+	t.Run("CodeNotFound-404", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeNotFound, 404)
 	})
-	t.Run("connect.CodeAlreadyExists, 409", func(t *testing.T) {
+	t.Run("CodeAlreadyExists-409", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeAlreadyExists, 409)
 	})
-	t.Run("connect.CodePermissionDenied, 403", func(t *testing.T) {
+	t.Run("CodePermissionDenied-403", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodePermissionDenied, 403)
 	})
-	t.Run("connect.CodeResourceExhausted, 429", func(t *testing.T) {
+	t.Run("CodeResourceExhausted-429", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeResourceExhausted, 429)
 	})
-	t.Run("connect.CodeFailedPrecondition, 412", func(t *testing.T) {
+	t.Run("CodeFailedPrecondition-412", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeFailedPrecondition, 412)
 	})
-	t.Run("connect.CodeAborted, 409", func(t *testing.T) {
+	t.Run("CodeAborted-409", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeAborted, 409)
 	})
-	t.Run("connect.CodeOutOfRange, 400", func(t *testing.T) {
+	t.Run("CodeOutOfRange-400", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeOutOfRange, 400)
 	})
-	t.Run("connect.CodeUnimplemented, 404", func(t *testing.T) {
+	t.Run("CodeUnimplemented-404", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeUnimplemented, 404)
 	})
-	t.Run("connect.CodeInternal, 500", func(t *testing.T) {
+	t.Run("CodeInternal-500", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeInternal, 500)
 	})
-	t.Run("connect.CodeUnavailable, 503", func(t *testing.T) {
+	t.Run("CodeUnavailable-503", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeUnavailable, 503)
 	})
-	t.Run("connect.CodeDataLoss, 500", func(t *testing.T) {
+	t.Run("CodeDataLoss-500", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeDataLoss, 500)
 	})
-	t.Run("connect.CodeUnauthenticated, 401", func(t *testing.T) {
+	t.Run("CodeUnauthenticated-401", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeUnauthenticated, 401)
 	})
-	t.Run("100, 500", func(t *testing.T) {
+	t.Run("100-500", func(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, 100, 500)
 	})
-	// t.Run("0, 500", func(t *testing.T) { //TODO: enable this when
-	//	t.Parallel()
-	//	checkHTTPStatus(t, 0, 500)
-	// })
+	t.Run("0-500", func(t *testing.T) {
+		t.Parallel()
+		checkHTTPStatus(t, 0, 500)
+	})
 }
 
 func TestFailCompression(t *testing.T) {

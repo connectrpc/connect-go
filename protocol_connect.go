@@ -423,6 +423,9 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 			)
 		}
 		serverErr := wireErr.asError()
+		if serverErr == nil {
+			return nil
+		}
 		serverErr.meta = cc.responseHeader.Clone()
 		mergeHeaders(serverErr.meta, cc.responseTrailer)
 		return serverErr
@@ -919,8 +922,11 @@ func newConnectWireError(err error) *connectWireError {
 }
 
 func (e *connectWireError) asError() *Error {
-	if e == nil || e.Code == 0 {
+	if e == nil {
 		return nil
+	}
+	if e.Code < minCode || e.Code > maxCode {
+		e.Code = CodeUnknown
 	}
 	err := NewError(e.Code, errors.New(e.Message))
 	err.wireErr = true
