@@ -146,7 +146,7 @@ func (a *assertPeerInterceptor) WrapStreamingClient(next connect.StreamingClient
 	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
 		conn := next(ctx, spec)
 		assert.NotZero(a.tb, conn.Peer().Addr)
-		assert.NotEqual(a.tb, conn.Spec(), connect.Spec{})
+		assert.NotZero(a.tb, conn.Spec())
 		return conn
 	}
 }
@@ -154,7 +154,7 @@ func (a *assertPeerInterceptor) WrapStreamingClient(next connect.StreamingClient
 func (a *assertPeerInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
 		assert.NotZero(a.tb, conn.Peer().Addr)
-		assert.NotEqual(a.tb, conn.Spec(), connect.Spec{})
+		assert.NotZero(a.tb, conn.Spec())
 		return next(ctx, conn)
 	}
 }
