@@ -1497,6 +1497,9 @@ func (p pingServer) Ping(ctx context.Context, request *connect.Request[pingv1.Pi
 	if request.Peer().Addr == "" {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
 	}
+	if request.Peer().Protocol == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer protocol"))
+	}
 	response := connect.NewResponse(
 		&pingv1.PingResponse{
 			Number: request.Msg.Number,
@@ -1515,6 +1518,9 @@ func (p pingServer) Fail(ctx context.Context, request *connect.Request[pingv1.Fa
 	if request.Peer().Addr == "" {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
 	}
+	if request.Peer().Protocol == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer protocol"))
+	}
 	err := connect.NewError(connect.Code(request.Msg.Code), errors.New(errorMessage))
 	err.Meta().Set(handlerHeader, headerValue)
 	err.Meta().Set(handlerTrailer, trailerValue)
@@ -1532,6 +1538,9 @@ func (p pingServer) Sum(
 	}
 	if stream.Peer().Addr == "" {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
+	}
+	if stream.Peer().Protocol == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer protocol"))
 	}
 	var sum int64
 	for stream.Receive() {
@@ -1556,6 +1565,9 @@ func (p pingServer) CountUp(
 	}
 	if request.Peer().Addr == "" {
 		return connect.NewError(connect.CodeInternal, errors.New("no peer address"))
+	}
+	if request.Peer().Protocol == "" {
+		return connect.NewError(connect.CodeInternal, errors.New("no peer protocol"))
 	}
 	if request.Msg.Number <= 0 {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
@@ -1584,6 +1596,9 @@ func (p pingServer) CumSum(
 		}
 	}
 	if stream.Peer().Addr == "" {
+		return connect.NewError(connect.CodeInternal, errors.New("no peer address"))
+	}
+	if stream.Peer().Protocol == "" {
 		return connect.NewError(connect.CodeInternal, errors.New("no peer address"))
 	}
 	stream.ResponseHeader().Set(handlerHeader, headerValue)

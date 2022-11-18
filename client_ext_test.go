@@ -97,7 +97,8 @@ func TestClientPeer(t *testing.T) {
 			_, closeErr := clientStream.CloseAndReceive()
 			assert.Nil(t, closeErr)
 		})
-		assert.NotNil(t, clientStream.Peer().Addr)
+		assert.NotZero(t, clientStream.Peer().Addr)
+		assert.NotZero(t, clientStream.Peer().Protocol)
 		err = clientStream.Send(&pingv1.SumRequest{})
 		assert.Nil(t, err)
 		// server streaming
@@ -112,7 +113,8 @@ func TestClientPeer(t *testing.T) {
 			assert.Nil(t, bidiStream.CloseRequest())
 			assert.Nil(t, bidiStream.CloseResponse())
 		})
-		assert.NotNil(t, bidiStream.Peer().Addr)
+		assert.NotZero(t, bidiStream.Peer().Addr)
+		assert.NotZero(t, bidiStream.Peer().Protocol)
 		err = bidiStream.Send(&pingv1.CumSumRequest{})
 		assert.Nil(t, err)
 	}
@@ -138,6 +140,7 @@ type assertPeerInterceptor struct {
 func (a *assertPeerInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 		assert.NotZero(a.tb, req.Peer().Addr)
+		assert.NotZero(a.tb, req.Peer().Protocol)
 		return next(ctx, req)
 	}
 }
@@ -146,6 +149,7 @@ func (a *assertPeerInterceptor) WrapStreamingClient(next connect.StreamingClient
 	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
 		conn := next(ctx, spec)
 		assert.NotZero(a.tb, conn.Peer().Addr)
+		assert.NotZero(a.tb, conn.Peer().Protocol)
 		return conn
 	}
 }
@@ -153,6 +157,7 @@ func (a *assertPeerInterceptor) WrapStreamingClient(next connect.StreamingClient
 func (a *assertPeerInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
 		assert.NotZero(a.tb, conn.Peer().Addr)
+		assert.NotZero(a.tb, conn.Peer().Protocol)
 		return next(ctx, conn)
 	}
 }
