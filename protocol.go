@@ -297,6 +297,17 @@ func negotiateCompression( //nolint:nonamedreturns
 	return requestCompression, responseCompression, nil
 }
 
+// checkServerStreamsCanFlush ensures that bidi and server streaming handlers
+// have received an http.ResponseWriter that implements http.Flusher, since
+// they must flush data after sending each message.
+func checkServerStreamsCanFlush(spec Spec, responseWriter http.ResponseWriter) *Error {
+	requiresFlusher := (spec.StreamType & StreamTypeServer) == StreamTypeServer
+	if _, flushable := responseWriter.(http.Flusher); requiresFlusher && !flushable {
+		return NewError(CodeInternal, fmt.Errorf("%T does not implement http.Flusher", responseWriter))
+	}
+	return nil
+}
+
 func flushResponseWriter(w http.ResponseWriter) {
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
