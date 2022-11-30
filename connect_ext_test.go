@@ -1774,6 +1774,64 @@ func TestFailCompression(t *testing.T) {
 	assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
 }
 
+func TestUnflushableResponseWriter(t *testing.T) {
+	t.Parallel()
+	assertIsFlusherErr := func(t *testing.T, err error) {
+		t.Helper()
+		assert.NotNil(t, err)
+		assert.Equal(t, connect.CodeOf(err), connect.CodeInternal, assert.Sprintf("got %v", err))
+		assert.True(
+			t,
+			strings.HasSuffix(err.Error(), "unflushableWriter does not implement http.Flusher"),
+			assert.Sprintf("error doesn't reference http.Flusher: %s", err.Error()),
+		)
+	}
+	mux := http.NewServeMux()
+	path, handler := pingv1connect.NewPingServiceHandler(pingServer{})
+	wrapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(&unflushableWriter{w}, r)
+	})
+	mux.Handle(path, wrapped)
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+
+	tests := []struct {
+		name    string
+		options []connect.ClientOption
+	}{
+		{"connect", nil},
+		{"grpc", []connect.ClientOption{connect.WithGRPC()}},
+		{"grpcweb", []connect.ClientOption{connect.WithGRPCWeb()}},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pingclient := pingv1connect.NewPingServiceClient(server.Client(), server.URL, tt.options...)
+			stream, err := pingclient.CountUp(
+				context.Background(),
+				connect.NewRequest(&pingv1.CountUpRequest{Number: 5}),
+			)
+			if err != nil {
+				assertIsFlusherErr(t, err)
+				return
+			}
+			assert.False(t, stream.Receive())
+			assertIsFlusherErr(t, stream.Err())
+		})
+	}
+}
+
+type unflushableWriter struct {
+	w http.ResponseWriter
+}
+
+func (w *unflushableWriter) Header() http.Header         { return w.w.Header() }
+func (w *unflushableWriter) Write(b []byte) (int, error) { return w.w.Write(b) }
+func (w *unflushableWriter) WriteHeader(code int)        { w.w.WriteHeader(code) }
+
 func gzipCompressedSize(tb testing.TB, message proto.Message) int {
 	tb.Helper()
 	uncompressed, err := proto.Marshal(message)
@@ -2069,6 +2127,9 @@ func (l *trimTrailerWriter) Flush() {
 }
 
 func (l *trimTrailerWriter) removeTrailers() {
+	for _, v := range l.w.Header().Values("Trailer") {
+		l.w.Header().Del(v)
+	}
 	l.w.Header().Del("Trailer")
 	for k := range l.w.Header() {
 		if strings.HasPrefix(k, http.TrailerPrefix) {
