@@ -121,6 +121,9 @@ func (h *connectHandler) NewConn(
 		contentEncoding,
 		acceptEncoding,
 	)
+	if failed == nil {
+		failed = checkServerStreamsCanFlush(h.Spec, responseWriter)
+	}
 
 	// Write any remaining headers here:
 	// (1) any writes to the stream will implicitly send the headers, so we
@@ -209,8 +212,7 @@ func (h *connectHandler) NewConn(
 		}
 	}
 	conn = wrapHandlerConnWithCodedErrors(conn)
-	// We can't return failed as-is: a nil *Error is non-nil when returned as an
-	// error interface.
+
 	if failed != nil {
 		// Negotiation failed, so we can't establish a stream.
 		_ = conn.Close(failed)
