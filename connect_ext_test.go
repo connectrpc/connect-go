@@ -1824,6 +1824,29 @@ func TestUnflushableResponseWriter(t *testing.T) {
 	}
 }
 
+func TestBidiOverHTTP1(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	// Clients expecting a full-duplex connection that end up with a simplex
+	// HTTP/1.1 connection shouldn't hang. Instead, the server should close the
+	// TCP connection.
+	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
+	stream := client.CumSum(context.Background())
+	if err := stream.Send(&pingv1.CumSumRequest{Number: 2}); err != nil {
+		assert.ErrorIs(t, err, io.EOF)
+	}
+	_, err := stream.Receive()
+	assert.NotNil(t, err)
+	assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+	assert.Equal(t, err.Error(), "unknown: HTTP status 505 HTTP Version Not Supported")
+	assert.Nil(t, stream.CloseRequest())
+	assert.Nil(t, stream.CloseResponse())
+}
+
 type unflushableWriter struct {
 	w http.ResponseWriter
 }
