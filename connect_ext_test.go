@@ -2124,6 +2124,9 @@ func (l *trimTrailerWriter) Flush() {
 }
 
 func (l *trimTrailerWriter) removeTrailers() {
+	for _, v := range l.w.Header().Values("Trailer") {
+		l.w.Header().Del(v)
+	}
 	l.w.Header().Del("Trailer")
 	for k := range l.w.Header() {
 		if strings.HasPrefix(k, http.TrailerPrefix) {
