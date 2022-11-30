@@ -1775,6 +1775,7 @@ func TestFailCompression(t *testing.T) {
 }
 
 func TestUnflushableResponseWriter(t *testing.T) {
+	t.Parallel()
 	assertIsFlusherErr := func(t *testing.T, err error) {
 		t.Helper()
 		assert.NotNil(t, err)
@@ -1805,7 +1806,9 @@ func TestUnflushableResponseWriter(t *testing.T) {
 		{"grpcweb", []connect.ClientOption{connect.WithGRPCWeb()}},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			pingclient := pingv1connect.NewPingServiceClient(server.Client(), server.URL, tt.options...)
 			stream, err := pingclient.CountUp(
 				context.Background(),
