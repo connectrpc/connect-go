@@ -47,17 +47,15 @@ type ErrorDetail struct {
 // NewErrorDetail constructs a new error detail. This returns an error
 // if msg cannot be marshalled into an Any message.
 func NewErrorDetail(msg proto.Message) (*ErrorDetail, error) {
+	// If it's already an Any, don't wrap it inside another.
+	if pb, ok := msg.(*anypb.Any); ok {
+		return &ErrorDetail{pb: pb}, nil
+	}
 	pb, err := anypb.New(msg)
 	if err != nil {
 		return nil, err
 	}
 	return &ErrorDetail{pb: pb}, nil
-}
-
-// NewErrorDetailFromAny constructs a new error detail using the
-// given Any message.
-func NewErrorDetailFromAny(pb *anypb.Any) *ErrorDetail {
-	return &ErrorDetail{pb: pb}
 }
 
 // Type is the fully-qualified name of the detail's Protobuf message (for
@@ -86,11 +84,6 @@ func (d *ErrorDetail) Bytes() []byte {
 // assertions to cast from the proto.Message interface to concrete types.
 func (d *ErrorDetail) Value() (proto.Message, error) {
 	return d.pb.UnmarshalNew()
-}
-
-// Any returns the underlying Any message for this error detail.
-func (d *ErrorDetail) Any() *anypb.Any {
-	return d.pb
 }
 
 // An Error captures four key pieces of information: a [Code], an underlying Go
