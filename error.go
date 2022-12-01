@@ -45,7 +45,7 @@ type ErrorDetail struct {
 }
 
 // NewErrorDetail constructs a new error detail. If msg is an *[anypb.Any] then
-// it is used as is. Otherwise, it is first marshaleled into an *[anypb.Any]
+// it is used as is. Otherwise, it is first marshalled into an *[anypb.Any]
 // value. This returns an error if msg cannot be marshalled.
 func NewErrorDetail(msg proto.Message) (*ErrorDetail, error) {
 	// If it's already an Any, don't wrap it inside another.
