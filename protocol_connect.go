@@ -121,6 +121,9 @@ func (h *connectHandler) NewConn(
 		contentEncoding,
 		acceptEncoding,
 	)
+	if failed == nil {
+		failed = checkServerStreamsCanFlush(h.Spec, responseWriter)
+	}
 
 	// Write any remaining headers here:
 	// (1) any writes to the stream will implicitly send the headers, so we
@@ -151,7 +154,10 @@ func (h *connectHandler) NewConn(
 	codec := h.Codecs.Get(codecName) // handler.go guarantees this is not nil
 
 	var conn handlerConnCloser
-	peer := Peer{Addr: request.RemoteAddr}
+	peer := Peer{
+		Addr:     request.RemoteAddr,
+		Protocol: ProtocolConnect,
+	}
 	if h.Spec.StreamType == StreamTypeUnary {
 		conn = &connectUnaryHandlerConn{
 			spec:           h.Spec,
@@ -206,8 +212,7 @@ func (h *connectHandler) NewConn(
 		}
 	}
 	conn = wrapHandlerConnWithCodedErrors(conn)
-	// We can't return failed as-is: a nil *Error is non-nil when returned as an
-	// error interface.
+
 	if failed != nil {
 		// Negotiation failed, so we can't establish a stream.
 		_ = conn.Close(failed)
@@ -221,7 +226,7 @@ type connectClient struct {
 }
 
 func (c *connectClient) Peer() Peer {
-	return newPeerFromURL(c.URL)
+	return newPeerFromURL(c.URL, ProtocolConnect)
 }
 
 func (c *connectClient) WriteRequestHeader(streamType StreamType, header http.Header) {
@@ -420,6 +425,9 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 			)
 		}
 		serverErr := wireErr.asError()
+		if serverErr == nil {
+			return nil
+		}
 		serverErr.meta = cc.responseHeader.Clone()
 		mergeHeaders(serverErr.meta, cc.responseTrailer)
 		return serverErr
@@ -745,6 +753,9 @@ type connectUnaryMarshaler struct {
 }
 
 func (m *connectUnaryMarshaler) Marshal(message any) *Error {
+	if message == nil {
+		return m.write(nil)
+	}
 	data, err := m.codec.Marshal(message)
 	if err != nil {
 		return errorf(CodeInternal, "marshal message: %w", err)
@@ -913,8 +924,11 @@ func newConnectWireError(err error) *connectWireError {
 }
 
 func (e *connectWireError) asError() *Error {
-	if e == nil || e.Code == 0 {
+	if e == nil {
 		return nil
+	}
+	if e.Code < minCode || e.Code > maxCode {
+		e.Code = CodeUnknown
 	}
 	err := NewError(e.Code, errors.New(e.Message))
 	err.wireErr = true

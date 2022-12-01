@@ -59,6 +59,9 @@ func (c *ClientStreamForClient[Req, Res]) Send(request *Req) error {
 	if c.err != nil {
 		return c.err
 	}
+	if request == nil {
+		return c.conn.Send(nil)
+	}
 	return c.conn.Send(request)
 }
 
@@ -194,7 +197,8 @@ func (b *BidiStreamForClient[Req, Res]) RequestHeader() http.Header {
 }
 
 // Send a message to the server. The first call to Send also sends the request
-// headers.
+// headers. To send just the request headers, without a body, call Send with a
+// nil pointer.
 //
 // If the server returns an error, Send returns an error that wraps [io.EOF].
 // Clients should check for EOF using the standard library's [errors.Is] and
@@ -202,6 +206,9 @@ func (b *BidiStreamForClient[Req, Res]) RequestHeader() http.Header {
 func (b *BidiStreamForClient[Req, Res]) Send(msg *Req) error {
 	if b.err != nil {
 		return b.err
+	}
+	if msg == nil {
+		return b.conn.Send(nil)
 	}
 	return b.conn.Send(msg)
 }

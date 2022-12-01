@@ -144,6 +144,9 @@ func (g *grpcHandler) NewConn(
 		request.Header.Get(grpcHeaderCompression),
 		request.Header.Get(grpcHeaderAcceptCompression),
 	)
+	if failed == nil {
+		failed = checkServerStreamsCanFlush(g.Spec, responseWriter)
+	}
 
 	// Write any remaining headers here:
 	// (1) any writes to the stream will implicitly send the headers, so we
@@ -161,9 +164,16 @@ func (g *grpcHandler) NewConn(
 
 	codecName := grpcCodecFromContentType(g.web, request.Header.Get(headerContentType))
 	codec := g.Codecs.Get(codecName) // handler.go guarantees this is not nil
+	protocolName := ProtocolGRPC
+	if g.web {
+		protocolName = ProtocolGRPCWeb
+	}
 	conn := wrapHandlerConnWithCodedErrors(&grpcHandlerConn{
-		spec:       g.Spec,
-		peer:       Peer{Addr: request.RemoteAddr},
+		spec: g.Spec,
+		peer: Peer{
+			Addr:     request.RemoteAddr,
+			Protocol: protocolName,
+		},
 		web:        g.web,
 		bufferPool: g.BufferPool,
 		protobuf:   g.Codecs.Protobuf(), // for errors
@@ -207,7 +217,10 @@ type grpcClient struct {
 }
 
 func (g *grpcClient) Peer() Peer {
-	return newPeerFromURL(g.URL)
+	if g.web {
+		return newPeerFromURL(g.URL, ProtocolGRPCWeb)
+	}
+	return newPeerFromURL(g.URL, ProtocolGRPC)
 }
 
 func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {
@@ -506,10 +519,26 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 	// we're sending a "trailers-only" response, we must send trailing metadata
 	// as HTTP trailers. (If we had frame-level control of the HTTP/2 layer, we
 	// could send trailers-only responses as a single HEADER frame and no DATA
-	// frames, but net/http doesn't expose APIs that low-level.) In net/http's
-	// ResponseWriter API, we send HTTP trailers by writing to the headers map
-	// with a special prefix. This prefixing is an implementation detail, so we
-	// should hide it and _not_ mutate the user-visible headers.
+	// frames, but net/http doesn't expose APIs that low-level.)
+	if !hc.wroteToBody {
+		// This block works around a bug in x/net/http2. Until Go 1.20, trailers
+		// written using http.TrailerPrefix were only sent if either (1) there's
+		// data in the body, or (2) the innermost http.ResponseWriter is flushed.
+		// To ensure that we always send a valid gRPC response, even if the user
+		// has wrapped the response writer in net/http middleware that doesn't
+		// implement http.Flusher, we must pre-declare our HTTP trailers. We can
+		// remove this when Go 1.21 ships and we drop support for Go 1.19.
+		for key, values := range mergedTrailers {
+			hc.responseWriter.Header().Add("Trailer", key)
+			for _, value := range values {
+				hc.responseWriter.Header().Add(key, value)
+			}
+		}
+		return nil
+	}
+	// In net/http's ResponseWriter API, we send HTTP trailers by writing to the
+	// headers map with a special prefix. This prefixing is an implementation
+	// detail, so we should hide it and _not_ mutate the user-visible headers.
 	//
 	// Note that this is _very_ finicky and difficult to test with net/http,
 	// since correctness depends on low-level framing details. Breaking this
