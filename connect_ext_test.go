@@ -19,6 +19,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -1822,6 +1823,46 @@ func TestUnflushableResponseWriter(t *testing.T) {
 			assertIsFlusherErr(t, stream.Err())
 		})
 	}
+}
+
+func TestGRPCErrorMetadataIsTrailersOnly(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+
+	protoBytes, err := proto.Marshal(&pingv1.FailRequest{Code: int32(connect.CodeInternal)})
+	assert.Nil(t, err)
+	// Manually construct a gRPC prefix. Data is uncompressed, so the first byte
+	// is 0. Set the last 4 bytes to the message length.
+	var prefix [5]byte
+	binary.BigEndian.PutUint32(prefix[1:5], uint32(len(protoBytes)))
+	body := append(prefix[:], protoBytes...)
+	// Manually send off a gRPC request.
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		server.URL+"/connect.ping.v1.PingService/Fail",
+		bytes.NewReader(body),
+	)
+	assert.Nil(t, err)
+	req.Header.Set("Content-Type", "application/grpc")
+	res, err := server.Client().Do(req)
+	assert.Nil(t, err)
+	assert.Equal(t, res.StatusCode, http.StatusOK)
+	assert.Equal(t, res.Header.Get("Content-Type"), "application/grpc")
+	// pingServer.Fail adds handlerHeader and handlerTrailer to the error
+	// metadata. The gRPC protocol should send all error metadata as trailers.
+	assert.Zero(t, res.Header.Get(handlerHeader))
+	assert.Zero(t, res.Header.Get(handlerTrailer))
+	_, err = io.Copy(io.Discard, res.Body)
+	assert.Nil(t, err)
+	assert.Nil(t, res.Body.Close())
+	assert.NotZero(t, res.Trailer.Get(handlerHeader))
+	assert.NotZero(t, res.Trailer.Get(handlerTrailer))
 }
 
 func TestBidiOverHTTP1(t *testing.T) {

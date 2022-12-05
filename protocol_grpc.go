@@ -528,8 +528,11 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 		// has wrapped the response writer in net/http middleware that doesn't
 		// implement http.Flusher, we must pre-declare our HTTP trailers. We can
 		// remove this when Go 1.21 ships and we drop support for Go 1.19.
-		for key, values := range mergedTrailers {
+		for key := range mergedTrailers {
 			hc.responseWriter.Header().Add("Trailer", key)
+		}
+		hc.responseWriter.WriteHeader(http.StatusOK)
+		for key, values := range mergedTrailers {
 			for _, value := range values {
 				hc.responseWriter.Header().Add(key, value)
 			}
