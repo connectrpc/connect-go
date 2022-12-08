@@ -126,6 +126,14 @@ func (h *connectHandler) NewConn(
 	if failed == nil {
 		failed = checkServerStreamsCanFlush(h.Spec, responseWriter)
 	}
+	if failed == nil && h.RequireConnectProtocolHeader && request.Header.Get(connectHeaderProtocolVersion) == "" {
+		failed = errorf(
+			CodeInvalidArgument,
+			"missing required header: set %q to %q",
+			connectHeaderProtocolVersion,
+			connectProtocolVersion,
+		)
+	}
 
 	// Write any remaining headers here:
 	// (1) any writes to the stream will implicitly send the headers, so we

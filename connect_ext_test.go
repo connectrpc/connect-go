@@ -1902,6 +1902,32 @@ func TestConnectProtocolHeader(t *testing.T) {
 	assert.Nil(t, stream.CloseResponse())
 }
 
+func TestConnectProtocolHeaderRequired(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(
+		pingServer{},
+		connect.WithRequireConnectProtocolHeader(),
+	))
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		server.URL+"/"+pingv1connect.PingServiceName+"/Ping",
+		strings.NewReader("{}"),
+	)
+	assert.Nil(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	response, err := server.Client().Do(req)
+	assert.Nil(t, err)
+	t.Cleanup(func() {
+		assert.Nil(t, response.Body.Close())
+	})
+	assert.Equal(t, response.StatusCode, http.StatusBadRequest)
+}
+
 func TestBidiOverHTTP1(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()

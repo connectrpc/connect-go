@@ -153,6 +153,18 @@ func WithRecover(handle func(context.Context, Spec, http.Header, any) error) Han
 	return WithInterceptors(&recoverHandlerInterceptor{handle: handle})
 }
 
+// WithRequireConnectProtocolHeader configures the Handler to require requests
+// using the Connect RPC protocol to include the Connect-Protocol-Version
+// header. This ensures that HTTP proxies and net/http middleware can easily
+// identify valid Connect requests, even if they use a common Content-Type like
+// application/json. However, it makes ad-hoc requests with tools like cURL
+// more laborious.
+//
+// This option has no effect if the client uses the gRPC or gRPC-Web protocols.
+func WithRequireConnectProtocolHeader() HandlerOption {
+	return &requireConnectProtocolHeaderOption{}
+}
+
 // Option implements both [ClientOption] and [HandlerOption], so it can be
 // applied both client-side and server-side.
 type Option interface {
@@ -379,6 +391,12 @@ func (o *handlerOptionsOption) applyToHandler(config *handlerConfig) {
 	for _, option := range o.options {
 		option.applyToHandler(config)
 	}
+}
+
+type requireConnectProtocolHeaderOption struct{}
+
+func (o *requireConnectProtocolHeaderOption) applyToHandler(config *handlerConfig) {
+	config.RequireConnectProtocolHeader = true
 }
 
 type grpcOption struct {
