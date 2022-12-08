@@ -1888,6 +1888,48 @@ func TestBidiOverHTTP1(t *testing.T) {
 	assert.Nil(t, stream.CloseResponse())
 }
 
+func TestHandlerReturnsNilResponse(t *testing.T) {
+	// When user-written handlers return nil responses _and_ nil errors, ensure
+	// that the resulting panic includes at least the name of the procedure.
+	t.Parallel()
+
+	var panics int
+	recoverPanic := func(_ context.Context, spec connect.Spec, _ http.Header, p any) error {
+		panics++
+		assert.NotNil(t, p)
+		str := fmt.Sprint(p)
+		assert.True(
+			t,
+			strings.Contains(str, spec.Procedure),
+			assert.Sprintf("%q does not contain procedure %q", str, spec.Procedure),
+		)
+		return connect.NewError(connect.CodeInternal, errors.New(str))
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(&pluggablePingServer{
+		ping: func(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+			return nil, nil //nolint: nilnil
+		},
+		sum: func(ctx context.Context, req *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+			return nil, nil //nolint: nilnil
+		},
+	}, connect.WithRecover(recoverPanic)))
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
+
+	_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
+	assert.NotNil(t, err)
+	assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
+
+	_, err = client.Sum(context.Background()).CloseAndReceive()
+	assert.NotNil(t, err)
+	assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
+
+	assert.Equal(t, panics, 2)
+}
+
 type unflushableWriter struct {
 	w http.ResponseWriter
 }
