@@ -1865,6 +1865,43 @@ func TestGRPCErrorMetadataIsTrailersOnly(t *testing.T) {
 	assert.NotZero(t, res.Trailer.Get(handlerTrailer))
 }
 
+func TestConnectProtocolHeader(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(&pluggablePingServer{
+		ping: func(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+			if req.Header().Get("Connect-Protocol-Version") == "" {
+				return nil, connect.NewError(connect.CodeInternal, errors.New("missing Connect-Protocol-Version header"))
+			}
+			return connect.NewResponse(&pingv1.PingResponse{Number: 42}), nil
+		},
+		cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+			if stream.RequestHeader().Get("Connect-Protocol-Version") == "" {
+				return connect.NewError(connect.CodeInternal, errors.New("missing Connect-Protocol-Version header"))
+			}
+			if err := stream.Send(&pingv1.CumSumResponse{}); err != nil {
+				return err
+			}
+			return nil
+		},
+	}))
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+
+	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
+	_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
+	assert.Nil(t, err)
+
+	stream := client.CumSum(context.Background())
+	assert.Nil(t, stream.Send(nil))
+	_, err = stream.Receive()
+	assert.Nil(t, err)
+	assert.Nil(t, stream.CloseRequest())
+	assert.Nil(t, stream.CloseResponse())
+}
+
 func TestBidiOverHTTP1(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
