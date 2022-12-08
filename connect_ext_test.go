@@ -1865,6 +1865,62 @@ func TestGRPCErrorMetadataIsTrailersOnly(t *testing.T) {
 	assert.NotZero(t, res.Trailer.Get(handlerTrailer))
 }
 
+func TestConnectProtocolHeaderSentByDefault(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}, connect.WithRequireConnectProtocolHeader()))
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+
+	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
+	_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
+	assert.Nil(t, err)
+
+	stream := client.CumSum(context.Background())
+	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{}))
+	_, err = stream.Receive()
+	assert.Nil(t, err)
+	assert.Nil(t, stream.CloseRequest())
+	assert.Nil(t, stream.CloseResponse())
+}
+
+func TestConnectProtocolHeaderRequired(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(
+		pingServer{},
+		connect.WithRequireConnectProtocolHeader(),
+	))
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	tests := []struct {
+		headers http.Header
+	}{
+		{http.Header{}},
+		{http.Header{"Connect-Protocol-Version": []string{"0"}}},
+	}
+	for _, tcase := range tests {
+		req, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodPost,
+			server.URL+"/"+pingv1connect.PingServiceName+"/Ping",
+			strings.NewReader("{}"),
+		)
+		assert.Nil(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range tcase.headers {
+			req.Header[k] = v
+		}
+		response, err := server.Client().Do(req)
+		assert.Nil(t, err)
+		assert.Nil(t, response.Body.Close())
+		assert.Equal(t, response.StatusCode, http.StatusBadRequest)
+	}
+}
+
 func TestBidiOverHTTP1(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
