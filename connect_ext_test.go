@@ -1902,7 +1902,7 @@ func TestConnectProtocolHeaderRequired(t *testing.T) {
 		{http.Header{}},
 		{http.Header{"Connect-Protocol-Version": []string{"0"}}},
 	}
-	for _, tt := range tests {
+	for _, tcase := range tests {
 		req, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodPost,
@@ -1911,7 +1911,7 @@ func TestConnectProtocolHeaderRequired(t *testing.T) {
 		)
 		assert.Nil(t, err)
 		req.Header.Set("Content-Type", "application/json")
-		for k, v := range tt.headers {
+		for k, v := range tcase.headers {
 			req.Header[k] = v
 		}
 		response, err := server.Client().Do(req)
