@@ -39,6 +39,8 @@ const (
 	connectStreamingHeaderCompression       = "Connect-Content-Encoding"
 	connectStreamingHeaderAcceptCompression = "Connect-Accept-Encoding"
 	connectHeaderTimeout                    = "Connect-Timeout-Ms"
+	connectHeaderProtocolVersion            = "Connect-Protocol-Version"
+	connectProtocolVersion                  = "1"
 
 	connectFlagEnvelopeEndStream = 0b00000010
 
@@ -123,6 +125,14 @@ func (h *connectHandler) NewConn(
 	)
 	if failed == nil {
 		failed = checkServerStreamsCanFlush(h.Spec, responseWriter)
+	}
+	if failed == nil {
+		version := request.Header.Get(connectHeaderProtocolVersion)
+		if version == "" && h.RequireConnectProtocolHeader {
+			failed = errorf(CodeInvalidArgument, "missing required header: set %s to %q", connectHeaderProtocolVersion, connectProtocolVersion)
+		} else if version != "" && version != connectProtocolVersion {
+			failed = errorf(CodeInvalidArgument, "%s must be %q: got %q", connectHeaderProtocolVersion, connectProtocolVersion, version)
+		}
 	}
 
 	// Write any remaining headers here:
@@ -233,6 +243,7 @@ func (c *connectClient) WriteRequestHeader(streamType StreamType, header http.He
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
 	header[headerUserAgent] = []string{connectUserAgent()}
+	header[connectHeaderProtocolVersion] = []string{connectProtocolVersion}
 	header[headerContentType] = []string{
 		connectContentTypeFromCodecName(streamType, c.Codec.Name()),
 	}

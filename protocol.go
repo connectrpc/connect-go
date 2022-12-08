@@ -69,13 +69,14 @@ type protocol interface {
 // Spec rather than constructing their own, since new fields may have been
 // added.
 type protocolHandlerParams struct {
-	Spec             Spec
-	Codecs           readOnlyCodecs
-	CompressionPools readOnlyCompressionPools
-	CompressMinBytes int
-	BufferPool       *bufferPool
-	ReadMaxBytes     int
-	SendMaxBytes     int
+	Spec                         Spec
+	Codecs                       readOnlyCodecs
+	CompressionPools             readOnlyCompressionPools
+	CompressMinBytes             int
+	BufferPool                   *bufferPool
+	ReadMaxBytes                 int
+	SendMaxBytes                 int
+	RequireConnectProtocolHeader bool
 }
 
 // Handler is the server side of a protocol. HTTP handlers typically support

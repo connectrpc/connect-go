@@ -230,17 +230,18 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 }
 
 type handlerConfig struct {
-	CompressionPools map[string]*compressionPool
-	CompressionNames []string
-	Codecs           map[string]Codec
-	CompressMinBytes int
-	Interceptor      Interceptor
-	Procedure        string
-	HandleGRPC       bool
-	HandleGRPCWeb    bool
-	BufferPool       *bufferPool
-	ReadMaxBytes     int
-	SendMaxBytes     int
+	CompressionPools             map[string]*compressionPool
+	CompressionNames             []string
+	Codecs                       map[string]Codec
+	CompressMinBytes             int
+	Interceptor                  Interceptor
+	Procedure                    string
+	HandleGRPC                   bool
+	HandleGRPCWeb                bool
+	RequireConnectProtocolHeader bool
+	BufferPool                   *bufferPool
+	ReadMaxBytes                 int
+	SendMaxBytes                 int
 }
 
 func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig {
@@ -285,13 +286,14 @@ func (c *handlerConfig) newProtocolHandlers(streamType StreamType) []protocolHan
 	)
 	for _, protocol := range protocols {
 		handlers = append(handlers, protocol.NewHandler(&protocolHandlerParams{
-			Spec:             c.newSpec(streamType),
-			Codecs:           codecs,
-			CompressionPools: compressors,
-			CompressMinBytes: c.CompressMinBytes,
-			BufferPool:       c.BufferPool,
-			ReadMaxBytes:     c.ReadMaxBytes,
-			SendMaxBytes:     c.SendMaxBytes,
+			Spec:                         c.newSpec(streamType),
+			Codecs:                       codecs,
+			CompressionPools:             compressors,
+			CompressMinBytes:             c.CompressMinBytes,
+			BufferPool:                   c.BufferPool,
+			ReadMaxBytes:                 c.ReadMaxBytes,
+			SendMaxBytes:                 c.SendMaxBytes,
+			RequireConnectProtocolHeader: c.RequireConnectProtocolHeader,
 		}))
 	}
 	return handlers
