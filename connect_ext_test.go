@@ -1896,20 +1896,29 @@ func TestConnectProtocolHeaderRequired(t *testing.T) {
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
-	req, err := http.NewRequestWithContext(
-		context.Background(),
-		http.MethodPost,
-		server.URL+"/"+pingv1connect.PingServiceName+"/Ping",
-		strings.NewReader("{}"),
-	)
-	assert.Nil(t, err)
-	req.Header.Set("Content-Type", "application/json")
-	response, err := server.Client().Do(req)
-	assert.Nil(t, err)
-	t.Cleanup(func() {
+	tests := []struct {
+		headers http.Header
+	}{
+		{http.Header{}},
+		{http.Header{"Connect-Protocol-Version": []string{"0"}}},
+	}
+	for _, tt := range tests {
+		req, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodPost,
+			server.URL+"/"+pingv1connect.PingServiceName+"/Ping",
+			strings.NewReader("{}"),
+		)
+		assert.Nil(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range tt.headers {
+			req.Header[k] = v
+		}
+		response, err := server.Client().Do(req)
+		assert.Nil(t, err)
 		assert.Nil(t, response.Body.Close())
-	})
-	assert.Equal(t, response.StatusCode, http.StatusBadRequest)
+		assert.Equal(t, response.StatusCode, http.StatusBadRequest)
+	}
 }
 
 func TestBidiOverHTTP1(t *testing.T) {

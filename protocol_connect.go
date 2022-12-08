@@ -126,13 +126,13 @@ func (h *connectHandler) NewConn(
 	if failed == nil {
 		failed = checkServerStreamsCanFlush(h.Spec, responseWriter)
 	}
-	if failed == nil && h.RequireConnectProtocolHeader && request.Header.Get(connectHeaderProtocolVersion) == "" {
-		failed = errorf(
-			CodeInvalidArgument,
-			"missing required header: set %q to %q",
-			connectHeaderProtocolVersion,
-			connectProtocolVersion,
-		)
+	if failed == nil {
+		version := request.Header.Get(connectHeaderProtocolVersion)
+		if version == "" && h.RequireConnectProtocolHeader {
+			failed = errorf(CodeInvalidArgument, "missing required header: set %s to %q", connectHeaderProtocolVersion, connectProtocolVersion)
+		} else if version != "" && version != connectProtocolVersion {
+			failed = errorf(CodeInvalidArgument, "%s must be %q: got %q", connectHeaderProtocolVersion, connectProtocolVersion, version)
+		}
 	}
 
 	// Write any remaining headers here:
