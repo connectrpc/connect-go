@@ -34,7 +34,7 @@ import (
 
 	"github.com/bufbuild/connect-go"
 	"github.com/bufbuild/connect-go/internal/assert"
-	"github.com/bufbuild/connect-go/internal/gen/connect/import/services/v1/servicesv1connect"
+	"github.com/bufbuild/connect-go/internal/gen/connect/import/v1/importv1connect"
 	pingv1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
 	"github.com/bufbuild/connect-go/internal/gen/connect/ping/v1/pingv1connect"
 	"google.golang.org/protobuf/proto"
@@ -1993,7 +1993,7 @@ func TestHandlerReturnsNilResponse(t *testing.T) {
 // available in the global proto registry.
 func TestBlankImportCodeGeneration(t *testing.T) {
 	t.Parallel()
-	desc, err := protoregistry.GlobalFiles.FindDescriptorByName(servicesv1connect.ImportServiceName)
+	desc, err := protoregistry.GlobalFiles.FindDescriptorByName(importv1connect.ImportServiceName)
 	assert.Nil(t, err)
 	assert.NotNil(t, desc)
 }

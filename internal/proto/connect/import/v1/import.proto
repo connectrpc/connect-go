@@ -14,11 +14,6 @@
 
 syntax = "proto3";
 
-package connect.import.services.v1;
+package connect.import.v1;
 
-import "connect/import/types/v1/types.proto";
-
-service ImportService {
-  // Ping sends a ping to the server to determine if it's reachable.
-  rpc Import(connect.import.types.v1.ImportRequest) returns (connect.import.types.v1.ImportResponse) {}
-}
+service ImportService {}
