@@ -34,9 +34,11 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
+	"connectrpc.com/connect/internal/gen/connect/import/v1/importv1connect"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoregistry"
 )
 
 const errorMessage = "oh no"
@@ -1984,6 +1986,16 @@ func TestHandlerReturnsNilResponse(t *testing.T) {
 	assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
 
 	assert.Equal(t, panics, 2)
+}
+
+// TestBlankImportCodeGeneration tests that services.connect.go is generated with
+// blank import statements to services.pb.go so that the service's Descriptor is
+// available in the global proto registry.
+func TestBlankImportCodeGeneration(t *testing.T) {
+	t.Parallel()
+	desc, err := protoregistry.GlobalFiles.FindDescriptorByName(importv1connect.ImportServiceName)
+	assert.Nil(t, err)
+	assert.NotNil(t, desc)
 }
 
 type unflushableWriter struct {
