@@ -115,6 +115,7 @@ func generate(plugin *protogen.Plugin, file *protogen.File) {
 			string(file.GoPackageName),
 		)),
 	)
+	generatedFile.Import(file.GoImportPath)
 	generatePreamble(generatedFile, file)
 	generateServiceNameConstants(generatedFile, file.Services)
 	for _, service := range file.Services {
