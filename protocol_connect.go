@@ -242,7 +242,9 @@ func (c *connectClient) Peer() Peer {
 func (c *connectClient) WriteRequestHeader(streamType StreamType, header http.Header) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
-	header[headerUserAgent] = []string{connectUserAgent()}
+	if header.Get(headerUserAgent) == "" {
+		header[headerUserAgent] = []string{connectUserAgent()}
+	}
 	header[connectHeaderProtocolVersion] = []string{connectProtocolVersion}
 	header[headerContentType] = []string{
 		connectContentTypeFromCodecName(streamType, c.Codec.Name()),

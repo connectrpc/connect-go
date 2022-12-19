@@ -226,7 +226,9 @@ func (g *grpcClient) Peer() Peer {
 func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
-	header[headerUserAgent] = []string{grpcUserAgent()}
+	if header.Get(headerUserAgent) == "" {
+		header[headerUserAgent] = []string{grpcUserAgent()}
+	}
 	header[headerContentType] = []string{grpcContentTypeFromCodecName(g.web, g.Codec.Name())}
 	// gRPC handles compression on a per-message basis, so we don't want to
 	// compress the whole stream. By default, http.Client will ask the server
