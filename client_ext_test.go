@@ -116,7 +116,7 @@ func TestClientPeer(t *testing.T) {
 		})
 		assert.NotZero(t, bidiStream.Peer().Addr)
 		assert.NotZero(t, bidiStream.Peer().Protocol)
-		assert.Nil(t, clientStream.Peer().Request)
+		assert.Nil(t, bidiStream.Peer().Request)
 		err = bidiStream.Send(&pingv1.CumSumRequest{})
 		assert.Nil(t, err)
 	}
