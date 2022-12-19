@@ -1923,6 +1923,39 @@ func TestConnectProtocolHeaderRequired(t *testing.T) {
 	}
 }
 
+func TestAllowCustomUserAgent(t *testing.T) {
+	t.Parallel()
+
+	const customAgent = "custom"
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(&pluggablePingServer{
+		ping: func(_ context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+			agent := req.Header().Get("User-Agent")
+			assert.Equal(t, agent, customAgent)
+			return connect.NewResponse(&pingv1.PingResponse{Number: req.Msg.Number}), nil
+		},
+	}))
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	// If the user has set a User-Agent, we shouldn't clobber it.
+	tests := []struct {
+		protocol string
+		opts     []connect.ClientOption
+	}{
+		{"connect", nil},
+		{"grpc", []connect.ClientOption{connect.WithGRPC()}},
+		{"grpcweb", []connect.ClientOption{connect.WithGRPCWeb()}},
+	}
+	for _, testCase := range tests {
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, testCase.opts...)
+		req := connect.NewRequest(&pingv1.PingRequest{Number: 42})
+		req.Header().Set("User-Agent", customAgent)
+		_, err := client.Ping(context.Background(), req)
+		assert.Nil(t, err)
+	}
+}
+
 func TestBidiOverHTTP1(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
