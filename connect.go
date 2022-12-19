@@ -262,12 +262,16 @@ type Spec struct {
 // On both the client and the server, Protocol is the RPC protocol in use.
 // Currently, it's either [ProtocolConnect], [ProtocolGRPC], or
 // [ProtocolGRPCWeb], but additional protocols may be added in the future.
+//
+// On server, Request is the HTTP request that initiated the RPC,
+// on client, Request is nil.
 type Peer struct {
 	Addr     string
 	Protocol string
+	Request  *http.Request
 }
 
-func newPeerFromURL(urlString, protocol string) Peer {
+func newClientPeerFromURL(urlString, protocol string) Peer {
 	peer := Peer{Protocol: protocol}
 	if u, err := url.Parse(urlString); err == nil {
 		peer.Addr = u.Host

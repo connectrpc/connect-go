@@ -167,6 +167,7 @@ func (h *connectHandler) NewConn(
 	peer := Peer{
 		Addr:     request.RemoteAddr,
 		Protocol: ProtocolConnect,
+		Request:  request,
 	}
 	if h.Spec.StreamType == StreamTypeUnary {
 		conn = &connectUnaryHandlerConn{
@@ -236,7 +237,7 @@ type connectClient struct {
 }
 
 func (c *connectClient) Peer() Peer {
-	return newPeerFromURL(c.URL, ProtocolConnect)
+	return newClientPeerFromURL(c.URL, ProtocolConnect)
 }
 
 func (c *connectClient) WriteRequestHeader(streamType StreamType, header http.Header) {

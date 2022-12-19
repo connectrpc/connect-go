@@ -173,6 +173,7 @@ func (g *grpcHandler) NewConn(
 		peer: Peer{
 			Addr:     request.RemoteAddr,
 			Protocol: protocolName,
+			Request:  request,
 		},
 		web:        g.web,
 		bufferPool: g.BufferPool,
@@ -218,9 +219,9 @@ type grpcClient struct {
 
 func (g *grpcClient) Peer() Peer {
 	if g.web {
-		return newPeerFromURL(g.URL, ProtocolGRPCWeb)
+		return newClientPeerFromURL(g.URL, ProtocolGRPCWeb)
 	}
-	return newPeerFromURL(g.URL, ProtocolGRPC)
+	return newClientPeerFromURL(g.URL, ProtocolGRPC)
 }
 
 func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {
