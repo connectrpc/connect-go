@@ -42,6 +42,9 @@ func (c *ClientStreamForClient[_, _]) Peer() Peer {
 
 // RequestHeader returns the request headers. Headers are sent to the server with the
 // first call to Send.
+//
+// Headers beginning with "Connect-" and "Grpc-" are reserved for use by the
+// Connect and gRPC protocols. Applications shouldn't write them.
 func (c *ClientStreamForClient[Req, Res]) RequestHeader() http.Header {
 	if c.err != nil {
 		return http.Header{}
@@ -189,6 +192,9 @@ func (b *BidiStreamForClient[_, _]) Peer() Peer {
 
 // RequestHeader returns the request headers. Headers are sent with the first
 // call to Send.
+//
+// Headers beginning with "Connect-" and "Grpc-" are reserved for use by the
+// Connect and gRPC protocols. Applications shouldn't write them.
 func (b *BidiStreamForClient[Req, Res]) RequestHeader() http.Header {
 	if b.err != nil {
 		return http.Header{}
