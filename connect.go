@@ -62,6 +62,10 @@ const (
 // Receive returns an error wrapping [io.EOF]. Handlers should check for this
 // using the standard library's [errors.Is].
 //
+// Headers and trailers beginning with "Connect-" and "Grpc-" are reserved for
+// use by the gRPC and Connect protocols: applications may read them but
+// shouldn't write them.
+//
 // StreamingHandlerConn implementations provided by this module guarantee that
 // all returned errors can be cast to [*Error] using the standard library's
 // [errors.As].
@@ -90,6 +94,10 @@ type StreamingHandlerConn interface {
 // processing, subsequent calls to the StreamingClientConn's Send method will
 // return an error wrapping [io.EOF]; clients may then call Receive to unmarshal
 // the error.
+//
+// Headers and trailers beginning with "Connect-" and "Grpc-" are reserved for
+// use by the gRPC and Connect protocols: applications may read them but
+// shouldn't write them.
 //
 // StreamingClientConn implementations provided by this module guarantee that
 // all returned errors can be cast to [*Error] using the standard library's
@@ -153,7 +161,9 @@ func (r *Request[_]) Peer() Peer {
 	return r.peer
 }
 
-// Header returns the HTTP headers for this request.
+// Header returns the HTTP headers for this request. Headers beginning with
+// "Connect-" and "Grpc-" are reserved for use by the Connect and gRPC
+// protocols: applications may read them but shouldn't write them.
 func (r *Request[_]) Header() http.Header {
 	if r.header == nil {
 		r.header = make(http.Header)
@@ -166,6 +176,10 @@ func (r *Request[_]) internalOnly() {}
 
 // AnyRequest is the common method set of every [Request], regardless of type
 // parameter. It's used in unary interceptors.
+//
+// Headers and trailers beginning with "Connect-" and "Grpc-" are reserved for
+// use by the gRPC and Connect protocols: applications may read them but
+// shouldn't write them.
 //
 // To preserve our ability to add methods to this interface without breaking
 // backward compatibility, only types defined in this package can implement
@@ -205,7 +219,9 @@ func (r *Response[_]) Any() any {
 	return r.Msg
 }
 
-// Header returns the HTTP headers for this response.
+// Header returns the HTTP headers for this response. Headers beginning with
+// "Connect-" and "Grpc-" are reserved for use by the Connect and gRPC
+// protocols: applications may read them but shouldn't write them.
 func (r *Response[_]) Header() http.Header {
 	if r.header == nil {
 		r.header = make(http.Header)
@@ -216,6 +232,10 @@ func (r *Response[_]) Header() http.Header {
 // Trailer returns the trailers for this response. Depending on the underlying
 // RPC protocol, trailers may be sent as HTTP trailers or a protocol-specific
 // block of in-body metadata.
+//
+// Trailers beginning with "Connect-" and "Grpc-" are reserved for use by the
+// Connect and gRPC protocols: applications may read them but shouldn't write
+// them.
 func (r *Response[_]) Trailer() http.Header {
 	if r.trailer == nil {
 		r.trailer = make(http.Header)
@@ -228,6 +248,10 @@ func (r *Response[_]) internalOnly() {}
 
 // AnyResponse is the common method set of every [Response], regardless of type
 // parameter. It's used in unary interceptors.
+//
+// Headers and trailers beginning with "Connect-" and "Grpc-" are reserved for
+// use by the gRPC and Connect protocols: applications may read them but
+// shouldn't write them.
 //
 // To preserve our ability to add methods to this interface without breaking
 // backward compatibility, only types defined in this package can implement
