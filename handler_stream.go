@@ -91,12 +91,18 @@ type ServerStream[Res any] struct {
 
 // ResponseHeader returns the response headers. Headers are sent with the first
 // call to Send.
+//
+// Headers beginning with "Connect-" and "Grpc-" are reserved for use by the
+// Connect and gRPC protocols. Applications shouldn't write them.
 func (s *ServerStream[Res]) ResponseHeader() http.Header {
 	return s.conn.ResponseHeader()
 }
 
 // ResponseTrailer returns the response trailers. Handlers may write to the
 // response trailers at any time before returning.
+//
+// Trailers beginning with "Connect-" and "Grpc-" are reserved for use by the
+// Connect and gRPC protocols. Applications shouldn't write them.
 func (s *ServerStream[Res]) ResponseTrailer() http.Header {
 	return s.conn.ResponseTrailer()
 }
@@ -151,12 +157,18 @@ func (b *BidiStream[Req, Res]) Receive() (*Req, error) {
 
 // ResponseHeader returns the response headers. Headers are sent with the first
 // call to Send.
+//
+// Headers beginning with "Connect-" and "Grpc-" are reserved for use by the
+// Connect and gRPC protocols. Applications shouldn't write them.
 func (b *BidiStream[Req, Res]) ResponseHeader() http.Header {
 	return b.conn.ResponseHeader()
 }
 
 // ResponseTrailer returns the response trailers. Handlers may write to the
 // response trailers at any time before returning.
+//
+// Trailers beginning with "Connect-" and "Grpc-" are reserved for use by the
+// Connect and gRPC protocols. Applications shouldn't write them.
 func (b *BidiStream[Req, Res]) ResponseTrailer() http.Header {
 	return b.conn.ResponseTrailer()
 }
