@@ -35,7 +35,7 @@ func BenchmarkConnect(b *testing.B) {
 	mux := http.NewServeMux()
 	mux.Handle(
 		pingv1connect.NewPingServiceHandler(
-			&ExamplePingServer{},
+			&examplePingImplementation{},
 		),
 	)
 	server := httptest.NewUnstartedServer(mux)
