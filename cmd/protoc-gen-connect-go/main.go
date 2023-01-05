@@ -162,6 +162,7 @@ func generateService(g *protogen.GeneratedFile, service *protogen.Service) {
 	generateServerInterface(g, service, names)
 	generateServerConstructor(g, service, names)
 	generateUnimplementedServerImplementation(g, service, names)
+	generateSimpleServerConstructor(g, service, names)
 }
 
 func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Service, names names) {
@@ -304,7 +305,7 @@ func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Servic
 			isDeprecatedMethod(method),
 		)
 		g.Annotate(names.Server+"."+method.GoName, method.Location)
-		g.P(serverSignature(g, method))
+		g.P(serverSignature(g, method, false /* named */))
 	}
 	g.P("}")
 	g.P()
@@ -352,7 +353,7 @@ func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, servic
 	g.P("type ", names.UnimplementedServer, " struct {}")
 	g.P()
 	for _, method := range service.Methods {
-		g.P("func (", names.UnimplementedServer, ") ", serverSignature(g, method), "{")
+		g.P("func (", names.UnimplementedServer, ") ", serverSignature(g, method, false /* named */), "{")
 		if method.Desc.IsStreamingServer() {
 			g.P("return ", connectPackage.Ident("NewError"), "(",
 				connectPackage.Ident("CodeUnimplemented"), ", ", errorsPackage.Ident("New"),
@@ -368,8 +369,58 @@ func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, servic
 	g.P()
 }
 
-func serverSignature(g *protogen.GeneratedFile, method *protogen.Method) string {
-	return method.GoName + serverSignatureParams(g, method, false /* named */)
+func generateSimpleServerConstructor(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+	unaryMethods := make([]*protogen.Method, 0, len(service.Methods))
+	for _, method := range service.Methods {
+		if method.Desc.IsStreamingServer() || method.Desc.IsStreamingClient() {
+			continue
+		}
+		unaryMethods = append(unaryMethods, method)
+	}
+
+	wrapComments(g, names.SimpleServerConstructor, " wraps a stripped-down implementation of the service, ",
+		"adapting it to implement the full ", names.Server, " interface. The stripped-down interface includes only unary ",
+		"methods and doesn't have access to HTTP headers, trailers, or other metadata. ",
+		"The full implementation returns CodeUnimplemented from all streaming methods.")
+	if isDeprecatedService(service) {
+		g.P("//")
+		deprecated(g)
+	}
+
+	g.P("func ", names.SimpleServerConstructor, " (simple interface{")
+	for _, method := range unaryMethods {
+		g.P(method.GoName, simpleUnaryServerSignatureParams(g, method))
+	}
+	g.P("}) ", names.Server, " {")
+	g.P("return &", names.WrappedServer, "{")
+	for _, method := range unaryMethods {
+		g.P(unexport(method.GoName), ": simple.", method.GoName, ",")
+	}
+	g.P("}")
+	g.P("}")
+
+	g.P("type ", names.WrappedServer, " struct{")
+	g.P(names.UnimplementedServer)
+	g.P()
+	for _, method := range unaryMethods {
+		g.P(unexport(method.GoName), " func", simpleUnaryServerSignatureParams(g, method))
+	}
+	g.P("}")
+	g.P()
+	for _, method := range unaryMethods {
+		g.P("func (w *", names.WrappedServer, ") ", serverSignature(g, method, true /* named */), "{")
+		g.P("res, err := w.", unexport(method.GoName), "(ctx, req.Msg)")
+		g.P("if err != nil {")
+		g.P("return nil, err")
+		g.P("}")
+		g.P("return ", connectPackage.Ident("NewResponse"), "(res), nil")
+		g.P("}")
+		g.P()
+	}
+}
+
+func serverSignature(g *protogen.GeneratedFile, method *protogen.Method, named bool) string {
+	return method.GoName + serverSignatureParams(g, method, named)
 }
 
 func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, named bool) string {
@@ -408,6 +459,12 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 		g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
 		"(*" + g.QualifiedGoIdent(connectPackage.Ident("Response")) + "[" +
 		g.QualifiedGoIdent(method.Output.GoIdent) + "], error)"
+}
+
+func simpleUnaryServerSignatureParams(g *protogen.GeneratedFile, method *protogen.Method) string {
+	return "(" + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
+		", " + "*" + g.QualifiedGoIdent(method.Input.GoIdent) + ") " +
+		"(*" + g.QualifiedGoIdent(method.Output.GoIdent) + ", error)"
 }
 
 func procedureName(method *protogen.Method) string {
@@ -499,25 +556,28 @@ func unexport(s string) string {
 }
 
 type names struct {
-	Base                string
-	Client              string
-	ClientConstructor   string
-	ClientImpl          string
-	ClientExposeMethod  string
-	Server              string
-	ServerConstructor   string
-	UnimplementedServer string
+	Base                    string
+	Client                  string
+	ClientConstructor       string
+	ClientImpl              string
+	Server                  string
+	ServerConstructor       string
+	SimpleServerConstructor string
+	UnimplementedServer     string
+	WrappedServer           string
 }
 
 func newNames(service *protogen.Service) names {
 	base := service.GoName
 	return names{
-		Base:                base,
-		Client:              fmt.Sprintf("%sClient", base),
-		ClientConstructor:   fmt.Sprintf("New%sClient", base),
-		ClientImpl:          fmt.Sprintf("%sClient", unexport(base)),
-		Server:              fmt.Sprintf("%sHandler", base),
-		ServerConstructor:   fmt.Sprintf("New%sHandler", base),
-		UnimplementedServer: fmt.Sprintf("Unimplemented%sHandler", base),
+		Base:                    base,
+		Client:                  fmt.Sprintf("%sClient", base),
+		ClientConstructor:       fmt.Sprintf("New%sClient", base),
+		ClientImpl:              fmt.Sprintf("%sClient", unexport(base)),
+		Server:                  fmt.Sprintf("%sHandler", base),
+		ServerConstructor:       fmt.Sprintf("New%sHandler", base),
+		SimpleServerConstructor: fmt.Sprintf("Wrap%sHandler", base),
+		UnimplementedServer:     fmt.Sprintf("Unimplemented%sHandler", base),
+		WrappedServer:           fmt.Sprintf("wrapped%sHandler", base),
 	}
 }

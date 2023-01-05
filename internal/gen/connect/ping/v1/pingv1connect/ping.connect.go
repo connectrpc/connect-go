@@ -196,3 +196,40 @@ func (UnimplementedPingServiceHandler) CountUp(context.Context, *connect_go.Requ
 func (UnimplementedPingServiceHandler) CumSum(context.Context, *connect_go.BidiStream[v1.CumSumRequest, v1.CumSumResponse]) error {
 	return connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.ping.v1.PingService.CumSum is not implemented"))
 }
+
+// WrapPingServiceHandler wraps a stripped-down implementation of the service, adapting it to
+// implement the full PingServiceHandler interface. The stripped-down interface includes only unary
+// methods and doesn't have access to HTTP headers, trailers, or other metadata. The full
+// implementation returns CodeUnimplemented from all streaming methods.
+func WrapPingServiceHandler(simple interface {
+	Ping(context.Context, *v1.PingRequest) (*v1.PingResponse, error)
+	Fail(context.Context, *v1.FailRequest) (*v1.FailResponse, error)
+}) PingServiceHandler {
+	return &wrappedPingServiceHandler{
+		ping: simple.Ping,
+		fail: simple.Fail,
+	}
+}
+
+type wrappedPingServiceHandler struct {
+	UnimplementedPingServiceHandler
+
+	ping func(context.Context, *v1.PingRequest) (*v1.PingResponse, error)
+	fail func(context.Context, *v1.FailRequest) (*v1.FailResponse, error)
+}
+
+func (w *wrappedPingServiceHandler) Ping(ctx context.Context, req *connect_go.Request[v1.PingRequest]) (*connect_go.Response[v1.PingResponse], error) {
+	res, err := w.ping(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect_go.NewResponse(res), nil
+}
+
+func (w *wrappedPingServiceHandler) Fail(ctx context.Context, req *connect_go.Request[v1.FailRequest]) (*connect_go.Response[v1.FailResponse], error) {
+	res, err := w.fail(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect_go.NewResponse(res), nil
+}

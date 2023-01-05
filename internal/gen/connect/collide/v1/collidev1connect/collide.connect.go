@@ -98,3 +98,29 @@ type UnimplementedCollideServiceHandler struct{}
 func (UnimplementedCollideServiceHandler) Import(context.Context, *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error) {
 	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.collide.v1.CollideService.Import is not implemented"))
 }
+
+// WrapCollideServiceHandler wraps a stripped-down implementation of the service, adapting it to
+// implement the full CollideServiceHandler interface. The stripped-down interface includes only
+// unary methods and doesn't have access to HTTP headers, trailers, or other metadata. The full
+// implementation returns CodeUnimplemented from all streaming methods.
+func WrapCollideServiceHandler(simple interface {
+	Import(context.Context, *v1.ImportRequest) (*v1.ImportResponse, error)
+}) CollideServiceHandler {
+	return &wrappedCollideServiceHandler{
+		_import: simple.Import,
+	}
+}
+
+type wrappedCollideServiceHandler struct {
+	UnimplementedCollideServiceHandler
+
+	_import func(context.Context, *v1.ImportRequest) (*v1.ImportResponse, error)
+}
+
+func (w *wrappedCollideServiceHandler) Import(ctx context.Context, req *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error) {
+	res, err := w._import(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect_go.NewResponse(res), nil
+}

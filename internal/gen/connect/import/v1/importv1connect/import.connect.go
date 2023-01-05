@@ -73,3 +73,16 @@ func NewImportServiceHandler(svc ImportServiceHandler, opts ...connect_go.Handle
 
 // UnimplementedImportServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedImportServiceHandler struct{}
+
+// WrapImportServiceHandler wraps a stripped-down implementation of the service, adapting it to
+// implement the full ImportServiceHandler interface. The stripped-down interface includes only
+// unary methods and doesn't have access to HTTP headers, trailers, or other metadata. The full
+// implementation returns CodeUnimplemented from all streaming methods.
+func WrapImportServiceHandler(simple interface {
+}) ImportServiceHandler {
+	return &wrappedImportServiceHandler{}
+}
+
+type wrappedImportServiceHandler struct {
+	UnimplementedImportServiceHandler
+}
