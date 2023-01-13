@@ -701,8 +701,7 @@ func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.H
 		return errorf(CodeInternal, "gRPC protocol error: invalid error code %q", codeHeader)
 	}
 	message := grpcPercentDecode(bufferPool, trailer.Get(grpcHeaderMessage))
-	retErr := NewError(Code(code), errors.New(message))
-	retErr.wireErr = true
+	retErr := NewWireError(Code(code), errors.New(message))
 
 	detailsBinaryEncoded := trailer.Get(grpcHeaderDetails)
 	if len(detailsBinaryEncoded) > 0 {

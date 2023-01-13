@@ -943,8 +943,7 @@ func (e *connectWireError) asError() *Error {
 	if e.Code < minCode || e.Code > maxCode {
 		e.Code = CodeUnknown
 	}
-	err := NewError(e.Code, errors.New(e.Message))
-	err.wireErr = true
+	err := NewWireError(e.Code, errors.New(e.Message))
 	if len(e.Details) > 0 {
 		err.details = make([]*ErrorDetail, len(e.Details))
 		for i, detail := range e.Details {
