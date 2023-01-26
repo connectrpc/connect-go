@@ -321,6 +321,10 @@ func canonicalizeContentType(ct string) string {
 		return ct
 	}
 
+	if len(params) == 0 {
+		return base
+	}
+
 	// According to RFC 9110 Section 8.3.2, the charset parameter value should be treated as case-insensitive.
 	// mime.FormatMediaType canonicalizes parameter names, but not parameter values,
 	// because the case sensitivity of a parameter value depends on its semantics.

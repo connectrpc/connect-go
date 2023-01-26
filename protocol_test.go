@@ -29,6 +29,7 @@ func TestCanonicalizeContentType(t *testing.T) {
 	}{
 		{name: "charset param should be treated as lowercase", arg: "application/json; charset=UTF-8", want: "application/json; charset=utf-8"},
 		{name: "non charset param should not be changed", arg: "multipart/form-data; boundary=fooBar", want: "multipart/form-data; boundary=fooBar"},
+		{name: "no parameters should not have base normalized", arg: "APPLICATION/json;  ", want: "application/json"},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -37,4 +38,27 @@ func TestCanonicalizeContentType(t *testing.T) {
 			assert.Equal(t, canonicalizeContentType(tt.arg), tt.want)
 		})
 	}
+}
+
+func BenchmarkCanonicalizeContentType(b *testing.B) {
+	b.Run("simple", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = canonicalizeContentType("application/json")
+		}
+		b.ReportAllocs()
+	})
+
+	b.Run("with charset", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = canonicalizeContentType("application/json; charset=utf-8")
+		}
+		b.ReportAllocs()
+	})
+
+	b.Run("with other param", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = canonicalizeContentType("application/json; foo=utf-8")
+		}
+		b.ReportAllocs()
+	})
 }
