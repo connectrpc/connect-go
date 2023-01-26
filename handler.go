@@ -190,7 +190,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	}
 
 	// Find our implementation of the RPC protocol in use.
-	contentType := canonicalizeContentType(request.Header.Get("Content-Type"))
+	contentType := canonicalizeContentType(getHeaderCanonical(request.Header, headerContentType))
 	var protocolHandler protocolHandler
 	for _, handler := range h.protocolHandlers {
 		if _, ok := handler.ContentTypes()[contentType]; ok {
@@ -205,7 +205,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	}
 
 	// Establish a stream and serve the RPC.
-	request.Header.Set("Content-Type", contentType)                // prefer canonicalized value
+	setHeaderCanonical(request.Header, headerContentType, contentType)
 	ctx, cancel, timeoutErr := protocolHandler.SetTimeout(request) //nolint: contextcheck
 	if timeoutErr != nil {
 		ctx = request.Context()
