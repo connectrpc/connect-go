@@ -56,10 +56,10 @@ func (*protocolConnect) NewHandler(params *protocolHandlerParams) protocolHandle
 	contentTypes := make(map[string]struct{})
 	for _, name := range params.Codecs.Names() {
 		if params.Spec.StreamType == StreamTypeUnary {
-			contentTypes[connectUnaryContentTypePrefix+name] = struct{}{}
+			contentTypes[canonicalizeContentType(connectUnaryContentTypePrefix+name)] = struct{}{}
 			continue
 		}
-		contentTypes[connectStreamingContentTypePrefix+name] = struct{}{}
+		contentTypes[canonicalizeContentType(connectStreamingContentTypePrefix+name)] = struct{}{}
 	}
 	return &connectHandler{
 		protocolHandlerParams: *params,

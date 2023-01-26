@@ -95,7 +95,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			strings.NewReader("{}"),
 		)
 		assert.Nil(t, err)
-		req.Header.Set("Content-Type", "application/json;Charset=utf-8")
+		req.Header.Set("Content-Type", "application/json;Charset=Utf-8")
 		resp, err := client.Do(req)
 		assert.Nil(t, err)
 		defer resp.Body.Close()
