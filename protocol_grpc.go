@@ -536,7 +536,8 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 		hc.responseWriter.WriteHeader(http.StatusOK)
 		for key, values := range mergedTrailers {
 			for _, value := range values {
-				// XXX: Not confident these are safe to assume always in canonical form.
+				// These are potentially user-supplied, so we can't assume they're in
+				// canonical form. Don't use addHeaderCanonical.
 				hc.responseWriter.Header().Add(key, value)
 			}
 		}
@@ -551,7 +552,8 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 	// logic breaks Envoy's gRPC-Web translation.
 	for key, values := range mergedTrailers {
 		for _, value := range values {
-			// XXX: Not confident these are safe to assume always in canonical form.
+			// These are potentially user-supplied, so we can't assume they're in
+			// canonical form. Don't use addHeaderCanonical.
 			hc.responseWriter.Header().Add(http.TrailerPrefix+key, value)
 		}
 	}
