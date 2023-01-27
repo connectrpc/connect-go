@@ -75,7 +75,7 @@ var (
 	//	in heterogeneous environments. The following structure is recommended to library developers:
 	//
 	//	User-Agent → "grpc-" Language ?("-" Variant) "/" Version ?( " ("  *(AdditionalProperty ";") ")" )
-	defaultGrpcUserAgent = []string{fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())}
+	defaultGrpcUserAgent = fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())
 )
 
 func init() {
@@ -238,7 +238,7 @@ func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
 	if header.Get(headerUserAgent) == "" {
-		header[headerUserAgent] = defaultGrpcUserAgent
+		header[headerUserAgent] = []string{defaultGrpcUserAgent}
 	}
 	header[headerContentType] = []string{grpcContentTypeFromCodecName(g.web, g.Codec.Name())}
 	// gRPC handles compression on a per-message basis, so we don't want to

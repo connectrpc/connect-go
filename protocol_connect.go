@@ -52,7 +52,7 @@ const (
 // defaultConnectUserAgent returns a User-Agent string similar to those used in gRPC.
 //
 //nolint:gochecknoglobals
-var defaultConnectUserAgent = []string{fmt.Sprintf("connect-go/%s (%s)", Version, runtime.Version())}
+var defaultConnectUserAgent = fmt.Sprintf("connect-go/%s (%s)", Version, runtime.Version())
 
 type protocolConnect struct{}
 
@@ -248,7 +248,7 @@ func (c *connectClient) WriteRequestHeader(streamType StreamType, header http.He
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
 	if header.Get(headerUserAgent) == "" {
-		header[headerUserAgent] = defaultConnectUserAgent
+		header[headerUserAgent] = []string{defaultConnectUserAgent}
 	}
 	header[connectHeaderProtocolVersion] = []string{connectProtocolVersion}
 	header[headerContentType] = []string{
