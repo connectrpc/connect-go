@@ -49,6 +49,11 @@ const (
 	connectStreamingContentTypePrefix = "application/connect+"
 )
 
+// defaultConnectUserAgent returns a User-Agent string similar to those used in gRPC.
+//
+//nolint:gochecknoglobals
+var defaultConnectUserAgent = fmt.Sprintf("connect-go/%s (%s)", Version, runtime.Version())
+
 type protocolConnect struct{}
 
 // NewHandler implements protocol, so it must return an interface.
@@ -243,7 +248,7 @@ func (c *connectClient) WriteRequestHeader(streamType StreamType, header http.He
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
 	if getHeaderCanonical(header, headerUserAgent) == "" {
-		header[headerUserAgent] = []string{connectUserAgent()}
+		header[headerUserAgent] = []string{defaultConnectUserAgent}
 	}
 	header[connectHeaderProtocolVersion] = []string{connectProtocolVersion}
 	header[headerContentType] = []string{
@@ -1026,11 +1031,6 @@ func connectHTTPToCode(httpCode int) Code {
 	default:
 		return CodeUnknown
 	}
-}
-
-// connectUserAgent returns a User-Agent string similar to those used in gRPC.
-func connectUserAgent() string {
-	return fmt.Sprintf("connect-go/%s (%s)", Version, runtime.Version())
 }
 
 func connectCodecFromContentType(streamType StreamType, contentType string) string {
