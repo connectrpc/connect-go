@@ -325,7 +325,6 @@ func canonicalizeContentType(ct string) string {
 	var slashes int
 	for _, r := range ct {
 		switch {
-		case r >= 'A' && r <= 'Z':
 		case r >= 'a' && r <= 'z':
 		case r == '.' || r == '+' || r == '-':
 		case r == '/':

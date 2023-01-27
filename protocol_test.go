@@ -27,6 +27,7 @@ func TestCanonicalizeContentType(t *testing.T) {
 		arg  string
 		want string
 	}{
+		{name: "uppercase should be normalized", arg: "APPLICATION/json", want: "application/json"},
 		{name: "charset param should be treated as lowercase", arg: "application/json; charset=UTF-8", want: "application/json; charset=utf-8"},
 		{name: "non charset param should not be changed", arg: "multipart/form-data; boundary=fooBar", want: "multipart/form-data; boundary=fooBar"},
 		{name: "no parameters should be normalized", arg: "APPLICATION/json;  ", want: "application/json"},
