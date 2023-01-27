@@ -315,7 +315,7 @@ func flushResponseWriter(w http.ResponseWriter) {
 	}
 }
 
-func canonicalizeContentType(ct string) string {
+func canonicalizeContentType(contentType string) string {
 	// Typically, clients send Content-Type in canonical form, without
 	// parameters. In those cases, we'd like to avoid parsing and
 	// canonicalization overhead.
@@ -323,26 +323,26 @@ func canonicalizeContentType(ct string) string {
 	// See https://www.rfc-editor.org/rfc/rfc2045.html#section-5.1 for a full
 	// grammar.
 	var slashes int
-	for _, r := range ct {
+	for _, r := range contentType {
 		switch {
 		case r >= 'a' && r <= 'z':
 		case r == '.' || r == '+' || r == '-':
 		case r == '/':
 			slashes++
 		default:
-			return canonicalizeContentTypeSlow(ct)
+			return canonicalizeContentTypeSlow(contentType)
 		}
 	}
 	if slashes == 1 {
-		return ct
+		return contentType
 	}
-	return canonicalizeContentTypeSlow(ct)
+	return canonicalizeContentTypeSlow(contentType)
 }
 
-func canonicalizeContentTypeSlow(ct string) string {
-	base, params, err := mime.ParseMediaType(ct)
+func canonicalizeContentTypeSlow(contentType string) string {
+	base, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		return ct
+		return contentType
 	}
 	// According to RFC 9110 Section 8.3.2, the charset parameter value should be treated as case-insensitive.
 	// mime.FormatMediaType canonicalizes parameter names, but not parameter values,
