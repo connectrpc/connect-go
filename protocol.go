@@ -237,20 +237,20 @@ func discard(reader io.Reader) error {
 	return err
 }
 
-func validateRequestURL(uri string) *Error {
-	_, err := url.ParseRequestURI(uri)
+func validateRequestURL(rawURL string) (*url.URL, *Error) {
+	url, err := url.ParseRequestURI(rawURL)
 	if err == nil {
-		return nil
+		return url, nil
 	}
-	if !strings.Contains(uri, "://") {
+	if !strings.Contains(rawURL, "://") {
 		// URL doesn't have a scheme, so the user is likely accustomed to
 		// grpc-go's APIs.
 		err = fmt.Errorf(
 			"URL %q missing scheme: use http:// or https:// (unlike grpc-go)",
-			uri,
+			rawURL,
 		)
 	}
-	return NewError(CodeUnavailable, err)
+	return nil, NewError(CodeUnavailable, err)
 }
 
 // negotiateCompression determines and validates the request compression and

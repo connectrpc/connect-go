@@ -291,12 +291,11 @@ type Peer struct {
 	Protocol string
 }
 
-func newPeerFromURL(urlString, protocol string) Peer {
-	peer := Peer{Protocol: protocol}
-	if u, err := url.Parse(urlString); err == nil {
-		peer.Addr = u.Host
+func newPeerFromURL(url *url.URL, protocol string) Peer {
+	return Peer{
+		Addr:     url.Host,
+		Protocol: protocol,
 	}
-	return peer
 }
 
 // handlerConnCloser extends HandlerConn with a method for handlers to

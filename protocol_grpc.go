@@ -23,6 +23,7 @@ import (
 	"math"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"runtime"
 	"strconv"
 	"strings"
@@ -99,12 +100,14 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 
 // NewClient implements protocol, so it must return an interface.
 func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, error) {
-	if err := validateRequestURL(params.URL); err != nil {
+	url, err := validateRequestURL(params.URL)
+	if err != nil {
 		return nil, err
 	}
 	return &grpcClient{
 		protocolClientParams: *params,
 		web:                  g.web,
+		peer:                 newGrpcPeerFromURL(url, g.web),
 	}, nil
 }
 
@@ -213,14 +216,19 @@ func (g *grpcHandler) NewConn(
 type grpcClient struct {
 	protocolClientParams
 
-	web bool
+	web  bool
+	peer Peer
+}
+
+func newGrpcPeerFromURL(url *url.URL, web bool) Peer {
+	if web {
+		return newPeerFromURL(url, ProtocolGRPCWeb)
+	}
+	return newPeerFromURL(url, ProtocolGRPC)
 }
 
 func (g *grpcClient) Peer() Peer {
-	if g.web {
-		return newPeerFromURL(g.URL, ProtocolGRPCWeb)
-	}
-	return newPeerFromURL(g.URL, ProtocolGRPC)
+	return g.peer
 }
 
 func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {
