@@ -65,6 +65,17 @@ var (
 	}
 	grpcTimeoutUnitLookup        = make(map[byte]time.Duration)
 	errTrailersWithoutGRPCStatus = fmt.Errorf("gRPC protocol error: no %s trailer", grpcHeaderStatus)
+
+	// defaultGrpcUserAgent follows
+	// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents:
+	//
+	//	While the protocol does not require a user-agent to function it is recommended
+	//	that clients provide a structured user-agent string that provides a basic
+	//	description of the calling library, version & platform to facilitate issue diagnosis
+	//	in heterogeneous environments. The following structure is recommended to library developers:
+	//
+	//	User-Agent → "grpc-" Language ?("-" Variant) "/" Version ?( " ("  *(AdditionalProperty ";") ")" )
+	defaultGrpcUserAgent = fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())
 )
 
 func init() {
@@ -231,7 +242,7 @@ func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
 	if header.Get(headerUserAgent) == "" {
-		header[headerUserAgent] = []string{grpcUserAgent()}
+		header[headerUserAgent] = []string{defaultGrpcUserAgent}
 	}
 	header[headerContentType] = []string{grpcContentTypeFromCodecName(g.web, g.Codec.Name())}
 	// gRPC handles compression on a per-message basis, so we don't want to
@@ -764,19 +775,6 @@ func grpcEncodeTimeout(timeout time.Duration) (string, error) {
 	// The max time.Duration is smaller than the maximum expressible gRPC
 	// timeout, so we can't reach this case.
 	return "", errNoTimeout
-}
-
-// grpcUserAgent follows
-// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents:
-//
-//	While the protocol does not require a user-agent to function it is recommended
-//	that clients provide a structured user-agent string that provides a basic
-//	description of the calling library, version & platform to facilitate issue diagnosis
-//	in heterogeneous environments. The following structure is recommended to library developers:
-//
-//	User-Agent → "grpc-" Language ?("-" Variant) "/" Version ?( " ("  *(AdditionalProperty ";") ")" )
-func grpcUserAgent() string {
-	return fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())
 }
 
 func grpcCodecFromContentType(web bool, contentType string) string {
