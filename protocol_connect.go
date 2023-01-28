@@ -74,10 +74,14 @@ func (*protocolConnect) NewHandler(params *protocolHandlerParams) protocolHandle
 
 // NewClient implements protocol, so it must return an interface.
 func (*protocolConnect) NewClient(params *protocolClientParams) (protocolClient, error) {
-	if err := validateRequestURL(params.URL); err != nil {
+	url, err := validateRequestURL(params.URL)
+	if err != nil {
 		return nil, err
 	}
-	return &connectClient{protocolClientParams: *params}, nil
+	return &connectClient{
+		protocolClientParams: *params,
+		peer:                 newPeerFromURL(url, ProtocolConnect),
+	}, nil
 }
 
 type connectHandler struct {
@@ -238,10 +242,12 @@ func (h *connectHandler) NewConn(
 
 type connectClient struct {
 	protocolClientParams
+
+	peer Peer
 }
 
 func (c *connectClient) Peer() Peer {
-	return newPeerFromURL(c.URL, ProtocolConnect)
+	return c.peer
 }
 
 func (c *connectClient) WriteRequestHeader(streamType StreamType, header http.Header) {
