@@ -23,7 +23,6 @@ import (
 	"math"
 	"net/http"
 	"net/textproto"
-	"net/url"
 	"runtime"
 	"strconv"
 	"strings"
@@ -104,10 +103,14 @@ func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, 
 	if err != nil {
 		return nil, err
 	}
+	peer := newPeerFromURL(url, ProtocolGRPC)
+	if g.web {
+		peer = newPeerFromURL(url, ProtocolGRPCWeb)
+	}
 	return &grpcClient{
 		protocolClientParams: *params,
 		web:                  g.web,
-		peer:                 newGrpcPeerFromURL(url, g.web),
+		peer:                 peer,
 	}, nil
 }
 
@@ -218,13 +221,6 @@ type grpcClient struct {
 
 	web  bool
 	peer Peer
-}
-
-func newGrpcPeerFromURL(url *url.URL, web bool) Peer {
-	if web {
-		return newPeerFromURL(url, ProtocolGRPCWeb)
-	}
-	return newPeerFromURL(url, ProtocolGRPC)
 }
 
 func (g *grpcClient) Peer() Peer {
