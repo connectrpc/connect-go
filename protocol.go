@@ -37,6 +37,7 @@ const (
 const (
 	headerContentType = "Content-Type"
 	headerUserAgent   = "User-Agent"
+	headerTrailer     = "Trailer"
 
 	discardLimit = 1024 * 1024 * 4 // 4MiB
 )

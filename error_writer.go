@@ -83,7 +83,7 @@ func NewErrorWriter(opts ...HandlerOption) *ErrorWriter {
 // IsSupported checks whether a request is using one of the ErrorWriter's
 // supported RPC protocols.
 func (w *ErrorWriter) IsSupported(request *http.Request) bool {
-	ctype := canonicalizeContentType(request.Header.Get(headerContentType))
+	ctype := canonicalizeContentType(getHeaderCanonical(request.Header, headerContentType))
 	_, ok := w.allContentTypes[ctype]
 	return ok
 }
@@ -94,22 +94,22 @@ func (w *ErrorWriter) IsSupported(request *http.Request) bool {
 //
 // Write does not read or close the request body.
 func (w *ErrorWriter) Write(response http.ResponseWriter, request *http.Request, err error) error {
-	ctype := canonicalizeContentType(request.Header.Get(headerContentType))
+	ctype := canonicalizeContentType(getHeaderCanonical(request.Header, headerContentType))
 	if _, ok := w.unaryConnectContentTypes[ctype]; ok {
 		// Unary errors are always JSON.
-		response.Header().Set(headerContentType, connectUnaryContentTypeJSON)
+		setHeaderCanonical(response.Header(), headerContentType, connectUnaryContentTypeJSON)
 		return w.writeConnectUnary(response, err)
 	}
 	if _, ok := w.streamingConnectContentTypes[ctype]; ok {
-		response.Header().Set(headerContentType, ctype)
+		setHeaderCanonical(response.Header(), headerContentType, ctype)
 		return w.writeConnectStreaming(response, err)
 	}
 	if _, ok := w.grpcContentTypes[ctype]; ok {
-		response.Header().Set(headerContentType, ctype)
+		setHeaderCanonical(response.Header(), headerContentType, ctype)
 		return w.writeGRPC(response, err)
 	}
 	if _, ok := w.grpcWebContentTypes[ctype]; ok {
-		response.Header().Set(headerContentType, ctype)
+		setHeaderCanonical(response.Header(), headerContentType, ctype)
 		return w.writeGRPCWeb(response, err)
 	}
 	return fmt.Errorf("unsupported Content-Type %q", ctype)
@@ -153,7 +153,7 @@ func (w *ErrorWriter) writeGRPC(response http.ResponseWriter, err error) error {
 	for k := range trailers {
 		keys = append(keys, k)
 	}
-	response.Header().Set("Trailer", strings.Join(keys, ","))
+	setHeaderCanonical(response.Header(), headerTrailer, strings.Join(keys, ","))
 	response.WriteHeader(http.StatusOK)
 	mergeHeaders(response.Header(), trailers)
 	return nil

@@ -50,3 +50,38 @@ func mergeHeaders(into, from http.Header) {
 		into[k] = append(into[k], vals...)
 	}
 }
+
+// getCanonicalHeader is a shortcut for Header.Get() which
+// bypasses the CanonicalMIMEHeaderKey operation when we
+// know the key is already in canonical form.
+func getHeaderCanonical(h http.Header, key string) string {
+	if h == nil {
+		return ""
+	}
+	v := h[key]
+	if len(v) == 0 {
+		return ""
+	}
+	return v[0]
+}
+
+// setHeaderCanonical is a shortcut for Header.Set() which
+// bypasses the CanonicalMIMEHeaderKey operation when we
+// know the key is already in canonical form.
+func setHeaderCanonical(h http.Header, key, value string) {
+	h[key] = []string{value}
+}
+
+// delHeaderCanonical is a shortcut for Header.Del() which
+// bypasses the CanonicalMIMEHeaderKey operation when we
+// know the key is already in canonical form.
+func delHeaderCanonical(h http.Header, key string) {
+	delete(h, key)
+}
+
+// addHeaderCanonical is a shortcut for Header.Add() which
+// bypasses the CanonicalMIMEHeaderKey operation when we
+// know the key is already in canonical form.
+func addHeaderCanonical(h http.Header, key, value string) {
+	h[key] = append(h[key], value)
+}
