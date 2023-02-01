@@ -32,7 +32,7 @@ import (
 )
 
 // Version is the semantic version of the connect module.
-const Version = "1.6.0-dev"
+const Version = "1.5.1"
 
 // These constants are used in compile-time handshakes with connect's generated
 // code.
