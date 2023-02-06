@@ -35,9 +35,9 @@ const (
 )
 
 const (
-	headerContentType = "Content-Type"
-	headerUserAgent   = "User-Agent"
-	headerTrailer     = "Trailer"
+	headerContentType = "content-type"
+	headerUserAgent   = "user-agent"
+	headerTrailer     = "trailer"
 
 	discardLimit = 1024 * 1024 * 4 // 4MiB
 )

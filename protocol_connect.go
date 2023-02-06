@@ -33,13 +33,13 @@ import (
 )
 
 const (
-	connectUnaryHeaderCompression           = "Content-Encoding"
-	connectUnaryHeaderAcceptCompression     = "Accept-Encoding"
-	connectUnaryTrailerPrefix               = "Trailer-"
-	connectStreamingHeaderCompression       = "Connect-Content-Encoding"
-	connectStreamingHeaderAcceptCompression = "Connect-Accept-Encoding"
-	connectHeaderTimeout                    = "Connect-Timeout-Ms"
-	connectHeaderProtocolVersion            = "Connect-Protocol-Version"
+	connectUnaryHeaderCompression           = "content-encoding"
+	connectUnaryHeaderAcceptCompression     = "accept-encoding"
+	connectUnaryTrailerPrefix               = "trailer-"
+	connectStreamingHeaderCompression       = "connect-content-encoding"
+	connectStreamingHeaderAcceptCompression = "connect-accept-encoding"
+	connectHeaderTimeout                    = "connect-timeout-ms"
+	connectHeaderProtocolVersion            = "connect-protocol-version"
 	connectProtocolVersion                  = "1"
 
 	connectFlagEnvelopeEndStream = 0b00000010

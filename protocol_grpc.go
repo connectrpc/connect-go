@@ -33,12 +33,12 @@ import (
 )
 
 const (
-	grpcHeaderCompression       = "Grpc-Encoding"
-	grpcHeaderAcceptCompression = "Grpc-Accept-Encoding"
-	grpcHeaderTimeout           = "Grpc-Timeout"
-	grpcHeaderStatus            = "Grpc-Status"
-	grpcHeaderMessage           = "Grpc-Message"
-	grpcHeaderDetails           = "Grpc-Status-Details-Bin"
+	grpcHeaderCompression       = "grpc-encoding"
+	grpcHeaderAcceptCompression = "grpc-accept-encoding"
+	grpcHeaderTimeout           = "grpc-timeout"
+	grpcHeaderStatus            = "grpc-status"
+	grpcHeaderMessage           = "grpc-message"
+	grpcHeaderDetails           = "grpc-status-details-bin"
 
 	grpcFlagEnvelopeTrailer = 0b10000000
 

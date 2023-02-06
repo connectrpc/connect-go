@@ -17,6 +17,7 @@ package connect
 import (
 	"encoding/base64"
 	"net/http"
+	"strings"
 )
 
 // EncodeBinaryHeader base64-encodes the data. It always emits unpadded values.
@@ -51,6 +52,18 @@ func mergeHeaders(into, from http.Header) {
 	}
 }
 
+// Despite the IETF spec for HTTP saying that header keys should be case-insensitive,
+// key gRPC-Web clients require headers to be lowercase. We think the spec should be
+// fixed, however we want to remain compatible with all gRPC-Web clients. As such,
+// we universally lowercase our header keys via strings.ToLower. Since we bypass
+// the Get and Set methods on http.Header, we have to do lowercase for all of our
+// canonical operations below.
+//
+// Note that strings.ToLower stops early if the key is already lowercase, and should
+// not allocate any additional memory.
+//
+// See https://github.com/bufbuild/connect-go/issues/453 for more details.
+
 // getCanonicalHeader is a shortcut for Header.Get() which
 // bypasses the CanonicalMIMEHeaderKey operation when we
 // know the key is already in canonical form.
@@ -58,7 +71,7 @@ func getHeaderCanonical(h http.Header, key string) string {
 	if h == nil {
 		return ""
 	}
-	v := h[key]
+	v := h[strings.ToLower(key)]
 	if len(v) == 0 {
 		return ""
 	}
@@ -69,19 +82,20 @@ func getHeaderCanonical(h http.Header, key string) string {
 // bypasses the CanonicalMIMEHeaderKey operation when we
 // know the key is already in canonical form.
 func setHeaderCanonical(h http.Header, key, value string) {
-	h[key] = []string{value}
+	h[strings.ToLower(key)] = []string{value}
 }
 
 // delHeaderCanonical is a shortcut for Header.Del() which
 // bypasses the CanonicalMIMEHeaderKey operation when we
 // know the key is already in canonical form.
 func delHeaderCanonical(h http.Header, key string) {
-	delete(h, key)
+	delete(h, strings.ToLower(key))
 }
 
 // addHeaderCanonical is a shortcut for Header.Add() which
 // bypasses the CanonicalMIMEHeaderKey operation when we
 // know the key is already in canonical form.
 func addHeaderCanonical(h http.Header, key, value string) {
+	key = strings.ToLower(key)
 	h[key] = append(h[key], value)
 }
