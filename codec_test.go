@@ -29,9 +29,9 @@ func TestJSONCodec(t *testing.T) {
 	codec := &protoJSONCodec{name: "json"}
 	err := codec.Unmarshal([]byte{}, &empty)
 	assert.NotNil(t, err)
-	assert.True(t, strings.Contains(
-		err.Error(),
-		"valid JSON",
+	assert.True(
+		t,
+		strings.Contains(err.Error(), "valid JSON"),
 		assert.Sprintf(`error message should explain that "" is not a valid JSON object`),
-	))
+	)
 }
