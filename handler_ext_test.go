@@ -135,7 +135,8 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		assert.Equal(t, resp.StatusCode, http.StatusNotFound)
 
 		type errorMessage struct {
-			Code, Message string
+			Code    string `json:"code,omitempty"`
+			Message string `json:"message,omitempty"`
 		}
 		var message errorMessage
 		err = json.NewDecoder(resp.Body).Decode(&message)
