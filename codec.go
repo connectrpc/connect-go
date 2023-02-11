@@ -95,7 +95,7 @@ func (c *protoJSONCodec) Unmarshal(binary []byte, message any) error {
 		return errNotProto(message)
 	}
 	if len(binary) == 0 {
-		return errors.New("empty string is not a valid JSON object")
+		return errors.New("zero-length payload is not a valid JSON object")
 	}
 	var options protojson.UnmarshalOptions
 	return options.Unmarshal(binary, protoMessage)
