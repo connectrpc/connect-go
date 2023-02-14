@@ -15,6 +15,7 @@
 package connect
 
 import (
+	"errors"
 	"fmt"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -92,6 +93,9 @@ func (c *protoJSONCodec) Unmarshal(binary []byte, message any) error {
 	protoMessage, ok := message.(proto.Message)
 	if !ok {
 		return errNotProto(message)
+	}
+	if len(binary) == 0 {
+		return errors.New("zero-length payload is not a valid JSON object")
 	}
 	var options protojson.UnmarshalOptions
 	return options.Unmarshal(binary, protoMessage)
