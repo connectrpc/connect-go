@@ -106,6 +106,7 @@ func (c *protoBinaryCodec) MarshalStable(message any) ([]byte, error) {
 	// guaranteed to match deterministic output from other protobuf libraries.
 	// In addition, unknown fields may cause inconsistent output for otherwise
 	// equal messages.
+	// https://github.com/golang/protobuf/issues/1121
 	options := proto.MarshalOptions{Deterministic: true}
 	return options.Marshal(protoMessage)
 }
@@ -145,6 +146,7 @@ func (c *protoJSONCodec) MarshalStable(message any) ([]byte, error) {
 	// are still ordered consistently by their index. However, protojson can
 	// output inconsistent whitespace for some reason, therefore it is
 	// suggested to use a formatter to ensure consistent formatting.
+	// https://github.com/golang/protobuf/issues/1373
 	compactedJSON := new(bytes.Buffer)
 	messageJSON, err := c.Marshal(message)
 	if err != nil {
