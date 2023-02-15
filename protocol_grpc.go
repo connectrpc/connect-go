@@ -582,12 +582,11 @@ type grpcMarshaler struct {
 func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *Error {
 	raw := m.envelopeWriter.bufferPool.Get()
 	defer m.envelopeWriter.bufferPool.Put(raw)
-	lcTrailer := http.Header{}
-	for key, element := range trailer {
-		lcKey := strings.ToLower(key)
-		lcTrailer[lcKey] = element
+	for key, values := range trailer {
+		delete(trailer, key)
+		trailer[strings.ToLower(key)] = values
 	}
-	if err := lcTrailer.Write(raw); err != nil {
+	if err := trailer.Write(raw); err != nil {
 		return errorf(CodeInternal, "format trailers: %w", err)
 	}
 	return m.Write(&envelope{
