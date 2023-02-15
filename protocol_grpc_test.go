@@ -174,3 +174,23 @@ func TestGRPCPercentEncoding(t *testing.T) {
 	roundtrip(`foo%bar`)
 	roundtrip("fiancée")
 }
+
+func TestGRPCWebTrailerMarshalling(t *testing.T) {
+	t.Parallel()
+	responseWriter := httptest.NewRecorder()
+	marshaler := grpcMarshaler{
+		envelopeWriter: envelopeWriter{
+			writer:     responseWriter,
+			bufferPool: newBufferPool(),
+		},
+	}
+	trailer := http.Header{}
+	trailer.Add("grpc-status", "0")
+	trailer.Add("Grpc-Message", "Foo")
+	trailer.Add("User-Provided", "bar")
+	err := marshaler.MarshalWebTrailers(trailer)
+	assert.Nil(t, err)
+	responseWriter.Body.Next(5) // skip flags and message length
+	marshalled := responseWriter.Body.String()
+	assert.Equal(t, marshalled, "grpc-message: Foo\r\ngrpc-status: 0\r\nuser-provided: bar\r\n")
+}
