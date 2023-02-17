@@ -63,7 +63,10 @@ var (
 		{time.Minute, 'M'},
 		{time.Hour, 'H'},
 	}
-	grpcTimeoutUnitLookup        = make(map[byte]time.Duration)
+	grpcTimeoutUnitLookup = make(map[byte]time.Duration)
+	grpcAllowedMethods    = map[string]struct{}{
+		http.MethodPost: {},
+	}
 	errTrailersWithoutGRPCStatus = fmt.Errorf("gRPC protocol error: no %s trailer", grpcHeaderStatus)
 
 	// defaultGrpcUserAgent follows
@@ -130,6 +133,10 @@ type grpcHandler struct {
 
 	web    bool
 	accept map[string]struct{}
+}
+
+func (g *grpcHandler) Methods() map[string]struct{} {
+	return grpcAllowedMethods
 }
 
 func (g *grpcHandler) ContentTypes() map[string]struct{} {

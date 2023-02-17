@@ -84,6 +84,9 @@ type protocolHandlerParams struct {
 // Handler is the server side of a protocol. HTTP handlers typically support
 // multiple protocols, codecs, and compressors.
 type protocolHandler interface {
+	// Methods is the list of HTTP methods the protocol can handle.
+	Methods() map[string]struct{}
+
 	// ContentTypes is the set of HTTP Content-Types that the protocol can
 	// handle.
 	ContentTypes() map[string]struct{}
@@ -221,6 +224,21 @@ func sortedAcceptPostValue(handlers []protocolHandler) string {
 	}
 	sort.Strings(accept)
 	return strings.Join(accept, ", ")
+}
+
+func sortedAllowMethodValue(handlers []protocolHandler) string {
+	methods := make(map[string]struct{})
+	for _, handler := range handlers {
+		for method := range handler.Methods() {
+			methods[method] = struct{}{}
+		}
+	}
+	allow := make([]string, 0, len(methods))
+	for ct := range methods {
+		allow = append(allow, ct)
+	}
+	sort.Strings(allow)
+	return strings.Join(allow, ", ")
 }
 
 func isCommaOrSpace(c rune) bool {

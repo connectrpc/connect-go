@@ -58,6 +58,9 @@ type protocolConnect struct{}
 
 // NewHandler implements protocol, so it must return an interface.
 func (*protocolConnect) NewHandler(params *protocolHandlerParams) protocolHandler {
+	methods := make(map[string]struct{})
+	methods[http.MethodPost] = struct{}{}
+
 	contentTypes := make(map[string]struct{})
 	for _, name := range params.Codecs.Names() {
 		if params.Spec.StreamType == StreamTypeUnary {
@@ -66,8 +69,10 @@ func (*protocolConnect) NewHandler(params *protocolHandlerParams) protocolHandle
 		}
 		contentTypes[canonicalizeContentType(connectStreamingContentTypePrefix+name)] = struct{}{}
 	}
+
 	return &connectHandler{
 		protocolHandlerParams: *params,
+		methods:               methods,
 		accept:                contentTypes,
 	}
 }
@@ -87,7 +92,12 @@ func (*protocolConnect) NewClient(params *protocolClientParams) (protocolClient,
 type connectHandler struct {
 	protocolHandlerParams
 
-	accept map[string]struct{}
+	methods map[string]struct{}
+	accept  map[string]struct{}
+}
+
+func (h *connectHandler) Methods() map[string]struct{} {
+	return h.methods
 }
 
 func (h *connectHandler) ContentTypes() map[string]struct{} {
