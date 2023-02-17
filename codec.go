@@ -51,8 +51,8 @@ type Codec interface {
 	Unmarshal([]byte, any) error
 }
 
-// StableCodec is an extension to Codec for serializing with stable output.
-type StableCodec interface {
+// stableCodec is an extension to Codec for serializing with stable output.
+type stableCodec interface {
 	// MarshalStable marshals the given message with stable field ordering.
 	//
 	// MarshalStable should return the same output for a given input. Although
