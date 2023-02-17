@@ -239,6 +239,7 @@ type handlerConfig struct {
 	HandleGRPC                   bool
 	HandleGRPCWeb                bool
 	RequireConnectProtocolHeader bool
+	IdempotencyLevel             IdempotencyLevel
 	BufferPool                   *bufferPool
 	ReadMaxBytes                 int
 	SendMaxBytes                 int
@@ -294,6 +295,7 @@ func (c *handlerConfig) newProtocolHandlers(streamType StreamType) []protocolHan
 			ReadMaxBytes:                 c.ReadMaxBytes,
 			SendMaxBytes:                 c.SendMaxBytes,
 			RequireConnectProtocolHeader: c.RequireConnectProtocolHeader,
+			IdempotencyLevel:             c.IdempotencyLevel,
 		}))
 	}
 	return handlers
