@@ -15,48 +15,81 @@
 package connect
 
 import (
+	"bytes"
 	"testing"
+	"testing/quick"
 
-	"github.com/bufbuild/connect-go/internal/assert"
 	pingv1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
-func TestCodec(t *testing.T) {
+func convertMapToInterface(stringMap map[string]string) map[string]interface{} {
+	interfaceMap := make(map[string]interface{})
+	for key, value := range stringMap {
+		interfaceMap[key] = value
+	}
+	return interfaceMap
+}
+
+func TestCodecRoundTrips(t *testing.T) {
 	t.Parallel()
-	assertCodecRoundTrips(t, &protoBinaryCodec{})
-	assertCodecRoundTrips(t, &protoJSONCodec{})
-	assertStableMarshalEquals(
-		t,
-		&protoBinaryCodec{},
-		&pingv1.PingRequest{Text: "text", Number: 1}, []byte{
-			// Comments are in the format of protoscope.
-			// 1:VARINT 1
-			0b00001_000, 1,
-			// 2:LEN 4 "test"
-			0b00010_010, 4, 0x74, 0x65, 0x78, 0x74,
-		},
-	)
-	assertStableMarshalEquals(
-		t,
-		&protoJSONCodec{},
-		&pingv1.PingRequest{Text: "text", Number: 1},
-		[]byte(`{"number":"1","text":"text"}`),
-	)
+	makeRoundtrip := func(codec Codec) func(string, int64) bool {
+		return func(text string, number int64) bool {
+			got := pingv1.PingRequest{}
+			want := pingv1.PingRequest{Text: text, Number: number}
+			data, err := codec.Marshal(&want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = codec.Unmarshal(data, &got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return proto.Equal(&got, &want)
+		}
+	}
+	if err := quick.Check(makeRoundtrip(&protoBinaryCodec{}), nil /* config */); err != nil {
+		t.Error(err)
+	}
+	if err := quick.Check(makeRoundtrip(&protoJSONCodec{}), nil /* config */); err != nil {
+		t.Error(err)
+	}
 }
 
-func assertCodecRoundTrips(tb testing.TB, codec Codec) {
-	tb.Helper()
-	got := pingv1.PingRequest{}
-	want := pingv1.PingRequest{Text: "text", Number: 1}
-	data, err := codec.Marshal(&want)
-	assert.Nil(tb, err)
-	assert.Nil(tb, codec.Unmarshal(data, &got))
-	assert.Equal(tb, &got, &want)
-}
-
-func assertStableMarshalEquals(tb testing.TB, codec stableCodec, message any, want []byte) {
-	tb.Helper()
-	got, err := codec.MarshalStable(message)
-	assert.Nil(tb, err)
-	assert.Equal(tb, got, want)
+func TestStableCodec(t *testing.T) {
+	t.Parallel()
+	makeRoundtrip := func(codec stableCodec) func(map[string]string) bool {
+		return func(input map[string]string) bool {
+			initialProto, err := structpb.NewStruct(convertMapToInterface(input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := codec.MarshalStable(initialProto)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < 10; i++ {
+				roundtripProto := &structpb.Struct{}
+				err = codec.Unmarshal(want, roundtripProto)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := codec.MarshalStable(roundtripProto)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(got, want) {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	if err := quick.Check(makeRoundtrip(&protoBinaryCodec{}), nil /* config */); err != nil {
+		t.Error(err)
+	}
+	if err := quick.Check(makeRoundtrip(&protoJSONCodec{}), nil /* config */); err != nil {
+		t.Error(err)
+	}
 }

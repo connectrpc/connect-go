@@ -53,6 +53,8 @@ type Codec interface {
 
 // stableCodec is an extension to Codec for serializing with stable output.
 type stableCodec interface {
+	Codec
+
 	// MarshalStable marshals the given message with stable field ordering.
 	//
 	// MarshalStable should return the same output for a given input. Although
