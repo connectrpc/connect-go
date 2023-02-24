@@ -47,6 +47,10 @@ const (
 	connectUnaryContentTypePrefix     = "application/"
 	connectUnaryContentTypeJSON       = connectUnaryContentTypePrefix + "json"
 	connectStreamingContentTypePrefix = "application/connect+"
+
+	connectUnaryEncodingQueryParameter = "enc"
+	connectUnaryMessageQueryParameter  = "msg"
+	connectUnaryBase64QueryParameter   = "b64"
 )
 
 // defaultConnectUserAgent returns a User-Agent string similar to those used in gRPC.
@@ -60,6 +64,10 @@ type protocolConnect struct{}
 func (*protocolConnect) NewHandler(params *protocolHandlerParams) protocolHandler {
 	methods := make(map[string]struct{})
 	methods[http.MethodPost] = struct{}{}
+
+	if params.Spec.StreamType == StreamTypeUnary && params.IdempotencyLevel == IdempotencyNoSideEffects {
+		methods[http.MethodGet] = struct{}{}
+	}
 
 	contentTypes := make(map[string]struct{})
 	for _, name := range params.Codecs.Names() {
@@ -154,6 +162,42 @@ func (h *connectHandler) NewConn(
 		}
 	}
 
+	var requestBody io.ReadCloser
+	var contentType, codecName string
+	if request.Method == http.MethodGet {
+		query := request.URL.Query()
+		if failed == nil && !query.Has(connectUnaryEncodingQueryParameter) {
+			failed = errorf(CodeInvalidArgument, "missing %s parameter", connectUnaryEncodingQueryParameter)
+		} else if failed == nil && !query.Has(connectUnaryMessageQueryParameter) {
+			failed = errorf(CodeInvalidArgument, "missing %s parameter", connectUnaryMessageQueryParameter)
+		}
+		msgReader := io.Reader(strings.NewReader(query.Get(connectUnaryMessageQueryParameter)))
+		if query.Get(connectUnaryBase64QueryParameter) == "1" {
+			msgReader = newBase64PaddedReader(msgReader)
+			msgReader = base64.NewDecoder(base64.URLEncoding, msgReader)
+		}
+		requestBody = io.NopCloser(msgReader)
+		codecName = query.Get(connectUnaryEncodingQueryParameter)
+		contentType = connectContentTypeFromCodecName(
+			h.Spec.StreamType,
+			codecName,
+		)
+	} else {
+		requestBody = request.Body
+		contentType = getHeaderCanonical(request.Header, headerContentType)
+		codecName = connectCodecFromContentType(
+			h.Spec.StreamType,
+			contentType,
+		)
+	}
+
+	codec := h.Codecs.Get(codecName)
+	// The codec can be nil in the GET request case; that's okay: when failed
+	// is non-nil, codec is never used.
+	if failed == nil && codec == nil {
+		failed = errorf(CodeInvalidArgument, "invalid message encoding: %q", codecName)
+	}
+
 	// Write any remaining headers here:
 	// (1) any writes to the stream will implicitly send the headers, so we
 	// should get all of gRPC's required response headers ready.
@@ -162,7 +206,7 @@ func (h *connectHandler) NewConn(
 	// Since we know that these header keys are already in canonical form, we can
 	// skip the normalization in Header.Set.
 	header := responseWriter.Header()
-	header[headerContentType] = []string{getHeaderCanonical(request.Header, headerContentType)}
+	header[headerContentType] = []string{contentType}
 	acceptCompressionHeader := connectUnaryHeaderAcceptCompression
 	if h.Spec.StreamType != StreamTypeUnary {
 		acceptCompressionHeader = connectStreamingHeaderAcceptCompression
@@ -175,12 +219,6 @@ func (h *connectHandler) NewConn(
 		}
 	}
 	header[acceptCompressionHeader] = []string{h.CompressionPools.CommaSeparatedNames()}
-
-	codecName := connectCodecFromContentType(
-		h.Spec.StreamType,
-		getHeaderCanonical(request.Header, headerContentType),
-	)
-	codec := h.Codecs.Get(codecName) // handler.go guarantees this is not nil
 
 	var conn handlerConnCloser
 	peer := Peer{
@@ -204,7 +242,7 @@ func (h *connectHandler) NewConn(
 				sendMaxBytes:     h.SendMaxBytes,
 			},
 			unmarshaler: connectUnaryUnmarshaler{
-				reader:          request.Body,
+				reader:          requestBody,
 				codec:           codec,
 				compressionPool: h.CompressionPools.Get(requestCompression),
 				bufferPool:      h.BufferPool,
@@ -230,7 +268,7 @@ func (h *connectHandler) NewConn(
 			},
 			unmarshaler: connectStreamingUnmarshaler{
 				envelopeReader: envelopeReader{
-					reader:          request.Body,
+					reader:          requestBody,
 					codec:           codec,
 					compressionPool: h.CompressionPools.Get(requestCompression),
 					bufferPool:      h.BufferPool,
