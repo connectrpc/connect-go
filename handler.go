@@ -195,13 +195,13 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 
 	// Find our implementation of the RPC protocol in use.
 	var protocolHandler protocolHandler
-	switch len(protocolHandlers) {
-	case 0:
+	switch {
+	case len(protocolHandlers) == 0:
 		responseWriter.Header().Set("Allow", h.allowMethod)
 		responseWriter.WriteHeader(http.StatusMethodNotAllowed)
 		return
 
-	case 1:
+	case len(protocolHandlers) == 1 && contentType == "":
 		protocolHandler = protocolHandlers[0]
 
 	default:
