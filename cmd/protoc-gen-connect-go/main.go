@@ -96,6 +96,17 @@ func main() {
 	)
 }
 
+func needsWithIdempotency(file *protogen.File) bool {
+	for _, service := range file.Services {
+		for _, method := range service.Methods {
+			if methodIdempotency(method) == connect.IdempotencyNoSideEffects {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func generate(plugin *protogen.Plugin, file *protogen.File) {
 	if len(file.Services) == 0 {
 		return
@@ -139,7 +150,11 @@ func generatePreamble(g *protogen.GeneratedFile, file *protogen.File) {
 		"is not defined, this code was generated with a version of connect newer than the one ",
 		"compiled into your binary. You can fix the problem by either regenerating this code ",
 		"with an older version of connect or updating the connect version compiled into your binary.")
-	g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion0_1_0"))
+	if needsWithIdempotency(file) {
+		g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion1_6_0"))
+	} else {
+		g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion0_1_0"))
+	}
 	g.P()
 }
 

@@ -39,6 +39,7 @@ const Version = "1.5.1"
 const (
 	IsAtLeastVersion0_0_1 = true
 	IsAtLeastVersion0_1_0 = true
+	IsAtLeastVersion1_6_0 = true
 )
 
 // StreamType describes whether the client, server, neither, or both is
