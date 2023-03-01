@@ -149,7 +149,8 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect_go.HandlerOpt
 	mux.Handle("/connect.ping.v1.PingService/Ping", connect_go.NewUnaryHandler(
 		"/connect.ping.v1.PingService/Ping",
 		svc.Ping,
-		opts...,
+		connect_go.WithIdempotency(connect_go.IdempotencyNoSideEffects),
+		connect_go.WithHandlerOptions(opts...),
 	))
 	mux.Handle("/connect.ping.v1.PingService/Fail", connect_go.NewUnaryHandler(
 		"/connect.ping.v1.PingService/Fail",
