@@ -181,11 +181,8 @@ func (h *connectHandler) NewConn(
 		} else if failed == nil && !query.Has(connectUnaryMessageQueryParameter) {
 			failed = errorf(CodeInvalidArgument, "missing %s parameter", connectUnaryMessageQueryParameter)
 		}
-		msgReader := io.Reader(strings.NewReader(query.Get(connectUnaryMessageQueryParameter)))
-		if query.Get(connectUnaryBase64QueryParameter) == "1" {
-			msgReader = newBase64PaddedReader(msgReader)
-			msgReader = base64.NewDecoder(base64.URLEncoding, msgReader)
-		}
+		msg := query.Get(connectUnaryMessageQueryParameter)
+		msgReader := headerReader(msg, query.Get(connectUnaryBase64QueryParameter) == "1")
 		requestBody = io.NopCloser(msgReader)
 		codecName = query.Get(connectUnaryEncodingQueryParameter)
 		contentType = connectContentTypeFromCodecName(
