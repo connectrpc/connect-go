@@ -280,8 +280,9 @@ func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig 
 
 func (c *handlerConfig) newSpec(streamType StreamType) Spec {
 	return Spec{
-		Procedure:  c.Procedure,
-		StreamType: streamType,
+		Procedure:        c.Procedure,
+		StreamType:       streamType,
+		IdempotencyLevel: c.IdempotencyLevel,
 	}
 }
 
