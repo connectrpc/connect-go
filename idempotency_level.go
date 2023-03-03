@@ -14,17 +14,22 @@
 
 package connect
 
+import "fmt"
+
 // An IdempotencyLevel is a value that declares how "idempotent" an RPC is. This
 // value can affect RPC behaviors, such as determining whether it is safe to
 // retry a request, or what kinds of request modalities are allowed for a given
 // procedure.
 type IdempotencyLevel int
 
+// NOTE: For simplicity, these should be kept in sync with the values of the
+// google.protobuf.MethodOptions.IdempotencyLevel enumeration.
+
 const (
 	// IdempotencyUnknown is the default idempotency level. A procedure with
 	// this idempotency level may not be idempotent. This is appropriate for
 	// any kind of procedure.
-	IdempotencyUnknown IdempotencyLevel = iota
+	IdempotencyUnknown IdempotencyLevel = 0
 
 	// IdempotencyNoSideEffects is the idempotency level that specifies that a
 	// given call has no side-effects. This is equivalent to [RFC 9110 § 9.2.1]
@@ -35,7 +40,7 @@ const (
 	// expect that the results will not be altered by preceding attempts.
 	//
 	// [RFC 9110 § 9.2.1]: https://www.rfc-editor.org/rfc/rfc9110.html#section-9.2.1
-	IdempotencyNoSideEffects
+	IdempotencyNoSideEffects IdempotencyLevel = 1
 
 	// IdempotencyIdempotent is the idempotency level that specifies that a
 	// given call is "idempotent", such that multiple instances of the same
@@ -47,5 +52,17 @@ const (
 	// as a result of multiple attempts, for example, entity deletion requests.
 	//
 	// [RFC 9110 § 9.2.2]: https://www.rfc-editor.org/rfc/rfc9110.html#section-9.2.2
-	IdempotencyIdempotent
+	IdempotencyIdempotent IdempotencyLevel = 2
 )
+
+func (i IdempotencyLevel) String() string {
+	switch i {
+	case IdempotencyUnknown:
+		return "idempotency_unknown"
+	case IdempotencyNoSideEffects:
+		return "no_side_effects"
+	case IdempotencyIdempotent:
+		return "idempotent"
+	}
+	return fmt.Sprintf("idempotency_%d", i)
+}
