@@ -44,7 +44,7 @@ const (
 	// This level is a subset of the previous level. This idempotency level is
 	// appropriate for any procedure that is safe to retry multiple times
 	// and be guaranteed that the response and side-effects will not be altered
-	// as a result of multiple attempts.
+	// as a result of multiple attempts, for example, entity deletion requests.
 	//
 	// [RFC 9110 § 9.2.2]: https://www.rfc-editor.org/rfc/rfc9110.html#section-9.2.2
 	IdempotencyIdempotent
