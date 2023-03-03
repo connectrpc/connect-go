@@ -84,7 +84,7 @@ type protocolHandlerParams struct {
 // Handler is the server side of a protocol. HTTP handlers typically support
 // multiple protocols, codecs, and compressors.
 type protocolHandler interface {
-	// Methods is the list of HTTP methods the protocol can handle.
+	// Methods is the set of HTTP methods the protocol can handle.
 	Methods() map[string]struct{}
 
 	// ContentTypes is the set of HTTP Content-Types that the protocol can
