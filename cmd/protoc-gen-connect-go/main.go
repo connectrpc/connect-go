@@ -99,7 +99,7 @@ func main() {
 func needsWithIdempotency(file *protogen.File) bool {
 	for _, service := range file.Services {
 		for _, method := range service.Methods {
-			if methodIdempotency(method) == connect.IdempotencyNoSideEffects {
+			if methodIdempotency(method) != connect.IdempotencyUnknown {
 				return true
 			}
 		}
@@ -359,7 +359,10 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 		case connect.IdempotencyNoSideEffects:
 			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyNoSideEffects"), "),")
 			g.P(connectPackage.Ident("WithHandlerOptions"), "(opts...),")
-		case connect.IdempotencyUnknown, connect.IdempotencyIdempotent:
+		case connect.IdempotencyIdempotent:
+			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyIdempotent"), "),")
+			g.P(connectPackage.Ident("WithHandlerOptions"), "(opts...),")
+		case connect.IdempotencyUnknown:
 			g.P("opts...,")
 		}
 		g.P("))")
