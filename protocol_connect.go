@@ -51,6 +51,8 @@ const (
 	connectUnaryEncodingQueryParameter = "enc"
 	connectUnaryMessageQueryParameter  = "msg"
 	connectUnaryBase64QueryParameter   = "b64"
+	connectUnaryAPIQueryParameter      = "api"
+	connectProtocolVersionQueryValue   = "connectv" + connectProtocolVersion
 )
 
 // defaultConnectUserAgent returns a User-Agent string similar to those used in gRPC.
@@ -153,7 +155,15 @@ func (h *connectHandler) NewConn(
 	if failed == nil {
 		failed = checkServerStreamsCanFlush(h.Spec, responseWriter)
 	}
-	if failed == nil {
+	if failed == nil && request.Method == http.MethodGet {
+		version := request.URL.Query().Get(connectUnaryAPIQueryParameter)
+		if version == "" && h.RequireConnectProtocolHeader {
+			failed = errorf(CodeInvalidArgument, "missing required header: set %s to %q", connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue)
+		} else if version != "" && version != connectProtocolVersionQueryValue {
+			failed = errorf(CodeInvalidArgument, "%s must be %q: got %q", connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue, version)
+		}
+	}
+	if failed == nil && request.Method == http.MethodPost {
 		version := getHeaderCanonical(request.Header, connectHeaderProtocolVersion)
 		if version == "" && h.RequireConnectProtocolHeader {
 			failed = errorf(CodeInvalidArgument, "missing required header: set %s to %q", connectHeaderProtocolVersion, connectProtocolVersion)
