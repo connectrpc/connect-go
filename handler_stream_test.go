@@ -39,3 +39,18 @@ type nopClientStreamingHandlerConn struct {
 func (nopClientStreamingHandlerConn) Receive(msg any) error {
 	return nil
 }
+
+func TestServerStream(t *testing.T) {
+	t.Parallel()
+	serverStream := &ServerStream[pingv1.PingResponse]{conn: &nopServerStreamingHandlerConn{}}
+	assert.Nil(t, serverStream.Send(&pingv1.PingResponse{}))
+}
+
+type nopServerStreamingHandlerConn struct {
+	StreamingHandlerConn
+}
+
+func (nopServerStreamingHandlerConn) Send(msg any) error {
+	return nil
+}
+
