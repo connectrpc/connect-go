@@ -54,3 +54,23 @@ func (nopServerStreamingHandlerConn) Send(msg any) error {
 	return nil
 }
 
+func TestBidiStream(t *testing.T) {
+	t.Parallel()
+	bidiStream := &BidiStream[pingv1.PingRequest, pingv1.PingResponse]{conn: &nopBidiStreamingHandlerConn{}}
+	res, err := bidiStream.Receive()
+	assert.NotNil(t, res)
+	assert.Nil(t, err)
+	assert.Nil(t, bidiStream.Send(&pingv1.PingResponse{}))
+}
+
+type nopBidiStreamingHandlerConn struct {
+	StreamingHandlerConn
+}
+
+func (nopBidiStreamingHandlerConn) Receive(msg any) error {
+	return nil
+}
+
+func (nopBidiStreamingHandlerConn) Send(msg any) error {
+	return nil
+}
