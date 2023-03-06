@@ -22,14 +22,17 @@ import (
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 )
 
-func TestClientStream(t *testing.T) {
+func TestClientStreamIterator(t *testing.T) {
 	t.Parallel()
+	// The server's view of a client streaming RPC is an iterator. For safety,
+	// and to match grpc-go's behavior, we should allocate a new message for each
+	// iteration.
 	stream := &ClientStream[pingv1.PingRequest]{conn: &nopStreamingHandlerConn{}}
 	assert.True(t, stream.Receive())
 	first := fmt.Sprintf("%p", stream.Msg())
 	assert.True(t, stream.Receive())
 	second := fmt.Sprintf("%p", stream.Msg())
-	assert.NotEqual(t, first, second)
+	assert.NotEqual(t, first, second, assert.Sprintf("should allocate a new message for each iteration"))
 }
 
 type nopStreamingHandlerConn struct {
