@@ -74,13 +74,9 @@ func (*protocolConnect) NewHandler(params *protocolHandlerParams) protocolHandle
 
 // NewClient implements protocol, so it must return an interface.
 func (*protocolConnect) NewClient(params *protocolClientParams) (protocolClient, error) {
-	url, err := validateRequestURL(params.URL)
-	if err != nil {
-		return nil, err
-	}
 	return &connectClient{
 		protocolClientParams: *params,
-		peer:                 newPeerFromURL(url, ProtocolConnect),
+		peer:                 newPeerFromURL(params.URL, ProtocolConnect),
 	}, nil
 }
 
