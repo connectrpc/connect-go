@@ -24,18 +24,18 @@ import (
 
 func TestClientStream(t *testing.T) {
 	t.Parallel()
-	clientStream := &ClientStream[pingv1.PingRequest]{conn: &nopClientStreamingHandlerConn{}}
-	assert.True(t, clientStream.Receive())
-	first := fmt.Sprintf("%p", clientStream.Msg())
-	assert.True(t, clientStream.Receive())
-	second := fmt.Sprintf("%p", clientStream.Msg())
+	stream := &ClientStream[pingv1.PingRequest]{conn: &nopStreamingHandlerConn{}}
+	assert.True(t, stream.Receive())
+	first := fmt.Sprintf("%p", stream.Msg())
+	assert.True(t, stream.Receive())
+	second := fmt.Sprintf("%p", stream.Msg())
 	assert.NotEqual(t, first, second)
 }
 
-type nopClientStreamingHandlerConn struct {
+type nopStreamingHandlerConn struct {
 	StreamingHandlerConn
 }
 
-func (nopClientStreamingHandlerConn) Receive(msg any) error {
+func (nopStreamingHandlerConn) Receive(msg any) error {
 	return nil
 }
