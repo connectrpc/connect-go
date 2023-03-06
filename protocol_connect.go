@@ -158,7 +158,7 @@ func (h *connectHandler) NewConn(
 	if failed == nil && request.Method == http.MethodGet {
 		version := request.URL.Query().Get(connectUnaryAPIQueryParameter)
 		if version == "" && h.RequireConnectProtocolHeader {
-			failed = errorf(CodeInvalidArgument, "missing required header: set %s to %q", connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue)
+			failed = errorf(CodeInvalidArgument, "missing required query parameter: set %s to %q", connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue)
 		} else if version != "" && version != connectProtocolVersionQueryValue {
 			failed = errorf(CodeInvalidArgument, "%s must be %q: got %q", connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue, version)
 		}
