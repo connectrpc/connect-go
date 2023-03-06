@@ -284,15 +284,15 @@ func (d *duplexHTTPCall) getError() error {
 }
 
 // See: https://cs.opensource.google/go/go/+/refs/tags/go1.20.1:src/net/http/clone.go;l=22-33
-func cloneURL(u *url.URL) *url.URL {
-	if u == nil {
+func cloneURL(oldURL *url.URL) *url.URL {
+	if oldURL == nil {
 		return nil
 	}
-	u2 := new(url.URL)
-	*u2 = *u
-	if u.User != nil {
-		u2.User = new(url.Userinfo)
-		*u2.User = *u.User
+	newURL := new(url.URL)
+	*newURL = *oldURL
+	if oldURL.User != nil {
+		newURL.User = new(url.Userinfo)
+		*newURL.User = *oldURL.User
 	}
-	return u2
+	return newURL
 }
