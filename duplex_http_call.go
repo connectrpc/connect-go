@@ -62,6 +62,13 @@ func newDuplexHTTPCall(
 	// to mutate the req.URL, we don't feel the effects of it.
 	url = cloneURL(url)
 	pipeReader, pipeWriter := io.Pipe()
+
+	// This is mirroring what http.NewRequestContext did, but
+	// using an already parsed url.URL object, rather than a string
+	// and parsing it again. This is a bit funny with HTTP/1.1
+	// explicitly, but this is logic copied over from
+	// NewRequestContext and doesn't effect the actual version
+	// being transmitted.
 	request := (&http.Request{
 		Method:     http.MethodPost,
 		URL:        url,
