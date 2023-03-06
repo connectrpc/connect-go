@@ -109,7 +109,7 @@ type protocolClientParams struct {
 	Codec            Codec
 	CompressMinBytes int
 	HTTPClient       HTTPClient
-	URL              string
+	URL              *url.URL
 	BufferPool       *bufferPool
 	ReadMaxBytes     int
 	SendMaxBytes     int
@@ -236,22 +236,6 @@ func discard(reader io.Reader) error {
 	lr := &io.LimitedReader{R: reader, N: discardLimit}
 	_, err := io.Copy(io.Discard, lr)
 	return err
-}
-
-func validateRequestURL(rawURL string) (*url.URL, *Error) {
-	url, err := url.ParseRequestURI(rawURL)
-	if err == nil {
-		return url, nil
-	}
-	if !strings.Contains(rawURL, "://") {
-		// URL doesn't have a scheme, so the user is likely accustomed to
-		// grpc-go's APIs.
-		err = fmt.Errorf(
-			"URL %q missing scheme: use http:// or https:// (unlike grpc-go)",
-			rawURL,
-		)
-	}
-	return nil, NewError(CodeUnavailable, err)
 }
 
 // negotiateCompression determines and validates the request compression and

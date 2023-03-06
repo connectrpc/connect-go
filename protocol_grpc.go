@@ -110,13 +110,9 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 
 // NewClient implements protocol, so it must return an interface.
 func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, error) {
-	url, err := validateRequestURL(params.URL)
-	if err != nil {
-		return nil, err
-	}
-	peer := newPeerFromURL(url, ProtocolGRPC)
+	peer := newPeerFromURL(params.URL, ProtocolGRPC)
 	if g.web {
-		peer = newPeerFromURL(url, ProtocolGRPCWeb)
+		peer = newPeerFromURL(params.URL, ProtocolGRPCWeb)
 	}
 	return &grpcClient{
 		protocolClientParams: *params,

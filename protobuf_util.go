@@ -22,8 +22,8 @@ import (
 // corresponding to the Protobuf package, service, and method. It always starts
 // with a slash. Within connect, we use this as (1) Spec.Procedure and (2) the
 // path when mounting handlers on muxes.
-func extractProtoPath(url string) string {
-	segments := strings.Split(url, "/")
+func extractProtoPath(path string) string {
+	segments := strings.Split(path, "/")
 	var pkg, method string
 	if len(segments) > 0 {
 		pkg = segments[0]
