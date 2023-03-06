@@ -16,7 +16,9 @@ package connect
 
 import (
 	"encoding/base64"
+	"io"
 	"net/http"
+	"strings"
 )
 
 // EncodeBinaryHeader base64-encodes the data. It always emits unpadded values.
@@ -43,6 +45,26 @@ func DecodeBinaryHeader(data string) ([]byte, error) {
 	// Either the data was padded, or padding wasn't necessary. In both cases,
 	// the padding-aware decoder works.
 	return base64.StdEncoding.DecodeString(data)
+}
+
+// binaryHeaderReader creates a reader that can read either padded or unpadded
+// base64 from a string.
+func binaryHeaderReader(data string) io.Reader {
+	stringReader := strings.NewReader(data)
+	if len(data)%4 != 0 {
+		// Data definitely isn't padded.
+		return base64.NewDecoder(base64.RawStdEncoding, stringReader)
+	}
+	// Data is padded, or no padding was necessary.
+	return base64.NewDecoder(base64.StdEncoding, stringReader)
+}
+
+// headerReader creates a reader for a header value that may be base64 encoded.
+func headerReader(data string, base64Encoded bool) io.Reader {
+	if base64Encoded {
+		return binaryHeaderReader(data)
+	}
+	return strings.NewReader(data)
 }
 
 func mergeHeaders(into, from http.Header) {

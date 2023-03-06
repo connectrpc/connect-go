@@ -165,6 +165,16 @@ func WithRequireConnectProtocolHeader() HandlerOption {
 	return &requireConnectProtocolHeaderOption{}
 }
 
+// WithIdempotency declares the idempotency of the handler. This can determine
+// whether a procedure call can safely be retried, and may affect which request
+// modalities are allowed for a given procedure call.
+//
+// In most cases, you should not need to manually set this. It is normally set
+// by the code generator for your schema.
+func WithIdempotency(idempotencyLevel IdempotencyLevel) HandlerOption {
+	return &idempotencyOption{idempotencyLevel: idempotencyLevel}
+}
+
 // Option implements both [ClientOption] and [HandlerOption], so it can be
 // applied both client-side and server-side.
 type Option interface {
@@ -397,6 +407,14 @@ type requireConnectProtocolHeaderOption struct{}
 
 func (o *requireConnectProtocolHeaderOption) applyToHandler(config *handlerConfig) {
 	config.RequireConnectProtocolHeader = true
+}
+
+type idempotencyOption struct {
+	idempotencyLevel IdempotencyLevel
+}
+
+func (o *idempotencyOption) applyToHandler(config *handlerConfig) {
+	config.IdempotencyLevel = o.idempotencyLevel
 }
 
 type grpcOption struct {

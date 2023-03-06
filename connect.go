@@ -39,6 +39,7 @@ const Version = "1.5.1"
 const (
 	IsAtLeastVersion0_0_1 = true
 	IsAtLeastVersion0_1_0 = true
+	IsAtLeastVersion1_6_0 = true
 )
 
 // StreamType describes whether the client, server, neither, or both is
@@ -272,9 +273,10 @@ type HTTPClient interface {
 
 // Spec is a description of a client call or a handler invocation.
 type Spec struct {
-	StreamType StreamType
-	Procedure  string // for example, "/acme.foo.v1.FooService/Bar"
-	IsClient   bool   // otherwise we're in a handler
+	StreamType       StreamType
+	Procedure        string // for example, "/acme.foo.v1.FooService/Bar"
+	IsClient         bool   // otherwise we're in a handler
+	IdempotencyLevel IdempotencyLevel
 }
 
 // Peer describes the other party to an RPC.

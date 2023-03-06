@@ -47,6 +47,12 @@ const (
 	connectUnaryContentTypePrefix     = "application/"
 	connectUnaryContentTypeJSON       = connectUnaryContentTypePrefix + "json"
 	connectStreamingContentTypePrefix = "application/connect+"
+
+	connectUnaryEncodingQueryParameter = "enc"
+	connectUnaryMessageQueryParameter  = "msg"
+	connectUnaryBase64QueryParameter   = "b64"
+	connectUnaryAPIQueryParameter      = "api"
+	connectProtocolVersionQueryValue   = "connectv" + connectProtocolVersion
 )
 
 // defaultConnectUserAgent returns a User-Agent string similar to those used in gRPC.
@@ -58,6 +64,13 @@ type protocolConnect struct{}
 
 // NewHandler implements protocol, so it must return an interface.
 func (*protocolConnect) NewHandler(params *protocolHandlerParams) protocolHandler {
+	methods := make(map[string]struct{})
+	methods[http.MethodPost] = struct{}{}
+
+	if params.Spec.StreamType == StreamTypeUnary && params.IdempotencyLevel == IdempotencyNoSideEffects {
+		methods[http.MethodGet] = struct{}{}
+	}
+
 	contentTypes := make(map[string]struct{})
 	for _, name := range params.Codecs.Names() {
 		if params.Spec.StreamType == StreamTypeUnary {
@@ -66,8 +79,10 @@ func (*protocolConnect) NewHandler(params *protocolHandlerParams) protocolHandle
 		}
 		contentTypes[canonicalizeContentType(connectStreamingContentTypePrefix+name)] = struct{}{}
 	}
+
 	return &connectHandler{
 		protocolHandlerParams: *params,
+		methods:               methods,
 		accept:                contentTypes,
 	}
 }
@@ -87,7 +102,12 @@ func (*protocolConnect) NewClient(params *protocolClientParams) (protocolClient,
 type connectHandler struct {
 	protocolHandlerParams
 
-	accept map[string]struct{}
+	methods map[string]struct{}
+	accept  map[string]struct{}
+}
+
+func (h *connectHandler) Methods() map[string]struct{} {
+	return h.methods
 }
 
 func (h *connectHandler) ContentTypes() map[string]struct{} {
@@ -135,13 +155,54 @@ func (h *connectHandler) NewConn(
 	if failed == nil {
 		failed = checkServerStreamsCanFlush(h.Spec, responseWriter)
 	}
-	if failed == nil {
+	if failed == nil && request.Method == http.MethodGet {
+		version := request.URL.Query().Get(connectUnaryAPIQueryParameter)
+		if version == "" && h.RequireConnectProtocolHeader {
+			failed = errorf(CodeInvalidArgument, "missing required query parameter: set %s to %q", connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue)
+		} else if version != "" && version != connectProtocolVersionQueryValue {
+			failed = errorf(CodeInvalidArgument, "%s must be %q: got %q", connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue, version)
+		}
+	}
+	if failed == nil && request.Method == http.MethodPost {
 		version := getHeaderCanonical(request.Header, connectHeaderProtocolVersion)
 		if version == "" && h.RequireConnectProtocolHeader {
 			failed = errorf(CodeInvalidArgument, "missing required header: set %s to %q", connectHeaderProtocolVersion, connectProtocolVersion)
 		} else if version != "" && version != connectProtocolVersion {
 			failed = errorf(CodeInvalidArgument, "%s must be %q: got %q", connectHeaderProtocolVersion, connectProtocolVersion, version)
 		}
+	}
+
+	var requestBody io.ReadCloser
+	var contentType, codecName string
+	if request.Method == http.MethodGet {
+		query := request.URL.Query()
+		if failed == nil && !query.Has(connectUnaryEncodingQueryParameter) {
+			failed = errorf(CodeInvalidArgument, "missing %s parameter", connectUnaryEncodingQueryParameter)
+		} else if failed == nil && !query.Has(connectUnaryMessageQueryParameter) {
+			failed = errorf(CodeInvalidArgument, "missing %s parameter", connectUnaryMessageQueryParameter)
+		}
+		msg := query.Get(connectUnaryMessageQueryParameter)
+		msgReader := headerReader(msg, query.Get(connectUnaryBase64QueryParameter) == "1")
+		requestBody = io.NopCloser(msgReader)
+		codecName = query.Get(connectUnaryEncodingQueryParameter)
+		contentType = connectContentTypeFromCodecName(
+			h.Spec.StreamType,
+			codecName,
+		)
+	} else {
+		requestBody = request.Body
+		contentType = getHeaderCanonical(request.Header, headerContentType)
+		codecName = connectCodecFromContentType(
+			h.Spec.StreamType,
+			contentType,
+		)
+	}
+
+	codec := h.Codecs.Get(codecName)
+	// The codec can be nil in the GET request case; that's okay: when failed
+	// is non-nil, codec is never used.
+	if failed == nil && codec == nil {
+		failed = errorf(CodeInvalidArgument, "invalid message encoding: %q", codecName)
 	}
 
 	// Write any remaining headers here:
@@ -152,7 +213,7 @@ func (h *connectHandler) NewConn(
 	// Since we know that these header keys are already in canonical form, we can
 	// skip the normalization in Header.Set.
 	header := responseWriter.Header()
-	header[headerContentType] = []string{getHeaderCanonical(request.Header, headerContentType)}
+	header[headerContentType] = []string{contentType}
 	acceptCompressionHeader := connectUnaryHeaderAcceptCompression
 	if h.Spec.StreamType != StreamTypeUnary {
 		acceptCompressionHeader = connectStreamingHeaderAcceptCompression
@@ -165,12 +226,6 @@ func (h *connectHandler) NewConn(
 		}
 	}
 	header[acceptCompressionHeader] = []string{h.CompressionPools.CommaSeparatedNames()}
-
-	codecName := connectCodecFromContentType(
-		h.Spec.StreamType,
-		getHeaderCanonical(request.Header, headerContentType),
-	)
-	codec := h.Codecs.Get(codecName) // handler.go guarantees this is not nil
 
 	var conn handlerConnCloser
 	peer := Peer{
@@ -194,7 +249,7 @@ func (h *connectHandler) NewConn(
 				sendMaxBytes:     h.SendMaxBytes,
 			},
 			unmarshaler: connectUnaryUnmarshaler{
-				reader:          request.Body,
+				reader:          requestBody,
 				codec:           codec,
 				compressionPool: h.CompressionPools.Get(requestCompression),
 				bufferPool:      h.BufferPool,
@@ -220,7 +275,7 @@ func (h *connectHandler) NewConn(
 			},
 			unmarshaler: connectStreamingUnmarshaler{
 				envelopeReader: envelopeReader{
-					reader:          request.Body,
+					reader:          requestBody,
 					codec:           codec,
 					compressionPool: h.CompressionPools.Get(requestCompression),
 					bufferPool:      h.BufferPool,

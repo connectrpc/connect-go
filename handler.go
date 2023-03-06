@@ -30,6 +30,7 @@ type Handler struct {
 	spec             Spec
 	implementation   StreamingHandlerFunc
 	protocolHandlers []protocolHandler
+	allowMethod      string // Allow header
 	acceptPost       string // Accept-Post header
 }
 
@@ -86,6 +87,7 @@ func NewUnaryHandler[Req, Res any](
 		spec:             config.newSpec(StreamTypeUnary),
 		implementation:   implementation,
 		protocolHandlers: protocolHandlers,
+		allowMethod:      sortedAllowMethodValue(protocolHandlers),
 		acceptPost:       sortedAcceptPostValue(protocolHandlers),
 	}
 }
@@ -182,26 +184,38 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 		return
 	}
 
-	// The gRPC-HTTP2, gRPC-Web, and Connect protocols are all POST-only.
-	if request.Method != http.MethodPost {
-		responseWriter.Header().Set("Allow", http.MethodPost)
-		responseWriter.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Find our implementation of the RPC protocol in use.
-	contentType := canonicalizeContentType(getHeaderCanonical(request.Header, headerContentType))
-	var protocolHandler protocolHandler
+	var protocolHandlers []protocolHandler
 	for _, handler := range h.protocolHandlers {
-		if _, ok := handler.ContentTypes()[contentType]; ok {
-			protocolHandler = handler
-			break
+		if _, ok := handler.Methods()[request.Method]; ok {
+			protocolHandlers = append(protocolHandlers, handler)
 		}
 	}
-	if protocolHandler == nil {
-		responseWriter.Header().Set("Accept-Post", h.acceptPost)
-		responseWriter.WriteHeader(http.StatusUnsupportedMediaType)
+
+	contentType := canonicalizeContentType(getHeaderCanonical(request.Header, headerContentType))
+
+	// Find our implementation of the RPC protocol in use.
+	var protocolHandler protocolHandler
+	switch {
+	case len(protocolHandlers) == 0:
+		responseWriter.Header().Set("Allow", h.allowMethod)
+		responseWriter.WriteHeader(http.StatusMethodNotAllowed)
 		return
+
+	case len(protocolHandlers) == 1 && contentType == "":
+		protocolHandler = protocolHandlers[0]
+
+	default:
+		for _, handler := range protocolHandlers {
+			if _, ok := handler.ContentTypes()[contentType]; ok {
+				protocolHandler = handler
+				break
+			}
+		}
+		if protocolHandler == nil {
+			responseWriter.Header().Set("Accept-Post", h.acceptPost)
+			responseWriter.WriteHeader(http.StatusUnsupportedMediaType)
+			return
+		}
 	}
 
 	// Establish a stream and serve the RPC.
@@ -239,6 +253,7 @@ type handlerConfig struct {
 	HandleGRPC                   bool
 	HandleGRPCWeb                bool
 	RequireConnectProtocolHeader bool
+	IdempotencyLevel             IdempotencyLevel
 	BufferPool                   *bufferPool
 	ReadMaxBytes                 int
 	SendMaxBytes                 int
@@ -265,8 +280,9 @@ func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig 
 
 func (c *handlerConfig) newSpec(streamType StreamType) Spec {
 	return Spec{
-		Procedure:  c.Procedure,
-		StreamType: streamType,
+		Procedure:        c.Procedure,
+		StreamType:       streamType,
+		IdempotencyLevel: c.IdempotencyLevel,
 	}
 }
 
@@ -294,6 +310,7 @@ func (c *handlerConfig) newProtocolHandlers(streamType StreamType) []protocolHan
 			ReadMaxBytes:                 c.ReadMaxBytes,
 			SendMaxBytes:                 c.SendMaxBytes,
 			RequireConnectProtocolHeader: c.RequireConnectProtocolHeader,
+			IdempotencyLevel:             c.IdempotencyLevel,
 		}))
 	}
 	return handlers
@@ -314,6 +331,7 @@ func newStreamHandler(
 		spec:             config.newSpec(streamType),
 		implementation:   implementation,
 		protocolHandlers: protocolHandlers,
+		allowMethod:      sortedAllowMethodValue(protocolHandlers),
 		acceptPost:       sortedAcceptPostValue(protocolHandlers),
 	}
 }
