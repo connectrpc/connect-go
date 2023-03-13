@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sync"
 )
 
@@ -134,6 +135,16 @@ func (d *duplexHTTPCall) Header() http.Header {
 // Trailer returns the HTTP request trailers.
 func (d *duplexHTTPCall) Trailer() http.Header {
 	return d.request.Trailer
+}
+
+// URL returns the URL for the request.
+func (d *duplexHTTPCall) URL() *url.URL {
+	return d.request.URL
+}
+
+// SetMethod changes the method of the request before it is sent.
+func (d *duplexHTTPCall) SetMethod(method string) {
+	d.request.Method = method
 }
 
 // Read from the response body. Returns the first error passed to SetError.

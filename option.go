@@ -240,6 +240,16 @@ func WithIdempotency(idempotencyLevel IdempotencyLevel) Option {
 	return &idempotencyOption{idempotencyLevel: idempotencyLevel}
 }
 
+// WithGetURLMaxBytes allows using HTTP Get requests for requests whose URLs
+// would fall under the provided maximum number of bytes. Please note that this
+// feature has some performance impact for requests made to RPCs which are
+// applicable, as a message may need to be marshalled twice.
+//
+// If this value is set to zero, no HTTP Get requests will be allowed.
+func WithGetURLMaxBytes(max int) ClientOption {
+	return &getURLMaxBytes{Max: max}
+}
+
 // WithInterceptors configures a client or handler's interceptor stack. Repeated
 // WithInterceptors options are applied in order, so
 //
@@ -427,6 +437,14 @@ type grpcOption struct {
 
 func (o *grpcOption) applyToClient(config *clientConfig) {
 	config.Protocol = &protocolGRPC{web: o.web}
+}
+
+type getURLMaxBytes struct {
+	Max int
+}
+
+func (o *getURLMaxBytes) applyToClient(config *clientConfig) {
+	config.GetURLMaxBytes = o.Max
 }
 
 type interceptorsOption struct {
