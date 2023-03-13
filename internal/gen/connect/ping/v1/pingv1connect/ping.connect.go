@@ -66,7 +66,8 @@ func NewPingServiceClient(httpClient connect_go.HTTPClient, baseURL string, opts
 		ping: connect_go.NewClient[v1.PingRequest, v1.PingResponse](
 			httpClient,
 			baseURL+"/connect.ping.v1.PingService/Ping",
-			opts...,
+			connect_go.WithIdempotency(connect_go.IdempotencyNoSideEffects),
+			connect_go.WithClientOptions(opts...),
 		),
 		fail: connect_go.NewClient[v1.FailRequest, v1.FailResponse](
 			httpClient,
