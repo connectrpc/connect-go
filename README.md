@@ -28,14 +28,13 @@ curl \
 Handlers and clients also support the gRPC and gRPC-Web protocols, including
 streaming, headers, trailers, and error details. gRPC-compatible [server
 reflection][] and [health checks][] are available as standalone packages.
-Instead of cURL, we could call our API with `grpcurl`:
+Instead of cURL, we could call our API with `buf curl`:
 
 ```
-go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
-grpcurl \
-    -d '{"sentence": "I feel happy."}' \
-    demo.connectrpc.com:443 \
-    buf.connect.demo.eliza.v1.ElizaService/Say
+go install github.com/bufbuild/buf/cmd/buf@latest
+buf curl --protocol grpc \
+    --data '{"sentence": "I feel happy."}' \
+    https://demo.connectrpc.com/buf.connect.demo.eliza.v1.ElizaService/Say
 ```
 
 Under the hood, Connect is just [Protocol Buffers][protobuf] and the standard
