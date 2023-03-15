@@ -125,7 +125,7 @@ func TestClientPeer(t *testing.T) {
 	})
 	t.Run("connect+get", func(t *testing.T) {
 		t.Parallel()
-		run(t, connect.WithGetURLMaxBytes(4096))
+		run(t, connect.WithHTTPGet(4096))
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()
