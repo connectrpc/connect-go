@@ -235,7 +235,12 @@ func WithSendMaxBytes(max int) Option {
 // modalities are allowed for a given procedure call.
 //
 // In most cases, you should not need to manually set this. It is normally set
-// by the code generator for your schema.
+// by the code generator for your schema. For protobuf, it can be set like this:
+//
+//	rpc Ping(PingRequest) returns (PingResponse) {
+//	  option idempotency_level = NO_SIDE_EFFECTS;
+//	}
+
 func WithIdempotency(idempotencyLevel IdempotencyLevel) Option {
 	return &idempotencyOption{idempotencyLevel: idempotencyLevel}
 }
