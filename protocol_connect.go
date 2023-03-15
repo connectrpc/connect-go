@@ -48,19 +48,18 @@ const (
 	connectUnaryContentTypeJSON       = connectUnaryContentTypePrefix + "json"
 	connectStreamingContentTypePrefix = "application/connect+"
 
-	connectUnaryEncodingQueryParameter = "enc"
-	connectUnaryMessageQueryParameter  = "msg"
-	connectUnaryBase64QueryParameter   = "b64"
-	connectUnaryAPIQueryParameter      = "api"
-	connectProtocolVersionQueryValue   = "connectv" + connectProtocolVersion
+	connectUnaryEncodingQueryParameter    = "enc"
+	connectUnaryMessageQueryParameter     = "msg"
+	connectUnaryBase64QueryParameter      = "b64"
+	connectUnaryCompressionQueryParameter = "cmp"
+	connectUnaryAPIQueryParameter         = "api"
+	connectProtocolVersionQueryValue      = "connectv" + connectProtocolVersion
 )
 
 // defaultConnectUserAgent returns a User-Agent string similar to those used in gRPC.
 //
 //nolint:gochecknoglobals
 var defaultConnectUserAgent = fmt.Sprintf("connect-go/%s (%s)", Version, runtime.Version())
-
-type connectMarshaler interface{ Marshal(message any) *Error }
 
 type protocolConnect struct{}
 
@@ -360,15 +359,17 @@ func (c *connectClient) NewConn(
 			duplexCall:       duplexCall,
 			compressionPools: c.CompressionPools,
 			bufferPool:       c.BufferPool,
-			marshaler: &connectUnaryMarshaler{
-				writer:           duplexCall,
-				codec:            c.Codec,
-				compressMinBytes: c.CompressMinBytes,
-				compressionName:  c.CompressionName,
-				compressionPool:  c.CompressionPools.Get(c.CompressionName),
-				bufferPool:       c.BufferPool,
-				header:           duplexCall.Header(),
-				sendMaxBytes:     c.SendMaxBytes,
+			marshaler: connectUnaryRequestMarshaler{
+				connectUnaryMarshaler: connectUnaryMarshaler{
+					writer:           duplexCall,
+					codec:            c.Codec,
+					compressMinBytes: c.CompressMinBytes,
+					compressionName:  c.CompressionName,
+					compressionPool:  c.CompressionPools.Get(c.CompressionName),
+					bufferPool:       c.BufferPool,
+					header:           duplexCall.Header(),
+					sendMaxBytes:     c.SendMaxBytes,
+				},
 			},
 			unmarshaler: connectUnaryUnmarshaler{
 				reader:       duplexCall,
@@ -379,12 +380,11 @@ func (c *connectClient) NewConn(
 			responseHeader:  make(http.Header),
 			responseTrailer: make(http.Header),
 		}
-		if codec, ok := c.Codec.(stableCodec); ok && spec.IdempotencyLevel == IdempotencyNoSideEffects && c.GetURLMaxBytes > 0 {
-			unaryConn.marshaler = &connectGetMarshaler{
-				getURLMaxBytes: c.GetURLMaxBytes,
-				codec:          codec,
-				duplexCall:     duplexCall,
-				nextMarshaler:  unaryConn.marshaler,
+		if spec.IdempotencyLevel == IdempotencyNoSideEffects {
+			if stableCodec, ok := c.Codec.(stableCodec); ok {
+				unaryConn.marshaler.getURLMaxBytes = c.GetURLMaxBytes
+				unaryConn.marshaler.stableCodec = stableCodec
+				unaryConn.marshaler.duplexCall = duplexCall
 			}
 		}
 		conn = unaryConn
@@ -430,7 +430,7 @@ type connectUnaryClientConn struct {
 	duplexCall       *duplexHTTPCall
 	compressionPools readOnlyCompressionPools
 	bufferPool       *bufferPool
-	marshaler        connectMarshaler
+	marshaler        connectUnaryRequestMarshaler
 	unmarshaler      connectUnaryUnmarshaler
 	responseHeader   http.Header
 	responseTrailer  http.Header
@@ -830,45 +830,6 @@ func (u *connectStreamingUnmarshaler) EndStreamError() *Error {
 	return u.endStreamErr
 }
 
-type connectGetMarshaler struct {
-	getURLMaxBytes int
-	codec          stableCodec
-	duplexCall     *duplexHTTPCall
-	nextMarshaler  connectMarshaler
-}
-
-func (m *connectGetMarshaler) Marshal(message any) *Error {
-	if m.tryGet(message) {
-		return nil
-	}
-	return m.nextMarshaler.Marshal(message)
-}
-
-func (m *connectGetMarshaler) tryGet(message any) bool {
-	data, err := m.codec.MarshalStable(message)
-	if err != nil || len(data) > m.getURLMaxBytes {
-		// TODO(jchadwick-buf): should return error? emit warning? unclear.
-		return false
-	}
-	url := *m.duplexCall.URL()
-	query := url.Query()
-	query.Set(connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue)
-	query.Set(connectUnaryEncodingQueryParameter, m.codec.Name())
-	if m.codec.IsBinary() {
-		query.Set(connectUnaryMessageQueryParameter, EncodeBinaryHeader(data))
-		query.Set(connectUnaryBase64QueryParameter, "1")
-	} else {
-		query.Set(connectUnaryMessageQueryParameter, string(data))
-	}
-	url.RawQuery = query.Encode()
-	if len(url.String()) > m.getURLMaxBytes {
-		return false
-	}
-	m.duplexCall.SetMethod(http.MethodGet)
-	*m.duplexCall.URL() = url
-	return true
-}
-
 type connectUnaryMarshaler struct {
 	writer           io.Writer
 	codec            Codec
@@ -917,6 +878,87 @@ func (m *connectUnaryMarshaler) write(data []byte) *Error {
 		return errorf(CodeUnknown, "write message: %w", err)
 	}
 	return nil
+}
+
+type connectUnaryRequestMarshaler struct {
+	connectUnaryMarshaler
+	getURLMaxBytes int
+	stableCodec    stableCodec
+	duplexCall     *duplexHTTPCall
+}
+
+func (m *connectUnaryRequestMarshaler) Marshal(message any) *Error {
+	if m.stableCodec != nil && m.getURLMaxBytes > 0 {
+		return m.marshalWithGet(message)
+	}
+	return m.connectUnaryMarshaler.Marshal(message)
+}
+
+func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
+	// TODO(jchadwick-buf): This function is mostly a superset of
+	// connectUnaryMarshaler.Marshal. This should be reconciled at some point.
+	if message == nil {
+		if m.writeWithGet(nil, false) {
+			return nil
+		}
+		return m.write(nil)
+	}
+	data, err := m.stableCodec.MarshalStable(message)
+	if err != nil {
+		return errorf(CodeInternal, "marshal message stable: %w", err)
+	}
+	if len(data) <= m.getURLMaxBytes {
+		if m.writeWithGet(data, false) {
+			return nil
+		}
+	}
+	if m.compressionPool == nil {
+		if m.sendMaxBytes > 0 && len(data) > m.sendMaxBytes {
+			return NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", len(data), m.sendMaxBytes))
+		}
+		return m.write(data)
+	}
+	// Compress message to try to make it fit in the URL.
+	uncompressed := bytes.NewBuffer(data)
+	defer m.bufferPool.Put(uncompressed)
+	compressed := m.bufferPool.Get()
+	defer m.bufferPool.Put(compressed)
+	if err := m.compressionPool.Compress(compressed, uncompressed); err != nil {
+		return err
+	}
+	if compressed.Len() < m.getURLMaxBytes {
+		if m.writeWithGet(compressed.Bytes(), false) {
+			return nil
+		}
+	}
+	if m.sendMaxBytes > 0 && compressed.Len() > m.sendMaxBytes {
+		return NewError(CodeResourceExhausted, fmt.Errorf("compressed message size %d exceeds sendMaxBytes %d", compressed.Len(), m.sendMaxBytes))
+	}
+	setHeaderCanonical(m.header, connectUnaryHeaderCompression, m.compressionName)
+	return m.write(compressed.Bytes())
+}
+
+func (m *connectUnaryRequestMarshaler) writeWithGet(data []byte, compressed bool) bool {
+	url := *m.duplexCall.URL()
+	query := url.Query()
+	query.Set(connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue)
+	query.Set(connectUnaryEncodingQueryParameter, m.codec.Name())
+	if m.stableCodec.IsBinary() {
+		query.Set(connectUnaryMessageQueryParameter, EncodeBinaryHeader(data))
+		query.Set(connectUnaryBase64QueryParameter, "1")
+	} else {
+		query.Set(connectUnaryMessageQueryParameter, string(data))
+	}
+	if compressed {
+		query.Set(connectUnaryCompressionQueryParameter, m.compressionName)
+	}
+	url.RawQuery = query.Encode()
+	if len(url.String()) > m.getURLMaxBytes {
+		return false
+	}
+	m.duplexCall.SetMethod(http.MethodGet)
+	*m.duplexCall.URL() = url
+	return true
 }
 
 type connectUnaryUnmarshaler struct {
