@@ -288,9 +288,13 @@ type Spec struct {
 // On both the client and the server, Protocol is the RPC protocol in use.
 // Currently, it's either [ProtocolConnect], [ProtocolGRPC], or
 // [ProtocolGRPCWeb], but additional protocols may be added in the future.
+//
+// Query contains the query parameters for the request. For the server, this
+// will reflect the actual query parameters sent. For the client, it is unset.
 type Peer struct {
 	Addr     string
 	Protocol string
+	Query    url.Values
 }
 
 func newPeerFromURL(url *url.URL, protocol string) Peer {

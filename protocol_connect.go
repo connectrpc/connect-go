@@ -138,6 +138,7 @@ func (h *connectHandler) NewConn(
 	responseWriter http.ResponseWriter,
 	request *http.Request,
 ) (handlerConnCloser, bool) {
+	query := request.URL.Query()
 	// We need to parse metadata before entering the interceptor stack; we'll
 	// send the error to the client later on.
 	var contentEncoding, acceptEncoding string
@@ -157,7 +158,7 @@ func (h *connectHandler) NewConn(
 		failed = checkServerStreamsCanFlush(h.Spec, responseWriter)
 	}
 	if failed == nil && request.Method == http.MethodGet {
-		version := request.URL.Query().Get(connectUnaryAPIQueryParameter)
+		version := query.Get(connectUnaryAPIQueryParameter)
 		if version == "" && h.RequireConnectProtocolHeader {
 			failed = errorf(CodeInvalidArgument, "missing required query parameter: set %s to %q", connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue)
 		} else if version != "" && version != connectProtocolVersionQueryValue {
@@ -176,7 +177,6 @@ func (h *connectHandler) NewConn(
 	var requestBody io.ReadCloser
 	var contentType, codecName string
 	if request.Method == http.MethodGet {
-		query := request.URL.Query()
 		if failed == nil && !query.Has(connectUnaryEncodingQueryParameter) {
 			failed = errorf(CodeInvalidArgument, "missing %s parameter", connectUnaryEncodingQueryParameter)
 		} else if failed == nil && !query.Has(connectUnaryMessageQueryParameter) {
@@ -232,6 +232,7 @@ func (h *connectHandler) NewConn(
 	peer := Peer{
 		Addr:     request.RemoteAddr,
 		Protocol: ProtocolConnect,
+		Query:    query,
 	}
 	if h.Spec.StreamType == StreamTypeUnary {
 		conn = &connectUnaryHandlerConn{
