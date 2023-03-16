@@ -926,13 +926,13 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 	if err := m.compressionPool.Compress(compressed, uncompressed); err != nil {
 		return err
 	}
-	if compressed.Len() < m.getURLMaxBytes {
-		if m.writeWithGet(compressed.Bytes(), false) {
-			return nil
-		}
-	}
 	if m.sendMaxBytes > 0 && compressed.Len() > m.sendMaxBytes {
 		return NewError(CodeResourceExhausted, fmt.Errorf("compressed message size %d exceeds sendMaxBytes %d", compressed.Len(), m.sendMaxBytes))
+	}
+	if compressed.Len() < m.getURLMaxBytes {
+		if m.writeWithGet(compressed.Bytes(), true) {
+			return nil
+		}
 	}
 	setHeaderCanonical(m.header, connectUnaryHeaderCompression, m.compressionName)
 	return m.write(compressed.Bytes())

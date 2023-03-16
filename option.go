@@ -264,7 +264,7 @@ func WithIdempotency(idempotencyLevel IdempotencyLevel) Option {
 // however, that Connect does not automatically set any cache headers on the
 // server; you can set cache headers using interceptors.
 //
-// If this value is set to zero (the default,) Get requests will be disabled.
+// If this value is set to zero (the default), Get requests will be disabled.
 func WithHTTPGet(maxURLSize int) ClientOption {
 	return &getURLMaxBytes{Max: maxURLSize}
 }
