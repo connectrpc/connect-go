@@ -228,7 +228,17 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 		)
 		g.P("httpClient,")
 		g.P(`baseURL + "`, procedureName(method), `",`)
-		g.P("opts...,")
+		idempotency := methodIdempotency(method)
+		switch idempotency {
+		case connect.IdempotencyNoSideEffects:
+			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyNoSideEffects"), "),")
+			g.P(connectPackage.Ident("WithClientOptions"), "(opts...),")
+		case connect.IdempotencyIdempotent:
+			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyIdempotent"), "),")
+			g.P(connectPackage.Ident("WithClientOptions"), "(opts...),")
+		case connect.IdempotencyUnknown:
+			g.P("opts...,")
+		}
 		g.P("),")
 	}
 	g.P("}")

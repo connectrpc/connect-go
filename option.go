@@ -165,16 +165,6 @@ func WithRequireConnectProtocolHeader() HandlerOption {
 	return &requireConnectProtocolHeaderOption{}
 }
 
-// WithIdempotency declares the idempotency of the handler. This can determine
-// whether a procedure call can safely be retried, and may affect which request
-// modalities are allowed for a given procedure call.
-//
-// In most cases, you should not need to manually set this. It is normally set
-// by the code generator for your schema.
-func WithIdempotency(idempotencyLevel IdempotencyLevel) HandlerOption {
-	return &idempotencyOption{idempotencyLevel: idempotencyLevel}
-}
-
 // Option implements both [ClientOption] and [HandlerOption], so it can be
 // applied both client-side and server-side.
 type Option interface {
@@ -238,6 +228,45 @@ func WithReadMaxBytes(max int) Option {
 // handlers default to allowing any message size.
 func WithSendMaxBytes(max int) Option {
 	return &sendMaxBytesOption{Max: max}
+}
+
+// WithIdempotency declares the idempotency of the procedure. This can determine
+// whether a procedure call can safely be retried, and may affect which request
+// modalities are allowed for a given procedure call.
+//
+// In most cases, you should not need to manually set this. It is normally set
+// by the code generator for your schema. For protobuf, it can be set like this:
+//
+//	rpc Ping(PingRequest) returns (PingResponse) {
+//	  option idempotency_level = NO_SIDE_EFFECTS;
+//	}
+
+func WithIdempotency(idempotencyLevel IdempotencyLevel) Option {
+	return &idempotencyOption{idempotencyLevel: idempotencyLevel}
+}
+
+// WithHTTPGet allows using HTTP Get requests for side-effect free unary RPC
+// calls. Typically, a given procedure is known to be side-effect free if it is
+// declared to be in its IDL (see [WithIdempotency].) You must provide the
+// maximum allowable URL length to enable this feature; this is necessary as
+// most user agents, middleboxes/proxies, and servers have limitations on the
+// allowable length of a URL. For example, Apache and Nginx limit the size of a
+// request line to around 8 KiB, meaning that maximum length of a URL is a bit
+// smaller than this.
+//
+// If a URL would be longer than the configured maximum value here, the request
+// will be sent as an HTTP POST instead.
+//
+// A safe value to start with would be 4096 (4 KiB), as this is well under the
+// 8 KiB request line limit encountered on common CDNs and proxies.
+//
+// Using HTTP Get requests makes it easier to set up caching with a CDN. Note,
+// however, that Connect does not automatically set any cache headers on the
+// server; you can set cache headers using interceptors.
+//
+// If this value is set to zero (the default), Get requests will be disabled.
+func WithHTTPGet(maxURLSize int) ClientOption {
+	return &getURLMaxBytes{Max: maxURLSize}
 }
 
 // WithInterceptors configures a client or handler's interceptor stack. Repeated
@@ -413,6 +442,10 @@ type idempotencyOption struct {
 	idempotencyLevel IdempotencyLevel
 }
 
+func (o *idempotencyOption) applyToClient(config *clientConfig) {
+	config.IdempotencyLevel = o.idempotencyLevel
+}
+
 func (o *idempotencyOption) applyToHandler(config *handlerConfig) {
 	config.IdempotencyLevel = o.idempotencyLevel
 }
@@ -423,6 +456,14 @@ type grpcOption struct {
 
 func (o *grpcOption) applyToClient(config *clientConfig) {
 	config.Protocol = &protocolGRPC{web: o.web}
+}
+
+type getURLMaxBytes struct {
+	Max int
+}
+
+func (o *getURLMaxBytes) applyToClient(config *clientConfig) {
+	config.GetURLMaxBytes = o.Max
 }
 
 type interceptorsOption struct {
