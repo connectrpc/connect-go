@@ -143,7 +143,11 @@ func (h *connectHandler) NewConn(
 	// send the error to the client later on.
 	var contentEncoding, acceptEncoding string
 	if h.Spec.StreamType == StreamTypeUnary {
-		contentEncoding = getHeaderCanonical(request.Header, connectUnaryHeaderCompression)
+		if request.Method == http.MethodGet {
+			contentEncoding = query.Get(connectUnaryCompressionQueryParameter)
+		} else {
+			contentEncoding = getHeaderCanonical(request.Header, connectUnaryHeaderCompression)
+		}
 		acceptEncoding = getHeaderCanonical(request.Header, connectUnaryHeaderAcceptCompression)
 	} else {
 		contentEncoding = getHeaderCanonical(request.Header, connectStreamingHeaderCompression)
@@ -908,7 +912,7 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 	if err != nil {
 		return errorf(CodeInternal, "marshal message stable: %w", err)
 	}
-	if len(data) <= m.getURLMaxBytes {
+	if len(data) <= m.getURLMaxBytes && (m.sendMaxBytes <= 0 || len(data) < m.sendMaxBytes) {
 		if m.writeWithGet(data, false) {
 			return nil
 		}
