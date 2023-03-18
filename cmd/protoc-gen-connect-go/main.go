@@ -168,12 +168,37 @@ func generatePreamble(g *protogen.GeneratedFile, file *protogen.File) {
 }
 
 func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protogen.Service) {
+	var numMethods int
 	g.P("const (")
 	for _, service := range services {
 		constName := fmt.Sprintf("%sName", service.Desc.Name())
 		wrapComments(g, constName, " is the fully-qualified name of the ",
 			service.Desc.Name(), " service.")
 		g.P(constName, ` = "`, service.Desc.FullName(), `"`)
+		numMethods += len(service.Methods)
+	}
+	g.P(")")
+	g.P()
+
+	if numMethods == 0 {
+		return
+	}
+	wrapComments(g, "These constants are the fully-qualified names of the RPCs defined in this package. ",
+		"They're exposed at runtime as Spec.Procedure and as the final two segments of the HTTP route.")
+	g.P("//")
+	wrapComments(g, "Note that these are different from the fully-qualified method names used by ",
+		"google.golang.org/protobuf/reflect/protoreflect. To convert from these constants to ",
+		"reflection-formatted method names, remove the leading slash and convert the ",
+		"remaining slash to a period.")
+	g.P("const (")
+	for _, service := range services {
+		for _, method := range service.Methods {
+			// The runtime exposes this value as Spec.Procedure, so we should use the
+			// same term here.
+			wrapComments(g, procedureConstName(method), " is the fully-qualified name of the ",
+				service.Desc.Name(), "'s ", method.Desc.Name(), " RPC.")
+			g.P(procedureConstName(method), ` = "`, fmt.Sprintf("/%s/%s", service.Desc.FullName(), method.Desc.Name()), `"`)
+		}
 	}
 	g.P(")")
 	g.P()
@@ -236,7 +261,7 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 			"(",
 		)
 		g.P("httpClient,")
-		g.P(`baseURL + "`, procedureName(method), `",`)
+		g.P(`baseURL + `, procedureConstName(method), `,`)
 		g.P("opts...,")
 		g.P("),")
 	}
@@ -353,15 +378,15 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 		isStreamingClient := method.Desc.IsStreamingClient()
 		switch {
 		case isStreamingClient && !isStreamingServer:
-			g.P(`mux.Handle("`, procedureName(method), `", `, connectPackage.Ident("NewClientStreamHandler"), "(")
+			g.P(`mux.Handle(`, procedureConstName(method), `, `, connectPackage.Ident("NewClientStreamHandler"), "(")
 		case !isStreamingClient && isStreamingServer:
-			g.P(`mux.Handle("`, procedureName(method), `", `, connectPackage.Ident("NewServerStreamHandler"), "(")
+			g.P(`mux.Handle(`, procedureConstName(method), `, `, connectPackage.Ident("NewServerStreamHandler"), "(")
 		case isStreamingClient && isStreamingServer:
-			g.P(`mux.Handle("`, procedureName(method), `", `, connectPackage.Ident("NewBidiStreamHandler"), "(")
+			g.P(`mux.Handle(`, procedureConstName(method), `, `, connectPackage.Ident("NewBidiStreamHandler"), "(")
 		default:
-			g.P(`mux.Handle("`, procedureName(method), `", `, connectPackage.Ident("NewUnaryHandler"), "(")
+			g.P(`mux.Handle(`, procedureConstName(method), `, `, connectPackage.Ident("NewUnaryHandler"), "(")
 		}
-		g.P(`"`, procedureName(method), `",`)
+		g.P(procedureConstName(method), `,`)
 		g.P("svc.", method.GoName, ",")
 		g.P("opts...,")
 		g.P("))")
@@ -434,13 +459,8 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 		g.QualifiedGoIdent(method.Output.GoIdent) + "], error)"
 }
 
-func procedureName(method *protogen.Method) string {
-	return fmt.Sprintf(
-		"/%s.%s/%s",
-		method.Parent.Desc.ParentFile().Package(),
-		method.Parent.Desc.Name(),
-		method.Desc.Name(),
-	)
+func procedureConstName(m *protogen.Method) string {
+	return fmt.Sprintf("%s%sProcedure", m.Parent.Desc.Name(), m.Desc.Name())
 }
 
 func reflectionName(service *protogen.Service) string {

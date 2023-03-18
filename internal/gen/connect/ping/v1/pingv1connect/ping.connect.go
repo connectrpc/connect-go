@@ -44,6 +44,26 @@ const (
 	PingServiceName = "connect.ping.v1.PingService"
 )
 
+// These constants are the fully-qualified names of the RPCs defined in this package. They're
+// exposed at runtime as Spec.Procedure and as the final two segments of the HTTP route.
+//
+// Note that these are different from the fully-qualified method names used by
+// google.golang.org/protobuf/reflect/protoreflect. To convert from these constants to
+// reflection-formatted method names, remove the leading slash and convert the remaining slash to a
+// period.
+const (
+	// PingServicePingProcedure is the fully-qualified name of the PingService's Ping RPC.
+	PingServicePingProcedure = "/connect.ping.v1.PingService/Ping"
+	// PingServiceFailProcedure is the fully-qualified name of the PingService's Fail RPC.
+	PingServiceFailProcedure = "/connect.ping.v1.PingService/Fail"
+	// PingServiceSumProcedure is the fully-qualified name of the PingService's Sum RPC.
+	PingServiceSumProcedure = "/connect.ping.v1.PingService/Sum"
+	// PingServiceCountUpProcedure is the fully-qualified name of the PingService's CountUp RPC.
+	PingServiceCountUpProcedure = "/connect.ping.v1.PingService/CountUp"
+	// PingServiceCumSumProcedure is the fully-qualified name of the PingService's CumSum RPC.
+	PingServiceCumSumProcedure = "/connect.ping.v1.PingService/CumSum"
+)
+
 // PingServiceClient is a client for the connect.ping.v1.PingService service.
 type PingServiceClient interface {
 	// Ping sends a ping to the server to determine if it's reachable.
@@ -70,27 +90,27 @@ func NewPingServiceClient(httpClient connect_go.HTTPClient, baseURL string, opts
 	return &pingServiceClient{
 		ping: connect_go.NewClient[v1.PingRequest, v1.PingResponse](
 			httpClient,
-			baseURL+"/connect.ping.v1.PingService/Ping",
+			baseURL+PingServicePingProcedure,
 			opts...,
 		),
 		fail: connect_go.NewClient[v1.FailRequest, v1.FailResponse](
 			httpClient,
-			baseURL+"/connect.ping.v1.PingService/Fail",
+			baseURL+PingServiceFailProcedure,
 			opts...,
 		),
 		sum: connect_go.NewClient[v1.SumRequest, v1.SumResponse](
 			httpClient,
-			baseURL+"/connect.ping.v1.PingService/Sum",
+			baseURL+PingServiceSumProcedure,
 			opts...,
 		),
 		countUp: connect_go.NewClient[v1.CountUpRequest, v1.CountUpResponse](
 			httpClient,
-			baseURL+"/connect.ping.v1.PingService/CountUp",
+			baseURL+PingServiceCountUpProcedure,
 			opts...,
 		),
 		cumSum: connect_go.NewClient[v1.CumSumRequest, v1.CumSumResponse](
 			httpClient,
-			baseURL+"/connect.ping.v1.PingService/CumSum",
+			baseURL+PingServiceCumSumProcedure,
 			opts...,
 		),
 	}
@@ -151,28 +171,28 @@ type PingServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewPingServiceHandler(svc PingServiceHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
 	mux := http.NewServeMux()
-	mux.Handle("/connect.ping.v1.PingService/Ping", connect_go.NewUnaryHandler(
-		"/connect.ping.v1.PingService/Ping",
+	mux.Handle(PingServicePingProcedure, connect_go.NewUnaryHandler(
+		PingServicePingProcedure,
 		svc.Ping,
 		opts...,
 	))
-	mux.Handle("/connect.ping.v1.PingService/Fail", connect_go.NewUnaryHandler(
-		"/connect.ping.v1.PingService/Fail",
+	mux.Handle(PingServiceFailProcedure, connect_go.NewUnaryHandler(
+		PingServiceFailProcedure,
 		svc.Fail,
 		opts...,
 	))
-	mux.Handle("/connect.ping.v1.PingService/Sum", connect_go.NewClientStreamHandler(
-		"/connect.ping.v1.PingService/Sum",
+	mux.Handle(PingServiceSumProcedure, connect_go.NewClientStreamHandler(
+		PingServiceSumProcedure,
 		svc.Sum,
 		opts...,
 	))
-	mux.Handle("/connect.ping.v1.PingService/CountUp", connect_go.NewServerStreamHandler(
-		"/connect.ping.v1.PingService/CountUp",
+	mux.Handle(PingServiceCountUpProcedure, connect_go.NewServerStreamHandler(
+		PingServiceCountUpProcedure,
 		svc.CountUp,
 		opts...,
 	))
-	mux.Handle("/connect.ping.v1.PingService/CumSum", connect_go.NewBidiStreamHandler(
-		"/connect.ping.v1.PingService/CumSum",
+	mux.Handle(PingServiceCumSumProcedure, connect_go.NewBidiStreamHandler(
+		PingServiceCumSumProcedure,
 		svc.CumSum,
 		opts...,
 	))
