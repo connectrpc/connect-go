@@ -44,11 +44,12 @@ lint: $(BIN)/golangci-lint $(BIN)/buf ## Lint Go and protobuf
 	$(GO) vet ./...
 	$(BIN)/golangci-lint run
 	$(BIN)/buf lint
+	$(BIN)/buf format -d --exit-code
 
 .PHONY: lintfix
 lintfix: $(BIN)/golangci-lint $(BIN)/buf ## Automatically fix some lint errors
 	$(BIN)/golangci-lint run --fix
-	$(BIN)/buf format -w .
+	$(BIN)/buf format -w
 
 .PHONY: generate
 generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
