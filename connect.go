@@ -294,7 +294,7 @@ type Spec struct {
 type Peer struct {
 	Addr     string
 	Protocol string
-	Query    url.Values
+	Query    url.Values // server-only
 }
 
 func newPeerFromURL(url *url.URL, protocol string) Peer {
