@@ -970,6 +970,7 @@ func (m *connectUnaryRequestMarshaler) buildGetURL(data []byte, compressed bool)
 }
 
 func (m *connectUnaryRequestMarshaler) writeWithGet(url *url.URL) *Error {
+	delete(m.header, connectHeaderProtocolVersion)
 	m.duplexCall.SetMethod(http.MethodGet)
 	*m.duplexCall.URL() = *url
 	return nil
