@@ -53,6 +53,7 @@ const (
 	connectUnaryMessageQueryParameter     = "msg"
 	connectUnaryBase64QueryParameter      = "b64"
 	connectUnaryCompressionQueryParameter = "cmp"
+	connectUnaryTimeoutQueryParameter     = "t"
 	connectUnaryAPIQueryParameter         = "api"
 	connectProtocolVersionQueryValue      = "connectv" + connectProtocolVersion
 )
@@ -117,7 +118,12 @@ func (h *connectHandler) ContentTypes() map[string]struct{} {
 }
 
 func (*connectHandler) SetTimeout(request *http.Request) (context.Context, context.CancelFunc, error) {
-	timeout := getHeaderCanonical(request.Header, connectHeaderTimeout)
+	var timeout string
+	if request.Method == http.MethodGet {
+		timeout = request.URL.Query().Get(connectUnaryTimeoutQueryParameter)
+	} else {
+		timeout = getHeaderCanonical(request.Header, connectHeaderTimeout)
+	}
 	if timeout == "" {
 		return request.Context(), nil, nil
 	}
@@ -956,6 +962,9 @@ func (m *connectUnaryRequestMarshaler) buildGetURL(data []byte, compressed bool)
 	query := url.Query()
 	query.Set(connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue)
 	query.Set(connectUnaryEncodingQueryParameter, m.codec.Name())
+	if len(m.header[connectHeaderTimeout]) > 0 {
+		query.Set(connectUnaryTimeoutQueryParameter, m.header[connectHeaderTimeout][0])
+	}
 	if m.stableCodec.IsBinary() {
 		query.Set(connectUnaryMessageQueryParameter, EncodeBinaryHeader(data))
 		query.Set(connectUnaryBase64QueryParameter, "1")
@@ -970,6 +979,8 @@ func (m *connectUnaryRequestMarshaler) buildGetURL(data []byte, compressed bool)
 }
 
 func (m *connectUnaryRequestMarshaler) writeWithGet(url *url.URL) *Error {
+	delete(m.header, connectHeaderProtocolVersion)
+	delete(m.header, connectHeaderTimeout)
 	m.duplexCall.SetMethod(http.MethodGet)
 	*m.duplexCall.URL() = *url
 	return nil
