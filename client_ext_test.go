@@ -130,7 +130,7 @@ func TestClientPeer(t *testing.T) {
 		t.Parallel()
 		run(t,
 			connect.WithHTTPGet(connect.GetPolicyEnforce),
-			connect.WithGetMaxURLSize(256),
+			connect.WithHTTPGetMaxURLSize(256),
 			connect.WithSendGzip(),
 		)
 	})

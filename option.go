@@ -258,7 +258,7 @@ func WithHTTPGet(policy GetPolicy) ClientOption {
 	return &getPolicy{Policy: policy}
 }
 
-// WithGetMaxURLSize sets the maximum allowable URL length for Get requests;
+// WithHTTPGetMaxURLSize sets the maximum allowable URL length for Get requests;
 // this is useful as most user agents, middleboxes/proxies, and servers have
 // limits on the allowable length of a URL. For example, Apache and Nginx limit
 // the size of a request line to around 8 KiB, meaning that maximum length of a
@@ -269,7 +269,7 @@ func WithHTTPGet(policy GetPolicy) ClientOption {
 //
 // A safe value to start with would be 4096 (4 KiB), as this is well under the
 // 8 KiB request line limit encountered on common CDNs and proxies.
-func WithGetMaxURLSize(maxURLSize int) ClientOption {
+func WithHTTPGetMaxURLSize(maxURLSize int) ClientOption {
 	return &getURLMaxBytes{Max: maxURLSize}
 }
 
