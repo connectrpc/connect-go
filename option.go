@@ -247,25 +247,29 @@ func WithIdempotency(idempotencyLevel IdempotencyLevel) Option {
 
 // WithHTTPGet allows using HTTP Get requests for side-effect free unary RPC
 // calls. Typically, a given procedure is known to be side-effect free if it is
-// declared to be in its IDL (see [WithIdempotency].) You must provide the
-// maximum allowable URL length to enable this feature; this is necessary as
-// most user agents, middleboxes/proxies, and servers have limitations on the
-// allowable length of a URL. For example, Apache and Nginx limit the size of a
-// request line to around 8 KiB, meaning that maximum length of a URL is a bit
-// smaller than this.
-//
-// If a URL would be longer than the configured maximum value here, the request
-// will be sent as an HTTP POST instead.
-//
-// A safe value to start with would be 4096 (4 KiB), as this is well under the
-// 8 KiB request line limit encountered on common CDNs and proxies.
+// declared to be in its IDL (see [WithIdempotency].)
 //
 // Using HTTP Get requests makes it easier to set up caching with a CDN. Note,
 // however, that Connect does not automatically set any cache headers on the
 // server; you can set cache headers using interceptors.
 //
 // If this value is set to zero (the default), Get requests will be disabled.
-func WithHTTPGet(maxURLSize int) ClientOption {
+func WithHTTPGet(policy GetPolicy) ClientOption {
+	return &getPolicy{Policy: policy}
+}
+
+// WithGetMaxURLSize sets the maximum allowable URL length for Get requests;
+// this is useful as most user agents, middleboxes/proxies, and servers have
+// limits on the allowable length of a URL. For example, Apache and Nginx limit
+// the size of a request line to around 8 KiB, meaning that maximum length of a
+// URL is a bit smaller than this.
+//
+// If a URL would be longer than the configured maximum value here, the request
+// will be sent as an HTTP POST instead.
+//
+// A safe value to start with would be 4096 (4 KiB), as this is well under the
+// 8 KiB request line limit encountered on common CDNs and proxies.
+func WithGetMaxURLSize(maxURLSize int) ClientOption {
 	return &getURLMaxBytes{Max: maxURLSize}
 }
 
@@ -456,6 +460,14 @@ type grpcOption struct {
 
 func (o *grpcOption) applyToClient(config *clientConfig) {
 	config.Protocol = &protocolGRPC{web: o.web}
+}
+
+type getPolicy struct {
+	Policy GetPolicy
+}
+
+func (o *getPolicy) applyToClient(config *clientConfig) {
+	config.GetPolicy = o.Policy
 }
 
 type getURLMaxBytes struct {

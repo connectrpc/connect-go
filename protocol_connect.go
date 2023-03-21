@@ -24,6 +24,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strconv"
 	"strings"
@@ -387,6 +388,7 @@ func (c *connectClient) NewConn(
 		}
 		if spec.IdempotencyLevel == IdempotencyNoSideEffects {
 			if stableCodec, ok := c.Codec.(stableCodec); ok {
+				unaryConn.marshaler.getPolicy = c.GetPolicy
 				unaryConn.marshaler.getURLMaxBytes = c.GetURLMaxBytes
 				unaryConn.marshaler.stableCodec = stableCodec
 				unaryConn.marshaler.duplexCall = duplexCall
@@ -887,13 +889,14 @@ func (m *connectUnaryMarshaler) write(data []byte) *Error {
 
 type connectUnaryRequestMarshaler struct {
 	connectUnaryMarshaler
+	getPolicy      GetPolicy
 	getURLMaxBytes int
 	stableCodec    stableCodec
 	duplexCall     *duplexHTTPCall
 }
 
 func (m *connectUnaryRequestMarshaler) Marshal(message any) *Error {
-	if m.stableCodec != nil && m.getURLMaxBytes > 0 {
+	if m.stableCodec != nil && m.getPolicy != GetPolicyNever {
 		return m.marshalWithGet(message)
 	}
 	return m.connectUnaryMarshaler.Marshal(message)
@@ -903,25 +906,28 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 	// TODO(jchadwick-buf): This function is mostly a superset of
 	// connectUnaryMarshaler.Marshal. This should be reconciled at some point.
 	if message == nil {
-		if m.writeWithGet(nil, false) {
-			return nil
-		}
-		return m.write(nil)
+		return m.writeWithGet(nil)
 	}
 	data, err := m.stableCodec.MarshalStable(message)
 	if err != nil {
 		return errorf(CodeInternal, "marshal message stable: %w", err)
 	}
-	if len(data) <= m.getURLMaxBytes && (m.sendMaxBytes <= 0 || len(data) < m.sendMaxBytes) {
-		if m.writeWithGet(data, false) {
-			return nil
-		}
-	}
-	if m.compressionPool == nil {
-		if m.sendMaxBytes > 0 && len(data) > m.sendMaxBytes {
+	if m.sendMaxBytes > 0 && len(data) > m.sendMaxBytes {
+		if m.compressionPool == nil {
 			return NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", len(data), m.sendMaxBytes))
 		}
-		return m.write(data)
+	}
+	if m.sendMaxBytes <= 0 || len(data) <= m.sendMaxBytes {
+		url := m.buildGetURL(data, false)
+		if m.getURLMaxBytes <= 0 || len(url.String()) < m.getURLMaxBytes {
+			return m.writeWithGet(url)
+		}
+		if m.compressionPool == nil {
+			if m.getPolicy == GetPolicyEnforce {
+				return NewError(CodeResourceExhausted, fmt.Errorf("url size %d exceeds getURLMaxBytes %d", len(url.String()), m.getURLMaxBytes))
+			}
+			return m.write(data)
+		}
 	}
 	// Compress message to try to make it fit in the URL.
 	uncompressed := bytes.NewBuffer(data)
@@ -934,16 +940,18 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 	if m.sendMaxBytes > 0 && compressed.Len() > m.sendMaxBytes {
 		return NewError(CodeResourceExhausted, fmt.Errorf("compressed message size %d exceeds sendMaxBytes %d", compressed.Len(), m.sendMaxBytes))
 	}
-	if compressed.Len() < m.getURLMaxBytes {
-		if m.writeWithGet(compressed.Bytes(), true) {
-			return nil
-		}
+	url := m.buildGetURL(compressed.Bytes(), true)
+	if m.getURLMaxBytes <= 0 || len(url.String()) < m.getURLMaxBytes {
+		return m.writeWithGet(url)
+	}
+	if m.getPolicy == GetPolicyEnforce {
+		return NewError(CodeResourceExhausted, fmt.Errorf("compressed url size %d exceeds getURLMaxBytes %d", len(url.String()), m.getURLMaxBytes))
 	}
 	setHeaderCanonical(m.header, connectUnaryHeaderCompression, m.compressionName)
 	return m.write(compressed.Bytes())
 }
 
-func (m *connectUnaryRequestMarshaler) writeWithGet(data []byte, compressed bool) bool {
+func (m *connectUnaryRequestMarshaler) buildGetURL(data []byte, compressed bool) *url.URL {
 	url := *m.duplexCall.URL()
 	query := url.Query()
 	query.Set(connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue)
@@ -958,12 +966,13 @@ func (m *connectUnaryRequestMarshaler) writeWithGet(data []byte, compressed bool
 		query.Set(connectUnaryCompressionQueryParameter, m.compressionName)
 	}
 	url.RawQuery = query.Encode()
-	if len(url.String()) > m.getURLMaxBytes {
-		return false
-	}
+	return &url
+}
+
+func (m *connectUnaryRequestMarshaler) writeWithGet(url *url.URL) *Error {
 	m.duplexCall.SetMethod(http.MethodGet)
-	*m.duplexCall.URL() = url
-	return true
+	*m.duplexCall.URL() = *url
+	return nil
 }
 
 type connectUnaryUnmarshaler struct {

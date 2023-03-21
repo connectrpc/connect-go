@@ -59,6 +59,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 			BufferPool:       config.BufferPool,
 			ReadMaxBytes:     config.ReadMaxBytes,
 			SendMaxBytes:     config.SendMaxBytes,
+			GetPolicy:        config.GetPolicy,
 			GetURLMaxBytes:   config.GetURLMaxBytes,
 		},
 	)
@@ -183,6 +184,7 @@ type clientConfig struct {
 	BufferPool             *bufferPool
 	ReadMaxBytes           int
 	SendMaxBytes           int
+	GetPolicy              GetPolicy
 	GetURLMaxBytes         int
 	IdempotencyLevel       IdempotencyLevel
 }

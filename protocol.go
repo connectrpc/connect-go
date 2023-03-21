@@ -117,6 +117,7 @@ type protocolClientParams struct {
 	BufferPool       *bufferPool
 	ReadMaxBytes     int
 	SendMaxBytes     int
+	GetPolicy        GetPolicy
 	GetURLMaxBytes   int
 	// The gRPC family of protocols always needs access to a Protobuf codec to
 	// marshal and unmarshal errors.
