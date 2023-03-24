@@ -460,7 +460,7 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 }
 
 func procedureConstName(m *protogen.Method) string {
-	return fmt.Sprintf("%s%sProcedure", m.Parent.Desc.Name(), m.Desc.Name())
+	return fmt.Sprintf("%s%sProcedure", m.Parent.GoName, m.GoName)
 }
 
 func reflectionName(service *protogen.Service) string {
