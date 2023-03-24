@@ -1520,7 +1520,7 @@ func TestStreamForServer(t *testing.T) {
 		client, server := newPingServer(&pluggablePingServer{
 			cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
 				assert.Equal(t, stream.Spec().StreamType, connect.StreamTypeBidi)
-				assert.Equal(t, stream.Spec().Procedure, pingv1connect.PingServicePingProcedure)
+				assert.Equal(t, stream.Spec().Procedure, pingv1connect.PingServiceCumSumProcedure)
 				assert.False(t, stream.Spec().IsClient)
 				return nil
 			},
