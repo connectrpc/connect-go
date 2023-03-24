@@ -47,8 +47,8 @@ type StreamType uint8
 
 const (
 	StreamTypeUnary  StreamType = 0b00
-	StreamTypeClient            = 0b01
-	StreamTypeServer            = 0b10
+	StreamTypeClient StreamType = 0b01
+	StreamTypeServer StreamType = 0b10
 	StreamTypeBidi              = StreamTypeClient | StreamTypeServer
 )
 
