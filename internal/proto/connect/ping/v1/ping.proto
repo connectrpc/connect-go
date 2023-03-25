@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// The canonical location for this file is
+// https://github.com/connectrpc/connect-go/blob/main/internal/proto/connect/ping/v1/ping.proto.
 syntax = "proto3";
 
+// The connect.ping.v1 package contains an echo service designed to test the
+// connect-go implementation.
 package connect.ping.v1;
 
 message PingRequest {

@@ -1520,7 +1520,7 @@ func TestStreamForServer(t *testing.T) {
 		client, server := newPingServer(&pluggablePingServer{
 			cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
 				assert.Equal(t, stream.Spec().StreamType, connect.StreamTypeBidi)
-				assert.Equal(t, stream.Spec().Procedure, "/connect.ping.v1.PingService/CumSum")
+				assert.Equal(t, stream.Spec().Procedure, pingv1connect.PingServiceCumSumProcedure)
 				assert.False(t, stream.Spec().IsClient)
 				return nil
 			},
@@ -1535,7 +1535,7 @@ func TestStreamForServer(t *testing.T) {
 		client, server := newPingServer(&pluggablePingServer{
 			countUp: func(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
 				assert.Equal(t, stream.Conn().Spec().StreamType, connect.StreamTypeServer)
-				assert.Equal(t, stream.Conn().Spec().Procedure, "/connect.ping.v1.PingService/CountUp")
+				assert.Equal(t, stream.Conn().Spec().Procedure, pingv1connect.PingServiceCountUpProcedure)
 				assert.False(t, stream.Conn().Spec().IsClient)
 				assert.Nil(t, stream.Send(&pingv1.CountUpResponse{Number: 1}))
 				return nil
@@ -1591,7 +1591,7 @@ func TestStreamForServer(t *testing.T) {
 		client, server := newPingServer(&pluggablePingServer{
 			sum: func(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
 				assert.Equal(t, stream.Spec().StreamType, connect.StreamTypeClient)
-				assert.Equal(t, stream.Spec().Procedure, "/connect.ping.v1.PingService/Sum")
+				assert.Equal(t, stream.Spec().Procedure, pingv1connect.PingServiceSumProcedure)
 				assert.False(t, stream.Spec().IsClient)
 				assert.True(t, stream.Receive())
 				msg := stream.Msg()
@@ -1847,7 +1847,7 @@ func TestGRPCErrorMetadataIsTrailersOnly(t *testing.T) {
 	req, err := http.NewRequestWithContext(
 		context.Background(),
 		http.MethodPost,
-		server.URL+"/connect.ping.v1.PingService/Fail",
+		server.URL+pingv1connect.PingServiceFailProcedure,
 		bytes.NewReader(body),
 	)
 	assert.Nil(t, err)
