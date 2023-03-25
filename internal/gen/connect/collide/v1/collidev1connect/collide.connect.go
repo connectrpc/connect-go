@@ -39,6 +39,18 @@ const (
 	CollideServiceName = "connect.collide.v1.CollideService"
 )
 
+// These constants are the fully-qualified names of the RPCs defined in this package. They're
+// exposed at runtime as Spec.Procedure and as the final two segments of the HTTP route.
+//
+// Note that these are different from the fully-qualified method names used by
+// google.golang.org/protobuf/reflect/protoreflect. To convert from these constants to
+// reflection-formatted method names, remove the leading slash and convert the remaining slash to a
+// period.
+const (
+	// CollideServiceImportProcedure is the fully-qualified name of the CollideService's Import RPC.
+	CollideServiceImportProcedure = "/connect.collide.v1.CollideService/Import"
+)
+
 // CollideServiceClient is a client for the connect.collide.v1.CollideService service.
 type CollideServiceClient interface {
 	Import(context.Context, *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error)
@@ -56,7 +68,7 @@ func NewCollideServiceClient(httpClient connect_go.HTTPClient, baseURL string, o
 	return &collideServiceClient{
 		_import: connect_go.NewClient[v1.ImportRequest, v1.ImportResponse](
 			httpClient,
-			baseURL+"/connect.collide.v1.CollideService/Import",
+			baseURL+CollideServiceImportProcedure,
 			opts...,
 		),
 	}
@@ -84,8 +96,8 @@ type CollideServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewCollideServiceHandler(svc CollideServiceHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
 	mux := http.NewServeMux()
-	mux.Handle("/connect.collide.v1.CollideService/Import", connect_go.NewUnaryHandler(
-		"/connect.collide.v1.CollideService/Import",
+	mux.Handle(CollideServiceImportProcedure, connect_go.NewUnaryHandler(
+		CollideServiceImportProcedure,
 		svc.Import,
 		opts...,
 	))
