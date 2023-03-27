@@ -388,8 +388,9 @@ func (c *connectClient) NewConn(
 		}
 		if spec.IdempotencyLevel == IdempotencyNoSideEffects {
 			if stableCodec, ok := c.Codec.(stableCodec); ok {
-				unaryConn.marshaler.getPolicy = c.GetPolicy
+				unaryConn.marshaler.enableGet = c.EnableGet
 				unaryConn.marshaler.getURLMaxBytes = c.GetURLMaxBytes
+				unaryConn.marshaler.getUseFallback = c.GetUseFallback
 				unaryConn.marshaler.stableCodec = stableCodec
 				unaryConn.marshaler.duplexCall = duplexCall
 			}
@@ -889,14 +890,15 @@ func (m *connectUnaryMarshaler) write(data []byte) *Error {
 
 type connectUnaryRequestMarshaler struct {
 	connectUnaryMarshaler
-	getPolicy      GetPolicy
+	enableGet      bool
 	getURLMaxBytes int
+	getUseFallback bool
 	stableCodec    stableCodec
 	duplexCall     *duplexHTTPCall
 }
 
 func (m *connectUnaryRequestMarshaler) Marshal(message any) *Error {
-	if m.stableCodec != nil && m.getPolicy != GetPolicyNever {
+	if m.stableCodec != nil && m.getUseFallback {
 		return m.marshalWithGet(message)
 	}
 	return m.connectUnaryMarshaler.Marshal(message)
@@ -905,12 +907,13 @@ func (m *connectUnaryRequestMarshaler) Marshal(message any) *Error {
 func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 	// TODO(jchadwick-buf): This function is mostly a superset of
 	// connectUnaryMarshaler.Marshal. This should be reconciled at some point.
-	if message == nil {
-		return m.writeWithGet(nil)
-	}
-	data, err := m.stableCodec.MarshalStable(message)
-	if err != nil {
-		return errorf(CodeInternal, "marshal message stable: %w", err)
+	var data []byte
+	var err error
+	if message != nil {
+		data, err = m.stableCodec.MarshalStable(message)
+		if err != nil {
+			return errorf(CodeInternal, "marshal message stable: %w", err)
+		}
 	}
 	if m.sendMaxBytes > 0 && len(data) > m.sendMaxBytes {
 		if m.compressionPool == nil {
@@ -923,10 +926,10 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 			return m.writeWithGet(url)
 		}
 		if m.compressionPool == nil {
-			if m.getPolicy == GetPolicyEnforce {
-				return NewError(CodeResourceExhausted, fmt.Errorf("url size %d exceeds getURLMaxBytes %d", len(url.String()), m.getURLMaxBytes))
+			if m.getUseFallback {
+				return m.write(data)
 			}
-			return m.write(data)
+			return NewError(CodeResourceExhausted, fmt.Errorf("url size %d exceeds getURLMaxBytes %d", len(url.String()), m.getURLMaxBytes))
 		}
 	}
 	// Compress message to try to make it fit in the URL.
@@ -944,11 +947,11 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 	if m.getURLMaxBytes <= 0 || len(url.String()) < m.getURLMaxBytes {
 		return m.writeWithGet(url)
 	}
-	if m.getPolicy == GetPolicyEnforce {
-		return NewError(CodeResourceExhausted, fmt.Errorf("compressed url size %d exceeds getURLMaxBytes %d", len(url.String()), m.getURLMaxBytes))
+	if m.getUseFallback {
+		setHeaderCanonical(m.header, connectUnaryHeaderCompression, m.compressionName)
+		return m.write(compressed.Bytes())
 	}
-	setHeaderCanonical(m.header, connectUnaryHeaderCompression, m.compressionName)
-	return m.write(compressed.Bytes())
+	return NewError(CodeResourceExhausted, fmt.Errorf("compressed url size %d exceeds getURLMaxBytes %d", len(url.String()), m.getURLMaxBytes))
 }
 
 func (m *connectUnaryRequestMarshaler) buildGetURL(data []byte, compressed bool) *url.URL {

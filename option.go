@@ -253,9 +253,9 @@ func WithIdempotency(idempotencyLevel IdempotencyLevel) Option {
 // however, that Connect does not automatically set any cache headers on the
 // server; you can set cache headers using interceptors.
 //
-// If this value is set to zero (the default), Get requests will be disabled.
-func WithHTTPGet(policy GetPolicy) ClientOption {
-	return &getPolicy{Policy: policy}
+// If this option is not set (the default), Get requests will be disabled.
+func WithHTTPGet() ClientOption {
+	return &enableGet{}
 }
 
 // WithHTTPGetMaxURLSize sets the maximum allowable URL length for Get requests;
@@ -264,13 +264,14 @@ func WithHTTPGet(policy GetPolicy) ClientOption {
 // the size of a request line to around 8 KiB, meaning that maximum length of a
 // URL is a bit smaller than this.
 //
-// If a URL would be longer than the configured maximum value here, the request
-// will be sent as an HTTP POST instead.
+// If fallback is set to true and the URL would be longer than the configured
+// maximum value, the request will be sent as an HTTP POST instead. If fallback
+// is set to false, the request will fail.
 //
 // A safe value to start with would be 4096 (4 KiB), as this is well under the
 // 8 KiB request line limit encountered on common CDNs and proxies.
-func WithHTTPGetMaxURLSize(maxURLSize int) ClientOption {
-	return &getURLMaxBytes{Max: maxURLSize}
+func WithHTTPGetMaxURLSize(bytes int, fallback bool) ClientOption {
+	return &getURLMaxBytes{Max: bytes, Fallback: fallback}
 }
 
 // WithInterceptors configures a client or handler's interceptor stack. Repeated
@@ -462,20 +463,21 @@ func (o *grpcOption) applyToClient(config *clientConfig) {
 	config.Protocol = &protocolGRPC{web: o.web}
 }
 
-type getPolicy struct {
-	Policy GetPolicy
+type enableGet struct {
 }
 
-func (o *getPolicy) applyToClient(config *clientConfig) {
-	config.GetPolicy = o.Policy
+func (o *enableGet) applyToClient(config *clientConfig) {
+	config.EnableGet = true
 }
 
 type getURLMaxBytes struct {
-	Max int
+	Max      int
+	Fallback bool
 }
 
 func (o *getURLMaxBytes) applyToClient(config *clientConfig) {
 	config.GetURLMaxBytes = o.Max
+	config.GetUseFallback = o.Fallback
 }
 
 type interceptorsOption struct {
