@@ -49,12 +49,12 @@ const (
 	connectUnaryContentTypeJSON       = connectUnaryContentTypePrefix + "json"
 	connectStreamingContentTypePrefix = "application/connect+"
 
-	connectUnaryEncodingQueryParameter    = "enc"
-	connectUnaryMessageQueryParameter     = "msg"
-	connectUnaryBase64QueryParameter      = "b64"
-	connectUnaryCompressionQueryParameter = "cmp"
-	connectUnaryAPIQueryParameter         = "api"
-	connectProtocolVersionQueryValue      = "connectv" + connectProtocolVersion
+	connectUnaryEncodingQueryParameter    = "encoding"
+	connectUnaryMessageQueryParameter     = "message"
+	connectUnaryBase64QueryParameter      = "base64"
+	connectUnaryCompressionQueryParameter = "compression"
+	connectUnaryConnectQueryParameter     = "connect"
+	connectUnaryConnectQueryValue         = "v" + connectProtocolVersion
 )
 
 // defaultConnectUserAgent returns a User-Agent string similar to those used in gRPC.
@@ -163,11 +163,11 @@ func (h *connectHandler) NewConn(
 		failed = checkServerStreamsCanFlush(h.Spec, responseWriter)
 	}
 	if failed == nil && request.Method == http.MethodGet {
-		version := query.Get(connectUnaryAPIQueryParameter)
+		version := query.Get(connectUnaryConnectQueryParameter)
 		if version == "" && h.RequireConnectProtocolHeader {
-			failed = errorf(CodeInvalidArgument, "missing required query parameter: set %s to %q", connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue)
-		} else if version != "" && version != connectProtocolVersionQueryValue {
-			failed = errorf(CodeInvalidArgument, "%s must be %q: got %q", connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue, version)
+			failed = errorf(CodeInvalidArgument, "missing required query parameter: set %s to %q", connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue)
+		} else if version != "" && version != connectUnaryConnectQueryValue {
+			failed = errorf(CodeInvalidArgument, "%s must be %q: got %q", connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue, version)
 		}
 	}
 	if failed == nil && request.Method == http.MethodPost {
@@ -954,7 +954,7 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 func (m *connectUnaryRequestMarshaler) buildGetURL(data []byte, compressed bool) *url.URL {
 	url := *m.duplexCall.URL()
 	query := url.Query()
-	query.Set(connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue)
+	query.Set(connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue)
 	query.Set(connectUnaryEncodingQueryParameter, m.codec.Name())
 	if m.stableCodec.IsBinary() {
 		query.Set(connectUnaryMessageQueryParameter, EncodeBinaryHeader(data))
