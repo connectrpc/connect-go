@@ -387,12 +387,12 @@ func (c *connectClient) NewConn(
 			responseTrailer: make(http.Header),
 		}
 		if spec.IdempotencyLevel == IdempotencyNoSideEffects {
+			unaryConn.marshaler.enableGet = c.EnableGet
+			unaryConn.marshaler.getURLMaxBytes = c.GetURLMaxBytes
+			unaryConn.marshaler.getUseFallback = c.GetUseFallback
+			unaryConn.marshaler.duplexCall = duplexCall
 			if stableCodec, ok := c.Codec.(stableCodec); ok {
-				unaryConn.marshaler.enableGet = c.EnableGet
-				unaryConn.marshaler.getURLMaxBytes = c.GetURLMaxBytes
-				unaryConn.marshaler.getUseFallback = c.GetUseFallback
 				unaryConn.marshaler.stableCodec = stableCodec
-				unaryConn.marshaler.duplexCall = duplexCall
 			}
 		}
 		conn = unaryConn
@@ -898,8 +898,13 @@ type connectUnaryRequestMarshaler struct {
 }
 
 func (m *connectUnaryRequestMarshaler) Marshal(message any) *Error {
-	if m.stableCodec != nil && m.getUseFallback {
-		return m.marshalWithGet(message)
+	if m.enableGet {
+		if m.stableCodec == nil && !m.getUseFallback {
+			return errorf(CodeInternal, "codec %s doesn't support stable marshal; cam't use get", m.codec.Name())
+		}
+		if m.stableCodec != nil {
+			return m.marshalWithGet(message)
+		}
 	}
 	return m.connectUnaryMarshaler.Marshal(message)
 }
