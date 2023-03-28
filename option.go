@@ -268,8 +268,10 @@ func WithHTTPGet() ClientOption {
 // maximum value, the request will be sent as an HTTP POST instead. If fallback
 // is set to false, the request will fail.
 //
-// A safe value to start with would be 4096 (4 KiB), as this is well under the
-// 8 KiB request line limit encountered on common CDNs and proxies.
+// By default, clients may send a URL of any size. If you run into URL size
+// limitations imposed by your network infrastructure and don't know the maximum
+// allowable size, or if you'd prefer to be cautious from the start, a 4096 byte
+// (4 KiB) limit works with most common proxies and CDNs.
 func WithHTTPGetMaxURLSize(bytes int, fallback bool) ClientOption {
 	return &getURLMaxBytes{Max: bytes, Fallback: fallback}
 }
