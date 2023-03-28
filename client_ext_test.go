@@ -90,6 +90,8 @@ func TestClientPeer(t *testing.T) {
 		)
 		ctx := context.Background()
 		// unary
+		_, err := client.Ping(ctx, connect.NewRequest[pingv1.PingRequest](nil))
+		assert.Nil(t, err)
 		text := strings.Repeat(".", 256)
 		r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
 		assert.Nil(t, err)
