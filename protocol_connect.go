@@ -972,7 +972,7 @@ func (m *connectUnaryRequestMarshaler) buildGetURL(data []byte, compressed bool)
 	query := url.Query()
 	query.Set(connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue)
 	query.Set(connectUnaryEncodingQueryParameter, m.codec.Name())
-	if m.stableCodec.IsBinary() {
+	if m.stableCodec.IsBinary() || compressed {
 		query.Set(connectUnaryMessageQueryParameter, EncodeBinaryHeader(data))
 		query.Set(connectUnaryBase64QueryParameter, "1")
 	} else {
