@@ -471,8 +471,7 @@ func (o *grpcOption) applyToClient(config *clientConfig) {
 	config.Protocol = &protocolGRPC{web: o.web}
 }
 
-type enableGet struct {
-}
+type enableGet struct{}
 
 func (o *enableGet) applyToClient(config *clientConfig) {
 	config.EnableGet = true
