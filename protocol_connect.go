@@ -921,13 +921,16 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 			return errorf(CodeInternal, "marshal message stable: %w", err)
 		}
 	}
-	if m.sendMaxBytes > 0 && len(data) > m.sendMaxBytes {
-		if m.compressionPool == nil {
-			return NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", len(data), m.sendMaxBytes))
-		}
+	isTooBig := m.sendMaxBytes > 0 && len(data) > m.sendMaxBytes
+	if isTooBig && m.compressionPool == nil {
+		return NewError(CodeResourceExhausted, fmt.Errorf(
+			"message size %d exceeds sendMaxBytes %d: enabling request compression may help",
+			len(data),
+			m.sendMaxBytes,
+		))
 	}
-	if m.sendMaxBytes <= 0 || len(data) <= m.sendMaxBytes {
-		url := m.buildGetURL(data, false)
+	if !isTooBig {
+		url := m.buildGetURL(data, false /* compressed */)
 		if m.getURLMaxBytes <= 0 || len(url.String()) < m.getURLMaxBytes {
 			return m.writeWithGet(url)
 		}
@@ -935,7 +938,11 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 			if m.getUseFallback {
 				return m.write(data)
 			}
-			return NewError(CodeResourceExhausted, fmt.Errorf("url size %d exceeds getURLMaxBytes %d", len(url.String()), m.getURLMaxBytes))
+			return NewError(CodeResourceExhausted, fmt.Errorf(
+				"url size %d exceeds getURLMaxBytes %d: enabling request compression may help",
+				len(url.String()),
+				m.getURLMaxBytes,
+			))
 		}
 	}
 	// Compress message to try to make it fit in the URL.
@@ -949,7 +956,7 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 	if m.sendMaxBytes > 0 && compressed.Len() > m.sendMaxBytes {
 		return NewError(CodeResourceExhausted, fmt.Errorf("compressed message size %d exceeds sendMaxBytes %d", compressed.Len(), m.sendMaxBytes))
 	}
-	url := m.buildGetURL(compressed.Bytes(), true)
+	url := m.buildGetURL(compressed.Bytes(), true /* compressed */)
 	if m.getURLMaxBytes <= 0 || len(url.String()) < m.getURLMaxBytes {
 		return m.writeWithGet(url)
 	}
