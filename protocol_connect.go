@@ -42,6 +42,7 @@ const (
 	connectHeaderTimeout                    = "Connect-Timeout-Ms"
 	connectHeaderProtocolVersion            = "Connect-Protocol-Version"
 	connectProtocolVersion                  = "1"
+	headerVary                              = "Vary"
 
 	connectFlagEnvelopeEndStream = 0b00000010
 
@@ -700,6 +701,12 @@ func (hc *connectUnaryHandlerConn) Close(err error) error {
 
 func (hc *connectUnaryHandlerConn) writeResponseHeader(err error) {
 	header := hc.responseWriter.Header()
+	if hc.request.Method == http.MethodGet {
+		// The response content varies depending on the compression that the client
+		// requested (if any). GETs are potentially cacheable, so we should ensure
+		// that the Vary header includes at least Accept-Encoding (and not overwrite any values already set).
+		header[headerVary] = append(header[headerVary], connectUnaryHeaderAcceptCompression)
+	}
 	if err != nil {
 		if connectErr, ok := asError(err); ok {
 			mergeHeaders(header, connectErr.meta)
