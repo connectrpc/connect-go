@@ -890,6 +890,7 @@ func (m *connectUnaryMarshaler) write(data []byte) *Error {
 
 type connectUnaryRequestMarshaler struct {
 	connectUnaryMarshaler
+
 	enableGet      bool
 	getURLMaxBytes int
 	getUseFallback bool
