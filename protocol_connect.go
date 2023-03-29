@@ -906,15 +906,15 @@ type connectUnaryRequestMarshaler struct {
 }
 
 func (m *connectUnaryRequestMarshaler) Marshal(message any) *Error {
-	if !m.enableGet {
-		return m.connectUnaryMarshaler.Marshal(message)
+	if m.enableGet {
+		if m.stableCodec == nil && !m.getUseFallback {
+			return errorf(CodeInternal, "codec %s doesn't support stable marshal; cam't use get", m.codec.Name())
+		}
+		if m.stableCodec != nil {
+			return m.marshalWithGet(message)
+		}
 	}
-	if m.stableCodec == nil && !m.getUseFallback {
-		return errorf(CodeInternal, "codec %s doesn't support stable marshal, can't use HTTP get", m.codec.Name())
-	}
-	if m.stableCodec != nil {
-		return m.marshalWithGet(message)
-	}
+	return m.connectUnaryMarshaler.Marshal(message)
 }
 
 func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
