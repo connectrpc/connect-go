@@ -189,7 +189,7 @@ func (h *connectHandler) NewConn(
 			failed = errorf(CodeInvalidArgument, "missing %s parameter", connectUnaryMessageQueryParameter)
 		}
 		msg := query.Get(connectUnaryMessageQueryParameter)
-		msgReader := headerReader(msg, query.Get(connectUnaryBase64QueryParameter) == "1")
+		msgReader := queryValueReader(msg, query.Get(connectUnaryBase64QueryParameter) == "1")
 		requestBody = io.NopCloser(msgReader)
 		codecName = query.Get(connectUnaryEncodingQueryParameter)
 		contentType = connectContentTypeFromCodecName(
@@ -980,7 +980,7 @@ func (m *connectUnaryRequestMarshaler) buildGetURL(data []byte, compressed bool)
 	query.Set(connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue)
 	query.Set(connectUnaryEncodingQueryParameter, m.codec.Name())
 	if m.stableCodec.IsBinary() || compressed {
-		query.Set(connectUnaryMessageQueryParameter, EncodeBinaryHeader(data))
+		query.Set(connectUnaryMessageQueryParameter, encodeBinaryQueryValue(data))
 		query.Set(connectUnaryBase64QueryParameter, "1")
 	} else {
 		query.Set(connectUnaryMessageQueryParameter, string(data))
