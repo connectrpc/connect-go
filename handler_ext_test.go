@@ -63,7 +63,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		var message errorMessage
 		err = json.NewDecoder(resp.Body).Decode(&message)
 		assert.Nil(t, err)
-		assert.Equal(t, message.Message, "missing enc parameter")
+		assert.Equal(t, message.Message, "missing encoding parameter")
 		assert.Equal(t, message.Code, connect.CodeInvalidArgument.String())
 	})
 
@@ -72,7 +72,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		request, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodGet,
-			server.URL+pingProcedure+`?enc=unk&msg={}`,
+			server.URL+pingProcedure+`?encoding=unk&message={}`,
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err)
@@ -97,7 +97,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		request, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodGet,
-			server.URL+pingProcedure+`?enc=json&msg={}`,
+			server.URL+pingProcedure+`?encoding=json&message={}`,
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err)

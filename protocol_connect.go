@@ -24,6 +24,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strconv"
 	"strings"
@@ -41,6 +42,7 @@ const (
 	connectHeaderTimeout                    = "Connect-Timeout-Ms"
 	connectHeaderProtocolVersion            = "Connect-Protocol-Version"
 	connectProtocolVersion                  = "1"
+	headerVary                              = "Vary"
 
 	connectFlagEnvelopeEndStream = 0b00000010
 
@@ -48,12 +50,12 @@ const (
 	connectUnaryContentTypeJSON       = connectUnaryContentTypePrefix + "json"
 	connectStreamingContentTypePrefix = "application/connect+"
 
-	connectUnaryEncodingQueryParameter    = "enc"
-	connectUnaryMessageQueryParameter     = "msg"
-	connectUnaryBase64QueryParameter      = "b64"
-	connectUnaryCompressionQueryParameter = "cmp"
-	connectUnaryAPIQueryParameter         = "api"
-	connectProtocolVersionQueryValue      = "connectv" + connectProtocolVersion
+	connectUnaryEncodingQueryParameter    = "encoding"
+	connectUnaryMessageQueryParameter     = "message"
+	connectUnaryBase64QueryParameter      = "base64"
+	connectUnaryCompressionQueryParameter = "compression"
+	connectUnaryConnectQueryParameter     = "connect"
+	connectUnaryConnectQueryValue         = "v" + connectProtocolVersion
 )
 
 // defaultConnectUserAgent returns a User-Agent string similar to those used in gRPC.
@@ -162,11 +164,11 @@ func (h *connectHandler) NewConn(
 		failed = checkServerStreamsCanFlush(h.Spec, responseWriter)
 	}
 	if failed == nil && request.Method == http.MethodGet {
-		version := query.Get(connectUnaryAPIQueryParameter)
+		version := query.Get(connectUnaryConnectQueryParameter)
 		if version == "" && h.RequireConnectProtocolHeader {
-			failed = errorf(CodeInvalidArgument, "missing required query parameter: set %s to %q", connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue)
-		} else if version != "" && version != connectProtocolVersionQueryValue {
-			failed = errorf(CodeInvalidArgument, "%s must be %q: got %q", connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue, version)
+			failed = errorf(CodeInvalidArgument, "missing required query parameter: set %s to %q", connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue)
+		} else if version != "" && version != connectUnaryConnectQueryValue {
+			failed = errorf(CodeInvalidArgument, "%s must be %q: got %q", connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue, version)
 		}
 	}
 	if failed == nil && request.Method == http.MethodPost {
@@ -187,7 +189,7 @@ func (h *connectHandler) NewConn(
 			failed = errorf(CodeInvalidArgument, "missing %s parameter", connectUnaryMessageQueryParameter)
 		}
 		msg := query.Get(connectUnaryMessageQueryParameter)
-		msgReader := headerReader(msg, query.Get(connectUnaryBase64QueryParameter) == "1")
+		msgReader := queryValueReader(msg, query.Get(connectUnaryBase64QueryParameter) == "1")
 		requestBody = io.NopCloser(msgReader)
 		codecName = query.Get(connectUnaryEncodingQueryParameter)
 		contentType = connectContentTypeFromCodecName(
@@ -386,10 +388,12 @@ func (c *connectClient) NewConn(
 			responseTrailer: make(http.Header),
 		}
 		if spec.IdempotencyLevel == IdempotencyNoSideEffects {
+			unaryConn.marshaler.enableGet = c.EnableGet
+			unaryConn.marshaler.getURLMaxBytes = c.GetURLMaxBytes
+			unaryConn.marshaler.getUseFallback = c.GetUseFallback
+			unaryConn.marshaler.duplexCall = duplexCall
 			if stableCodec, ok := c.Codec.(stableCodec); ok {
-				unaryConn.marshaler.getURLMaxBytes = c.GetURLMaxBytes
 				unaryConn.marshaler.stableCodec = stableCodec
-				unaryConn.marshaler.duplexCall = duplexCall
 			}
 		}
 		conn = unaryConn
@@ -697,6 +701,12 @@ func (hc *connectUnaryHandlerConn) Close(err error) error {
 
 func (hc *connectUnaryHandlerConn) writeResponseHeader(err error) {
 	header := hc.responseWriter.Header()
+	if hc.request.Method == http.MethodGet {
+		// The response content varies depending on the compression that the client
+		// requested (if any). GETs are potentially cacheable, so we should ensure
+		// that the Vary header includes at least Accept-Encoding (and not overwrite any values already set).
+		header[headerVary] = append(header[headerVary], connectUnaryHeaderAcceptCompression)
+	}
 	if err != nil {
 		if connectErr, ok := asError(err); ok {
 			mergeHeaders(header, connectErr.meta)
@@ -887,14 +897,22 @@ func (m *connectUnaryMarshaler) write(data []byte) *Error {
 
 type connectUnaryRequestMarshaler struct {
 	connectUnaryMarshaler
+
+	enableGet      bool
 	getURLMaxBytes int
+	getUseFallback bool
 	stableCodec    stableCodec
 	duplexCall     *duplexHTTPCall
 }
 
 func (m *connectUnaryRequestMarshaler) Marshal(message any) *Error {
-	if m.stableCodec != nil && m.getURLMaxBytes > 0 {
-		return m.marshalWithGet(message)
+	if m.enableGet {
+		if m.stableCodec == nil && !m.getUseFallback {
+			return errorf(CodeInternal, "codec %s doesn't support stable marshal; cam't use get", m.codec.Name())
+		}
+		if m.stableCodec != nil {
+			return m.marshalWithGet(message)
+		}
 	}
 	return m.connectUnaryMarshaler.Marshal(message)
 }
@@ -902,26 +920,37 @@ func (m *connectUnaryRequestMarshaler) Marshal(message any) *Error {
 func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 	// TODO(jchadwick-buf): This function is mostly a superset of
 	// connectUnaryMarshaler.Marshal. This should be reconciled at some point.
-	if message == nil {
-		if m.writeWithGet(nil, false) {
-			return nil
-		}
-		return m.write(nil)
-	}
-	data, err := m.stableCodec.MarshalStable(message)
-	if err != nil {
-		return errorf(CodeInternal, "marshal message stable: %w", err)
-	}
-	if len(data) <= m.getURLMaxBytes && (m.sendMaxBytes <= 0 || len(data) < m.sendMaxBytes) {
-		if m.writeWithGet(data, false) {
-			return nil
+	var data []byte
+	var err error
+	if message != nil {
+		data, err = m.stableCodec.MarshalStable(message)
+		if err != nil {
+			return errorf(CodeInternal, "marshal message stable: %w", err)
 		}
 	}
-	if m.compressionPool == nil {
-		if m.sendMaxBytes > 0 && len(data) > m.sendMaxBytes {
-			return NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", len(data), m.sendMaxBytes))
+	isTooBig := m.sendMaxBytes > 0 && len(data) > m.sendMaxBytes
+	if isTooBig && m.compressionPool == nil {
+		return NewError(CodeResourceExhausted, fmt.Errorf(
+			"message size %d exceeds sendMaxBytes %d: enabling request compression may help",
+			len(data),
+			m.sendMaxBytes,
+		))
+	}
+	if !isTooBig {
+		url := m.buildGetURL(data, false /* compressed */)
+		if m.getURLMaxBytes <= 0 || len(url.String()) < m.getURLMaxBytes {
+			return m.writeWithGet(url)
 		}
-		return m.write(data)
+		if m.compressionPool == nil {
+			if m.getUseFallback {
+				return m.write(data)
+			}
+			return NewError(CodeResourceExhausted, fmt.Errorf(
+				"url size %d exceeds getURLMaxBytes %d: enabling request compression may help",
+				len(url.String()),
+				m.getURLMaxBytes,
+			))
+		}
 	}
 	// Compress message to try to make it fit in the URL.
 	uncompressed := bytes.NewBuffer(data)
@@ -934,22 +963,24 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 	if m.sendMaxBytes > 0 && compressed.Len() > m.sendMaxBytes {
 		return NewError(CodeResourceExhausted, fmt.Errorf("compressed message size %d exceeds sendMaxBytes %d", compressed.Len(), m.sendMaxBytes))
 	}
-	if compressed.Len() < m.getURLMaxBytes {
-		if m.writeWithGet(compressed.Bytes(), true) {
-			return nil
-		}
+	url := m.buildGetURL(compressed.Bytes(), true /* compressed */)
+	if m.getURLMaxBytes <= 0 || len(url.String()) < m.getURLMaxBytes {
+		return m.writeWithGet(url)
 	}
-	setHeaderCanonical(m.header, connectUnaryHeaderCompression, m.compressionName)
-	return m.write(compressed.Bytes())
+	if m.getUseFallback {
+		setHeaderCanonical(m.header, connectUnaryHeaderCompression, m.compressionName)
+		return m.write(compressed.Bytes())
+	}
+	return NewError(CodeResourceExhausted, fmt.Errorf("compressed url size %d exceeds getURLMaxBytes %d", len(url.String()), m.getURLMaxBytes))
 }
 
-func (m *connectUnaryRequestMarshaler) writeWithGet(data []byte, compressed bool) bool {
+func (m *connectUnaryRequestMarshaler) buildGetURL(data []byte, compressed bool) *url.URL {
 	url := *m.duplexCall.URL()
 	query := url.Query()
-	query.Set(connectUnaryAPIQueryParameter, connectProtocolVersionQueryValue)
+	query.Set(connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue)
 	query.Set(connectUnaryEncodingQueryParameter, m.codec.Name())
-	if m.stableCodec.IsBinary() {
-		query.Set(connectUnaryMessageQueryParameter, EncodeBinaryHeader(data))
+	if m.stableCodec.IsBinary() || compressed {
+		query.Set(connectUnaryMessageQueryParameter, encodeBinaryQueryValue(data))
 		query.Set(connectUnaryBase64QueryParameter, "1")
 	} else {
 		query.Set(connectUnaryMessageQueryParameter, string(data))
@@ -958,12 +989,14 @@ func (m *connectUnaryRequestMarshaler) writeWithGet(data []byte, compressed bool
 		query.Set(connectUnaryCompressionQueryParameter, m.compressionName)
 	}
 	url.RawQuery = query.Encode()
-	if len(url.String()) > m.getURLMaxBytes {
-		return false
-	}
+	return &url
+}
+
+func (m *connectUnaryRequestMarshaler) writeWithGet(url *url.URL) *Error {
+	delete(m.header, connectHeaderProtocolVersion)
 	m.duplexCall.SetMethod(http.MethodGet)
-	*m.duplexCall.URL() = url
-	return true
+	*m.duplexCall.URL() = *url
+	return nil
 }
 
 type connectUnaryUnmarshaler struct {
@@ -1202,4 +1235,30 @@ func connectContentTypeFromCodecName(streamType StreamType, name string) string 
 		return connectUnaryContentTypePrefix + name
 	}
 	return connectStreamingContentTypePrefix + name
+}
+
+// encodeBinaryQueryValue URL-safe base64-encodes data, without padding.
+func encodeBinaryQueryValue(data []byte) string {
+	return base64.RawURLEncoding.EncodeToString(data)
+}
+
+// binaryQueryValueReader creates a reader that can read either padded or
+// unpadded URL-safe base64 from a string.
+func binaryQueryValueReader(data string) io.Reader {
+	stringReader := strings.NewReader(data)
+	if len(data)%4 != 0 {
+		// Data definitely isn't padded.
+		return base64.NewDecoder(base64.RawURLEncoding, stringReader)
+	}
+	// Data is padded, or no padding was necessary.
+	return base64.NewDecoder(base64.URLEncoding, stringReader)
+}
+
+// queryValueReader creates a reader for a string that may be URL-safe base64
+// encoded.
+func queryValueReader(data string, base64Encoded bool) io.Reader {
+	if base64Encoded {
+		return binaryQueryValueReader(data)
+	}
+	return strings.NewReader(data)
 }

@@ -235,38 +235,51 @@ func WithSendMaxBytes(max int) Option {
 // modalities are allowed for a given procedure call.
 //
 // In most cases, you should not need to manually set this. It is normally set
-// by the code generator for your schema. For protobuf, it can be set like this:
+// by the code generator for your schema. For protobuf schemas, it can be set like this:
 //
 //	rpc Ping(PingRequest) returns (PingResponse) {
 //	  option idempotency_level = NO_SIDE_EFFECTS;
 //	}
-
 func WithIdempotency(idempotencyLevel IdempotencyLevel) Option {
 	return &idempotencyOption{idempotencyLevel: idempotencyLevel}
 }
 
-// WithHTTPGet allows using HTTP Get requests for side-effect free unary RPC
-// calls. Typically, a given procedure is known to be side-effect free if it is
-// declared to be in its IDL (see [WithIdempotency].) You must provide the
-// maximum allowable URL length to enable this feature; this is necessary as
-// most user agents, middleboxes/proxies, and servers have limitations on the
-// allowable length of a URL. For example, Apache and Nginx limit the size of a
-// request line to around 8 KiB, meaning that maximum length of a URL is a bit
-// smaller than this.
+// WithHTTPGet allows Connect-protocol clients to use HTTP GET requests for
+// side-effect free unary RPC calls. Typically, the service schema indicates
+// which procedures are idempotent (see [WithIdempotency] for an example
+// protobuf schema). The gRPC and gRPC-Web protocols are POST-only, so this
+// option has no effect when combined with [WithGRPC] or [WithGRPCWeb].
 //
-// If a URL would be longer than the configured maximum value here, the request
-// will be sent as an HTTP POST instead.
+// Using HTTP GET requests makes it easier to take advantage of CDNs, caching
+// reverse proxies, and browsers' built-in caching. Note, however, that servers
+// don't automatically set any cache headers; you can set cache headers using
+// interceptors or by adding headers in individual procedure implementations.
 //
-// A safe value to start with would be 4096 (4 KiB), as this is well under the
-// 8 KiB request line limit encountered on common CDNs and proxies.
+// By default, all requests are made as HTTP POSTs.
+func WithHTTPGet() ClientOption {
+	return &enableGet{}
+}
+
+// WithHTTPGetMaxURLSize sets the maximum allowable URL length for GET requests
+// made using the Connect protocol. It has no effect on gRPC or gRPC-Web
+// clients, since those protocols are POST-only.
 //
-// Using HTTP Get requests makes it easier to set up caching with a CDN. Note,
-// however, that Connect does not automatically set any cache headers on the
-// server; you can set cache headers using interceptors.
+// Limiting the URL size is useful as most user agents, proxies, and servers
+// have limits on the allowable length of a URL. For example, Apache and Nginx
+// limit the size of a request line to around 8 KiB, meaning that maximum
+// length of a URL is a bit smaller than this. If you run into URL size
+// limitations imposed by your network infrastructure and don't know the
+// maximum allowable size, or if you'd prefer to be cautious from the start, a
+// 4096 byte (4 KiB) limit works with most common proxies and CDNs.
 //
-// If this value is set to zero (the default), Get requests will be disabled.
-func WithHTTPGet(maxURLSize int) ClientOption {
-	return &getURLMaxBytes{Max: maxURLSize}
+// If fallback is set to true and the URL would be longer than the configured
+// maximum value, the request will be sent as an HTTP POST instead. If fallback
+// is set to false, the request will fail with [CodeResourceExhausted].
+//
+// By default, Connect-protocol clients with GET requests enabled may send a
+// URL of any size.
+func WithHTTPGetMaxURLSize(bytes int, fallback bool) ClientOption {
+	return &getURLMaxBytes{Max: bytes, Fallback: fallback}
 }
 
 // WithInterceptors configures a client or handler's interceptor stack. Repeated
@@ -458,12 +471,20 @@ func (o *grpcOption) applyToClient(config *clientConfig) {
 	config.Protocol = &protocolGRPC{web: o.web}
 }
 
+type enableGet struct{}
+
+func (o *enableGet) applyToClient(config *clientConfig) {
+	config.EnableGet = true
+}
+
 type getURLMaxBytes struct {
-	Max int
+	Max      int
+	Fallback bool
 }
 
 func (o *getURLMaxBytes) applyToClient(config *clientConfig) {
 	config.GetURLMaxBytes = o.Max
+	config.GetUseFallback = o.Fallback
 }
 
 type interceptorsOption struct {

@@ -90,6 +90,8 @@ func TestClientPeer(t *testing.T) {
 		)
 		ctx := context.Background()
 		// unary
+		_, err := client.Ping(ctx, connect.NewRequest[pingv1.PingRequest](nil))
+		assert.Nil(t, err)
 		text := strings.Repeat(".", 256)
 		r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
 		assert.Nil(t, err)
@@ -128,7 +130,19 @@ func TestClientPeer(t *testing.T) {
 	})
 	t.Run("connect+get", func(t *testing.T) {
 		t.Parallel()
-		run(t, connect.WithHTTPGet(256), connect.WithSendGzip())
+		run(t,
+			connect.WithHTTPGet(),
+			connect.WithHTTPGetMaxURLSize(256, false),
+			connect.WithSendGzip(),
+		)
+	})
+	t.Run("connect+get fallback", func(t *testing.T) {
+		t.Parallel()
+		run(t,
+			connect.WithHTTPGet(),
+			connect.WithHTTPGetMaxURLSize(1, true),
+			connect.WithSendGzip(),
+		)
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()
