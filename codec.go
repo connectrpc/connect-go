@@ -154,11 +154,11 @@ func (c *protoJSONCodec) MarshalStable(message any) ([]byte, error) {
 	// output inconsistent whitespace for some reason, therefore it is
 	// suggested to use a formatter to ensure consistent formatting.
 	// https://github.com/golang/protobuf/issues/1373
-	compactedJSON := new(bytes.Buffer)
 	messageJSON, err := c.Marshal(message)
 	if err != nil {
 		return nil, err
 	}
+	compactedJSON := bytes.NewBuffer(messageJSON[:0])
 	if err = json.Compact(compactedJSON, messageJSON); err != nil {
 		return nil, err
 	}
