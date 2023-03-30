@@ -113,13 +113,9 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 
 // NewClient implements protocol, so it must return an interface.
 func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, error) {
-	url, err := validateRequestURL(params.URL)
-	if err != nil {
-		return nil, err
-	}
-	peer := newPeerFromURL(url, ProtocolGRPC)
+	peer := newPeerFromURL(params.URL, ProtocolGRPC)
 	if g.web {
-		peer = newPeerFromURL(url, ProtocolGRPCWeb)
+		peer = newPeerFromURL(params.URL, ProtocolGRPCWeb)
 	}
 	return &grpcClient{
 		protocolClientParams: *params,
@@ -589,6 +585,17 @@ type grpcMarshaler struct {
 func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *Error {
 	raw := m.envelopeWriter.bufferPool.Get()
 	defer m.envelopeWriter.bufferPool.Put(raw)
+	for key, values := range trailer {
+		// Per the Go specification, keys inserted during iteration may be produced
+		// later in the iteration or may be skipped. For safety, avoid mutating the
+		// map if the key is already lower-cased.
+		lower := strings.ToLower(key)
+		if key == lower {
+			continue
+		}
+		delete(trailer, key)
+		trailer[lower] = values
+	}
 	if err := trailer.Write(raw); err != nil {
 		return errorf(CodeInternal, "format trailers: %w", err)
 	}

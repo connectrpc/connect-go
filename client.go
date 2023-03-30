@@ -17,8 +17,11 @@ package connect
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 // Client is a reusable, concurrency-safe client for a single procedure.
@@ -55,7 +58,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 			Protobuf:         config.protobuf(),
 			CompressMinBytes: config.CompressMinBytes,
 			HTTPClient:       httpClient,
-			URL:              url,
+			URL:              config.URL,
 			BufferPool:       config.BufferPool,
 			ReadMaxBytes:     config.ReadMaxBytes,
 			SendMaxBytes:     config.SendMaxBytes,
@@ -138,6 +141,8 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 		return nil, c.err
 	}
 	conn := c.newConn(ctx, StreamTypeServer)
+	request.spec = conn.Spec()
+	request.peer = conn.Peer()
 	mergeHeaders(conn.RequestHeader(), request.header)
 	// Send always returns an io.EOF unless the error is from the client-side.
 	// We want the user to continue to call Receive in those cases to get the
@@ -174,6 +179,7 @@ func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType) S
 }
 
 type clientConfig struct {
+	URL                    *url.URL
 	Protocol               protocol
 	Procedure              string
 	CompressMinBytes       int
@@ -191,9 +197,14 @@ type clientConfig struct {
 	IdempotencyLevel       IdempotencyLevel
 }
 
-func newClientConfig(url string, options []ClientOption) (*clientConfig, *Error) {
-	protoPath := extractProtoPath(url)
+func newClientConfig(rawURL string, options []ClientOption) (*clientConfig, *Error) {
+	url, err := parseRequestURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	protoPath := extractProtoPath(url.Path)
 	config := clientConfig{
+		URL:              url,
 		Protocol:         &protocolConnect{},
 		Procedure:        protoPath,
 		CompressionPools: make(map[string]*compressionPool),
@@ -236,4 +247,20 @@ func (c *clientConfig) newSpec(t StreamType) Spec {
 		IsClient:         true,
 		IdempotencyLevel: c.IdempotencyLevel,
 	}
+}
+
+func parseRequestURL(rawURL string) (*url.URL, *Error) {
+	url, err := url.ParseRequestURI(rawURL)
+	if err == nil {
+		return url, nil
+	}
+	if !strings.Contains(rawURL, "://") {
+		// URL doesn't have a scheme, so the user is likely accustomed to
+		// grpc-go's APIs.
+		err = fmt.Errorf(
+			"URL %q missing scheme: use http:// or https:// (unlike grpc-go)",
+			rawURL,
+		)
+	}
+	return nil, NewError(CodeUnavailable, err)
 }

@@ -53,19 +53,33 @@ type duplexHTTPCall struct {
 func newDuplexHTTPCall(
 	ctx context.Context,
 	httpClient HTTPClient,
-	url string,
+	url *url.URL,
 	spec Spec,
 	header http.Header,
 ) *duplexHTTPCall {
+	// ensure we make a copy of the url before we pass along to the
+	// Request. This ensures if a transport out of our control wants
+	// to mutate the req.URL, we don't feel the effects of it.
+	url = cloneURL(url)
 	pipeReader, pipeWriter := io.Pipe()
-	request, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		url,
-		pipeReader,
-	)
-	request.Header = header
-	client := &duplexHTTPCall{
+
+	// This is mirroring what http.NewRequestContext did, but
+	// using an already parsed url.URL object, rather than a string
+	// and parsing it again. This is a bit funny with HTTP/1.1
+	// explicitly, but this is logic copied over from
+	// NewRequestContext and doesn't effect the actual version
+	// being transmitted.
+	request := (&http.Request{
+		Method:     http.MethodPost,
+		URL:        url,
+		Header:     header,
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Body:       pipeReader,
+		Host:       url.Host,
+	}).WithContext(ctx)
+	return &duplexHTTPCall{
 		ctx:               ctx,
 		httpClient:        httpClient,
 		streamType:        spec.StreamType,
@@ -74,15 +88,6 @@ func newDuplexHTTPCall(
 		request:           request,
 		responseReady:     make(chan struct{}),
 	}
-	if err != nil {
-		// We can't construct a request, so we definitely can't send it over the
-		// network. Exhaust the sync.Once immediately and short-circuit Read and
-		// Write by setting an error.
-		client.sendRequestOnce.Do(func() {})
-		connectErr := errorf(CodeUnavailable, "construct *http.Request: %w", err)
-		client.SetError(connectErr)
-	}
-	return client
 }
 
 // Write to the request body. Returns an error wrapping io.EOF after SetError
@@ -286,4 +291,18 @@ func (d *duplexHTTPCall) getError() error {
 	d.errMu.Lock()
 	defer d.errMu.Unlock()
 	return d.err
+}
+
+// See: https://cs.opensource.google/go/go/+/refs/tags/go1.20.1:src/net/http/clone.go;l=22-33
+func cloneURL(oldURL *url.URL) *url.URL {
+	if oldURL == nil {
+		return nil
+	}
+	newURL := new(url.URL)
+	*newURL = *oldURL
+	if oldURL.User != nil {
+		newURL.User = new(url.Userinfo)
+		*newURL.User = *oldURL.User
+	}
+	return newURL
 }

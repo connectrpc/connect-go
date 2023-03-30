@@ -16,11 +16,14 @@ package connect
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"testing/quick"
 
+	"github.com/bufbuild/connect-go/internal/assert"
 	pingv1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -92,4 +95,18 @@ func TestStableCodec(t *testing.T) {
 	if err := quick.Check(makeRoundtrip(&protoJSONCodec{}), nil /* config */); err != nil {
 		t.Error(err)
 	}
+}
+
+func TestJSONCodec(t *testing.T) {
+	t.Parallel()
+
+	var empty emptypb.Empty
+	codec := &protoJSONCodec{name: "json"}
+	err := codec.Unmarshal([]byte{}, &empty)
+	assert.NotNil(t, err)
+	assert.True(
+		t,
+		strings.Contains(err.Error(), "valid JSON"),
+		assert.Sprintf(`error message should explain that "" is not a valid JSON object`),
+	)
 }

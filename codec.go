@@ -17,10 +17,12 @@ package connect
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/runtime/protoiface"
 )
 
 const (
@@ -139,6 +141,9 @@ func (c *protoJSONCodec) Unmarshal(binary []byte, message any) error {
 	if !ok {
 		return errNotProto(message)
 	}
+	if len(binary) == 0 {
+		return errors.New("zero-length payload is not a valid JSON object")
+	}
 	var options protojson.UnmarshalOptions
 	return options.Unmarshal(binary, protoMessage)
 }
@@ -210,5 +215,8 @@ func (m *codecMap) Names() []string {
 }
 
 func errNotProto(message any) error {
+	if _, ok := message.(protoiface.MessageV1); ok {
+		return fmt.Errorf("%T uses github.com/golang/protobuf, but connect-go only supports google.golang.org/protobuf: see https://go.dev/blog/protobuf-apiv2", message)
+	}
 	return fmt.Errorf("%T doesn't implement proto.Message", message)
 }
