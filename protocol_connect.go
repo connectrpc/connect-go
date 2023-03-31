@@ -132,6 +132,19 @@ func (*connectHandler) SetTimeout(request *http.Request) (context.Context, conte
 	return ctx, cancel, nil
 }
 
+func (h *connectHandler) CanHandlePayload(request *http.Request, contentType string) bool {
+	if request.Method == http.MethodGet {
+		query := request.URL.Query()
+		codecName := query.Get(connectUnaryEncodingQueryParameter)
+		contentType = connectContentTypeFromCodecName(
+			h.Spec.StreamType,
+			codecName,
+		)
+	}
+	_, ok := h.accept[contentType]
+	return ok
+}
+
 func (h *connectHandler) NewConn(
 	responseWriter http.ResponseWriter,
 	request *http.Request,

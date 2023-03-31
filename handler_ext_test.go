@@ -54,17 +54,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		resp, err := client.Do(request)
 		assert.Nil(t, err)
 		defer resp.Body.Close()
-		assert.Equal(t, resp.StatusCode, http.StatusBadRequest)
-
-		type errorMessage struct {
-			Code    string `json:"code,omitempty"`
-			Message string `json:"message,omitempty"`
-		}
-		var message errorMessage
-		err = json.NewDecoder(resp.Body).Decode(&message)
-		assert.Nil(t, err)
-		assert.Equal(t, message.Message, "missing encoding parameter")
-		assert.Equal(t, message.Code, connect.CodeInvalidArgument.String())
+		assert.Equal(t, resp.StatusCode, http.StatusUnsupportedMediaType)
 	})
 
 	t.Run("get_method_bad_encoding", func(t *testing.T) {
@@ -79,17 +69,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		resp, err := client.Do(request)
 		assert.Nil(t, err)
 		defer resp.Body.Close()
-		assert.Equal(t, resp.StatusCode, http.StatusBadRequest)
-
-		type errorMessage struct {
-			Code    string `json:"code,omitempty"`
-			Message string `json:"message,omitempty"`
-		}
-		var message errorMessage
-		err = json.NewDecoder(resp.Body).Decode(&message)
-		assert.Nil(t, err)
-		assert.Equal(t, message.Message, `invalid message encoding: "unk"`)
-		assert.Equal(t, message.Code, connect.CodeInvalidArgument.String())
+		assert.Equal(t, resp.StatusCode, http.StatusUnsupportedMediaType)
 	})
 
 	t.Run("idempotent_get_method", func(t *testing.T) {

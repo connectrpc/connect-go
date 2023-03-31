@@ -153,6 +153,11 @@ func (*grpcHandler) SetTimeout(request *http.Request) (context.Context, context.
 	return ctx, cancel, nil
 }
 
+func (g *grpcHandler) CanHandlePayload(request *http.Request, contentType string) bool {
+	_, ok := g.accept[contentType]
+	return ok
+}
+
 func (g *grpcHandler) NewConn(
 	responseWriter http.ResponseWriter,
 	request *http.Request,

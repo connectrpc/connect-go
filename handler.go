@@ -191,31 +191,26 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 		}
 	}
 
+	if len(protocolHandlers) == 0 {
+		responseWriter.Header().Set("Allow", h.allowMethod)
+		responseWriter.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
 	contentType := canonicalizeContentType(getHeaderCanonical(request.Header, headerContentType))
 
 	// Find our implementation of the RPC protocol in use.
 	var protocolHandler protocolHandler
-	switch {
-	case len(protocolHandlers) == 0:
-		responseWriter.Header().Set("Allow", h.allowMethod)
-		responseWriter.WriteHeader(http.StatusMethodNotAllowed)
+	for _, handler := range protocolHandlers {
+		if handler.CanHandlePayload(request, contentType) {
+			protocolHandler = handler
+			break
+		}
+	}
+	if protocolHandler == nil {
+		responseWriter.Header().Set("Accept-Post", h.acceptPost)
+		responseWriter.WriteHeader(http.StatusUnsupportedMediaType)
 		return
-
-	case len(protocolHandlers) == 1 && contentType == "":
-		protocolHandler = protocolHandlers[0]
-
-	default:
-		for _, handler := range protocolHandlers {
-			if _, ok := handler.ContentTypes()[contentType]; ok {
-				protocolHandler = handler
-				break
-			}
-		}
-		if protocolHandler == nil {
-			responseWriter.Header().Set("Accept-Post", h.acceptPost)
-			responseWriter.WriteHeader(http.StatusUnsupportedMediaType)
-			return
-		}
 	}
 
 	// Establish a stream and serve the RPC.

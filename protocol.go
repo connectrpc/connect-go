@@ -99,6 +99,9 @@ type protocolHandler interface {
 	// request's context, a nil cancellation function, and a nil error.
 	SetTimeout(*http.Request) (context.Context, context.CancelFunc, error)
 
+	// CanHandlePayload returns true if the protocol can handle an HTTP request.
+	CanHandlePayload(*http.Request, string) bool
+
 	// NewConn constructs a HandlerConn for the message exchange.
 	NewConn(http.ResponseWriter, *http.Request) (handlerConnCloser, bool)
 }
