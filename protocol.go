@@ -100,6 +100,8 @@ type protocolHandler interface {
 	SetTimeout(*http.Request) (context.Context, context.CancelFunc, error)
 
 	// CanHandlePayload returns true if the protocol can handle an HTTP request.
+	// This is called after the request method is validated, so we only need to
+	// be concerned with the content type/payload specifically.
 	CanHandlePayload(*http.Request, string) bool
 
 	// NewConn constructs a HandlerConn for the message exchange.
