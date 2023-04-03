@@ -132,15 +132,6 @@ func TestClientPeer(t *testing.T) {
 		t.Parallel()
 		run(t,
 			connect.WithHTTPGet(),
-			connect.WithHTTPGetMaxURLSize(256, false),
-			connect.WithSendGzip(),
-		)
-	})
-	t.Run("connect+get fallback", func(t *testing.T) {
-		t.Parallel()
-		run(t,
-			connect.WithHTTPGet(),
-			connect.WithHTTPGetMaxURLSize(1, true),
 			connect.WithSendGzip(),
 		)
 	})

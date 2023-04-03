@@ -260,7 +260,7 @@ func WithHTTPGet() ClientOption {
 	return &enableGet{}
 }
 
-// WithHTTPGetMaxURLSize sets the maximum allowable URL length for GET requests
+// withHTTPGetMaxURLSize sets the maximum allowable URL length for GET requests
 // made using the Connect protocol. It has no effect on gRPC or gRPC-Web
 // clients, since those protocols are POST-only.
 //
@@ -278,9 +278,13 @@ func WithHTTPGet() ClientOption {
 //
 // By default, Connect-protocol clients with GET requests enabled may send a
 // URL of any size.
-func WithHTTPGetMaxURLSize(bytes int, fallback bool) ClientOption {
+func withHTTPGetMaxURLSize(bytes int, fallback bool) ClientOption {
 	return &getURLMaxBytes{Max: bytes, Fallback: fallback}
 }
+
+// TODO(jchadwick-buf): Remove this once we've determined whether this option
+// should be exported or removed.
+var _ = withHTTPGetMaxURLSize(0, false)
 
 // WithInterceptors configures a client or handler's interceptor stack. Repeated
 // WithInterceptors options are applied in order, so
