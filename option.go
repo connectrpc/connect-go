@@ -282,10 +282,6 @@ func withHTTPGetMaxURLSize(bytes int, fallback bool) ClientOption {
 	return &getURLMaxBytes{Max: bytes, Fallback: fallback}
 }
 
-// TODO(jchadwick-buf): Remove this once we've determined whether this option
-// should be exported or removed.
-var _ = withHTTPGetMaxURLSize(0, false)
-
 // WithInterceptors configures a client or handler's interceptor stack. Repeated
 // WithInterceptors options are applied in order, so
 //
