@@ -48,9 +48,6 @@ func WithAcceptCompression(
 	newDecompressor func() Decompressor,
 	newCompressor func() Compressor,
 ) ClientOption {
-	if newDecompressor == nil && newCompressor == nil {
-		return &compressionOption{Name: name}
-	}
 	return &compressionOption{
 		Name:            name,
 		CompressionPool: newCompressionPool(newDecompressor, newCompressor),
@@ -93,7 +90,7 @@ func WithSendCompression(name string) ClientOption {
 
 // WithSendGzip configures the client to gzip requests. Since clients have
 // access to a gzip compressor by default, WithSendGzip doesn't require
-// [WithSendCompresion].
+// [WithSendCompression].
 //
 // Some servers don't support gzip, so clients default to sending uncompressed
 // requests.
