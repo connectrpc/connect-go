@@ -102,6 +102,17 @@ func main() {
 	)
 }
 
+func needsWithIdempotency(file *protogen.File) bool {
+	for _, service := range file.Services {
+		for _, method := range service.Methods {
+			if methodIdempotency(method) != connect.IdempotencyUnknown {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func generate(plugin *protogen.Plugin, file *protogen.File) {
 	if len(file.Services) == 0 {
 		return
@@ -163,7 +174,11 @@ func generatePreamble(g *protogen.GeneratedFile, file *protogen.File) {
 		"is not defined, this code was generated with a version of connect newer than the one ",
 		"compiled into your binary. You can fix the problem by either regenerating this code ",
 		"with an older version of connect or updating the connect version compiled into your binary.")
-	g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion0_1_0"))
+	if needsWithIdempotency(file) {
+		g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion1_6_0"))
+	} else {
+		g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion0_1_0"))
+	}
 	g.P()
 }
 
@@ -262,7 +277,17 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 		)
 		g.P("httpClient,")
 		g.P(`baseURL + `, procedureConstName(method), `,`)
-		g.P("opts...,")
+		idempotency := methodIdempotency(method)
+		switch idempotency {
+		case connect.IdempotencyNoSideEffects:
+			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyNoSideEffects"), "),")
+			g.P(connectPackage.Ident("WithClientOptions"), "(opts...),")
+		case connect.IdempotencyIdempotent:
+			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyIdempotent"), "),")
+			g.P(connectPackage.Ident("WithClientOptions"), "(opts...),")
+		case connect.IdempotencyUnknown:
+			g.P("opts...,")
+		}
 		g.P("),")
 	}
 	g.P("}")
@@ -376,6 +401,7 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 	for _, method := range service.Methods {
 		isStreamingServer := method.Desc.IsStreamingServer()
 		isStreamingClient := method.Desc.IsStreamingClient()
+		idempotency := methodIdempotency(method)
 		switch {
 		case isStreamingClient && !isStreamingServer:
 			g.P(`mux.Handle(`, procedureConstName(method), `, `, connectPackage.Ident("NewClientStreamHandler"), "(")
@@ -388,7 +414,16 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 		}
 		g.P(procedureConstName(method), `,`)
 		g.P("svc.", method.GoName, ",")
-		g.P("opts...,")
+		switch idempotency {
+		case connect.IdempotencyNoSideEffects:
+			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyNoSideEffects"), "),")
+			g.P(connectPackage.Ident("WithHandlerOptions"), "(opts...),")
+		case connect.IdempotencyIdempotent:
+			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyIdempotent"), "),")
+			g.P(connectPackage.Ident("WithHandlerOptions"), "(opts...),")
+		case connect.IdempotencyUnknown:
+			g.P("opts...,")
+		}
 		g.P("))")
 	}
 	g.P(`return "/`, reflectionName(service), `/", mux`)
@@ -475,6 +510,22 @@ func isDeprecatedService(service *protogen.Service) bool {
 func isDeprecatedMethod(method *protogen.Method) bool {
 	methodOptions, ok := method.Desc.Options().(*descriptorpb.MethodOptions)
 	return ok && methodOptions.GetDeprecated()
+}
+
+func methodIdempotency(method *protogen.Method) connect.IdempotencyLevel {
+	methodOptions, ok := method.Desc.Options().(*descriptorpb.MethodOptions)
+	if !ok {
+		return connect.IdempotencyUnknown
+	}
+	switch methodOptions.GetIdempotencyLevel() {
+	case descriptorpb.MethodOptions_NO_SIDE_EFFECTS:
+		return connect.IdempotencyNoSideEffects
+	case descriptorpb.MethodOptions_IDEMPOTENT:
+		return connect.IdempotencyIdempotent
+	case descriptorpb.MethodOptions_IDEMPOTENCY_UNKNOWN:
+		return connect.IdempotencyUnknown
+	}
+	return connect.IdempotencyUnknown
 }
 
 // Raggedy comments in the generated code are driving me insane. This

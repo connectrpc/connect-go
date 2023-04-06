@@ -15,6 +15,8 @@
 package connect
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -51,6 +53,32 @@ type Codec interface {
 	Unmarshal([]byte, any) error
 }
 
+// stableCodec is an extension to Codec for serializing with stable output.
+type stableCodec interface {
+	Codec
+
+	// MarshalStable marshals the given message with stable field ordering.
+	//
+	// MarshalStable should return the same output for a given input. Although
+	// it is not guaranteed to be canonicalized, the marshalling routine for
+	// MarshalStable will opt for the most normalized output available for a
+	// given serialization.
+	//
+	// For practical reasons, it is possible for MarshalStable to return two
+	// different results for two inputs considered to be "equal" in their own
+	// domain, and it may change in the future with codec updates, but for
+	// any given concrete value and any given version, it should return the
+	// same output.
+	MarshalStable(any) ([]byte, error)
+
+	// IsBinary returns true if the marshalled data is binary for this codec.
+	//
+	// If this function returns false, the data returned from Marshal and
+	// MarshalStable are considered valid text and may be used in contexts
+	// where text is expected.
+	IsBinary() bool
+}
+
 type protoBinaryCodec struct{}
 
 var _ Codec = (*protoBinaryCodec)(nil)
@@ -71,6 +99,24 @@ func (c *protoBinaryCodec) Unmarshal(data []byte, message any) error {
 		return errNotProto(message)
 	}
 	return proto.Unmarshal(data, protoMessage)
+}
+
+func (c *protoBinaryCodec) MarshalStable(message any) ([]byte, error) {
+	protoMessage, ok := message.(proto.Message)
+	if !ok {
+		return nil, errNotProto(message)
+	}
+	// protobuf does not offer a canonical output today, so this format is not
+	// guaranteed to match deterministic output from other protobuf libraries.
+	// In addition, unknown fields may cause inconsistent output for otherwise
+	// equal messages.
+	// https://github.com/golang/protobuf/issues/1121
+	options := proto.MarshalOptions{Deterministic: true}
+	return options.Marshal(protoMessage)
+}
+
+func (c *protoBinaryCodec) IsBinary() bool {
+	return true
 }
 
 type protoJSONCodec struct {
@@ -100,6 +146,27 @@ func (c *protoJSONCodec) Unmarshal(binary []byte, message any) error {
 	}
 	var options protojson.UnmarshalOptions
 	return options.Unmarshal(binary, protoMessage)
+}
+
+func (c *protoJSONCodec) MarshalStable(message any) ([]byte, error) {
+	// protojson does not offer a "deterministic" field ordering, but fields
+	// are still ordered consistently by their index. However, protojson can
+	// output inconsistent whitespace for some reason, therefore it is
+	// suggested to use a formatter to ensure consistent formatting.
+	// https://github.com/golang/protobuf/issues/1373
+	messageJSON, err := c.Marshal(message)
+	if err != nil {
+		return nil, err
+	}
+	compactedJSON := bytes.NewBuffer(messageJSON[:0])
+	if err = json.Compact(compactedJSON, messageJSON); err != nil {
+		return nil, err
+	}
+	return compactedJSON.Bytes(), nil
+}
+
+func (c *protoJSONCodec) IsBinary() bool {
+	return false
 }
 
 // readOnlyCodecs is a read-only interface to a map of named codecs.

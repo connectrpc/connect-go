@@ -12,10 +12,10 @@ compression, and content type negotiation. It also generates an idiomatic,
 type-safe client. Handlers and clients support three protocols: gRPC, gRPC-Web,
 and Connect's own protocol.
 
-The [Connect protocol][protocol] is a simple, POST-only protocol that works
-over HTTP/1.1 or HTTP/2. It takes the best portions of gRPC and gRPC-Web,
-including streaming, and packages them into a protocol that works equally well
-in browsers, monoliths, and microservices. Calling a Connect API is as easy as
+The [Connect protocol][protocol] is a simple protocol that works over HTTP/1.1
+or HTTP/2. It takes the best portions of gRPC and gRPC-Web, including
+streaming, and packages them into a protocol that works equally well in
+browsers, monoliths, and microservices. Calling a Connect API is as easy as
 using `curl`. Try it with our live demo:
 
 ```

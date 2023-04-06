@@ -19,6 +19,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/bufbuild/connect-go"
@@ -89,8 +90,12 @@ func TestClientPeer(t *testing.T) {
 		)
 		ctx := context.Background()
 		// unary
-		_, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
+		_, err := client.Ping(ctx, connect.NewRequest[pingv1.PingRequest](nil))
 		assert.Nil(t, err)
+		text := strings.Repeat(".", 256)
+		r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
+		assert.Nil(t, err)
+		assert.Equal(t, r.Msg.Text, text)
 		// client streaming
 		clientStream := client.Sum(ctx)
 		t.Cleanup(func() {
@@ -122,6 +127,13 @@ func TestClientPeer(t *testing.T) {
 	t.Run("connect", func(t *testing.T) {
 		t.Parallel()
 		run(t)
+	})
+	t.Run("connect+get", func(t *testing.T) {
+		t.Parallel()
+		run(t,
+			connect.WithHTTPGet(),
+			connect.WithSendGzip(),
+		)
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()

@@ -78,11 +78,15 @@ type protocolHandlerParams struct {
 	ReadMaxBytes                 int
 	SendMaxBytes                 int
 	RequireConnectProtocolHeader bool
+	IdempotencyLevel             IdempotencyLevel
 }
 
 // Handler is the server side of a protocol. HTTP handlers typically support
 // multiple protocols, codecs, and compressors.
 type protocolHandler interface {
+	// Methods is the set of HTTP methods the protocol can handle.
+	Methods() map[string]struct{}
+
 	// ContentTypes is the set of HTTP Content-Types that the protocol can
 	// handle.
 	ContentTypes() map[string]struct{}
@@ -94,6 +98,11 @@ type protocolHandler interface {
 	// If the client didn't send a timeout, SetTimeout should return the
 	// request's context, a nil cancellation function, and a nil error.
 	SetTimeout(*http.Request) (context.Context, context.CancelFunc, error)
+
+	// CanHandlePayload returns true if the protocol can handle an HTTP request.
+	// This is called after the request method is validated, so we only need to
+	// be concerned with the content type/payload specifically.
+	CanHandlePayload(*http.Request, string) bool
 
 	// NewConn constructs a HandlerConn for the message exchange.
 	NewConn(http.ResponseWriter, *http.Request) (handlerConnCloser, bool)
@@ -113,6 +122,9 @@ type protocolClientParams struct {
 	BufferPool       *bufferPool
 	ReadMaxBytes     int
 	SendMaxBytes     int
+	EnableGet        bool
+	GetURLMaxBytes   int
+	GetUseFallback   bool
 	// The gRPC family of protocols always needs access to a Protobuf codec to
 	// marshal and unmarshal errors.
 	Protobuf Codec
@@ -220,6 +232,21 @@ func sortedAcceptPostValue(handlers []protocolHandler) string {
 	}
 	sort.Strings(accept)
 	return strings.Join(accept, ", ")
+}
+
+func sortedAllowMethodValue(handlers []protocolHandler) string {
+	methods := make(map[string]struct{})
+	for _, handler := range handlers {
+		for method := range handler.Methods() {
+			methods[method] = struct{}{}
+		}
+	}
+	allow := make([]string, 0, len(methods))
+	for ct := range methods {
+		allow = append(allow, ct)
+	}
+	sort.Strings(allow)
+	return strings.Join(allow, ", ")
 }
 
 func isCommaOrSpace(c rune) bool {
