@@ -62,6 +62,9 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 			BufferPool:       config.BufferPool,
 			ReadMaxBytes:     config.ReadMaxBytes,
 			SendMaxBytes:     config.SendMaxBytes,
+			EnableGet:        config.EnableGet,
+			GetURLMaxBytes:   config.GetURLMaxBytes,
+			GetUseFallback:   config.GetUseFallback,
 		},
 	)
 	if protocolErr != nil {
@@ -188,6 +191,10 @@ type clientConfig struct {
 	BufferPool             *bufferPool
 	ReadMaxBytes           int
 	SendMaxBytes           int
+	EnableGet              bool
+	GetURLMaxBytes         int
+	GetUseFallback         bool
+	IdempotencyLevel       IdempotencyLevel
 }
 
 func newClientConfig(rawURL string, options []ClientOption) (*clientConfig, *Error) {
@@ -235,9 +242,10 @@ func (c *clientConfig) protobuf() Codec {
 
 func (c *clientConfig) newSpec(t StreamType) Spec {
 	return Spec{
-		StreamType: t,
-		Procedure:  c.Procedure,
-		IsClient:   true,
+		StreamType:       t,
+		Procedure:        c.Procedure,
+		IsClient:         true,
+		IdempotencyLevel: c.IdempotencyLevel,
 	}
 }
 

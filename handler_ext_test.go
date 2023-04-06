@@ -35,10 +35,56 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		successPingServer{},
 	))
 	const pingProcedure = "/" + pingv1connect.PingServiceName + "/Ping"
+	const sumProcedure = "/" + pingv1connect.PingServiceName + "/Sum"
 	server := httptest.NewServer(mux)
 	client := server.Client()
 	t.Cleanup(func() {
 		server.Close()
+	})
+
+	t.Run("get_method_no_encoding", func(t *testing.T) {
+		t.Parallel()
+		request, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodGet,
+			server.URL+pingProcedure,
+			strings.NewReader(""),
+		)
+		assert.Nil(t, err)
+		resp, err := client.Do(request)
+		assert.Nil(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, resp.StatusCode, http.StatusUnsupportedMediaType)
+	})
+
+	t.Run("get_method_bad_encoding", func(t *testing.T) {
+		t.Parallel()
+		request, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodGet,
+			server.URL+pingProcedure+`?encoding=unk&message={}`,
+			strings.NewReader(""),
+		)
+		assert.Nil(t, err)
+		resp, err := client.Do(request)
+		assert.Nil(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, resp.StatusCode, http.StatusUnsupportedMediaType)
+	})
+
+	t.Run("idempotent_get_method", func(t *testing.T) {
+		t.Parallel()
+		request, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodGet,
+			server.URL+pingProcedure+`?encoding=json&message={}`,
+			strings.NewReader(""),
+		)
+		assert.Nil(t, err)
+		resp, err := client.Do(request)
+		assert.Nil(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, resp.StatusCode, http.StatusOK)
 	})
 
 	t.Run("method_not_allowed", func(t *testing.T) {
@@ -46,7 +92,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		request, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodGet,
-			server.URL+pingProcedure,
+			server.URL+sumProcedure,
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err)

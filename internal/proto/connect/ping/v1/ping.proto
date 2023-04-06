@@ -62,7 +62,9 @@ message CumSumResponse {
 
 service PingService {
   // Ping sends a ping to the server to determine if it's reachable.
-  rpc Ping(PingRequest) returns (PingResponse) {}
+  rpc Ping(PingRequest) returns (PingResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
   // Fail always fails.
   rpc Fail(FailRequest) returns (FailResponse) {}
   // Sum calculates the sum of the numbers sent on the stream.

@@ -37,7 +37,7 @@ import (
 // generated with a version of connect newer than the one compiled into your binary. You can fix the
 // problem by either regenerating this code with an older version of connect or updating the connect
 // version compiled into your binary.
-const _ = connect_go.IsAtLeastVersion0_1_0
+const _ = connect_go.IsAtLeastVersion1_6_0
 
 const (
 	// PingServiceName is the fully-qualified name of the PingService service.
@@ -91,7 +91,8 @@ func NewPingServiceClient(httpClient connect_go.HTTPClient, baseURL string, opts
 		ping: connect_go.NewClient[v1.PingRequest, v1.PingResponse](
 			httpClient,
 			baseURL+PingServicePingProcedure,
-			opts...,
+			connect_go.WithIdempotency(connect_go.IdempotencyNoSideEffects),
+			connect_go.WithClientOptions(opts...),
 		),
 		fail: connect_go.NewClient[v1.FailRequest, v1.FailResponse](
 			httpClient,
@@ -174,7 +175,8 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect_go.HandlerOpt
 	mux.Handle(PingServicePingProcedure, connect_go.NewUnaryHandler(
 		PingServicePingProcedure,
 		svc.Ping,
-		opts...,
+		connect_go.WithIdempotency(connect_go.IdempotencyNoSideEffects),
+		connect_go.WithHandlerOptions(opts...),
 	))
 	mux.Handle(PingServiceFailProcedure, connect_go.NewUnaryHandler(
 		PingServiceFailProcedure,

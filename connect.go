@@ -39,6 +39,7 @@ const Version = "1.7.0-dev"
 const (
 	IsAtLeastVersion0_0_1 = true
 	IsAtLeastVersion0_1_0 = true
+	IsAtLeastVersion1_6_0 = true
 )
 
 // StreamType describes whether the client, server, neither, or both is
@@ -275,9 +276,10 @@ type HTTPClient interface {
 // If you're using Protobuf, protoc-gen-connect-go generates a constant for the
 // fully-qualified Procedure corresponding to each RPC in your schema.
 type Spec struct {
-	StreamType StreamType
-	Procedure  string // for example, "/acme.foo.v1.FooService/Bar"
-	IsClient   bool   // otherwise we're in a handler
+	StreamType       StreamType
+	Procedure        string // for example, "/acme.foo.v1.FooService/Bar"
+	IsClient         bool   // otherwise we're in a handler
+	IdempotencyLevel IdempotencyLevel
 }
 
 // Peer describes the other party to an RPC.
@@ -289,9 +291,13 @@ type Spec struct {
 // On both the client and the server, Protocol is the RPC protocol in use.
 // Currently, it's either [ProtocolConnect], [ProtocolGRPC], or
 // [ProtocolGRPCWeb], but additional protocols may be added in the future.
+//
+// Query contains the query parameters for the request. For the server, this
+// will reflect the actual query parameters sent. For the client, it is unset.
 type Peer struct {
 	Addr     string
 	Protocol string
+	Query    url.Values // server-only
 }
 
 func newPeerFromURL(url *url.URL, protocol string) Peer {
