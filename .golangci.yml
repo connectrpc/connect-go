@@ -94,7 +94,7 @@ issues:
     - linters: [testableexamples]
       path: error_not_modified_example_test.go
     - linters: [testableexamples]
-      path: error_ext_test.go
+      path: error_example_test.go
     # In examples, it's okay to use http.ListenAndServe.
     - linters: [gosec]
       path: error_not_modified_example_test.go
