@@ -26,6 +26,7 @@ package connect
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -52,6 +53,20 @@ const (
 	StreamTypeServer StreamType = 0b10
 	StreamTypeBidi              = StreamTypeClient | StreamTypeServer
 )
+
+func (s StreamType) String() string {
+	switch s {
+	case StreamTypeUnary:
+		return "unary"
+	case StreamTypeClient:
+		return "client"
+	case StreamTypeServer:
+		return "server"
+	case StreamTypeBidi:
+		return "bidi"
+	}
+	return fmt.Sprintf("stream_%d", s)
+}
 
 // StreamingHandlerConn is the server's view of a bidirectional message
 // exchange. Interceptors for streaming RPCs may wrap StreamingHandlerConns.
