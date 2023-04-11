@@ -43,6 +43,8 @@ type ClientOption interface {
 // Clients accept gzipped responses by default, using a compressor backed by the
 // standard library's [gzip] package with the default compression level. Use
 // [WithSendGzip] to compress requests with gzip.
+//
+// Calling WithAcceptCompression with an empty name is a no-op.
 func WithAcceptCompression(
 	name string,
 	newDecompressor func() Decompressor,
@@ -113,9 +115,11 @@ type HandlerOption interface {
 // compressors and decompressors.
 //
 // By default, handlers support gzip using the standard library's
-// [compress/gzip] package at the default compression level.
+// [compress/gzip] package at the default compression level. To remove support for
+// a previously-registered compression algorithm, use WithCompression with nil
+// decompressor and compressor constructors.
 //
-// Calling WithCompression with an empty name or nil constructors is a no-op.
+// Calling WithCompression with an empty name is a no-op.
 func WithCompression(
 	name string,
 	newDecompressor func() Decompressor,
@@ -317,31 +321,31 @@ type compressionOption struct {
 }
 
 func (o *compressionOption) applyToClient(config *clientConfig) {
+	o.apply(&config.CompressionNames, config.CompressionPools)
+}
+
+func (o *compressionOption) applyToHandler(config *handlerConfig) {
+	o.apply(&config.CompressionNames, config.CompressionPools)
+}
+
+func (o *compressionOption) apply(configuredNames *[]string, configuredPools map[string]*compressionPool) {
 	if o.Name == "" {
 		return
 	}
 	if o.CompressionPool == nil {
-		delete(config.CompressionPools, o.Name)
+		delete(configuredPools, o.Name)
 		var names []string
-		for _, name := range config.CompressionNames {
+		for _, name := range *configuredNames {
 			if name == o.Name {
 				continue
 			}
 			names = append(names, name)
 		}
-		config.CompressionNames = names
+		*configuredNames = names
 		return
 	}
-	config.CompressionPools[o.Name] = o.CompressionPool
-	config.CompressionNames = append(config.CompressionNames, o.Name)
-}
-
-func (o *compressionOption) applyToHandler(config *handlerConfig) {
-	if o.Name == "" || o.CompressionPool == nil {
-		return
-	}
-	config.CompressionPools[o.Name] = o.CompressionPool
-	config.CompressionNames = append(config.CompressionNames, o.Name)
+	configuredPools[o.Name] = o.CompressionPool
+	*configuredNames = append(*configuredNames, o.Name)
 }
 
 type compressMinBytesOption struct {

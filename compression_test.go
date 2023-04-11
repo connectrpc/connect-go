@@ -153,11 +153,11 @@ func TestHandlerCompressionOptionTest(t *testing.T) {
 		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
 		checkPools(t, config)
 	})
-	t.Run("WithCompression-nil-ctors-does-not-unregister", func(t *testing.T) {
+	t.Run("WithCompression-nil-ctors-unregisters", func(t *testing.T) {
 		t.Parallel()
 		opts := []HandlerOption{WithCompression("gzip", nil, nil)}
 		config := newHandlerConfig(testProc, opts)
-		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
+		assert.Equal(t, config.CompressionNames, nil)
 		checkPools(t, config)
 	})
 }
