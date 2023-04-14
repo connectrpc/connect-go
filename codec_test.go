@@ -22,7 +22,9 @@ import (
 
 	"github.com/bufbuild/connect-go/internal/assert"
 	pingv1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/apipb"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -109,4 +111,60 @@ func TestJSONCodec(t *testing.T) {
 		strings.Contains(err.Error(), "valid JSON"),
 		assert.Sprintf(`error message should explain that "" is not a valid JSON object`),
 	)
+}
+
+func TestJSONCodecWithOptions(t *testing.T) {
+	t.Parallel()
+
+	codec := &protoJSONCodec{
+		name: "json",
+		marshalOptions: protojson.MarshalOptions{
+			Multiline:       true,
+			Indent:          "  ",
+			UseProtoNames:   true,
+			UseEnumNumbers:  true,
+			EmitUnpopulated: true,
+		},
+		unmarshalOptions: protojson.UnmarshalOptions{
+			AllowPartial:   false,
+			DiscardUnknown: true,
+			Resolver:       nil,
+		},
+	}
+
+	in := apipb.Api{
+		Name:    "api",
+		Version: "1.0",
+	}
+	data, err := codec.Marshal(&in)
+	if err != nil {
+		t.Error(err)
+	}
+
+	out := apipb.Api{}
+	err = codec.Unmarshal(data, &out)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if out.Name != "api" || out.Version != "1.0" {
+		t.Error("values not preserved after round trip through marshal and unmarshal")
+	}
+
+	asJSON := string(data)
+	lines := strings.Count(asJSON, "\n")
+	spaces := strings.Count(asJSON, " ")
+
+	if lines == 0 || spaces == 0 {
+		t.Error("expected formatted JSON")
+	}
+
+	if !strings.Contains(asJSON, "\"source_context\"") {
+		t.Error("expected unpopulated fields to be included in message")
+	}
+
+	err = codec.Unmarshal([]byte(`{"name": "api", "foo": "bar"}`), &out)
+	if err != nil {
+		t.Error("expected unknown fields to be ignored, got error:", err)
+	}
 }

@@ -19,6 +19,8 @@ import (
 	"context"
 	"io"
 	"net/http"
+
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // A ClientOption configures a [Client].
@@ -77,7 +79,20 @@ func WithGRPCWeb() ClientOption {
 // lowerCamelCase, zero values are omitted, missing required fields are errors,
 // enums are emitted as strings, etc.
 func WithProtoJSON() ClientOption {
-	return WithCodec(&protoJSONCodec{codecNameJSON})
+	return WithCodec(&protoJSONCodec{name: codecNameJSON})
+}
+
+// WithProtoJSONOptions is identical to WithProtoJSON, but also allows
+// protojson marshalling options to be configured.
+func WithProtoJSONOptions(
+	marshalOptions protojson.MarshalOptions,
+	unmarshalOptions protojson.UnmarshalOptions,
+) ClientOption {
+	return WithCodec(&protoJSONCodec{
+		name:             codecNameJSON,
+		marshalOptions:   marshalOptions,
+		unmarshalOptions: unmarshalOptions,
+	})
 }
 
 // WithSendCompression configures the client to use the specified algorithm to
@@ -553,7 +568,7 @@ func withProtoBinaryCodec() Option {
 
 func withProtoJSONCodecs() HandlerOption {
 	return WithHandlerOptions(
-		WithCodec(&protoJSONCodec{codecNameJSON}),
-		WithCodec(&protoJSONCodec{codecNameJSONCharsetUTF8}),
+		WithCodec(&protoJSONCodec{name: codecNameJSON}),
+		WithCodec(&protoJSONCodec{name: codecNameJSONCharsetUTF8}),
 	)
 }

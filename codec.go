@@ -120,7 +120,9 @@ func (c *protoBinaryCodec) IsBinary() bool {
 }
 
 type protoJSONCodec struct {
-	name string
+	name             string
+	marshalOptions   protojson.MarshalOptions
+	unmarshalOptions protojson.UnmarshalOptions
 }
 
 var _ Codec = (*protoJSONCodec)(nil)
@@ -132,8 +134,7 @@ func (c *protoJSONCodec) Marshal(message any) ([]byte, error) {
 	if !ok {
 		return nil, errNotProto(message)
 	}
-	var options protojson.MarshalOptions
-	return options.Marshal(protoMessage)
+	return c.marshalOptions.Marshal(protoMessage)
 }
 
 func (c *protoJSONCodec) Unmarshal(binary []byte, message any) error {
@@ -144,8 +145,7 @@ func (c *protoJSONCodec) Unmarshal(binary []byte, message any) error {
 	if len(binary) == 0 {
 		return errors.New("zero-length payload is not a valid JSON object")
 	}
-	var options protojson.UnmarshalOptions
-	return options.Unmarshal(binary, protoMessage)
+	return c.unmarshalOptions.Unmarshal(binary, protoMessage)
 }
 
 func (c *protoJSONCodec) MarshalStable(message any) ([]byte, error) {
