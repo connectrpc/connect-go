@@ -145,6 +145,62 @@ func TestClientPeer(t *testing.T) {
 	})
 }
 
+func TestGetNotModified(t *testing.T) {
+	t.Parallel()
+
+	const etag = "some-etag"
+	// Handlers should automatically set Vary to include request headers that are
+	// part of the RPC protocol.
+	expectVary := []string{"Accept-Encoding"}
+
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(&notModifiedPingServer{etag: etag}))
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+
+	client := pingv1connect.NewPingServiceClient(
+		server.Client(),
+		server.URL,
+		connect.WithHTTPGet(),
+	)
+	ctx := context.Background()
+	// unconditional request
+	res, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
+	assert.Nil(t, err)
+	assert.Equal(t, res.Header().Get("Etag"), etag)
+	assert.Equal(t, res.Header().Values("Vary"), expectVary)
+
+	conditional := connect.NewRequest(&pingv1.PingRequest{})
+	conditional.Header().Set("If-None-Match", etag)
+	_, err = client.Ping(ctx, conditional)
+	assert.NotNil(t, err)
+	assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+	assert.True(t, connect.IsNotModifiedError(err))
+	var connectErr *connect.Error
+	assert.True(t, errors.As(err, &connectErr))
+	assert.Equal(t, connectErr.Meta().Get("Etag"), etag)
+	assert.Equal(t, connectErr.Meta().Values("Vary"), expectVary)
+}
+
+type notModifiedPingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+
+	etag string
+}
+
+func (s *notModifiedPingServer) Ping(
+	_ context.Context,
+	req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	if len(req.Peer().Query) > 0 && req.Header().Get("If-None-Match") == s.etag {
+		return nil, connect.NewNotModifiedError(http.Header{"Etag": []string{s.etag}})
+	}
+	resp := connect.NewResponse(&pingv1.PingResponse{})
+	resp.Header().Set("Etag", s.etag)
+	return resp, nil
+}
+
 type assertPeerInterceptor struct {
 	tb testing.TB
 }
