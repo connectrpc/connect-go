@@ -175,7 +175,7 @@ func generatePreamble(g *protogen.GeneratedFile, file *protogen.File) {
 		"compiled into your binary. You can fix the problem by either regenerating this code ",
 		"with an older version of connect or updating the connect version compiled into your binary.")
 	if needsWithIdempotency(file) {
-		g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion1_6_0"))
+		g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion1_7_0"))
 	} else {
 		g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion0_1_0"))
 	}
