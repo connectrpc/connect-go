@@ -295,7 +295,7 @@ func wrapIfContextError(err error) error {
 	return err
 }
 
-// wrapIfLikelyWithGRPCNotUsedError adds a wrapping error that has a message
+// wrapIfLikelyH2CNotConfiguredError adds a wrapping error that has a message
 // telling the caller that they likely need to use h2c but are using a raw http.Client{}.
 //
 // This happens when running a gRPC-only server.
