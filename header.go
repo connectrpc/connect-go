@@ -51,7 +51,7 @@ func mergeHeaders(into, from http.Header) {
 	}
 }
 
-// getCanonicalHeader is a shortcut for Header.Get() which
+// getHeaderCanonical is a shortcut for Header.Get() which
 // bypasses the CanonicalMIMEHeaderKey operation when we
 // know the key is already in canonical form.
 func getHeaderCanonical(h http.Header, key string) string {
