@@ -135,6 +135,7 @@ type Request[T any] struct {
 	spec   Spec
 	peer   Peer
 	header http.Header
+	method string
 }
 
 // NewRequest wraps a generated request message.
@@ -172,8 +173,26 @@ func (r *Request[_]) Header() http.Header {
 	return r.header
 }
 
+// Method returns the HTTP method for this request. This is nearly always
+// POST, but side-effect-free RPCs could be made via a GET.
+//
+// On a newly created request, via NewRequest, this will return "POST" and
+// only changes to return to "GET" after it is actually sent to a server
+// using GET as the method.
+func (r *Request[_]) Method() string {
+	if r.method == "" {
+		return http.MethodPost
+	}
+	return r.method
+}
+
 // internalOnly implements AnyRequest.
 func (r *Request[_]) internalOnly() {}
+
+// setRequestMethod sets the request method to the given value.
+func (r *Request[_]) setRequestMethod(method string) {
+	r.method = method
+}
 
 // AnyRequest is the common method set of every [Request], regardless of type
 // parameter. It's used in unary interceptors.
@@ -190,8 +209,10 @@ type AnyRequest interface {
 	Spec() Spec
 	Peer() Peer
 	Header() http.Header
+	Method() string
 
 	internalOnly()
+	setRequestMethod(string)
 }
 
 // Response is a wrapper around a generated response message. It provides
@@ -313,6 +334,16 @@ type handlerConnCloser interface {
 	StreamingHandlerConn
 
 	Close(error) error
+}
+
+type handlerConnWithRequestMethod interface {
+	StreamingHandlerConn
+	getMethod() string
+}
+
+type clientConnWithRequestMethod interface {
+	StreamingClientConn
+	onSetMethod(fn func(string))
 }
 
 // receiveUnaryResponse unmarshals a message from a StreamingClientConn, then

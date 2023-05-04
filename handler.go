@@ -67,11 +67,16 @@ func NewUnaryHandler[Req, Res any](
 		if err := conn.Receive(&msg); err != nil {
 			return err
 		}
+		method := http.MethodPost
+		if hasRequestMethod, ok := conn.(handlerConnWithRequestMethod); ok {
+			method = hasRequestMethod.getMethod()
+		}
 		request := &Request[Req]{
 			Msg:    &msg,
 			spec:   conn.Spec(),
 			peer:   conn.Peer(),
 			header: conn.RequestHeader(),
+			method: method,
 		}
 		response, err := untyped(ctx, request)
 		if err != nil {

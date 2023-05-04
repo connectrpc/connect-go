@@ -499,6 +499,10 @@ func (cc *connectUnaryClientConn) CloseResponse() error {
 	return cc.duplexCall.CloseRead()
 }
 
+func (cc *connectUnaryClientConn) onSetMethod(fn func(string)) {
+	cc.duplexCall.onSetMethod = fn
+}
+
 func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Error {
 	for k, v := range response.Header {
 		if !strings.HasPrefix(k, connectUnaryTrailerPrefix) {
@@ -719,6 +723,10 @@ func (hc *connectUnaryHandlerConn) Close(err error) error {
 	return hc.request.Body.Close()
 }
 
+func (hc *connectUnaryHandlerConn) getMethod() string {
+	return hc.request.Method
+}
+
 func (hc *connectUnaryHandlerConn) writeResponseHeader(err error) {
 	header := hc.responseWriter.Header()
 	if hc.request.Method == http.MethodGet {
@@ -928,7 +936,7 @@ type connectUnaryRequestMarshaler struct {
 func (m *connectUnaryRequestMarshaler) Marshal(message any) *Error {
 	if m.enableGet {
 		if m.stableCodec == nil && !m.getUseFallback {
-			return errorf(CodeInternal, "codec %s doesn't support stable marshal; cam't use get", m.codec.Name())
+			return errorf(CodeInternal, "codec %s doesn't support stable marshal; can't use get", m.codec.Name())
 		}
 		if m.stableCodec != nil {
 			return m.marshalWithGet(message)

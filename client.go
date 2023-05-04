@@ -77,6 +77,11 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 	unarySpec := config.newSpec(StreamTypeUnary)
 	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
 		conn := client.protocolClient.NewConn(ctx, unarySpec, request.Header())
+		if hasRequestMethod, ok := conn.(clientConnWithRequestMethod); ok {
+			hasRequestMethod.onSetMethod(func(method string) {
+				request.setRequestMethod(method)
+			})
+		}
 		// Send always returns an io.EOF unless the error is from the client-side.
 		// We want the user to continue to call Receive in those cases to get the
 		// full error from the server-side.
