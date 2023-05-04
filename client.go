@@ -78,9 +78,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
 		conn := client.protocolClient.NewConn(ctx, unarySpec, request.Header())
 		if hasRequestMethod, ok := conn.(clientConnWithRequestMethod); ok {
-			hasRequestMethod.onSetMethod(func(method string) {
-				request.setRequestMethod(method)
-			})
+			hasRequestMethod.onSetMethod(request.setRequestMethod)
 		}
 		// Send always returns an io.EOF unless the error is from the client-side.
 		// We want the user to continue to call Receive in those cases to get the
