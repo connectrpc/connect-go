@@ -234,10 +234,10 @@ func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Servic
 		g.P("//")
 		deprecated(g)
 	}
-	g.Annotate(names.Client, service.Location)
+	g.AnnotateSymbol(names.Client, protogen.Annotation{Location: service.Location})
 	g.P("type ", names.Client, " interface {")
 	for _, method := range service.Methods {
-		g.Annotate(names.Client+"."+method.GoName, method.Location)
+		g.AnnotateSymbol(names.Client+"."+method.GoName, protogen.Annotation{Location: method.Location})
 		leadingComments(
 			g,
 			method.Comments.Leading,
@@ -369,7 +369,7 @@ func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Servic
 		g.P("//")
 		deprecated(g)
 	}
-	g.Annotate(names.Server, service.Location)
+	g.AnnotateSymbol(names.Server, protogen.Annotation{Location: service.Location})
 	g.P("type ", names.Server, " interface {")
 	for _, method := range service.Methods {
 		leadingComments(
@@ -377,7 +377,7 @@ func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Servic
 			method.Comments.Leading,
 			isDeprecatedMethod(method),
 		)
-		g.Annotate(names.Server+"."+method.GoName, method.Location)
+		g.AnnotateSymbol(names.Server+"."+method.GoName, protogen.Annotation{Location: method.Location})
 		g.P(serverSignature(g, method))
 	}
 	g.P("}")

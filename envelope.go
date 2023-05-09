@@ -67,14 +67,24 @@ func (w *envelopeWriter) Marshal(message any) *Error {
 		}
 		return nil
 	}
-	raw, err := w.codec.Marshal(message)
+
+	buffer := w.bufferPool.Get()
+	defer w.bufferPool.Put(buffer)
+
+	// Reuse byte buffer if codec supports MarshalAppend.
+	var (
+		raw []byte
+		err error
+	)
+	if c, ok := w.codec.(marshalAppend); ok {
+		raw, err = c.MarshalAppend(buffer.Bytes(), message)
+	} else {
+		raw, err = w.codec.Marshal(message)
+	}
 	if err != nil {
 		return errorf(CodeInternal, "marshal message: %w", err)
 	}
-	// We can't avoid allocating the byte slice, so we may as well reuse it once
-	// we're done with it.
-	buffer := bytes.NewBuffer(raw)
-	defer w.bufferPool.Put(buffer)
+	buffer.Write(raw)
 	envelope := &envelope{Data: buffer}
 	return w.Write(envelope)
 }
