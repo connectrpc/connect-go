@@ -33,7 +33,7 @@ type duplexHTTPCall struct {
 	ctx              context.Context
 	httpClient       HTTPClient
 	streamType       StreamType
-	onSetMethod      func(method string)
+	onRequestSend    func(*http.Request)
 	validateResponse func(*http.Response) *Error
 
 	// We'll use a pipe as the request body. We hand the read side of the pipe to
@@ -151,9 +151,6 @@ func (d *duplexHTTPCall) URL() *url.URL {
 // SetMethod changes the method of the request before it is sent.
 func (d *duplexHTTPCall) SetMethod(method string) {
 	d.request.Method = method
-	if d.onSetMethod != nil {
-		d.onSetMethod(method)
-	}
 }
 
 // Read from the response body. Returns the first error passed to SetError.
@@ -259,6 +256,9 @@ func (d *duplexHTTPCall) makeRequest() {
 	// on d.responseReady, so we can't race with them.
 	defer close(d.responseReady)
 
+	if d.onRequestSend != nil {
+		d.onRequestSend(d.request)
+	}
 	// Once we send a message to the server, they send a message back and
 	// establish the receive side of the stream.
 	response, err := d.httpClient.Do(d.request) //nolint:bodyclose

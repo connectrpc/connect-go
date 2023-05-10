@@ -356,7 +356,7 @@ func (c *connectClient) NewConn(
 	ctx context.Context,
 	spec Spec,
 	header http.Header,
-) StreamingClientConn {
+) streamingClientConn {
 	if deadline, ok := ctx.Deadline(); ok {
 		millis := int64(time.Until(deadline) / time.Millisecond)
 		if millis > 0 {
@@ -367,7 +367,7 @@ func (c *connectClient) NewConn(
 		}
 	}
 	duplexCall := newDuplexHTTPCall(ctx, c.HTTPClient, c.URL, spec, header)
-	var conn StreamingClientConn
+	var conn streamingClientConn
 	if spec.StreamType == StreamTypeUnary {
 		unaryConn := &connectUnaryClientConn{
 			spec:             spec,
@@ -499,8 +499,8 @@ func (cc *connectUnaryClientConn) CloseResponse() error {
 	return cc.duplexCall.CloseRead()
 }
 
-func (cc *connectUnaryClientConn) onSetMethod(fn func(string)) {
-	cc.duplexCall.onSetMethod = fn
+func (cc *connectUnaryClientConn) onRequestSend(fn func(*http.Request)) {
+	cc.duplexCall.onRequestSend = fn
 }
 
 func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Error {
@@ -628,6 +628,10 @@ func (cc *connectStreamingClientConn) CloseResponse() error {
 	return cc.duplexCall.CloseRead()
 }
 
+func (cc *connectStreamingClientConn) onRequestSend(fn func(*http.Request)) {
+	cc.duplexCall.onRequestSend = fn
+}
+
 func (cc *connectStreamingClientConn) validateResponse(response *http.Response) *Error {
 	if response.StatusCode != http.StatusOK {
 		return errorf(connectHTTPToCode(response.StatusCode), "HTTP status %v", response.Status)
@@ -723,7 +727,7 @@ func (hc *connectUnaryHandlerConn) Close(err error) error {
 	return hc.request.Body.Close()
 }
 
-func (hc *connectUnaryHandlerConn) getMethod() string {
+func (hc *connectUnaryHandlerConn) getHTTPMethod() string {
 	return hc.request.Method
 }
 

@@ -173,16 +173,17 @@ func (r *Request[_]) Header() http.Header {
 	return r.header
 }
 
-// Method returns the HTTP method for this request. This is nearly always
-// POST, but side-effect-free RPCs could be made via a GET.
+// HTTPMethod returns the HTTP method for this request. This is nearly always
+// POST, but side-effect-free unary RPCs could be made via a GET.
 //
-// On a newly created request, via NewRequest, this will return "POST" and
-// only changes to return to "GET" after it is actually sent to a server
-// using GET as the method.
-func (r *Request[_]) Method() string {
-	if r.method == "" {
-		return http.MethodPost
-	}
+// On a newly created request, via NewRequest, this will return the empty
+// string until the actual request is actually sent and the HTTP method
+// determined. This means that client interceptor functions will see the
+// empty string until *after* they delegate to the handler they wrapped. It
+// is even possible for this to return the empty string after such delegation,
+// if the request was never actually sent to the server (and thus no
+// determination ever made about the HTTP method).
+func (r *Request[_]) HTTPMethod() string {
 	return r.method
 }
 
@@ -209,7 +210,7 @@ type AnyRequest interface {
 	Spec() Spec
 	Peer() Peer
 	Header() http.Header
-	Method() string
+	HTTPMethod() string
 
 	internalOnly()
 	setRequestMethod(string)
@@ -328,22 +329,12 @@ func newPeerFromURL(url *url.URL, protocol string) Peer {
 	}
 }
 
-// handlerConnCloser extends HandlerConn with a method for handlers to
+// handlerConnCloser extends StreamingHandlerConn with a method for handlers to
 // terminate the message exchange (and optionally send an error to the client).
 type handlerConnCloser interface {
 	StreamingHandlerConn
 
 	Close(error) error
-}
-
-type handlerConnWithRequestMethod interface {
-	StreamingHandlerConn
-	getMethod() string
-}
-
-type clientConnWithRequestMethod interface {
-	StreamingClientConn
-	onSetMethod(fn func(string))
 }
 
 // receiveUnaryResponse unmarshals a message from a StreamingClientConn, then

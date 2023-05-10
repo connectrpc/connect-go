@@ -68,8 +68,8 @@ func NewUnaryHandler[Req, Res any](
 			return err
 		}
 		method := http.MethodPost
-		if hasRequestMethod, ok := conn.(handlerConnWithRequestMethod); ok {
-			method = hasRequestMethod.getMethod()
+		if hasRequestMethod, ok := conn.(interface{ getHTTPMethod() string }); ok {
+			method = hasRequestMethod.getHTTPMethod()
 		}
 		request := &Request[Req]{
 			Msg:    &msg,
@@ -146,6 +146,7 @@ func NewServerStreamHandler[Req, Res any](
 					spec:   conn.Spec(),
 					peer:   conn.Peer(),
 					header: conn.RequestHeader(),
+					method: http.MethodPost,
 				},
 				&ServerStream[Res]{conn: conn},
 			)
