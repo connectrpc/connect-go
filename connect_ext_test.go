@@ -2128,10 +2128,7 @@ func expectClientHeader(check bool, req connect.AnyRequest) error {
 	if !check {
 		return nil
 	}
-	if err := expectMetadata(req.Header(), "header", clientHeader, headerValue); err != nil {
-		return err
-	}
-	return nil
+	return expectMetadata(req.Header(), "header", clientHeader, headerValue)
 }
 
 func expectMetadata(meta http.Header, metaType, key, value string) error {
