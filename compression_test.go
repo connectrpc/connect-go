@@ -54,3 +54,110 @@ func TestAcceptEncodingOrdering(t *testing.T) {
 	_, _ = client.CallUnary(context.Background(), NewRequest(&emptypb.Empty{}))
 	assert.True(t, called)
 }
+
+func TestClientCompressionOptionTest(t *testing.T) {
+	t.Parallel()
+	const testURL = "http://foo.bar.com/service/method"
+
+	checkPools := func(t *testing.T, config *clientConfig) {
+		t.Helper()
+		assert.Equal(t, len(config.CompressionNames), len(config.CompressionPools))
+		for _, name := range config.CompressionNames {
+			pool := config.CompressionPools[name]
+			assert.NotNil(t, pool)
+		}
+	}
+	dummyDecompressCtor := func() Decompressor { return nil }
+	dummyCompressCtor := func() Compressor { return nil }
+
+	t.Run("defaults", func(t *testing.T) {
+		t.Parallel()
+		config, err := newClientConfig(testURL, nil)
+		assert.Nil(t, err)
+		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
+		checkPools(t, config)
+	})
+	t.Run("WithAcceptCompression", func(t *testing.T) {
+		t.Parallel()
+		opts := []ClientOption{WithAcceptCompression("foo", dummyDecompressCtor, dummyCompressCtor)}
+		config, err := newClientConfig(testURL, opts)
+		assert.Nil(t, err)
+		assert.Equal(t, config.CompressionNames, []string{compressionGzip, "foo"})
+		checkPools(t, config)
+	})
+	t.Run("WithAcceptCompression-empty-name-noop", func(t *testing.T) {
+		t.Parallel()
+		opts := []ClientOption{WithAcceptCompression("", dummyDecompressCtor, dummyCompressCtor)}
+		config, err := newClientConfig(testURL, opts)
+		assert.Nil(t, err)
+		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
+		checkPools(t, config)
+	})
+	t.Run("WithAcceptCompression-nil-ctors-noop", func(t *testing.T) {
+		t.Parallel()
+		opts := []ClientOption{WithAcceptCompression("foo", nil, nil)}
+		config, err := newClientConfig(testURL, opts)
+		assert.Nil(t, err)
+		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
+		checkPools(t, config)
+	})
+	t.Run("WithAcceptCompression-nil-ctors-unregisters", func(t *testing.T) {
+		t.Parallel()
+		opts := []ClientOption{WithAcceptCompression("gzip", nil, nil)}
+		config, err := newClientConfig(testURL, opts)
+		assert.Nil(t, err)
+		assert.Equal(t, config.CompressionNames, nil)
+		checkPools(t, config)
+	})
+}
+
+func TestHandlerCompressionOptionTest(t *testing.T) {
+	t.Parallel()
+	const testProc = "/service/method"
+
+	checkPools := func(t *testing.T, config *handlerConfig) {
+		t.Helper()
+		assert.Equal(t, len(config.CompressionNames), len(config.CompressionPools))
+		for _, name := range config.CompressionNames {
+			pool := config.CompressionPools[name]
+			assert.NotNil(t, pool)
+		}
+	}
+	dummyDecompressCtor := func() Decompressor { return nil }
+	dummyCompressCtor := func() Compressor { return nil }
+
+	t.Run("defaults", func(t *testing.T) {
+		t.Parallel()
+		config := newHandlerConfig(testProc, nil)
+		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
+		checkPools(t, config)
+	})
+	t.Run("WithCompression", func(t *testing.T) {
+		t.Parallel()
+		opts := []HandlerOption{WithCompression("foo", dummyDecompressCtor, dummyCompressCtor)}
+		config := newHandlerConfig(testProc, opts)
+		assert.Equal(t, config.CompressionNames, []string{compressionGzip, "foo"})
+		checkPools(t, config)
+	})
+	t.Run("WithCompression-empty-name-noop", func(t *testing.T) {
+		t.Parallel()
+		opts := []HandlerOption{WithCompression("", dummyDecompressCtor, dummyCompressCtor)}
+		config := newHandlerConfig(testProc, opts)
+		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
+		checkPools(t, config)
+	})
+	t.Run("WithCompression-nil-ctors-noop", func(t *testing.T) {
+		t.Parallel()
+		opts := []HandlerOption{WithCompression("foo", nil, nil)}
+		config := newHandlerConfig(testProc, opts)
+		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
+		checkPools(t, config)
+	})
+	t.Run("WithCompression-nil-ctors-unregisters", func(t *testing.T) {
+		t.Parallel()
+		opts := []HandlerOption{WithCompression("gzip", nil, nil)}
+		config := newHandlerConfig(testProc, opts)
+		assert.Equal(t, config.CompressionNames, nil)
+		checkPools(t, config)
+	})
+}

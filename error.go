@@ -31,6 +31,14 @@ const (
 	defaultAnyResolverPrefix = "type.googleapis.com/"
 )
 
+var (
+	// errNotModified signals Connect-protocol responses to GET requests to use the
+	// 304 Not Modified HTTP error code.
+	errNotModified = errors.New("not modified")
+	// errNotModifiedClient wraps ErrNotModified for use client-side.
+	errNotModifiedClient = fmt.Errorf("HTTP 304: %w", errNotModified)
+)
+
 // An ErrorDetail is a self-describing Protobuf message attached to an [*Error].
 // Error details are sent over the network to clients, which can then work with
 // strongly-typed data rather than trying to parse a complex error message. For
@@ -151,6 +159,24 @@ func IsWireError(err error) bool {
 	return se.wireErr
 }
 
+// NewNotModifiedError indicates that the requested resource hasn't changed. It
+// should be used only when handlers wish to respond to conditional HTTP GET
+// requests with a 304 Not Modified. In all other circumstances, including all
+// RPCs using the gRPC or gRPC-Web protocols, it's equivalent to sending an
+// error with [CodeUnknown]. The supplied headers should include Etag,
+// Cache-Control, or any other headers required by [RFC 9110 § 15.4.5].
+//
+// Clients should check for this error using [IsNotModifiedError].
+//
+// [RFC 9110 § 15.4.5]: https://httpwg.org/specs/rfc9110.html#status.304
+func NewNotModifiedError(headers http.Header) *Error {
+	err := NewError(CodeUnknown, errNotModified)
+	if headers != nil {
+		err.meta = headers
+	}
+	return err
+}
+
 func (e *Error) Error() string {
 	message := e.Message()
 	if message == "" {
@@ -214,6 +240,14 @@ func (e *Error) detailsAsAny() []*anypb.Any {
 	return anys
 }
 
+// IsNotModifiedError checks whether the supplied error indicates that the
+// requested resource hasn't changed. It only returns true if the server used
+// [NewNotModifiedError] in response to a Connect-protocol RPC made with an
+// HTTP GET.
+func IsNotModifiedError(err error) bool {
+	return errors.Is(err, errNotModified)
+}
+
 // errorf calls fmt.Errorf with the supplied template and arguments, then wraps
 // the resulting error.
 func errorf(c Code, template string, args ...any) *Error {
@@ -261,7 +295,7 @@ func wrapIfContextError(err error) error {
 	return err
 }
 
-// wrapIfLikelyWithGRPCNotUsedError adds a wrapping error that has a message
+// wrapIfLikelyH2CNotConfiguredError adds a wrapping error that has a message
 // telling the caller that they likely need to use h2c but are using a raw http.Client{}.
 //
 // This happens when running a gRPC-only server.

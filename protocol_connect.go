@@ -518,7 +518,12 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 			cc.compressionPools.CommaSeparatedNames(),
 		)
 	}
-	if response.StatusCode != http.StatusOK {
+	if response.StatusCode == http.StatusNotModified && cc.Spec().IdempotencyLevel == IdempotencyNoSideEffects {
+		serverErr := NewWireError(CodeUnknown, errNotModifiedClient)
+		// RFC 9110 doesn't allow trailers on 304s, so we only need to include headers.
+		serverErr.meta = cc.responseHeader.Clone()
+		return serverErr
+	} else if response.StatusCode != http.StatusOK {
 		unmarshaler := connectUnaryUnmarshaler{
 			reader:          response.Body,
 			compressionPool: cc.compressionPools.Get(compression),
@@ -689,6 +694,12 @@ func (hc *connectUnaryHandlerConn) ResponseTrailer() http.Header {
 func (hc *connectUnaryHandlerConn) Close(err error) error {
 	if !hc.wroteBody {
 		hc.writeResponseHeader(err)
+		// If the handler received a GET request and the resource hasn't changed,
+		// return a 304.
+		if len(hc.peer.Query) > 0 && IsNotModifiedError(err) {
+			hc.responseWriter.WriteHeader(http.StatusNotModified)
+			return hc.request.Body.Close()
+		}
 	}
 	if err == nil {
 		return hc.request.Body.Close()
