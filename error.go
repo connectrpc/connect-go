@@ -400,3 +400,12 @@ func wrapIfRSTError(err error) error {
 		return err
 	}
 }
+
+func asMaxBytesError(err error, tmpl string, args ...any) *Error {
+	var maxBytesErr *http.MaxBytesError
+	if ok := errors.As(err, &maxBytesErr); !ok {
+		return nil
+	}
+	prefix := fmt.Sprintf(tmpl, args...)
+	return errorf(CodeResourceExhausted, "%s: exceeded %d byte http.MaxBytesReader limit", prefix, maxBytesErr.Limit)
+}
