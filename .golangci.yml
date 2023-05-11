@@ -100,7 +100,7 @@ issues:
       path: error_not_modified_example_test.go
     # There are many instances where we want to keep unused parameters
     # as a matter of style or convention, for example when a context.Context
-    # is the first paramater, we choose to just globally ignore this.
+    # is the first parameter, we choose to just globally ignore this.
     - linters: [revive]
       text: "^unused-parameter: "
     # We want to return explicit nils in protocol_grpc.go
