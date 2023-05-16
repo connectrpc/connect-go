@@ -364,11 +364,15 @@ func (h *httpMethodChecker) WrapUnary(unaryFunc connect.UnaryFunc) connect.Unary
 			}
 		} else {
 			// server interceptors see method from the start
+			// NB: In theory, the method could also be GET, not just POST. But for the
+			// configuration under test, it will always be POST.
 			if req.HTTPMethod() != http.MethodPost {
 				return nil, fmt.Errorf("expected HTTP method %s but instead got %q", http.MethodPost, req.HTTPMethod())
 			}
 		}
 		resp, err := unaryFunc(ctx, req)
+		// NB: In theory, the method could also be GET, not just POST. But for the
+		// configuration under test, it will always be POST.
 		if req.HTTPMethod() != http.MethodPost {
 			return nil, fmt.Errorf("expected HTTP method %s but instead got %q", http.MethodPost, req.HTTPMethod())
 		}

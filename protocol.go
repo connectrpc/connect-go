@@ -152,6 +152,7 @@ type protocolClient interface {
 // a hook when the HTTP request is actually sent.
 type streamingClientConn interface {
 	StreamingClientConn
+
 	onRequestSend(fn func(*http.Request))
 }
 
