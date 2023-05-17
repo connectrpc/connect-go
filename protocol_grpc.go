@@ -274,7 +274,7 @@ func (g *grpcClient) NewConn(
 	ctx context.Context,
 	spec Spec,
 	header http.Header,
-) StreamingClientConn {
+) streamingClientConn {
 	if deadline, ok := ctx.Deadline(); ok {
 		if encodedDeadline, err := grpcEncodeTimeout(time.Until(deadline)); err == nil {
 			// Tests verify that the error in encodeTimeout is unreachable, so we
@@ -422,6 +422,10 @@ func (cc *grpcClientConn) ResponseTrailer() http.Header {
 
 func (cc *grpcClientConn) CloseResponse() error {
 	return cc.duplexCall.CloseRead()
+}
+
+func (cc *grpcClientConn) onRequestSend(fn func(*http.Request)) {
+	cc.duplexCall.onRequestSend = fn
 }
 
 func (cc *grpcClientConn) validateResponse(response *http.Response) *Error {

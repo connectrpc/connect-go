@@ -80,7 +80,7 @@ func TestClientPeer(t *testing.T) {
 	server.StartTLS()
 	t.Cleanup(server.Close)
 
-	run := func(t *testing.T, opts ...connect.ClientOption) {
+	run := func(t *testing.T, unaryHTTPMethod string, opts ...connect.ClientOption) {
 		t.Helper()
 		client := pingv1connect.NewPingServiceClient(
 			server.Client(),
@@ -90,8 +90,10 @@ func TestClientPeer(t *testing.T) {
 		)
 		ctx := context.Background()
 		// unary
-		_, err := client.Ping(ctx, connect.NewRequest[pingv1.PingRequest](nil))
+		unaryReq := connect.NewRequest[pingv1.PingRequest](nil)
+		_, err := client.Ping(ctx, unaryReq)
 		assert.Nil(t, err)
+		assert.Equal(t, unaryHTTPMethod, unaryReq.HTTPMethod())
 		text := strings.Repeat(".", 256)
 		r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
 		assert.Nil(t, err)
@@ -126,22 +128,22 @@ func TestClientPeer(t *testing.T) {
 
 	t.Run("connect", func(t *testing.T) {
 		t.Parallel()
-		run(t)
+		run(t, http.MethodPost)
 	})
 	t.Run("connect+get", func(t *testing.T) {
 		t.Parallel()
-		run(t,
+		run(t, http.MethodGet,
 			connect.WithHTTPGet(),
 			connect.WithSendGzip(),
 		)
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()
-		run(t, connect.WithGRPC())
+		run(t, http.MethodPost, connect.WithGRPC())
 	})
 	t.Run("grpcweb", func(t *testing.T) {
 		t.Parallel()
-		run(t, connect.WithGRPCWeb())
+		run(t, http.MethodPost, connect.WithGRPCWeb())
 	})
 }
 
@@ -167,14 +169,16 @@ func TestGetNotModified(t *testing.T) {
 	)
 	ctx := context.Background()
 	// unconditional request
-	res, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
+	unaryReq := connect.NewRequest(&pingv1.PingRequest{})
+	res, err := client.Ping(ctx, unaryReq)
 	assert.Nil(t, err)
 	assert.Equal(t, res.Header().Get("Etag"), etag)
 	assert.Equal(t, res.Header().Values("Vary"), expectVary)
+	assert.Equal(t, http.MethodGet, unaryReq.HTTPMethod())
 
-	conditional := connect.NewRequest(&pingv1.PingRequest{})
-	conditional.Header().Set("If-None-Match", etag)
-	_, err = client.Ping(ctx, conditional)
+	unaryReq = connect.NewRequest(&pingv1.PingRequest{})
+	unaryReq.Header().Set("If-None-Match", etag)
+	_, err = client.Ping(ctx, unaryReq)
 	assert.NotNil(t, err)
 	assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
 	assert.True(t, connect.IsNotModifiedError(err))
@@ -182,6 +186,7 @@ func TestGetNotModified(t *testing.T) {
 	assert.True(t, errors.As(err, &connectErr))
 	assert.Equal(t, connectErr.Meta().Get("Etag"), etag)
 	assert.Equal(t, connectErr.Meta().Values("Vary"), expectVary)
+	assert.Equal(t, http.MethodGet, unaryReq.HTTPMethod())
 }
 
 type notModifiedPingServer struct {
