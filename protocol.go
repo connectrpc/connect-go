@@ -181,6 +181,13 @@ func (hc *errorTranslatingHandlerConnCloser) Close(err error) error {
 	return hc.fromWire(closeErr)
 }
 
+func (hc *errorTranslatingHandlerConnCloser) getHTTPMethod() string {
+	if methoder, ok := hc.handlerConnCloser.(interface{ getHTTPMethod() string }); ok {
+		return methoder.getHTTPMethod()
+	}
+	return http.MethodPost
+}
+
 // errorTranslatingClientConn wraps a StreamingClientConn to make sure that we always
 // return coded errors from clients.
 //
