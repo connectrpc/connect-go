@@ -356,7 +356,7 @@ func (c *connectClient) NewConn(
 	ctx context.Context,
 	spec Spec,
 	header http.Header,
-) StreamingClientConn {
+) streamingClientConn {
 	if deadline, ok := ctx.Deadline(); ok {
 		millis := int64(time.Until(deadline) / time.Millisecond)
 		if millis > 0 {
@@ -367,7 +367,7 @@ func (c *connectClient) NewConn(
 		}
 	}
 	duplexCall := newDuplexHTTPCall(ctx, c.HTTPClient, c.URL, spec, header)
-	var conn StreamingClientConn
+	var conn streamingClientConn
 	if spec.StreamType == StreamTypeUnary {
 		unaryConn := &connectUnaryClientConn{
 			spec:             spec,
@@ -499,6 +499,10 @@ func (cc *connectUnaryClientConn) CloseResponse() error {
 	return cc.duplexCall.CloseRead()
 }
 
+func (cc *connectUnaryClientConn) onRequestSend(fn func(*http.Request)) {
+	cc.duplexCall.onRequestSend = fn
+}
+
 func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Error {
 	for k, v := range response.Header {
 		if !strings.HasPrefix(k, connectUnaryTrailerPrefix) {
@@ -624,6 +628,10 @@ func (cc *connectStreamingClientConn) CloseResponse() error {
 	return cc.duplexCall.CloseRead()
 }
 
+func (cc *connectStreamingClientConn) onRequestSend(fn func(*http.Request)) {
+	cc.duplexCall.onRequestSend = fn
+}
+
 func (cc *connectStreamingClientConn) validateResponse(response *http.Response) *Error {
 	if response.StatusCode != http.StatusOK {
 		return errorf(connectHTTPToCode(response.StatusCode), "HTTP status %v", response.Status)
@@ -717,6 +725,10 @@ func (hc *connectUnaryHandlerConn) Close(err error) error {
 		return writeErr
 	}
 	return hc.request.Body.Close()
+}
+
+func (hc *connectUnaryHandlerConn) getHTTPMethod() string {
+	return hc.request.Method
 }
 
 func (hc *connectUnaryHandlerConn) writeResponseHeader(err error) {
@@ -928,7 +940,7 @@ type connectUnaryRequestMarshaler struct {
 func (m *connectUnaryRequestMarshaler) Marshal(message any) *Error {
 	if m.enableGet {
 		if m.stableCodec == nil && !m.getUseFallback {
-			return errorf(CodeInternal, "codec %s doesn't support stable marshal; cam't use get", m.codec.Name())
+			return errorf(CodeInternal, "codec %s doesn't support stable marshal; can't use get", m.codec.Name())
 		}
 		if m.stableCodec != nil {
 			return m.marshalWithGet(message)

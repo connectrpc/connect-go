@@ -145,7 +145,15 @@ type protocolClient interface {
 	// been populated by WriteRequestHeader. When constructing a stream for a
 	// unary call, implementations may assume that the Sender's Send and Close
 	// methods return before the Receiver's Receive or Close methods are called.
-	NewConn(context.Context, Spec, http.Header) StreamingClientConn
+	NewConn(context.Context, Spec, http.Header) streamingClientConn
+}
+
+// streamingClientConn extends StreamingClientConn with a method for registering
+// a hook when the HTTP request is actually sent.
+type streamingClientConn interface {
+	StreamingClientConn
+
+	onRequestSend(fn func(*http.Request))
 }
 
 // errorTranslatingHandlerConnCloser wraps a handlerConnCloser to ensure that
@@ -178,25 +186,29 @@ func (hc *errorTranslatingHandlerConnCloser) Close(err error) error {
 //
 // It's used in protocol implementations.
 type errorTranslatingClientConn struct {
-	StreamingClientConn
+	streamingClientConn
 
 	fromWire func(error) error
 }
 
 func (cc *errorTranslatingClientConn) Send(msg any) error {
-	return cc.fromWire(cc.StreamingClientConn.Send(msg))
+	return cc.fromWire(cc.streamingClientConn.Send(msg))
 }
 
 func (cc *errorTranslatingClientConn) Receive(msg any) error {
-	return cc.fromWire(cc.StreamingClientConn.Receive(msg))
+	return cc.fromWire(cc.streamingClientConn.Receive(msg))
 }
 
 func (cc *errorTranslatingClientConn) CloseRequest() error {
-	return cc.fromWire(cc.StreamingClientConn.CloseRequest())
+	return cc.fromWire(cc.streamingClientConn.CloseRequest())
 }
 
 func (cc *errorTranslatingClientConn) CloseResponse() error {
-	return cc.fromWire(cc.StreamingClientConn.CloseResponse())
+	return cc.fromWire(cc.streamingClientConn.CloseResponse())
+}
+
+func (cc *errorTranslatingClientConn) onRequestSend(fn func(*http.Request)) {
+	cc.streamingClientConn.onRequestSend(fn)
 }
 
 // wrapHandlerConnWithCodedErrors ensures that we (1) automatically code
@@ -212,9 +224,9 @@ func wrapHandlerConnWithCodedErrors(conn handlerConnCloser) handlerConnCloser {
 
 // wrapClientConnWithCodedErrors ensures that we always return *Errors from
 // public APIs.
-func wrapClientConnWithCodedErrors(conn StreamingClientConn) StreamingClientConn {
+func wrapClientConnWithCodedErrors(conn streamingClientConn) streamingClientConn {
 	return &errorTranslatingClientConn{
-		StreamingClientConn: conn,
+		streamingClientConn: conn,
 		fromWire:            wrapIfUncoded,
 	}
 }
