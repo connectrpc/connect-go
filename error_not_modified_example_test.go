@@ -43,16 +43,14 @@ func (*ExampleCachingPingServer) Ping(
 	})
 	// Our hashing logic is simple: we use the number in the PingResponse.
 	hash := fmt.Sprint(resp.Msg.Number)
-	// If the request was an HTTP GET (which always has URL query parameters),
-	// we'll need to check if the client already has the response cached.
-	if len(req.Peer().Query) > 0 {
-		if req.Header().Get("If-None-Match") == hash {
-			return nil, connect.NewNotModifiedError(http.Header{
-				"Etag": []string{hash},
-			})
-		}
-		resp.Header().Set("Etag", hash)
+	// If the request was an HTTP GET, we'll need to check if the client already
+	// has the response cached.
+	if req.HTTPMethod() == http.MethodGet && req.Header().Get("If-None-Match") == hash {
+		return nil, connect.NewNotModifiedError(http.Header{
+			"Etag": []string{hash},
+		})
 	}
+	resp.Header().Set("Etag", hash)
 	return resp, nil
 }
 

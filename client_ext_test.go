@@ -198,7 +198,7 @@ type notModifiedPingServer struct {
 func (s *notModifiedPingServer) Ping(
 	_ context.Context,
 	req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
-	if len(req.Peer().Query) > 0 && req.Header().Get("If-None-Match") == s.etag {
+	if req.HTTPMethod() == http.MethodGet && req.Header().Get("If-None-Match") == s.etag {
 		return nil, connect.NewNotModifiedError(http.Header{"Etag": []string{s.etag}})
 	}
 	resp := connect.NewResponse(&pingv1.PingResponse{})
