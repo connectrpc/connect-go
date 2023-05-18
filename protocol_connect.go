@@ -704,7 +704,7 @@ func (hc *connectUnaryHandlerConn) Close(err error) error {
 		hc.writeResponseHeader(err)
 		// If the handler received a GET request and the resource hasn't changed,
 		// return a 304.
-		if len(hc.peer.Query) > 0 && IsNotModifiedError(err) {
+		if hc.request.Method == http.MethodGet && IsNotModifiedError(err) {
 			hc.responseWriter.WriteHeader(http.StatusNotModified)
 			return hc.request.Body.Close()
 		}

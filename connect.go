@@ -202,6 +202,12 @@ func (r *Request[_]) HTTPMethod() string {
 	return r.method
 }
 
+// Query returns the query parameters of the request, if any. Note that this is
+// empty for client-side requests.
+func (r *Request[_]) Query() url.Values {
+	return r.peer.Query
+}
+
 // internalOnly implements AnyRequest.
 func (r *Request[_]) internalOnly() {}
 
@@ -226,6 +232,7 @@ type AnyRequest interface {
 	Peer() Peer
 	Header() http.Header
 	HTTPMethod() string
+	Query() url.Values
 
 	internalOnly()
 	setRequestMethod(string)
@@ -328,13 +335,15 @@ type Spec struct {
 // On both the client and the server, Protocol is the RPC protocol in use.
 // Currently, it's either [ProtocolConnect], [ProtocolGRPC], or
 // [ProtocolGRPCWeb], but additional protocols may be added in the future.
-//
-// Query contains the query parameters for the request. For the server, this
-// will reflect the actual query parameters sent. For the client, it is unset.
 type Peer struct {
 	Addr     string
 	Protocol string
-	Query    url.Values // server-only
+
+	// Query contains the query parameters of the request. Only set for
+	// server-side handlers; on the client-side, this is unset.
+	//
+	// Deprecated: Use Request.Query() instead.
+	Query url.Values
 }
 
 func newPeerFromURL(url *url.URL, protocol string) Peer {
