@@ -180,6 +180,7 @@ func (d *duplexHTTPCall) CloseRead() error {
 		return nil
 	}
 	if err := discard(d.response.Body); err != nil {
+		_ = d.response.Body.Close()
 		return wrapIfRSTError(err)
 	}
 	return wrapIfRSTError(d.response.Body.Close())
