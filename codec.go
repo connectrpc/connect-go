@@ -144,7 +144,9 @@ func (c *protoJSONCodec) Unmarshal(binary []byte, message any) error {
 	if len(binary) == 0 {
 		return errors.New("zero-length payload is not a valid JSON object")
 	}
-	var options protojson.UnmarshalOptions
+	// Discard unknown fields so clients and servers aren't forced to always use
+	// exactly the same version of the schema.
+	options := protojson.UnmarshalOptions{DiscardUnknown: true}
 	return options.Unmarshal(binary, protoMessage)
 }
 

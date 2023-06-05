@@ -108,6 +108,12 @@ func TestJSONCodec(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	t.Run("unknown fields", func(t *testing.T) {
+		t.Parallel()
+		err := codec.Unmarshal([]byte(`{"foo": "bar"}`), &emptypb.Empty{})
+		assert.Nil(t, err)
+	})
+
 	t.Run("empty string", func(t *testing.T) {
 		t.Parallel()
 		err := codec.Unmarshal([]byte{}, &emptypb.Empty{})
