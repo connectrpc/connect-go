@@ -100,13 +100,22 @@ func TestStableCodec(t *testing.T) {
 func TestJSONCodec(t *testing.T) {
 	t.Parallel()
 
-	var empty emptypb.Empty
 	codec := &protoJSONCodec{name: "json"}
-	err := codec.Unmarshal([]byte{}, &empty)
-	assert.NotNil(t, err)
-	assert.True(
-		t,
-		strings.Contains(err.Error(), "valid JSON"),
-		assert.Sprintf(`error message should explain that "" is not a valid JSON object`),
-	)
+
+	t.Run("success", func(t *testing.T) {
+		t.Parallel()
+		err := codec.Unmarshal([]byte("{}"), &emptypb.Empty{})
+		assert.Nil(t, err)
+	})
+
+	t.Run("empty string", func(t *testing.T) {
+		t.Parallel()
+		err := codec.Unmarshal([]byte{}, &emptypb.Empty{})
+		assert.NotNil(t, err)
+		assert.True(
+			t,
+			strings.Contains(err.Error(), "valid JSON"),
+			assert.Sprintf(`error message should explain that "" is not a valid JSON object`),
+		)
+	})
 }
