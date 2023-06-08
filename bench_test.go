@@ -174,3 +174,63 @@ func unaryRESTIteration(b *testing.B, client *http.Client, url string, text stri
 		b.Fatalf("unmarshal: %v", err)
 	}
 }
+
+type noopResponseWriter struct {
+	header http.Header
+}
+
+func (w noopResponseWriter) Header() http.Header         { return w.header }
+func (w noopResponseWriter) Write(b []byte) (int, error) { return len(b), nil }
+func (w noopResponseWriter) WriteHeader(statusCode int)  {}
+
+func BenchmarkMux(b *testing.B) {
+	resp := []byte("OK")
+	fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(resp)
+	})
+
+	b.Run("net/http", func(b *testing.B) {
+		mux := http.NewServeMux()
+		mux.Handle("/example.v1.Service/A", fn)
+		mux.Handle("/example.v1.Service/B", fn)
+		mux.Handle("/example.v1.Service/C", fn)
+		mux.Handle("/example.v1.Service/D", fn)
+		mux.Handle("/example.v1.Service/E", fn)
+
+		w := noopResponseWriter{make(http.Header, 100)}
+		req, _ := http.NewRequest("POST", "http://localhost/example.v1.Service/E", nil)
+
+		b.StartTimer()
+		for i := 0; i < b.N; i++ {
+			mux.ServeHTTP(w, req)
+		}
+		b.StopTimer()
+	})
+
+	b.Run("switch", func(b *testing.B) {
+		mux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/example.v1.Service/A":
+				fn.ServeHTTP(w, r)
+			case "/example.v1.Service/B":
+				fn.ServeHTTP(w, r)
+			case "/example.v1.Service/C":
+				fn.ServeHTTP(w, r)
+			case "/example.v1.Service/D":
+				fn.ServeHTTP(w, r)
+			case "/example.v1.Service/E":
+				fn.ServeHTTP(w, r)
+			default:
+				http.NotFound(w, r)
+			}
+		})
+		w := noopResponseWriter{make(http.Header, 100)}
+		req, _ := http.NewRequest("POST", "http://localhost/example.v1.Service/E", nil)
+
+		b.StartTimer()
+		for i := 0; i < b.N; i++ {
+			mux.ServeHTTP(w, req)
+		}
+		b.StopTimer()
+	})
+}
