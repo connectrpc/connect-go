@@ -18,7 +18,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/bufbuild/connect-go"
+	connect "github.com/bufbuild/connect-go"
 	pingv1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
 	"github.com/bufbuild/connect-go/internal/gen/connect/ping/v1/pingv1connect"
 )

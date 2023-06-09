@@ -32,7 +32,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bufbuild/connect-go"
+	connect "github.com/bufbuild/connect-go"
 	"github.com/bufbuild/connect-go/internal/assert"
 	"github.com/bufbuild/connect-go/internal/gen/connect/import/v1/importv1connect"
 	pingv1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
