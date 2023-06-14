@@ -521,6 +521,33 @@ func TestHeaderBasic(t *testing.T) {
 	assert.Equal(t, response.Header().Get(key), hval)
 }
 
+func TestHeaderHost(t *testing.T) {
+	t.Parallel()
+	const (
+		key  = "Host"
+		cval = "buf.build"
+	)
+
+	pingServer := &pluggablePingServer{
+		ping: func(_ context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+			assert.Equal(t, request.Header().Get(key), cval)
+			response := connect.NewResponse(&pingv1.PingResponse{})
+			return response, nil
+		},
+	}
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
+	request := connect.NewRequest(&pingv1.PingRequest{})
+	request.Header().Set(key, cval)
+	response, err := client.Ping(context.Background(), request)
+	assert.Nil(t, err)
+	assert.Equal(t, response.Header().Get(key), "")
+}
+
 func TestTimeoutParsing(t *testing.T) {
 	t.Parallel()
 	const timeout = 10 * time.Minute
