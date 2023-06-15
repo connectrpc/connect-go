@@ -535,17 +535,48 @@ func TestHeaderHost(t *testing.T) {
 			return response, nil
 		},
 	}
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
-	server := httptest.NewServer(mux)
-	defer server.Close()
 
-	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
-	request := connect.NewRequest(&pingv1.PingRequest{})
-	request.Header().Set(key, cval)
-	response, err := client.Ping(context.Background(), request)
-	assert.Nil(t, err)
-	assert.Equal(t, response.Header().Get(key), "")
+	newHTTP2Server := func(t *testing.T) *httptest.Server {
+		t.Helper()
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+		server := httptest.NewUnstartedServer(mux)
+		server.EnableHTTP2 = true
+		server.StartTLS()
+		t.Cleanup(server.Close)
+		return server
+	}
+
+	callWithHost := func(t *testing.T, client pingv1connect.PingServiceClient) {
+		t.Helper()
+
+		request := connect.NewRequest(&pingv1.PingRequest{})
+		request.Header().Set(key, cval)
+		response, err := client.Ping(context.Background(), request)
+		assert.Nil(t, err)
+		assert.Equal(t, response.Header().Get(key), "")
+	}
+
+	t.Run("connect", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
+		callWithHost(t, client)
+	})
+
+	t.Run("grpc", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPC())
+		callWithHost(t, client)
+	})
+
+	t.Run("grpc-web", func(t *testing.T) {
+		t.Parallel()
+		server := newHTTP2Server(t)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPCWeb())
+		callWithHost(t, client)
+	})
 }
 
 func TestTimeoutParsing(t *testing.T) {

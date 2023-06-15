@@ -221,6 +221,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 
 	// Establish a stream and serve the RPC.
 	setHeaderCanonical(request.Header, headerContentType, contentType)
+	setHeaderCanonical(request.Header, headerHost, request.Host)
 	ctx, cancel, timeoutErr := protocolHandler.SetTimeout(request) //nolint: contextcheck
 	if timeoutErr != nil {
 		ctx = request.Context()

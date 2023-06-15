@@ -164,9 +164,6 @@ func (h *connectHandler) NewConn(
 		contentEncoding = getHeaderCanonical(request.Header, connectStreamingHeaderCompression)
 		acceptEncoding = getHeaderCanonical(request.Header, connectStreamingHeaderAcceptCompression)
 	}
-	if host := request.Host; len(host) > 0 {
-		request.Header["Host"] = []string{host}
-	}
 	requestCompression, responseCompression, failed := negotiateCompression(
 		h.CompressionPools,
 		contentEncoding,
@@ -370,9 +367,6 @@ func (c *connectClient) NewConn(
 		}
 	}
 	duplexCall := newDuplexHTTPCall(ctx, c.HTTPClient, c.URL, spec, header)
-	if hosts := header["Host"]; len(hosts) > 0 {
-		duplexCall.request.Host = hosts[0]
-	}
 	var conn streamingClientConn
 	if spec.StreamType == StreamTypeUnary {
 		unaryConn := &connectUnaryClientConn{
