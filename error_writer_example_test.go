@@ -20,7 +20,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/bufbuild/connect-go"
+	connect "github.com/bufbuild/connect-go"
 )
 
 // NewHelloHandler is an example HTTP handler. In a real application, it might
