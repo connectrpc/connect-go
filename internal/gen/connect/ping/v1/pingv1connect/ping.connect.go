@@ -171,34 +171,48 @@ type PingServiceHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewPingServiceHandler(svc PingServiceHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
-	mux := http.NewServeMux()
-	mux.Handle(PingServicePingProcedure, connect_go.NewUnaryHandler(
+	pingServicePingHandler := connect_go.NewUnaryHandler(
 		PingServicePingProcedure,
 		svc.Ping,
 		connect_go.WithIdempotency(connect_go.IdempotencyNoSideEffects),
 		connect_go.WithHandlerOptions(opts...),
-	))
-	mux.Handle(PingServiceFailProcedure, connect_go.NewUnaryHandler(
+	)
+	pingServiceFailHandler := connect_go.NewUnaryHandler(
 		PingServiceFailProcedure,
 		svc.Fail,
 		opts...,
-	))
-	mux.Handle(PingServiceSumProcedure, connect_go.NewClientStreamHandler(
+	)
+	pingServiceSumHandler := connect_go.NewClientStreamHandler(
 		PingServiceSumProcedure,
 		svc.Sum,
 		opts...,
-	))
-	mux.Handle(PingServiceCountUpProcedure, connect_go.NewServerStreamHandler(
+	)
+	pingServiceCountUpHandler := connect_go.NewServerStreamHandler(
 		PingServiceCountUpProcedure,
 		svc.CountUp,
 		opts...,
-	))
-	mux.Handle(PingServiceCumSumProcedure, connect_go.NewBidiStreamHandler(
+	)
+	pingServiceCumSumHandler := connect_go.NewBidiStreamHandler(
 		PingServiceCumSumProcedure,
 		svc.CumSum,
 		opts...,
-	))
-	return "/connect.ping.v1.PingService/", mux
+	)
+	return "/connect.ping.v1.PingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case PingServicePingProcedure:
+			pingServicePingHandler.ServeHTTP(w, r)
+		case PingServiceFailProcedure:
+			pingServiceFailHandler.ServeHTTP(w, r)
+		case PingServiceSumProcedure:
+			pingServiceSumHandler.ServeHTTP(w, r)
+		case PingServiceCountUpProcedure:
+			pingServiceCountUpHandler.ServeHTTP(w, r)
+		case PingServiceCumSumProcedure:
+			pingServiceCumSumHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
 }
 
 // UnimplementedPingServiceHandler returns CodeUnimplemented from all methods.
