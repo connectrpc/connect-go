@@ -32,7 +32,7 @@ import (
 	"testing"
 	"time"
 
-	"connectrpc.com/connect"
+	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
 	"connectrpc.com/connect/internal/gen/connect/import/v1/importv1connect"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"

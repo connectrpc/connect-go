@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"connectrpc.com/connect"
+	connect "connectrpc.com/connect"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )

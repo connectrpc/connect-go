@@ -49,7 +49,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"connectrpc.com/connect"
+	connect "connectrpc.com/connect"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"

@@ -20,7 +20,7 @@ import (
 	"log"
 	"net/http"
 
-	"connectrpc.com/connect"
+	connect "connectrpc.com/connect"
 )
 
 // NewHelloHandler is an example HTTP handler. In a real application, it might
