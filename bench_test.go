@@ -185,20 +185,20 @@ func (w noopResponseWriter) WriteHeader(statusCode int)  {}
 
 func BenchmarkMux(b *testing.B) {
 	resp := []byte("OK")
-	fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(resp)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(resp)
 	})
 
 	b.Run("net/http", func(b *testing.B) {
 		mux := http.NewServeMux()
-		mux.Handle("/example.v1.Service/A", fn)
-		mux.Handle("/example.v1.Service/B", fn)
-		mux.Handle("/example.v1.Service/C", fn)
-		mux.Handle("/example.v1.Service/D", fn)
-		mux.Handle("/example.v1.Service/E", fn)
+		mux.Handle("/example.v1.Service/A", handler)
+		mux.Handle("/example.v1.Service/B", handler)
+		mux.Handle("/example.v1.Service/C", handler)
+		mux.Handle("/example.v1.Service/D", handler)
+		mux.Handle("/example.v1.Service/E", handler)
 
 		w := noopResponseWriter{make(http.Header, 100)}
-		req, _ := http.NewRequest("POST", "http://localhost/example.v1.Service/E", nil)
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "http://localhost/example.v1.Service/E", nil)
 
 		b.StartTimer()
 		for i := 0; i < b.N; i++ {
@@ -208,24 +208,24 @@ func BenchmarkMux(b *testing.B) {
 	})
 
 	b.Run("switch", func(b *testing.B) {
-		mux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.URL.Path {
+		mux := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			switch request.URL.Path {
 			case "/example.v1.Service/A":
-				fn.ServeHTTP(w, r)
+				handler.ServeHTTP(writer, request)
 			case "/example.v1.Service/B":
-				fn.ServeHTTP(w, r)
+				handler.ServeHTTP(writer, request)
 			case "/example.v1.Service/C":
-				fn.ServeHTTP(w, r)
+				handler.ServeHTTP(writer, request)
 			case "/example.v1.Service/D":
-				fn.ServeHTTP(w, r)
+				handler.ServeHTTP(writer, request)
 			case "/example.v1.Service/E":
-				fn.ServeHTTP(w, r)
+				handler.ServeHTTP(writer, request)
 			default:
-				http.NotFound(w, r)
+				http.NotFound(writer, request)
 			}
 		})
 		w := noopResponseWriter{make(http.Header, 100)}
-		req, _ := http.NewRequest("POST", "http://localhost/example.v1.Service/E", nil)
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "http://localhost/example.v1.Service/E", nil)
 
 		b.StartTimer()
 		for i := 0; i < b.N; i++ {
