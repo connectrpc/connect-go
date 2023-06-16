@@ -257,6 +257,11 @@ func (d *duplexHTTPCall) makeRequest() {
 	// on d.responseReady, so we can't race with them.
 	defer close(d.responseReady)
 
+	// Promote the header Host to the request object.
+	if host := d.request.Header.Get(headerHost); len(host) > 0 {
+		d.request.Host = host
+	}
+
 	if d.onRequestSend != nil {
 		d.onRequestSend(d.request)
 	}

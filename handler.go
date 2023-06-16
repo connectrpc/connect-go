@@ -176,7 +176,7 @@ func NewBidiStreamHandler[Req, Res any](
 
 // ServeHTTP implements [http.Handler].
 func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
-	// We don't need to defer functions  to close the request body or read to
+	// We don't need to defer functions to close the request body or read to
 	// EOF: the stream we construct later on already does that, and we only
 	// return early when dealing with misbehaving clients. In those cases, it's
 	// okay if we can't re-use the connection.
@@ -221,6 +221,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 
 	// Establish a stream and serve the RPC.
 	setHeaderCanonical(request.Header, headerContentType, contentType)
+	setHeaderCanonical(request.Header, headerHost, request.Host)
 	ctx, cancel, timeoutErr := protocolHandler.SetTimeout(request) //nolint: contextcheck
 	if timeoutErr != nil {
 		ctx = request.Context()
