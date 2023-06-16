@@ -36,6 +36,7 @@ const (
 
 const (
 	headerContentType = "Content-Type"
+	headerHost        = "Host"
 	headerUserAgent   = "User-Agent"
 	headerTrailer     = "Trailer"
 
