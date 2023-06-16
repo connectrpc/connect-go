@@ -397,20 +397,19 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 	handlerOption := connectPackage.Ident("HandlerOption")
 	g.P("func ", names.ServerConstructor, "(svc ", names.Server, ", opts ...", handlerOption,
 		") (string, ", httpPackage.Ident("Handler"), ") {")
-	g.P("mux := ", httpPackage.Ident("NewServeMux"), "()")
 	for _, method := range service.Methods {
 		isStreamingServer := method.Desc.IsStreamingServer()
 		isStreamingClient := method.Desc.IsStreamingClient()
 		idempotency := methodIdempotency(method)
 		switch {
 		case isStreamingClient && !isStreamingServer:
-			g.P(`mux.Handle(`, procedureConstName(method), `, `, connectPackage.Ident("NewClientStreamHandler"), "(")
+			g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewClientStreamHandler"), "(")
 		case !isStreamingClient && isStreamingServer:
-			g.P(`mux.Handle(`, procedureConstName(method), `, `, connectPackage.Ident("NewServerStreamHandler"), "(")
+			g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewServerStreamHandler"), "(")
 		case isStreamingClient && isStreamingServer:
-			g.P(`mux.Handle(`, procedureConstName(method), `, `, connectPackage.Ident("NewBidiStreamHandler"), "(")
+			g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewBidiStreamHandler"), "(")
 		default:
-			g.P(`mux.Handle(`, procedureConstName(method), `, `, connectPackage.Ident("NewUnaryHandler"), "(")
+			g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewUnaryHandler"), "(")
 		}
 		g.P(procedureConstName(method), `,`)
 		g.P("svc.", method.GoName, ",")
@@ -424,9 +423,18 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 		case connect.IdempotencyUnknown:
 			g.P("opts...,")
 		}
-		g.P("))")
+		g.P(")")
 	}
-	g.P(`return "/`, reflectionName(service), `/", mux`)
+	g.P(`return "/`, reflectionName(service), `/", `, httpPackage.Ident("HandlerFunc"), `(func(w `, httpPackage.Ident("ResponseWriter"), `, r *`, httpPackage.Ident("Request"), `){`)
+	g.P("switch r.URL.Path {")
+	for _, method := range service.Methods {
+		g.P("case ", procedureConstName(method), ":")
+		g.P(procedureHandlerName(method), ".ServeHTTP(w, r)")
+	}
+	g.P("default:")
+	g.P(httpPackage.Ident("NotFound"), "(w, r)")
+	g.P("}")
+	g.P("})")
 	g.P("}")
 	g.P()
 }
@@ -496,6 +504,10 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 
 func procedureConstName(m *protogen.Method) string {
 	return fmt.Sprintf("%s%sProcedure", m.Parent.GoName, m.GoName)
+}
+
+func procedureHandlerName(m *protogen.Method) string {
+	return fmt.Sprintf("%s%sHandler", unexport(m.Parent.GoName), m.GoName)
 }
 
 func reflectionName(service *protogen.Service) string {

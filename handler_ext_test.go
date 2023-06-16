@@ -30,12 +30,14 @@ import (
 
 func TestHandler_ServeHTTP(t *testing.T) {
 	t.Parallel()
+	path, handler := pingv1connect.NewPingServiceHandler(successPingServer{})
+	prefixed := http.NewServeMux()
+	prefixed.Handle(path, handler)
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(
-		successPingServer{},
-	))
-	const pingProcedure = "/" + pingv1connect.PingServiceName + "/Ping"
-	const sumProcedure = "/" + pingv1connect.PingServiceName + "/Sum"
+	mux.Handle(path, handler)
+	mux.Handle("/prefixed/", http.StripPrefix("/prefixed", prefixed))
+	const pingProcedure = pingv1connect.PingServicePingProcedure
+	const sumProcedure = pingv1connect.PingServiceSumProcedure
 	server := httptest.NewServer(mux)
 	client := server.Client()
 	t.Cleanup(func() {
@@ -78,6 +80,21 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			context.Background(),
 			http.MethodGet,
 			server.URL+pingProcedure+`?encoding=json&message={}`,
+			strings.NewReader(""),
+		)
+		assert.Nil(t, err)
+		resp, err := client.Do(request)
+		assert.Nil(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, resp.StatusCode, http.StatusOK)
+	})
+
+	t.Run("prefixed_get_method", func(t *testing.T) {
+		t.Parallel()
+		request, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodGet,
+			server.URL+"/prefixed"+pingProcedure+`?encoding=json&message={}`,
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err)

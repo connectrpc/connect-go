@@ -95,13 +95,19 @@ type CollideServiceHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewCollideServiceHandler(svc CollideServiceHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
-	mux := http.NewServeMux()
-	mux.Handle(CollideServiceImportProcedure, connect_go.NewUnaryHandler(
+	collideServiceImportHandler := connect_go.NewUnaryHandler(
 		CollideServiceImportProcedure,
 		svc.Import,
 		opts...,
-	))
-	return "/connect.collide.v1.CollideService/", mux
+	)
+	return "/connect.collide.v1.CollideService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case CollideServiceImportProcedure:
+			collideServiceImportHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
 }
 
 // UnimplementedCollideServiceHandler returns CodeUnimplemented from all methods.

@@ -67,8 +67,12 @@ type ImportServiceHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewImportServiceHandler(svc ImportServiceHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
-	mux := http.NewServeMux()
-	return "/connect.import.v1.ImportService/", mux
+	return "/connect.import.v1.ImportService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		default:
+			http.NotFound(w, r)
+		}
+	})
 }
 
 // UnimplementedImportServiceHandler returns CodeUnimplemented from all methods.
