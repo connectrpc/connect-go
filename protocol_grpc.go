@@ -45,10 +45,11 @@ const (
 	grpcTimeoutMaxHours = math.MaxInt64 / int64(time.Hour) // how many hours fit into a time.Duration?
 	grpcMaxTimeoutChars = 8                                // from gRPC protocol
 
-	grpcContentTypeDefault    = "application/grpc"
-	grpcWebContentTypeDefault = "application/grpc-web"
-	grpcContentTypePrefix     = grpcContentTypeDefault + "+"
-	grpcWebContentTypePrefix  = grpcWebContentTypeDefault + "+"
+	grpcContentTypeDefault        = "application/grpc"
+	grpcWebContentTypeDefault     = "application/grpc-web"
+	grpcWebTextContentTypeDefault = "application/grpc-web-text"
+	grpcContentTypePrefix         = grpcContentTypeDefault + "+"
+	grpcWebContentTypePrefix      = grpcWebContentTypeDefault + "+"
 )
 
 var (

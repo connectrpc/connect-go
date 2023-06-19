@@ -27,6 +27,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"strings"
 	"sync"
 	"testing"
@@ -435,6 +436,29 @@ func TestServer(t *testing.T) {
 	t.Run("http2", func(t *testing.T) {
 		t.Parallel()
 		server := httptest.NewUnstartedServer(mux)
+		server.EnableHTTP2 = true
+		server.StartTLS()
+		defer server.Close()
+		testMatrix(t, server, true /* bidi */)
+	})
+	t.Run("transcode", func(t *testing.T) {
+		t.Parallel()
+
+		gRPCOnlyMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			b, _ := httputil.DumpRequest(r, false)
+			t.Log(string(b))
+
+			contentType := r.Header.Get("Content-Type")
+			if r.Method != http.MethodPost || !strings.HasPrefix(contentType, "application/grpc+") {
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprintf(w, "invalid content:%v", contentType) //nolint
+				return
+			}
+
+			mux.ServeHTTP(w, r)
+		})
+		convertToGRPCMux := connect.HandleToGRPC(gRPCOnlyMux)
+		server := httptest.NewUnstartedServer(convertToGRPCMux)
 		server.EnableHTTP2 = true
 		server.StartTLS()
 		defer server.Close()
