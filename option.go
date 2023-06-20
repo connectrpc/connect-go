@@ -166,35 +166,6 @@ func WithRequireConnectProtocolHeader() HandlerOption {
 	return &requireConnectProtocolHeaderOption{}
 }
 
-// CORS config that adds Cross-Origin Resource Sharing (CORS) header support.
-type CORS struct {
-	// AllowOriginFunc is a custom function to validate the origin. It take the
-	// origin as argument and returns true if allowed or false otherwise.
-	AllowOriginFunc func(origin string) bool
-
-	// AllowedMethods is a list of methods the client is allowed to use with
-	// cross-domain requests. Default value is simple methods (GET and POST).
-	AllowedMethods []string
-
-	// AllowedHeaders is list of non simple headers the client is allowed to
-	// use with cross-domain requests.
-	AllowedHeaders []string
-
-	// ExposedHeaders indicates which headers are safe to expose to the API of
-	// AllowHeaders.ExposedHeaders is ignored if the request's
-	// Access-Control-Request-Headers header is empty.
-	ExposedHeaders []string
-
-	// MaxAge indicates how long (in seconds) the results of a preflight request
-	// can be cached. Default value is 0 which means that the request is not
-	// cached.
-	MaxAge int
-
-	// AllowCredentials indicates whether the request can include user credentials like
-	// cookies, HTTP authentication or client side SSL certificates.
-	AllowCredentials bool
-}
-
 // WithCORS configures a handler to support Cross-Origin Resource Sharing
 // (CORS). The handler will respond to preflight requests and add CORS headers
 // to all responses.
@@ -202,9 +173,7 @@ type CORS struct {
 // By default, handlers don't support CORS.
 //
 // See: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
-func WithCORS(config CORS) HandlerOption {
-	return newCORSHandler(config)
-}
+func WithCORS(config CORS) HandlerOption { return config }
 
 // Option implements both [ClientOption] and [HandlerOption], so it can be
 // applied both client-side and server-side.

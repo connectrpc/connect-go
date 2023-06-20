@@ -248,7 +248,6 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		defer resp.Body.Close()
 		assert.Equal(t, resp.StatusCode, http.StatusNoContent)
 		assert.Equal(t, resp.Header.Get("Access-Control-Allow-Origin"), "")
-
 	})
 }
 

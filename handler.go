@@ -95,7 +95,7 @@ func NewUnaryHandler[Req, Res any](
 		protocolHandlers: protocolHandlers,
 		allowMethod:      sortedAllowMethodValue(protocolHandlers),
 		acceptPost:       sortedAcceptPostValue(protocolHandlers),
-		corsHandler:      config.CORSHandler,
+		corsHandler:      config.CORS.wrap(protocolHandlers),
 	}
 }
 
@@ -268,7 +268,7 @@ type handlerConfig struct {
 	BufferPool                   *bufferPool
 	ReadMaxBytes                 int
 	SendMaxBytes                 int
-	CORSHandler                  *corsHandler
+	CORS                         *CORS
 }
 
 func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig {
@@ -345,6 +345,6 @@ func newStreamHandler(
 		protocolHandlers: protocolHandlers,
 		allowMethod:      sortedAllowMethodValue(protocolHandlers),
 		acceptPost:       sortedAcceptPostValue(protocolHandlers),
-		corsHandler:      config.CORSHandler,
+		corsHandler:      config.CORS.wrap(protocolHandlers),
 	}
 }

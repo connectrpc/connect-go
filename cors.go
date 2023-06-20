@@ -20,16 +20,55 @@ import (
 	"github.com/rs/cors"
 )
 
-type corsHandler struct {
-	cors *cors.Cors
+// CORS config that adds Cross-Origin Resource Sharing (CORS) header support.
+type CORS struct {
+	// AllowOriginFunc is a custom function to validate the origin. It takes the
+	// origin as argument and returns true if allowed or false otherwise.
+	AllowOriginFunc func(origin string) bool
+
+	// AllowedHeaders is list of non simple headers the client is allowed to
+	// use with cross-domain requests.
+	AllowedHeaders []string
+
+	// ExposedHeaders indicates which headers are safe to expose to the API of
+	// AllowHeaders.ExposedHeaders is ignored if the request's
+	// Access-Control-Request-Headers header is empty.
+	ExposedHeaders []string
+
+	// MaxAge indicates how long (in seconds) the results of a preflight request
+	// can be cached. Default value is 0 which means that the request is not
+	// cached.
+	MaxAge int
+
+	// AllowCredentials indicates whether the request can include user credentials like
+	// cookies, HTTP authentication or client side SSL certificates.
+	AllowCredentials bool
 }
 
-func newCORSHandler(config CORS) *corsHandler {
+func (c CORS) applyToHandler(config *handlerConfig) {
+	config.CORS = &c
+}
+
+// wrap creates a corsHandler that wraps the given handlers.
+// Methods are extracted from the handlers.
+// If c is nil, nil is returned.
+func (c *CORS) wrap(handlers []protocolHandler) *corsHandler {
+	if c == nil {
+		return nil
+	}
+	methods := make(map[string]struct{})
+	for _, handler := range handlers {
+		for method := range handler.Methods() {
+			methods[method] = struct{}{}
+		}
+	}
+	allow := make([]string, 0, len(methods))
+	for ct := range methods {
+		allow = append(allow, ct)
+	}
+
 	options := cors.Options{
-		AllowedMethods: []string{
-			http.MethodGet,
-			http.MethodPost,
-		},
+		AllowedMethods: allow,
 		AllowedHeaders: []string{
 			"Content-Type",
 			"Connect-Protocol-Version",
@@ -51,27 +90,26 @@ func newCORSHandler(config CORS) *corsHandler {
 		},
 	}
 
-	options.AllowOriginFunc = config.AllowOriginFunc
-	options.AllowedHeaders = append(options.AllowedHeaders, config.AllowedHeaders...)
-	options.ExposedHeaders = append(options.ExposedHeaders, config.ExposedHeaders...)
-	options.MaxAge = config.MaxAge
-	options.AllowCredentials = config.AllowCredentials
-
+	options.AllowOriginFunc = c.AllowOriginFunc
+	options.AllowedHeaders = append(options.AllowedHeaders, c.AllowedHeaders...)
+	options.ExposedHeaders = append(options.ExposedHeaders, c.ExposedHeaders...)
+	options.MaxAge = c.MaxAge
+	options.AllowCredentials = c.AllowCredentials
 	return &corsHandler{
 		cors: cors.New(options),
 	}
 }
 
-func (c *corsHandler) applyToHandler(config *handlerConfig) {
-	config.CORSHandler = c
+type corsHandler struct {
+	cors *cors.Cors
 }
 
 func isPreflight(r *http.Request) bool {
 	return r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != ""
 }
 
-// handle handles CORS for the request, returning true if the request is done.
-func (c *corsHandler) handle(w http.ResponseWriter, r *http.Request) (done bool) {
+// handle handles CORS for the request, returning true if the request is completed.
+func (c *corsHandler) handle(w http.ResponseWriter, r *http.Request) bool {
 	c.cors.HandlerFunc(w, r)
 	return isPreflight(r)
 }
