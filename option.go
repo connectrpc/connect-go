@@ -19,7 +19,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"time"
 )
 
 // A ClientOption configures a [Client].

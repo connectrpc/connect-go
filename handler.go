@@ -95,6 +95,7 @@ func NewUnaryHandler[Req, Res any](
 		protocolHandlers: protocolHandlers,
 		allowMethod:      sortedAllowMethodValue(protocolHandlers),
 		acceptPost:       sortedAcceptPostValue(protocolHandlers),
+		corsHandler:      config.CORSHandler,
 	}
 }
 

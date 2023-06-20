@@ -30,7 +30,13 @@ import (
 
 func TestHandler_ServeHTTP(t *testing.T) {
 	t.Parallel()
-	path, handler := pingv1connect.NewPingServiceHandler(successPingServer{})
+	path, handler := pingv1connect.NewPingServiceHandler(successPingServer{},
+		connect.WithCORS(connect.CORS{
+			AllowOriginFunc: func(origin string) bool {
+				return origin == "https://buf.build"
+			},
+		}),
+	)
 	prefixed := http.NewServeMux()
 	prefixed.Handle(path, handler)
 	mux := http.NewServeMux()
@@ -206,6 +212,43 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, message.Message, `unknown compression "invalid": supported encodings are gzip`)
 		assert.Equal(t, message.Code, connect.CodeUnimplemented.String())
+	})
+
+	t.Run("preflight_request_origin_valid", func(t *testing.T) {
+		t.Parallel()
+		req, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodOptions,
+			server.URL+pingProcedure,
+			nil,
+		)
+		assert.Nil(t, err)
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		req.Header.Set("Origin", "https://buf.build")
+		resp, err := client.Do(req)
+		assert.Nil(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, resp.StatusCode, http.StatusNoContent)
+		assert.Equal(t, resp.Header.Get("Access-Control-Allow-Origin"), "https://buf.build")
+	})
+
+	t.Run("preflight_request_origin_invalid", func(t *testing.T) {
+		t.Parallel()
+		req, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodOptions,
+			server.URL+pingProcedure,
+			nil,
+		)
+		assert.Nil(t, err)
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		req.Header.Set("Origin", "https://example.com")
+		resp, err := client.Do(req)
+		assert.Nil(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, resp.StatusCode, http.StatusNoContent)
+		assert.Equal(t, resp.Header.Get("Access-Control-Allow-Origin"), "")
+
 	})
 }
 
