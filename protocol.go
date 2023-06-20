@@ -239,6 +239,16 @@ func wrapClientConnWithCodedErrors(conn streamingClientConn) streamingClientConn
 	}
 }
 
+func mappedMethodHandlers(handlers []protocolHandler) map[string][]protocolHandler {
+	methodHandlers := make(map[string][]protocolHandler)
+	for _, handler := range handlers {
+		for method := range handler.Methods() {
+			methodHandlers[method] = append(methodHandlers[method], handler)
+		}
+	}
+	return methodHandlers
+}
+
 func sortedAcceptPostValue(handlers []protocolHandler) string {
 	contentTypes := make(map[string]struct{})
 	for _, handler := range handlers {

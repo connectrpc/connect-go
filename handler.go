@@ -29,9 +29,9 @@ import (
 type Handler struct {
 	spec             Spec
 	implementation   StreamingHandlerFunc
-	protocolHandlers []protocolHandler
-	allowMethod      string // Allow header
-	acceptPost       string // Accept-Post header
+	protocolHandlers map[string][]protocolHandler // Method to protocol handlers
+	allowMethod      string                       // Allow header
+	acceptPost       string                       // Accept-Post header
 }
 
 // NewUnaryHandler constructs a [Handler] for a request-response procedure.
@@ -91,7 +91,7 @@ func NewUnaryHandler[Req, Res any](
 	return &Handler{
 		spec:             config.newSpec(StreamTypeUnary),
 		implementation:   implementation,
-		protocolHandlers: protocolHandlers,
+		protocolHandlers: mappedMethodHandlers(protocolHandlers),
 		allowMethod:      sortedAllowMethodValue(protocolHandlers),
 		acceptPost:       sortedAcceptPostValue(protocolHandlers),
 	}
@@ -190,13 +190,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 		return
 	}
 
-	var protocolHandlers []protocolHandler
-	for _, handler := range h.protocolHandlers {
-		if _, ok := handler.Methods()[request.Method]; ok {
-			protocolHandlers = append(protocolHandlers, handler)
-		}
-	}
-
+	protocolHandlers := h.protocolHandlers[request.Method]
 	if len(protocolHandlers) == 0 {
 		responseWriter.Header().Set("Allow", h.allowMethod)
 		responseWriter.WriteHeader(http.StatusMethodNotAllowed)
@@ -332,7 +326,7 @@ func newStreamHandler(
 	return &Handler{
 		spec:             config.newSpec(streamType),
 		implementation:   implementation,
-		protocolHandlers: protocolHandlers,
+		protocolHandlers: mappedMethodHandlers(protocolHandlers),
 		allowMethod:      sortedAllowMethodValue(protocolHandlers),
 		acceptPost:       sortedAcceptPostValue(protocolHandlers),
 	}
