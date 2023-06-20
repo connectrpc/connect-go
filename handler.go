@@ -32,6 +32,7 @@ type Handler struct {
 	protocolHandlers []protocolHandler
 	allowMethod      string // Allow header
 	acceptPost       string // Accept-Post header
+	corsHandler      *corsHandler
 }
 
 // NewUnaryHandler constructs a [Handler] for a request-response procedure.
@@ -176,6 +177,13 @@ func NewBidiStreamHandler[Req, Res any](
 
 // ServeHTTP implements [http.Handler].
 func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
+	// Handle CORS requests.
+	if c := h.corsHandler; c != nil {
+		if done := c.handle(responseWriter, request); done {
+			return
+		}
+	}
+
 	// We don't need to defer functions to close the request body or read to
 	// EOF: the stream we construct later on already does that, and we only
 	// return early when dealing with misbehaving clients. In those cases, it's
@@ -259,6 +267,7 @@ type handlerConfig struct {
 	BufferPool                   *bufferPool
 	ReadMaxBytes                 int
 	SendMaxBytes                 int
+	CORSHandler                  *corsHandler
 }
 
 func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig {
@@ -335,5 +344,6 @@ func newStreamHandler(
 		protocolHandlers: protocolHandlers,
 		allowMethod:      sortedAllowMethodValue(protocolHandlers),
 		acceptPost:       sortedAcceptPostValue(protocolHandlers),
+		corsHandler:      config.CORSHandler,
 	}
 }
