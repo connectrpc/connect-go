@@ -864,6 +864,13 @@ func (u *connectStreamingUnmarshaler) Unmarshal(message any) *Error {
 	if err := json.Unmarshal(env.Data.Bytes(), &end); err != nil {
 		return errorf(CodeInternal, "unmarshal end stream message: %w", err)
 	}
+	for name, value := range end.Trailer {
+		canonical := http.CanonicalHeaderKey(name)
+		if name != canonical {
+			delete(end.Trailer, name)
+			end.Trailer[canonical] = append(end.Trailer[canonical], value...)
+		}
+	}
 	u.trailer = end.Trailer
 	u.endStreamErr = end.Error.asError()
 	return errSpecialEnvelope

@@ -15,7 +15,9 @@
 package connect
 
 import (
+	"bytes"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -53,4 +55,41 @@ func TestConnectErrorDetailMarshalingNoDescriptor(t *testing.T) {
 	encoded, err := json.Marshal(&detail)
 	assert.Nil(t, err)
 	assert.Equal(t, string(encoded), raw)
+}
+
+func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
+	t.Parallel()
+
+	buffer := bytes.Buffer{}
+	bufferPool := newBufferPool()
+
+	endStreamMessage := connectEndStreamMessage{Trailer: make(http.Header)}
+	endStreamMessage.Trailer["not-canonical-header"] = []string{"a"}
+	endStreamMessage.Trailer["mixed-Canonical"] = []string{"b"}
+	endStreamMessage.Trailer["Mixed-Canonical"] = []string{"b"}
+	endStreamMessage.Trailer["Canonical-Header"] = []string{"c"}
+	endStreamData, err := json.Marshal(endStreamMessage)
+	assert.Nil(t, err)
+
+	writer := envelopeWriter{
+		writer:     &buffer,
+		bufferPool: bufferPool,
+	}
+	err = writer.Write(&envelope{
+		Flags: connectFlagEnvelopeEndStream,
+		Data:  bytes.NewBuffer(endStreamData),
+	})
+	assert.Nil(t, err)
+
+	unmarshaler := connectStreamingUnmarshaler{
+		envelopeReader: envelopeReader{
+			reader:     &buffer,
+			bufferPool: bufferPool,
+		},
+	}
+	err = unmarshaler.Unmarshal(nil) // parameter won't be used
+	assert.ErrorIs(t, err, errSpecialEnvelope)
+	assert.Equal(t, unmarshaler.Trailer().Values("Not-Canonical-Header"), []string{"a"})
+	assert.Equal(t, unmarshaler.Trailer().Values("Mixed-Canonical"), []string{"b", "b"})
+	assert.Equal(t, unmarshaler.Trailer().Values("Canonical-Header"), []string{"c"})
 }
