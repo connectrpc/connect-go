@@ -16,7 +16,6 @@ package connect
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -27,11 +26,6 @@ import (
 	"net/textproto"
 	"strings"
 )
-
-type readCloser struct {
-	io.Reader
-	io.Closer
-}
 
 // ensureTeTrailers ensures that the "Te" header contains "trailers".
 func ensureTeTrailers(header http.Header) {
@@ -51,7 +45,7 @@ func ensureTeTrailers(header http.Header) {
 	header["Te"] = append(teValues, "trailers")
 }
 
-func translateGRPCWebToGRPC(request *http.Request, typ, enc string) {
+func translateGRPCWebToGRPC(request *http.Request, enc string) {
 	request.ProtoMajor = 2
 	request.ProtoMinor = 0
 	header := request.Header
@@ -60,11 +54,6 @@ func translateGRPCWebToGRPC(request *http.Request, typ, enc string) {
 	delHeaderCanonical(header, headerContentLength)
 	contentType := grpcContentTypePrefix + enc
 	setHeaderCanonical(header, headerContentType, contentType)
-
-	if typ == grpcWebTextContentTypeDefault {
-		body := base64.NewDecoder(base64.StdEncoding, request.Body)
-		request.Body = readCloser{body, request.Body}
-	}
 }
 
 type grpcWebResponseWriter struct {
@@ -76,10 +65,6 @@ type grpcWebResponseWriter struct {
 }
 
 func newGRPCWebResponseWriter(responseWriter http.ResponseWriter, typ, enc string) *grpcWebResponseWriter {
-	if typ == grpcWebTextContentTypeDefault {
-		responseWriter = newBase64ResponseWriter(responseWriter)
-	}
-
 	return &grpcWebResponseWriter{
 		ResponseWriter: responseWriter,
 		typ:            typ,
@@ -155,28 +140,6 @@ func (w *grpcWebResponseWriter) writeTrailer() error {
 		return err
 	}
 	return nil
-}
-
-// base64ResponseWriter encodes the response body in base64.
-type base64ResponseWriter struct {
-	http.ResponseWriter
-	encoder io.WriteCloser
-}
-
-func newBase64ResponseWriter(responseWriter http.ResponseWriter) *base64ResponseWriter {
-	return &base64ResponseWriter{
-		ResponseWriter: responseWriter,
-		encoder:        base64.NewEncoder(base64.StdEncoding, responseWriter),
-	}
-}
-
-func (w *base64ResponseWriter) Write(b []byte) (int, error) {
-	return w.encoder.Write(b)
-}
-func (w *base64ResponseWriter) Flush() {
-	_ = w.encoder.Close()
-	w.encoder = base64.NewEncoder(base64.StdEncoding, w.ResponseWriter)
-	flushResponseWriter(w.ResponseWriter)
 }
 
 // bufferedEnvelopeReader buffers a message to wrap it in an envelope.
@@ -583,7 +546,6 @@ func GRPCHandler(grpcHandler http.Handler, options ...HandlerOption) http.Handle
 		}
 		isHandledType := typ == grpcContentTypeDefault && method == http.MethodPost ||
 			typ == grpcWebContentTypeDefault && method == http.MethodPost ||
-			typ == grpcWebTextContentTypeDefault && method == http.MethodPost ||
 			typ == connectStreamingContentTypeDefault && method == http.MethodPost || // connect streaming
 			strings.HasPrefix(typ, connectUnaryContentTypePrefix) &&
 				(method == http.MethodPost || method == http.MethodGet) // connect unary
@@ -599,7 +561,7 @@ func GRPCHandler(grpcHandler http.Handler, options ...HandlerOption) http.Handle
 			grpcHandler.ServeHTTP(responseWriter, request)
 		case grpcWebContentTypeDefault:
 			// grpc-web -> grpc
-			translateGRPCWebToGRPC(request, typ, enc)
+			translateGRPCWebToGRPC(request, enc)
 			ww := newGRPCWebResponseWriter(responseWriter, typ, enc)
 			grpcHandler.ServeHTTP(ww, request)
 			ww.flushWithTrailers()
