@@ -75,13 +75,13 @@ func TestClientPeer(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
-	server := httptest.NewUnstartedServer(mux)
-	server.EnableHTTP2 = true
-	server.StartTLS()
-	t.Cleanup(server.Close)
 
-	run := func(t *testing.T, unaryHTTPMethod string, opts ...connect.ClientOption) {
+	run := func(t *testing.T, mux http.Handler, unaryHTTPMethod string, opts ...connect.ClientOption) {
 		t.Helper()
+		server := httptest.NewUnstartedServer(mux)
+		server.EnableHTTP2 = true
+		server.StartTLS()
+		t.Cleanup(server.Close)
 		client := pingv1connect.NewPingServiceClient(
 			server.Client(),
 			server.URL,
@@ -128,22 +128,30 @@ func TestClientPeer(t *testing.T) {
 
 	t.Run("connect", func(t *testing.T) {
 		t.Parallel()
-		run(t, http.MethodPost)
+		run(t, mux, http.MethodPost)
 	})
 	t.Run("connect+get", func(t *testing.T) {
 		t.Parallel()
-		run(t, http.MethodGet,
+		run(t, mux, http.MethodGet,
 			connect.WithHTTPGet(),
 			connect.WithSendGzip(),
 		)
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()
-		run(t, http.MethodPost, connect.WithGRPC())
+		run(t, mux, http.MethodPost, connect.WithGRPC())
 	})
 	t.Run("grpcweb", func(t *testing.T) {
 		t.Parallel()
-		run(t, http.MethodPost, connect.WithGRPCWeb())
+		run(t, mux, http.MethodPost, connect.WithGRPCWeb())
+	})
+	t.Run("grpc_transcode", func(t *testing.T) {
+		t.Parallel()
+		mux := connect.GRPCHandler(mux)
+		run(t, mux, http.MethodGet,
+			connect.WithHTTPGet(),
+			connect.WithSendGzip(),
+		)
 	})
 }
 
