@@ -391,11 +391,14 @@ func (w *connectResponseWriter) writeHeader() {
 		setHeaderCanonical(header, connectUnaryHeaderCompression, compression)
 	}
 
-	for rawHeader, values := range w.header {
-		key := textproto.CanonicalMIMEHeaderKey(rawHeader)
+	for rawKey, values := range w.header {
+		key := textproto.CanonicalMIMEHeaderKey(rawKey)
 		isTrailer := strings.HasPrefix(key, http.TrailerPrefix)
 		if isProtocolHeader(key) || isTrailer {
 			continue
+		}
+		if rawKey != key {
+			delete(header, rawKey)
 		}
 		header[key] = values
 	}
@@ -458,9 +461,11 @@ func getGRPCTrailer(header http.Header) http.Header {
 
 	trailer := make(http.Header)
 	for key, vals := range header {
-		key = http.CanonicalHeaderKey(key)
-		if strings.HasPrefix(key, http.TrailerPrefix) || isTrailer[key] {
-			key = strings.TrimPrefix(key, http.TrailerPrefix)
+		if strings.HasPrefix(key, http.TrailerPrefix) {
+			// Must remove trailer prefix before canonicalizing.
+			key = http.CanonicalHeaderKey(key[len(http.TrailerPrefix):])
+			trailer[key] = vals
+		} else if key := http.CanonicalHeaderKey(key); isTrailer[key] {
 			trailer[key] = vals
 		}
 	}

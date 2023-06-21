@@ -613,15 +613,15 @@ func TestTimeoutParsing(t *testing.T) {
 		},
 	}
 	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
 
 	t.Run("connect", func(t *testing.T) {
 		t.Parallel()
-		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
 		server := httptest.NewServer(mux)
-		defer server.Close()
+		t.Cleanup(server.Close)
 
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
+		t.Cleanup(cancel)
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
 		_, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
 		assert.Nil(t, err)
@@ -633,9 +633,10 @@ func TestTimeoutParsing(t *testing.T) {
 		server := httptest.NewUnstartedServer(mux)
 		server.EnableHTTP2 = true
 		server.StartTLS()
-		defer server.Close()
+		t.Cleanup(server.Close)
+
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
+		t.Cleanup(cancel)
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
 		_, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
 		assert.Nil(t, err)
