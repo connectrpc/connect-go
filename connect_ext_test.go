@@ -443,15 +443,15 @@ func TestServer(t *testing.T) {
 	t.Run("grpc_transcode", func(t *testing.T) {
 		t.Parallel()
 
-		gRPCOnlyMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			contentType := r.Header.Get("Content-Type")
-			if r.Method != http.MethodPost || !strings.HasPrefix(contentType, "application/grpc+") {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, "invalid content:%v", contentType) //nolint
+		gRPCOnlyMux := http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+			contentType := request.Header.Get("Content-Type")
+			if request.Method != http.MethodPost || !strings.HasPrefix(contentType, "application/grpc+") {
+				responseWriter.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprintf(responseWriter, "invalid content:%v", contentType)
 				return
 			}
 
-			mux.ServeHTTP(w, r)
+			mux.ServeHTTP(responseWriter, request)
 		})
 		grpcMux := connect.GRPCHandler(gRPCOnlyMux)
 		server := httptest.NewUnstartedServer(grpcMux)
@@ -613,15 +613,19 @@ func TestTimeoutParsing(t *testing.T) {
 		},
 	}
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
-	server := httptest.NewServer(mux)
-	defer server.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
-	_, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
-	assert.Nil(t, err)
+	t.Run("connect", func(t *testing.T) {
+		t.Parallel()
+		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+		server := httptest.NewServer(mux)
+		defer server.Close()
+
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
+		_, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
+		assert.Nil(t, err)
+	})
 
 	t.Run("grpc_transcode", func(t *testing.T) {
 		t.Parallel()
@@ -629,7 +633,7 @@ func TestTimeoutParsing(t *testing.T) {
 		server := httptest.NewUnstartedServer(mux)
 		server.EnableHTTP2 = true
 		server.StartTLS()
-		t.Cleanup(server.Close)
+		defer server.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)

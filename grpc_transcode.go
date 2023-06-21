@@ -19,6 +19,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -27,33 +28,15 @@ import (
 	"strings"
 )
 
-// parseTypeEncoding parses the type and encoding from the content-type header.
-func parseTypeEncoding(method string, header http.Header) (typ, enc string, ok bool) {
-	contentType := canonicalizeContentType(getHeaderCanonical(header, headerContentType))
-
-	typ, enc, found := strings.Cut(contentType, "+")
-	if !found {
-		enc = "proto"
-	}
-	ok = typ == grpcContentTypeDefault && method == http.MethodPost ||
-		typ == grpcWebContentTypeDefault && method == http.MethodPost ||
-		typ == grpcWebTextContentTypeDefault && method == http.MethodPost ||
-		typ == connectStreamingContentTypeDefault && method == http.MethodPost || // connect streaming
-		strings.HasPrefix(typ, connectUnaryContentTypePrefix) &&
-			(method == http.MethodPost || method == http.MethodGet) // connect unary
-
-	return typ, enc, ok
-}
-
 type readCloser struct {
 	io.Reader
 	io.Closer
 }
 
 // ensureTeTrailers ensures that the "Te" header contains "trailers".
-func ensureTeTrailers(h http.Header) {
-	te := h["Te"]
-	for _, val := range te {
+func ensureTeTrailers(header http.Header) {
+	teValues := header["Te"]
+	for _, val := range teValues {
 		valElements := strings.Split(val, ",")
 		for _, element := range valElements {
 			pos := strings.IndexByte(element, ';')
@@ -65,21 +48,22 @@ func ensureTeTrailers(h http.Header) {
 			}
 		}
 	}
-	h["Te"] = append(te, "trailers")
+	header["Te"] = append(teValues, "trailers")
 }
 
-func translateGRPCWebToGRPC(r *http.Request, typ, enc string) {
-	r.ProtoMajor = 2
-	r.ProtoMinor = 0
-	ensureTeTrailers(r.Header)
+func translateGRPCWebToGRPC(request *http.Request, typ, enc string) {
+	request.ProtoMajor = 2
+	request.ProtoMinor = 0
+	header := request.Header
+	ensureTeTrailers(header)
 
-	delHeaderCanonical(r.Header, headerContentLength)
+	delHeaderCanonical(header, headerContentLength)
 	contentType := grpcContentTypePrefix + enc
-	setHeaderCanonical(r.Header, headerContentType, contentType)
+	setHeaderCanonical(header, headerContentType, contentType)
 
 	if typ == grpcWebTextContentTypeDefault {
-		body := base64.NewDecoder(base64.StdEncoding, r.Body)
-		r.Body = readCloser{body, r.Body}
+		body := base64.NewDecoder(base64.StdEncoding, request.Body)
+		request.Body = readCloser{body, request.Body}
 	}
 }
 
@@ -91,13 +75,13 @@ type grpcWebResponseWriter struct {
 	wroteHeader bool
 }
 
-func newGRPCWebResponseWriter(w http.ResponseWriter, typ, enc string) *grpcWebResponseWriter {
+func newGRPCWebResponseWriter(responseWriter http.ResponseWriter, typ, enc string) *grpcWebResponseWriter {
 	if typ == grpcWebTextContentTypeDefault {
-		w = newBase64ResponseWriter(w)
+		responseWriter = newBase64ResponseWriter(responseWriter)
 	}
 
 	return &grpcWebResponseWriter{
-		ResponseWriter: w,
+		ResponseWriter: responseWriter,
 		typ:            typ,
 		enc:            enc,
 	}
@@ -145,20 +129,20 @@ func (w *grpcWebResponseWriter) Flush() {
 }
 
 func (w *grpcWebResponseWriter) writeTrailer() error {
-	hdr := w.Header()
+	header := w.Header()
 
-	tr := make(http.Header, len(hdr)-len(w.seenHeaders)+1)
-	for key, val := range hdr {
+	trailer := make(http.Header, len(header)-len(w.seenHeaders)+1)
+	for key, values := range header {
 		if w.seenHeaders[key] {
 			continue
 		}
 		key = strings.TrimPrefix(key, http.TrailerPrefix)
 		// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md#protocol-differences-vs-grpc-over-http2
-		tr[strings.ToLower(key)] = val
+		trailer[strings.ToLower(key)] = values
 	}
 
 	var buf bytes.Buffer
-	if err := tr.Write(&buf); err != nil {
+	if err := trailer.Write(&buf); err != nil {
 		return err
 	}
 
@@ -179,10 +163,10 @@ type base64ResponseWriter struct {
 	encoder io.WriteCloser
 }
 
-func newBase64ResponseWriter(w http.ResponseWriter) *base64ResponseWriter {
+func newBase64ResponseWriter(responseWriter http.ResponseWriter) *base64ResponseWriter {
 	return &base64ResponseWriter{
-		ResponseWriter: w,
-		encoder:        base64.NewEncoder(base64.StdEncoding, w),
+		ResponseWriter: responseWriter,
+		encoder:        base64.NewEncoder(base64.StdEncoding, responseWriter),
 	}
 }
 
@@ -190,9 +174,7 @@ func (w *base64ResponseWriter) Write(b []byte) (int, error) {
 	return w.encoder.Write(b)
 }
 func (w *base64ResponseWriter) Flush() {
-	if err := w.encoder.Close(); err != nil {
-		panic(err)
-	}
+	_ = w.encoder.Close()
 	w.encoder = base64.NewEncoder(base64.StdEncoding, w.ResponseWriter)
 	flushResponseWriter(w.ResponseWriter)
 }
@@ -208,32 +190,23 @@ type bufferedEnvelopeReader struct {
 	err        error
 }
 
-func (r *bufferedEnvelopeReader) Read(b []byte) (int, error) {
-	if r.err != nil {
-		return 0, r.err
-	}
-	if r.buffered {
-		return r.buf.Read(b)
-	}
-
+func (r *bufferedEnvelopeReader) fillBuffer() error {
 	body, err := readAll(nil, r.ReadCloser, int64(r.config.ReadMaxBytes))
 	if err != nil {
 		// Limit reached if EOF.
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			bytesRead := int64(len(body))
 			discardedBytes, err := io.Copy(io.Discard, r.ReadCloser)
 			if err != nil {
-				r.err = errorf(CodeResourceExhausted,
+				return errorf(CodeResourceExhausted,
 					"message is larger than configured max %d - unable to determine message size: %w",
 					r.config.ReadMaxBytes, err)
-				return 0, r.err
 			}
-			r.err = errorf(CodeResourceExhausted,
+			return errorf(CodeResourceExhausted,
 				"message size %d is larger than configured max %d",
 				bytesRead+discardedBytes, r.config.ReadMaxBytes)
-			return 0, r.err
 		}
-		return 0, errorf(CodeUnknown, "read message: %w", err)
+		return errorf(CodeUnknown, "read message: %w", err)
 	}
 	size := uint32(len(body))
 
@@ -243,35 +216,45 @@ func (r *bufferedEnvelopeReader) Read(b []byte) (int, error) {
 		head[0] = 1 // compressed
 	}
 	binary.BigEndian.PutUint32(head[1:], size)
-	r.buf.Write(head[:]) //nolint
-	r.buf.Write(body)    //nolint
+	r.buf.Write(head[:])
+	r.buf.Write(body)
+	return nil
+}
+
+func (r *bufferedEnvelopeReader) Read(data []byte) (int, error) {
+	if !r.buffered && r.ReadCloser != nil {
+		r.err = r.fillBuffer()
+	}
 	r.buffered = true
-	return r.buf.Read(b)
+	if r.err != nil {
+		return 0, r.err
+	}
+	return r.buf.Read(data)
 }
 
 // readAll reads from r until an error or the limit is reached.
-func readAll(b []byte, r io.Reader, limit int64) ([]byte, error) {
+func readAll(data []byte, reader io.Reader, limit int64) ([]byte, error) {
 	if limit <= 0 {
 		limit = math.MaxInt32
 	}
 	// Copied from io.ReadAll with the limit applied.
 	var total int64
 	for {
-		if len(b) == cap(b) {
+		if len(data) == cap(data) {
 			// Add more capacity (let append pick how much).
-			b = append(b, 0)[:len(b)]
+			data = append(data, 0)[:len(data)]
 		}
-		n, err := r.Read(b[len(b):cap(b)])
-		b = b[:len(b)+n]
+		n, err := reader.Read(data[len(data):cap(data)])
+		data = data[:len(data)+n]
 		total += int64(n)
 		if total > limit {
-			return b, io.EOF
+			return data, io.EOF
 		}
 		if err != nil {
 			if err == io.EOF {
 				err = nil
 			}
-			return b, err
+			return data, err
 		}
 	}
 }
@@ -283,55 +266,55 @@ func (r *bufferedEnvelopeReader) Close() error {
 	return nil
 }
 
-func translateConnectToGRPC(r *http.Request, typ, enc string, config *handlerConfig) {
-	r.ProtoMajor = 2
-	r.ProtoMinor = 0
-	ensureTeTrailers(r.Header)
+func translateConnectToGRPC(request *http.Request, typ, enc string, config *handlerConfig) {
+	request.ProtoMajor = 2
+	request.ProtoMinor = 0
+	header := request.Header
+	ensureTeTrailers(header)
 
-	delHeaderCanonical(r.Header, connectHeaderProtocolVersion)
-	delHeaderCanonical(r.Header, headerContentLength)
+	delHeaderCanonical(header, connectHeaderProtocolVersion)
+	delHeaderCanonical(header, headerContentLength)
 
 	// Translate timeout header
-	if timeout := getHeaderCanonical(r.Header, connectHeaderTimeout); len(timeout) > 0 {
-		delHeaderCanonical(r.Header, connectHeaderTimeout)
-		setHeaderCanonical(r.Header, grpcHeaderTimeout, timeout+"m")
+	if timeout := getHeaderCanonical(header, connectHeaderTimeout); len(timeout) > 0 {
+		delHeaderCanonical(header, connectHeaderTimeout)
+		setHeaderCanonical(header, grpcHeaderTimeout, timeout+"m")
 	}
 
 	// stream
 	if strings.HasPrefix(typ, connectStreamingContentTypeDefault) {
 		contentType := grpcContentTypePrefix + enc
-		setHeaderCanonical(r.Header, headerContentType, contentType)
-		if contentEncoding := getHeaderCanonical(r.Header, connectStreamingHeaderCompression); len(contentEncoding) > 0 {
-			delHeaderCanonical(r.Header, connectStreamingHeaderCompression)
-			setHeaderCanonical(r.Header, grpcHeaderCompression, contentEncoding)
+		setHeaderCanonical(header, headerContentType, contentType)
+		if contentEncoding := getHeaderCanonical(header, connectStreamingHeaderCompression); len(contentEncoding) > 0 {
+			delHeaderCanonical(header, connectStreamingHeaderCompression)
+			setHeaderCanonical(header, grpcHeaderCompression, contentEncoding)
 		}
-		if acceptEncoding := getHeaderCanonical(r.Header, connectStreamingHeaderAcceptCompression); len(acceptEncoding) > 0 {
-			delHeaderCanonical(r.Header, connectStreamingHeaderAcceptCompression)
-			setHeaderCanonical(r.Header, grpcHeaderAcceptCompression, acceptEncoding)
+		if acceptEncoding := getHeaderCanonical(header, connectStreamingHeaderAcceptCompression); len(acceptEncoding) > 0 {
+			delHeaderCanonical(header, connectStreamingHeaderAcceptCompression)
+			setHeaderCanonical(header, grpcHeaderAcceptCompression, acceptEncoding)
 		}
 		return
 	}
 
 	// unary
 	contentType := grpcContentTypePrefix + strings.TrimPrefix(typ, "application/")
-	setHeaderCanonical(r.Header, headerContentType, contentType)
+	setHeaderCanonical(header, headerContentType, contentType)
 
-	if acceptEncoding := getHeaderCanonical(r.Header, connectUnaryHeaderAcceptCompression); len(acceptEncoding) > 0 {
-		delHeaderCanonical(r.Header, connectUnaryHeaderAcceptCompression)
-		setHeaderCanonical(r.Header, grpcHeaderAcceptCompression, acceptEncoding)
+	if acceptEncoding := getHeaderCanonical(header, connectUnaryHeaderAcceptCompression); len(acceptEncoding) > 0 {
+		delHeaderCanonical(header, connectUnaryHeaderAcceptCompression)
+		setHeaderCanonical(header, grpcHeaderAcceptCompression, acceptEncoding)
 	}
 
-	// Handle GET request with query parameters
-	if r.Method == http.MethodGet {
-		r.Method = http.MethodPost
-		query := r.URL.Query()
-		r.URL.RawQuery = "" // clear query parameters
+	generateGetBody := func() {
+		request.Method = http.MethodPost
+		query := request.URL.Query()
+		request.URL.RawQuery = "" // clear query parameters
 
 		compressed := false
 		if contentEncoding := query.Get(connectUnaryCompressionQueryParameter); len(contentEncoding) > 0 {
 			compressed = contentEncoding != "identity"
-			delHeaderCanonical(r.Header, connectUnaryHeaderCompression)
-			setHeaderCanonical(r.Header, grpcHeaderCompression, contentEncoding)
+			delHeaderCanonical(header, connectUnaryHeaderCompression)
+			setHeaderCanonical(header, grpcHeaderCompression, contentEncoding)
 		}
 
 		var failed error
@@ -342,50 +325,53 @@ func translateConnectToGRPC(r *http.Request, typ, enc string, config *handlerCon
 			failed = errorf(CodeInvalidArgument, "%s must be %q: got %q", connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue, version)
 		}
 		if failed != nil {
-			r.Body = &bufferedEnvelopeReader{err: failed}
+			request.Body = &bufferedEnvelopeReader{err: failed}
 			return
 		}
 		msg := query.Get(connectUnaryMessageQueryParameter)
 		msgReader := queryValueReader(msg, query.Get(connectUnaryBase64QueryParameter) == "1")
-		r.Body = &bufferedEnvelopeReader{
+		request.Body = &bufferedEnvelopeReader{
 			ReadCloser: io.NopCloser(msgReader),
 			compressed: compressed,
 			config:     config,
 		}
-
-	} else {
+	}
+	generatePostBody := func() {
 		compressed := false
-		if contentEncoding := getHeaderCanonical(r.Header, connectUnaryHeaderCompression); len(contentEncoding) > 0 {
+		if contentEncoding := getHeaderCanonical(header, connectUnaryHeaderCompression); len(contentEncoding) > 0 {
 			compressed = contentEncoding != "identity"
-			delHeaderCanonical(r.Header, connectUnaryHeaderCompression)
-			setHeaderCanonical(r.Header, grpcHeaderCompression, contentEncoding)
+			delHeaderCanonical(header, connectUnaryHeaderCompression)
+			setHeaderCanonical(header, grpcHeaderCompression, contentEncoding)
 		}
-		r.Body = &bufferedEnvelopeReader{
-			ReadCloser: r.Body,
+		request.Body = &bufferedEnvelopeReader{
+			ReadCloser: request.Body,
 			compressed: compressed,
 			config:     config,
 		}
 	}
+
+	// Handle GET request with query parameters
+	if request.Method == http.MethodGet {
+		generateGetBody()
+	} else {
+		generatePostBody()
+	}
 }
 
-var (
-	isConnectHeader = map[string]bool{
-		connectUnaryHeaderCompression:           true,
-		connectUnaryHeaderAcceptCompression:     true,
-		connectStreamingHeaderCompression:       true,
-		connectStreamingHeaderAcceptCompression: true,
-		connectHeaderTimeout:                    true,
-		connectHeaderProtocolVersion:            true,
-	}
-	isGRPCHeader = map[string]bool{
-		grpcHeaderCompression:       true,
-		grpcHeaderAcceptCompression: true,
-		grpcHeaderTimeout:           true,
-		grpcHeaderStatus:            true,
-		grpcHeaderMessage:           true,
-		grpcHeaderDetails:           true,
-	}
-)
+func isProtocolHeader(header string) bool {
+	return header == connectUnaryHeaderCompression ||
+		header == connectUnaryHeaderAcceptCompression ||
+		header == connectStreamingHeaderCompression ||
+		header == connectStreamingHeaderAcceptCompression ||
+		header == connectHeaderTimeout ||
+		header == connectHeaderProtocolVersion ||
+		header == grpcHeaderCompression ||
+		header == grpcHeaderAcceptCompression ||
+		header == grpcHeaderTimeout ||
+		header == grpcHeaderStatus ||
+		header == grpcHeaderMessage ||
+		header == grpcHeaderDetails
+}
 
 type connectResponseWriter struct {
 	http.ResponseWriter
@@ -396,12 +382,12 @@ type connectResponseWriter struct {
 	body        bytes.Buffer // buffered body for unary payloads
 	header      http.Header  // buffered header for trailer capture
 	wroteHeader bool
-	wrotePrefix int // unary prefix
+	wroteHead   int // unary envelope head
 }
 
-func newConnectResponseWriter(w http.ResponseWriter, typ, enc string, config *handlerConfig) *connectResponseWriter {
+func newConnectResponseWriter(responseWriter http.ResponseWriter, typ, enc string, config *handlerConfig) *connectResponseWriter {
 	return &connectResponseWriter{
-		ResponseWriter: w,
+		ResponseWriter: responseWriter,
 		typ:            typ,
 		enc:            enc,
 		config:         config,
@@ -429,20 +415,19 @@ func (w *connectResponseWriter) writeHeader() {
 		contentType := connectStreamingContentTypePrefix + w.enc
 		setHeaderCanonical(header, headerContentType, contentType)
 		setHeaderCanonical(header, connectStreamingHeaderCompression, compression)
-
 	} else {
 		contentType := w.typ // type has no encoding suffix
 		setHeaderCanonical(header, headerContentType, contentType)
 		setHeaderCanonical(header, connectUnaryHeaderCompression, compression)
 	}
 
-	for k, v := range w.header {
-		key := textproto.CanonicalMIMEHeaderKey(k)
+	for rawHeader, values := range w.header {
+		key := textproto.CanonicalMIMEHeaderKey(rawHeader)
 		isTrailer := strings.HasPrefix(key, http.TrailerPrefix)
-		if isGRPCHeader[key] || isConnectHeader[key] || isTrailer {
+		if isProtocolHeader(key) || isTrailer {
 			continue
 		}
-		header[key] = v
+		header[key] = values
 	}
 	w.wroteHeader = true
 }
@@ -457,32 +442,36 @@ func (w *connectResponseWriter) WriteHeader(statusCode int) {
 	}
 }
 
-func (w *connectResponseWriter) Write(b []byte) (n int, err error) {
+func (w *connectResponseWriter) writeBuffered(data []byte) (int, error) {
+	headSize := 5 - w.wroteHead
+	if headSize <= 0 {
+		return w.body.Write(data)
+	}
+
+	size := len(data)
+	if size < headSize {
+		headSize = size
+	}
+	w.wroteHead += headSize
+	data = data[headSize:]
+	return w.body.Write(data)
+}
+
+func (w *connectResponseWriter) Write(data []byte) (int, error) {
 	if w.isStreaming() {
 		if !w.wroteHeader {
 			w.writeHeader()
 		}
-		return w.ResponseWriter.Write(b)
+		return w.ResponseWriter.Write(data)
 	}
 
-	prefixSize := 5 - w.wrotePrefix
-	if prefixSize <= 0 {
-		n, err = w.body.Write(b)
-	} else {
-		size := len(b)
-		if size < prefixSize {
-			prefixSize = size
-		}
-		w.wrotePrefix += prefixSize
-		b = b[prefixSize:]
-		n, err = w.body.Write(b)
-	}
-	total := w.body.Len() + w.wrotePrefix
+	wroteN, err := w.writeBuffered(data)
+	total := w.body.Len() + w.wroteHead
 	limit := w.config.SendMaxBytes
 	if limit > 0 && total > limit {
-		return n, NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", total, limit))
+		return 0, NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", total, limit))
 	}
-	return n, err
+	return wroteN, err
 }
 
 func getGRPCTrailer(header http.Header) http.Header {
@@ -525,9 +514,9 @@ func (w *connectResponseWriter) finalize() error {
 		return trailerErr
 	}
 
-	// Remove all gRPC trailer keys.
+	// Remove all protocol trailer keys.
 	for key := range trailer {
-		if isGRPCHeader[key] {
+		if isProtocolHeader(key) {
 			delete(trailer, key)
 		}
 	}
@@ -539,7 +528,7 @@ func (w *connectResponseWriter) finalize() error {
 		}
 		data, err := json.Marshal(end)
 		if err != nil {
-			panic(err)
+			return err
 		}
 
 		head := [5]byte{connectFlagEnvelopeEndStream, 0, 0, 0, 0}
@@ -556,7 +545,7 @@ func (w *connectResponseWriter) finalize() error {
 	// Encode trailers as header
 	responseHeader := w.ResponseWriter.Header()
 	for key, vals := range trailer {
-		if isGRPCHeader[key] || isConnectHeader[key] {
+		if isProtocolHeader(key) {
 			continue
 		}
 		key = connectUnaryTrailerPrefix + key
@@ -578,40 +567,56 @@ func (w *connectResponseWriter) Flush() {
 
 // GRPCHandler translates connect and gRPC-web to a gRPC request for
 // use with a gRPC handler.
-func GRPCHandler(h http.Handler, options ...HandlerOption) http.Handler {
+func GRPCHandler(grpcHandler http.Handler, options ...HandlerOption) http.Handler {
 	errorWriter := NewErrorWriter()
 	config := newHandlerConfig("", options)
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		typ, enc, ok := parseTypeEncoding(r.Method, r.Header)
-		if !ok {
+	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		method := request.Method
+		header := request.Header
+		contentType := canonicalizeContentType(getHeaderCanonical(header, headerContentType))
+
+		// parse content-type into type and encoding
+		typ, enc, found := strings.Cut(contentType, "+")
+		if !found {
+			enc = "proto"
+		}
+		isHandledType := typ == grpcContentTypeDefault && method == http.MethodPost ||
+			typ == grpcWebContentTypeDefault && method == http.MethodPost ||
+			typ == grpcWebTextContentTypeDefault && method == http.MethodPost ||
+			typ == connectStreamingContentTypeDefault && method == http.MethodPost || // connect streaming
+			strings.HasPrefix(typ, connectUnaryContentTypePrefix) &&
+				(method == http.MethodPost || method == http.MethodGet) // connect unary
+
+		if !isHandledType {
 			// Let the handler serve the error response.
-			h.ServeHTTP(w, r)
+			grpcHandler.ServeHTTP(responseWriter, request)
 			return
 		}
 		switch typ {
 		case grpcContentTypeDefault:
 			// grpc -> grpc
-			h.ServeHTTP(w, r)
+			grpcHandler.ServeHTTP(responseWriter, request)
 		case grpcWebContentTypeDefault:
 			// grpc-web -> grpc
-			translateGRPCWebToGRPC(r, typ, enc)
-			ww := newGRPCWebResponseWriter(w, typ, enc)
-			h.ServeHTTP(ww, r)
+			translateGRPCWebToGRPC(request, typ, enc)
+			ww := newGRPCWebResponseWriter(responseWriter, typ, enc)
+			grpcHandler.ServeHTTP(ww, request)
 			ww.flushWithTrailers()
 		default:
 			// connect -> grpc
-			translateConnectToGRPC(r, typ, enc, config)
-			ww := newConnectResponseWriter(w, typ, enc, config)
-			h.ServeHTTP(ww, r)
+			translateConnectToGRPC(request, typ, enc, config)
+			ww := newConnectResponseWriter(responseWriter, typ, enc, config)
+			grpcHandler.ServeHTTP(ww, request)
 			if err := ww.finalize(); err != nil {
+				responseHeader := responseWriter.Header()
 				if ww.isStreaming() {
-					setHeaderCanonical(w.Header(), headerContentType, typ)
-					errorWriter.writeConnectStreaming(w, err) // ignore error
+					setHeaderCanonical(responseHeader, headerContentType, typ)
+					_ = errorWriter.writeConnectStreaming(responseWriter, err)
 				} else {
-					delHeaderCanonical(w.Header(), connectUnaryHeaderCompression)
-					setHeaderCanonical(w.Header(), headerContentType, connectUnaryContentTypeJSON)
-					errorWriter.writeConnectUnary(w, err) // ignore error
+					delHeaderCanonical(responseHeader, connectUnaryHeaderCompression)
+					setHeaderCanonical(responseHeader, headerContentType, connectUnaryContentTypeJSON)
+					_ = errorWriter.writeConnectUnary(responseWriter, err)
 				}
 			}
 		}
