@@ -27,6 +27,24 @@ import (
 	"strings"
 )
 
+type middlewareConfig struct {
+	Codec        Codec
+	BufferPool   *bufferPool
+	ReadMaxBytes int
+	SendMaxBytes int
+}
+
+func newMiddlewareConfig(options []MiddlewareOption) *middlewareConfig {
+	config := &middlewareConfig{
+		Codec:      &protoBinaryCodec{},
+		BufferPool: newBufferPool(),
+	}
+	for _, option := range options {
+		option.applyToMiddleware(config)
+	}
+	return config
+}
+
 // ensureTeTrailers ensures that the "Te" header contains "trailers".
 func ensureTeTrailers(header http.Header) {
 	teValues := header["Te"]
@@ -73,15 +91,15 @@ func newGRPCWebResponseWriter(responseWriter http.ResponseWriter, typ, enc strin
 }
 
 func (w *grpcWebResponseWriter) seeHeaders() {
-	hdr := w.Header()
-	hdr.Set("Content-Type", w.typ+"+"+w.enc) // override content-type
+	header := w.Header()
+	setHeaderCanonical(header, headerContentType, w.typ+"+"+w.enc)
 
-	keys := make(map[string]bool, len(hdr))
-	for k := range hdr {
-		if strings.HasPrefix(k, http.TrailerPrefix) {
+	keys := make(map[string]bool, len(header))
+	for key := range header {
+		if strings.HasPrefix(key, http.TrailerPrefix) {
 			continue
 		}
-		keys[k] = true
+		keys[key] = true
 	}
 	w.seenHeaders = keys
 	w.wroteHeader = true
@@ -146,7 +164,7 @@ func (w *grpcWebResponseWriter) writeTrailer() error {
 type bufferedEnvelopeReader struct {
 	io.ReadCloser
 
-	config     *handlerConfig
+	config     *middlewareConfig
 	buf        bytes.Buffer
 	buffered   bool
 	compressed bool
@@ -229,7 +247,7 @@ func (r *bufferedEnvelopeReader) Close() error {
 	return nil
 }
 
-func translateConnectToGRPC(request *http.Request, typ, enc string, config *handlerConfig) {
+func translateConnectToGRPC(request *http.Request, typ, enc string, config *middlewareConfig) {
 	request.ProtoMajor = 2
 	request.ProtoMinor = 0
 	header := request.Header
@@ -280,17 +298,6 @@ func translateConnectToGRPC(request *http.Request, typ, enc string, config *hand
 			setHeaderCanonical(header, grpcHeaderCompression, contentEncoding)
 		}
 
-		var failed error
-		version := query.Get(connectUnaryConnectQueryParameter)
-		if version == "" && config.RequireConnectProtocolHeader {
-			failed = errorf(CodeInvalidArgument, "missing required query parameter: set %s to %q", connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue)
-		} else if version != "" && version != connectUnaryConnectQueryValue {
-			failed = errorf(CodeInvalidArgument, "%s must be %q: got %q", connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue, version)
-		}
-		if failed != nil {
-			request.Body = &bufferedEnvelopeReader{err: failed}
-			return
-		}
 		msg := query.Get(connectUnaryMessageQueryParameter)
 		msgReader := queryValueReader(msg, query.Get(connectUnaryBase64QueryParameter) == "1")
 		request.Body = &bufferedEnvelopeReader{
@@ -339,7 +346,7 @@ func isProtocolHeader(header string) bool {
 type connectResponseWriter struct {
 	http.ResponseWriter
 	typ, enc string
-	config   *handlerConfig
+	config   *middlewareConfig
 
 	statusCode  int
 	body        bytes.Buffer // buffered body for unary payloads
@@ -348,7 +355,7 @@ type connectResponseWriter struct {
 	wroteHead   int // unary envelope head
 }
 
-func newConnectResponseWriter(responseWriter http.ResponseWriter, typ, enc string, config *handlerConfig) *connectResponseWriter {
+func newConnectResponseWriter(responseWriter http.ResponseWriter, typ, enc string, config *middlewareConfig) *connectResponseWriter {
 	return &connectResponseWriter{
 		ResponseWriter: responseWriter,
 		typ:            typ,
@@ -468,7 +475,7 @@ func (w *connectResponseWriter) finalize() error {
 	header := w.Header()
 	trailer := getGRPCTrailer(header)
 
-	protobuf := w.config.Codecs[codecNameProto]
+	protobuf := w.config.Codec
 	trailerErr := grpcErrorFromTrailer(w.config.BufferPool, protobuf, trailer)
 	if trailerErr != nil {
 		if w.isStreaming() {
@@ -523,6 +530,7 @@ func (w *connectResponseWriter) finalize() error {
 }
 
 func (w *connectResponseWriter) Flush() {
+	// Flush is a no-op for unary requests.
 	if w.isStreaming() {
 		flushResponseWriter(w.ResponseWriter)
 	}
@@ -530,9 +538,9 @@ func (w *connectResponseWriter) Flush() {
 
 // GRPCHandler translates connect and gRPC-web to a gRPC request for
 // use with a gRPC handler.
-func GRPCHandler(grpcHandler http.Handler, options ...HandlerOption) http.Handler {
+func GRPCHandler(grpcHandler http.Handler, options ...MiddlewareOption) http.Handler {
 	errorWriter := NewErrorWriter()
-	config := newHandlerConfig("", options)
+	config := newMiddlewareConfig(options)
 
 	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
 		method := request.Method
