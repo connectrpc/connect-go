@@ -50,12 +50,32 @@ type readCloser struct {
 	io.Closer
 }
 
+// ensureTeTrailers ensures that the "Te" header contains "trailers".
+func ensureTeTrailers(h http.Header) {
+	te := h["Te"]
+	for _, val := range te {
+		valElements := strings.Split(val, ",")
+		for _, element := range valElements {
+			pos := strings.IndexByte(element, ';')
+			if pos != -1 {
+				element = element[:pos]
+			}
+			if strings.ToLower(element) == "trailers" {
+				return // "trailers" is already present
+			}
+		}
+	}
+	h["Te"] = append(te, "trailers")
+}
+
 func translateGRPCWebToGRPC(r *http.Request, typ, enc string) {
 	r.ProtoMajor = 2
 	r.ProtoMinor = 0
+	ensureTeTrailers(r.Header)
 
-	r.Header.Del("Content-Length")
-	r.Header.Set("Content-Type", grpcContentTypePrefix+enc)
+	delHeaderCanonical(r.Header, headerContentLength)
+	contentType := grpcContentTypePrefix + enc
+	setHeaderCanonical(r.Header, headerContentType, contentType)
 
 	if typ == grpcWebTextContentTypeDefault {
 		body := base64.NewDecoder(base64.StdEncoding, r.Body)
@@ -266,6 +286,7 @@ func (r *bufferedEnvelopeReader) Close() error {
 func translateConnectToGRPC(r *http.Request, typ, enc string, config *handlerConfig) {
 	r.ProtoMajor = 2
 	r.ProtoMinor = 0
+	ensureTeTrailers(r.Header)
 
 	delHeaderCanonical(r.Header, connectHeaderProtocolVersion)
 	delHeaderCanonical(r.Header, headerContentLength)
@@ -396,7 +417,7 @@ func (w *connectResponseWriter) Header() http.Header {
 
 // isStreaming checks via the content type if the response is streaming.
 func (w *connectResponseWriter) isStreaming() bool {
-	return strings.HasPrefix(w.typ, connectStreamingContentTypeDefault)
+	return w.typ == connectStreamingContentTypeDefault
 }
 
 func (w *connectResponseWriter) writeHeader() {
@@ -521,9 +542,9 @@ func (w *connectResponseWriter) finalize() error {
 			panic(err)
 		}
 
-		head := []byte{connectFlagEnvelopeEndStream, 0, 0, 0, 0}
+		head := [5]byte{connectFlagEnvelopeEndStream, 0, 0, 0, 0}
 		binary.BigEndian.PutUint32(head[1:5], uint32(len(data)))
-		if _, err := w.ResponseWriter.Write(head); err != nil {
+		if _, err := w.ResponseWriter.Write(head[:]); err != nil {
 			return err
 		}
 		if _, err := w.ResponseWriter.Write(data); err != nil {
@@ -556,7 +577,7 @@ func (w *connectResponseWriter) Flush() {
 }
 
 // GRPCHandler translates connect and gRPC-web to a gRPC request for
-// use with gRPC handlers.
+// use with a gRPC handler.
 func GRPCHandler(h http.Handler, options ...HandlerOption) http.Handler {
 	errorWriter := NewErrorWriter()
 	config := newHandlerConfig("", options)
@@ -586,15 +607,11 @@ func GRPCHandler(h http.Handler, options ...HandlerOption) http.Handler {
 			if err := ww.finalize(); err != nil {
 				if ww.isStreaming() {
 					setHeaderCanonical(w.Header(), headerContentType, typ)
-					if err := errorWriter.writeConnectStreaming(w, err); err != nil {
-						panic(err) // TODO
-					}
+					errorWriter.writeConnectStreaming(w, err) // ignore error
 				} else {
-					delete(w.Header(), connectUnaryHeaderCompression)
+					delHeaderCanonical(w.Header(), connectUnaryHeaderCompression)
 					setHeaderCanonical(w.Header(), headerContentType, connectUnaryContentTypeJSON)
-					if err := errorWriter.writeConnectUnary(w, err); err != nil {
-						panic(err) // TODO
-					}
+					errorWriter.writeConnectUnary(w, err) // ignore error
 				}
 			}
 		}
