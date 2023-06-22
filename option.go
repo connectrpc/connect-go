@@ -173,16 +173,16 @@ type Option interface {
 	HandlerOption
 }
 
-// MiddlewareOption configures middleware.
-type MiddlewareOption interface {
-	applyToMiddleware(*middlewareConfig)
+// AdapterOption configures middleware.
+type AdapterOption interface {
+	applyToAdapter(*adapterConfig)
 }
 
-// OptionAny implements [ClientOption], [HandlerOption] and [MiddlewareOption],
-// so it can be applied both client-side and server-side and as middleware.
-type OptionAny interface {
+// AnyOption implements [ClientOption], [HandlerOption] and [AdapterOption],
+// so it can be applied both client-side and server-side or as an adapter.
+type AnyOption interface {
 	Option
-	MiddlewareOption
+	AdapterOption
 }
 
 // WithCodec registers a serialization method with a client or handler.
@@ -227,7 +227,7 @@ func WithCompressMinBytes(min int) Option {
 // HTTP request stream (rather than the per-message size). Connect handles
 // [http.MaxBytesError] specially, so clients still receive errors with the
 // appropriate error code and informative messages.
-func WithReadMaxBytes(max int) OptionAny {
+func WithReadMaxBytes(max int) AnyOption {
 	return &readMaxBytesOption{Max: max}
 }
 
@@ -239,7 +239,7 @@ func WithReadMaxBytes(max int) OptionAny {
 //
 // Setting WithSendMaxBytes to zero allows any message size. Both clients and
 // handlers default to allowing any message size.
-func WithSendMaxBytes(max int) OptionAny {
+func WithSendMaxBytes(max int) AnyOption {
 	return &sendMaxBytesOption{Max: max}
 }
 
@@ -414,7 +414,7 @@ func (o *readMaxBytesOption) applyToHandler(config *handlerConfig) {
 	config.ReadMaxBytes = o.Max
 }
 
-func (o *readMaxBytesOption) applyToMiddleware(config *middlewareConfig) {
+func (o *readMaxBytesOption) applyToAdapter(config *adapterConfig) {
 	config.ReadMaxBytes = o.Max
 }
 
@@ -430,7 +430,7 @@ func (o *sendMaxBytesOption) applyToHandler(config *handlerConfig) {
 	config.SendMaxBytes = o.Max
 }
 
-func (o *sendMaxBytesOption) applyToMiddleware(config *middlewareConfig) {
+func (o *sendMaxBytesOption) applyToAdapter(config *adapterConfig) {
 	config.SendMaxBytes = o.Max
 }
 

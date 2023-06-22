@@ -27,20 +27,20 @@ import (
 	"strings"
 )
 
-type middlewareConfig struct {
+type adapterConfig struct {
 	Codec        Codec
 	BufferPool   *bufferPool
 	ReadMaxBytes int
 	SendMaxBytes int
 }
 
-func newMiddlewareConfig(options []MiddlewareOption) *middlewareConfig {
-	config := &middlewareConfig{
+func newAdapterConfig(options []AdapterOption) *adapterConfig {
+	config := &adapterConfig{
 		Codec:      &protoBinaryCodec{},
 		BufferPool: newBufferPool(),
 	}
 	for _, option := range options {
-		option.applyToMiddleware(config)
+		option.applyToAdapter(config)
 	}
 	return config
 }
@@ -187,7 +187,7 @@ func (w *grpcWebResponseWriter) writeTrailer() error {
 type bufferedEnvelopeReader struct {
 	io.ReadCloser
 
-	config     *middlewareConfig
+	config     *adapterConfig
 	buf        bytes.Buffer
 	buffered   bool
 	compressed bool
@@ -270,7 +270,7 @@ func (r *bufferedEnvelopeReader) Close() error {
 	return nil
 }
 
-func translateConnectToGRPC(request *http.Request, typ, enc string, config *middlewareConfig) {
+func translateConnectToGRPC(request *http.Request, typ, enc string, config *adapterConfig) {
 	request.ProtoMajor = 2
 	request.ProtoMinor = 0
 	header := request.Header
@@ -369,16 +369,15 @@ func isProtocolHeader(header string) bool {
 type connectResponseWriter struct {
 	http.ResponseWriter
 	typ, enc string
-	config   *middlewareConfig
+	config   *adapterConfig
 
-	statusCode  int
 	body        bytes.Buffer // buffered body for unary payloads
 	header      http.Header  // buffered header for trailer capture
 	wroteHeader bool
 	wroteHead   int // unary envelope head
 }
 
-func newConnectResponseWriter(responseWriter http.ResponseWriter, typ, enc string, config *middlewareConfig) *connectResponseWriter {
+func newConnectResponseWriter(responseWriter http.ResponseWriter, typ, enc string, config *adapterConfig) *connectResponseWriter {
 	return &connectResponseWriter{
 		ResponseWriter: responseWriter,
 		typ:            typ,
@@ -429,7 +428,6 @@ func (w *connectResponseWriter) writeHeader() {
 }
 
 func (w *connectResponseWriter) WriteHeader(statusCode int) {
-	w.statusCode = statusCode
 	if w.isStreaming() {
 		if !w.wroteHeader {
 			w.writeHeader()
@@ -564,11 +562,26 @@ func (w *connectResponseWriter) Flush() {
 	}
 }
 
-// GRPCHandler translates connect and gRPC-web to a gRPC request for
-// use with a gRPC handler.
-func GRPCHandler(grpcHandler http.Handler, options ...MiddlewareOption) http.Handler {
+// NewGRPCAdapter returns a new http.Handler that transcodes connect and
+// gRPC-Web requests to gRPC.
+//
+// The adapter supports unary and streaming requests and responses but does not
+// validate the transport can support bidi streaming. Connect unary requests and
+// responses are buffered in memory and subject to the configured limits.
+// Connect streaming requests and responses are not buffered and defer to
+// the handlers limits.
+//
+// To use the adapter, pass it an http.Handler that serves gRPC requests such as:
+//
+//	grpcServer := grpc.NewServer()
+//	mux := connect.NewGRPCAdapter(grpcServer,
+//		connect.WithReadMaxBytes(1024),
+//		connect.WithWriteMaxBytes(1024),
+//	)
+//	http.ListenAndServe(":8080", h2c.NewHandler(mux, &http2.Server{}))
+func NewGRPCAdapter(grpcHandler http.Handler, options ...AdapterOption) http.Handler {
 	errorWriter := NewErrorWriter()
-	config := newMiddlewareConfig(options)
+	config := newAdapterConfig(options)
 
 	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
 		method := request.Method

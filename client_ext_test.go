@@ -147,7 +147,7 @@ func TestClientPeer(t *testing.T) {
 	})
 	t.Run("grpc_transcode", func(t *testing.T) {
 		t.Parallel()
-		mux := connect.GRPCHandler(mux)
+		mux := connect.NewGRPCAdapter(mux)
 		run(t, mux, http.MethodGet,
 			connect.WithHTTPGet(),
 			connect.WithSendGzip(),

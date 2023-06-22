@@ -453,7 +453,7 @@ func TestServer(t *testing.T) {
 
 			mux.ServeHTTP(responseWriter, request)
 		})
-		grpcMux := connect.GRPCHandler(gRPCOnlyMux)
+		grpcMux := connect.NewGRPCAdapter(gRPCOnlyMux)
 		server := httptest.NewUnstartedServer(grpcMux)
 		server.EnableHTTP2 = true
 		server.StartTLS()
@@ -629,7 +629,7 @@ func TestTimeoutParsing(t *testing.T) {
 
 	t.Run("grpc_transcode", func(t *testing.T) {
 		t.Parallel()
-		mux := connect.GRPCHandler(mux)
+		mux := connect.NewGRPCAdapter(mux)
 		server := httptest.NewUnstartedServer(mux)
 		server.EnableHTTP2 = true
 		server.StartTLS()
@@ -837,7 +837,7 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 	)
 }
 
-func TestGRPCHandlerHeaders(t *testing.T) {
+func TestGRPCAdapterHeaders(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/connect.ping.v1.PingService/Ping", func(responseWriter http.ResponseWriter, _ *http.Request) {
@@ -848,7 +848,7 @@ func TestGRPCHandlerHeaders(t *testing.T) {
 		header.Set("Trailer", "Grpc-Status Grpc-Message Grpc-Status-Details-Bin")
 		responseWriter.WriteHeader(http.StatusOK)
 	})
-	server := httptest.NewUnstartedServer(connect.GRPCHandler(mux))
+	server := httptest.NewUnstartedServer(connect.NewGRPCAdapter(mux))
 	server.EnableHTTP2 = true
 	server.StartTLS()
 	t.Cleanup(server.Close)
@@ -1167,7 +1167,7 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 		// Unrestricted mux.
 		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
 		// Restricted GRPC handler.
-		grpcMux := connect.GRPCHandler(mux, connect.WithReadMaxBytes(readMaxBytes))
+		grpcMux := connect.NewGRPCAdapter(mux, connect.WithReadMaxBytes(readMaxBytes))
 		server := newHTTP2Server(t, grpcMux)
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
 		readMaxBytesMatrix(t, client, false)
