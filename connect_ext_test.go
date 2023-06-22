@@ -837,6 +837,38 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 	)
 }
 
+func TestGRPCHandlerHeaders(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/connect.ping.v1.PingService/Ping", func(responseWriter http.ResponseWriter, _ *http.Request) {
+		header := responseWriter.Header()
+		header["content-type"] = []string{"application/grpc+proto"}
+		header.Set("Grpc-Message", "method Ping not implemented")
+		header.Set("grpc-status", "12")
+		header.Set("Trailer", "Grpc-Status Grpc-Message Grpc-Status-Details-Bin")
+		responseWriter.WriteHeader(http.StatusOK)
+	})
+	server := httptest.NewUnstartedServer(connect.GRPCHandler(mux))
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+
+	client := pingv1connect.NewPingServiceClient(
+		server.Client(),
+		server.URL,
+		connect.WithGRPCWeb(),
+	)
+	t.Run("ping_trailer_only", func(t *testing.T) {
+		t.Parallel()
+		request := connect.NewRequest(&pingv1.PingRequest{})
+		_, err := client.Ping(context.Background(), request)
+		t.Log("error:", err)
+		assert.NotNil(t, err)
+		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
+		assert.Match(t, err.Error(), "method Ping not implemented")
+	})
+}
+
 func TestCompressMinBytesClient(t *testing.T) {
 	t.Parallel()
 	assertContentType := func(tb testing.TB, text, expect string) {

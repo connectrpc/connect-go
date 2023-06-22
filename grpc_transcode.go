@@ -90,39 +90,63 @@ func newGRPCWebResponseWriter(responseWriter http.ResponseWriter, typ, enc strin
 	}
 }
 
-func (w *grpcWebResponseWriter) seeHeaders() {
+func (w *grpcWebResponseWriter) writeHeaders() {
 	header := w.Header()
-	setHeaderCanonical(header, headerContentType, w.typ+"+"+w.enc)
+
+	isTrailer := map[string]bool{
+		// Force GRPC status values to be trailers.
+		grpcHeaderStatus:  true,
+		grpcHeaderDetails: true,
+		grpcHeaderMessage: true,
+	}
+	for _, key := range strings.Split(header.Get(headerTrailer), ",") {
+		key = http.CanonicalHeaderKey(key)
+		isTrailer[key] = true
+	}
 
 	keys := make(map[string]bool, len(header))
 	for key := range header {
 		if strings.HasPrefix(key, http.TrailerPrefix) {
 			continue
 		}
+		canonicalKey := http.CanonicalHeaderKey(key)
+		if key != canonicalKey {
+			header[canonicalKey] = header[key]
+			delete(header, key)
+			key = canonicalKey
+		}
+		if isTrailer[key] {
+			continue
+		}
 		keys[key] = true
 	}
+
+	setHeaderCanonical(header, headerContentType, w.typ+"+"+w.enc)
+
 	w.seenHeaders = keys
 	w.wroteHeader = true
 }
 
 func (w *grpcWebResponseWriter) Write(b []byte) (int, error) {
 	if !w.wroteHeader {
-		w.seeHeaders()
+		w.writeHeaders()
 	}
 	return w.ResponseWriter.Write(b)
 }
 
 func (w *grpcWebResponseWriter) WriteHeader(code int) {
-	w.seeHeaders()
+	if !w.wroteHeader {
+		w.writeHeaders()
+	}
 	w.ResponseWriter.WriteHeader(code)
 }
 
 func (w *grpcWebResponseWriter) flushWithTrailers() {
-	if w.wroteHeader {
-		// Write trailers only if message has been sent.
-		if err := w.writeTrailer(); err != nil {
-			return // nothing
-		}
+	if !w.wroteHeader {
+		w.writeHeaders()
+	}
+	if err := w.writeTrailer(); err != nil {
+		return // nothing
 	}
 	flushResponseWriter(w.ResponseWriter)
 }
@@ -133,8 +157,7 @@ func (w *grpcWebResponseWriter) Flush() {
 
 func (w *grpcWebResponseWriter) writeTrailer() error {
 	header := w.Header()
-
-	trailer := make(http.Header, len(header)-len(w.seenHeaders)+1)
+	trailer := make(http.Header, len(header)-len(w.seenHeaders))
 	for key, values := range header {
 		if w.seenHeaders[key] {
 			continue
