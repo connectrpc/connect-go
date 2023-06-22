@@ -32,12 +32,14 @@ type adapterConfig struct {
 	BufferPool   *bufferPool
 	ReadMaxBytes int
 	SendMaxBytes int
+	ErrorWriter  *ErrorWriter
 }
 
 func newAdapterConfig(options []AdapterOption) *adapterConfig {
 	config := &adapterConfig{
-		Codec:      &protoBinaryCodec{},
-		BufferPool: newBufferPool(),
+		Codec:       &protoBinaryCodec{},
+		BufferPool:  newBufferPool(),
+		ErrorWriter: NewErrorWriter(),
 	}
 	for _, option := range options {
 		option.applyToAdapter(config)
@@ -366,8 +368,10 @@ type connectResponseWriter struct {
 
 	body        bytes.Buffer // buffered body for unary payloads
 	header      http.Header  // buffered header for trailer capture
-	wroteHeader bool
-	wroteHead   int // unary envelope head
+	wroteHeader bool         // whether header has been written
+	head        [5]byte      // unary envelope head
+	headIndex   int          // number of bytes written to head
+	isFinalized bool         // finalized called
 }
 
 func newConnectResponseWriter(responseWriter http.ResponseWriter, typ, enc string, config *adapterConfig) *connectResponseWriter {
@@ -392,6 +396,10 @@ func (w *connectResponseWriter) isStreaming() bool {
 }
 
 func (w *connectResponseWriter) writeHeader() {
+	if w.wroteHeader {
+		return
+	}
+
 	// Encode header response.
 	header := w.ResponseWriter.Header()
 	compression := getHeaderCanonical(w.header, grpcHeaderCompression)
@@ -422,38 +430,44 @@ func (w *connectResponseWriter) writeHeader() {
 
 func (w *connectResponseWriter) WriteHeader(statusCode int) {
 	if w.isStreaming() {
-		if !w.wroteHeader {
-			w.writeHeader()
-		}
+		w.writeHeader()
 		w.ResponseWriter.WriteHeader(statusCode)
 	}
 }
 
+func (w *connectResponseWriter) gotHead() bool {
+	return w.headIndex >= 5
+}
+func (w *connectResponseWriter) payloadSize() int {
+	return int(binary.BigEndian.Uint32(w.head[1:]))
+}
+
+// writeBuffered writes data to the buffered body. If the header has not been
+// written yet, it will write to the header buffer.
 func (w *connectResponseWriter) writeBuffered(data []byte) (int, error) {
-	headSize := 5 - w.wroteHead
-	if headSize <= 0 {
+	if w.gotHead() {
 		return w.body.Write(data)
 	}
+	headSize := 5 - w.headIndex
 
 	size := len(data)
 	if size < headSize {
 		headSize = size
 	}
-	w.wroteHead += headSize
+	copy(w.head[w.headIndex:], data[:headSize])
+	w.headIndex += headSize
 	data = data[headSize:]
 	return w.body.Write(data)
 }
 
 func (w *connectResponseWriter) Write(data []byte) (int, error) {
 	if w.isStreaming() {
-		if !w.wroteHeader {
-			w.writeHeader()
-		}
+		w.writeHeader()
 		return w.ResponseWriter.Write(data)
 	}
 
 	wroteN, err := w.writeBuffered(data)
-	total := w.body.Len() + w.wroteHead
+	total := w.body.Len() + w.headIndex
 	limit := w.config.SendMaxBytes
 	if limit > 0 && total > limit {
 		return 0, NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", total, limit))
@@ -461,7 +475,10 @@ func (w *connectResponseWriter) Write(data []byte) (int, error) {
 	return wroteN, err
 }
 
-func getGRPCTrailer(header http.Header) http.Header {
+func (w *connectResponseWriter) getTrailer() (http.Header, error) {
+	w.writeHeader()
+
+	header := w.Header()
 	isTrailer := map[string]bool{
 		// Force GRPC status values, try copy them directly from header.
 		grpcHeaderStatus:  true,
@@ -483,16 +500,6 @@ func getGRPCTrailer(header http.Header) http.Header {
 			trailer[key] = vals
 		}
 	}
-	return trailer
-}
-
-func (w *connectResponseWriter) finalize() error {
-	if !w.wroteHeader {
-		w.writeHeader()
-	}
-
-	header := w.Header()
-	trailer := getGRPCTrailer(header)
 
 	protobuf := w.config.Codec
 	trailerErr := grpcErrorFromTrailer(w.config.BufferPool, protobuf, trailer)
@@ -500,7 +507,7 @@ func (w *connectResponseWriter) finalize() error {
 		if w.isStreaming() {
 			trailerErr.meta = trailer
 		}
-		return trailerErr
+		return trailer, trailerErr
 	}
 
 	// Remove all protocol trailer keys.
@@ -509,26 +516,13 @@ func (w *connectResponseWriter) finalize() error {
 			delete(trailer, key)
 		}
 	}
+	return trailer, nil
+}
 
-	if w.isStreaming() {
-		// Encode as connect end message.
-		end := &connectEndStreamMessage{
-			Trailer: trailer,
-		}
-		data, err := json.Marshal(end)
-		if err != nil {
-			return err
-		}
-
-		head := [5]byte{connectFlagEnvelopeEndStream, 0, 0, 0, 0}
-		binary.BigEndian.PutUint32(head[1:5], uint32(len(data)))
-		if _, err := w.ResponseWriter.Write(head[:]); err != nil {
-			return err
-		}
-		if _, err := w.ResponseWriter.Write(data); err != nil {
-			return err
-		}
-		return nil
+func (w *connectResponseWriter) finalizeUnary() error {
+	trailer, err := w.getTrailer()
+	if err != nil {
+		return err
 	}
 
 	// Encode trailers as header
@@ -544,14 +538,63 @@ func (w *connectResponseWriter) finalize() error {
 	if _, err := w.body.WriteTo(w.ResponseWriter); err != nil {
 		return err
 	}
-	flushResponseWriter(w.ResponseWriter)
 	return nil
 }
 
+func (w *connectResponseWriter) finalizeStream() error {
+	trailer, err := w.getTrailer()
+	if err != nil {
+		return err
+	}
+
+	// Encode as connect end message.
+	end := &connectEndStreamMessage{
+		Trailer: trailer,
+	}
+	data, err := json.Marshal(end)
+	if err != nil {
+		return err
+	}
+
+	head := [5]byte{connectFlagEnvelopeEndStream, 0, 0, 0, 0}
+	binary.BigEndian.PutUint32(head[1:5], uint32(len(data)))
+	if _, err := w.ResponseWriter.Write(head[:]); err != nil {
+		return err
+	}
+	if _, err := w.ResponseWriter.Write(data); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *connectResponseWriter) flushWithTrailers() {
+	if w.isFinalized {
+		return
+	}
+
+	if w.isStreaming() {
+		if err := w.finalizeStream(); err != nil {
+			responseHeader := w.ResponseWriter.Header()
+			setHeaderCanonical(responseHeader, headerContentType, w.typ)
+			_ = w.config.ErrorWriter.writeConnectStreaming(w.ResponseWriter, err)
+		}
+	} else {
+		if err := w.finalizeUnary(); err != nil {
+			responseHeader := w.ResponseWriter.Header()
+			delHeaderCanonical(responseHeader, connectUnaryHeaderCompression)
+			setHeaderCanonical(responseHeader, headerContentType, connectUnaryContentTypeJSON)
+			_ = w.config.ErrorWriter.writeConnectUnary(w.ResponseWriter, err)
+		}
+	}
+	flushResponseWriter(w.ResponseWriter)
+	w.isFinalized = true
+}
+
 func (w *connectResponseWriter) Flush() {
-	// Flush is a no-op for unary requests.
+	w.writeHeader()
 	if w.isStreaming() {
 		flushResponseWriter(w.ResponseWriter)
+		return
 	}
 }
 
@@ -573,7 +616,6 @@ func (w *connectResponseWriter) Flush() {
 //	)
 //	http.ListenAndServe(":8080", h2c.NewHandler(mux, &http2.Server{}))
 func NewGRPCAdapter(grpcHandler http.Handler, options ...AdapterOption) http.Handler {
-	errorWriter := NewErrorWriter()
 	config := newAdapterConfig(options)
 
 	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
@@ -612,17 +654,7 @@ func NewGRPCAdapter(grpcHandler http.Handler, options ...AdapterOption) http.Han
 			translateConnectToGRPC(request, typ, enc, config)
 			ww := newConnectResponseWriter(responseWriter, typ, enc, config)
 			grpcHandler.ServeHTTP(ww, request)
-			if err := ww.finalize(); err != nil {
-				responseHeader := responseWriter.Header()
-				if ww.isStreaming() {
-					setHeaderCanonical(responseHeader, headerContentType, typ)
-					_ = errorWriter.writeConnectStreaming(responseWriter, err)
-				} else {
-					delHeaderCanonical(responseHeader, connectUnaryHeaderCompression)
-					setHeaderCanonical(responseHeader, headerContentType, connectUnaryContentTypeJSON)
-					_ = errorWriter.writeConnectUnary(responseWriter, err)
-				}
-			}
+			ww.flushWithTrailers()
 		}
 	})
 }
