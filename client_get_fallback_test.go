@@ -47,7 +47,7 @@ func TestClientUnaryGetFallback(t *testing.T) {
 		server.Client(),
 		server.URL+"/connect.ping.v1.PingService/Ping",
 		WithHTTPGet(),
-		withHTTPGetMaxURLSize(1, true),
+		WithHTTPGetMaxURLSize(1, true),
 		WithSendGzip(),
 	)
 	ctx := context.Background()
