@@ -226,10 +226,10 @@ func (r *bufferedEnvelopeReader) fillBuffer() error {
 }
 
 func (r *bufferedEnvelopeReader) Read(data []byte) (int, error) {
-	if !r.buffered && r.ReadCloser != nil {
+	if !r.buffered {
 		r.err = r.fillBuffer()
+		r.buffered = true
 	}
-	r.buffered = true
 	if r.err != nil {
 		return 0, r.err
 	}
@@ -261,13 +261,6 @@ func readAll(data []byte, reader io.Reader, limit int64) ([]byte, error) {
 			return data, err
 		}
 	}
-}
-
-func (r *bufferedEnvelopeReader) Close() error {
-	if r.ReadCloser != nil {
-		return r.ReadCloser.Close()
-	}
-	return nil
 }
 
 func translateConnectToGRPC(request *http.Request, typ, enc string, config *adapterConfig) {

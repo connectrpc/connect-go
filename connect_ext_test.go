@@ -27,6 +27,8 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -867,6 +869,111 @@ func TestGRPCAdapterHeaders(t *testing.T) {
 		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
 		assert.Match(t, err.Error(), "method Ping not implemented")
 	})
+}
+
+type what struct {
+	name      string
+	transport http.RoundTripper
+}
+
+func (w *what) RoundTrip(request *http.Request) (*http.Response, error) {
+	b, _ := httputil.DumpRequest(request, true)
+	fmt.Println("->", w.name)
+	fmt.Println(string(b))
+	resp, err := w.transport.RoundTrip(request)
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		return nil, err
+	}
+	b, _ = httputil.DumpResponse(resp, true)
+	fmt.Println("<-", w.name)
+	fmt.Println(string(b))
+	return resp, err
+}
+
+func TestGRPCAdapterProxy(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+
+	serverURL, err := url.Parse(server.URL)
+	assert.Nil(t, err)
+
+	proxyReverseProxy := httputil.NewSingleHostReverseProxy(serverURL)
+	proxyReverseProxy.Transport = &what{name: "server", transport: server.Client().Transport}
+
+	proxy := httptest.NewUnstartedServer(
+		connect.NewGRPCAdapter(proxyReverseProxy),
+		//proxyReverseProxy,
+	)
+	proxy.EnableHTTP2 = true
+	proxy.StartTLS()
+	t.Cleanup(proxy.Close)
+
+	for _, tt := range []struct {
+		name    string
+		options []connect.ClientOption
+	}{{
+		name: "grpc",
+		options: []connect.ClientOption{
+			connect.WithGRPC(),
+		},
+	}, {
+		name: "grpc_web",
+		options: []connect.ClientOption{
+			connect.WithGRPCWeb(),
+		},
+	}, {
+		name:    "connect",
+		options: []connect.ClientOption{},
+	}} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := proxy.Client()
+			c.Transport = &what{name: "proxy", transport: c.Transport}
+			client := pingv1connect.NewPingServiceClient(
+				c,
+				proxy.URL,
+				tt.options...,
+			)
+
+			t.Run("ping", func(t *testing.T) {
+				t.Parallel()
+				num := int64(42)
+				request := connect.NewRequest(&pingv1.PingRequest{Number: num})
+				request.Header().Set(clientHeader, headerValue)
+				expect := &pingv1.PingResponse{Number: num}
+				response, err := client.Ping(context.Background(), request)
+				assert.Nil(t, err)
+				assert.Equal(t, response.Msg, expect)
+				assert.Equal(t, response.Header().Values(handlerHeader), []string{headerValue})
+				assert.Equal(t, response.Trailer().Values(handlerTrailer), []string{trailerValue})
+			})
+			t.Run("sum", func(t *testing.T) {
+				const (
+					upTo   = 10
+					expect = 55 // 1+10 + 2+9 + ... + 5+6 = 55
+				)
+				stream := client.Sum(context.Background())
+				stream.RequestHeader().Set(clientHeader, headerValue)
+				for i := int64(1); i <= upTo; i++ {
+					err := stream.Send(&pingv1.SumRequest{Number: i})
+					assert.Nil(t, err, assert.Sprintf("send %d", i))
+				}
+				response, err := stream.CloseAndReceive()
+				assert.Nil(t, err)
+				assert.Equal(t, response.Msg.Sum, expect)
+				assert.Equal(t, response.Header().Values(handlerHeader), []string{headerValue})
+				assert.Equal(t, response.Trailer().Values(handlerTrailer), []string{trailerValue})
+			})
+		})
+	}
 }
 
 func TestCompressMinBytesClient(t *testing.T) {
