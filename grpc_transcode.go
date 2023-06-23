@@ -24,6 +24,7 @@ import (
 	"math"
 	"net/http"
 	"net/textproto"
+	"strconv"
 	"strings"
 )
 
@@ -217,9 +218,8 @@ func (r *bufferedEnvelopeReader) fillBuffer() error {
 	size := uint32(len(body))
 
 	var head [5]byte
-	head[0] = 0 // uncompressed
 	if r.compressed {
-		head[0] = 1 // compressed
+		head[0] &= 1
 	}
 	binary.BigEndian.PutUint32(head[1:], size)
 	r.buf.Write(head[:])
@@ -369,9 +369,6 @@ type connectResponseWriter struct {
 	body        bytes.Buffer // buffered body for unary payloads
 	header      http.Header  // buffered header for trailer capture
 	wroteHeader bool         // whether header has been written
-	head        [5]byte      // unary envelope head
-	headIndex   int          // number of bytes written to head
-	isFinalized bool         // finalized called
 }
 
 func newConnectResponseWriter(responseWriter http.ResponseWriter, typ, enc string, config *adapterConfig) *connectResponseWriter {
@@ -395,11 +392,7 @@ func (w *connectResponseWriter) isStreaming() bool {
 	return w.typ == connectStreamingContentTypeDefault
 }
 
-func (w *connectResponseWriter) writeHeader() {
-	if w.wroteHeader {
-		return
-	}
-
+func (w *connectResponseWriter) writeHeader(statusCode int) {
 	// Encode header response.
 	header := w.ResponseWriter.Header()
 	compression := getHeaderCanonical(w.header, grpcHeaderCompression)
@@ -425,49 +418,32 @@ func (w *connectResponseWriter) writeHeader() {
 		}
 		header[key] = values
 	}
+	if statusCode != http.StatusOK {
+		w.ResponseWriter.WriteHeader(statusCode)
+	}
 	w.wroteHeader = true
 }
 
 func (w *connectResponseWriter) WriteHeader(statusCode int) {
-	if w.isStreaming() {
-		w.writeHeader()
-		w.ResponseWriter.WriteHeader(statusCode)
+	if statusCode != http.StatusOK || w.isStreaming() {
+		if !w.wroteHeader {
+			w.writeHeader(statusCode)
+		}
 	}
-}
-
-func (w *connectResponseWriter) gotHead() bool {
-	return w.headIndex >= 5
-}
-func (w *connectResponseWriter) payloadSize() int {
-	return int(binary.BigEndian.Uint32(w.head[1:]))
-}
-
-// writeBuffered writes data to the buffered body. If the header has not been
-// written yet, it will write to the header buffer.
-func (w *connectResponseWriter) writeBuffered(data []byte) (int, error) {
-	if w.gotHead() {
-		return w.body.Write(data)
-	}
-	headSize := 5 - w.headIndex
-
-	size := len(data)
-	if size < headSize {
-		headSize = size
-	}
-	copy(w.head[w.headIndex:], data[:headSize])
-	w.headIndex += headSize
-	data = data[headSize:]
-	return w.body.Write(data)
 }
 
 func (w *connectResponseWriter) Write(data []byte) (int, error) {
 	if w.isStreaming() {
-		w.writeHeader()
+		if !w.wroteHeader {
+			w.writeHeader(http.StatusOK)
+		}
 		return w.ResponseWriter.Write(data)
 	}
 
-	wroteN, err := w.writeBuffered(data)
-	total := w.body.Len() + w.headIndex
+	// Write unary requests to buffered body to capture trailers and
+	// allow recoding them as headers.
+	wroteN, err := w.body.Write(data)
+	total := w.body.Len()
 	limit := w.config.SendMaxBytes
 	if limit > 0 && total > limit {
 		return 0, NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", total, limit))
@@ -476,7 +452,9 @@ func (w *connectResponseWriter) Write(data []byte) (int, error) {
 }
 
 func (w *connectResponseWriter) getTrailer() (http.Header, error) {
-	w.writeHeader()
+	if !w.wroteHeader {
+		w.writeHeader(http.StatusOK)
+	}
 
 	header := w.Header()
 	isTrailer := map[string]bool{
@@ -534,6 +512,11 @@ func (w *connectResponseWriter) finalizeUnary() error {
 		key = connectUnaryTrailerPrefix + key
 		responseHeader[key] = vals
 	}
+
+	_ = w.body.Next(5) // Discard envelope head.
+	contentLength := strconv.Itoa(w.body.Len())
+	setHeaderCanonical(responseHeader, headerContentLength, contentLength)
+
 	// Write buffered unary body to stream.
 	if _, err := w.body.WriteTo(w.ResponseWriter); err != nil {
 		return err
@@ -568,10 +551,6 @@ func (w *connectResponseWriter) finalizeStream() error {
 }
 
 func (w *connectResponseWriter) flushWithTrailers() {
-	if w.isFinalized {
-		return
-	}
-
 	if w.isStreaming() {
 		if err := w.finalizeStream(); err != nil {
 			responseHeader := w.ResponseWriter.Header()
@@ -581,18 +560,20 @@ func (w *connectResponseWriter) flushWithTrailers() {
 	} else {
 		if err := w.finalizeUnary(); err != nil {
 			responseHeader := w.ResponseWriter.Header()
+			delHeaderCanonical(responseHeader, headerContentLength)
 			delHeaderCanonical(responseHeader, connectUnaryHeaderCompression)
 			setHeaderCanonical(responseHeader, headerContentType, connectUnaryContentTypeJSON)
 			_ = w.config.ErrorWriter.writeConnectUnary(w.ResponseWriter, err)
 		}
 	}
 	flushResponseWriter(w.ResponseWriter)
-	w.isFinalized = true
 }
 
 func (w *connectResponseWriter) Flush() {
-	w.writeHeader()
 	if w.isStreaming() {
+		if !w.wroteHeader {
+			w.writeHeader(http.StatusOK)
+		}
 		flushResponseWriter(w.ResponseWriter)
 		return
 	}

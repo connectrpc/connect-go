@@ -872,7 +872,6 @@ func TestGRPCAdapterHeaders(t *testing.T) {
 }
 
 func TestGRPCAdapterProxy(t *testing.T) {
-	t.Skip("TODO: fix connect adapter proxy")
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
@@ -890,13 +889,10 @@ func TestGRPCAdapterProxy(t *testing.T) {
 
 	proxy := httptest.NewUnstartedServer(
 		connect.NewGRPCAdapter(proxyReverseProxy),
-		//proxyReverseProxy,
 	)
 	proxy.EnableHTTP2 = true
 	proxy.StartTLS()
 	t.Cleanup(proxy.Close)
-
-	c := proxy.Client()
 
 	for _, tt := range []struct {
 		name    string
@@ -919,7 +915,7 @@ func TestGRPCAdapterProxy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			client := pingv1connect.NewPingServiceClient(
-				c,
+				proxy.Client(),
 				proxy.URL,
 				tt.options...,
 			)
