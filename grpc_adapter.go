@@ -28,24 +28,51 @@ import (
 	"strings"
 )
 
-type adapterConfig struct {
-	Codec        Codec
-	BufferPool   *bufferPool
-	ReadMaxBytes int
-	SendMaxBytes int
-	ErrorWriter  *ErrorWriter
+type grpcAdapterConfig struct {
+	Codec         Codec
+	BufferPool    *bufferPool
+	ReadMaxBytes  int
+	WriteMaxBytes int
+	ErrorWriter   *ErrorWriter
 }
 
-func newAdapterConfig(options []AdapterOption) *adapterConfig {
-	config := &adapterConfig{
+func newGRPCAdapterConfig(options []GRPCAdapterOption) *grpcAdapterConfig {
+	config := &grpcAdapterConfig{
 		Codec:       &protoBinaryCodec{},
 		BufferPool:  newBufferPool(),
 		ErrorWriter: NewErrorWriter(),
 	}
 	for _, option := range options {
-		option.applyToAdapter(config)
+		option.applyToGRPCAdapter(config)
 	}
 	return config
+}
+
+// A GRRPCAdapterOption configures [NewGRPCAdapter].
+type GRPCAdapterOption interface {
+	applyToGRPCAdapter(*grpcAdapterConfig)
+}
+
+type grpcAdapterOptionFunc func(*grpcAdapterConfig)
+
+func (f grpcAdapterOptionFunc) applyToGRPCAdapter(config *grpcAdapterConfig) {
+	f(config)
+}
+
+// WithGRPCAdapterReadMaxBuffer returns a new AdapterOption that sets the
+// maximum number of bytes that can be buffered for a connect unary request.
+func WithGRPCAdapterReadMaxBuffer(readMaxBytes int) GRPCAdapterOption {
+	return grpcAdapterOptionFunc(func(config *grpcAdapterConfig) {
+		config.ReadMaxBytes = readMaxBytes
+	})
+}
+
+// WithGRPCAdapterWriteMaxBuffer returns a new GRPCAdapterOption that sets the
+// maximum number of bytes that can be buffered for a connect unary response.
+func WithGRPCAdapterWriteMaxBuffer(writeMaxBytes int) GRPCAdapterOption {
+	return grpcAdapterOptionFunc(func(config *grpcAdapterConfig) {
+		config.WriteMaxBytes = writeMaxBytes
+	})
 }
 
 // ensureTeTrailers ensures that the "Te" header contains "trailers".
@@ -190,7 +217,7 @@ func (w *grpcWebResponseWriter) writeTrailer() error {
 type bufferedEnvelopeReader struct {
 	io.ReadCloser
 
-	config     *adapterConfig
+	config     *grpcAdapterConfig
 	buf        bytes.Buffer
 	buffered   bool
 	compressed bool
@@ -219,7 +246,7 @@ func (r *bufferedEnvelopeReader) fillBuffer() error {
 
 	var head [5]byte
 	if r.compressed {
-		head[0] &= 1
+		head[0] = 1
 	}
 	binary.BigEndian.PutUint32(head[1:], size)
 	r.buf.Write(head[:])
@@ -265,7 +292,7 @@ func readAll(data []byte, reader io.Reader, limit int64) ([]byte, error) {
 	}
 }
 
-func translateConnectToGRPC(request *http.Request, typ, enc string, config *adapterConfig) {
+func translateConnectToGRPC(request *http.Request, typ, enc string, config *grpcAdapterConfig) {
 	request.ProtoMajor = 2
 	request.ProtoMinor = 0
 	header := request.Header
@@ -364,14 +391,14 @@ func isProtocolHeader(header string) bool {
 type connectResponseWriter struct {
 	http.ResponseWriter
 	typ, enc string
-	config   *adapterConfig
+	config   *grpcAdapterConfig
 
 	body        bytes.Buffer // buffered body for unary payloads
 	header      http.Header  // buffered header for trailer capture
 	wroteHeader bool         // whether header has been written
 }
 
-func newConnectResponseWriter(responseWriter http.ResponseWriter, typ, enc string, config *adapterConfig) *connectResponseWriter {
+func newConnectResponseWriter(responseWriter http.ResponseWriter, typ, enc string, config *grpcAdapterConfig) *connectResponseWriter {
 	return &connectResponseWriter{
 		ResponseWriter: responseWriter,
 		typ:            typ,
@@ -444,7 +471,7 @@ func (w *connectResponseWriter) Write(data []byte) (int, error) {
 	// allow recoding them as headers.
 	wroteN, err := w.body.Write(data)
 	total := w.body.Len()
-	limit := w.config.SendMaxBytes
+	limit := w.config.WriteMaxBytes
 	if limit > 0 && total > limit {
 		return 0, NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", total, limit))
 	}
@@ -585,19 +612,19 @@ func (w *connectResponseWriter) Flush() {
 // The adapter supports unary and streaming requests and responses but does not
 // validate the transport can support bidi streaming. Connect unary requests and
 // responses are buffered in memory and subject to the configured limits.
-// Connect streaming requests and responses are not buffered and defer to
-// the handlers limits.
+// Other protocols and connect streaming are not buffered and defer to the
+// handlers limits.
 //
 // To use the adapter, pass it an http.Handler that serves gRPC requests such as:
 //
 //	grpcServer := grpc.NewServer()
 //	mux := connect.NewGRPCAdapter(grpcServer,
-//		connect.WithReadMaxBytes(1024),
-//		connect.WithWriteMaxBytes(1024),
+//		connect.WithGRPCAdapterReadMaxBuffer(1024*1024),
+//		connect.WithGRPCAdapterWriteMaxBuffer(1024*1024),
 //	)
 //	http.ListenAndServe(":8080", h2c.NewHandler(mux, &http2.Server{}))
-func NewGRPCAdapter(grpcHandler http.Handler, options ...AdapterOption) http.Handler {
-	config := newAdapterConfig(options)
+func NewGRPCAdapter(grpcHandler http.Handler, options ...GRPCAdapterOption) http.Handler {
+	config := newGRPCAdapterConfig(options)
 
 	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
 		method := request.Method

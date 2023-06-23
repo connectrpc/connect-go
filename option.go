@@ -173,18 +173,6 @@ type Option interface {
 	HandlerOption
 }
 
-// AdapterOption configures middleware.
-type AdapterOption interface {
-	applyToAdapter(*adapterConfig)
-}
-
-// AnyOption implements [ClientOption], [HandlerOption] and [AdapterOption],
-// so it can be applied both client-side and server-side or as an adapter.
-type AnyOption interface {
-	Option
-	AdapterOption
-}
-
 // WithCodec registers a serialization method with a client or handler.
 // Handlers may have multiple codecs registered, and use whichever the client
 // chooses. Clients may only have a single codec.
@@ -227,7 +215,7 @@ func WithCompressMinBytes(min int) Option {
 // HTTP request stream (rather than the per-message size). Connect handles
 // [http.MaxBytesError] specially, so clients still receive errors with the
 // appropriate error code and informative messages.
-func WithReadMaxBytes(max int) AnyOption {
+func WithReadMaxBytes(max int) Option {
 	return &readMaxBytesOption{Max: max}
 }
 
@@ -239,7 +227,7 @@ func WithReadMaxBytes(max int) AnyOption {
 //
 // Setting WithSendMaxBytes to zero allows any message size. Both clients and
 // handlers default to allowing any message size.
-func WithSendMaxBytes(max int) AnyOption {
+func WithSendMaxBytes(max int) Option {
 	return &sendMaxBytesOption{Max: max}
 }
 
@@ -414,10 +402,6 @@ func (o *readMaxBytesOption) applyToHandler(config *handlerConfig) {
 	config.ReadMaxBytes = o.Max
 }
 
-func (o *readMaxBytesOption) applyToAdapter(config *adapterConfig) {
-	config.ReadMaxBytes = o.Max
-}
-
 type sendMaxBytesOption struct {
 	Max int
 }
@@ -427,10 +411,6 @@ func (o *sendMaxBytesOption) applyToClient(config *clientConfig) {
 }
 
 func (o *sendMaxBytesOption) applyToHandler(config *handlerConfig) {
-	config.SendMaxBytes = o.Max
-}
-
-func (o *sendMaxBytesOption) applyToAdapter(config *adapterConfig) {
 	config.SendMaxBytes = o.Max
 }
 

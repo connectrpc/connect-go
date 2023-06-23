@@ -442,7 +442,7 @@ func TestServer(t *testing.T) {
 		defer server.Close()
 		testMatrix(t, server, true /* bidi */)
 	})
-	t.Run("grpc_transcode", func(t *testing.T) {
+	t.Run("grpc_adapter", func(t *testing.T) {
 		t.Parallel()
 
 		gRPCOnlyMux := http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
@@ -629,7 +629,7 @@ func TestTimeoutParsing(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	t.Run("grpc_transcode", func(t *testing.T) {
+	t.Run("grpc_adapter", func(t *testing.T) {
 		t.Parallel()
 		mux := connect.NewGRPCAdapter(mux)
 		server := httptest.NewUnstartedServer(mux)
@@ -894,7 +894,7 @@ func TestGRPCAdapterProxy(t *testing.T) {
 	proxy.StartTLS()
 	t.Cleanup(proxy.Close)
 
-	for _, tt := range []struct {
+	for _, testcase := range []struct {
 		name    string
 		options []connect.ClientOption
 	}{{
@@ -911,13 +911,13 @@ func TestGRPCAdapterProxy(t *testing.T) {
 		name:    "connect",
 		options: []connect.ClientOption{},
 	}} {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
+		testcase := testcase
+		t.Run(testcase.name, func(t *testing.T) {
 			t.Parallel()
 			client := pingv1connect.NewPingServiceClient(
 				proxy.Client(),
 				proxy.URL,
-				tt.options...,
+				testcase.options...,
 			)
 
 			t.Run("ping", func(t *testing.T) {
@@ -1296,13 +1296,13 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPCWeb(), connect.WithSendGzip())
 		readMaxBytesMatrix(t, client, true)
 	})
-	t.Run("grpc_transcode", func(t *testing.T) {
+	t.Run("grpc_adapter", func(t *testing.T) {
 		t.Parallel()
 		mux := http.NewServeMux()
 		// Unrestricted mux.
 		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
 		// Restricted GRPC handler.
-		grpcMux := connect.NewGRPCAdapter(mux, connect.WithReadMaxBytes(readMaxBytes))
+		grpcMux := connect.NewGRPCAdapter(mux, connect.WithGRPCAdapterReadMaxBuffer(readMaxBytes))
 		server := newHTTP2Server(t, grpcMux)
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
 		readMaxBytesMatrix(t, client, false)
@@ -1600,7 +1600,7 @@ func TestHandlerWithSendMaxBytes(t *testing.T) {
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithGRPCWeb())
 		sendMaxBytesMatrix(t, client, true)
 	})
-	t.Run("grpc_transcode", func(t *testing.T) {
+	t.Run("grpc_adapter", func(t *testing.T) {
 		t.Parallel()
 		mux := http.NewServeMux()
 		mux.Handle(pingv1connect.NewPingServiceHandler(
