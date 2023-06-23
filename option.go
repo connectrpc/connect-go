@@ -456,7 +456,7 @@ func (o *enableGet) applyToClient(config *clientConfig) {
 	config.EnableGet = true
 }
 
-// withHTTPGetMaxURLSize sets the maximum allowable URL length for GET requests
+// WithHTTPGetMaxURLSize sets the maximum allowable URL length for GET requests
 // made using the Connect protocol. It has no effect on gRPC or gRPC-Web
 // clients, since those protocols are POST-only.
 //
@@ -474,7 +474,7 @@ func (o *enableGet) applyToClient(config *clientConfig) {
 //
 // By default, Connect-protocol clients with GET requests enabled may send a
 // URL of any size.
-func withHTTPGetMaxURLSize(bytes int, fallback bool) ClientOption {
+func WithHTTPGetMaxURLSize(bytes int, fallback bool) ClientOption {
 	return &getURLMaxBytes{Max: bytes, Fallback: fallback}
 }
 
