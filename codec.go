@@ -152,8 +152,7 @@ func (c *protoJSONCodec) Marshal(message any) ([]byte, error) {
 	if !ok {
 		return nil, errNotProto(message)
 	}
-	var options protojson.MarshalOptions
-	return options.Marshal(protoMessage)
+	return protojson.MarshalOptions{}.Marshal(protoMessage)
 }
 
 func (c *protoJSONCodec) MarshalAppend(dst []byte, message any) ([]byte, error) {
@@ -161,8 +160,7 @@ func (c *protoJSONCodec) MarshalAppend(dst []byte, message any) ([]byte, error) 
 	if !ok {
 		return nil, errNotProto(message)
 	}
-	var options protojson.MarshalOptions
-	return options.MarshalAppend(dst, protoMessage)
+	return protojson.MarshalOptions{}.MarshalAppend(dst, protoMessage)
 }
 
 func (c *protoJSONCodec) Unmarshal(binary []byte, message any) error {
