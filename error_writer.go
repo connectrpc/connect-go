@@ -145,7 +145,7 @@ func (w *ErrorWriter) writeConnectStreaming(response http.ResponseWriter, err er
 
 func (w *ErrorWriter) writeGRPC(response http.ResponseWriter, err error) error {
 	trailers := make(http.Header, 2) // need space for at least code & message
-	grpcErrorToTrailer(w.bufferPool, trailers, w.protobuf, err)
+	grpcErrorToTrailer(trailers, w.protobuf, err)
 	// To make net/http reliably send trailers without a body, we must set the
 	// Trailers header rather than using http.TrailerPrefix. See
 	// https://github.com/golang/go/issues/54723.
@@ -162,7 +162,7 @@ func (w *ErrorWriter) writeGRPC(response http.ResponseWriter, err error) error {
 func (w *ErrorWriter) writeGRPCWeb(response http.ResponseWriter, err error) error {
 	// This is a trailers-only response. To match the behavior of Envoy and
 	// protocol_grpc.go, put the trailers in the HTTP headers.
-	grpcErrorToTrailer(w.bufferPool, response.Header(), w.protobuf, err)
+	grpcErrorToTrailer(response.Header(), w.protobuf, err)
 	response.WriteHeader(http.StatusOK)
 	return nil
 }

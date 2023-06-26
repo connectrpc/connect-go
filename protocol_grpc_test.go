@@ -144,13 +144,12 @@ func TestGRPCEncodeTimeoutQuick(t *testing.T) {
 
 func TestGRPCPercentEncodingQuick(t *testing.T) {
 	t.Parallel()
-	pool := newBufferPool()
 	roundtrip := func(input string) bool {
 		if !utf8.ValidString(input) {
 			return true
 		}
-		encoded := grpcPercentEncode(pool, input)
-		decoded := grpcPercentDecode(pool, encoded)
+		encoded := grpcPercentEncode(input)
+		decoded := grpcPercentDecode(encoded)
 		return decoded == input
 	}
 	if err := quick.Check(roundtrip, nil /* config */); err != nil {
@@ -160,12 +159,11 @@ func TestGRPCPercentEncodingQuick(t *testing.T) {
 
 func TestGRPCPercentEncoding(t *testing.T) {
 	t.Parallel()
-	pool := newBufferPool()
 	roundtrip := func(input string) {
 		assert.True(t, utf8.ValidString(input), assert.Sprintf("input invalid UTF-8"))
-		encoded := grpcPercentEncode(pool, input)
+		encoded := grpcPercentEncode(input)
 		t.Logf("%q encoded as %q", input, encoded)
-		decoded := grpcPercentDecode(pool, encoded)
+		decoded := grpcPercentDecode(encoded)
 		assert.Equal(t, decoded, input)
 	}
 
@@ -193,4 +191,28 @@ func TestGRPCWebTrailerMarshalling(t *testing.T) {
 	responseWriter.Body.Next(5) // skip flags and message length
 	marshalled := responseWriter.Body.String()
 	assert.Equal(t, marshalled, "grpc-message: Foo\r\ngrpc-status: 0\r\nuser-provided: bar\r\n")
+}
+
+func BenchmarkGRPCPercentEncoding(b *testing.B) {
+	input := "Hello, 世界"
+	want := "Hello, %E4%B8%96%E7%95%8C"
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		got := grpcPercentEncode(input)
+		if got != want {
+			b.Fatalf("encodeGrpcMessage(%q) = %s, want %s", input, got, want)
+		}
+	}
+}
+
+func BenchmarkGRPCPercentDecoding(b *testing.B) {
+	input := "Hello, %E4%B8%96%E7%95%8C"
+	want := "Hello, 世界"
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		got := grpcPercentDecode(input)
+		if got != want {
+			b.Fatalf("decodeGrpcMessage(%q) = %s, want %s", input, got, want)
+		}
+	}
 }
