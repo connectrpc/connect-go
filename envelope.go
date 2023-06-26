@@ -69,7 +69,6 @@ func (w *envelopeWriter) Marshal(message any) *Error {
 	}
 
 	buffer := w.bufferPool.Get()
-	defer w.bufferPool.Put(buffer)
 
 	// Reuse byte buffer if codec supports MarshalAppend.
 	var (
@@ -85,6 +84,10 @@ func (w *envelopeWriter) Marshal(message any) *Error {
 		// We've either grown the buffer or allocated an entirely new one. Before
 		// we return, capture the new backing array in the buffer pool.
 		defer w.bufferPool.Put(bytes.NewBuffer(raw))
+	} else {
+		// The original buffer was sufficiently large for the workload, so we can
+		// return it to the pool.
+		defer w.bufferPool.Put(buffer)
 	}
 	if err != nil {
 		return errorf(CodeInternal, "marshal message: %w", err)
