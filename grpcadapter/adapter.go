@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package connect
+package grpcadapter
 
 import (
 	"bytes"
@@ -24,10 +24,45 @@ import (
 	"net/textproto"
 	"strconv"
 	"strings"
+
+	connect "github.com/bufbuild/connect-go"
 )
 
-// NewGRPCAdapter returns a new http.Handler that transcodes connect and
-// gRPC-Web requests to gRPC.
+const (
+	headerContentLength                     = "Content-Length"
+	headerContentType                       = "Content-Type"
+	headerTe                                = "Te"
+	headerTrailer                           = "Trailer"
+	connectUnaryHeaderCompression           = "Content-Encoding"
+	connectUnaryHeaderAcceptCompression     = "Accept-Encoding"
+	connectUnaryTrailerPrefix               = "Trailer-"
+	connectStreamingHeaderCompression       = "Connect-Content-Encoding"
+	connectStreamingHeaderAcceptCompression = "Connect-Accept-Encoding"
+	connectHeaderTimeout                    = "Connect-Timeout-Ms"
+	connectHeaderProtocolVersion            = "Connect-Protocol-Version"
+	connectUnaryEncodingQueryParameter      = "encoding"
+	connectUnaryMessageQueryParameter       = "message"
+	connectUnaryBase64QueryParameter        = "base64"
+	connectUnaryCompressionQueryParameter   = "compression"
+	connectUnaryConnectQueryParameter       = "connect"
+	headerVary                              = "Vary"
+	connectUnaryContentTypePrefix           = "application/"
+	connectStreamingContentTypeDefault      = "application/connect"
+	connectStreamingContentTypePrefix       = "application/connect+"
+	grpcHeaderCompression                   = "Grpc-Encoding"
+	grpcHeaderAcceptCompression             = "Grpc-Accept-Encoding"
+	grpcHeaderTimeout                       = "Grpc-Timeout"
+	grpcHeaderStatus                        = "Grpc-Status"
+	grpcHeaderMessage                       = "Grpc-Message"
+	grpcHeaderDetails                       = "Grpc-Status-Details-Bin"
+	grpcContentTypeDefault                  = "application/grpc"
+	grpcWebContentTypeDefault               = "application/grpc-web"
+	grpcContentTypePrefix                   = grpcContentTypeDefault + "+"
+	grpcWebContentTypePrefix                = grpcWebContentTypeDefault + "+"
+)
+
+// NewHandler returns a new http.Handler that transcodes connect and gRPC-Web
+// protocol requests to gRPC.
 //
 // The adapter supports unary and streaming requests and responses but does not
 // validate the transport can support bidi streaming. Connect unary requests and
@@ -35,21 +70,21 @@ import (
 // Other protocols and connect streaming are not buffered and defer to the
 // handlers limits.
 //
-// To use the adapter, pass it an http.Handler that serves gRPC requests such as:
+// To use the adapter, pass in a http.Handler that serves gRPC requests such as:
 //
 //	grpcServer := grpc.NewServer()
-//	mux := connect.NewGRPCAdapter(grpcServer,
-//		connect.WithGRPCAdapterReadMaxBuffer(1024*1024),
-//		connect.WithGRPCAdapterWriteMaxBuffer(1024*1024),
+//	mux := grpcadapter.NewHandler(grpcServer,
+//		grpcadapter.WithReadMaxBuffer(1024*1024),
+//		grpcadapter.WithWriteMaxBuffer(1024*1024),
 //	)
 //	http.ListenAndServe(":8080", h2c.NewHandler(mux, &http2.Server{}))
-func NewGRPCAdapter(grpcHandler http.Handler, options ...GRPCAdapterOption) http.Handler {
-	config := newGRPCAdapterConfig(options)
+func NewHandler(grpcHandler http.Handler, options ...Option) http.Handler {
+	config := newConfig(options)
 
 	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
 		method := request.Method
 		header := request.Header
-		contentType := canonicalizeContentType(getHeaderCanonical(header, headerContentType))
+		contentType := getHeaderCanonical(header, headerContentType)
 
 		if _, ok := responseWriter.(http.Flusher); !ok {
 			msg := "gRPC requires a ResponseWriter supporting http.Flusher"
@@ -72,13 +107,13 @@ func NewGRPCAdapter(grpcHandler http.Handler, options ...GRPCAdapterOption) http
 			translateConnectStreamingToGRPC(request, contentType)
 			ww := newConnectStreamingResponseWriter(responseWriter, contentType, config)
 			grpcHandler.ServeHTTP(ww, request)
-			ww.flushWithTrailers()
+			ww.flushWithTrailers(contentType)
 		case isConnectUnaryContentType(method, contentType):
 			// connect unary -> grpc
 			translateConnectUnaryToGRPC(request, contentType, config.ReadMaxBytes)
 			ww := newConnectUnaryResponseWriter(responseWriter, contentType, config)
 			grpcHandler.ServeHTTP(ww, request)
-			ww.flushWithTrailers()
+			ww.flushWithTrailers(contentType)
 		default:
 			// unknown -> grpc
 			grpcHandler.ServeHTTP(responseWriter, request)
@@ -86,47 +121,45 @@ func NewGRPCAdapter(grpcHandler http.Handler, options ...GRPCAdapterOption) http
 	})
 }
 
-// A GRRPCAdapterOption configures [NewGRPCAdapter].
-type GRPCAdapterOption interface {
-	applyToGRPCAdapter(*grpcAdapterConfig)
+// An Option configures [NewHandler].
+type Option interface {
+	applyToConfig(*config)
 }
 
-type grpcAdapterOptionFunc func(*grpcAdapterConfig)
+type optionFunc func(*config)
 
-func (f grpcAdapterOptionFunc) applyToGRPCAdapter(config *grpcAdapterConfig) {
+func (f optionFunc) applyToConfig(config *config) {
 	f(config)
 }
 
-// WithGRPCAdapterReadMaxBuffer returns a new AdapterOption that sets the
-// maximum number of bytes that can be buffered for a connect unary request.
-func WithGRPCAdapterReadMaxBuffer(readMaxBytes int) GRPCAdapterOption {
-	return grpcAdapterOptionFunc(func(config *grpcAdapterConfig) {
+// WithReadMaxBuffer returns a new Option that sets the maximum number of
+// bytes that can be buffered for a connect unary request.
+func WithReadMaxBuffer(readMaxBytes int) Option {
+	return optionFunc(func(config *config) {
 		config.ReadMaxBytes = readMaxBytes
 	})
 }
 
-// WithGRPCAdapterWriteMaxBuffer returns a new GRPCAdapterOption that sets the
-// maximum number of bytes that can be buffered for a connect unary response.
-func WithGRPCAdapterWriteMaxBuffer(writeMaxBytes int) GRPCAdapterOption {
-	return grpcAdapterOptionFunc(func(config *grpcAdapterConfig) {
+// WithWriteMaxBuffer returns a new Option that sets the maximum
+// number of bytes that can be buffered for a connect unary response.
+func WithWriteMaxBuffer(writeMaxBytes int) Option {
+	return optionFunc(func(config *config) {
 		config.WriteMaxBytes = writeMaxBytes
 	})
 }
 
-type grpcAdapterConfig struct {
-	BufferPool    *bufferPool
+type config struct {
 	ReadMaxBytes  int
 	WriteMaxBytes int
-	ErrorWriter   *ErrorWriter
+	ErrorWriter   *connect.ErrorWriter
 }
 
-func newGRPCAdapterConfig(options []GRPCAdapterOption) *grpcAdapterConfig {
-	config := &grpcAdapterConfig{
-		BufferPool:  newBufferPool(),
-		ErrorWriter: NewErrorWriter(),
+func newConfig(options []Option) *config {
+	config := &config{
+		ErrorWriter: connect.NewErrorWriter(),
 	}
 	for _, option := range options {
-		option.applyToGRPCAdapter(config)
+		option.applyToConfig(config)
 	}
 	return config
 }
@@ -156,7 +189,7 @@ func isConnectUnaryContentType(method, contentType string) bool {
 
 // ensureTeTrailers ensures that the "Te" header contains "trailers".
 func ensureTeTrailers(header http.Header) {
-	teValues := header["Te"]
+	teValues := header[headerTe]
 	for _, val := range teValues {
 		valElements := strings.Split(val, ",")
 		for _, element := range valElements {
@@ -169,7 +202,7 @@ func ensureTeTrailers(header http.Header) {
 			}
 		}
 	}
-	header["Te"] = append(teValues, "trailers")
+	header[headerTe] = append(teValues, "trailers")
 }
 
 func getTypeEncoding(contentType string) string {
@@ -185,9 +218,9 @@ func translateGRPCWebToGRPC(request *http.Request, contentType string) {
 	header := request.Header
 	ensureTeTrailers(header)
 
-	delHeaderCanonical(header, headerContentLength)
+	delete(header, headerContentLength)
 	grpcContentType := grpcContentTypePrefix + getTypeEncoding(contentType)
-	setHeaderCanonical(header, headerContentType, grpcContentType)
+	header[headerContentType] = []string{grpcContentType}
 }
 
 type grpcWebResponseWriter struct {
@@ -236,7 +269,7 @@ func (w *grpcWebResponseWriter) writeHeaders() {
 		keys[key] = true
 	}
 
-	setHeaderCanonical(header, headerContentType, w.contentType)
+	header[headerContentType] = []string{w.contentType}
 
 	w.seenHeaders = keys
 	w.wroteHeader = true
@@ -320,20 +353,23 @@ func (r *bufferedEnvelopeReader) fillBuffer() error {
 	}
 	body, err := io.ReadAll(bodyReader)
 	if err != nil {
-		return errorf(CodeUnknown, "read message: %w", err)
+		err := fmt.Errorf("read message: %w", err)
+		return connect.NewError(connect.CodeUnknown, err)
 	}
 	// Check if read more than max bytes, try to determine the size of the message.
 	if r.maxBytes > 0 && len(body) > r.maxBytes {
 		bytesRead := int64(len(body))
 		discardedBytes, err := io.Copy(io.Discard, r.ReadCloser)
 		if err != nil {
-			return errorf(CodeResourceExhausted,
+			err := fmt.Errorf(
 				"message is larger than configured max %d - unable to determine message size: %w",
 				r.maxBytes, err)
+			return connect.NewError(connect.CodeResourceExhausted, err)
 		}
-		return errorf(CodeResourceExhausted,
+		err = fmt.Errorf(
 			"message size %d is larger than configured max %d",
 			bytesRead+discardedBytes, r.maxBytes)
+		return connect.NewError(connect.CodeResourceExhausted, err)
 	}
 
 	size := uint32(len(body))
@@ -364,13 +400,13 @@ func translateConnectCommonToGRPC(request *http.Request) {
 	header := request.Header
 	ensureTeTrailers(header)
 
-	delHeaderCanonical(header, connectHeaderProtocolVersion)
-	delHeaderCanonical(header, headerContentLength)
+	delete(header, connectHeaderProtocolVersion)
+	delete(header, headerContentLength)
 
 	// Translate timeout header
 	if timeout := getHeaderCanonical(header, connectHeaderTimeout); len(timeout) > 0 {
-		delHeaderCanonical(header, connectHeaderTimeout)
-		setHeaderCanonical(header, grpcHeaderTimeout, timeout+"m")
+		delete(header, connectHeaderTimeout)
+		header[grpcHeaderTimeout] = []string{timeout + "m"}
 	}
 }
 
@@ -454,12 +490,12 @@ func isProtocolHeader(header string) bool {
 type connectStreamingResponseWriter struct {
 	http.ResponseWriter
 	contentType string
-	config      *grpcAdapterConfig
+	config      *config
 	header      http.Header
 	wroteHeader bool
 }
 
-func newConnectStreamingResponseWriter(responseWriter http.ResponseWriter, contentType string, config *grpcAdapterConfig) *connectStreamingResponseWriter {
+func newConnectStreamingResponseWriter(responseWriter http.ResponseWriter, contentType string, config *config) *connectStreamingResponseWriter {
 	return &connectStreamingResponseWriter{
 		ResponseWriter: responseWriter,
 		contentType:    contentType,
@@ -512,37 +548,47 @@ func (w *connectStreamingResponseWriter) Write(data []byte) (int, error) {
 	return w.ResponseWriter.Write(data)
 }
 
-func (w *connectStreamingResponseWriter) finalizeStream() error {
-	trailer, trailerErr := getGRPCTrailer(w.config.BufferPool, w.Header())
+func (w *connectStreamingResponseWriter) finalizeStream() *connect.Error {
+	trailer, trailerErr := getGRPCTrailer(w.Header())
 	if trailerErr != nil {
-		trailerErr.meta = trailer
+		meta := trailerErr.Meta()
+		for key, vals := range trailer {
+			meta[key] = append(meta[key], vals...)
+		}
 		return trailerErr
 	}
 
 	// Encode as connect end message.
-	end := &connectEndStreamMessage{
-		Trailer: trailer,
+	end := &struct {
+		Metadata http.Header `json:"metadata,omitempty"`
+	}{
+		Metadata: trailer,
 	}
 	data, err := json.Marshal(end)
 	if err != nil {
-		return err
+		err := fmt.Errorf("failed to marshal connect end message: %w", err)
+		return connect.NewError(connect.CodeInternal, err)
 	}
 
-	head := [5]byte{connectFlagEnvelopeEndStream, 0, 0, 0, 0}
+	head := [5]byte{1 << 1, 0, 0, 0, 0} // 1 << 1 = 2 = end stream
 	binary.BigEndian.PutUint32(head[1:5], uint32(len(data)))
 	if _, err := w.ResponseWriter.Write(head[:]); err != nil {
-		return err
+		err := fmt.Errorf("failed to write head: %w", err)
+		return connect.NewError(connect.CodeInternal, err)
 	}
 	if _, err := w.ResponseWriter.Write(data); err != nil {
-		return err
+		err := fmt.Errorf("failed to write end response: %w", err)
+		return connect.NewError(connect.CodeInternal, err)
 	}
 	return nil
 }
-func (w *connectStreamingResponseWriter) flushWithTrailers() {
+func (w *connectStreamingResponseWriter) flushWithTrailers(contentType string) {
 	if err := w.finalizeStream(); err != nil {
 		responseHeader := w.ResponseWriter.Header()
 		setHeaderCanonical(responseHeader, headerContentType, "application/json")
-		_ = w.config.ErrorWriter.writeConnectStreaming(w.ResponseWriter, err)
+		// Stub request to satisfy error writer.
+		request := &http.Request{Header: map[string][]string{"Content-Type": {contentType}}}
+		_ = w.config.ErrorWriter.Write(w.ResponseWriter, request, err)
 	}
 	flushResponseWriter(w.ResponseWriter)
 }
@@ -561,14 +607,14 @@ func (w *connectStreamingResponseWriter) Unwrap() http.ResponseWriter {
 type connectUnaryResponseWriter struct {
 	http.ResponseWriter
 	contentType string
-	config      *grpcAdapterConfig
+	config      *config
 
 	body        bytes.Buffer // buffered body for unary payloads
 	header      http.Header  // buffered header for trailer capture
 	wroteHeader bool         // whether header has been written
 }
 
-func newConnectUnaryResponseWriter(responseWriter http.ResponseWriter, contentType string, config *grpcAdapterConfig) *connectUnaryResponseWriter {
+func newConnectUnaryResponseWriter(responseWriter http.ResponseWriter, contentType string, config *config) *connectUnaryResponseWriter {
 	return &connectUnaryResponseWriter{
 		ResponseWriter: responseWriter,
 		contentType:    contentType,
@@ -621,14 +667,15 @@ func (w *connectUnaryResponseWriter) Write(data []byte) (int, error) {
 	// allow recoding them as headers.
 	wroteN, err := w.body.Write(data)
 	total := w.body.Len()
-	limit := int(w.config.WriteMaxBytes)
+	limit := w.config.WriteMaxBytes
 	if limit > 0 && total > limit {
-		return 0, NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", total, limit))
+		err := fmt.Errorf("message size %d exceeds sendMaxBytes %d", total, limit)
+		return 0, connect.NewError(connect.CodeResourceExhausted, err)
 	}
 	return wroteN, err
 }
 
-func getGRPCTrailer(bufferPool *bufferPool, header http.Header) (http.Header, *Error) {
+func getGRPCTrailer(header http.Header) (http.Header, *connect.Error) {
 	isTrailer := map[string]bool{
 		// Force GRPC status values, try copy them directly from header.
 		grpcHeaderStatus:  true,
@@ -651,7 +698,7 @@ func getGRPCTrailer(bufferPool *bufferPool, header http.Header) (http.Header, *E
 		}
 	}
 
-	trailerErr := grpcErrorFromTrailer(bufferPool, &protoBinaryCodec{}, trailer)
+	trailerErr := grpcErrorFromTrailer(trailer)
 	if trailerErr != nil {
 		return trailer, trailerErr
 	}
@@ -665,14 +712,14 @@ func getGRPCTrailer(bufferPool *bufferPool, header http.Header) (http.Header, *E
 	return trailer, nil
 }
 
-func (w *connectUnaryResponseWriter) finalizeUnary() error {
+func (w *connectUnaryResponseWriter) finalizeUnary() *connect.Error {
 	if !w.wroteHeader {
 		w.writeHeader(http.StatusOK)
 	}
 
-	trailer, err := getGRPCTrailer(w.config.BufferPool, w.header)
-	if err != nil {
-		return err
+	trailer, trailerErr := getGRPCTrailer(w.header)
+	if trailerErr != nil {
+		return trailerErr
 	}
 
 	// Encode trailers as header
@@ -691,18 +738,21 @@ func (w *connectUnaryResponseWriter) finalizeUnary() error {
 
 	// Write buffered unary body to stream.
 	if _, err := w.body.WriteTo(w.ResponseWriter); err != nil {
-		return err
+		err := fmt.Errorf("failed to write buffered body: %w", err)
+		return connect.NewError(connect.CodeInternal, err)
 	}
 	return nil
 }
 
-func (w *connectUnaryResponseWriter) flushWithTrailers() {
+func (w *connectUnaryResponseWriter) flushWithTrailers(contentType string) {
 	if err := w.finalizeUnary(); err != nil {
 		responseHeader := w.ResponseWriter.Header()
 		delHeaderCanonical(responseHeader, headerContentLength)
 		delHeaderCanonical(responseHeader, connectUnaryHeaderCompression)
-		setHeaderCanonical(responseHeader, headerContentType, connectUnaryContentTypeJSON)
-		_ = w.config.ErrorWriter.writeConnectUnary(w.ResponseWriter, err)
+		setHeaderCanonical(responseHeader, headerContentType, "application/json")
+		// Stub request to satisfy error writer.
+		request := &http.Request{Header: map[string][]string{"Content-Type": {contentType}}}
+		_ = w.config.ErrorWriter.Write(w.ResponseWriter, request, err)
 	}
 	flushResponseWriter(w.ResponseWriter)
 }
@@ -711,4 +761,10 @@ func (w *connectUnaryResponseWriter) Flush() {}
 
 func (w *connectUnaryResponseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
+}
+
+func flushResponseWriter(responseWriter http.ResponseWriter) {
+	if flusher, ok := responseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }

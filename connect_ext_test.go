@@ -35,6 +35,7 @@ import (
 	"time"
 
 	connect "github.com/bufbuild/connect-go"
+	"github.com/bufbuild/connect-go/grpcadapter"
 	"github.com/bufbuild/connect-go/internal/assert"
 	"github.com/bufbuild/connect-go/internal/gen/connect/import/v1/importv1connect"
 	pingv1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
@@ -98,10 +99,11 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, response.Trailer().Values(handlerTrailer), []string{trailerValue})
 		})
 		t.Run("ping_error", func(t *testing.T) {
-			_, err := client.Ping(
+			rsp, err := client.Ping(
 				context.Background(),
 				connect.NewRequest(&pingv1.PingRequest{}),
 			)
+			t.Log(rsp, err)
 			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
 		})
 		t.Run("ping_timeout", func(t *testing.T) {
@@ -455,7 +457,7 @@ func TestServer(t *testing.T) {
 
 			mux.ServeHTTP(responseWriter, request)
 		})
-		grpcMux := connect.NewGRPCAdapter(gRPCOnlyMux)
+		grpcMux := grpcadapter.NewHandler(gRPCOnlyMux)
 		server := httptest.NewUnstartedServer(grpcMux)
 		server.EnableHTTP2 = true
 		server.StartTLS()
@@ -631,7 +633,7 @@ func TestTimeoutParsing(t *testing.T) {
 
 	t.Run("grpc_adapter", func(t *testing.T) {
 		t.Parallel()
-		mux := connect.NewGRPCAdapter(mux)
+		mux := grpcadapter.NewHandler(mux)
 		server := httptest.NewUnstartedServer(mux)
 		server.EnableHTTP2 = true
 		server.StartTLS()
@@ -850,7 +852,7 @@ func TestGRPCAdapterHeaders(t *testing.T) {
 		header.Set("Trailer", "Grpc-Status Grpc-Message Grpc-Status-Details-Bin")
 		responseWriter.WriteHeader(http.StatusOK)
 	})
-	server := httptest.NewUnstartedServer(connect.NewGRPCAdapter(mux))
+	server := httptest.NewUnstartedServer(grpcadapter.NewHandler(mux))
 	server.EnableHTTP2 = true
 	server.StartTLS()
 	t.Cleanup(server.Close)
@@ -888,7 +890,7 @@ func TestGRPCAdapterProxy(t *testing.T) {
 	proxyReverseProxy.Transport = server.Client().Transport
 
 	proxy := httptest.NewUnstartedServer(
-		connect.NewGRPCAdapter(proxyReverseProxy),
+		grpcadapter.NewHandler(proxyReverseProxy),
 	)
 	proxy.EnableHTTP2 = true
 	proxy.StartTLS()
@@ -1302,7 +1304,7 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 		// Unrestricted mux.
 		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
 		// Restricted GRPC handler.
-		grpcMux := connect.NewGRPCAdapter(mux, connect.WithGRPCAdapterReadMaxBuffer(readMaxBytes))
+		grpcMux := grpcadapter.NewHandler(mux, grpcadapter.WithReadMaxBuffer(readMaxBytes))
 		server := newHTTP2Server(t, grpcMux)
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
 		readMaxBytesMatrix(t, client, false)

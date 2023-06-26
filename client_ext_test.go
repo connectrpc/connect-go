@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	connect "github.com/bufbuild/connect-go"
+	"github.com/bufbuild/connect-go/grpcadapter"
 	"github.com/bufbuild/connect-go/internal/assert"
 	pingv1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
 	"github.com/bufbuild/connect-go/internal/gen/connect/ping/v1/pingv1connect"
@@ -147,7 +148,7 @@ func TestClientPeer(t *testing.T) {
 	})
 	t.Run("grpc_adapter", func(t *testing.T) {
 		t.Parallel()
-		mux := connect.NewGRPCAdapter(mux)
+		mux := grpcadapter.NewHandler(mux)
 		run(t, mux, http.MethodGet,
 			connect.WithHTTPGet(),
 			connect.WithSendGzip(),
