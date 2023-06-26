@@ -80,6 +80,9 @@ func (w *envelopeWriter) Marshal(message any) *Error {
 		raw, err = c.MarshalAppend(buffer.Bytes(), message)
 	} else {
 		raw, err = w.codec.Marshal(message)
+		if len(raw) > 0 {
+			defer w.bufferPool.Put(bytes.NewBuffer(raw))
+		}
 	}
 	if err != nil {
 		return errorf(CodeInternal, "marshal message: %w", err)

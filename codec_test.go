@@ -60,6 +60,34 @@ func TestCodecRoundTrips(t *testing.T) {
 	}
 }
 
+func TestAppendCodec(t *testing.T) {
+	t.Parallel()
+	makeRoundtrip := func(codec marshalAppend) func(string, int64) bool {
+		var data []byte
+		return func(text string, number int64) bool {
+			got := pingv1.PingRequest{}
+			want := pingv1.PingRequest{Text: text, Number: number}
+			data = data[:0]
+			var err error
+			data, err = codec.MarshalAppend(data, &want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = codec.Unmarshal(data, &got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return proto.Equal(&got, &want)
+		}
+	}
+	if err := quick.Check(makeRoundtrip(&protoBinaryCodec{}), nil /* config */); err != nil {
+		t.Error(err)
+	}
+	if err := quick.Check(makeRoundtrip(&protoJSONCodec{}), nil /* config */); err != nil {
+		t.Error(err)
+	}
+}
+
 func TestStableCodec(t *testing.T) {
 	t.Parallel()
 	makeRoundtrip := func(codec stableCodec) func(map[string]string) bool {
