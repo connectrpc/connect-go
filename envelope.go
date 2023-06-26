@@ -171,14 +171,11 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 		// stream. Save the message for protocol-specific code to process and
 		// return a sentinel error. Since we've deferred functions to return env's
 		// underlying buffer to a pool, we need to keep a copy.
+		copiedData := make([]byte, data.Len())
+		copy(copiedData, data.Bytes())
 		r.last = envelope{
-			Data:  r.bufferPool.Get(),
+			Data:  bytes.NewBuffer(copiedData),
 			Flags: env.Flags,
-		}
-		// Don't return last to the pool! We're going to reference the data
-		// elsewhere.
-		if _, err := r.last.Data.ReadFrom(data); err != nil {
-			return errorf(CodeUnknown, "copy final envelope: %w", err)
 		}
 		return errSpecialEnvelope
 	}
