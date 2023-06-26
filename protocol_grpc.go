@@ -38,7 +38,10 @@ const (
 	grpcHeaderTimeout           = "Grpc-Timeout"
 	grpcHeaderStatus            = "Grpc-Status"
 	grpcHeaderMessage           = "Grpc-Message"
+	grpcHeaderMessageType       = "Grpc-Message-Type"
 	grpcHeaderDetails           = "Grpc-Status-Details-Bin"
+	grpcWebHeaderXGrpcWeb       = "X-Grpc-Web"
+	grpcWebHeaderXUserAgent     = "X-User-Agent"
 
 	grpcFlagEnvelopeTrailer = 0b10000000
 
