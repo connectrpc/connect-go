@@ -53,8 +53,8 @@ type Codec interface {
 	Unmarshal([]byte, any) error
 }
 
-// marshalAppend is an extension to Codec for appending to a byte slice.
-type marshalAppend interface {
+// marshalAppender is an extension to Codec for appending to a byte slice.
+type marshalAppender interface {
 	Codec
 
 	// MarshalAppend marshals the given message and appends it to the given

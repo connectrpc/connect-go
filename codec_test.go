@@ -62,7 +62,7 @@ func TestCodecRoundTrips(t *testing.T) {
 
 func TestAppendCodec(t *testing.T) {
 	t.Parallel()
-	makeRoundtrip := func(codec marshalAppend) func(string, int64) bool {
+	makeRoundtrip := func(codec marshalAppender) func(string, int64) bool {
 		var data []byte
 		return func(text string, number int64) bool {
 			got := pingv1.PingRequest{}

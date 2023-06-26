@@ -75,7 +75,7 @@ func (w *envelopeWriter) Marshal(message any) *Error {
 		raw []byte
 		err error
 	)
-	if c, ok := w.codec.(marshalAppend); ok {
+	if c, ok := w.codec.(marshalAppender); ok {
 		raw, err = c.MarshalAppend(buffer.Bytes(), message)
 	} else {
 		raw, err = w.codec.Marshal(message)
