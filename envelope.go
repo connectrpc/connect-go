@@ -246,6 +246,9 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 			// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.
 			return maxBytesErr
 		}
+		if err == nil {
+			err = io.ErrUnexpectedEOF
+		}
 		return errorf(
 			CodeInvalidArgument,
 			"protocol error: incomplete envelope: %w", err,

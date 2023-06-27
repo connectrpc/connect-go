@@ -27,6 +27,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"strings"
 	"sync"
 	"testing"
@@ -2081,17 +2082,49 @@ func TestHandlerReturnsNilResponse(t *testing.T) {
 
 func TestStreamUnexpectedEOF(t *testing.T) {
 	t.Parallel()
+	testcases := map[string]http.HandlerFunc{
+		"stream_unexpected_eof": func(responseWriter http.ResponseWriter, request *http.Request) {
+			_, _ = io.Copy(io.Discard, request.Body)
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/connect+json")
+			responseWriter.WriteHeader(http.StatusOK)
+			head := [5]byte{}
+			payload := []byte(`{"number": 42}`)
+			binary.BigEndian.PutUint32(head[1:], uint32(len(payload)))
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload)
+		},
+		"stream_partial_payload": func(responseWriter http.ResponseWriter, request *http.Request) {
+			_, _ = io.Copy(io.Discard, request.Body)
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/connect+json")
+			responseWriter.WriteHeader(http.StatusOK)
+			head := [5]byte{}
+			payload := []byte(`{"number": 42}`)
+			binary.BigEndian.PutUint32(head[1:], uint32(len(payload)))
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload[:len(payload)-1])
+		},
+		"stream_partial_frame": func(responseWriter http.ResponseWriter, request *http.Request) {
+			_, _ = io.Copy(io.Discard, request.Body)
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/connect+json")
+			responseWriter.WriteHeader(http.StatusOK)
+			head := [5]byte{}
+			payload := []byte(`{"number": 42}`)
+			binary.BigEndian.PutUint32(head[1:], uint32(len(payload)))
+			_, _ = responseWriter.Write(head[:4])
+		},
+	}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/connect.ping.v1.PingService/CountUp", func(responseWriter http.ResponseWriter, request *http.Request) {
-		io.Copy(io.Discard, request.Body) //nolint:errcheck
-		header := responseWriter.Header()
-		header["content-type"] = []string{"application/connect+json"}
-		responseWriter.WriteHeader(http.StatusOK)
-		head := [5]byte{0, 0, 0, 0, 0}
-		payload := []byte(`{"number": 42}`)
-		binary.BigEndian.PutUint32(head[1:], uint32(len(payload)))
-		responseWriter.Write(head[:]) //nolint:errcheck
-		responseWriter.Write(payload) //nolint:errcheck
+	mux.HandleFunc("/", func(responseWriter http.ResponseWriter, request *http.Request) {
+		testcase, ok := testcases[path.Base(request.Header.Get("Test-Case"))]
+		if !ok {
+			responseWriter.WriteHeader(http.StatusNotFound)
+			return
+		}
+		testcase(responseWriter, request)
 	})
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
@@ -2107,7 +2140,8 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		t.Parallel()
 		const upTo = 2
 		request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
-		request.Header().Set(clientHeader, headerValue)
+		request.Header().Set("Test-Case", t.Name())
+
 		stream, err := client.CountUp(context.Background(), request)
 		assert.Nil(t, err)
 		for stream.Receive() {
@@ -2116,6 +2150,35 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		assert.NotNil(t, stream.Err())
 		assert.Equal(t, connect.CodeOf(stream.Err()), connect.CodeUnknown)
 		assert.True(t, errors.Is(stream.Err(), io.ErrUnexpectedEOF))
+	})
+	t.Run("stream_partial_payload", func(t *testing.T) {
+		t.Parallel()
+		const upTo = 2
+		request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
+		request.Header().Set("Test-Case", t.Name())
+		stream, err := client.CountUp(context.Background(), request)
+		assert.Nil(t, err)
+		for stream.Receive() {
+			assert.Equal(t, stream.Msg().Number, 42)
+		}
+		assert.NotNil(t, stream.Err())
+		assert.Equal(t, connect.CodeOf(stream.Err()), connect.CodeInvalidArgument)
+		assert.Equal(t, stream.Err().Error(), "invalid_argument: protocol error: promised 14 bytes in enveloped message, got 13 bytes")
+	})
+	t.Run("stream_partial_frame", func(t *testing.T) {
+		t.Parallel()
+		const upTo = 2
+		request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
+		request.Header().Set("Test-Case", t.Name())
+		stream, err := client.CountUp(context.Background(), request)
+		assert.Nil(t, err)
+		for stream.Receive() {
+			assert.Equal(t, stream.Msg().Number, 42)
+		}
+		assert.NotNil(t, stream.Err())
+		assert.Equal(t, connect.CodeOf(stream.Err()), connect.CodeInvalidArgument)
+		t.Log(stream.Err())
+		assert.Equal(t, stream.Err().Error(), "invalid_argument: protocol error: incomplete envelope: unexpected EOF")
 	})
 }
 
