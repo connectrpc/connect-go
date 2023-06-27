@@ -67,34 +67,10 @@ func (w *envelopeWriter) Marshal(message any) *Error {
 		}
 		return nil
 	}
-
-	buffer := w.bufferPool.Get()
-
-	// Reuse byte buffer if codec supports MarshalAppend.
-	var (
-		raw []byte
-		err error
-	)
-	if c, ok := w.codec.(marshalAppender); ok {
-		raw, err = c.MarshalAppend(buffer.Bytes(), message)
-	} else {
-		raw, err = w.codec.Marshal(message)
+	if appender, ok := w.codec.(marshalAppender); ok {
+		return w.marshalAppend(message, appender)
 	}
-	if err == nil && len(raw) > 0 && cap(raw) != cap(buffer.Bytes()) {
-		// We've either grown the buffer or allocated an entirely new one. Before
-		// we return, capture the new backing array in the buffer pool.
-		defer w.bufferPool.Put(bytes.NewBuffer(raw))
-	} else {
-		// The original buffer was sufficiently large for the workload, so we can
-		// return it to the pool.
-		defer w.bufferPool.Put(buffer)
-	}
-	if err != nil {
-		return errorf(CodeInternal, "marshal message: %w", err)
-	}
-	buffer.Write(raw)
-	envelope := &envelope{Data: buffer}
-	return w.Write(envelope)
+	return w.marshal(message)
 }
 
 // Write writes the enveloped message, compressing as necessary. It doesn't
@@ -120,6 +96,44 @@ func (w *envelopeWriter) Write(env *envelope) *Error {
 		Data:  data,
 		Flags: env.Flags | flagEnvelopeCompressed,
 	})
+}
+
+func (w *envelopeWriter) marshalAppend(message any, codec marshalAppender) *Error {
+	// Codec supports MarshalAppend; try to re-use a []byte from the pool.
+	buffer := w.bufferPool.Get()
+	defer w.bufferPool.Put(buffer)
+	raw, err := codec.MarshalAppend(buffer.Bytes(), message)
+	if err != nil {
+		return errorf(CodeInternal, "marshal message: %w", err)
+	}
+	if cap(raw) > buffer.Cap() {
+		// The buffer from the pool was too small, so MarshalAppend grew the slice.
+		// Pessimistically assume that the too-small buffer is insufficient for the
+		// application workload, so there's no point in keeping it in the pool.
+		// Instead, replace it with the larger, newly-allocated slice. This
+		// allocates, but it's a small, constant-size allocation.
+		*buffer = *bytes.NewBuffer(raw)
+	} else {
+		// MarshalAppend didn't allocate, but we need to fix the internal state of
+		// the buffer. Compared to replacing the buffer (as above), buffer.Write
+		// copies but avoids allocating.
+		buffer.Write(raw)
+	}
+	envelope := &envelope{Data: buffer}
+	return w.Write(envelope)
+}
+
+func (w *envelopeWriter) marshal(message any) *Error {
+	// Codec doesn't support MarshalAppend; let Marshal allocate a []byte.
+	raw, err := w.codec.Marshal(message)
+	if err != nil {
+		return errorf(CodeInternal, "marshal message: %w", err)
+	}
+	buffer := bytes.NewBuffer(raw)
+	// Put our new []byte into the pool for later reuse.
+	defer w.bufferPool.Put(buffer)
+	envelope := &envelope{Data: buffer}
+	return w.Write(envelope)
 }
 
 func (w *envelopeWriter) write(env *envelope) *Error {
