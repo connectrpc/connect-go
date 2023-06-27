@@ -67,16 +67,10 @@ func (w *envelopeWriter) Marshal(message any) *Error {
 		}
 		return nil
 	}
-	raw, err := w.codec.Marshal(message)
-	if err != nil {
-		return errorf(CodeInternal, "marshal message: %w", err)
+	if appender, ok := w.codec.(marshalAppender); ok {
+		return w.marshalAppend(message, appender)
 	}
-	// We can't avoid allocating the byte slice, so we may as well reuse it once
-	// we're done with it.
-	buffer := bytes.NewBuffer(raw)
-	defer w.bufferPool.Put(buffer)
-	envelope := &envelope{Data: buffer}
-	return w.Write(envelope)
+	return w.marshal(message)
 }
 
 // Write writes the enveloped message, compressing as necessary. It doesn't
@@ -102,6 +96,44 @@ func (w *envelopeWriter) Write(env *envelope) *Error {
 		Data:  data,
 		Flags: env.Flags | flagEnvelopeCompressed,
 	})
+}
+
+func (w *envelopeWriter) marshalAppend(message any, codec marshalAppender) *Error {
+	// Codec supports MarshalAppend; try to re-use a []byte from the pool.
+	buffer := w.bufferPool.Get()
+	defer w.bufferPool.Put(buffer)
+	raw, err := codec.MarshalAppend(buffer.Bytes(), message)
+	if err != nil {
+		return errorf(CodeInternal, "marshal message: %w", err)
+	}
+	if cap(raw) > buffer.Cap() {
+		// The buffer from the pool was too small, so MarshalAppend grew the slice.
+		// Pessimistically assume that the too-small buffer is insufficient for the
+		// application workload, so there's no point in keeping it in the pool.
+		// Instead, replace it with the larger, newly-allocated slice. This
+		// allocates, but it's a small, constant-size allocation.
+		*buffer = *bytes.NewBuffer(raw)
+	} else {
+		// MarshalAppend didn't allocate, but we need to fix the internal state of
+		// the buffer. Compared to replacing the buffer (as above), buffer.Write
+		// copies but avoids allocating.
+		buffer.Write(raw)
+	}
+	envelope := &envelope{Data: buffer}
+	return w.Write(envelope)
+}
+
+func (w *envelopeWriter) marshal(message any) *Error {
+	// Codec doesn't support MarshalAppend; let Marshal allocate a []byte.
+	raw, err := w.codec.Marshal(message)
+	if err != nil {
+		return errorf(CodeInternal, "marshal message: %w", err)
+	}
+	buffer := bytes.NewBuffer(raw)
+	// Put our new []byte into the pool for later reuse.
+	defer w.bufferPool.Put(buffer)
+	envelope := &envelope{Data: buffer}
+	return w.Write(envelope)
 }
 
 func (w *envelopeWriter) write(env *envelope) *Error {
