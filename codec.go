@@ -53,6 +53,18 @@ type Codec interface {
 	Unmarshal([]byte, any) error
 }
 
+// marshalAppender is an extension to Codec for appending to a byte slice.
+type marshalAppender interface {
+	Codec
+
+	// MarshalAppend marshals the given message and appends it to the given
+	// byte slice.
+	//
+	// MarshalAppend may expect a specific type of message, and will error if
+	// this type is not given.
+	MarshalAppend([]byte, any) ([]byte, error)
+}
+
 // stableCodec is an extension to Codec for serializing with stable output.
 type stableCodec interface {
 	Codec
@@ -91,6 +103,14 @@ func (c *protoBinaryCodec) Marshal(message any) ([]byte, error) {
 		return nil, errNotProto(message)
 	}
 	return proto.Marshal(protoMessage)
+}
+
+func (c *protoBinaryCodec) MarshalAppend(dst []byte, message any) ([]byte, error) {
+	protoMessage, ok := message.(proto.Message)
+	if !ok {
+		return nil, errNotProto(message)
+	}
+	return proto.MarshalOptions{}.MarshalAppend(dst, protoMessage)
 }
 
 func (c *protoBinaryCodec) Unmarshal(data []byte, message any) error {
@@ -132,8 +152,15 @@ func (c *protoJSONCodec) Marshal(message any) ([]byte, error) {
 	if !ok {
 		return nil, errNotProto(message)
 	}
-	var options protojson.MarshalOptions
-	return options.Marshal(protoMessage)
+	return protojson.MarshalOptions{}.Marshal(protoMessage)
+}
+
+func (c *protoJSONCodec) MarshalAppend(dst []byte, message any) ([]byte, error) {
+	protoMessage, ok := message.(proto.Message)
+	if !ok {
+		return nil, errNotProto(message)
+	}
+	return protojson.MarshalOptions{}.MarshalAppend(dst, protoMessage)
 }
 
 func (c *protoJSONCodec) Unmarshal(binary []byte, message any) error {
