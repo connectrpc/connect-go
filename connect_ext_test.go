@@ -2079,6 +2079,46 @@ func TestHandlerReturnsNilResponse(t *testing.T) {
 	assert.Equal(t, panics, 2)
 }
 
+func TestStreamUnexpectedEOF(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/connect.ping.v1.PingService/CountUp", func(responseWriter http.ResponseWriter, request *http.Request) {
+		io.Copy(io.Discard, request.Body) //nolint:errcheck
+		header := responseWriter.Header()
+		header["content-type"] = []string{"application/connect+json"}
+		responseWriter.WriteHeader(http.StatusOK)
+		head := [5]byte{0, 0, 0, 0, 0}
+		payload := []byte(`{"number": 42}`)
+		binary.BigEndian.PutUint32(head[1:], uint32(len(payload)))
+		responseWriter.Write(head[:]) //nolint:errcheck
+		responseWriter.Write(payload) //nolint:errcheck
+	})
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+
+	client := pingv1connect.NewPingServiceClient(
+		server.Client(),
+		server.URL,
+		connect.WithProtoJSON(),
+	)
+	t.Run("stream_unexpected_eof", func(t *testing.T) {
+		t.Parallel()
+		const upTo = 2
+		request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
+		request.Header().Set(clientHeader, headerValue)
+		stream, err := client.CountUp(context.Background(), request)
+		assert.Nil(t, err)
+		for stream.Receive() {
+			assert.Equal(t, stream.Msg().Number, 42)
+		}
+		assert.NotNil(t, stream.Err())
+		assert.Equal(t, connect.CodeOf(stream.Err()), connect.CodeUnknown)
+		assert.True(t, errors.Is(stream.Err(), io.ErrUnexpectedEOF))
+	})
+}
+
 // TestBlankImportCodeGeneration tests that services.connect.go is generated with
 // blank import statements to services.pb.go so that the service's Descriptor is
 // available in the global proto registry.
