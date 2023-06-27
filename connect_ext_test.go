@@ -2138,6 +2138,20 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		},
 		expectCode: connect.CodeInvalidArgument,
 		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
+	}, {
+		name: "stream_excess_eof",
+		handler: func(responseWriter http.ResponseWriter, request *http.Request) {
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload)
+			// Write EOF
+			_, _ = responseWriter.Write([]byte{2, 0, 0, 0, 2})
+			_, _ = responseWriter.Write([]byte("{}"))
+			// Excess payload
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload)
+		},
+		expectCode: connect.CodeUnknown,
+		expectMsg:  fmt.Sprintf("unknown: corrupt response: %d extra bytes after end of stream", len(payload)+len(head)),
 	}}
 	for _, testcase := range testcases {
 		testcaseMux[t.Name()+"/"+testcase.name] = testcase.handler
