@@ -1001,7 +1001,12 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 	readMaxBytes := 1024
 	mux.Handle(pingv1connect.NewPingServiceHandler(
 		pingServer{},
-		connect.WithReadMaxBytes(readMaxBytes),
+		connect.WithHandlerOptional(func(spec connect.Spec) connect.HandlerOption {
+			if spec.Procedure == pingv1connect.PingServicePingProcedure {
+				return connect.WithReadMaxBytes(readMaxBytes)
+			}
+			return nil
+		}),
 	))
 	readMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, compressed bool) {
 		t.Helper()

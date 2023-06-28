@@ -166,6 +166,25 @@ func WithRequireConnectProtocolHeader() HandlerOption {
 	return &requireConnectProtocolHeaderOption{}
 }
 
+// WithHandlerOptional is a function that returns a HandlerOption. It's used
+// to conditionally apply HandlerOption to a Handler based on the Spec.
+// For example, to apply a HandlerOption only to a specific procedure:
+//
+//	connect.WithHandlerOptional(func(spec connect.Spec) connect.HandlerOption {
+//		if spec.Procedure == pingv1connect.PingServicePingProcedure {
+//			return connect.WithReadMaxBytes(1024)
+//		}
+//		return nil
+//	})
+type WithHandlerOptional func(Spec) HandlerOption
+
+func (f WithHandlerOptional) applyToHandler(h *handlerConfig) {
+	spec := h.newSpec()
+	if option := f(spec); option != nil {
+		option.applyToHandler(h)
+	}
+}
+
 // Option implements both [ClientOption] and [HandlerOption], so it can be
 // applied both client-side and server-side.
 type Option interface {
