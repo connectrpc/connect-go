@@ -325,8 +325,6 @@ func (g *grpcClient) NewConn(
 		}
 	} else {
 		conn.readTrailers = func(_ *grpcUnmarshaler, call *duplexHTTPCall) http.Header {
-			// To access HTTP trailers, we need to read the body to EOF.
-			_, _ = discard(call)
 			return call.ResponseTrailer()
 		}
 	}
