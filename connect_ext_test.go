@@ -2079,6 +2079,89 @@ func TestHandlerReturnsNilResponse(t *testing.T) {
 	assert.Equal(t, panics, 2)
 }
 
+func TestStreamUnexpectedEOF(t *testing.T) {
+	t.Parallel()
+
+	// Initialized by the test case.
+	testcaseMux := make(map[string]http.HandlerFunc)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(responseWriter http.ResponseWriter, request *http.Request) {
+		testcase, ok := testcaseMux[request.Header.Get("Test-Case")]
+		if !ok {
+			responseWriter.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = io.Copy(io.Discard, request.Body)
+		header := responseWriter.Header()
+		header.Set("Content-Type", "application/connect+json")
+		testcase(responseWriter, request)
+	})
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+
+	client := pingv1connect.NewPingServiceClient(
+		server.Client(),
+		server.URL,
+		connect.WithProtoJSON(),
+	)
+	head := [5]byte{}
+	payload := []byte(`{"number": 42}`)
+	binary.BigEndian.PutUint32(head[1:], uint32(len(payload)))
+	testcases := []struct {
+		name       string
+		handler    http.HandlerFunc
+		expectCode connect.Code
+		expectMsg  string
+	}{{
+		name: "stream_unexpected_eof",
+		handler: func(responseWriter http.ResponseWriter, request *http.Request) {
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload)
+		},
+		expectCode: connect.CodeUnknown,
+		expectMsg:  "unknown: unexpected EOF",
+	}, {
+		name: "stream_partial_payload",
+		handler: func(responseWriter http.ResponseWriter, request *http.Request) {
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload[:len(payload)-1])
+		},
+		expectCode: connect.CodeInvalidArgument,
+		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+	}, {
+		name: "stream_partial_frame",
+		handler: func(responseWriter http.ResponseWriter, request *http.Request) {
+			_, _ = responseWriter.Write(head[:4])
+		},
+		expectCode: connect.CodeInvalidArgument,
+		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
+	}}
+	for _, testcase := range testcases {
+		testcaseMux[t.Name()+"/"+testcase.name] = testcase.handler
+	}
+	for _, testcase := range testcases {
+		testcase := testcase
+		t.Run(testcase.name, func(t *testing.T) {
+			t.Parallel()
+			const upTo = 2
+			request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
+			request.Header().Set("Test-Case", t.Name())
+			stream, err := client.CountUp(context.Background(), request)
+			assert.Nil(t, err)
+			for stream.Receive() {
+				assert.Equal(t, stream.Msg().Number, 42)
+			}
+			assert.NotNil(t, stream.Err())
+			assert.Equal(t, connect.CodeOf(stream.Err()), testcase.expectCode)
+			t.Log(stream.Err())
+			assert.Equal(t, stream.Err().Error(), testcase.expectMsg)
+		})
+	}
+}
+
 // TestBlankImportCodeGeneration tests that services.connect.go is generated with
 // blank import statements to services.pb.go so that the service's Descriptor is
 // available in the global proto registry.
