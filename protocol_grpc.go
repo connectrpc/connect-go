@@ -67,7 +67,7 @@ var (
 	grpcAllowedMethods    = map[string]struct{}{
 		http.MethodPost: {},
 	}
-	errTrailersWithoutGRPCStatus = fmt.Errorf("protocol error: no %s trailer", grpcHeaderStatus)
+	errTrailersWithoutGRPCStatus = fmt.Errorf("protocol error: no %s trailer: %w", grpcHeaderStatus, io.ErrUnexpectedEOF)
 
 	// defaultGrpcUserAgent follows
 	// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents:
@@ -729,7 +729,7 @@ func grpcHTTPToCode(httpCode int) Code {
 func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {
 	codeHeader := getHeaderCanonical(trailer, grpcHeaderStatus)
 	if codeHeader == "" {
-		return NewError(CodeUnknown, errTrailersWithoutGRPCStatus)
+		return NewError(CodeInternal, errTrailersWithoutGRPCStatus)
 	}
 	if codeHeader == "0" {
 		return nil
