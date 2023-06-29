@@ -704,7 +704,7 @@ func TestGRPCMissingTrailersError(t *testing.T) {
 		var connectErr *connect.Error
 		ok := errors.As(err, &connectErr)
 		assert.True(t, ok)
-		assert.Equal(t, connectErr.Code(), connect.CodeInternal)
+		assert.Equal(t, connectErr.Code(), connect.CodeUnknown)
 		assert.True(
 			t,
 			strings.HasSuffix(connectErr.Message(), "protocol error: no Grpc-Status trailer"),
@@ -2129,8 +2129,8 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, _ = responseWriter.Write(head[:])
 			_, _ = responseWriter.Write(payload)
 		},
-		expectCode: connect.CodeInternal,
-		expectMsg:  "internal: protocol error: no Grpc-Status trailer",
+		expectCode: connect.CodeUnknown,
+		expectMsg:  "unknown: protocol error: no Grpc-Status trailer",
 	}, {
 		name:    "grpc-web_missing_end",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
@@ -2140,8 +2140,8 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, _ = responseWriter.Write(head[:])
 			_, _ = responseWriter.Write(payload)
 		},
-		expectCode: connect.CodeInternal,
-		expectMsg:  "internal: protocol error: no Grpc-Status trailer",
+		expectCode: connect.CodeUnknown,
+		expectMsg:  "unknown: protocol error: no Grpc-Status trailer",
 	}, {
 		name:    "connect_partial_payload",
 		options: []connect.ClientOption{connect.WithProtoJSON()},

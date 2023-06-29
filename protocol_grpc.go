@@ -729,7 +729,7 @@ func grpcHTTPToCode(httpCode int) Code {
 func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {
 	codeHeader := getHeaderCanonical(trailer, grpcHeaderStatus)
 	if codeHeader == "" {
-		return NewError(CodeInternal, errTrailersWithoutGRPCStatus)
+		return NewError(CodeUnknown, errTrailersWithoutGRPCStatus)
 	}
 	if codeHeader == "0" {
 		return nil
