@@ -46,10 +46,9 @@ const (
 
 	connectFlagEnvelopeEndStream = 0b00000010
 
-	connectUnaryContentTypePrefix      = "application/"
-	connectUnaryContentTypeJSON        = connectUnaryContentTypePrefix + "json"
-	connectStreamingContentTypeDefault = "application/connect"
-	connectStreamingContentTypePrefix  = "application/connect+"
+	connectUnaryContentTypePrefix     = "application/"
+	connectUnaryContentTypeJSON       = connectUnaryContentTypePrefix + "json"
+	connectStreamingContentTypePrefix = "application/connect+"
 
 	connectUnaryEncodingQueryParameter    = "encoding"
 	connectUnaryMessageQueryParameter     = "message"

@@ -141,3 +141,40 @@ func grpcErrorFromTrailer(trailer http.Header) *connect.Error {
 	}
 	return trailerErr
 }
+
+func getGRPCTrailer(header http.Header) (http.Header, *connect.Error) {
+	isTrailer := map[string]bool{
+		// Force GRPC status values, try copy them directly from header.
+		grpcHeaderStatus:  true,
+		grpcHeaderDetails: true,
+		grpcHeaderMessage: true,
+	}
+	for _, key := range strings.Split(header.Get(headerTrailer), ",") {
+		key = http.CanonicalHeaderKey(key)
+		isTrailer[key] = true
+	}
+
+	trailer := make(http.Header)
+	for key, vals := range header {
+		if strings.HasPrefix(key, http.TrailerPrefix) {
+			// Must remove trailer prefix before canonicalizing.
+			key = http.CanonicalHeaderKey(key[len(http.TrailerPrefix):])
+			trailer[key] = vals
+		} else if key := http.CanonicalHeaderKey(key); isTrailer[key] {
+			trailer[key] = vals
+		}
+	}
+
+	trailerErr := grpcErrorFromTrailer(trailer)
+	if trailerErr != nil {
+		return trailer, trailerErr
+	}
+
+	// Remove all protocol trailer keys.
+	for key := range trailer {
+		if isProtocolHeader(key) {
+			delete(trailer, key)
+		}
+	}
+	return trailer, nil
+}
