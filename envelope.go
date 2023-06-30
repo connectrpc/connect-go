@@ -199,6 +199,12 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 	}
 
 	if env.Flags != 0 && env.Flags != flagEnvelopeCompressed {
+		// Drain the rest of the stream to ensure there is no extra data.
+		if n, err := discard(r.reader); err != nil {
+			return errorf(CodeInternal, "corrupt response: I/O error after end-stream message: %w", err)
+		} else if n > 0 {
+			return errorf(CodeInternal, "corrupt response: %d extra bytes after end of stream", n)
+		}
 		// One of the protocol-specific flags are set, so this is the end of the
 		// stream. Save the message for protocol-specific code to process and
 		// return a sentinel error. Since we've deferred functions to return env's
@@ -208,12 +214,6 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 		r.last = envelope{
 			Data:  bytes.NewBuffer(copiedData),
 			Flags: env.Flags,
-		}
-		// Drain the rest of the stream to ensure there is no extra data.
-		if n, err := discard(r.reader); err != nil {
-			return errorf(CodeInternal, "corrupt response: I/O error after end-stream message: %w", err)
-		} else if n > 0 {
-			return errorf(CodeInternal, "corrupt response: %d extra bytes after end of stream", n)
 		}
 		return errSpecialEnvelope
 	}
