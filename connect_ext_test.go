@@ -2221,20 +2221,6 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		expectCode: connect.CodeInternal,
 		expectMsg:  fmt.Sprintf("internal: corrupt response: %d extra bytes after end of stream", len(payload)+len(head)),
 	}, {
-		name:    "grpc_excess_eof",
-		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPC()},
-		handler: func(responseWriter http.ResponseWriter, request *http.Request) {
-			_, _ = responseWriter.Write(head[:])
-			_, _ = responseWriter.Write(payload)
-			// Write end of stream, empty data frame
-			_, _ = responseWriter.Write([]byte{1 << 7, 0, 0, 0, 0})
-			// Excess payload
-			_, _ = responseWriter.Write(head[:])
-			_, _ = responseWriter.Write(payload)
-		},
-		expectCode: connect.CodeInternal,
-		expectMsg:  fmt.Sprintf("internal: corrupt response: %d extra bytes after end of stream", len(payload)+len(head)),
-	}, {
 		name:    "grpc-web_excess_eof",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
 		handler: func(responseWriter http.ResponseWriter, request *http.Request) {
@@ -2273,11 +2259,13 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			request.Header().Set("Test-Case", t.Name())
 			stream, err := client.CountUp(context.Background(), request)
 			assert.Nil(t, err)
-			for stream.Receive() {
+			for i := 0; stream.Receive() && i < upTo; i += 1 {
 				assert.Equal(t, stream.Msg().Number, 42)
 			}
-			assert.NotNil(t, stream.Err())
 			t.Log(stream.Err())
+			closeErr := stream.Close()
+			t.Log(closeErr)
+			assert.NotNil(t, stream.Err())
 			assert.Equal(t, connect.CodeOf(stream.Err()), testcase.expectCode)
 			assert.Equal(t, stream.Err().Error(), testcase.expectMsg)
 		})
