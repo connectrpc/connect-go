@@ -211,9 +211,9 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 		}
 		// Drain the rest of the stream to ensure there is no extra data.
 		if n, err := discard(r.reader); err != nil {
-			return errorf(CodeUnknown, "corrupt response: I/O error after end-stream message: %w", err)
+			return errorf(CodeInternal, "corrupt response: I/O error after end-stream message: %w", err)
 		} else if n > 0 {
-			return errorf(CodeUnknown, "corrupt response: %d extra bytes after end of stream", n)
+			return errorf(CodeInternal, "corrupt response: %d extra bytes after end of stream", n)
 		}
 		return errSpecialEnvelope
 	}

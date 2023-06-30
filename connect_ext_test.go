@@ -2206,19 +2206,55 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		expectCode: connect.CodeInvalidArgument,
 		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
 	}, {
-		name: "stream_excess_eof",
+		name:    "connect_excess_eof",
+		options: []connect.ClientOption{connect.WithProtoJSON()},
 		handler: func(responseWriter http.ResponseWriter, request *http.Request) {
 			_, _ = responseWriter.Write(head[:])
 			_, _ = responseWriter.Write(payload)
 			// Write EOF
-			_, _ = responseWriter.Write([]byte{2, 0, 0, 0, 2})
+			_, _ = responseWriter.Write([]byte{1 << 1, 0, 0, 0, 2})
 			_, _ = responseWriter.Write([]byte("{}"))
 			// Excess payload
 			_, _ = responseWriter.Write(head[:])
 			_, _ = responseWriter.Write(payload)
 		},
-		expectCode: connect.CodeUnknown,
-		expectMsg:  fmt.Sprintf("unknown: corrupt response: %d extra bytes after end of stream", len(payload)+len(head)),
+		expectCode: connect.CodeInternal,
+		expectMsg:  fmt.Sprintf("internal: corrupt response: %d extra bytes after end of stream", len(payload)+len(head)),
+	}, {
+		name:    "grpc_excess_eof",
+		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPC()},
+		handler: func(responseWriter http.ResponseWriter, request *http.Request) {
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload)
+			// Write end of stream, empty data frame
+			_, _ = responseWriter.Write([]byte{1 << 7, 0, 0, 0, 0})
+			// Excess payload
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload)
+		},
+		expectCode: connect.CodeInternal,
+		expectMsg:  fmt.Sprintf("internal: corrupt response: %d extra bytes after end of stream", len(payload)+len(head)),
+	}, {
+		name:    "grpc-web_excess_eof",
+		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
+		handler: func(responseWriter http.ResponseWriter, request *http.Request) {
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload)
+			// Write EOF
+			var buf bytes.Buffer
+			trailer := http.Header{"grpc-status": []string{"0"}}
+			_ = trailer.Write(&buf)
+			var head [5]byte
+			head[0] = 1 << 7
+			binary.BigEndian.PutUint32(head[1:], uint32(buf.Len()))
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(buf.Bytes())
+			// Excess payload
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload)
+		},
+		expectCode: connect.CodeInternal,
+		expectMsg:  fmt.Sprintf("internal: corrupt response: %d extra bytes after end of stream", len(payload)+len(head)),
 	}}
 	for _, testcase := range testcases {
 		testcaseMux[t.Name()+"/"+testcase.name] = testcase.handler
