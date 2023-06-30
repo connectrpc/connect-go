@@ -67,7 +67,7 @@ var (
 	grpcAllowedMethods    = map[string]struct{}{
 		http.MethodPost: {},
 	}
-	errTrailersWithoutGRPCStatus = fmt.Errorf("gRPC protocol error: no %s trailer", grpcHeaderStatus)
+	errTrailersWithoutGRPCStatus = fmt.Errorf("protocol error: no %s trailer: %w", grpcHeaderStatus, io.ErrUnexpectedEOF)
 
 	// defaultGrpcUserAgent follows
 	// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents:
@@ -388,7 +388,7 @@ func (cc *grpcClientConn) Receive(msg any) error {
 		cc.responseTrailer,
 		cc.readTrailers(&cc.unmarshaler, cc.duplexCall),
 	)
-	serverErr := grpcErrorFromTrailer(cc.bufferPool, cc.protobuf, cc.responseTrailer)
+	serverErr := grpcErrorFromTrailer(cc.protobuf, cc.responseTrailer)
 	if serverErr != nil && (errors.Is(err, io.EOF) || !errors.Is(serverErr, errTrailersWithoutGRPCStatus)) {
 		// We've either:
 		//   - Cleanly read until the end of the response body and *not* received
@@ -434,7 +434,6 @@ func (cc *grpcClientConn) validateResponse(response *http.Response) *Error {
 		cc.responseHeader,
 		cc.responseTrailer,
 		cc.compressionPools,
-		cc.bufferPool,
 		cc.protobuf,
 	); err != nil {
 		return err
@@ -524,7 +523,7 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 		len(hc.responseTrailer)+2, // always make space for status & message
 	)
 	mergeHeaders(mergedTrailers, hc.responseTrailer)
-	grpcErrorToTrailer(hc.bufferPool, mergedTrailers, hc.protobuf, err)
+	grpcErrorToTrailer(mergedTrailers, hc.protobuf, err)
 	if hc.web && !hc.wroteToBody {
 		// We're using gRPC-Web and we haven't yet written to the body. Since we're
 		// not sending any response messages, the gRPC specification calls this a
@@ -661,7 +660,6 @@ func grpcValidateResponse(
 	response *http.Response,
 	header, trailer http.Header,
 	availableCompressors readOnlyCompressionPools,
-	bufferPool *bufferPool,
 	protobuf Codec,
 ) *Error {
 	if response.StatusCode != http.StatusOK {
@@ -683,7 +681,6 @@ func grpcValidateResponse(
 	// When there's no body, gRPC and gRPC-Web servers may send error information
 	// in the HTTP headers.
 	if err := grpcErrorFromTrailer(
-		bufferPool,
 		protobuf,
 		response.Header,
 	); err != nil && !errors.Is(err, errTrailersWithoutGRPCStatus) {
@@ -729,7 +726,7 @@ func grpcHTTPToCode(httpCode int) Code {
 // binary Protobuf format, even if the messages in the request/response stream
 // use a different codec. Consequently, this function needs a Protobuf codec to
 // unmarshal error information in the headers.
-func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.Header) *Error {
+func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {
 	codeHeader := getHeaderCanonical(trailer, grpcHeaderStatus)
 	if codeHeader == "" {
 		return NewError(CodeInternal, errTrailersWithoutGRPCStatus)
@@ -740,9 +737,9 @@ func grpcErrorFromTrailer(bufferPool *bufferPool, protobuf Codec, trailer http.H
 
 	code, err := strconv.ParseUint(codeHeader, 10 /* base */, 32 /* bitsize */)
 	if err != nil {
-		return errorf(CodeInternal, "gRPC protocol error: invalid error code %q", codeHeader)
+		return errorf(CodeInternal, "protocol error: invalid error code %q", codeHeader)
 	}
-	message := grpcPercentDecode(bufferPool, getHeaderCanonical(trailer, grpcHeaderMessage))
+	message := grpcPercentDecode(getHeaderCanonical(trailer, grpcHeaderMessage))
 	retErr := NewWireError(Code(code), errors.New(message))
 
 	detailsBinaryEncoded := getHeaderCanonical(trailer, grpcHeaderDetails)
@@ -772,14 +769,14 @@ func grpcParseTimeout(timeout string) (time.Duration, error) {
 	}
 	unit, ok := grpcTimeoutUnitLookup[timeout[len(timeout)-1]]
 	if !ok {
-		return 0, fmt.Errorf("gRPC protocol error: timeout %q has invalid unit", timeout)
+		return 0, fmt.Errorf("protocol error: timeout %q has invalid unit", timeout)
 	}
 	num, err := strconv.ParseInt(timeout[:len(timeout)-1], 10 /* base */, 64 /* bitsize */)
 	if err != nil || num < 0 {
-		return 0, fmt.Errorf("gRPC protocol error: invalid timeout %q", timeout)
+		return 0, fmt.Errorf("protocol error: invalid timeout %q", timeout)
 	}
 	if num > 99999999 { // timeout must be ASCII string of at most 8 digits
-		return 0, fmt.Errorf("gRPC protocol error: timeout %q is too long", timeout)
+		return 0, fmt.Errorf("protocol error: timeout %q is too long", timeout)
 	}
 	if unit == time.Hour && num > grpcTimeoutMaxHours {
 		// Timeout is effectively unbounded, so ignore it. The grpc-go
@@ -823,7 +820,7 @@ func grpcContentTypeFromCodecName(web bool, name string) string {
 	return grpcContentTypePrefix + name
 }
 
-func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Codec, err error) {
+func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) {
 	if err == nil {
 		setHeaderCanonical(trailer, grpcHeaderStatus, "0") // zero is the gRPC OK status
 		setHeaderCanonical(trailer, grpcHeaderMessage, "")
@@ -842,7 +839,6 @@ func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Co
 			trailer,
 			grpcHeaderMessage,
 			grpcPercentEncode(
-				bufferPool,
 				fmt.Sprintf("marshal protobuf status: %v", binErr),
 			),
 		)
@@ -852,7 +848,7 @@ func grpcErrorToTrailer(bufferPool *bufferPool, trailer http.Header, protobuf Co
 		mergeHeaders(trailer, connectErr.meta)
 	}
 	setHeaderCanonical(trailer, grpcHeaderStatus, code)
-	setHeaderCanonical(trailer, grpcHeaderMessage, grpcPercentEncode(bufferPool, status.Message))
+	setHeaderCanonical(trailer, grpcHeaderMessage, grpcPercentEncode(status.Message))
 	setHeaderCanonical(trailer, grpcHeaderDetails, EncodeBinaryHeader(bin))
 }
 
@@ -881,12 +877,12 @@ func grpcStatusFromError(err error) *statusv1.Status {
 //
 //	https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#responses
 //	https://datatracker.ietf.org/doc/html/rfc3986#section-2.1
-func grpcPercentEncode(bufferPool *bufferPool, msg string) string {
+func grpcPercentEncode(msg string) string {
 	for i := 0; i < len(msg); i++ {
 		// Characters that need to be escaped are defined in gRPC's HTTP/2 spec.
 		// They're different from the generic set defined in RFC 3986.
 		if c := msg[i]; c < ' ' || c > '~' || c == '%' {
-			return grpcPercentEncodeSlow(bufferPool, msg, i)
+			return grpcPercentEncodeSlow(msg, i)
 		}
 	}
 	return msg
@@ -894,14 +890,14 @@ func grpcPercentEncode(bufferPool *bufferPool, msg string) string {
 
 // msg needs some percent-escaping. Bytes before offset don't require
 // percent-encoding, so they can be copied to the output as-is.
-func grpcPercentEncodeSlow(bufferPool *bufferPool, msg string, offset int) string {
-	out := bufferPool.Get()
-	defer bufferPool.Put(out)
+func grpcPercentEncodeSlow(msg string, offset int) string {
+	var out strings.Builder
+	out.Grow(2 * len(msg))
 	out.WriteString(msg[:offset])
 	for i := offset; i < len(msg); i++ {
 		c := msg[i]
 		if c < ' ' || c > '~' || c == '%' {
-			out.WriteString(fmt.Sprintf("%%%02X", c))
+			fmt.Fprintf(&out, "%%%02X", c)
 			continue
 		}
 		out.WriteByte(c)
@@ -909,10 +905,10 @@ func grpcPercentEncodeSlow(bufferPool *bufferPool, msg string, offset int) strin
 	return out.String()
 }
 
-func grpcPercentDecode(bufferPool *bufferPool, encoded string) string {
+func grpcPercentDecode(encoded string) string {
 	for i := 0; i < len(encoded); i++ {
 		if c := encoded[i]; c == '%' && i+2 < len(encoded) {
-			return grpcPercentDecodeSlow(bufferPool, encoded, i)
+			return grpcPercentDecodeSlow(encoded, i)
 		}
 	}
 	return encoded
@@ -920,9 +916,9 @@ func grpcPercentDecode(bufferPool *bufferPool, encoded string) string {
 
 // Similar to percentEncodeSlow: encoded is percent-encoded, and needs to be
 // decoded byte-by-byte starting at offset.
-func grpcPercentDecodeSlow(bufferPool *bufferPool, encoded string, offset int) string {
-	out := bufferPool.Get()
-	defer bufferPool.Put(out)
+func grpcPercentDecodeSlow(encoded string, offset int) string {
+	var out strings.Builder
+	out.Grow(len(encoded))
 	out.WriteString(encoded[:offset])
 	for i := offset; i < len(encoded); i++ {
 		c := encoded[i]

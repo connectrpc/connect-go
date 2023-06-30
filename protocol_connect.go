@@ -606,6 +606,11 @@ func (cc *connectStreamingClientConn) Receive(msg any) error {
 		cc.duplexCall.SetError(serverErr)
 		return serverErr
 	}
+	// If the error is EOF but not from a last message, we want to return
+	// io.ErrUnexpectedEOF instead.
+	if errors.Is(err, io.EOF) && !errors.Is(err, errSpecialEnvelope) {
+		err = errorf(CodeInternal, "protocol error: %w", io.ErrUnexpectedEOF)
+	}
 	// There's no error in the trailers, so this was probably an error
 	// converting the bytes to a message, an error reading from the network, or
 	// just an EOF. We're going to return it to the user, but we also want to
@@ -863,6 +868,13 @@ func (u *connectStreamingUnmarshaler) Unmarshal(message any) *Error {
 	var end connectEndStreamMessage
 	if err := json.Unmarshal(env.Data.Bytes(), &end); err != nil {
 		return errorf(CodeInternal, "unmarshal end stream message: %w", err)
+	}
+	for name, value := range end.Trailer {
+		canonical := http.CanonicalHeaderKey(name)
+		if name != canonical {
+			delete(end.Trailer, name)
+			end.Trailer[canonical] = append(end.Trailer[canonical], value...)
+		}
 	}
 	u.trailer = end.Trailer
 	u.endStreamErr = end.Error.asError()

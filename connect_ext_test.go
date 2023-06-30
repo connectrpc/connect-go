@@ -750,7 +750,7 @@ func TestGRPCMissingTrailersError(t *testing.T) {
 		assert.Equal(t, connectErr.Code(), connect.CodeInternal)
 		assert.True(
 			t,
-			strings.HasSuffix(connectErr.Message(), "gRPC protocol error: no Grpc-Status trailer"),
+			strings.HasSuffix(connectErr.Message(), "protocol error: no Grpc-Status trailer: unexpected EOF"),
 		)
 	}
 
@@ -2311,6 +2311,161 @@ func TestHandlerReturnsNilResponse(t *testing.T) {
 	assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
 
 	assert.Equal(t, panics, 2)
+}
+
+func TestStreamUnexpectedEOF(t *testing.T) {
+	t.Parallel()
+
+	// Initialized by the test case.
+	testcaseMux := make(map[string]http.HandlerFunc)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(responseWriter http.ResponseWriter, request *http.Request) {
+		testcase, ok := testcaseMux[request.Header.Get("Test-Case")]
+		if !ok {
+			responseWriter.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = io.Copy(io.Discard, request.Body)
+		testcase(responseWriter, request)
+	})
+	server := httptest.NewUnstartedServer(mux)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+
+	head := [5]byte{}
+	payload := []byte(`{"number": 42}`)
+	binary.BigEndian.PutUint32(head[1:], uint32(len(payload)))
+	testcases := []struct {
+		name       string
+		handler    http.HandlerFunc
+		options    []connect.ClientOption
+		expectCode connect.Code
+		expectMsg  string
+	}{{
+		name:    "connect_missing_end",
+		options: []connect.ClientOption{connect.WithProtoJSON()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/connect+json")
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload)
+		},
+		expectCode: connect.CodeInternal,
+		expectMsg:  "internal: protocol error: unexpected EOF",
+	}, {
+		name:    "grpc_missing_end",
+		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPC()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc+json")
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload)
+		},
+		expectCode: connect.CodeInternal,
+		expectMsg:  "internal: protocol error: no Grpc-Status trailer: unexpected EOF",
+	}, {
+		name:    "grpc-web_missing_end",
+		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc-web+json")
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload)
+		},
+		expectCode: connect.CodeInternal,
+		expectMsg:  "internal: protocol error: no Grpc-Status trailer: unexpected EOF",
+	}, {
+		name:    "connect_partial_payload",
+		options: []connect.ClientOption{connect.WithProtoJSON()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/connect+json")
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload[:len(payload)-1])
+		},
+		expectCode: connect.CodeInvalidArgument,
+		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+	}, {
+		name:    "grpc_partial_payload",
+		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPC()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc+json")
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload[:len(payload)-1])
+		},
+		expectCode: connect.CodeInvalidArgument,
+		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+	}, {
+		name:    "grpc-web_partial_payload",
+		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc-web+json")
+			_, _ = responseWriter.Write(head[:])
+			_, _ = responseWriter.Write(payload[:len(payload)-1])
+		},
+		expectCode: connect.CodeInvalidArgument,
+		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+	}, {
+		name:    "connect_partial_frame",
+		options: []connect.ClientOption{connect.WithProtoJSON()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/connect+json")
+			_, _ = responseWriter.Write(head[:4])
+		},
+		expectCode: connect.CodeInvalidArgument,
+		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
+	}, {
+		name:    "grpc_partial_frame",
+		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPC()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc+json")
+			_, _ = responseWriter.Write(head[:4])
+		},
+		expectCode: connect.CodeInvalidArgument,
+		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
+	}, {
+		name:    "grpc-web_partial_frame",
+		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc-web+json")
+			_, _ = responseWriter.Write(head[:4])
+		},
+		expectCode: connect.CodeInvalidArgument,
+		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
+	}}
+	for _, testcase := range testcases {
+		testcaseMux[t.Name()+"/"+testcase.name] = testcase.handler
+	}
+	for _, testcase := range testcases {
+		testcase := testcase
+		t.Run(testcase.name, func(t *testing.T) {
+			t.Parallel()
+			client := pingv1connect.NewPingServiceClient(
+				server.Client(),
+				server.URL,
+				testcase.options...,
+			)
+			const upTo = 2
+			request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
+			request.Header().Set("Test-Case", t.Name())
+			stream, err := client.CountUp(context.Background(), request)
+			assert.Nil(t, err)
+			for stream.Receive() {
+				assert.Equal(t, stream.Msg().Number, 42)
+			}
+			assert.NotNil(t, stream.Err())
+			t.Log(stream.Err())
+			assert.Equal(t, connect.CodeOf(stream.Err()), testcase.expectCode)
+			assert.Equal(t, stream.Err().Error(), testcase.expectMsg)
+		})
+	}
 }
 
 // TestBlankImportCodeGeneration tests that services.connect.go is generated with

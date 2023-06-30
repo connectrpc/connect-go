@@ -67,16 +67,10 @@ func (w *envelopeWriter) Marshal(message any) *Error {
 		}
 		return nil
 	}
-	raw, err := w.codec.Marshal(message)
-	if err != nil {
-		return errorf(CodeInternal, "marshal message: %w", err)
+	if appender, ok := w.codec.(marshalAppender); ok {
+		return w.marshalAppend(message, appender)
 	}
-	// We can't avoid allocating the byte slice, so we may as well reuse it once
-	// we're done with it.
-	buffer := bytes.NewBuffer(raw)
-	defer w.bufferPool.Put(buffer)
-	envelope := &envelope{Data: buffer}
-	return w.Write(envelope)
+	return w.marshal(message)
 }
 
 // Write writes the enveloped message, compressing as necessary. It doesn't
@@ -102,6 +96,44 @@ func (w *envelopeWriter) Write(env *envelope) *Error {
 		Data:  data,
 		Flags: env.Flags | flagEnvelopeCompressed,
 	})
+}
+
+func (w *envelopeWriter) marshalAppend(message any, codec marshalAppender) *Error {
+	// Codec supports MarshalAppend; try to re-use a []byte from the pool.
+	buffer := w.bufferPool.Get()
+	defer w.bufferPool.Put(buffer)
+	raw, err := codec.MarshalAppend(buffer.Bytes(), message)
+	if err != nil {
+		return errorf(CodeInternal, "marshal message: %w", err)
+	}
+	if cap(raw) > buffer.Cap() {
+		// The buffer from the pool was too small, so MarshalAppend grew the slice.
+		// Pessimistically assume that the too-small buffer is insufficient for the
+		// application workload, so there's no point in keeping it in the pool.
+		// Instead, replace it with the larger, newly-allocated slice. This
+		// allocates, but it's a small, constant-size allocation.
+		*buffer = *bytes.NewBuffer(raw)
+	} else {
+		// MarshalAppend didn't allocate, but we need to fix the internal state of
+		// the buffer. Compared to replacing the buffer (as above), buffer.Write
+		// copies but avoids allocating.
+		buffer.Write(raw)
+	}
+	envelope := &envelope{Data: buffer}
+	return w.Write(envelope)
+}
+
+func (w *envelopeWriter) marshal(message any) *Error {
+	// Codec doesn't support MarshalAppend; let Marshal allocate a []byte.
+	raw, err := w.codec.Marshal(message)
+	if err != nil {
+		return errorf(CodeInternal, "marshal message: %w", err)
+	}
+	buffer := bytes.NewBuffer(raw)
+	// Put our new []byte into the pool for later reuse.
+	defer w.bufferPool.Put(buffer)
+	envelope := &envelope{Data: buffer}
+	return w.Write(envelope)
 }
 
 func (w *envelopeWriter) write(env *envelope) *Error {
@@ -155,7 +187,7 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 		if r.compressionPool == nil {
 			return errorf(
 				CodeInvalidArgument,
-				"gRPC protocol error: sent compressed message without Grpc-Encoding header",
+				"protocol error: sent compressed message without Grpc-Encoding header",
 			)
 		}
 		decompressed := r.bufferPool.Get()
@@ -171,14 +203,11 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 		// stream. Save the message for protocol-specific code to process and
 		// return a sentinel error. Since we've deferred functions to return env's
 		// underlying buffer to a pool, we need to keep a copy.
+		copiedData := make([]byte, data.Len())
+		copy(copiedData, data.Bytes())
 		r.last = envelope{
-			Data:  r.bufferPool.Get(),
+			Data:  bytes.NewBuffer(copiedData),
 			Flags: env.Flags,
-		}
-		// Don't return last to the pool! We're going to reference the data
-		// elsewhere.
-		if _, err := r.last.Data.ReadFrom(data); err != nil {
-			return errorf(CodeUnknown, "copy final envelope: %w", err)
 		}
 		return errSpecialEnvelope
 	}
@@ -213,6 +242,9 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		if maxBytesErr := asMaxBytesError(err, "read 5 byte message prefix"); maxBytesErr != nil {
 			// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.
 			return maxBytesErr
+		}
+		if err == nil {
+			err = io.ErrUnexpectedEOF
 		}
 		return errorf(
 			CodeInvalidArgument,
