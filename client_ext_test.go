@@ -146,7 +146,7 @@ func TestClientPeer(t *testing.T) {
 		t.Parallel()
 		run(t, mux, http.MethodPost, connect.WithGRPCWeb())
 	})
-	t.Run("grpc_adapter", func(t *testing.T) {
+	t.Run("grpcadapt", func(t *testing.T) {
 		t.Parallel()
 		mux := grpcadapt.NewHandler(mux)
 		run(t, mux, http.MethodGet,

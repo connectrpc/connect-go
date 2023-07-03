@@ -74,9 +74,9 @@ const (
 // To use the adapter, pass in a http.Handler that serves gRPC requests such as:
 //
 //	grpcServer := grpc.NewServer()
-//	mux := grpcadapter.NewHandler(grpcServer,
-//		grpcadapter.WithReadMaxBuffer(1024*1024),
-//		grpcadapter.WithWriteMaxBuffer(1024*1024),
+//	mux := grpcadapt.NewHandler(grpcServer,
+//		grpcadapt.WithReadMaxBuffer(1024*1024),
+//		grpcadapt.WithWriteMaxBuffer(1024*1024),
 //	)
 //	http.ListenAndServe(":8080", h2c.NewHandler(mux, &http2.Server{}))
 func NewHandler(grpcHandler http.Handler, options ...Option) http.Handler {
@@ -134,7 +134,9 @@ func (f optionFunc) applyToConfig(config *config) {
 }
 
 // WithReadMaxBuffer returns a new Option that sets the maximum number of
-// bytes that can be buffered for a connect unary request.
+// bytes that can be buffered.
+// It only applies to connect unary requests.
+// Messages larger than this will be rejected with a Resource Exhausted error.
 func WithReadMaxBuffer(readMaxBytes int) Option {
 	return optionFunc(func(config *config) {
 		config.ReadMaxBytes = readMaxBytes
@@ -142,7 +144,9 @@ func WithReadMaxBuffer(readMaxBytes int) Option {
 }
 
 // WithWriteMaxBuffer returns a new Option that sets the maximum
-// number of bytes that can be buffered for a connect unary response.
+// number of bytes that can be buffered.
+// It only applies to connect unary responses.
+// Messages larger than this will be rejected with a Resource Exhausted error.
 func WithWriteMaxBuffer(writeMaxBytes int) Option {
 	return optionFunc(func(config *config) {
 		config.WriteMaxBytes = writeMaxBytes
