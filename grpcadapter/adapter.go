@@ -346,6 +346,22 @@ func (r *bufferedEnvelopeReader) fillBuffer() error {
 	return nil
 }
 
+type envelopeReader struct {
+	io.ReadCloser
+
+	head  [5]byte
+	index int
+}
+
+func (r *envelopeReader) Read(data []byte) (int, error) {
+	if r.index < len(r.head) {
+		n := copy(data, r.head[r.index:])
+		r.index += n
+		return n, nil
+	}
+	return r.ReadCloser.Read(data)
+}
+
 func translateConnectCommonToGRPC(request *http.Request) {
 	request.ProtoMajor = 2
 	request.ProtoMinor = 0
@@ -409,18 +425,32 @@ func translateConnectUnaryToGRPC(request *http.Request, contentType string, read
 			isCompressed: isCompressed,
 			maxBytes:     readMaxBytes,
 		}
-	} else {
-		isCompressed := false
-		if contentEncoding := getHeaderCanonical(header, connectUnaryHeaderCompression); len(contentEncoding) > 0 {
-			isCompressed = contentEncoding != "identity"
-			delHeaderCanonical(header, connectUnaryHeaderCompression)
-			setHeaderCanonical(header, grpcHeaderCompression, contentEncoding)
-		}
+		return
+	}
+	isCompressed := false
+	if contentEncoding := getHeaderCanonical(header, connectUnaryHeaderCompression); len(contentEncoding) > 0 {
+		isCompressed = contentEncoding != "identity"
+		delHeaderCanonical(header, connectUnaryHeaderCompression)
+		setHeaderCanonical(header, grpcHeaderCompression, contentEncoding)
+	}
+	if request.ContentLength <= 0 {
+		// no content length, buffer message
 		request.Body = &bufferedEnvelopeReader{
 			ReadCloser:   request.Body,
 			isCompressed: isCompressed,
 			maxBytes:     readMaxBytes,
 		}
+		return
+	}
+	var head [5]byte
+	if isCompressed {
+		head[0] = 1
+	}
+	size := uint32(request.ContentLength) // > 0
+	binary.BigEndian.PutUint32(head[1:], size)
+	request.Body = &envelopeReader{
+		ReadCloser: request.Body,
+		head:       head,
 	}
 }
 
@@ -491,9 +521,7 @@ func (w *connectStreamingResponseWriter) writeHeader(statusCode int) {
 		}
 		header[key] = values
 	}
-	if statusCode != http.StatusOK {
-		w.ResponseWriter.WriteHeader(statusCode)
-	}
+	w.ResponseWriter.WriteHeader(statusCode)
 	w.wroteHeader = true
 }
 
@@ -613,6 +641,7 @@ func (w *connectUnaryResponseWriter) writeHeader(statusCode int) {
 		}
 		header[key] = values
 	}
+	// Don't send headers to caputre trailers, unless there is an error.
 	if statusCode != http.StatusOK {
 		w.ResponseWriter.WriteHeader(statusCode)
 	}
