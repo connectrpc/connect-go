@@ -241,8 +241,9 @@ func generateServiceTypeAliases(g *protogen.GeneratedFile, services []*protogen.
 						", "+g.QualifiedGoIdent(method.Output.GoIdent)+"]")
 			} else if isStreamingClient {
 				g.P(typeNames.ClientRequest, " = ",
-					g.QualifiedGoIdent(connectPackage.Ident("Request"))+
-						"["+g.QualifiedGoIdent(method.Input.GoIdent)+"]")
+					g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClient"))+
+						"["+g.QualifiedGoIdent(method.Input.GoIdent)+
+						", "+g.QualifiedGoIdent(method.Output.GoIdent)+"]")
 				g.P(typeNames.HandlerRequest, " = ",
 					g.QualifiedGoIdent(connectPackage.Ident("ClientStream"))+
 						"["+g.QualifiedGoIdent(method.Input.GoIdent)+"]")

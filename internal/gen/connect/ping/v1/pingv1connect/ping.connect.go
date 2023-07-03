@@ -72,7 +72,7 @@ type (
 	PingServiceFailRequest  = connect_go.Request[v1.FailRequest]
 	PingServiceFailResponse = connect_go.Response[v1.FailResponse]
 	// Sum
-	PingServiceSumClientStream = connect_go.Request[v1.SumRequest]
+	PingServiceSumClientStream = connect_go.ClientStreamForClient[v1.SumRequest, v1.SumResponse]
 	PingServiceSumStream       = connect_go.ClientStream[v1.SumRequest]
 	PingServiceSumResponse     = connect_go.Response[v1.SumResponse]
 	// CountUp
