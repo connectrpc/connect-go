@@ -238,9 +238,9 @@ func (w *grpcWebResponseWriter) writeHeaders() {
 
 	isTrailer := map[string]struct{}{
 		// Force GRPC status values to be trailers.
-		grpcHeaderStatus:  struct{}{},
-		grpcHeaderDetails: struct{}{},
-		grpcHeaderMessage: struct{}{},
+		grpcHeaderStatus:  {},
+		grpcHeaderDetails: {},
+		grpcHeaderMessage: {},
 	}
 	for _, key := range strings.Split(header.Get(headerTrailer), ",") {
 		key = http.CanonicalHeaderKey(key)
@@ -723,7 +723,9 @@ func (w *connectUnaryResponseWriter) flushWithTrailers() {
 }
 
 func flushResponseWriter(responseWriter http.ResponseWriter) {
-	responseWriter.(http.Flusher).Flush()
+	if flusher, ok := responseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func isProtocolHeader(header string) bool {
