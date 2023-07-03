@@ -100,7 +100,7 @@ func NewHandler(grpcHandler http.Handler, options ...Option) http.Handler {
 		case isGRPCWebContentType(method, contentType):
 			// grpc-web -> grpc
 			translateGRPCWebToGRPC(request, contentType)
-			ww := newGRPCWebResponseWriter(responseWriter, contentType)
+			ww := newGRPCWebResponseWriter(responseWriter, contentType, config)
 			grpcHandler.ServeHTTP(ww, request)
 			ww.flushWithTrailers()
 		case isConnectStreamingContentType(method, contentType):
@@ -111,7 +111,7 @@ func NewHandler(grpcHandler http.Handler, options ...Option) http.Handler {
 			ww.flushWithTrailers()
 		case isConnectUnaryContentType(method, contentType):
 			// connect unary -> grpc
-			translateConnectUnaryToGRPC(request, contentType, config.ReadMaxBytes)
+			translateConnectUnaryToGRPC(request, contentType, config)
 			ww := newConnectUnaryResponseWriter(responseWriter, contentType, config)
 			grpcHandler.ServeHTTP(ww, request)
 			ww.flushWithTrailers()
@@ -153,11 +153,16 @@ type config struct {
 	ReadMaxBytes  int
 	WriteMaxBytes int
 	ErrorWriter   *connect.ErrorWriter
+	BufferPool    *bufferPool
 }
 
 func newConfig(options []Option) *config {
 	config := &config{
 		ErrorWriter: connect.NewErrorWriter(),
+		BufferPool: &bufferPool{
+			initialBufferSize:    512,
+			maxRecycleBufferSize: 8 * 1024 * 1024,
+		},
 	}
 	for _, option := range options {
 		option.applyToConfig(config)
@@ -178,15 +183,17 @@ func translateGRPCWebToGRPC(request *http.Request, contentType string) {
 type grpcWebResponseWriter struct {
 	http.ResponseWriter
 
+	config      *config
 	contentType string
 	seenHeaders map[string]struct{}
 	wroteHeader bool
 }
 
-func newGRPCWebResponseWriter(responseWriter http.ResponseWriter, contentType string) *grpcWebResponseWriter {
+func newGRPCWebResponseWriter(responseWriter http.ResponseWriter, contentType string, config *config) *grpcWebResponseWriter {
 	return &grpcWebResponseWriter{
 		ResponseWriter: responseWriter,
 		contentType:    contentType,
+		config:         config,
 	}
 }
 
@@ -271,8 +278,9 @@ func (w *grpcWebResponseWriter) writeTrailer() error {
 		trailer[strings.ToLower(key)] = values
 	}
 
-	var buf bytes.Buffer
-	if err := trailer.Write(&buf); err != nil {
+	buf := w.config.BufferPool.Get()
+	defer w.config.BufferPool.Put(buf)
+	if err := trailer.Write(buf); err != nil {
 		return err
 	}
 
@@ -291,8 +299,8 @@ func (w *grpcWebResponseWriter) writeTrailer() error {
 type bufferedEnvelopeReader struct {
 	io.ReadCloser
 
-	maxBytes       int
-	buf            bytes.Buffer
+	config         *config
+	buf            *bytes.Buffer // lazy initialized
 	hasInitialized bool
 	initializedErr error
 	isCompressed   bool
@@ -308,11 +316,23 @@ func (r *bufferedEnvelopeReader) Read(data []byte) (int, error) {
 	}
 	return r.buf.Read(data)
 }
+func (r *bufferedEnvelopeReader) Close() error {
+	if r.buf != nil {
+		r.config.BufferPool.Put(r.buf)
+		r.buf = nil
+	}
+	if r.initializedErr != nil {
+		r.initializedErr = io.EOF
+	}
+	return r.ReadCloser.Close()
+}
 
 func (r *bufferedEnvelopeReader) fillBuffer() error {
+	r.buf = r.config.BufferPool.Get()
+
 	var bodyReader io.Reader = r.ReadCloser
-	if r.maxBytes > 0 {
-		bodyReader = io.LimitReader(bodyReader, int64(r.maxBytes)+1)
+	if r.config.ReadMaxBytes > 0 {
+		bodyReader = io.LimitReader(bodyReader, int64(r.config.ReadMaxBytes)+1)
 	}
 	body, err := io.ReadAll(bodyReader)
 	if err != nil {
@@ -320,18 +340,18 @@ func (r *bufferedEnvelopeReader) fillBuffer() error {
 		return connect.NewError(connect.CodeUnknown, err)
 	}
 	// Check if read more than max bytes, try to determine the size of the message.
-	if r.maxBytes > 0 && len(body) > r.maxBytes {
+	if maxBytes := r.config.ReadMaxBytes; maxBytes > 0 && len(body) > maxBytes {
 		bytesRead := int64(len(body))
 		discardedBytes, err := io.Copy(io.Discard, r.ReadCloser)
 		if err != nil {
 			err := fmt.Errorf(
 				"message is larger than configured max %d - unable to determine message size: %w",
-				r.maxBytes, err)
+				maxBytes, err)
 			return connect.NewError(connect.CodeResourceExhausted, err)
 		}
 		err = fmt.Errorf(
 			"message size %d is larger than configured max %d",
-			bytesRead+discardedBytes, r.maxBytes)
+			bytesRead+discardedBytes, maxBytes)
 		return connect.NewError(connect.CodeResourceExhausted, err)
 	}
 
@@ -394,7 +414,7 @@ func translateConnectStreamingToGRPC(request *http.Request, contentType string) 
 	}
 }
 
-func translateConnectUnaryToGRPC(request *http.Request, contentType string, readMaxBytes int) {
+func translateConnectUnaryToGRPC(request *http.Request, contentType string, config *config) {
 	translateConnectCommonToGRPC(request)
 	header := request.Header
 
@@ -422,8 +442,8 @@ func translateConnectUnaryToGRPC(request *http.Request, contentType string, read
 		msgReader := queryValueReader(msg, query.Get(connectUnaryBase64QueryParameter) == "1")
 		request.Body = &bufferedEnvelopeReader{
 			ReadCloser:   io.NopCloser(msgReader),
+			config:       config,
 			isCompressed: isCompressed,
-			maxBytes:     readMaxBytes,
 		}
 		return
 	}
@@ -437,8 +457,8 @@ func translateConnectUnaryToGRPC(request *http.Request, contentType string, read
 		// no content length, buffer message
 		request.Body = &bufferedEnvelopeReader{
 			ReadCloser:   request.Body,
+			config:       config,
 			isCompressed: isCompressed,
-			maxBytes:     readMaxBytes,
 		}
 		return
 	}
@@ -575,9 +595,9 @@ type connectUnaryResponseWriter struct {
 
 	contentType string
 	config      *config
-	body        bytes.Buffer // buffered body for unary payloads
-	header      http.Header  // buffered header for trailer capture
-	wroteHeader bool         // whether header has been written
+	body        *bytes.Buffer // buffered body for unary payloads
+	header      http.Header   // buffered header for trailer capture
+	wroteHeader bool          // whether header has been written
 }
 
 func newConnectUnaryResponseWriter(responseWriter http.ResponseWriter, contentType string, config *config) *connectUnaryResponseWriter {
@@ -585,6 +605,7 @@ func newConnectUnaryResponseWriter(responseWriter http.ResponseWriter, contentTy
 		ResponseWriter: responseWriter,
 		contentType:    contentType,
 		config:         config,
+		body:           config.BufferPool.Get(),
 	}
 }
 
@@ -649,6 +670,10 @@ func (w *connectUnaryResponseWriter) writeHeader(statusCode int) {
 }
 
 func (w *connectUnaryResponseWriter) finalizeUnary() *connect.Error {
+	defer func() {
+		w.config.BufferPool.Put(w.body)
+		w.body = nil
+	}()
 	if !w.wroteHeader {
 		w.writeHeader(http.StatusOK)
 	}
@@ -694,9 +719,7 @@ func (w *connectUnaryResponseWriter) flushWithTrailers() {
 }
 
 func flushResponseWriter(responseWriter http.ResponseWriter) {
-	if flusher, ok := responseWriter.(http.Flusher); ok {
-		flusher.Flush()
-	}
+	responseWriter.(http.Flusher).Flush()
 }
 
 func isProtocolHeader(header string) bool {
