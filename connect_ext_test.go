@@ -29,13 +29,14 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	connect "github.com/bufbuild/connect-go"
-	"github.com/bufbuild/connect-go/grpcadapter"
+	"github.com/bufbuild/connect-go/grpcadapt"
 	"github.com/bufbuild/connect-go/internal/assert"
 	"github.com/bufbuild/connect-go/internal/gen/connect/import/v1/importv1connect"
 	pingv1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
@@ -457,7 +458,7 @@ func TestServer(t *testing.T) {
 
 			mux.ServeHTTP(responseWriter, request)
 		})
-		grpcMux := grpcadapter.NewHandler(gRPCOnlyMux)
+		grpcMux := grpcadapt.NewHandler(gRPCOnlyMux)
 		server := httptest.NewUnstartedServer(grpcMux)
 		server.EnableHTTP2 = true
 		server.StartTLS()
@@ -633,7 +634,7 @@ func TestTimeoutParsing(t *testing.T) {
 
 	t.Run("grpc_adapter", func(t *testing.T) {
 		t.Parallel()
-		mux := grpcadapter.NewHandler(mux)
+		mux := grpcadapt.NewHandler(mux)
 		server := httptest.NewUnstartedServer(mux)
 		server.EnableHTTP2 = true
 		server.StartTLS()
@@ -848,11 +849,11 @@ func TestGRPCAdapterHeaders(t *testing.T) {
 		header := responseWriter.Header()
 		header["content-type"] = []string{"application/grpc+proto"}
 		header.Set("Grpc-Message", "method Ping not implemented")
-		header.Set("grpc-status", "12")
+		header.Set("Grpc-Status", strconv.Itoa(int(connect.CodeUnimplemented)))
 		header.Set("Trailer", "Grpc-Status Grpc-Message Grpc-Status-Details-Bin")
 		responseWriter.WriteHeader(http.StatusOK)
 	})
-	server := httptest.NewUnstartedServer(grpcadapter.NewHandler(mux))
+	server := httptest.NewUnstartedServer(grpcadapt.NewHandler(mux))
 	server.EnableHTTP2 = true
 	server.StartTLS()
 	t.Cleanup(server.Close)
@@ -890,7 +891,7 @@ func TestGRPCAdapterProxy(t *testing.T) {
 	proxyReverseProxy.Transport = server.Client().Transport
 
 	proxy := httptest.NewUnstartedServer(
-		grpcadapter.NewHandler(proxyReverseProxy),
+		grpcadapt.NewHandler(proxyReverseProxy),
 	)
 	proxy.EnableHTTP2 = true
 	proxy.StartTLS()
@@ -1304,7 +1305,7 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 		// Unrestricted mux.
 		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
 		// Restricted GRPC handler.
-		grpcMux := grpcadapter.NewHandler(mux, grpcadapter.WithReadMaxBuffer(readMaxBytes))
+		grpcMux := grpcadapt.NewHandler(mux, grpcadapt.WithReadMaxBuffer(readMaxBytes))
 		server := newHTTP2Server(t, grpcMux)
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
 		readMaxBytesMatrix(t, client, false)
