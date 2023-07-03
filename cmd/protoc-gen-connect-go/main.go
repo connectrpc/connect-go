@@ -135,6 +135,7 @@ func generate(plugin *protogen.Plugin, file *protogen.File) {
 	generatedFile.Import(file.GoImportPath)
 	generatePreamble(generatedFile, file)
 	generateServiceNameConstants(generatedFile, file.Services)
+	generateServiceTypeAliases(generatedFile, file.Services)
 	for _, service := range file.Services {
 		generateService(generatedFile, service)
 	}
@@ -213,6 +214,59 @@ func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protoge
 			wrapComments(g, procedureConstName(method), " is the fully-qualified name of the ",
 				service.Desc.Name(), "'s ", method.Desc.Name(), " RPC.")
 			g.P(procedureConstName(method), ` = "`, fmt.Sprintf("/%s/%s", service.Desc.FullName(), method.Desc.Name()), `"`)
+		}
+	}
+	g.P(")")
+	g.P()
+}
+
+func generateServiceTypeAliases(g *protogen.GeneratedFile, services []*protogen.Service) {
+	// TODO: comment
+	g.P("type (")
+	for _, service := range services {
+		for _, method := range service.Methods {
+			typeNames := makeMethodTypeNames(method)
+
+			isStreamingClient := method.Desc.IsStreamingClient()
+			isStreamingServer := method.Desc.IsStreamingServer()
+			g.P("// ", method.GoName)
+			if isStreamingClient && isStreamingServer {
+				g.P(typeNames.ClientRequest, " = ",
+					g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClient"))+
+						"["+g.QualifiedGoIdent(method.Input.GoIdent)+
+						", "+g.QualifiedGoIdent(method.Output.GoIdent)+"]")
+				g.P(typeNames.HandlerRequest, " = ",
+					g.QualifiedGoIdent(connectPackage.Ident("BidiStream"))+
+						"["+g.QualifiedGoIdent(method.Input.GoIdent)+
+						", "+g.QualifiedGoIdent(method.Output.GoIdent)+"]")
+			} else if isStreamingClient {
+				g.P(typeNames.ClientRequest, " = ",
+					g.QualifiedGoIdent(connectPackage.Ident("Request"))+
+						"["+g.QualifiedGoIdent(method.Input.GoIdent)+"]")
+				g.P(typeNames.HandlerRequest, " = ",
+					g.QualifiedGoIdent(connectPackage.Ident("ClientStream"))+
+						"["+g.QualifiedGoIdent(method.Input.GoIdent)+"]")
+				g.P(typeNames.HandlerResponse, " = ",
+					g.QualifiedGoIdent(connectPackage.Ident("Response"))+
+						"["+g.QualifiedGoIdent(method.Output.GoIdent)+"]")
+			} else if isStreamingServer {
+				g.P(typeNames.HandlerRequest, " = ",
+					g.QualifiedGoIdent(connectPackage.Ident("Request"))+
+						"["+g.QualifiedGoIdent(method.Input.GoIdent)+"]")
+				g.P(typeNames.ClientResponse, " = ",
+					g.QualifiedGoIdent(connectPackage.Ident("ServerStreamForClient"))+
+						"["+g.QualifiedGoIdent(method.Output.GoIdent)+"]")
+				g.P(typeNames.HandlerResponse, " = ",
+					g.QualifiedGoIdent(connectPackage.Ident("ServerStream"))+
+						"["+g.QualifiedGoIdent(method.Output.GoIdent)+"]")
+			} else {
+				g.P(typeNames.HandlerRequest, " = ",
+					g.QualifiedGoIdent(connectPackage.Ident("Request"))+"["+
+						g.QualifiedGoIdent(method.Input.GoIdent)+"]")
+				g.P(typeNames.HandlerResponse, " = ",
+					g.QualifiedGoIdent(connectPackage.Ident("Response"))+"["+
+						g.QualifiedGoIdent(method.Output.GoIdent)+"]")
+			}
 		}
 	}
 	g.P(")")
@@ -339,24 +393,21 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named b
 	if !named {
 		reqName, ctxName = "", ""
 	}
+	typeNames := makeMethodTypeNames(method)
 	if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
 		// bidi streaming
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
-			"*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClient")) +
-			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
+			"*" + typeNames.ClientRequest
 	}
 	if method.Desc.IsStreamingClient() {
 		// client streaming
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
-			"*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClient")) +
-			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
+			"*" + typeNames.ClientRequest
 	}
 	if method.Desc.IsStreamingServer() {
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
-			", " + reqName + " *" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
-			g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
-			"(*" + g.QualifiedGoIdent(connectPackage.Ident("ServerStreamForClient")) +
-			"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
+			", " + reqName + " *" + typeNames.ClientRequest + ") " +
+			"(*" + typeNames.ClientResponse +
 			", error)"
 	}
 	// unary; symmetric so we can re-use server templating
@@ -471,35 +522,72 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 	if !named {
 		ctxName, reqName, streamName = "", "", ""
 	}
+	typeNames := makeMethodTypeNames(method)
 	if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
 		// bidi streaming
 		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ", " +
-			streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStream")) +
-			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
-			") error"
+			streamName + "*" + typeNames.HandlerRequest + ") error"
 	}
 	if method.Desc.IsStreamingClient() {
 		// client streaming
 		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ", " +
-			streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStream")) +
-			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + "]" +
-			") (*" + g.QualifiedGoIdent(connectPackage.Ident("Response")) + "[" + g.QualifiedGoIdent(method.Output.GoIdent) + "] ,error)"
+			streamName + "*" + typeNames.HandlerRequest +
+			") (*" + typeNames.HandlerResponse + " ,error)"
 	}
 	if method.Desc.IsStreamingServer() {
 		// server streaming
 		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
-			", " + reqName + "*" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
-			g.QualifiedGoIdent(method.Input.GoIdent) + "], " +
-			streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ServerStream")) +
-			"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
-			") error"
+			", " + reqName + "*" + typeNames.HandlerRequest + ", " +
+			streamName + "*" + typeNames.HandlerResponse + ") error"
 	}
 	// unary
 	return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
-		", " + reqName + "*" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
-		g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
-		"(*" + g.QualifiedGoIdent(connectPackage.Ident("Response")) + "[" +
-		g.QualifiedGoIdent(method.Output.GoIdent) + "], error)"
+		", " + reqName + "*" + typeNames.HandlerRequest + ") " +
+		"(*" + typeNames.HandlerResponse + ", error)"
+}
+
+type methodTypeNames struct {
+	ClientRequest   string
+	ClientResponse  string
+	HandlerRequest  string
+	HandlerResponse string
+}
+
+func makeMethodTypeNames(method *protogen.Method) methodTypeNames {
+	isStreamingClient := method.Desc.IsStreamingClient()
+	isStreamingServer := method.Desc.IsStreamingServer()
+	methodPrefix := method.Parent.GoName + method.GoName
+
+	if isStreamingClient && isStreamingServer {
+		return methodTypeNames{
+			ClientRequest:   methodPrefix + "ClientStream", // 1
+			ClientResponse:  methodPrefix + "ClientStream", // 1
+			HandlerRequest:  methodPrefix + "Stream",       // 2
+			HandlerResponse: methodPrefix + "Stream",       // 2
+		}
+	} else if isStreamingClient {
+		return methodTypeNames{
+			ClientRequest:   methodPrefix + "ClientStream", // 1
+			ClientResponse:  methodPrefix + "ClientStream", // 1
+			HandlerRequest:  methodPrefix + "Stream",       // 2
+			HandlerResponse: methodPrefix + "Response",     // 3
+		}
+
+	} else if isStreamingServer {
+		return methodTypeNames{
+			ClientRequest:   methodPrefix + "Request",      // 1
+			ClientResponse:  methodPrefix + "ClientStream", // 2
+			HandlerRequest:  methodPrefix + "Request",      // 1
+			HandlerResponse: methodPrefix + "Stream",       // 3
+		}
+	} else {
+		return methodTypeNames{
+			ClientRequest:   methodPrefix + "Request",  // 1
+			ClientResponse:  methodPrefix + "Response", // 2
+			HandlerRequest:  methodPrefix + "Request",  // 1
+			HandlerResponse: methodPrefix + "Response", // 2
+		}
+	}
 }
 
 func procedureConstName(m *protogen.Method) string {
