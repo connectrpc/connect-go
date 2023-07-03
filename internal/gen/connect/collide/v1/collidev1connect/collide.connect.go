@@ -51,9 +51,15 @@ const (
 	CollideServiceImportProcedure = "/connect.collide.v1.CollideService/Import"
 )
 
+type (
+	// Import
+	CollideServiceImportRequest  = connect_go.Request[v1.ImportRequest]
+	CollideServiceImportResponse = connect_go.Response[v1.ImportResponse]
+)
+
 // CollideServiceClient is a client for the connect.collide.v1.CollideService service.
 type CollideServiceClient interface {
-	Import(context.Context, *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error)
+	Import(context.Context, *CollideServiceImportRequest) (*CollideServiceImportResponse, error)
 }
 
 // NewCollideServiceClient constructs a client for the connect.collide.v1.CollideService service. By
@@ -80,13 +86,13 @@ type collideServiceClient struct {
 }
 
 // Import calls connect.collide.v1.CollideService.Import.
-func (c *collideServiceClient) Import(ctx context.Context, req *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error) {
+func (c *collideServiceClient) Import(ctx context.Context, req *CollideServiceImportRequest) (*CollideServiceImportResponse, error) {
 	return c._import.CallUnary(ctx, req)
 }
 
 // CollideServiceHandler is an implementation of the connect.collide.v1.CollideService service.
 type CollideServiceHandler interface {
-	Import(context.Context, *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error)
+	Import(context.Context, *CollideServiceImportRequest) (*CollideServiceImportResponse, error)
 }
 
 // NewCollideServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -113,6 +119,6 @@ func NewCollideServiceHandler(svc CollideServiceHandler, opts ...connect_go.Hand
 // UnimplementedCollideServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedCollideServiceHandler struct{}
 
-func (UnimplementedCollideServiceHandler) Import(context.Context, *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error) {
+func (UnimplementedCollideServiceHandler) Import(context.Context, *CollideServiceImportRequest) (*CollideServiceImportResponse, error) {
 	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.collide.v1.CollideService.Import is not implemented"))
 }

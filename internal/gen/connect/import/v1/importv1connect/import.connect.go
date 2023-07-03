@@ -37,6 +37,8 @@ const (
 	ImportServiceName = "connect.import.v1.ImportService"
 )
 
+type ()
+
 // ImportServiceClient is a client for the connect.import.v1.ImportService service.
 type ImportServiceClient interface {
 }
