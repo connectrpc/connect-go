@@ -40,8 +40,9 @@ type ErrorWriter struct {
 // NewErrorWriter constructs an ErrorWriter. To properly recognize supported
 // RPC Content-Types in net/http middleware, you must pass the same
 // HandlerOptions to NewErrorWriter and any wrapped Connect handlers.
+// Conditional options are ignored.
 func NewErrorWriter(opts ...HandlerOption) *ErrorWriter {
-	config := newHandlerConfig("", ^StreamType(0), opts)
+	config := newHandlerConfig("", StreamTypeUnary, opts)
 	writer := &ErrorWriter{
 		bufferPool:                   config.BufferPool,
 		protobuf:                     newReadOnlyCodecs(config.Codecs).Protobuf(),
