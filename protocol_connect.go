@@ -366,7 +366,7 @@ func (c *connectClient) NewConn(
 			} // else effectively unbounded
 		}
 	}
-	duplexCall := newDuplexHTTPCall(ctx, c.HTTPClient, c.URL, spec, header, c.BufferPool)
+	duplexCall := newDuplexHTTPCall(ctx, c.HTTPClient, c.URL, spec, header)
 	var conn streamingClientConn
 	if spec.StreamType == StreamTypeUnary {
 		unaryConn := &connectUnaryClientConn{

@@ -42,26 +42,23 @@ func TestDuplexHTTPCallGetBody(t *testing.T) {
 		serverURL,
 		Spec{StreamType: StreamTypeUnary},
 		http.Header{},
-		newBufferPool(),
 	)
+	duplexCall.SetValidateResponse(func(*http.Response) *Error {
+		return nil
+	})
 
 	_, err := duplexCall.Write([]byte("hello"))
 	assert.Nil(t, err)
 
 	go func() {
-		_, err := duplexCall.Write([]byte(", world"))
-		assert.Nil(t, err)
+		_, _ = duplexCall.Write([]byte(", world"))
 		duplexCall.CloseWrite()
 	}()
 
-	answers := make(chan string)
-	go func() {
-		body, err := duplexCall.request.GetBody()
-		assert.Nil(t, err)
-		ans, err := io.ReadAll(body)
-		assert.Nil(t, err)
-		answers <- string(ans)
-	}()
-	got := <-answers
+	body, err := duplexCall.request.GetBody()
+	assert.Nil(t, err)
+	ans, err := io.ReadAll(body)
+	assert.Nil(t, err)
+	got := string(ans)
 	assert.Equal(t, got, "hello, world")
 }

@@ -288,7 +288,6 @@ func (g *grpcClient) NewConn(
 		g.URL,
 		spec,
 		header,
-		g.BufferPool,
 	)
 	conn := &grpcClientConn{
 		spec:             spec,

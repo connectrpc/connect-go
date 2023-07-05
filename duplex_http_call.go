@@ -36,7 +36,6 @@ type duplexHTTPCall struct {
 	streamType       StreamType
 	onRequestSend    func(*http.Request)
 	validateResponse func(*http.Response) *Error
-	bufferPool       *bufferPool
 
 	// We'll use a pipe as the request body. We hand the read side of the pipe to
 	// net/http, and we write to the write side (naturally). The two ends are
@@ -50,7 +49,7 @@ type duplexHTTPCall struct {
 	response        *http.Response
 
 	requestBodyMu  sync.Mutex
-	requestBodyBuf *bytes.Buffer
+	requestBodyBuf bytes.Buffer
 
 	errMu sync.Mutex
 	err   error
@@ -62,7 +61,6 @@ func newDuplexHTTPCall(
 	url *url.URL,
 	spec Spec,
 	header http.Header,
-	bufferPool *bufferPool,
 ) *duplexHTTPCall {
 	// ensure we make a copy of the url before we pass along to the
 	// Request. This ensures if a transport out of our control wants
@@ -90,7 +88,6 @@ func newDuplexHTTPCall(
 		ctx:               ctx,
 		httpClient:        httpClient,
 		streamType:        spec.StreamType,
-		bufferPool:        bufferPool,
 		requestBodyReader: pipeReader,
 		requestBodyWriter: pipeWriter,
 		request:           request,
@@ -107,6 +104,9 @@ func (d *duplexHTTPCall) Write(data []byte) (int, error) {
 		d.SetError(err)
 		return 0, wrapIfContextError(err)
 	}
+	d.requestBodyMu.Lock()
+	defer d.requestBodyMu.Unlock()
+
 	// It's safe to write to this side of the pipe while net/http concurrently
 	// reads from the other side.
 	bytesWritten, err := d.requestBodyWriter.Write(data)
@@ -116,11 +116,9 @@ func (d *duplexHTTPCall) Write(data []byte) (int, error) {
 		// match grpc-go's behavior.
 		return bytesWritten, io.EOF
 	}
-	if d.requestBodyBuf != nil {
+	if d.streamType == StreamTypeUnary {
 		// If we're buffering the request body, write to the buffer as well.
-		d.requestBodyMu.Lock()
 		_, _ = d.requestBodyBuf.Write(data)
-		d.requestBodyMu.Unlock()
 	}
 	return bytesWritten, err
 }
@@ -281,7 +279,6 @@ func (d *duplexHTTPCall) makeRequest() {
 	// If we're sending a unary request, we need to buffer the request body so
 	// that we can send it again if we need to retry.
 	if d.streamType == StreamTypeUnary {
-		d.requestBodyBuf = d.bufferPool.Get()
 		d.request.GetBody = func() (io.ReadCloser, error) {
 			d.requestBodyMu.Lock()
 			buf := d.requestBodyBuf.Bytes()
