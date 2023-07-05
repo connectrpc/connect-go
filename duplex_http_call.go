@@ -356,6 +356,9 @@ type reReader struct {
 func (r *reReader) Read(b []byte) (int, error) {
 	if r.index >= int64(len(r.buf)) {
 		n, err := r.src.Read(b)
+		if errors.Is(err, io.ErrClosedPipe) {
+			err = io.EOF
+		}
 		return n, err
 	}
 	n := copy(b, r.buf[r.index:])
