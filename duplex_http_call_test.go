@@ -30,7 +30,8 @@ func TestDuplexHTTPCallGetBody(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("hello world"))
+		b, _ := io.ReadAll(r.Body)
+		_, _ = w.Write(b)
 	}))
 	t.Cleanup(server.Close)
 
@@ -44,12 +45,23 @@ func TestDuplexHTTPCallGetBody(t *testing.T) {
 		newBufferPool(),
 	)
 
-	_, err := duplexCall.Write([]byte("hello world"))
+	_, err := duplexCall.Write([]byte("hello"))
 	assert.Nil(t, err)
-	body, err := duplexCall.request.GetBody()
-	assert.Nil(t, err)
-	ans, err := io.ReadAll(body)
-	assert.Nil(t, err)
-	assert.Equal(t, "hello world", string(ans))
-	assert.Nil(t, duplexCall.CloseWrite())
+
+	go func() {
+		_, err := duplexCall.Write([]byte(", world"))
+		assert.Nil(t, err)
+		duplexCall.CloseWrite()
+	}()
+
+	answers := make(chan string)
+	go func() {
+		body, err := duplexCall.request.GetBody()
+		assert.Nil(t, err)
+		ans, err := io.ReadAll(body)
+		assert.Nil(t, err)
+		answers <- string(ans)
+	}()
+	got := <-answers
+	assert.Equal(t, got, "hello, world")
 }

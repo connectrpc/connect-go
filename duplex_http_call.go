@@ -47,8 +47,10 @@ type duplexHTTPCall struct {
 	sendRequestOnce sync.Once
 	responseReady   chan struct{}
 	request         *http.Request
-	requestBodyBuf  *bytes.Buffer
 	response        *http.Response
+
+	requestBodyMu  sync.Mutex
+	requestBodyBuf *bytes.Buffer
 
 	errMu sync.Mutex
 	err   error
@@ -116,7 +118,9 @@ func (d *duplexHTTPCall) Write(data []byte) (int, error) {
 	}
 	if d.requestBodyBuf != nil {
 		// If we're buffering the request body, write to the buffer as well.
+		d.requestBodyMu.Lock()
 		_, _ = d.requestBodyBuf.Write(data)
+		d.requestBodyMu.Unlock()
 	}
 	return bytesWritten, err
 }
@@ -279,11 +283,14 @@ func (d *duplexHTTPCall) makeRequest() {
 	if d.streamType == StreamTypeUnary {
 		d.requestBodyBuf = d.bufferPool.Get()
 		d.request.GetBody = func() (io.ReadCloser, error) {
+			d.requestBodyMu.Lock()
 			buf := d.requestBodyBuf.Bytes()
-			reader := bytes.NewReader(buf)
-			return io.NopCloser(reader), nil
+			d.requestBodyMu.Unlock()
+			return &reReader{
+				src: d.requestBodyReader, // read io.PipeReader.
+				buf: buf,
+			}, nil
 		}
-
 	}
 	// Once we send a message to the server, they send a message back and
 	// establish the receive side of the stream.
@@ -336,3 +343,23 @@ func cloneURL(oldURL *url.URL) *url.URL {
 	}
 	return newURL
 }
+
+// reReader is an io.Reader that reads from a buffer, then from the request body.
+// It's used to replay the request body if we need to retry a unary request.
+// See: https://cs.opensource.google/go/go/+/refs/tags/go1.20.5:src/net/http/request.go;l=187-193
+type reReader struct {
+	src   io.ReadCloser
+	buf   []byte
+	index int64
+}
+
+func (r *reReader) Read(b []byte) (int, error) {
+	if r.index >= int64(len(r.buf)) {
+		n, err := r.src.Read(b)
+		return n, err
+	}
+	n := copy(b, r.buf[r.index:])
+	r.index += int64(n)
+	return n, nil
+}
+func (r *reReader) Close() error { return r.src.Close() }
