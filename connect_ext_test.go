@@ -2227,7 +2227,6 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 				assert.Equal(t, stream.Msg().Number, 42)
 			}
 			assert.NotNil(t, stream.Err())
-			t.Log(stream.Err())
 			assert.Equal(t, connect.CodeOf(stream.Err()), testcase.expectCode)
 			assert.Equal(t, stream.Err().Error(), testcase.expectMsg)
 		})
