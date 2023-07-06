@@ -15,6 +15,7 @@
 package connect
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -36,16 +37,12 @@ type duplexHTTPCall struct {
 	onRequestSend    func(*http.Request)
 	validateResponse func(*http.Response) *Error
 
-	// We'll use a pipe as the request body. We hand the read side of the pipe to
-	// net/http, and we write to the write side (naturally). The two ends are
-	// safe to use concurrently.
-	requestBodyReader *io.PipeReader
-	requestBodyWriter *io.PipeWriter
-
-	sendRequestOnce sync.Once
-	responseReady   chan struct{}
-	request         *http.Request
-	response        *http.Response
+	sendRequestOnce   sync.Once
+	responseReady     chan struct{}
+	requestBodyWriter *writeBuffer //*io.PipeWriter
+	request           *http.Request
+	response          *http.Response
+	bufferPool        *bufferPool
 
 	errMu sync.Mutex
 	err   error
@@ -57,12 +54,16 @@ func newDuplexHTTPCall(
 	url *url.URL,
 	spec Spec,
 	header http.Header,
+	bufferPool *bufferPool,
 ) *duplexHTTPCall {
 	// ensure we make a copy of the url before we pass along to the
 	// Request. This ensures if a transport out of our control wants
 	// to mutate the req.URL, we don't feel the effects of it.
 	url = cloneURL(url)
 	pipeReader, pipeWriter := io.Pipe()
+	writeBuffer := &writeBuffer{
+		dst: pipeWriter,
+	}
 
 	// This is mirroring what http.NewRequestContext did, but
 	// using an already parsed url.URL object, rather than a string
@@ -77,17 +78,31 @@ func newDuplexHTTPCall(
 		Proto:      "HTTP/1.1",
 		ProtoMajor: 1,
 		ProtoMinor: 1,
-		Body:       pipeReader,
 		Host:       url.Host,
+		Body:       pipeReader,
+		GetBody: func() (io.ReadCloser, error) {
+			// GetBody is called by the http client on request retries.
+			// We need to return a reader that will read from the buffer
+			// and then the pipe reader.
+			buf := writeBuffer.getBytes()
+			if buf == nil {
+				// Buffer is gone, so we can't return a reader.
+				return nil, fmt.Errorf("GetBody called after request was sent")
+			}
+			bufferReader := bytes.NewReader(buf)
+			return io.NopCloser(
+				io.MultiReader(bufferReader, pipeReader),
+			), nil
+		},
 	}).WithContext(ctx)
 	return &duplexHTTPCall{
 		ctx:               ctx,
 		httpClient:        httpClient,
 		streamType:        spec.StreamType,
-		requestBodyReader: pipeReader,
-		requestBodyWriter: pipeWriter,
 		request:           request,
+		requestBodyWriter: writeBuffer,
 		responseReady:     make(chan struct{}),
+		bufferPool:        bufferPool,
 	}
 }
 
@@ -233,7 +248,7 @@ func (d *duplexHTTPCall) SetError(err error) {
 	//
 	// It's safe to ignore the returned error here. Under the hood, Close calls
 	// CloseWithError, which is documented to always return nil.
-	_ = d.requestBodyReader.Close()
+	_ = d.request.Body.Close()
 }
 
 // SetValidateResponse sets the response validation function. The function runs
@@ -248,14 +263,67 @@ func (d *duplexHTTPCall) BlockUntilResponseReady() {
 
 func (d *duplexHTTPCall) ensureRequestMade() {
 	d.sendRequestOnce.Do(func() {
+		// Initialize the request body write buffer before writes.
+		d.requestBodyWriter.set(d.bufferPool)
+
 		go d.makeRequest()
 	})
+}
+
+// writeBuffer is a write-through cache.
+type writeBuffer struct {
+	dst io.WriteCloser
+
+	mu     sync.Mutex
+	buffer *bytes.Buffer
+}
+
+// Write to dst and buffer the data if possible.
+func (b *writeBuffer) Write(p []byte) (int, error) {
+	n, err := b.dst.Write(p)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.buffer == nil || err != nil {
+		return n, err
+	}
+	_, _ = b.buffer.Write(p[:n])
+	if b.buffer.Len() > maxRecycleBufferSize {
+		b.buffer = nil // Don't recycle large buffers.
+	}
+	return n, err
+}
+func (b *writeBuffer) Close() error {
+	return b.dst.Close()
+}
+func (b *writeBuffer) put(pool *bufferPool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.buffer != nil {
+		pool.Put(b.buffer)
+	}
+	b.buffer = nil
+}
+func (b *writeBuffer) getBytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.buffer != nil {
+		return b.buffer.Bytes()
+	}
+	return nil
+}
+func (b *writeBuffer) set(pool *bufferPool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buffer = pool.Get()
 }
 
 func (d *duplexHTTPCall) makeRequest() {
 	// This runs concurrently with Write and CloseWrite. Read and CloseRead wait
 	// on d.responseReady, so we can't race with them.
 	defer close(d.responseReady)
+
+	// Release the request body buffer when we're done.
+	defer d.requestBodyWriter.put(d.bufferPool)
 
 	// Promote the header Host to the request object.
 	if host := d.request.Header.Get(headerHost); len(host) > 0 {
