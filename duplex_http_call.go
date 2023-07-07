@@ -348,7 +348,7 @@ type bufferPipeWriter struct {
 	buffer *bytes.Buffer
 }
 
-// Write to dst and buffer the data if possible.
+// Write to the PipeWriter and buffer the data if available.
 func (b *bufferPipeWriter) Write(data []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -362,6 +362,8 @@ func (b *bufferPipeWriter) Write(data []byte) (int, error) {
 	}
 	return bytesWritten, err
 }
+
+// put returns the buffer to the pool.
 func (b *bufferPipeWriter) put(pool *bufferPool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -370,14 +372,21 @@ func (b *bufferPipeWriter) put(pool *bufferPool) {
 	}
 	b.buffer = nil
 }
+
+// getBytes returns a copy of the buffered bytes.
 func (b *bufferPipeWriter) getBytes() []byte {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.buffer != nil {
-		return b.buffer.Bytes()
+		buf := b.buffer.Bytes()
+		copyBuf := make([]byte, len(buf))
+		copy(copyBuf, buf)
+		return copyBuf
 	}
 	return nil
 }
+
+// set sets the buffer, replacing the existing buffer.
 func (b *bufferPipeWriter) set(pool *bufferPool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -391,6 +400,7 @@ type bufferedPipeReader struct {
 	index int
 }
 
+// Read from the buffer then once exhausted from the PipeReader.
 func (b *bufferedPipeReader) Read(data []byte) (int, error) {
 	if b.index >= len(b.buf) {
 		bytesRead, err := b.PipeReader.Read(data)
