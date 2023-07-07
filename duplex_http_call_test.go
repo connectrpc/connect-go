@@ -74,9 +74,12 @@ func TestDuplexHTTPCallGetBody(t *testing.T) {
 		if err := duplexCall.CloseWrite(); err != nil {
 			return err
 		}
-		_, err = io.ReadAll(duplexCall)
+		body, err := io.ReadAll(duplexCall)
 		if err != nil {
 			return err
+		}
+		if string(body) != "hello" {
+			return fmt.Errorf("expected %q, got %q", "hello", string(body))
 		}
 		if getBodyCalled {
 			return errGetBodyCalled
