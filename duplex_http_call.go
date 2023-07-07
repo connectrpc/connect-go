@@ -40,9 +40,10 @@ type duplexHTTPCall struct {
 
 	sendRequestOnce   sync.Once
 	responseReady     chan struct{}
-	requestBodyWriter *bufferPipeWriter // Buffer for the request body.
 	request           *http.Request
 	response          *http.Response
+	requestBodyWriter *io.PipeWriter
+	requestBodyReader *bufferPipeReader
 
 	errMu sync.Mutex
 	err   error
@@ -61,8 +62,8 @@ func newDuplexHTTPCall(
 	// to mutate the req.URL, we don't feel the effects of it.
 	url = cloneURL(url)
 	pipeReader, pipeWriter := io.Pipe()
-	writeBuffer := &bufferPipeWriter{
-		PipeWriter: pipeWriter,
+	pipeBuffer := &bufferPipeReader{
+		PipeReader: pipeReader,
 	}
 
 	// This is mirroring what http.NewRequestContext did, but
@@ -79,16 +80,17 @@ func newDuplexHTTPCall(
 		ProtoMajor: 1,
 		ProtoMinor: 1,
 		Host:       url.Host,
-		Body:       pipeReader,
+		Body:       pipeBuffer,
 		GetBody: func() (io.ReadCloser, error) {
 			// GetBody is called by the http client on request retries.
 			// We need to return a reader that will read from the buffer
 			// and then the pipe reader.
-			buf := writeBuffer.getBytes()
+			buf := pipeBuffer.getBytes()
 			if buf == nil {
 				// Buffer is gone, so we can't return a reader.
 				return nil, errorf(
-					CodeUnavailable, "request failed for retryable reason",
+					CodeUnavailable,
+					"request failed for retryable reason",
 				)
 			}
 			return &bufferedPipeReader{
@@ -102,7 +104,8 @@ func newDuplexHTTPCall(
 		httpClient:        httpClient,
 		streamType:        spec.StreamType,
 		request:           request,
-		requestBodyWriter: writeBuffer,
+		requestBodyWriter: pipeWriter,
+		requestBodyReader: pipeBuffer,
 		responseReady:     make(chan struct{}),
 		bufferPool:        bufferPool,
 	}
@@ -266,7 +269,7 @@ func (d *duplexHTTPCall) BlockUntilResponseReady() {
 func (d *duplexHTTPCall) ensureRequestMade() {
 	d.sendRequestOnce.Do(func() {
 		// Initialize the request body write buffer before writes.
-		d.requestBodyWriter.set(d.bufferPool)
+		d.requestBodyReader.set(d.bufferPool)
 
 		go d.makeRequest()
 	})
@@ -277,8 +280,8 @@ func (d *duplexHTTPCall) makeRequest() {
 	// on d.responseReady, so we can't race with them.
 	defer close(d.responseReady)
 
-	// Release the request body buffer when we're done.
-	defer d.requestBodyWriter.put(d.bufferPool)
+	// Release the request body buffer when the request is established.
+	defer d.requestBodyReader.put(d.bufferPool)
 
 	// Promote the header Host to the request object.
 	if host := d.request.Header.Get(headerHost); len(host) > 0 {
@@ -340,31 +343,34 @@ func cloneURL(oldURL *url.URL) *url.URL {
 	return newURL
 }
 
-// bufferPipeWriter is a write-through cache.
-type bufferPipeWriter struct {
-	*io.PipeWriter
+// bufferPipeReader is a write-through cache.
+type bufferPipeReader struct {
+	*io.PipeReader
 
 	mu     sync.Mutex
 	buffer *bytes.Buffer
 }
 
-// Write to the PipeWriter and buffer the data if available.
-func (b *bufferPipeWriter) Write(data []byte) (int, error) {
+// Read to the PipeReader copy to the buffer if available.
+func (b *bufferPipeReader) Read(data []byte) (int, error) {
+	bytesRead, err := b.PipeReader.Read(data)
+	if err != nil {
+		return bytesRead, err
+	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	bytesWritten, err := b.PipeWriter.Write(data)
-	if b.buffer == nil || err != nil {
-		return bytesWritten, err
+	if b.buffer != nil {
+		_, _ = b.buffer.Write(data[:bytesRead])
+		if b.buffer.Len() > maxRecycleBufferSize {
+			b.buffer = nil // Release large buffers.
+		}
 	}
-	_, _ = b.buffer.Write(data[:bytesWritten])
-	if b.buffer.Len() > maxRecycleBufferSize {
-		b.buffer = nil // Don't recycle large buffers.
-	}
-	return bytesWritten, err
+	return bytesRead, err
 }
 
 // put returns the buffer to the pool.
-func (b *bufferPipeWriter) put(pool *bufferPool) {
+func (b *bufferPipeReader) put(pool *bufferPool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.buffer != nil {
@@ -374,7 +380,7 @@ func (b *bufferPipeWriter) put(pool *bufferPool) {
 }
 
 // getBytes returns a copy of the buffered bytes.
-func (b *bufferPipeWriter) getBytes() []byte {
+func (b *bufferPipeReader) getBytes() []byte {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.buffer != nil {
@@ -387,7 +393,7 @@ func (b *bufferPipeWriter) getBytes() []byte {
 }
 
 // set sets the buffer, replacing the existing buffer.
-func (b *bufferPipeWriter) set(pool *bufferPool) {
+func (b *bufferPipeReader) set(pool *bufferPool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.buffer = pool.Get()
