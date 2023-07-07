@@ -16,6 +16,7 @@ package connect
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,23 +24,20 @@ import (
 	"net/url"
 	"sync/atomic"
 	"testing"
-	//"golang.org/x/net/http2"
 )
 
 func TestDuplexHTTPCallGetBody(t *testing.T) {
 	t.Parallel()
 
 	var getBodyCount uint32
-	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
 		// The "Connection: close" header is turned into a GOAWAY frame by the http2 server.
 		if atomic.LoadUint32(&getBodyCount) == 0 {
-			w.Header().Add("Connection", "close")
-			w.(http.Flusher).Flush()
+			responseWriter.Header().Add("Connection", "close")
 		}
-
-		b, _ := io.ReadAll(r.Body)
-		_ = r.Body.Close()
-		_, _ = w.Write(b)
+		b, _ := io.ReadAll(request.Body)
+		_ = request.Body.Close()
+		_, _ = responseWriter.Write(b)
 	}))
 	server.EnableHTTP2 = true
 	server.StartTLS()
@@ -49,7 +47,7 @@ func TestDuplexHTTPCallGetBody(t *testing.T) {
 	serverURL, _ := url.Parse(server.URL)
 
 	errGetBodyCalled := fmt.Errorf("getBodyCalled")
-	caller := func(id int) error {
+	caller := func(_ int) error {
 		duplexCall := newDuplexHTTPCall(
 			context.Background(),
 			server.Client(),
@@ -65,7 +63,7 @@ func TestDuplexHTTPCallGetBody(t *testing.T) {
 		getBody := duplexCall.request.GetBody
 		duplexCall.request.GetBody = func() (io.ReadCloser, error) {
 			getBodyCalled = true
-			t.Log("GOT GetBody()", id)
+			t.Log("getBodyCalled")
 			atomic.AddUint32(&getBodyCount, 1)
 			return getBody()
 		}
@@ -102,8 +100,7 @@ func TestDuplexHTTPCallGetBody(t *testing.T) {
 
 		t.Log("waiting", i)
 		for _, err := range []error{<-errChan1, <-errChan2} {
-			if err == errGetBodyCalled {
-				t.Log("success", err)
+			if errors.Is(err, errGetBodyCalled) {
 				gotGetBody = true
 			} else if err != nil {
 				t.Fatal(err)

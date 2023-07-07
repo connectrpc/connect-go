@@ -36,13 +36,13 @@ type duplexHTTPCall struct {
 	streamType       StreamType
 	onRequestSend    func(*http.Request)
 	validateResponse func(*http.Response) *Error
+	bufferPool       *bufferPool
 
 	sendRequestOnce   sync.Once
 	responseReady     chan struct{}
 	requestBodyWriter *bufferPipeWriter // Buffer for the request body.
 	request           *http.Request
 	response          *http.Response
-	bufferPool        *bufferPool
 
 	errMu sync.Mutex
 	err   error
@@ -349,18 +349,18 @@ type bufferPipeWriter struct {
 }
 
 // Write to dst and buffer the data if possible.
-func (b *bufferPipeWriter) Write(p []byte) (int, error) {
+func (b *bufferPipeWriter) Write(data []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	n, err := b.PipeWriter.Write(p)
+	bytesWritten, err := b.PipeWriter.Write(data)
 	if b.buffer == nil || err != nil {
-		return n, err
+		return bytesWritten, err
 	}
-	_, _ = b.buffer.Write(p[:n])
+	_, _ = b.buffer.Write(data[:bytesWritten])
 	if b.buffer.Len() > maxRecycleBufferSize {
 		b.buffer = nil // Don't recycle large buffers.
 	}
-	return n, err
+	return bytesWritten, err
 }
 func (b *bufferPipeWriter) put(pool *bufferPool) {
 	b.mu.Lock()
@@ -391,15 +391,15 @@ type bufferedPipeReader struct {
 	index int
 }
 
-func (b *bufferedPipeReader) Read(p []byte) (n int, err error) {
+func (b *bufferedPipeReader) Read(data []byte) (int, error) {
 	if b.index >= len(b.buf) {
-		n, err := b.PipeReader.Read(p)
-		if err == io.ErrClosedPipe {
+		bytesRead, err := b.PipeReader.Read(data)
+		if errors.Is(err, io.ErrClosedPipe) {
 			err = io.EOF
 		}
-		return n, err
+		return bytesRead, err
 	}
-	n = copy(p, b.buf[b.index:])
-	b.index += n
-	return n, nil
+	bytesRead := copy(data, b.buf[b.index:])
+	b.index += bytesRead
+	return bytesRead, nil
 }
