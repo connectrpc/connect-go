@@ -15,6 +15,7 @@
 package connect
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -24,6 +25,8 @@ import (
 	"net/url"
 	"sync/atomic"
 	"testing"
+
+	"github.com/bufbuild/connect-go/internal/assert"
 )
 
 func TestDuplexHTTPCallGetBody(t *testing.T) {
@@ -112,4 +115,34 @@ func TestDuplexHTTPCallGetBody(t *testing.T) {
 	}
 	close(workChan)
 	t.Log("done", atomic.LoadUint32(&getBodyCount))
+}
+
+func TestBufferPipeReader(t *testing.T) {
+	t.Parallel()
+	buffer := bytes.NewBuffer(nil)
+	pipeReader, pipeWriter := io.Pipe()
+	pipeBuffer := bufferPipeReader{
+		PipeReader: pipeReader,
+		buffer:     buffer,
+	}
+
+	payload := []byte("abc")
+	go func() {
+		_, _ = pipeWriter.Write(payload)
+	}()
+	a := make([]byte, 1)
+	_, _ = pipeBuffer.Read(a)
+	assert.Equal(t, "a", string(a))
+	b := make([]byte, 1)
+	_, _ = pipeBuffer.Read(b)
+	assert.Equal(t, "b", string(b))
+	assert.Equal(t, "ab", string(pipeBuffer.getBytes()))
+	cd := make([]byte, 2)
+	go func() {
+		n, _ := pipeBuffer.Read(cd)    // consumes "c"
+		_, _ = pipeBuffer.Read(cd[n:]) // consumes "d"
+	}()
+	_, _ = pipeWriter.Write([]byte("d"))
+	assert.Equal(t, "cd", string(cd))
+	assert.Equal(t, "abcd", string(pipeBuffer.getBytes()))
 }

@@ -281,7 +281,11 @@ func (d *duplexHTTPCall) makeRequest() {
 	defer close(d.responseReady)
 
 	// Release the request body buffer when the request is established.
-	defer d.requestBodyReader.put(d.bufferPool)
+	defer func() {
+		// Must be called in a goroutine to avoid deadlock with Reads
+		// waiting for the responseReady channel to be closed.
+		go d.requestBodyReader.put(d.bufferPool)
+	}()
 
 	// Promote the header Host to the request object.
 	if host := d.request.Header.Get(headerHost); len(host) > 0 {
@@ -353,13 +357,12 @@ type bufferPipeReader struct {
 
 // Read to the PipeReader copy to the buffer if available.
 func (b *bufferPipeReader) Read(data []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	bytesRead, err := b.PipeReader.Read(data)
 	if err != nil {
 		return bytesRead, err
 	}
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.buffer != nil {
 		_, _ = b.buffer.Write(data[:bytesRead])
 		if b.buffer.Len() > maxRecycleBufferSize {
