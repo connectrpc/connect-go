@@ -39,7 +39,7 @@ type duplexHTTPCall struct {
 
 	sendRequestOnce   sync.Once
 	responseReady     chan struct{}
-	requestBodyWriter *writeBuffer //*io.PipeWriter
+	requestBodyWriter *bufferPipeWriter // Buffer for the request body.
 	request           *http.Request
 	response          *http.Response
 	bufferPool        *bufferPool
@@ -61,8 +61,8 @@ func newDuplexHTTPCall(
 	// to mutate the req.URL, we don't feel the effects of it.
 	url = cloneURL(url)
 	pipeReader, pipeWriter := io.Pipe()
-	writeBuffer := &writeBuffer{
-		dst: pipeWriter,
+	writeBuffer := &bufferPipeWriter{
+		PipeWriter: pipeWriter,
 	}
 
 	// This is mirroring what http.NewRequestContext did, but
@@ -87,12 +87,14 @@ func newDuplexHTTPCall(
 			buf := writeBuffer.getBytes()
 			if buf == nil {
 				// Buffer is gone, so we can't return a reader.
-				return nil, fmt.Errorf("GetBody called after request was sent")
+				return nil, errorf(
+					CodeUnavailable, "request failed for retryable reason",
+				)
 			}
-			bufferReader := bytes.NewReader(buf)
-			return io.NopCloser(
-				io.MultiReader(bufferReader, pipeReader),
-			), nil
+			return &bufferedPipeReader{
+				PipeReader: pipeReader,
+				buf:        buf,
+			}, nil
 		},
 	}).WithContext(ctx)
 	return &duplexHTTPCall{
@@ -270,53 +272,6 @@ func (d *duplexHTTPCall) ensureRequestMade() {
 	})
 }
 
-// writeBuffer is a write-through cache.
-type writeBuffer struct {
-	dst io.WriteCloser
-
-	mu     sync.Mutex
-	buffer *bytes.Buffer
-}
-
-// Write to dst and buffer the data if possible.
-func (b *writeBuffer) Write(p []byte) (int, error) {
-	n, err := b.dst.Write(p)
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.buffer == nil || err != nil {
-		return n, err
-	}
-	_, _ = b.buffer.Write(p[:n])
-	if b.buffer.Len() > maxRecycleBufferSize {
-		b.buffer = nil // Don't recycle large buffers.
-	}
-	return n, err
-}
-func (b *writeBuffer) Close() error {
-	return b.dst.Close()
-}
-func (b *writeBuffer) put(pool *bufferPool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.buffer != nil {
-		pool.Put(b.buffer)
-	}
-	b.buffer = nil
-}
-func (b *writeBuffer) getBytes() []byte {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.buffer != nil {
-		return b.buffer.Bytes()
-	}
-	return nil
-}
-func (b *writeBuffer) set(pool *bufferPool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.buffer = pool.Get()
-}
-
 func (d *duplexHTTPCall) makeRequest() {
 	// This runs concurrently with Write and CloseWrite. Read and CloseRead wait
 	// on d.responseReady, so we can't race with them.
@@ -383,4 +338,68 @@ func cloneURL(oldURL *url.URL) *url.URL {
 		*newURL.User = *oldURL.User
 	}
 	return newURL
+}
+
+// bufferPipeWriter is a write-through cache.
+type bufferPipeWriter struct {
+	*io.PipeWriter
+
+	mu     sync.Mutex
+	buffer *bytes.Buffer
+}
+
+// Write to dst and buffer the data if possible.
+func (b *bufferPipeWriter) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n, err := b.PipeWriter.Write(p)
+	if b.buffer == nil || err != nil {
+		return n, err
+	}
+	_, _ = b.buffer.Write(p[:n])
+	if b.buffer.Len() > maxRecycleBufferSize {
+		b.buffer = nil // Don't recycle large buffers.
+	}
+	return n, err
+}
+func (b *bufferPipeWriter) put(pool *bufferPool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.buffer != nil {
+		pool.Put(b.buffer)
+	}
+	b.buffer = nil
+}
+func (b *bufferPipeWriter) getBytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.buffer != nil {
+		return b.buffer.Bytes()
+	}
+	return nil
+}
+func (b *bufferPipeWriter) set(pool *bufferPool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buffer = pool.Get()
+}
+
+type bufferedPipeReader struct {
+	*io.PipeReader
+
+	buf   []byte
+	index int
+}
+
+func (b *bufferedPipeReader) Read(p []byte) (n int, err error) {
+	if b.index >= len(b.buf) {
+		n, err := b.PipeReader.Read(p)
+		if err == io.ErrClosedPipe {
+			err = io.EOF
+		}
+		return n, err
+	}
+	n = copy(p, b.buf[b.index:])
+	b.index += n
+	return n, nil
 }
