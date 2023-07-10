@@ -30,18 +30,69 @@ func newErrInvalidEnvelopeFlags(flags uint8) *Error {
 	return errorf(CodeInternal, "protocol error: invalid envelope flags %08b", flags)
 }
 
-// setBuffer sets the buffer to the given bytes. The buffer takes ownership of
-// the bytes, so the caller must not use the bytes after calling setBuffer.
-func setBuffer(dst *bytes.Buffer, buf []byte) {
-	if cap(buf) > dst.Cap() {
-		// Pessimistically assume that the too-small buffer is insufficient for the
-		// application workload, so there's no point in keeping it in the pool.
-		// Instead, replace it with the larger, newly-allocated slice. This
-		// allocates, but it's a small, constant-size allocation.
-		*dst = *bytes.NewBuffer(buf)
-	} else {
-		// Write to the buffer large enough to hold the bytes.
-		dst.Write(buf)
+// envelope is a block of arbitrary bytes wrapped in gRPC and Connect's framing
+// protocol.
+//
+// Each message is preceded by a 5-byte prefix. The first byte is a uint8 used
+// as a set of bitwise flags, and the remainder is a uint32 indicating the
+// message length. gRPC and Connect interpret the bitwise flags differently, so
+// envelope leaves their interpretation up to the caller.
+type envelope struct {
+	*bytes.Buffer
+}
+
+func makeEnvelope(buffer *bytes.Buffer) envelope {
+	buffer.Reset() // Reset the buffer to the beginning.
+	var head [5]byte
+	_, _ = buffer.Write(head[:])
+	return envelope{buffer}
+}
+func (e envelope) flags() uint8 {
+	return e.Bytes()[0]
+}
+func (e envelope) encodeSizeAndFlags(flags uint8) {
+	e.Bytes()[0] = flags
+	binary.BigEndian.PutUint32(e.Bytes()[1:5], uint32(e.Len()-5))
+}
+func (e envelope) decodeSize() int {
+	return int(binary.BigEndian.Uint32(e.Bytes()[1:5]))
+}
+func (e envelope) size() int {
+	return e.Len() - 5
+}
+
+type messageParams struct {
+	codec            Codec            // Codec to use for marshalling.
+	buffer           *bytes.Buffer    // Buffer to use for marshalling.
+	compressBuffer   *bytes.Buffer    // Buffer to use for compression.
+	bufferPool       *bufferPool      // Buffer Pool to use for allocating buffers.
+	compressionPool  *compressionPool // CompressionPool to use for compressing buffers.
+	maxBytes         int              // Maximum size of the message.
+	compressMinBytes int              // Minimum size of the message to compress.
+}
+
+func (p *messageParams) getBuffer() *bytes.Buffer {
+	if p.buffer == nil {
+		p.buffer = p.bufferPool.Get()
+	}
+	p.buffer.Reset()
+	return p.buffer
+}
+func (p *messageParams) getCompressionBuffer() *bytes.Buffer {
+	if p.compressBuffer == nil {
+		p.compressBuffer = p.bufferPool.Get()
+	}
+	p.compressBuffer.Reset()
+	return p.compressBuffer
+}
+func (p *messageParams) drop() {
+	if p.buffer != nil {
+		p.bufferPool.Put(p.buffer)
+		p.buffer = nil
+	}
+	if p.compressBuffer != nil {
+		p.bufferPool.Put(p.compressBuffer)
+		p.compressBuffer = nil
 	}
 }
 
@@ -51,11 +102,11 @@ func marshal(dst *bytes.Buffer, message any, codec Codec) *Error {
 	}
 	if codec, ok := codec.(marshalAppender); ok {
 		// Codec supports MarshalAppend; try to re-use a []byte from the pool.
-		raw, err := codec.MarshalAppend(dst.Bytes(), message)
+		raw, err := codec.MarshalAppend(dst.Bytes()[dst.Len():], message)
 		if err != nil {
 			return errorf(CodeInternal, "marshal message: %w", err)
 		}
-		setBuffer(dst, raw)
+		dst.Write(raw)
 		return nil
 	}
 	// Codec doesn't support MarshalAppend; let Marshal allocate a []byte.
@@ -63,7 +114,7 @@ func marshal(dst *bytes.Buffer, message any, codec Codec) *Error {
 	if err != nil {
 		return errorf(CodeInternal, "marshal message: %w", err)
 	}
-	setBuffer(dst, raw)
+	dst.Write(raw)
 	return nil
 }
 
@@ -237,15 +288,15 @@ func readAll(dst *bytes.Buffer, src io.Reader, readMaxBytes int) *Error {
 	return nil
 }
 
-func checkSendMaxBytes(buffer *bytes.Buffer, sendMaxBytes int, isCompressed bool) *Error {
-	if sendMaxBytes <= 0 || buffer.Len() <= sendMaxBytes {
+func checkSendMaxBytes(length, sendMaxBytes int, isCompressed bool) *Error {
+	if sendMaxBytes <= 0 || length <= sendMaxBytes {
 		return nil
 	}
 	tmpl := "message size %d exceeds sendMaxBytes %d"
 	if isCompressed {
 		tmpl = "compressed message size %d exceeds sendMaxBytes %d"
 	}
-	return errorf(CodeResourceExhausted, tmpl, buffer.Len(), sendMaxBytes)
+	return errorf(CodeResourceExhausted, tmpl, length, sendMaxBytes)
 }
 
 func writeAll(dst io.Writer, src *bytes.Buffer) *Error {

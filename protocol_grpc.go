@@ -201,19 +201,27 @@ func (g *grpcHandler) NewConn(
 			Addr:     request.RemoteAddr,
 			Protocol: protocolName,
 		},
-		web:                     g.web,
-		bufferPool:              g.BufferPool,
-		protobuf:                g.Codecs.Protobuf(), // for errors
-		responseWriter:          responseWriter,
-		responseHeader:          make(http.Header),
-		responseTrailer:         make(http.Header),
-		request:                 request,
-		codec:                   codec,
-		compressionRequestPool:  g.CompressionPools.Get(requestCompression),
-		compressionResponsePool: g.CompressionPools.Get(responseCompression),
-		compressMinBytes:        g.CompressMinBytes,
-		sendMaxBytes:            g.SendMaxBytes,
-		readMaxBytes:            g.ReadMaxBytes,
+		web:             g.web,
+		bufferPool:      g.BufferPool,
+		protobuf:        g.Codecs.Protobuf(), // for errors
+		responseWriter:  responseWriter,
+		responseHeader:  make(http.Header),
+		responseTrailer: make(http.Header),
+		request:         request,
+
+		recv: messageParams{
+			codec:           codec,
+			bufferPool:      g.BufferPool,
+			compressionPool: g.CompressionPools.Get(requestCompression),
+			maxBytes:        g.ReadMaxBytes,
+		},
+		send: messageParams{
+			codec:            codec,
+			bufferPool:       g.BufferPool,
+			compressionPool:  g.CompressionPools.Get(responseCompression),
+			compressMinBytes: g.CompressMinBytes,
+			maxBytes:         g.SendMaxBytes,
+		},
 	})
 	if failed != nil {
 		// Negotiation failed, so we can't establish a stream.
@@ -284,14 +292,23 @@ func (g *grpcClient) NewConn(
 		compressionPools: g.CompressionPools,
 		bufferPool:       g.BufferPool,
 		protobuf:         g.Protobuf,
-		compressionPool:  g.CompressionPools.Get(g.CompressionName),
-		codec:            g.Codec,
-		compressMinBytes: g.CompressMinBytes,
-		sendMaxBytes:     g.SendMaxBytes,
-		readMaxBytes:     g.ReadMaxBytes,
-		responseHeader:   make(http.Header),
-		responseTrailer:  make(http.Header),
-		web:              g.web,
+
+		recv: messageParams{
+			codec:           g.Codec,
+			bufferPool:      g.BufferPool,
+			compressionPool: g.CompressionPools.Get(g.CompressionName),
+			maxBytes:        g.ReadMaxBytes,
+		},
+		send: messageParams{
+			codec:            g.Codec,
+			bufferPool:       g.BufferPool,
+			compressionPool:  g.CompressionPools.Get(g.CompressionName),
+			maxBytes:         g.SendMaxBytes,
+			compressMinBytes: g.CompressMinBytes,
+		},
+		responseHeader:  make(http.Header),
+		responseTrailer: make(http.Header),
+		web:             g.web,
 	}
 	duplexCall.SetValidateResponse(conn.validateResponse)
 	return wrapClientConnWithCodedErrors(conn)
@@ -308,12 +325,15 @@ type grpcClientConn struct {
 	responseHeader   http.Header
 	responseTrailer  http.Header
 
-	codec            Codec
-	compressMinBytes int
-	compressionPool  *compressionPool
-	sendMaxBytes     int
-	readMaxBytes     int
-	web              bool
+	send messageParams
+	recv messageParams
+	web  bool
+
+	//codec            Codec
+	//compressMinBytes int
+	//compressionPool  *compressionPool
+	//sendMaxBytes     int
+	//readMaxBytes     int
 }
 
 func (cc *grpcClientConn) Spec() Spec {
@@ -325,23 +345,32 @@ func (cc *grpcClientConn) Peer() Peer {
 }
 
 func (cc *grpcClientConn) Send(msg any) error {
-	buffer := cc.bufferPool.Get()
-	defer cc.bufferPool.Put(buffer)
+	envelope := makeEnvelope(cc.send.getBuffer())
 
-	if err := marshal(buffer, msg, cc.codec); err != nil {
+	if err := marshal(envelope.Buffer, msg, cc.send.codec); err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	if err := marshal(&buf, msg, cc.send.codec); err != nil {
 		return err
 	}
 	var flags uint8
-	if buffer.Len() > cc.compressMinBytes && cc.compressionPool != nil {
-		if err := compress(buffer, cc.bufferPool, cc.compressionPool); err != nil {
+	if envelope.Len() > cc.send.compressMinBytes && cc.send.compressionPool != nil {
+		compressionEnvelope := makeEnvelope(cc.send.getCompressionBuffer())
+		envelope.Next(5) // skip the envelope header
+		if err := cc.send.compressionPool.Compress(
+			compressionEnvelope.Buffer, envelope.Buffer,
+		); err != nil {
 			return err
 		}
 		flags |= flagEnvelopeCompressed
+		envelope.Buffer = compressionEnvelope.Buffer // swap buffers
 	}
-	if err := checkSendMaxBytes(buffer, cc.sendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
+	if err := checkSendMaxBytes(envelope.size(), cc.send.maxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
 		return err
 	}
-	if err := writeEnvelope(cc.duplexCall, flags, buffer); err != nil {
+	envelope.encodeSizeAndFlags(flags)
+	if err := writeAll(cc.duplexCall, envelope.Buffer); err != nil {
 		return err
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
@@ -352,28 +381,32 @@ func (cc *grpcClientConn) RequestHeader() http.Header {
 }
 
 func (cc *grpcClientConn) CloseRequest() error {
+	cc.recv.drop()
 	return cc.duplexCall.CloseWrite()
 }
 
 func (cc *grpcClientConn) Receive(msg any) error {
 	cc.duplexCall.BlockUntilResponseReady()
-	buffer := cc.bufferPool.Get()
-	defer cc.bufferPool.Put(buffer)
+	buffer := cc.recv.bufferPool.Get()
 
-	flags, err := readEnvelope(buffer, cc.duplexCall, cc.readMaxBytes)
+	flags, err := readEnvelope(buffer, cc.duplexCall, cc.recv.maxBytes)
 	if err != nil {
 		return cc.checkReceiveErr(err, cc.duplexCall.ResponseTrailer())
 	}
 	if flags&flagEnvelopeCompressed != 0 {
-		if cc.compressionPool == nil {
+		if cc.recv.compressionPool == nil {
 			return errorf(CodeInvalidArgument,
 				"protocol error: received compressed message without %s header",
 				grpcHeaderCompression,
 			)
 		}
-		if err := decompress(buffer, cc.bufferPool, cc.compressionPool, cc.readMaxBytes); err != nil {
+		compressionBuffer := cc.recv.getCompressionBuffer()
+		if err := cc.recv.compressionPool.Decompress(
+			compressionBuffer, buffer, int64(cc.recv.maxBytes),
+		); err != nil {
 			return err
 		}
+		buffer = compressionBuffer
 	}
 	if flags&grpcFlagEnvelopeTrailer != 0 {
 		if !cc.web {
@@ -398,7 +431,7 @@ func (cc *grpcClientConn) Receive(msg any) error {
 		}
 		return cc.checkReceiveErr(io.EOF, http.Header(mimeHeader))
 	}
-	if err := unmarshal(buffer, msg, cc.codec); err != nil {
+	if err := unmarshal(buffer, msg, cc.recv.codec); err != nil {
 		return err
 	}
 	return nil
@@ -446,6 +479,7 @@ func (cc *grpcClientConn) ResponseTrailer() http.Header {
 }
 
 func (cc *grpcClientConn) CloseResponse() error {
+	cc.send.drop()
 	return cc.duplexCall.CloseRead()
 }
 
@@ -464,7 +498,7 @@ func (cc *grpcClientConn) validateResponse(response *http.Response) *Error {
 		return err
 	}
 	compression := getHeaderCanonical(response.Header, grpcHeaderCompression)
-	cc.compressionPool = cc.compressionPools.Get(compression)
+	cc.recv.compressionPool = cc.compressionPools.Get(compression)
 	return nil
 }
 
@@ -480,12 +514,8 @@ type grpcHandlerConn struct {
 	wroteToBody     bool
 	request         *http.Request
 
-	codec                   Codec
-	compressionRequestPool  *compressionPool
-	compressionResponsePool *compressionPool
-	compressMinBytes        int
-	sendMaxBytes            int
-	readMaxBytes            int
+	recv messageParams
+	send messageParams
 }
 
 func (hc *grpcHandlerConn) Spec() Spec {
@@ -497,22 +527,24 @@ func (hc *grpcHandlerConn) Peer() Peer {
 }
 
 func (hc *grpcHandlerConn) Receive(msg any) error {
-	buffer := hc.bufferPool.Get()
-	defer hc.bufferPool.Put(buffer)
-
-	flags, err := readEnvelope(buffer, hc.request.Body, hc.readMaxBytes)
+	buffer := hc.recv.getBuffer()
+	flags, err := readEnvelope(buffer, hc.request.Body, hc.recv.maxBytes)
 	if err != nil {
 		return err
 	}
 	if flags&flagEnvelopeCompressed != 0 {
-		if err := decompress(buffer, hc.bufferPool, hc.compressionRequestPool, hc.readMaxBytes); err != nil {
+		compressionBuffer := hc.recv.getCompressionBuffer()
+		if err := hc.recv.compressionPool.Decompress(
+			compressionBuffer, buffer, int64(hc.recv.maxBytes),
+		); err != nil {
 			return err
 		}
+		buffer = compressionBuffer
 	}
 	if flags != 0 && flags != flagEnvelopeCompressed {
 		return newErrInvalidEnvelopeFlags(flags)
 	}
-	if err := unmarshal(buffer, msg, hc.codec); err != nil {
+	if err := unmarshal(buffer, msg, hc.recv.codec); err != nil {
 		return err
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
@@ -527,23 +559,27 @@ func (hc *grpcHandlerConn) Send(msg any) error {
 		mergeHeaders(hc.responseWriter.Header(), hc.responseHeader)
 		hc.wroteToBody = true
 	}
-	buffer := hc.bufferPool.Get()
-	defer hc.bufferPool.Put(buffer)
-
-	if err := marshal(buffer, msg, hc.codec); err != nil {
+	envelope := makeEnvelope(hc.send.getBuffer())
+	if err := marshal(envelope.Buffer, msg, hc.send.codec); err != nil {
 		return err
 	}
 	var flags uint8
-	if buffer.Len() > hc.compressMinBytes && hc.compressionResponsePool != nil {
-		if err := compress(buffer, hc.bufferPool, hc.compressionResponsePool); err != nil {
+	if envelope.size() > hc.send.compressMinBytes && hc.send.compressionPool != nil {
+		compressionEnvelope := makeEnvelope(hc.send.getCompressionBuffer())
+		envelope.Next(5) // skip the envelope header
+		if err := hc.send.compressionPool.Compress(
+			compressionEnvelope.Buffer, envelope.Buffer,
+		); err != nil {
 			return err
 		}
 		flags |= flagEnvelopeCompressed
+		envelope.Buffer = compressionEnvelope.Buffer // swap buffers
 	}
-	if err := checkSendMaxBytes(buffer, hc.sendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
+	if err := checkSendMaxBytes(envelope.size(), hc.send.maxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
 		return err
 	}
-	if err := writeEnvelope(hc.responseWriter, flags, buffer); err != nil {
+	envelope.encodeSizeAndFlags(flags)
+	if err := writeAll(hc.responseWriter, envelope.Buffer); err != nil {
 		return err
 	}
 	flushResponseWriter(hc.responseWriter)
@@ -570,6 +606,8 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 		if retErr == nil {
 			retErr = closeErr
 		}
+		hc.recv.drop()
+		hc.send.drop()
 	}()
 	defer flushResponseWriter(hc.responseWriter)
 	// If we haven't written the headers yet, do so.

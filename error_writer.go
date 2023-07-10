@@ -129,14 +129,16 @@ func (w *ErrorWriter) writeConnectUnary(response http.ResponseWriter, err error)
 }
 
 func (w *ErrorWriter) writeConnectStreaming(response http.ResponseWriter, err error) error {
-	buffer := w.bufferPool.Get()
-	defer w.bufferPool.Put(buffer)
+	envelope := makeEnvelope(w.bufferPool.Get())
+	defer w.bufferPool.Put(envelope.Buffer)
+
 	response.WriteHeader(http.StatusOK)
 	end := newConnectEndStreamMessage(err, make(http.Header))
-	if err := connectMarshalEndStreamMessage(buffer, end); err != nil {
+	if err := connectMarshalEndStreamMessage(envelope.Buffer, end); err != nil {
 		return err
 	}
-	if err := writeEnvelope(response, connectFlagEnvelopeEndStream, buffer); err != nil {
+	envelope.encodeSizeAndFlags(connectFlagEnvelopeEndStream)
+	if err := writeAll(response, envelope.Buffer); err != nil {
 		return err
 	}
 	return nil

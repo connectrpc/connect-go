@@ -586,7 +586,7 @@ func (cc *connectStreamingClientConn) Send(msg any) error {
 		}
 		flags |= flagEnvelopeCompressed
 	}
-	if err := checkSendMaxBytes(buffer, cc.sendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
+	if err := checkSendMaxBytes(buffer.Len(), cc.sendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
 		return err
 	}
 	if err := writeEnvelope(cc.duplexCall, flags, buffer); err != nil {
@@ -771,7 +771,7 @@ func (hc *connectUnaryHandlerConn) Send(msg any) error {
 		setHeaderCanonical(header, connectUnaryHeaderCompression, hc.compressionResponseName)
 		isCompressed = true
 	}
-	if err := checkSendMaxBytes(buffer, hc.sendMaxBytes, isCompressed); err != nil {
+	if err := checkSendMaxBytes(buffer.Len(), hc.sendMaxBytes, isCompressed); err != nil {
 		delHeaderCanonical(header, connectUnaryHeaderCompression)
 		return err
 	}
@@ -919,7 +919,7 @@ func (hc *connectStreamingHandlerConn) Send(msg any) error {
 		}
 		flags |= flagEnvelopeCompressed
 	}
-	if err := checkSendMaxBytes(buffer, hc.sendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
+	if err := checkSendMaxBytes(buffer.Len(), hc.sendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
 		return err
 	}
 	if err := writeEnvelope(hc.responseWriter, flags, buffer); err != nil {
@@ -983,7 +983,7 @@ func (cc *connectUnaryClientConn) sendMsg(buffer *bytes.Buffer, msg any) error {
 		setHeaderCanonical(header, connectUnaryHeaderCompression, cc.compressionName)
 		isCompressed = true
 	}
-	if err := checkSendMaxBytes(buffer, cc.sendMaxBytes, isCompressed); err != nil {
+	if err := checkSendMaxBytes(buffer.Len(), cc.sendMaxBytes, isCompressed); err != nil {
 		return err
 	}
 	if err := writeAll(cc.duplexCall, buffer); err != nil {
@@ -1004,7 +1004,7 @@ func (cc *connectUnaryClientConn) trySendGet(buffer *bytes.Buffer, msg any) erro
 		if err != nil {
 			return err
 		}
-		setBuffer(buffer, data)
+		buffer.Write(data)
 	}
 
 	isTooBig := cc.sendMaxBytes > 0 && buffer.Len() > cc.sendMaxBytes
@@ -1318,6 +1318,6 @@ func connectMarshalEndStreamMessage(dst *bytes.Buffer, end *connectEndStreamMess
 	if marshalErr != nil {
 		return errorf(CodeInternal, "marshal end stream: %w", marshalErr)
 	}
-	setBuffer(dst, data)
+	dst.Write(data)
 	return nil
 }

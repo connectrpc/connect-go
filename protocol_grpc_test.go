@@ -43,11 +43,16 @@ func TestGRPCHandlerSender(t *testing.T) {
 		)
 		assert.Nil(t, err)
 		return &grpcHandlerConn{
-			spec:            Spec{},
-			web:             web,
-			bufferPool:      bufferPool,
-			protobuf:        protobufCodec,
-			codec:           protobufCodec,
+			spec:       Spec{},
+			web:        web,
+			bufferPool: bufferPool,
+			protobuf:   protobufCodec,
+			send: messageParams{
+				codec: protobufCodec,
+			},
+			recv: messageParams{
+				codec: protobufCodec,
+			},
 			responseWriter:  responseWriter,
 			responseHeader:  make(http.Header),
 			responseTrailer: make(http.Header),
