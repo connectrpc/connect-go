@@ -66,12 +66,14 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 	endStreamMessage.Trailer["Mixed-Canonical"] = []string{"b"}
 	endStreamMessage.Trailer["Canonical-Header"] = []string{"c"}
 
-	data := &bytes.Buffer{}
-	err := connectMarshalEndStreamMessage(data, endStreamMessage)
+	envelope := makeEnvelope(&bytes.Buffer{})
+	err := connectMarshalEndStreamMessage(envelope.Buffer, endStreamMessage)
 	assert.Nil(t, err)
 
+	envelope.encodeSizeAndFlags(connectFlagEnvelopeEndStream)
+
 	output := &bytes.Buffer{}
-	err = writeEnvelope(output, connectFlagEnvelopeEndStream, data)
+	err = writeAll(output, envelope.Buffer)
 	assert.Nil(t, err)
 
 	input := &bytes.Buffer{}

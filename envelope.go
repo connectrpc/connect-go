@@ -38,62 +38,31 @@ func newErrInvalidEnvelopeFlags(flags uint8) *Error {
 // message length. gRPC and Connect interpret the bitwise flags differently, so
 // envelope leaves their interpretation up to the caller.
 type envelope struct {
-	*bytes.Buffer
+	Buffer *bytes.Buffer
 }
 
+// makeEnvelope creates an envelope with a 5-byte prefix.
 func makeEnvelope(buffer *bytes.Buffer) envelope {
-	buffer.Reset() // Reset the buffer to the beginning.
 	var head [5]byte
-	_, _ = buffer.Write(head[:])
-	return envelope{buffer}
+	buffer.Write(head[:])
+	return envelope{Buffer: buffer}
 }
-func (e envelope) flags() uint8 {
-	return e.Bytes()[0]
-}
+
+// encodeSizeAndFlags writes the size and flags to the envelope's prefix.
 func (e envelope) encodeSizeAndFlags(flags uint8) {
-	e.Bytes()[0] = flags
-	binary.BigEndian.PutUint32(e.Bytes()[1:5], uint32(e.Len()-5))
+	e.Buffer.Bytes()[0] = flags
+	binary.BigEndian.PutUint32(e.Buffer.Bytes()[1:5], uint32(e.size()))
 }
-func (e envelope) decodeSize() int {
-	return int(binary.BigEndian.Uint32(e.Bytes()[1:5]))
-}
+
+// size returns the size of the envelope's payload, in bytes.
 func (e envelope) size() int {
-	return e.Len() - 5
+	return e.Buffer.Len() - 5
 }
 
-type messageParams struct {
-	codec            Codec            // Codec to use for marshalling.
-	buffer           *bytes.Buffer    // Buffer to use for marshalling.
-	compressBuffer   *bytes.Buffer    // Buffer to use for compression.
-	bufferPool       *bufferPool      // Buffer Pool to use for allocating buffers.
-	compressionPool  *compressionPool // CompressionPool to use for compressing buffers.
-	maxBytes         int              // Maximum size of the message.
-	compressMinBytes int              // Minimum size of the message to compress.
-}
-
-func (p *messageParams) getBuffer() *bytes.Buffer {
-	if p.buffer == nil {
-		p.buffer = p.bufferPool.Get()
-	}
-	p.buffer.Reset()
-	return p.buffer
-}
-func (p *messageParams) getCompressionBuffer() *bytes.Buffer {
-	if p.compressBuffer == nil {
-		p.compressBuffer = p.bufferPool.Get()
-	}
-	p.compressBuffer.Reset()
-	return p.compressBuffer
-}
-func (p *messageParams) drop() {
-	if p.buffer != nil {
-		p.bufferPool.Put(p.buffer)
-		p.buffer = nil
-	}
-	if p.compressBuffer != nil {
-		p.bufferPool.Put(p.compressBuffer)
-		p.compressBuffer = nil
-	}
+// unwrap returns the underlying buffer, skipping the prefix.
+func (e envelope) unwrap() *bytes.Buffer {
+	e.Buffer.Next(5) // skip the prefix
+	return e.Buffer
 }
 
 func marshal(dst *bytes.Buffer, message any, codec Codec) *Error {
@@ -102,11 +71,22 @@ func marshal(dst *bytes.Buffer, message any, codec Codec) *Error {
 	}
 	if codec, ok := codec.(marshalAppender); ok {
 		// Codec supports MarshalAppend; try to re-use a []byte from the pool.
-		raw, err := codec.MarshalAppend(dst.Bytes()[dst.Len():], message)
+		raw, err := codec.MarshalAppend(dst.Bytes(), message)
 		if err != nil {
 			return errorf(CodeInternal, "marshal message: %w", err)
 		}
-		dst.Write(raw)
+		if cap(raw) > dst.Cap() {
+			// The buffer from the pool was too small, so MarshalAppend grew the slice.
+			// Pessimistically assume that the too-small buffer is insufficient for the
+			// application workload, so there's no point in keeping it in the pool.
+			// Instead, replace it with the larger, newly-allocated slice. This
+			// allocates, but it's a small, constant-size allocation.
+			*dst = *bytes.NewBuffer(raw)
+		} else {
+			// The buffer from the pool was large enough, MarshalAppend didn't allocate.
+			// Copy to the same byte slice is a nop.
+			dst.Write(raw[dst.Len():])
+		}
 		return nil
 	}
 	// Codec doesn't support MarshalAppend; let Marshal allocate a []byte.
@@ -125,54 +105,34 @@ func unmarshal(src *bytes.Buffer, message any, codec Codec) *Error {
 	return nil
 }
 
-func compress(buffer *bytes.Buffer, bufferPool *bufferPool, compressionPool *compressionPool) *Error {
-	data := bufferPool.Get()
-	defer bufferPool.Put(data)
-	if err := compressionPool.Compress(data, buffer); err != nil {
-		return err
+func readAll(dst *bytes.Buffer, src io.Reader, readMaxBytes int) *Error {
+	limitReader := src
+	if readMaxBytes > 0 && int64(readMaxBytes) < math.MaxInt64 {
+		limitReader = io.LimitReader(src, int64(readMaxBytes)+1)
 	}
-	buffer.Reset()
-	_, _ = data.WriteTo(buffer)
-	return nil
-}
-func decompress(buffer *bytes.Buffer, bufferPool *bufferPool, compressionPool *compressionPool, readMaxBytes int) *Error {
-	data := bufferPool.Get()
-	defer bufferPool.Put(data)
-	if err := compressionPool.Decompress(data, buffer, int64(readMaxBytes)); err != nil {
-		return err
-	}
-	buffer.Reset()
-	_, _ = data.WriteTo(buffer)
-	return nil
-}
 
-// func envelopeBuffer(flags uint8, src *bytes.Buffer) {
-// 	prefix := [5]byte{}
-// 	prefix[0] = flags
-// 	binary.BigEndian.PutUint32(prefix[1:5], uint32(src.Len()))
-// 	buf := append(src.Bytes(), prefix[:]...)
-// 	copy(buf[5:], buf[:5])
-// 	copy(buf[:5], prefix[:])
-// 	if cap(buf) > src.Cap() {
-// 		*src = *bytes.NewBuffer(buf)
-// 	} else {
-// 		src.Reset()
-// 		src.Write(buf)
-// 	}
-// }
-
-func writeEnvelope(dst io.Writer, flags uint8, src *bytes.Buffer) *Error {
-	prefix := [5]byte{}
-	prefix[0] = flags
-	binary.BigEndian.PutUint32(prefix[1:5], uint32(src.Len()))
-	if _, err := dst.Write(prefix[:]); err != nil {
+	// ReadFrom ignores io.EOF, so any error here is real.
+	bytesRead, err := dst.ReadFrom(limitReader)
+	if err != nil {
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
-		return errorf(CodeUnknown, "write envelope: %w", err)
+		if readMaxBytesErr := asMaxBytesError(err, "read first %d bytes of message", bytesRead); readMaxBytesErr != nil {
+			return readMaxBytesErr
+		}
+		return errorf(CodeUnknown, "read message: %w", err)
 	}
-	if _, err := src.WriteTo(dst); err != nil {
-		return errorf(CodeUnknown, "write message: %w", err)
+	if readMaxBytes > 0 && bytesRead > int64(readMaxBytes) {
+		// Attempt to read to end in order to allow connection re-use
+		discardedBytes, err := io.Copy(io.Discard, src)
+		if err != nil {
+			return errorf(CodeResourceExhausted,
+				"message is larger than configured max %d - unable to determine message size: %w",
+				readMaxBytes, err)
+		}
+		return errorf(CodeResourceExhausted,
+			"message size %d is larger than configured max %d",
+			bytesRead+discardedBytes, readMaxBytes)
 	}
 	return nil
 }
@@ -255,39 +215,6 @@ func readEnvelope(dst *bytes.Buffer, src io.Reader, readMaxBytes int) (uint8, *E
 func isSizeZeroPrefix(prefix [5]byte) bool {
 	return prefix[1]|prefix[2]|prefix[3]|prefix[4] == 0
 }
-
-func readAll(dst *bytes.Buffer, src io.Reader, readMaxBytes int) *Error {
-	limitReader := src
-	if readMaxBytes > 0 && int64(readMaxBytes) < math.MaxInt64 {
-		limitReader = io.LimitReader(src, int64(readMaxBytes)+1)
-	}
-
-	// ReadFrom ignores io.EOF, so any error here is real.
-	bytesRead, err := dst.ReadFrom(limitReader)
-	if err != nil {
-		if connectErr, ok := asError(err); ok {
-			return connectErr
-		}
-		if readMaxBytesErr := asMaxBytesError(err, "read first %d bytes of message", bytesRead); readMaxBytesErr != nil {
-			return readMaxBytesErr
-		}
-		return errorf(CodeUnknown, "read message: %w", err)
-	}
-	if readMaxBytes > 0 && bytesRead > int64(readMaxBytes) {
-		// Attempt to read to end in order to allow connection re-use
-		discardedBytes, err := io.Copy(io.Discard, src)
-		if err != nil {
-			return errorf(CodeResourceExhausted,
-				"message is larger than configured max %d - unable to determine message size: %w",
-				readMaxBytes, err)
-		}
-		return errorf(CodeResourceExhausted,
-			"message size %d is larger than configured max %d",
-			bytesRead+discardedBytes, readMaxBytes)
-	}
-	return nil
-}
-
 func checkSendMaxBytes(length, sendMaxBytes int, isCompressed bool) *Error {
 	if sendMaxBytes <= 0 || length <= sendMaxBytes {
 		return nil
