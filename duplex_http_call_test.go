@@ -15,7 +15,6 @@
 package connect
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -23,10 +22,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"testing"
-
-	"github.com/bufbuild/connect-go/internal/assert"
 )
 
 func TestDuplexHTTPCallGetBody(t *testing.T) {
@@ -50,7 +48,7 @@ func TestDuplexHTTPCallGetBody(t *testing.T) {
 	serverURL, _ := url.Parse(server.URL)
 
 	errGetBodyCalled := fmt.Errorf("getBodyCalled")
-	caller := func(_ int) error {
+	caller := func(size int) error {
 		duplexCall := newDuplexHTTPCall(
 			context.Background(),
 			server.Client(),
@@ -66,11 +64,16 @@ func TestDuplexHTTPCallGetBody(t *testing.T) {
 		getBody := duplexCall.request.GetBody
 		duplexCall.request.GetBody = func() (io.ReadCloser, error) {
 			getBodyCalled = true
+			rdcloser, err := getBody()
+			if err != nil {
+				t.Log("getBody failed", err)
+				return nil, err
+			}
 			t.Log("getBodyCalled")
 			atomic.AddUint32(&getBodyCount, 1)
-			return getBody()
+			return rdcloser, nil
 		}
-		_, err := duplexCall.Write([]byte("hello"))
+		_, err := duplexCall.Write(make([]byte, size))
 		if err != nil {
 			return err
 		}
@@ -81,68 +84,60 @@ func TestDuplexHTTPCallGetBody(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if string(body) != "hello" {
-			return fmt.Errorf("expected %q, got %q", "hello", string(body))
+		if len(body) != size {
+			return fmt.Errorf("expected %d bytes, got %d", size, len(body))
 		}
 		if getBodyCalled {
 			return errGetBodyCalled
 		}
 		return nil
 	}
-	workChan := make(chan chan error)
-	runner := func(id int) {
-		for errChan := range workChan {
-			errChan <- caller(id)
-		}
+	type work struct {
+		size int
+		errs chan error
 	}
-	go runner(1)
-	go runner(2)
+	numWorkers := 2
+	workChan := make(chan work)
+	var wg sync.WaitGroup
+	worker := func() {
+		for work := range workChan {
+			work.errs <- caller(work.size)
+		}
+		wg.Done()
+	}
+	wg.Add(numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		go worker()
+	}
 
-	errChan1 := make(chan error)
-	errChan2 := make(chan error)
-	for i, gotGetBody := 0, false; !gotGetBody; i++ {
-		workChan <- errChan1
-		workChan <- errChan2
+	for _, size := range []int{
+		512,
+		56 * 1024, // 56KB
+	} {
+		for i, gotGetBody := 0, false; !gotGetBody; i++ {
+			errs := make([]chan error, numWorkers)
+			for i := 0; i < numWorkers; i++ {
+				errs[i] = make(chan error, 1)
+				workChan <- work{size: size, errs: errs[i]}
+			}
 
-		t.Log("waiting", i)
-		for _, err := range []error{<-errChan1, <-errChan2} {
-			if errors.Is(err, errGetBodyCalled) {
-				gotGetBody = true
-			} else if err != nil {
-				t.Fatal(err)
+			t.Log("waiting", i)
+			for _, errChan := range errs {
+				err := <-errChan
+				if errors.Is(err, errGetBodyCalled) {
+					gotGetBody = true
+				} else if err != nil {
+					t.Fatal(err)
+				}
 			}
 		}
+		x := atomic.LoadUint32(&getBodyCount)
+		t.Log("done", x)
+		if x == 0 {
+			t.Fatal("expected getBody to be called at least once")
+		}
+		atomic.StoreUint32(&getBodyCount, 0)
 	}
 	close(workChan)
-	t.Log("done", atomic.LoadUint32(&getBodyCount))
-}
-
-func TestBufferPipeReader(t *testing.T) {
-	t.Parallel()
-	buffer := bytes.NewBuffer(nil)
-	pipeReader, pipeWriter := io.Pipe()
-	pipeBuffer := bufferPipeReader{
-		PipeReader: pipeReader,
-		buffer:     buffer,
-	}
-
-	payload := []byte("abc")
-	go func() {
-		_, _ = pipeWriter.Write(payload)
-	}()
-	a := make([]byte, 1)
-	_, _ = pipeBuffer.Read(a)
-	assert.Equal(t, "a", string(a))
-	b := make([]byte, 1)
-	_, _ = pipeBuffer.Read(b)
-	assert.Equal(t, "b", string(b))
-	assert.Equal(t, "ab", string(pipeBuffer.getBytes()))
-	cd := make([]byte, 2)
-	go func() {
-		n, _ := pipeBuffer.Read(cd)    // consumes "c"
-		_, _ = pipeBuffer.Read(cd[n:]) // consumes "d"
-	}()
-	_, _ = pipeWriter.Write([]byte("d"))
-	assert.Equal(t, "cd", string(cd))
-	assert.Equal(t, "abcd", string(pipeBuffer.getBytes()))
+	wg.Wait()
 }
