@@ -2115,8 +2115,10 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
 			header := responseWriter.Header()
 			header.Set("Content-Type", "application/connect+json")
-			_, _ = responseWriter.Write(head[:])
-			_, _ = responseWriter.Write(payload)
+			_, err := responseWriter.Write(head[:])
+			assert.Nil(t, err)
+			_, err = responseWriter.Write(payload)
+			assert.Nil(t, err)
 		},
 		expectCode: connect.CodeInternal,
 		expectMsg:  "internal: protocol error: unexpected EOF",
@@ -2126,8 +2128,10 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
 			header := responseWriter.Header()
 			header.Set("Content-Type", "application/grpc+json")
-			_, _ = responseWriter.Write(head[:])
-			_, _ = responseWriter.Write(payload)
+			_, err := responseWriter.Write(head[:])
+			assert.Nil(t, err)
+			_, err = responseWriter.Write(payload)
+			assert.Nil(t, err)
 		},
 		expectCode: connect.CodeInternal,
 		expectMsg:  "internal: protocol error: no Grpc-Status trailer: unexpected EOF",
@@ -2137,8 +2141,10 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
 			header := responseWriter.Header()
 			header.Set("Content-Type", "application/grpc-web+json")
-			_, _ = responseWriter.Write(head[:])
+			_, err := responseWriter.Write(head[:])
+			assert.Nil(t, err)
 			_, _ = responseWriter.Write(payload)
+			assert.Nil(t, err)
 		},
 		expectCode: connect.CodeInternal,
 		expectMsg:  "internal: protocol error: no Grpc-Status trailer: unexpected EOF",
@@ -2148,8 +2154,10 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
 			header := responseWriter.Header()
 			header.Set("Content-Type", "application/connect+json")
-			_, _ = responseWriter.Write(head[:])
-			_, _ = responseWriter.Write(payload[:len(payload)-1])
+			_, err := responseWriter.Write(head[:])
+			assert.Nil(t, err)
+			_, err = responseWriter.Write(payload[:len(payload)-1])
+			assert.Nil(t, err)
 		},
 		expectCode: connect.CodeInvalidArgument,
 		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
@@ -2159,8 +2167,10 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
 			header := responseWriter.Header()
 			header.Set("Content-Type", "application/grpc+json")
-			_, _ = responseWriter.Write(head[:])
-			_, _ = responseWriter.Write(payload[:len(payload)-1])
+			_, err := responseWriter.Write(head[:])
+			assert.Nil(t, err)
+			_, err = responseWriter.Write(payload[:len(payload)-1])
+			assert.Nil(t, err)
 		},
 		expectCode: connect.CodeInvalidArgument,
 		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
@@ -2170,8 +2180,10 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
 			header := responseWriter.Header()
 			header.Set("Content-Type", "application/grpc-web+json")
-			_, _ = responseWriter.Write(head[:])
-			_, _ = responseWriter.Write(payload[:len(payload)-1])
+			_, err := responseWriter.Write(head[:])
+			assert.Nil(t, err)
+			_, err = responseWriter.Write(payload[:len(payload)-1])
+			assert.Nil(t, err)
 		},
 		expectCode: connect.CodeInvalidArgument,
 		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
@@ -2181,7 +2193,8 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
 			header := responseWriter.Header()
 			header.Set("Content-Type", "application/connect+json")
-			_, _ = responseWriter.Write(head[:4])
+			_, err := responseWriter.Write(head[:4])
+			assert.Nil(t, err)
 		},
 		expectCode: connect.CodeInvalidArgument,
 		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
@@ -2191,7 +2204,8 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
 			header := responseWriter.Header()
 			header.Set("Content-Type", "application/grpc+json")
-			_, _ = responseWriter.Write(head[:4])
+			_, err := responseWriter.Write(head[:4])
+			assert.Nil(t, err)
 		},
 		expectCode: connect.CodeInvalidArgument,
 		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
@@ -2201,43 +2215,56 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
 			header := responseWriter.Header()
 			header.Set("Content-Type", "application/grpc-web+json")
-			_, _ = responseWriter.Write(head[:4])
+			_, err := responseWriter.Write(head[:4])
+			assert.Nil(t, err)
 		},
 		expectCode: connect.CodeInvalidArgument,
 		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
 	}, {
 		name:    "connect_excess_eof",
 		options: []connect.ClientOption{connect.WithProtoJSON()},
-		handler: func(responseWriter http.ResponseWriter, request *http.Request) {
-			_, _ = responseWriter.Write(head[:])
-			_, _ = responseWriter.Write(payload)
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			_, err := responseWriter.Write(head[:])
+			assert.Nil(t, err)
+			_, err = responseWriter.Write(payload)
+			assert.Nil(t, err)
 			// Write EOF
-			_, _ = responseWriter.Write([]byte{1 << 1, 0, 0, 0, 2})
-			_, _ = responseWriter.Write([]byte("{}"))
+			_, err = responseWriter.Write([]byte{1 << 1, 0, 0, 0, 2})
+			assert.Nil(t, err)
+			_, err = responseWriter.Write([]byte("{}"))
+			assert.Nil(t, err)
 			// Excess payload
-			_, _ = responseWriter.Write(head[:])
-			_, _ = responseWriter.Write(payload)
+			_, err = responseWriter.Write(head[:])
+			assert.Nil(t, err)
+			_, err = responseWriter.Write(payload)
+			assert.Nil(t, err)
 		},
 		expectCode: connect.CodeInternal,
 		expectMsg:  fmt.Sprintf("internal: corrupt response: %d extra bytes after end of stream", len(payload)+len(head)),
 	}, {
 		name:    "grpc-web_excess_eof",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
-		handler: func(responseWriter http.ResponseWriter, request *http.Request) {
-			_, _ = responseWriter.Write(head[:])
-			_, _ = responseWriter.Write(payload)
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			_, err := responseWriter.Write(head[:])
+			assert.Nil(t, err)
+			_, err = responseWriter.Write(payload)
+			assert.Nil(t, err)
 			// Write EOF
 			var buf bytes.Buffer
 			trailer := http.Header{"grpc-status": []string{"0"}}
-			_ = trailer.Write(&buf)
+			assert.Nil(t, trailer.Write(&buf))
 			var head [5]byte
 			head[0] = 1 << 7
 			binary.BigEndian.PutUint32(head[1:], uint32(buf.Len()))
-			_, _ = responseWriter.Write(head[:])
-			_, _ = responseWriter.Write(buf.Bytes())
+			_, err = responseWriter.Write(head[:])
+			assert.Nil(t, err)
+			_, err = responseWriter.Write(buf.Bytes())
+			assert.Nil(t, err)
 			// Excess payload
-			_, _ = responseWriter.Write(head[:])
-			_, _ = responseWriter.Write(payload)
+			_, err = responseWriter.Write(head[:])
+			assert.Nil(t, err)
+			_, err = responseWriter.Write(payload)
+			assert.Nil(t, err)
 		},
 		expectCode: connect.CodeInternal,
 		expectMsg:  fmt.Sprintf("internal: corrupt response: %d extra bytes after end of stream", len(payload)+len(head)),
