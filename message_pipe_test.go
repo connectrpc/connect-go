@@ -37,15 +37,16 @@ func TestPipe1(t *testing.T) {
 	pipe := &messagePipe{}
 	var buf = make([]byte, 64)
 	go func() {
-		n, err := pipe.Write(buf)
+		data := []byte("hello, world")
+		n, err := pipe.Write(data)
 		assert.Nil(t, err)
-		assert.Equal(t, n, len(buf))
+		assert.Equal(t, n, len(data))
 		done <- 0
 	}()
 	n, err := pipe.Read(buf)
 	assert.Nil(t, err)
 	if n != 12 || string(buf[0:12]) != "hello, world" {
-		t.Errorf("bad read: got %q", buf[0:n])
+		t.Errorf("bad read: got %d %q", n, string(buf[0:n]))
 	}
 	<-done
 	_ = pipe.Close()
@@ -125,7 +126,7 @@ func TestPipe3(t *testing.T) {
 			expect = 1
 		case 256:
 			expect = 0
-			if errors.Is(err, io.EOF) {
+			if !errors.Is(err, io.EOF) {
 				t.Fatalf("read at end: %v", err)
 			}
 		}
@@ -187,7 +188,7 @@ func TestPipeReadClose(t *testing.T) {
 			done := make(chan int, 1)
 			pipe := &messagePipe{}
 			closer := func(err error) error {
-				pipe.CloseRead(err)
+				pipe.CloseWithErr(err)
 				return nil
 			}
 			if testcase.async {
@@ -216,7 +217,7 @@ func TestPipeReadClose2(t *testing.T) {
 	pipe := &messagePipe{}
 	go func() {
 		time.Sleep(1 * time.Millisecond)
-		pipe.CloseRead(io.EOF) // delayClose
+		pipe.CloseWithErr(io.EOF) // delayClose
 		done <- 0
 	}()
 	n, err := pipe.Read(make([]byte, 64))
@@ -233,7 +234,7 @@ func TestPipeWriteClose2(t *testing.T) {
 	pipe := &messagePipe{}
 	go func() {
 		time.Sleep(1 * time.Millisecond)
-		pipe.CloseWrite(io.EOF) // delayClose
+		_ = pipe.Close() // delayClose
 		done <- 0
 	}()
 	n, err := pipe.Write(make([]byte, 64))
@@ -264,7 +265,7 @@ func TestPipeWriteNil(t *testing.T) {
 	}()
 	var b [2]byte
 	_, _ = io.ReadFull(pipe, b[0:2])
-	pipe.CloseRead(io.ErrClosedPipe)
+	pipe.CloseWithErr(io.ErrClosedPipe)
 }
 
 func TestPipeWriteAfterWriterClose(t *testing.T) {

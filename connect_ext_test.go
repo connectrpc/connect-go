@@ -1132,6 +1132,7 @@ func TestHandlerWithHTTPMaxBytes(t *testing.T) {
 			}
 			_, err := client.Ping(context.Background(), connect.NewRequest(pingRequest))
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
+			t.Logf("error: %v", err)
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
 		})
 	}

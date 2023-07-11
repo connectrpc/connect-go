@@ -79,7 +79,7 @@ func newDuplexHTTPCall(
 		ProtoMajor: 1,
 		ProtoMinor: 1,
 		Host:       url.Host,
-		Body:       pipeBuffer.AsReadCloser(),
+		Body:       pipeBuffer,
 		GetBody: func() (io.ReadCloser, error) {
 			// GetBody is called by the http client on request retries.
 			// We need to return a reader that will read from the buffer
@@ -91,7 +91,7 @@ func newDuplexHTTPCall(
 					"request failed for retryable reason",
 				)
 			}
-			return pipeBuffer.AsReadCloser(), nil
+			return pipeBuffer, nil
 		},
 	}).WithContext(ctx)
 	return &duplexHTTPCall{
@@ -232,9 +232,10 @@ func (d *duplexHTTPCall) ResponseTrailer() http.Header {
 // Write return an error wrapping io.EOF. It's safe to call concurrently with
 // any other method.
 func (d *duplexHTTPCall) SetError(err error) {
+	err = wrapIfContextError(err)
 	d.errMu.Lock()
 	if d.err == nil {
-		d.err = wrapIfContextError(err)
+		d.err = err
 	}
 	// Closing the read side of the request body pipe acquires an internal lock,
 	// so we want to scope errMu's usage narrowly and avoid defer.
@@ -247,7 +248,7 @@ func (d *duplexHTTPCall) SetError(err error) {
 	//
 	// It's safe to ignore the returned error here. Under the hood, Close calls
 	// CloseWithError, which is documented to always return nil.
-	_ = d.request.Body.Close()
+	d.requestBody.CloseWithErr(err)
 }
 
 // SetValidateResponse sets the response validation function. The function runs

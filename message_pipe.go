@@ -27,7 +27,6 @@ const maxRPCClientBufferSize = 256 * 1024 // 256KB
 type messagePipe struct {
 	mu   sync.Mutex
 	wait sync.Cond
-	rerr error
 	werr error
 	data []byte
 
@@ -53,8 +52,6 @@ func (p *messagePipe) Read(data []byte) (int, error) {
 	defer p.unlock()
 	for {
 		switch {
-		case p.rerr != nil:
-			return 0, p.rerr
 		case p.data != nil:
 			nbytes := copy(data, p.data)
 			p.data = p.data[nbytes:]
@@ -80,9 +77,12 @@ func (p *messagePipe) Write(data []byte) (int, error) {
 	defer p.unlock()
 	for p.data != nil {
 		if p.werr != nil {
-			return 0, io.ErrClosedPipe
+			return 0, p.werr
 		}
 		p.wait.Wait()
+	}
+	if p.werr != nil {
+		return 0, p.werr
 	}
 	p.data = data
 	p.head = data
@@ -102,26 +102,15 @@ func (p *messagePipe) Write(data []byte) (int, error) {
 		case p.werr != nil:
 			nbytes := len(data) - len(p.data)
 			p.data = nil
-			err := io.ErrClosedPipe
-			if nbytes > 0 {
-				err = io.ErrShortWrite
-			}
+			p.head = nil
+			err := p.werr
 			return nbytes, err
 		}
 		p.wait.Wait()
 	}
 }
 
-func (p *messagePipe) CloseRead(err error) {
-	if err == nil {
-		err = io.EOF
-	}
-	p.lock()
-	defer p.unlock()
-	p.rerr = err
-	p.wait.Broadcast()
-}
-func (p *messagePipe) CloseWrite(err error) {
+func (p *messagePipe) CloseWithErr(err error) {
 	if err == nil {
 		err = io.EOF
 	}
@@ -131,20 +120,7 @@ func (p *messagePipe) CloseWrite(err error) {
 	p.wait.Broadcast()
 }
 func (p *messagePipe) Close() error {
-	p.CloseWrite(io.EOF)
-	return nil
-}
-
-func (p *messagePipe) AsReadCloser() io.ReadCloser {
-	return messagePipeReadCloser{p}
-}
-
-type messagePipeReadCloser struct {
-	*messagePipe
-}
-
-func (p messagePipeReadCloser) Close() error {
-	p.CloseRead(io.EOF)
+	p.CloseWithErr(nil)
 	return nil
 }
 
@@ -162,7 +138,6 @@ func (p *messagePipe) Rewind() bool {
 		// referenced the head
 		p.data = p.head
 	}
-	p.rerr = nil
 	p.wait.Broadcast()
 	return true
 }
