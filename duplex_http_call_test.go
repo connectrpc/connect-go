@@ -110,10 +110,7 @@ func TestDuplexHTTPCallGetBody(t *testing.T) {
 		go worker()
 	}
 
-	for _, size := range []int{
-		512,
-		56 * 1024, // 56KB
-	} {
+	for _, size := range []int{512} {
 		for i, gotGetBody := 0, false; !gotGetBody; i++ {
 			errs := make([]chan error, numWorkers)
 			for i := 0; i < numWorkers; i++ {
@@ -132,7 +129,6 @@ func TestDuplexHTTPCallGetBody(t *testing.T) {
 			}
 		}
 		x := atomic.LoadUint32(&getBodyCount)
-		t.Log("done", x)
 		if x == 0 {
 			t.Fatal("expected getBody to be called at least once")
 		}

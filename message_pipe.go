@@ -22,8 +22,9 @@ import (
 
 const maxRPCClientBufferSize = 256 * 1024 // 256KB
 
-// messagePipe based on io.Pipe.
-// See: https://github.com/golang/go/blob/master/src/io/pipe.go
+// messagePipe is based on io.Pipe.
+// See: https://github.com/golang/go/blob/cb7a091d729eab75ccfdaeba5a0605f05addf422/src/io/pipe.go#L39
+// And: https://github.com/golang/go/blob/cb7a091d729eab75ccfdaeba5a0605f05addf422/src/net/net_fake.go#L259
 type messagePipe struct {
 	mu   sync.Mutex
 	wait sync.Cond
@@ -32,9 +33,9 @@ type messagePipe struct {
 
 	// buffering
 	limit  int
-	head   []byte
-	buffer *bytes.Buffer
-	onFree func(*bytes.Buffer)
+	head   []byte              // TODO: *bytes.Buffer
+	buffer *bytes.Buffer       // TODO: []*bytes.Buffer
+	onFree func(*bytes.Buffer) // TODO: func([]*bytes.Buffer)
 }
 
 func (p *messagePipe) lock() {
@@ -67,6 +68,7 @@ func (p *messagePipe) Read(data []byte) (int, error) {
 	}
 }
 
+// TODO: WriteMessage(*bytes.Buffer) (int, error)
 func (p *messagePipe) Write(data []byte) (int, error) {
 	if data == nil {
 		var zero = [0]byte{}
