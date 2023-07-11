@@ -42,7 +42,7 @@ type duplexHTTPCall struct {
 	responseReady   chan struct{}
 	request         *http.Request
 	response        *http.Response
-	requestBody     *messagePipe
+	requestBody     messagePipe
 
 	errMu sync.Mutex
 	err   error
@@ -60,8 +60,13 @@ func newDuplexHTTPCall(
 	// Request. This ensures if a transport out of our control wants
 	// to mutate the req.URL, we don't feel the effects of it.
 	url = cloneURL(url)
-
-	pipeBuffer := &messagePipe{}
+	call := &duplexHTTPCall{
+		ctx:           ctx,
+		httpClient:    httpClient,
+		streamType:    spec.StreamType,
+		responseReady: make(chan struct{}),
+		bufferPool:    bufferPool,
+	}
 
 	// This is mirroring what http.NewRequestContext did, but
 	// using an already parsed url.URL object, rather than a string
@@ -69,7 +74,7 @@ func newDuplexHTTPCall(
 	// explicitly, but this is logic copied over from
 	// NewRequestContext and doesn't effect the actual version
 	// being transmitted.
-	request := (&http.Request{
+	call.request = (&http.Request{
 		Method:     http.MethodPost,
 		URL:        url,
 		Header:     header,
@@ -77,28 +82,20 @@ func newDuplexHTTPCall(
 		ProtoMajor: 1,
 		ProtoMinor: 1,
 		Host:       url.Host,
-		Body:       pipeBuffer,
+		Body:       &call.requestBody,
 		GetBody: func() (io.ReadCloser, error) {
 			// Rewind the reader to the beginning of the buffer.
-			if pipeBuffer.Rewind() {
+			if call.requestBody.Rewind() {
 				// Rewind succeeded, so we can return a reader.
-				return pipeBuffer, nil
+				return &call.requestBody, nil
 			}
 			return nil, errorf(CodeInternal,
 				"retry limit exceeded: %d bytes written, %d bytes max",
-				pipeBuffer.total, pipeBuffer.limit,
+				call.requestBody.total, call.requestBody.limit,
 			)
 		},
 	}).WithContext(ctx)
-	return &duplexHTTPCall{
-		ctx:           ctx,
-		httpClient:    httpClient,
-		streamType:    spec.StreamType,
-		request:       request,
-		requestBody:   pipeBuffer,
-		responseReady: make(chan struct{}),
-		bufferPool:    bufferPool,
-	}
+	return call
 }
 
 // WriteMessage to the request body. Returns an error wrapping io.EOF after
