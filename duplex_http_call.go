@@ -61,9 +61,7 @@ func newDuplexHTTPCall(
 	// to mutate the req.URL, we don't feel the effects of it.
 	url = cloneURL(url)
 
-	pipeBuffer := &messagePipe{
-		buffer: &bytes.Buffer{},
-	}
+	pipeBuffer := &messagePipe{}
 
 	// This is mirroring what http.NewRequestContext did, but
 	// using an already parsed url.URL object, rather than a string
@@ -81,17 +79,15 @@ func newDuplexHTTPCall(
 		Host:       url.Host,
 		Body:       pipeBuffer,
 		GetBody: func() (io.ReadCloser, error) {
-			// GetBody is called by the http client on request retries.
-			// We need to return a reader that will read from the buffer
-			// and then the pipe reader.
-			if !pipeBuffer.Rewind() {
-				// Buffer is gone, so we can't return a reader.
-				return nil, errorf(
-					CodeUnavailable,
-					"request failed for retryable reason",
-				)
+			// Rewind the reader to the beginning of the buffer.
+			if pipeBuffer.Rewind() {
+				// Rewind succeeded, so we can return a reader.
+				return pipeBuffer, nil
 			}
-			return pipeBuffer, nil
+			return nil, errorf(CodeInternal,
+				"retry limit exceeded: %d bytes written, %d bytes max",
+				pipeBuffer.total, pipeBuffer.limit,
+			)
 		},
 	}).WithContext(ctx)
 	return &duplexHTTPCall{
@@ -105,8 +101,8 @@ func newDuplexHTTPCall(
 	}
 }
 
-// Write to the request body. Returns an error wrapping io.EOF after SetError
-// is called.
+// WriteMessage to the request body. Returns an error wrapping io.EOF after
+// SetError is called.
 func (d *duplexHTTPCall) Write(data []byte) (int, error) {
 	d.ensureRequestMade()
 	// Before we send any data, check if the context has been canceled.

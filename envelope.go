@@ -147,6 +147,9 @@ func (w *envelopeWriter) write(env *envelope) *Error {
 		return errorf(CodeUnknown, "write envelope: %w", err)
 	}
 	if _, err := io.Copy(w.writer, env.Data); err != nil {
+		if connectErr, ok := asError(err); ok {
+			return connectErr
+		}
 		return errorf(CodeUnknown, "write message: %w", err)
 	}
 	return nil

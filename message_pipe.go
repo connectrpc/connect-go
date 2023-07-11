@@ -32,10 +32,11 @@ type messagePipe struct {
 	data []byte
 
 	// buffering
-	limit  int
 	head   []byte              // TODO: *bytes.Buffer
 	buffer *bytes.Buffer       // TODO: []*bytes.Buffer
 	onFree func(*bytes.Buffer) // TODO: func([]*bytes.Buffer)
+	limit  int
+	total  int64
 }
 
 func (p *messagePipe) lock() {
@@ -68,7 +69,6 @@ func (p *messagePipe) Read(data []byte) (int, error) {
 	}
 }
 
-// TODO: WriteMessage(*bytes.Buffer) (int, error)
 func (p *messagePipe) Write(data []byte) (int, error) {
 	if data == nil {
 		var zero = [0]byte{}
@@ -92,8 +92,9 @@ func (p *messagePipe) Write(data []byte) (int, error) {
 	for {
 		switch {
 		case p.data == nil:
+			p.total += int64(len(data))
 			if p.buffer != nil {
-				if p.buffer.Len()+len(p.head) < p.limit {
+				if p.total < int64(p.limit) {
 					p.buffer.Write(p.head)
 				} else {
 					p.freeWithLock()
