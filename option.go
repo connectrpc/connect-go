@@ -166,32 +166,10 @@ func WithRequireConnectProtocolHeader() HandlerOption {
 	return &requireConnectProtocolHeaderOption{}
 }
 
-// WithConditionalHandlerOptions is a function that returns a HandlerOption.
+// WithConditionalHandlerOptions accepts a function that returns a HandlerOption.
 // It's used to conditionally apply HandlerOption to a Handler based on the Spec.
-// For example, to apply a HandlerOption only to a specific procedure:
-//
-//	connect.WithConditionalHandlerOptions(func(spec connect.Spec) (options []connect.HandlerOption) {
-//		if spec.Procedure == pingv1connect.PingServicePingProcedure {
-//			options = append(options, connect.WithReadMaxBytes(1024))
-//		}
-//		return options
-//	})
 func WithConditionalHandlerOptions(conditional func(spec Spec) []HandlerOption) HandlerOption {
 	return &conditionalHandlerOptions{conditional: conditional}
-}
-
-type conditionalHandlerOptions struct {
-	conditional func(spec Spec) []HandlerOption
-}
-
-func (o *conditionalHandlerOptions) applyToHandler(config *handlerConfig) {
-	spec := config.newSpec()
-	if spec.Procedure == "" {
-		return // ignore empty specs
-	}
-	for _, option := range o.conditional(spec) {
-		option.applyToHandler(config)
-	}
 }
 
 // Option implements both [ClientOption] and [HandlerOption], so it can be
@@ -584,4 +562,18 @@ func withProtoJSONCodecs() HandlerOption {
 		WithCodec(&protoJSONCodec{codecNameJSON}),
 		WithCodec(&protoJSONCodec{codecNameJSONCharsetUTF8}),
 	)
+}
+
+type conditionalHandlerOptions struct {
+	conditional func(spec Spec) []HandlerOption
+}
+
+func (o *conditionalHandlerOptions) applyToHandler(config *handlerConfig) {
+	spec := config.newSpec()
+	if spec.Procedure == "" {
+		return // ignore empty specs
+	}
+	for _, option := range o.conditional(spec) {
+		option.applyToHandler(config)
+	}
 }
