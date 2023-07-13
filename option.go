@@ -166,8 +166,13 @@ func WithRequireConnectProtocolHeader() HandlerOption {
 	return &requireConnectProtocolHeaderOption{}
 }
 
-// WithConditionalHandlerOptions accepts a function that returns a HandlerOption.
-// It's used to conditionally apply HandlerOption to a Handler based on the Spec.
+// WithConditionalHandlerOptions allows procedures in the same service to have
+// different configurations: for example, one procedure may need a much larger
+// WithReadMaxBytes setting than the others.
+//
+// WithConditionalHandlerOptions takes a function which may inspect each
+// procedure's Spec before deciding which options to apply. Returning a nil
+// slice is safe.
 func WithConditionalHandlerOptions(conditional func(spec Spec) []HandlerOption) HandlerOption {
 	return &conditionalHandlerOptions{conditional: conditional}
 }
