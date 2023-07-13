@@ -57,7 +57,7 @@ func NewUnaryHandler[Req, Res any](
 		}
 		return res, err
 	})
-	config := newHandlerConfig(procedure, options)
+	config := newHandlerConfig(procedure, StreamTypeUnary, options)
 	if interceptor := config.Interceptor; interceptor != nil {
 		untyped = interceptor.WrapUnary(untyped)
 	}
@@ -87,9 +87,9 @@ func NewUnaryHandler[Req, Res any](
 		return conn.Send(response.Any())
 	}
 
-	protocolHandlers := config.newProtocolHandlers(StreamTypeUnary)
+	protocolHandlers := config.newProtocolHandlers()
 	return &Handler{
-		spec:             config.newSpec(StreamTypeUnary),
+		spec:             config.newSpec(),
 		implementation:   implementation,
 		protocolHandlers: mappedMethodHandlers(protocolHandlers),
 		allowMethod:      sortedAllowMethodValue(protocolHandlers),
@@ -253,9 +253,10 @@ type handlerConfig struct {
 	BufferPool                   *bufferPool
 	ReadMaxBytes                 int
 	SendMaxBytes                 int
+	StreamType                   StreamType
 }
 
-func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig {
+func newHandlerConfig(procedure string, streamType StreamType, options []HandlerOption) *handlerConfig {
 	protoPath := extractProtoPath(procedure)
 	config := handlerConfig{
 		Procedure:        protoPath,
@@ -264,6 +265,7 @@ func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig 
 		HandleGRPC:       true,
 		HandleGRPCWeb:    true,
 		BufferPool:       newBufferPool(),
+		StreamType:       streamType,
 	}
 	withProtoBinaryCodec().applyToHandler(&config)
 	withProtoJSONCodecs().applyToHandler(&config)
@@ -274,15 +276,15 @@ func newHandlerConfig(procedure string, options []HandlerOption) *handlerConfig 
 	return &config
 }
 
-func (c *handlerConfig) newSpec(streamType StreamType) Spec {
+func (c *handlerConfig) newSpec() Spec {
 	return Spec{
 		Procedure:        c.Procedure,
-		StreamType:       streamType,
+		StreamType:       c.StreamType,
 		IdempotencyLevel: c.IdempotencyLevel,
 	}
 }
 
-func (c *handlerConfig) newProtocolHandlers(streamType StreamType) []protocolHandler {
+func (c *handlerConfig) newProtocolHandlers() []protocolHandler {
 	protocols := []protocol{&protocolConnect{}}
 	if c.HandleGRPC {
 		protocols = append(protocols, &protocolGRPC{web: false})
@@ -298,7 +300,7 @@ func (c *handlerConfig) newProtocolHandlers(streamType StreamType) []protocolHan
 	)
 	for _, protocol := range protocols {
 		handlers = append(handlers, protocol.NewHandler(&protocolHandlerParams{
-			Spec:                         c.newSpec(streamType),
+			Spec:                         c.newSpec(),
 			Codecs:                       codecs,
 			CompressionPools:             compressors,
 			CompressMinBytes:             c.CompressMinBytes,
@@ -318,13 +320,13 @@ func newStreamHandler(
 	implementation StreamingHandlerFunc,
 	options ...HandlerOption,
 ) *Handler {
-	config := newHandlerConfig(procedure, options)
+	config := newHandlerConfig(procedure, streamType, options)
 	if ic := config.Interceptor; ic != nil {
 		implementation = ic.WrapStreamingHandler(implementation)
 	}
-	protocolHandlers := config.newProtocolHandlers(streamType)
+	protocolHandlers := config.newProtocolHandlers()
 	return &Handler{
-		spec:             config.newSpec(streamType),
+		spec:             config.newSpec(),
 		implementation:   implementation,
 		protocolHandlers: mappedMethodHandlers(protocolHandlers),
 		allowMethod:      sortedAllowMethodValue(protocolHandlers),
