@@ -95,3 +95,14 @@ func ExampleWithInterceptors() {
 	// inner interceptor: after call
 	// outer interceptor: after call
 }
+
+func ExampleWithConditionalHandlerOptions() {
+	connect.WithConditionalHandlerOptions(func(spec connect.Spec) []connect.HandlerOption {
+		var options []connect.HandlerOption
+		if spec.Procedure == pingv1connect.PingServicePingProcedure {
+			options = append(options, connect.WithReadMaxBytes(1024))
+		}
+		return options
+	})
+	// Output:
+}

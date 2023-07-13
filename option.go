@@ -166,6 +166,12 @@ func WithRequireConnectProtocolHeader() HandlerOption {
 	return &requireConnectProtocolHeaderOption{}
 }
 
+// WithConditionalHandlerOptions accepts a function that returns a HandlerOption.
+// It's used to conditionally apply HandlerOption to a Handler based on the Spec.
+func WithConditionalHandlerOptions(conditional func(spec Spec) []HandlerOption) HandlerOption {
+	return &conditionalHandlerOptions{conditional: conditional}
+}
+
 // Option implements both [ClientOption] and [HandlerOption], so it can be
 // applied both client-side and server-side.
 type Option interface {
@@ -556,4 +562,18 @@ func withProtoJSONCodecs() HandlerOption {
 		WithCodec(&protoJSONCodec{codecNameJSON}),
 		WithCodec(&protoJSONCodec{codecNameJSONCharsetUTF8}),
 	)
+}
+
+type conditionalHandlerOptions struct {
+	conditional func(spec Spec) []HandlerOption
+}
+
+func (o *conditionalHandlerOptions) applyToHandler(config *handlerConfig) {
+	spec := config.newSpec()
+	if spec.Procedure == "" {
+		return // ignore empty specs
+	}
+	for _, option := range o.conditional(spec) {
+		option.applyToHandler(config)
+	}
 }

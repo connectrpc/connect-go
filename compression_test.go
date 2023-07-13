@@ -128,35 +128,35 @@ func TestHandlerCompressionOptionTest(t *testing.T) {
 
 	t.Run("defaults", func(t *testing.T) {
 		t.Parallel()
-		config := newHandlerConfig(testProc, nil)
+		config := newHandlerConfig(testProc, StreamTypeUnary, nil)
 		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
 		checkPools(t, config)
 	})
 	t.Run("WithCompression", func(t *testing.T) {
 		t.Parallel()
 		opts := []HandlerOption{WithCompression("foo", dummyDecompressCtor, dummyCompressCtor)}
-		config := newHandlerConfig(testProc, opts)
+		config := newHandlerConfig(testProc, StreamTypeUnary, opts)
 		assert.Equal(t, config.CompressionNames, []string{compressionGzip, "foo"})
 		checkPools(t, config)
 	})
 	t.Run("WithCompression-empty-name-noop", func(t *testing.T) {
 		t.Parallel()
 		opts := []HandlerOption{WithCompression("", dummyDecompressCtor, dummyCompressCtor)}
-		config := newHandlerConfig(testProc, opts)
+		config := newHandlerConfig(testProc, StreamTypeUnary, opts)
 		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
 		checkPools(t, config)
 	})
 	t.Run("WithCompression-nil-ctors-noop", func(t *testing.T) {
 		t.Parallel()
 		opts := []HandlerOption{WithCompression("foo", nil, nil)}
-		config := newHandlerConfig(testProc, opts)
+		config := newHandlerConfig(testProc, StreamTypeUnary, opts)
 		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
 		checkPools(t, config)
 	})
 	t.Run("WithCompression-nil-ctors-unregisters", func(t *testing.T) {
 		t.Parallel()
 		opts := []HandlerOption{WithCompression("gzip", nil, nil)}
-		config := newHandlerConfig(testProc, opts)
+		config := newHandlerConfig(testProc, StreamTypeUnary, opts)
 		assert.Equal(t, config.CompressionNames, nil)
 		checkPools(t, config)
 	})
