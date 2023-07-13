@@ -609,7 +609,7 @@ func (cc *connectStreamingClientConn) Receive(msg any) error {
 	// If the error is EOF but not from a last message, we want to return
 	// io.ErrUnexpectedEOF instead.
 	if errors.Is(err, io.EOF) && !errors.Is(err, errSpecialEnvelope) {
-		err = NewError(CodeUnknown, io.ErrUnexpectedEOF)
+		err = errorf(CodeInternal, "protocol error: %w", io.ErrUnexpectedEOF)
 	}
 	// There's no error in the trailers, so this was probably an error
 	// converting the bytes to a message, an error reading from the network, or

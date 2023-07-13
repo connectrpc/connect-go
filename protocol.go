@@ -283,16 +283,14 @@ func isCommaOrSpace(c rune) bool {
 	return c == ',' || c == ' '
 }
 
-func discard(reader io.Reader) error {
+func discard(reader io.Reader) (int64, error) {
 	if lr, ok := reader.(*io.LimitedReader); ok {
-		_, err := io.Copy(io.Discard, lr)
-		return err
+		return io.Copy(io.Discard, lr)
 	}
 	// We don't want to get stuck throwing data away forever, so limit how much
 	// we're willing to do here.
 	lr := &io.LimitedReader{R: reader, N: discardLimit}
-	_, err := io.Copy(io.Discard, lr)
-	return err
+	return io.Copy(io.Discard, lr)
 }
 
 // negotiateCompression determines and validates the request compression and

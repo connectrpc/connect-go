@@ -166,7 +166,7 @@ _not_ make breaking changes in the 1.x series of releases.
 Offered under the [Apache 2 license][license].
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
-[Buf Studio]: https://studio.buf.build/
+[Buf Studio]: https://buf.build/studio
 [Getting Started]: https://connect.build/docs/go/getting-started
 [blog]: https://buf.build/blog/connect-a-better-grpc
 [connect-crosstest]: https://github.com/bufbuild/connect-crosstest
