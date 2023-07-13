@@ -76,16 +76,16 @@ $(BIN)/protoc-gen-connect-go:
 
 $(BIN)/buf: Makefile
 	@mkdir -p $(@D)
-	GOBIN="$(abspath $(@D))" cd internal/tools && $(GO) install github.com/bufbuild/buf/cmd/buf
+	cd internal/tools && GOBIN="$(abspath $(@D))" $(GO) install github.com/bufbuild/buf/cmd/buf
 
 $(BIN)/license-header: Makefile
 	@mkdir -p $(@D)
-	GOBIN="$(abspath $(@D))" cd internal/tools && $(GO) install \
+	cd internal/tools && GOBIN="$(abspath $(@D))" $(GO) install \
 		  github.com/bufbuild/buf/private/pkg/licenseheader/cmd/license-header
 
 $(BIN)/golangci-lint: Makefile
 	@mkdir -p $(@D)
-	GOBIN="$(abspath $(@D))" cd internal/tools && go install github.com/golangci/golangci-lint/cmd/golangci-lint
+	cd internal/tools && GOBIN="$(abspath $(@D))" go install github.com/golangci/golangci-lint/cmd/golangci-lint
 
 $(BIN)/protoc-gen-go: Makefile go.mod
 	@mkdir -p $(@D)
