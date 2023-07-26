@@ -68,7 +68,7 @@ We're much more likely to approve your changes if you:
 * Write a [good commit message][commit-message].
 * Maintain backward compatibility.
 
-[fork]: https://connectrpc.com/connect/fork
-[open-issue]: https://connectrpc.com/connect/issues/new
-[cla]: https://cla-assistant.io/bufbuild/connect-go
+[fork]: https://github.com/connectrpc/connect-go/fork
+[open-issue]: https://github.com/connectrpc/connect-go/issues/new
+[cla]: https://cla-assistant.io/connectrpc/connect-go
 [commit-message]: http://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html
