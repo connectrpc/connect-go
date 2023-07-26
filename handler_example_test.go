@@ -54,8 +54,7 @@ func Example_handler() {
 		),
 	)
 	// You can serve gRPC's health and server reflection APIs using
-	// github.com/bufbuild/connect-grpchealth-go and
-	// github.com/bufbuild/connect-grpcreflect-go.
+	// connectrpc.com/grpchealth and connectrpc.com/grpcreflect.
 	_ = http.ListenAndServeTLS(
 		"localhost:8080",
 		"internal/testdata/server.crt",

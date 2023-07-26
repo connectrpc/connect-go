@@ -21,7 +21,7 @@
 // [Connect website], and there's a working [demonstration service] on Github.
 //
 // [Connect website]: https://connectrpc.com
-// [demonstration service]: https://github.com/bufbuild/connect-demo
+// [demonstration service]: https://github.com/connectrpc/examples-go
 package connect
 
 import (
