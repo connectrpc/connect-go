@@ -6,11 +6,11 @@ linters-settings:
   exhaustruct:
     include:
       # No zero values for param structs.
-      - 'github\.com/bufbuild/connect-go\..*[pP]arams'
+      - 'connectrpc\.com/connect\..*[pP]arams'
       # No zero values for ClientStream, ServerStream, and friends.
-      - 'github\.com/bufbuild/connect-go\.ClientStream.*'
-      - 'github\.com/bufbuild/connect-go\.ServerStream.*'
-      - 'github\.com/bufbuild/connect-go\.BidiStream.*'
+      - 'connectrpc\.com/connect\.ClientStream.*'
+      - 'connectrpc\.com/connect\.ServerStream.*'
+      - 'connectrpc\.com/connect\.BidiStream.*'
   forbidigo:
     forbid:
       - '^fmt\.Print'
