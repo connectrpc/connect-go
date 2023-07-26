@@ -1,7 +1,7 @@
 Connect
 =======
 
-[![Build](https://connectrpc.com/connect/actions/workflows/ci.yaml/badge.svg?branch=main)](https://connectrpc.com/connect/actions/workflows/ci.yaml)
+[![Build](https://github.com/connectrpc/connect-go/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/connectrpc/connect-go/actions/workflows/ci.yaml)
 [![Report Card](https://goreportcard.com/badge/connectrpc.com/connect)](https://goreportcard.com/report/connectrpc.com/connect)
 [![GoDoc](https://pkg.go.dev/badge/connectrpc.com/connect.svg)](https://pkg.go.dev/connectrpc.com/connect)
 
@@ -27,8 +27,8 @@ curl \
 
 Handlers and clients also support the gRPC and gRPC-Web protocols, including
 streaming, headers, trailers, and error details. gRPC-compatible [server
-reflection][] and [health checks][] are available as standalone packages.
-Instead of cURL, we could call our API with `buf curl`:
+reflection][grpreflect] and [health checks][grpchealth] are available as
+standalone packages. Instead of cURL, we could call our API with `buf curl`:
 
 ```
 go install github.com/bufbuild/buf/cmd/buf@latest
@@ -45,7 +45,7 @@ or `http.Handler` also works with Connect.
 
 For more on Connect, see the [announcement blog post][blog], the documentation
 on [connectrpc.com][docs] (especially the [Getting Started] guide for Go), the
-[demo service][demo], or the [protocol specification][protocol].
+[demo service][examples-go], or the [protocol specification][protocol].
 
 ## A small example
 
@@ -105,7 +105,7 @@ func main() {
 ```
 
 With that server running, you can make requests with any gRPC or Connect
-client. To write a client using `connect-go`,
+client. To write a client using Connect,
 
 ```go
 package main
@@ -144,9 +144,9 @@ configuring timeouts, connection pools, observability, and h2c.
 
 ## Ecosystem
 
-* [connect-grpchealth-go]: gRPC-compatible health checks
-* [connect-grpcreflect-go]: gRPC-compatible server reflection
-* [connect-demo]: service powering demo.connectrpc.com, including bidi streaming
+* [grpchealth]: gRPC-compatible health checks
+* [grpcreflect]: gRPC-compatible server reflection
+* [examples-go]: service powering demo.connectrpc.com, including bidi streaming
 * [connect-web]: TypeScript clients for web browsers
 * [Buf Studio]: web UI for ad-hoc RPCs
 * [connect-crosstest]: gRPC and gRPC-Web interoperability tests
@@ -158,7 +158,7 @@ This module is stable. It supports:
 * The [two most recent major releases][go-support-policy] of Go.
 * [APIv2] of Protocol Buffers in Go (`google.golang.org/protobuf`).
 
-Within those parameters, `connect-go` follows semantic versioning. We will
+Within those parameters, `connect` follows semantic versioning. We will
 _not_ make breaking changes in the 1.x series of releases.
 
 ## Legal
@@ -170,16 +170,13 @@ Offered under the [Apache 2 license][license].
 [Getting Started]: https://connectrpc.com/docs/go/getting-started
 [blog]: https://buf.build/blog/connect-a-better-grpc
 [connect-crosstest]: https://github.com/bufbuild/connect-crosstest
-[connect-demo]: https://github.com/bufbuild/connect-demo
-[connect-grpchealth-go]: https://github.com/bufbuild/connect-grpchealth-go
-[connect-grpcreflect-go]: https://github.com/bufbuild/connect-grpcreflect-go
+[grpchealth]: https://github.com/connectrpc/grpchealth-go
+[grpcreflect]: https://github.com/connectrpc/grpcreflect-go
 [connect-web]: https://www.npmjs.com/package/@bufbuild/connect-web
-[demo]: https://github.com/bufbuild/connect-demo
+[examples-go]: https://github.com/connectrpc/examples-go
 [docs-deployment]: https://connectrpc.com/docs/go/deployment
 [docs]: https://connectrpc.com
 [go-support-policy]: https://golang.org/doc/devel/release#policy
-[health checks]: https://github.com/bufbuild/connect-grpchealth-go
 [license]: https://connectrpc.com/connect/blob/main/LICENSE
 [protobuf]: https://developers.google.com/protocol-buffers
 [protocol]: https://connectrpc.com/docs/protocol
-[server reflection]: https://github.com/bufbuild/connect-grpcreflect-go
