@@ -19,10 +19,10 @@
 package collidev1connect
 
 import (
+	connect "connectrpc.com/connect"
+	v1 "connectrpc.com/connect/internal/gen/connect/collide/v1"
 	context "context"
 	errors "errors"
-	connect_go "connectrpc.com/connect"
-	v1 "connectrpc.com/connect/internal/gen/connect/collide/v1"
 	http "net/http"
 	strings "strings"
 )
@@ -32,7 +32,7 @@ import (
 // generated with a version of connect newer than the one compiled into your binary. You can fix the
 // problem by either regenerating this code with an older version of connect or updating the connect
 // version compiled into your binary.
-const _ = connect_go.IsAtLeastVersion0_1_0
+const _ = connect.IsAtLeastVersion0_1_0
 
 const (
 	// CollideServiceName is the fully-qualified name of the CollideService service.
@@ -53,7 +53,7 @@ const (
 
 // CollideServiceClient is a client for the connect.collide.v1.CollideService service.
 type CollideServiceClient interface {
-	Import(context.Context, *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error)
+	Import(context.Context, *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error)
 }
 
 // NewCollideServiceClient constructs a client for the connect.collide.v1.CollideService service. By
@@ -63,10 +63,10 @@ type CollideServiceClient interface {
 //
 // The URL supplied here should be the base URL for the Connect or gRPC server (for example,
 // http://api.acme.com or https://acme.com/grpc).
-func NewCollideServiceClient(httpClient connect_go.HTTPClient, baseURL string, opts ...connect_go.ClientOption) CollideServiceClient {
+func NewCollideServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) CollideServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
 	return &collideServiceClient{
-		_import: connect_go.NewClient[v1.ImportRequest, v1.ImportResponse](
+		_import: connect.NewClient[v1.ImportRequest, v1.ImportResponse](
 			httpClient,
 			baseURL+CollideServiceImportProcedure,
 			opts...,
@@ -76,17 +76,17 @@ func NewCollideServiceClient(httpClient connect_go.HTTPClient, baseURL string, o
 
 // collideServiceClient implements CollideServiceClient.
 type collideServiceClient struct {
-	_import *connect_go.Client[v1.ImportRequest, v1.ImportResponse]
+	_import *connect.Client[v1.ImportRequest, v1.ImportResponse]
 }
 
 // Import calls connect.collide.v1.CollideService.Import.
-func (c *collideServiceClient) Import(ctx context.Context, req *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error) {
+func (c *collideServiceClient) Import(ctx context.Context, req *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error) {
 	return c._import.CallUnary(ctx, req)
 }
 
 // CollideServiceHandler is an implementation of the connect.collide.v1.CollideService service.
 type CollideServiceHandler interface {
-	Import(context.Context, *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error)
+	Import(context.Context, *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error)
 }
 
 // NewCollideServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -94,8 +94,8 @@ type CollideServiceHandler interface {
 //
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
-func NewCollideServiceHandler(svc CollideServiceHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
-	collideServiceImportHandler := connect_go.NewUnaryHandler(
+func NewCollideServiceHandler(svc CollideServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	collideServiceImportHandler := connect.NewUnaryHandler(
 		CollideServiceImportProcedure,
 		svc.Import,
 		opts...,
@@ -113,6 +113,6 @@ func NewCollideServiceHandler(svc CollideServiceHandler, opts ...connect_go.Hand
 // UnimplementedCollideServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedCollideServiceHandler struct{}
 
-func (UnimplementedCollideServiceHandler) Import(context.Context, *connect_go.Request[v1.ImportRequest]) (*connect_go.Response[v1.ImportResponse], error) {
-	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("connect.collide.v1.CollideService.Import is not implemented"))
+func (UnimplementedCollideServiceHandler) Import(context.Context, *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.collide.v1.CollideService.Import is not implemented"))
 }

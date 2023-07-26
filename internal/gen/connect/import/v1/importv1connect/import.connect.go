@@ -19,7 +19,7 @@
 package importv1connect
 
 import (
-	connect_go "connectrpc.com/connect"
+	connect "connectrpc.com/connect"
 	_ "connectrpc.com/connect/internal/gen/connect/import/v1"
 	http "net/http"
 	strings "strings"
@@ -30,7 +30,7 @@ import (
 // generated with a version of connect newer than the one compiled into your binary. You can fix the
 // problem by either regenerating this code with an older version of connect or updating the connect
 // version compiled into your binary.
-const _ = connect_go.IsAtLeastVersion0_1_0
+const _ = connect.IsAtLeastVersion0_1_0
 
 const (
 	// ImportServiceName is the fully-qualified name of the ImportService service.
@@ -48,7 +48,7 @@ type ImportServiceClient interface {
 //
 // The URL supplied here should be the base URL for the Connect or gRPC server (for example,
 // http://api.acme.com or https://acme.com/grpc).
-func NewImportServiceClient(httpClient connect_go.HTTPClient, baseURL string, opts ...connect_go.ClientOption) ImportServiceClient {
+func NewImportServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) ImportServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
 	return &importServiceClient{}
 }
@@ -66,7 +66,7 @@ type ImportServiceHandler interface {
 //
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
-func NewImportServiceHandler(svc ImportServiceHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
+func NewImportServiceHandler(svc ImportServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	return "/connect.import.v1.ImportService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		default:
