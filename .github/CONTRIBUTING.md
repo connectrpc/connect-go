@@ -18,11 +18,11 @@ accept the CLA when you open your pull request.
 [Fork][fork], then clone the repository:
 
 ```
-mkdir -p $GOPATH/src/github.com/bufbuild
-cd $GOPATH/src/github.com/bufbuild
-git clone git@github.com:your_github_username/connect-go.git
-cd connect-go
-git remote add upstream https://connectrpc.com/connect.git
+mkdir -p $GOPATH/src/connectrpc.com
+cd $GOPATH/src/connectrpc.com
+git clone git@github.com:your_github_username/connect-go.git connect
+cd connect
+git remote add upstream https://github.com/connectrpc/connect-go.git
 git fetch upstream
 ```
 
