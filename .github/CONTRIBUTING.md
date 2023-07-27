@@ -9,20 +9,20 @@ pull request review much smoother. In your issue, pull request, and any other
 communications, please remember to treat your fellow contributors with
 respect!
 
-Note that you'll need to sign [Buf's Contributor License Agreement][cla]
-before we can accept any of your contributions. If necessary, a bot will remind
-you to accept the CLA when you open your pull request.
+Note that you'll need to sign the [Contributor License Agreement][cla] before
+we can accept any of your contributions. If necessary, a bot will remind you to
+accept the CLA when you open your pull request.
 
 ## Setup
 
 [Fork][fork], then clone the repository:
 
 ```
-mkdir -p $GOPATH/src/github.com/bufbuild
-cd $GOPATH/src/github.com/bufbuild
-git clone git@github.com:your_github_username/connect-go.git
-cd connect-go
-git remote add upstream https://connectrpc.com/connect.git
+mkdir -p $GOPATH/src/connectrpc.com
+cd $GOPATH/src/connectrpc.com
+git clone git@github.com:your_github_username/connect-go.git connect
+cd connect
+git remote add upstream https://github.com/connectrpc/connect-go.git
 git fetch upstream
 ```
 
