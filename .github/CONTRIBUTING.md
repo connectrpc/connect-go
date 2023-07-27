@@ -9,9 +9,9 @@ pull request review much smoother. In your issue, pull request, and any other
 communications, please remember to treat your fellow contributors with
 respect!
 
-Note that you'll need to sign [Buf's Contributor License Agreement][cla]
-before we can accept any of your contributions. If necessary, a bot will remind
-you to accept the CLA when you open your pull request.
+Note that you'll need to sign the [Contributor License Agreement][cla] before
+we can accept any of your contributions. If necessary, a bot will remind you to
+accept the CLA when you open your pull request.
 
 ## Setup
 
