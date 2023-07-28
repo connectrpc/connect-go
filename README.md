@@ -22,19 +22,19 @@ using `curl`. Try it with our live demo:
 curl \
     --header "Content-Type: application/json" \
     --data '{"sentence": "I feel happy."}' \
-    https://demo.connectrpc.com/buf.connect.demo.eliza.v1.ElizaService/Say
+    https://demo.connectrpc.com/connectrpc.eliza.v1.ElizaService/Say
 ```
 
 Handlers and clients also support the gRPC and gRPC-Web protocols, including
 streaming, headers, trailers, and error details. gRPC-compatible [server
 reflection][grpreflect] and [health checks][grpchealth] are available as
-standalone packages. Instead of cURL, we could call our API with `buf curl`:
+standalone packages. Instead of cURL, we could call our API with a gRPC client:
 
 ```
 go install github.com/bufbuild/buf/cmd/buf@latest
 buf curl --protocol grpc \
     --data '{"sentence": "I feel happy."}' \
-    https://demo.connectrpc.com/buf.connect.demo.eliza.v1.ElizaService/Say
+    https://demo.connectrpc.com/connectrpc.eliza.v1.ElizaService/Say
 ```
 
 Under the hood, Connect is just [Protocol Buffers][protobuf] and the standard
