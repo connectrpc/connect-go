@@ -33,16 +33,13 @@ type panicPingServer struct {
 	panicWith any
 }
 
-func (s *panicPingServer) Ping(
-	context.Context,
-	*connect.Request[pingv1.PingRequest],
-) (*connect.Response[pingv1.PingResponse], error) {
+func (s *panicPingServer) Ping(context.Context, *pingv1connect.PingRequest) (*pingv1connect.PingResponse, error) {
 	panic(s.panicWith) //nolint:forbidigo
 }
 
 func (s *panicPingServer) CountUp(
 	_ context.Context,
-	_ *connect.Request[pingv1.CountUpRequest],
+	_ *pingv1connect.CountUpRequest,
 	stream *connect.ServerStream[pingv1.CountUpResponse],
 ) error {
 	if err := stream.Send(&pingv1.CountUpResponse{}); err != nil {

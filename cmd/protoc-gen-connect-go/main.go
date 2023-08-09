@@ -135,8 +135,12 @@ func generate(plugin *protogen.Plugin, file *protogen.File) {
 	generatedFile.Import(file.GoImportPath)
 	generatePreamble(generatedFile, file)
 	generateServiceNameConstants(generatedFile, file.Services)
+
+	paramNames := newParameterNames(generatedFile, file.Services)
+	generateTypeAliases(generatedFile, paramNames)
+
 	for _, service := range file.Services {
-		generateService(generatedFile, service)
+		generateService(generatedFile, service, paramNames)
 	}
 }
 
@@ -219,16 +223,16 @@ func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protoge
 	g.P()
 }
 
-func generateService(g *protogen.GeneratedFile, service *protogen.Service) {
+func generateService(g *protogen.GeneratedFile, service *protogen.Service, paramNames *parameterNames) {
 	names := newNames(service)
-	generateClientInterface(g, service, names)
-	generateClientImplementation(g, service, names)
-	generateServerInterface(g, service, names)
+	generateClientInterface(g, service, names, paramNames)
+	generateClientImplementation(g, service, names, paramNames)
+	generateServerInterface(g, service, names, paramNames)
 	generateServerConstructor(g, service, names)
-	generateUnimplementedServerImplementation(g, service, names)
+	generateUnimplementedServerImplementation(g, service, names, paramNames)
 }
 
-func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Service, names names, paramNames *parameterNames) {
 	wrapComments(g, names.Client, " is a client for the ", service.Desc.FullName(), " service.")
 	if isDeprecatedService(service) {
 		g.P("//")
@@ -243,13 +247,13 @@ func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Servic
 			method.Comments.Leading,
 			isDeprecatedMethod(method),
 		)
-		g.P(clientSignature(g, method, false /* named */))
+		g.P(clientSignature(g, method, paramNames.Get(method), false /* named */))
 	}
 	g.P("}")
 	g.P()
 }
 
-func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names, paramNames *parameterNames) {
 	clientOption := connectPackage.Ident("ClientOption")
 
 	// Client constructor.
@@ -304,11 +308,11 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 	g.P("}")
 	g.P()
 	for _, method := range service.Methods {
-		generateClientMethod(g, method, names)
+		generateClientMethod(g, method, names, paramNames.Get(method))
 	}
 }
 
-func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, names names) {
+func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, names names, paramNames *methodParameterNames) {
 	receiver := names.ClientImpl
 	isStreamingClient := method.Desc.IsStreamingClient()
 	isStreamingServer := method.Desc.IsStreamingServer()
@@ -317,7 +321,7 @@ func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, na
 		g.P("//")
 		deprecated(g)
 	}
-	g.P("func (c *", receiver, ") ", clientSignature(g, method, true /* named */), " {")
+	g.P("func (c *", receiver, ") ", clientSignature(g, method, paramNames, true /* named */), " {")
 
 	switch {
 	case isStreamingClient && !isStreamingServer:
@@ -333,37 +337,31 @@ func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, na
 	g.P()
 }
 
-func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named bool) string {
+func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, paramNames *methodParameterNames, named bool) string {
 	reqName := "req"
 	ctxName := "ctx"
 	if !named {
 		reqName, ctxName = "", ""
 	}
+	ctxType := g.QualifiedGoIdent(contextPackage.Ident("Context"))
 	if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
 		// bidi streaming
-		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
-			"*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClient")) +
-			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
+		return method.GoName + "(" + ctxName + " " + ctxType + ") *" + paramNames.ClientOutput.Name()
 	}
 	if method.Desc.IsStreamingClient() {
 		// client streaming
-		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
-			"*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClient")) +
-			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
+		return method.GoName + "(" + ctxName + " " + ctxType + ") *" + paramNames.ClientOutput.Name()
 	}
 	if method.Desc.IsStreamingServer() {
-		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
-			", " + reqName + " *" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
-			g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
-			"(*" + g.QualifiedGoIdent(connectPackage.Ident("ServerStreamForClient")) +
-			"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
-			", error)"
+		return method.GoName + "(" + ctxName + " " + ctxType +
+			", " + reqName + " *" + paramNames.ClientInput.Name() + ") " +
+			"(*" + paramNames.ClientOutput.Name() + ", error)"
 	}
 	// unary; symmetric so we can re-use server templating
-	return method.GoName + serverSignatureParams(g, method, named)
+	return method.GoName + serverSignatureParams(g, method, paramNames, named)
 }
 
-func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Service, names names, paramNames *parameterNames) {
 	wrapComments(g, names.Server, " is an implementation of the ", service.Desc.FullName(), " service.")
 	if isDeprecatedService(service) {
 		g.P("//")
@@ -378,7 +376,7 @@ func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Servic
 			isDeprecatedMethod(method),
 		)
 		g.AnnotateSymbol(names.Server+"."+method.GoName, protogen.Annotation{Location: method.Location})
-		g.P(serverSignature(g, method))
+		g.P(serverSignature(g, method, paramNames.Get(method)))
 	}
 	g.P("}")
 	g.P()
@@ -439,12 +437,12 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 	g.P()
 }
 
-func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names, paramNames *parameterNames) {
 	wrapComments(g, names.UnimplementedServer, " returns CodeUnimplemented from all methods.")
 	g.P("type ", names.UnimplementedServer, " struct {}")
 	g.P()
 	for _, method := range service.Methods {
-		g.P("func (", names.UnimplementedServer, ") ", serverSignature(g, method), "{")
+		g.P("func (", names.UnimplementedServer, ") ", serverSignature(g, method, paramNames.Get(method)), "{")
 		if method.Desc.IsStreamingServer() {
 			g.P("return ", connectPackage.Ident("NewError"), "(",
 				connectPackage.Ident("CodeUnimplemented"), ", ", errorsPackage.Ident("New"),
@@ -460,46 +458,47 @@ func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, servic
 	g.P()
 }
 
-func serverSignature(g *protogen.GeneratedFile, method *protogen.Method) string {
-	return method.GoName + serverSignatureParams(g, method, false /* named */)
+func generateTypeAliases(g *protogen.GeneratedFile, paramNames *parameterNames) {
+	if len(paramNames.Aliases) == 0 {
+		return
+	}
+	g.P("type (")
+	for _, alias := range paramNames.Aliases {
+		g.P(alias[0], " = ", alias[1])
+	}
+	g.P(")")
+	g.P()
 }
 
-func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, named bool) string {
+func serverSignature(g *protogen.GeneratedFile, method *protogen.Method, paramNames *methodParameterNames) string {
+	return method.GoName + serverSignatureParams(g, method, paramNames, false /* named */)
+}
+
+func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, paramNames *methodParameterNames, named bool) string {
 	ctxName := "ctx "
 	reqName := "req "
 	streamName := "stream "
 	if !named {
 		ctxName, reqName, streamName = "", "", ""
 	}
+	ctxType := g.QualifiedGoIdent(contextPackage.Ident("Context"))
 	if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
 		// bidi streaming
-		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ", " +
-			streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStream")) +
-			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
-			") error"
+		return "(" + ctxName + ctxType + ", " + streamName + "*" + paramNames.HandlerInput.Name() + ") error"
 	}
 	if method.Desc.IsStreamingClient() {
 		// client streaming
-		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ", " +
-			streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStream")) +
-			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + "]" +
-			") (*" + g.QualifiedGoIdent(connectPackage.Ident("Response")) + "[" + g.QualifiedGoIdent(method.Output.GoIdent) + "] ,error)"
+		return "(" + ctxName + ctxType + ", " + streamName + "*" + paramNames.HandlerInput.Name() +
+			") (*" + paramNames.HandlerOutput.Name() + " ,error)"
 	}
 	if method.Desc.IsStreamingServer() {
 		// server streaming
-		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
-			", " + reqName + "*" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
-			g.QualifiedGoIdent(method.Input.GoIdent) + "], " +
-			streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ServerStream")) +
-			"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
-			") error"
+		return "(" + ctxName + ctxType + ", " + reqName + "*" + paramNames.HandlerInput.Name() + ", " +
+			streamName + "*" + paramNames.HandlerOutput.Name() + ") error"
 	}
 	// unary
-	return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
-		", " + reqName + "*" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
-		g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
-		"(*" + g.QualifiedGoIdent(connectPackage.Ident("Response")) + "[" +
-		g.QualifiedGoIdent(method.Output.GoIdent) + "], error)"
+	return "(" + ctxName + ctxType + ", " + reqName + "*" + paramNames.HandlerInput.Name() + ") " +
+		"(*" + paramNames.HandlerOutput.Name() + ", error)"
 }
 
 func procedureConstName(m *protogen.Method) string {
@@ -627,4 +626,160 @@ func newNames(service *protogen.Service) names {
 		ServerConstructor:   fmt.Sprintf("New%sHandler", base),
 		UnimplementedServer: fmt.Sprintf("Unimplemented%sHandler", base),
 	}
+}
+
+type parameterNames struct {
+	Aliases [][2]string
+	Methods map[protoreflect.FullName]*methodParameterNames
+}
+
+func newParameterNames(g *protogen.GeneratedFile, services []*protogen.Service) *parameterNames { //nolint:gocyclo
+	// First, make one pass to find alias-able request and response types. We're
+	// trying to shorten user-visible type names, so there's no point in
+	// producing aliases that are just as long as the spelled-out generic types.
+	//
+	// To safely produce short aliases, we're only aliasing messages that are:
+	//   - used as a connect.Request or connect.Response, but not both.
+	//   - from the same protobuf package and file as the service.
+	// Ideally we'd allow aliases for types from different files in the same
+	// package, but the plugin contract doesn't allow us to inspect services in
+	// files other than the ones we're generating code for.
+	//
+	// Notably, we're not generating aliases for Connect's stream types: useful
+	// aliases for them are just as wordy as the generic types, so the extra
+	// indirection isn't worth it.
+	const (
+		asRequest  = 0b01
+		asResponse = 0b10
+	)
+	aliasable := make(map[protoreflect.FullName]uint8)
+	for _, service := range services {
+		pkg := service.Desc.ParentFile().Package()
+		path := service.Desc.ParentFile().Path()
+		for _, method := range service.Methods {
+			if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
+				continue
+			}
+			if method.Input.Desc.ParentFile().Package() == pkg && method.Input.Desc.ParentFile().Path() == path {
+				aliasable[method.Input.Desc.FullName()] |= asRequest
+			}
+			if method.Output.Desc.ParentFile().Package() == pkg && method.Input.Desc.ParentFile().Path() == path {
+				aliasable[method.Output.Desc.FullName()] |= asResponse
+			}
+		}
+	}
+	for fqn, usage := range aliasable {
+		if usage == asRequest&asResponse {
+			delete(aliasable, fqn)
+		}
+	}
+	// Now, make another pass to choose names.
+	params := &parameterNames{Methods: make(map[protoreflect.FullName]*methodParameterNames)}
+	for _, service := range services {
+		for _, method := range service.Methods {
+			isStreamingClient := method.Desc.IsStreamingClient()
+			isStreamingServer := method.Desc.IsStreamingServer()
+			methodParams := &methodParameterNames{}
+			switch {
+			case isStreamingClient && isStreamingServer:
+				methodParams.ClientOutput.Generic = g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClient")) +
+					"[" + g.QualifiedGoIdent(method.Input.GoIdent) +
+					", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
+				methodParams.HandlerInput.Generic = g.QualifiedGoIdent(connectPackage.Ident("BidiStream")) +
+					"[" + g.QualifiedGoIdent(method.Input.GoIdent) +
+					", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
+			case isStreamingClient:
+				methodParams.ClientOutput.Generic = g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClient")) +
+					"[" + g.QualifiedGoIdent(method.Input.GoIdent) +
+					", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
+				methodParams.HandlerInput.Generic = g.QualifiedGoIdent(connectPackage.Ident("ClientStream")) +
+					"[" + g.QualifiedGoIdent(method.Input.GoIdent) + "]"
+				methodParams.HandlerOutput.Generic = g.QualifiedGoIdent(connectPackage.Ident("Response")) +
+					"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
+				if _, ok := aliasable[method.Output.Desc.FullName()]; ok {
+					methodParams.HandlerOutput.Alias = method.Output.GoIdent.GoName
+				}
+			case isStreamingServer:
+				methodParams.ClientInput.Generic = g.QualifiedGoIdent(connectPackage.Ident("Request")) +
+					"[" + g.QualifiedGoIdent(method.Input.GoIdent) + "]"
+				methodParams.ClientOutput.Generic = g.QualifiedGoIdent(connectPackage.Ident("ServerStreamForClient")) +
+					"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
+				methodParams.HandlerInput.Generic = g.QualifiedGoIdent(connectPackage.Ident("Request")) +
+					"[" + g.QualifiedGoIdent(method.Input.GoIdent) + "]"
+				methodParams.HandlerOutput.Generic = g.QualifiedGoIdent(connectPackage.Ident("ServerStream")) +
+					"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
+				if _, ok := aliasable[method.Input.Desc.FullName()]; ok {
+					methodParams.ClientInput.Alias = method.Input.GoIdent.GoName
+					methodParams.HandlerInput.Alias = methodParams.ClientInput.Alias
+				}
+			default:
+				methodParams.ClientInput.Generic = g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
+					g.QualifiedGoIdent(method.Input.GoIdent) + "]"
+				methodParams.ClientOutput.Generic = g.QualifiedGoIdent(connectPackage.Ident("Response")) + "[" +
+					g.QualifiedGoIdent(method.Output.GoIdent) + "]"
+				methodParams.HandlerInput.Generic = methodParams.ClientInput.Generic
+				methodParams.HandlerOutput.Generic = methodParams.ClientOutput.Generic
+				if _, ok := aliasable[method.Input.Desc.FullName()]; ok {
+					methodParams.ClientInput.Alias = method.Input.GoIdent.GoName
+					methodParams.HandlerInput.Alias = methodParams.ClientInput.Alias
+				}
+				if _, ok := aliasable[method.Output.Desc.FullName()]; ok {
+					methodParams.ClientOutput.Alias = method.Output.GoIdent.GoName
+					methodParams.HandlerOutput.Alias = methodParams.ClientOutput.Alias
+				}
+			}
+			params.Methods[method.Desc.FullName()] = methodParams
+		}
+	}
+	// Finally, another pass to prepare the actual alias declarations. We need to
+	// deduplicate (in case the same message is used in multiple RPCs), and we'd
+	// like the aliases to appear in the same order as they're used in the RPC
+	// definitions.
+	for _, service := range services {
+		for _, method := range service.Methods {
+			methodParams := params.Get(method)
+			if _, ok := aliasable[method.Input.Desc.FullName()]; ok {
+				if methodParams.ClientInput.Alias != "" {
+					params.Aliases = append(params.Aliases, [2]string{methodParams.ClientInput.Alias, methodParams.ClientInput.Generic})
+				}
+				if methodParams.HandlerInput.Alias != "" && methodParams.HandlerInput.Alias != methodParams.ClientInput.Alias {
+					params.Aliases = append(params.Aliases, [2]string{methodParams.HandlerInput.Alias, methodParams.HandlerInput.Generic})
+				}
+				delete(aliasable, method.Input.Desc.FullName())
+			}
+			if _, ok := aliasable[method.Output.Desc.FullName()]; ok {
+				if methodParams.ClientOutput.Alias != "" {
+					params.Aliases = append(params.Aliases, [2]string{methodParams.ClientOutput.Alias, methodParams.ClientOutput.Generic})
+				}
+				if methodParams.HandlerOutput.Alias != "" && methodParams.HandlerOutput.Alias != methodParams.ClientOutput.Alias {
+					params.Aliases = append(params.Aliases, [2]string{methodParams.HandlerOutput.Alias, methodParams.HandlerOutput.Generic})
+				}
+				delete(aliasable, method.Output.Desc.FullName())
+			}
+		}
+	}
+	return params
+}
+
+func (pn *parameterNames) Get(method *protogen.Method) *methodParameterNames {
+	return pn.Methods[method.Desc.FullName()]
+}
+
+type methodParameterNames struct {
+	ClientInput   aliasedTypeName
+	ClientOutput  aliasedTypeName
+	HandlerInput  aliasedTypeName
+	HandlerOutput aliasedTypeName
+}
+
+type aliasedTypeName struct {
+	Generic string
+	Alias   string
+}
+
+func (n aliasedTypeName) Name() string {
+	if n.Alias != "" {
+		return n.Alias
+	}
+	return n.Generic
 }

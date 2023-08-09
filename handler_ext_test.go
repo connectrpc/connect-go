@@ -24,7 +24,6 @@ import (
 
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
-	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
 
@@ -213,6 +212,6 @@ type successPingServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
 }
 
-func (successPingServer) Ping(context.Context, *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
-	return &connect.Response[pingv1.PingResponse]{}, nil
+func (successPingServer) Ping(context.Context, *pingv1connect.PingRequest) (*pingv1connect.PingResponse, error) {
+	return &pingv1connect.PingResponse{}, nil
 }

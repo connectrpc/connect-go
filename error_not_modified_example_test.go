@@ -34,10 +34,7 @@ type ExampleCachingPingServer struct {
 // Ping is idempotent and free of side effects (and the Protobuf schema
 // indicates this), so clients using the Connect protocol may call it with HTTP
 // GET requests. This implementation uses Etags to manage client-side caching.
-func (*ExampleCachingPingServer) Ping(
-	_ context.Context,
-	req *connect.Request[pingv1.PingRequest],
-) (*connect.Response[pingv1.PingResponse], error) {
+func (*ExampleCachingPingServer) Ping(_ context.Context, req *pingv1connect.PingRequest) (*pingv1connect.PingResponse, error) {
 	resp := connect.NewResponse(&pingv1.PingResponse{
 		Number: req.Msg.Number,
 	})

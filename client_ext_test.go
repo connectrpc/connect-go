@@ -195,9 +195,7 @@ type notModifiedPingServer struct {
 	etag string
 }
 
-func (s *notModifiedPingServer) Ping(
-	_ context.Context,
-	req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+func (s *notModifiedPingServer) Ping(_ context.Context, req *pingv1connect.PingRequest) (*pingv1connect.PingResponse, error) {
 	if req.HTTPMethod() == http.MethodGet && req.Header().Get("If-None-Match") == s.etag {
 		return nil, connect.NewNotModifiedError(http.Header{"Etag": []string{s.etag}})
 	}

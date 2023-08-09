@@ -51,9 +51,14 @@ const (
 	CollideServiceImportProcedure = "/connect.collide.v1.CollideService/Import"
 )
 
+type (
+	ImportRequest  = connect.Request[v1.ImportRequest]
+	ImportResponse = connect.Response[v1.ImportResponse]
+)
+
 // CollideServiceClient is a client for the connect.collide.v1.CollideService service.
 type CollideServiceClient interface {
-	Import(context.Context, *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error)
+	Import(context.Context, *ImportRequest) (*ImportResponse, error)
 }
 
 // NewCollideServiceClient constructs a client for the connect.collide.v1.CollideService service. By
@@ -80,13 +85,13 @@ type collideServiceClient struct {
 }
 
 // Import calls connect.collide.v1.CollideService.Import.
-func (c *collideServiceClient) Import(ctx context.Context, req *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error) {
+func (c *collideServiceClient) Import(ctx context.Context, req *ImportRequest) (*ImportResponse, error) {
 	return c._import.CallUnary(ctx, req)
 }
 
 // CollideServiceHandler is an implementation of the connect.collide.v1.CollideService service.
 type CollideServiceHandler interface {
-	Import(context.Context, *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error)
+	Import(context.Context, *ImportRequest) (*ImportResponse, error)
 }
 
 // NewCollideServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -113,6 +118,6 @@ func NewCollideServiceHandler(svc CollideServiceHandler, opts ...connect.Handler
 // UnimplementedCollideServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedCollideServiceHandler struct{}
 
-func (UnimplementedCollideServiceHandler) Import(context.Context, *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error) {
+func (UnimplementedCollideServiceHandler) Import(context.Context, *ImportRequest) (*ImportResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.collide.v1.CollideService.Import is not implemented"))
 }

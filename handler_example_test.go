@@ -30,10 +30,7 @@ type ExamplePingServer struct {
 }
 
 // Ping implements pingv1connect.PingServiceHandler.
-func (*ExamplePingServer) Ping(
-	_ context.Context,
-	request *connect.Request[pingv1.PingRequest],
-) (*connect.Response[pingv1.PingResponse], error) {
+func (*ExamplePingServer) Ping(_ context.Context, request *pingv1connect.PingRequest) (*pingv1connect.PingResponse, error) {
 	return connect.NewResponse(
 		&pingv1.PingResponse{
 			Number: request.Msg.Number,

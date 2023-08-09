@@ -73,10 +73,7 @@ type PingServer struct {
   pingv1connect.UnimplementedPingServiceHandler // returns errors from all methods
 }
 
-func (ps *PingServer) Ping(
-  ctx context.Context,
-  req *connect.Request[pingv1.PingRequest],
-) (*connect.Response[pingv1.PingResponse], error) {
+func (ps *PingServer) Ping(ctx context.Context, req *pingv1connect.PingRequest) (*pingv1connect.PingResponse, error) {
   // connect.Request and connect.Response give you direct access to headers and
   // trailers. No context-based nonsense!
   log.Println(req.Header().Get("Some-Header"))
