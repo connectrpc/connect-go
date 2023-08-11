@@ -177,6 +177,6 @@ Offered under the [Apache 2 license][license].
 [docs-deployment]: https://connectrpc.com/docs/go/deployment
 [docs]: https://connectrpc.com
 [go-support-policy]: https://golang.org/doc/devel/release#policy
-[license]: https://connectrpc.com/connect/blob/main/LICENSE
+[license]: https://github.com/connectrpc/connect-go/blob/main/LICENSE
 [protobuf]: https://developers.google.com/protocol-buffers
 [protocol]: https://connectrpc.com/docs/protocol
