@@ -904,11 +904,17 @@ func (m *connectUnaryMarshaler) Marshal(message any) *Error {
 	if message == nil {
 		return m.write(nil)
 	}
-	data, err := m.codec.Marshal(message)
+	var data []byte
+	var err error
+	if appender, ok := m.codec.(marshalAppender); ok {
+		data, err = appender.MarshalAppend(m.bufferPool.Get().Bytes(), message)
+	} else {
+		// Can't avoid allocating the slice, but we'll reuse it.
+		data, err = m.codec.Marshal(message)
+	}
 	if err != nil {
 		return errorf(CodeInternal, "marshal message: %w", err)
 	}
-	// Can't avoid allocating the slice, but we can reuse it.
 	uncompressed := bytes.NewBuffer(data)
 	defer m.bufferPool.Put(uncompressed)
 	if len(data) < m.compressMinBytes || m.compressionPool == nil {
