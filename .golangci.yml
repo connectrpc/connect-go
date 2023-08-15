@@ -7,10 +7,6 @@ linters-settings:
     include:
       # No zero values for param structs.
       - 'connectrpc\.com/connect\..*[pP]arams'
-      # No zero values for ClientStream, ServerStream, and friends.
-      - 'connectrpc\.com/connect\.ClientStream.*'
-      - 'connectrpc\.com/connect\.ServerStream.*'
-      - 'connectrpc\.com/connect\.BidiStream.*'
   forbidigo:
     forbid:
       - '^fmt\.Print'
@@ -38,6 +34,7 @@ linters:
   enable-all: true
   disable:
     - cyclop            # covered by gocyclo
+    - depguard          # unnecessary for small libraries
     - deadcode          # abandoned
     - exhaustivestruct  # replaced by exhaustruct
     - funlen            # rely on code review to limit function length
