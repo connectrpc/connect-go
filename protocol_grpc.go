@@ -29,7 +29,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	statusv1 "connectrpc.com/connect/internal/gen/connectext/grpc/status/v1"
+	statusv1 "google.golang.org/genproto/googleapis/rpc/status"
 )
 
 const (

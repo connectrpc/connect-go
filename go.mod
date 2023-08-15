@@ -9,5 +9,6 @@ retract (
 
 require (
 	github.com/google/go-cmp v0.5.9
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20230814215434-ca7cfce7776a
 	google.golang.org/protobuf v1.31.0
 )
