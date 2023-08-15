@@ -155,7 +155,8 @@ configuring timeouts, connection pools, observability, and h2c.
 
 This module is stable. It supports:
 
-* The [two most recent major releases][go-support-policy] of Go.
+* The three most recent major releases of Go. Keep in mind that [only the last
+  two releases receive security patches][go-support-policy].
 * [APIv2] of Protocol Buffers in Go (`google.golang.org/protobuf`).
 
 Within those parameters, `connect` follows semantic versioning. We will
