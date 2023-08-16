@@ -11,8 +11,6 @@ export PATH := $(BIN):$(PATH)
 export GOBIN := $(abspath $(BIN))
 COPYRIGHT_YEARS := 2021-2023
 LICENSE_IGNORE := --ignore /testdata/
-# Set to use a different compiler. For example, `GO=go1.18rc1 make test`.
-GO ?= go
 
 .PHONY: help
 help: ## Describe useful make targets
@@ -30,20 +28,20 @@ clean: ## Delete intermediate build artifacts
 
 .PHONY: test
 test: build ## Run unit tests
-	$(GO) test -vet=off -race -cover ./...
+	go test -vet=off -race -cover ./...
 
 .PHONY: build
 build: generate ## Build all packages
-	$(GO) build ./...
+	go build ./...
 
 .PHONY: install
 install: ## Install all binaries
-	$(GO) install ./...
+	go install ./...
 
 .PHONY: lint
 lint: $(BIN)/golangci-lint $(BIN)/buf ## Lint Go and protobuf
 	test -z "$$($(BIN)/buf format -d . | tee /dev/stderr)"
-	$(GO) vet ./...
+	go vet ./...
 	golangci-lint run
 	buf lint
 	buf format -d --exit-code
@@ -74,22 +72,22 @@ checkgenerate:
 .PHONY: $(BIN)/protoc-gen-connect-go
 $(BIN)/protoc-gen-connect-go:
 	@mkdir -p $(@D)
-	$(GO) build -o $(@) ./cmd/protoc-gen-connect-go
+	go build -o $(@) ./cmd/protoc-gen-connect-go
 
 $(BIN)/buf: Makefile
 	@mkdir -p $(@D)
-	$(GO) install github.com/bufbuild/buf/cmd/buf@v1.26.1
+	go install github.com/bufbuild/buf/cmd/buf@v1.26.1
 
 $(BIN)/license-header: Makefile
 	@mkdir -p $(@D)
-	$(GO) install github.com/bufbuild/buf/private/pkg/licenseheader/cmd/license-header@v1.26.1
+	go install github.com/bufbuild/buf/private/pkg/licenseheader/cmd/license-header@v1.26.1
 
 $(BIN)/golangci-lint: Makefile
 	@mkdir -p $(@D)
-	$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.54.1
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.54.1
 
 $(BIN)/protoc-gen-go: Makefile go.mod
 	@mkdir -p $(@D)
 	@# The version of protoc-gen-go is determined by the version in go.mod
-	$(GO) install google.golang.org/protobuf/cmd/protoc-gen-go
+	go install google.golang.org/protobuf/cmd/protoc-gen-go
 
