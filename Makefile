@@ -56,7 +56,7 @@ lintfix: $(BIN)/golangci-lint $(BIN)/buf ## Automatically fix some lint errors
 .PHONY: generate
 generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
 	rm -rf internal/gen
-	PATH="$(abspath $(BIN))" $(BIN)/buf generate
+	PATH="$(abspath $(BIN))" buf generate
 	license-header \
 		--license-type apache \
 		--copyright-holder "Buf Technologies, Inc." \
