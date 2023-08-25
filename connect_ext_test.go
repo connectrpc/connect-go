@@ -429,7 +429,7 @@ func TestServer(t *testing.T) {
 	t.Run("http1", func(t *testing.T) {
 		t.Parallel()
 		server := httptest.NewServer(mux)
-		defer server.Close()
+		t.Cleanup(server.Close)
 		testMatrix(t, server, false /* bidi */)
 	})
 	t.Run("http2", func(t *testing.T) {
@@ -437,7 +437,7 @@ func TestServer(t *testing.T) {
 		server := httptest.NewUnstartedServer(mux)
 		server.EnableHTTP2 = true
 		server.StartTLS()
-		defer server.Close()
+		t.Cleanup(server.Close)
 		testMatrix(t, server, true /* bidi */)
 	})
 }
@@ -511,7 +511,7 @@ func TestHeaderBasic(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
 	server := httptest.NewServer(mux)
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL)
 	request := connect.NewRequest(&pingv1.PingRequest{})
@@ -595,7 +595,7 @@ func TestTimeoutParsing(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
 	server := httptest.NewServer(mux)
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -608,7 +608,7 @@ func TestFailCodec(t *testing.T) {
 	t.Parallel()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
 	server := httptest.NewServer(handler)
-	defer server.Close()
+	t.Cleanup(server.Close)
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL,
@@ -626,7 +626,7 @@ func TestContextError(t *testing.T) {
 	t.Parallel()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
 	server := httptest.NewServer(handler)
-	defer server.Close()
+	t.Cleanup(server.Close)
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL,
@@ -653,7 +653,7 @@ func TestGRPCMarshalStatusError(t *testing.T) {
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	assertInternalError := func(tb testing.TB, opts ...connect.ClientOption) {
 		tb.Helper()
@@ -779,7 +779,7 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 		assert.Nil(t, err)
 	})
 	server := httptest.NewServer(handler)
-	defer server.Close()
+	t.Cleanup(server.Close)
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL,
@@ -900,7 +900,7 @@ func TestCustomCompression(t *testing.T) {
 		connect.WithCompression(compressionName, decompressor, compressor),
 	))
 	server := httptest.NewServer(mux)
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := pingv1connect.NewPingServiceClient(server.Client(),
 		server.URL,
@@ -921,7 +921,7 @@ func TestClientWithoutGzipSupport(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
 	server := httptest.NewServer(mux)
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := pingv1connect.NewPingServiceClient(server.Client(),
 		server.URL,
@@ -976,7 +976,7 @@ func TestInterceptorReturnsWrongType(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
 	server := httptest.NewServer(mux)
-	defer server.Close()
+	t.Cleanup(server.Close)
 	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithInterceptors(connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, request connect.AnyRequest) (connect.AnyResponse, error) {
 			if _, err := next(ctx, request); err != nil {

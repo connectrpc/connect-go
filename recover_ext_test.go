@@ -80,7 +80,7 @@ func TestWithRecover(t *testing.T) {
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
-	defer server.Close()
+	t.Cleanup(server.Close)
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL,

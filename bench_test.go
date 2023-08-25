@@ -41,7 +41,7 @@ func BenchmarkConnect(b *testing.B) {
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
-	defer server.Close()
+	b.Cleanup(server.Close)
 
 	httpClient := server.Client()
 	httpTransport, ok := httpClient.Transport.(*http.Transport)
@@ -116,7 +116,7 @@ func BenchmarkREST(b *testing.B) {
 	server := httptest.NewUnstartedServer(http.HandlerFunc(handler))
 	server.EnableHTTP2 = true
 	server.StartTLS()
-	defer server.Close()
+	b.Cleanup(server.Close)
 	twoMiB := strings.Repeat("a", 2*1024*1024)
 	b.ResetTimer()
 

@@ -43,7 +43,7 @@ func TestAcceptEncodingOrdering(t *testing.T) {
 		called = true
 	})
 	server := httptest.NewServer(verify)
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := NewClient[emptypb.Empty, emptypb.Empty](
 		server.Client(),
