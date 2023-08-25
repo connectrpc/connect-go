@@ -128,7 +128,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 		),
 	)
 	server := httptest.NewServer(mux)
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
@@ -205,7 +205,7 @@ func TestInterceptorFuncAccessingHTTPMethod(t *testing.T) {
 		),
 	)
 	server := httptest.NewServer(mux)
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
