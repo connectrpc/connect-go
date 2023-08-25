@@ -49,6 +49,8 @@ const (
 	grpcWebContentTypeDefault = "application/grpc-web"
 	grpcContentTypePrefix     = grpcContentTypeDefault + "+"
 	grpcWebContentTypePrefix  = grpcWebContentTypeDefault + "+"
+
+	headerXUserAgent = "X-User-Agent"
 )
 
 var (
@@ -251,6 +253,13 @@ func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {
 	// checks in Header.Set.
 	if getHeaderCanonical(header, headerUserAgent) == "" {
 		header[headerUserAgent] = []string{defaultGrpcUserAgent}
+	}
+	if g.web && getHeaderCanonical(header, headerXUserAgent) == "" {
+		// The gRPC-Web pseudo-specification seems to require X-User-Agent rather
+		// than User-Agent for all clients, even if they're not browser-based. This
+		// is very odd for a backend client, so we'll split the difference and set
+		// both.
+		header[headerXUserAgent] = []string{defaultGrpcUserAgent}
 	}
 	header[headerContentType] = []string{grpcContentTypeFromCodecName(g.web, g.Codec.Name())}
 	// gRPC handles compression on a per-message basis, so we don't want to
