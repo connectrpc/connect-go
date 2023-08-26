@@ -25,11 +25,6 @@ import (
 // same meaning in the gRPC-Web, gRPC-HTTP2, and Connect protocols.
 const flagEnvelopeCompressed = 0b00000001
 
-// maxPreallocateBytes is the largest allocation we're willing to make eagerly.
-// Capping this prevents malicious clients from sending an envelope that
-// immediately triggers a large allocation.
-const maxPreallocateBytes = 1024 * 1024 * 4 // 4MiB
-
 var errSpecialEnvelope = errorf(
 	CodeUnknown,
 	"final message has protocol-specific flags: %w",
@@ -273,15 +268,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		}
 		return errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", size, r.readMaxBytes)
 	}
-	preallocateBytes := size
-	// Where possible, avoid many small allocations growing the buffer, but don't
-	// blindly trust the client: malicious clients may try to trigger large
-	// allocations by sending a spurious prefix.
-	if preallocateBytes > maxPreallocateBytes {
-		preallocateBytes = maxPreallocateBytes
-	}
 	if size > 0 {
-		env.Data.Grow(preallocateBytes)
 		// At layer 7, we don't know exactly what's happening down in L4. Large
 		// length-prefixed messages may arrive in chunks, so we may need to read
 		// the request body past EOF. We also need to take care that we don't retry
