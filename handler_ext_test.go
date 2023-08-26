@@ -245,7 +245,7 @@ func TestHandlerMaliciousPrefix(t *testing.T) {
 			<-start
 			response, err := server.Client().Do(req)
 			if err == nil {
-				io.Copy(io.Discard, response.Body)
+				_, _ = io.Copy(io.Discard, response.Body)
 				response.Body.Close()
 			}
 		}(req)
