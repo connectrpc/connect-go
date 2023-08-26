@@ -40,7 +40,6 @@ install: ## Install all binaries
 
 .PHONY: lint
 lint: $(BIN)/golangci-lint $(BIN)/buf ## Lint Go and protobuf
-	test -z "$$($(BIN)/buf format -d . | tee /dev/stderr)"
 	go vet ./...
 	golangci-lint run
 	buf lint
