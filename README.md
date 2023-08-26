@@ -27,7 +27,7 @@ curl \
 
 Handlers and clients also support the gRPC and gRPC-Web protocols, including
 streaming, headers, trailers, and error details. gRPC-compatible [server
-reflection][grpreflect] and [health checks][grpchealth] are available as
+reflection][grpcreflect] and [health checks][grpchealth] are available as
 standalone packages. Instead of cURL, we could call our API with a gRPC client:
 
 ```

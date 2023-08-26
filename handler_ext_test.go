@@ -15,11 +15,15 @@
 package connect_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	connect "connectrpc.com/connect"
@@ -207,6 +211,47 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		assert.Equal(t, message.Message, `unknown compression "invalid": supported encodings are gzip`)
 		assert.Equal(t, message.Code, connect.CodeUnimplemented.String())
 	})
+}
+
+func TestHandlerMaliciousPrefix(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(successPingServer{}))
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	const (
+		concurrency  = 256
+		spuriousSize = 1024 * 1024 * 512 // 512 MB
+	)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < concurrency; i++ {
+		body := make([]byte, 16)
+		// Envelope prefix indicates a large payload which we're not actually
+		// sending.
+		binary.BigEndian.PutUint32(body[1:5], spuriousSize)
+		req, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodPost,
+			server.URL+pingv1connect.PingServicePingProcedure,
+			bytes.NewReader(body),
+		)
+		assert.Nil(t, err)
+		req.Header.Set("Content-Type", "application/grpc")
+		wg.Add(1)
+		go func(req *http.Request) {
+			defer wg.Done()
+			<-start
+			response, err := server.Client().Do(req)
+			if err == nil {
+				_, _ = io.Copy(io.Discard, response.Body)
+				response.Body.Close()
+			}
+		}(req)
+	}
+	close(start)
+	wg.Wait()
 }
 
 type successPingServer struct {

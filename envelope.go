@@ -269,7 +269,6 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		return errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", size, r.readMaxBytes)
 	}
 	if size > 0 {
-		env.Data.Grow(size)
 		// At layer 7, we don't know exactly what's happening down in L4. Large
 		// length-prefixed messages may arrive in chunks, so we may need to read
 		// the request body past EOF. We also need to take care that we don't retry
