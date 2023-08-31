@@ -147,9 +147,9 @@ configuring timeouts, connection pools, observability, and h2c.
 * [grpchealth]: gRPC-compatible health checks
 * [grpcreflect]: gRPC-compatible server reflection
 * [examples-go]: service powering demo.connectrpc.com, including bidi streaming
-* [connect-web]: TypeScript clients for web browsers
+* [connect-es]: Type-safe APIs with Protobuf and TypeScript
 * [Buf Studio]: web UI for ad-hoc RPCs
-* [connect-crosstest]: gRPC and gRPC-Web interoperability tests
+* [connect-conformance]: gRPC and gRPC-Web interoperability tests
 
 ## Status: Stable
 
@@ -170,10 +170,10 @@ Offered under the [Apache 2 license][license].
 [Buf Studio]: https://buf.build/studio
 [Getting Started]: https://connectrpc.com/docs/go/getting-started
 [blog]: https://buf.build/blog/connect-a-better-grpc
-[connect-crosstest]: https://github.com/bufbuild/connect-crosstest
+[connect-conformance]: https://github.com/connectrpc/conformance
 [grpchealth]: https://github.com/connectrpc/grpchealth-go
 [grpcreflect]: https://github.com/connectrpc/grpcreflect-go
-[connect-web]: https://www.npmjs.com/package/@bufbuild/connect-web
+[connect-es]: https://github.com/connectrpc/connect-es
 [examples-go]: https://github.com/connectrpc/examples-go
 [docs-deployment]: https://connectrpc.com/docs/go/deployment
 [docs]: https://connectrpc.com
