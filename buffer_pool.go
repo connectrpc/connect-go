@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	initialBufferSize    = 512
+	initialBufferSize    = bytes.MinRead
 	maxRecycleBufferSize = 8 * 1024 * 1024 // if >8MiB, don't hold onto a buffer
 )
 
@@ -29,26 +29,20 @@ type bufferPool struct {
 }
 
 func newBufferPool() *bufferPool {
-	return &bufferPool{
-		Pool: sync.Pool{
-			New: func() any {
-				return bytes.NewBuffer(make([]byte, 0, initialBufferSize))
-			},
-		},
-	}
+	return &bufferPool{}
 }
 
 func (b *bufferPool) Get() *bytes.Buffer {
 	if buf, ok := b.Pool.Get().(*bytes.Buffer); ok {
+		buf.Reset()
 		return buf
 	}
 	return bytes.NewBuffer(make([]byte, 0, initialBufferSize))
 }
 
-func (b *bufferPool) Put(buffer *bytes.Buffer) {
-	if buffer.Cap() > maxRecycleBufferSize {
+func (b *bufferPool) Put(buf *bytes.Buffer) {
+	if buf.Cap() > maxRecycleBufferSize {
 		return
 	}
-	buffer.Reset()
-	b.Pool.Put(buffer)
+	b.Pool.Put(buf)
 }

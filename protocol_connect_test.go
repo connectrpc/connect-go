@@ -60,36 +60,26 @@ func TestConnectErrorDetailMarshalingNoDescriptor(t *testing.T) {
 func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 	t.Parallel()
 
-	buffer := bytes.Buffer{}
-	bufferPool := newBufferPool()
-
-	endStreamMessage := connectEndStreamMessage{Trailer: make(http.Header)}
+	buffer := &bytes.Buffer{}
+	endStreamMessage := newConnectEndStreamMessage(nil, make(http.Header))
 	endStreamMessage.Trailer["not-canonical-header"] = []string{"a"}
 	endStreamMessage.Trailer["mixed-Canonical"] = []string{"b"}
 	endStreamMessage.Trailer["Mixed-Canonical"] = []string{"b"}
 	endStreamMessage.Trailer["Canonical-Header"] = []string{"c"}
-	endStreamData, err := json.Marshal(endStreamMessage)
+	err := connectMarshalEndStreamMessage(buffer, endStreamMessage)
 	assert.Nil(t, err)
 
-	writer := envelopeWriter{
-		writer:     &buffer,
-		bufferPool: bufferPool,
-	}
-	err = writer.Write(&envelope{
-		Flags: connectFlagEnvelopeEndStream,
-		Data:  bytes.NewBuffer(endStreamData),
-	})
+	output := &bytes.Buffer{}
+	err = writeAll(output, envelope{Data: buffer, Flags: connectFlagEnvelopeEndStream})
 	assert.Nil(t, err)
 
-	unmarshaler := connectStreamingUnmarshaler{
-		envelopeReader: envelopeReader{
-			reader:     &buffer,
-			bufferPool: bufferPool,
-		},
-	}
-	err = unmarshaler.Unmarshal(nil) // parameter won't be used
-	assert.ErrorIs(t, err, errSpecialEnvelope)
-	assert.Equal(t, unmarshaler.Trailer().Values("Not-Canonical-Header"), []string{"a"})
-	assert.Equal(t, unmarshaler.Trailer().Values("Mixed-Canonical"), []string{"b", "b"})
-	assert.Equal(t, unmarshaler.Trailer().Values("Canonical-Header"), []string{"c"})
+	input := &bytes.Buffer{}
+	_, err = readEnvelope(input, output, -1)
+	assert.Nil(t, err)
+
+	end, err := connectUnmarshalEndStreamMessage(input, connectFlagEnvelopeEndStream)
+	assert.Nil(t, err)
+	assert.Equal(t, end.Trailer.Values("Not-Canonical-Header"), []string{"a"})
+	assert.Equal(t, end.Trailer.Values("Mixed-Canonical"), []string{"b", "b"})
+	assert.Equal(t, end.Trailer.Values("Canonical-Header"), []string{"c"})
 }

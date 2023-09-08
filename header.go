@@ -55,9 +55,6 @@ func mergeHeaders(into, from http.Header) {
 // bypasses the CanonicalMIMEHeaderKey operation when we
 // know the key is already in canonical form.
 func getHeaderCanonical(h http.Header, key string) string {
-	if h == nil {
-		return ""
-	}
 	v := h[key]
 	if len(v) == 0 {
 		return ""

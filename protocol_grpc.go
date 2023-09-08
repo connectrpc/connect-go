@@ -16,6 +16,7 @@ package connect
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -69,7 +70,6 @@ var (
 	grpcAllowedMethods    = map[string]struct{}{
 		http.MethodPost: {},
 	}
-	errTrailersWithoutGRPCStatus = fmt.Errorf("protocol error: no %s trailer: %w", grpcHeaderStatus, io.ErrUnexpectedEOF)
 
 	// defaultGrpcUserAgent follows
 	// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents:
@@ -196,38 +196,18 @@ func (g *grpcHandler) NewConn(
 		protocolName = ProtocolGRPCWeb
 	}
 	conn := wrapHandlerConnWithCodedErrors(&grpcHandlerConn{
-		spec: g.Spec,
+		grpcHandler: g,
 		peer: Peer{
 			Addr:     request.RemoteAddr,
 			Protocol: protocolName,
 		},
-		web:        g.web,
-		bufferPool: g.BufferPool,
-		protobuf:   g.Codecs.Protobuf(), // for errors
-		marshaler: grpcMarshaler{
-			envelopeWriter: envelopeWriter{
-				writer:           responseWriter,
-				compressionPool:  g.CompressionPools.Get(responseCompression),
-				codec:            codec,
-				compressMinBytes: g.CompressMinBytes,
-				bufferPool:       g.BufferPool,
-				sendMaxBytes:     g.SendMaxBytes,
-			},
-		},
-		responseWriter:  responseWriter,
-		responseHeader:  make(http.Header),
-		responseTrailer: make(http.Header),
-		request:         request,
-		unmarshaler: grpcUnmarshaler{
-			envelopeReader: envelopeReader{
-				reader:          request.Body,
-				codec:           codec,
-				compressionPool: g.CompressionPools.Get(requestCompression),
-				bufferPool:      g.BufferPool,
-				readMaxBytes:    g.ReadMaxBytes,
-			},
-			web: g.web,
-		},
+		request:             request,
+		responseWriter:      responseWriter,
+		responseHeader:      make(http.Header),
+		responseTrailer:     make(http.Header),
+		codec:               codec,
+		recvCompressionPool: g.CompressionPools.Get(requestCompression),
+		sendCompressionPool: g.CompressionPools.Get(responseCompression),
 	})
 	if failed != nil {
 		// Negotiation failed, so we can't establish a stream.
@@ -299,62 +279,28 @@ func (g *grpcClient) NewConn(
 		header,
 	)
 	conn := &grpcClientConn{
-		spec:             spec,
-		peer:             g.Peer(),
-		duplexCall:       duplexCall,
-		compressionPools: g.CompressionPools,
-		bufferPool:       g.BufferPool,
-		protobuf:         g.Protobuf,
-		marshaler: grpcMarshaler{
-			envelopeWriter: envelopeWriter{
-				writer:           duplexCall,
-				compressionPool:  g.CompressionPools.Get(g.CompressionName),
-				codec:            g.Codec,
-				compressMinBytes: g.CompressMinBytes,
-				bufferPool:       g.BufferPool,
-				sendMaxBytes:     g.SendMaxBytes,
-			},
-		},
-		unmarshaler: grpcUnmarshaler{
-			envelopeReader: envelopeReader{
-				reader:       duplexCall,
-				codec:        g.Codec,
-				bufferPool:   g.BufferPool,
-				readMaxBytes: g.ReadMaxBytes,
-			},
-		},
-		responseHeader:  make(http.Header),
-		responseTrailer: make(http.Header),
+		grpcClient:          g,
+		spec:                spec,
+		duplexCall:          duplexCall,
+		responseHeader:      make(http.Header),
+		responseTrailer:     make(http.Header),
+		sendCompressionPool: g.CompressionPools.Get(g.CompressionName),
+		recvCompressionPool: nil, // set in SetValidateResponse
 	}
 	duplexCall.SetValidateResponse(conn.validateResponse)
-	if g.web {
-		conn.unmarshaler.web = true
-		conn.readTrailers = func(unmarshaler *grpcUnmarshaler, _ *duplexHTTPCall) http.Header {
-			return unmarshaler.WebTrailer()
-		}
-	} else {
-		conn.readTrailers = func(_ *grpcUnmarshaler, call *duplexHTTPCall) http.Header {
-			// To access HTTP trailers, we need to read the body to EOF.
-			_, _ = discard(call)
-			return call.ResponseTrailer()
-		}
-	}
 	return wrapClientConnWithCodedErrors(conn)
 }
 
 // grpcClientConn works for both gRPC and gRPC-Web.
 type grpcClientConn struct {
-	spec             Spec
-	peer             Peer
-	duplexCall       *duplexHTTPCall
-	compressionPools readOnlyCompressionPools
-	bufferPool       *bufferPool
-	protobuf         Codec // for errors
-	marshaler        grpcMarshaler
-	unmarshaler      grpcUnmarshaler
-	responseHeader   http.Header
-	responseTrailer  http.Header
-	readTrailers     func(*grpcUnmarshaler, *duplexHTTPCall) http.Header
+	*grpcClient
+
+	spec                Spec
+	duplexCall          *duplexHTTPCall
+	responseHeader      http.Header
+	responseTrailer     http.Header
+	sendCompressionPool *compressionPool
+	recvCompressionPool *compressionPool
 }
 
 func (cc *grpcClientConn) Spec() Spec {
@@ -366,7 +312,28 @@ func (cc *grpcClientConn) Peer() Peer {
 }
 
 func (cc *grpcClientConn) Send(msg any) error {
-	if err := cc.marshaler.Marshal(msg); err != nil {
+	buffer := cc.BufferPool.Get()
+	defer cc.BufferPool.Put(buffer)
+	if err := marshal(buffer, msg, cc.Codec); err != nil {
+		return err
+	}
+	var flags uint8
+	if buffer.Len() > cc.CompressMinBytes && cc.sendCompressionPool != nil {
+		compressionBuffer := cc.BufferPool.Get()
+		defer cc.BufferPool.Put(compressionBuffer)
+		if err := cc.sendCompressionPool.Compress(
+			compressionBuffer, buffer,
+		); err != nil {
+			return err
+		}
+		buffer = compressionBuffer // swap buffers
+		flags |= flagEnvelopeCompressed
+	}
+	if err := checkSendMaxBytes(buffer.Len(), cc.SendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
+		return err
+	}
+	env := envelope{Data: buffer, Flags: flags}
+	if err := writeAll(cc.duplexCall, env); err != nil {
 		return err
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
@@ -381,42 +348,69 @@ func (cc *grpcClientConn) CloseRequest() error {
 }
 
 func (cc *grpcClientConn) Receive(msg any) error {
+	buffer := cc.BufferPool.Get()
+	defer cc.BufferPool.Put(buffer)
 	cc.duplexCall.BlockUntilResponseReady()
-	err := cc.unmarshaler.Unmarshal(msg)
-	if err == nil {
-		return nil
+
+	flags, err := readEnvelope(buffer, cc.duplexCall, cc.ReadMaxBytes)
+	if err != nil {
+		if !errors.Is(err, io.EOF) {
+			return err
+		}
+		// If we got an EOF, we need to check the trailers for an error.
+		mergeHeaders(cc.responseTrailer, cc.duplexCall.ResponseTrailer())
+		if err := grpcErrorFromTrailer(cc.Protobuf, cc.responseTrailer); err != nil {
+			return err
+		}
+		return io.EOF
 	}
-	if getHeaderCanonical(cc.responseHeader, grpcHeaderStatus) != "" {
-		// We got what gRPC calls a trailers-only response, which puts the trailing
-		// metadata (including errors) into HTTP headers. validateResponse has
-		// already extracted the error.
+	if flags&flagEnvelopeCompressed != 0 {
+		if cc.recvCompressionPool == nil {
+			return errorf(CodeInvalidArgument,
+				"protocol error: received compressed message without %s header",
+				grpcHeaderCompression,
+			)
+		}
+		compressionBuffer := cc.BufferPool.Get()
+		defer cc.BufferPool.Put(compressionBuffer)
+		if err := cc.recvCompressionPool.Decompress(
+			compressionBuffer, buffer, int64(cc.ReadMaxBytes),
+		); err != nil {
+			return err
+		}
+		buffer = compressionBuffer // swap buffers
+	}
+	if flags&grpcFlagEnvelopeTrailer != 0 {
+		if !cc.web {
+			return newErrInvalidEnvelopeFlags(flags)
+		}
+		// handle grpc-web trailers
+		// Per the gRPC-Web specification, trailers should be encoded as an HTTP/1
+		// headers block _without_ the terminating newline. To make the headers
+		// parseable by net/textproto, we need to add the newline.
+		if err := buffer.WriteByte('\n'); err != nil {
+			return errorf(CodeInternal, "unmarshal web trailers: %w", err)
+		}
+		bufferedReader := bufio.NewReader(buffer)
+		mimeReader := textproto.NewReader(bufferedReader)
+		mimeHeader, mimeErr := mimeReader.ReadMIMEHeader()
+		if mimeErr != nil {
+			return errorf(
+				CodeInternal,
+				"gRPC-Web protocol error: trailers invalid: %w",
+				mimeErr,
+			)
+		}
+		mergeHeaders(cc.responseTrailer, http.Header(mimeHeader))
+		if err := grpcErrorFromTrailer(cc.Protobuf, cc.responseTrailer); err != nil {
+			return err
+		}
+		return ensureEOF(cc.duplexCall)
+	}
+	if err := unmarshal(buffer, msg, cc.Codec); err != nil {
 		return err
 	}
-	// See if the server sent an explicit error in the HTTP or gRPC-Web trailers.
-	mergeHeaders(
-		cc.responseTrailer,
-		cc.readTrailers(&cc.unmarshaler, cc.duplexCall),
-	)
-	serverErr := grpcErrorFromTrailer(cc.protobuf, cc.responseTrailer)
-	if serverErr != nil && (errors.Is(err, io.EOF) || !errors.Is(serverErr, errTrailersWithoutGRPCStatus)) {
-		// We've either:
-		//   - Cleanly read until the end of the response body and *not* received
-		//   gRPC status trailers, which is a protocol error, or
-		//   - Received an explicit error from the server.
-		//
-		// This is expected from a protocol perspective, but receiving trailers
-		// means that we're _not_ getting a message. For users to realize that
-		// the stream has ended, Receive must return an error.
-		serverErr.meta = cc.responseHeader.Clone()
-		mergeHeaders(serverErr.meta, cc.responseTrailer)
-		cc.duplexCall.SetError(serverErr)
-		return serverErr
-	}
-	// This was probably an error converting the bytes to a message or an error
-	// reading from the network. We're going to return it to the
-	// user, but we also want to setResponseError so Send errors out.
-	cc.duplexCall.SetError(err)
-	return err
+	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
 func (cc *grpcClientConn) ResponseHeader() http.Header {
@@ -442,33 +436,32 @@ func (cc *grpcClientConn) validateResponse(response *http.Response) *Error {
 		response,
 		cc.responseHeader,
 		cc.responseTrailer,
-		cc.compressionPools,
-		cc.protobuf,
+		cc.CompressionPools,
+		cc.Protobuf,
 	); err != nil {
 		return err
 	}
 	compression := getHeaderCanonical(response.Header, grpcHeaderCompression)
-	cc.unmarshaler.envelopeReader.compressionPool = cc.compressionPools.Get(compression)
+	cc.recvCompressionPool = cc.CompressionPools.Get(compression)
 	return nil
 }
 
 type grpcHandlerConn struct {
-	spec            Spec
-	peer            Peer
-	web             bool
-	bufferPool      *bufferPool
-	protobuf        Codec // for errors
-	marshaler       grpcMarshaler
-	responseWriter  http.ResponseWriter
-	responseHeader  http.Header
-	responseTrailer http.Header
-	wroteToBody     bool
-	request         *http.Request
-	unmarshaler     grpcUnmarshaler
+	*grpcHandler
+
+	peer                Peer
+	request             *http.Request
+	responseWriter      http.ResponseWriter
+	responseHeader      http.Header
+	responseTrailer     http.Header
+	codec               Codec
+	recvCompressionPool *compressionPool
+	sendCompressionPool *compressionPool
+	wroteToBody         bool
 }
 
 func (hc *grpcHandlerConn) Spec() Spec {
-	return hc.spec
+	return hc.protocolHandlerParams.Spec
 }
 
 func (hc *grpcHandlerConn) Peer() Peer {
@@ -476,8 +469,28 @@ func (hc *grpcHandlerConn) Peer() Peer {
 }
 
 func (hc *grpcHandlerConn) Receive(msg any) error {
-	if err := hc.unmarshaler.Unmarshal(msg); err != nil {
-		return err // already coded
+	buffer := hc.BufferPool.Get()
+	defer hc.BufferPool.Put(buffer)
+
+	flags, err := readEnvelope(buffer, hc.request.Body, hc.ReadMaxBytes)
+	if err != nil {
+		return err
+	}
+	if flags&flagEnvelopeCompressed != 0 {
+		compressionBuffer := hc.BufferPool.Get()
+		defer hc.BufferPool.Put(compressionBuffer)
+		if err := hc.recvCompressionPool.Decompress(
+			compressionBuffer, buffer, int64(hc.ReadMaxBytes),
+		); err != nil {
+			return err
+		}
+		buffer = compressionBuffer
+	}
+	if flags != 0 && flags != flagEnvelopeCompressed {
+		return newErrInvalidEnvelopeFlags(flags)
+	}
+	if err := unmarshal(buffer, msg, hc.codec); err != nil {
+		return err
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
 }
@@ -487,14 +500,36 @@ func (hc *grpcHandlerConn) RequestHeader() http.Header {
 }
 
 func (hc *grpcHandlerConn) Send(msg any) error {
-	defer flushResponseWriter(hc.responseWriter)
 	if !hc.wroteToBody {
 		mergeHeaders(hc.responseWriter.Header(), hc.responseHeader)
 		hc.wroteToBody = true
 	}
-	if err := hc.marshaler.Marshal(msg); err != nil {
+	buffer := hc.BufferPool.Get()
+	defer hc.BufferPool.Put(buffer)
+
+	if err := marshal(buffer, msg, hc.codec); err != nil {
 		return err
 	}
+	var flags uint8
+	if buffer.Len() > hc.CompressMinBytes && hc.sendCompressionPool != nil {
+		compressionBuffer := hc.BufferPool.Get()
+		defer hc.BufferPool.Put(compressionBuffer)
+		if err := hc.sendCompressionPool.Compress(
+			compressionBuffer, buffer,
+		); err != nil {
+			return err
+		}
+		buffer = compressionBuffer // swap buffers
+		flags |= flagEnvelopeCompressed
+	}
+	if err := checkSendMaxBytes(buffer.Len(), hc.SendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
+		return err
+	}
+	env := envelope{Data: buffer, Flags: flags}
+	if err := writeAll(hc.responseWriter, env); err != nil {
+		return err
+	}
+	flushResponseWriter(hc.responseWriter)
 	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
@@ -532,7 +567,7 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 		len(hc.responseTrailer)+2, // always make space for status & message
 	)
 	mergeHeaders(mergedTrailers, hc.responseTrailer)
-	grpcErrorToTrailer(mergedTrailers, hc.protobuf, err)
+	grpcErrorToTrailer(mergedTrailers, hc.Codecs.Protobuf(), err)
 	if hc.web && !hc.wroteToBody {
 		// We're using gRPC-Web and we haven't yet written to the body. Since we're
 		// not sending any response messages, the gRPC specification calls this a
@@ -547,7 +582,7 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 	if hc.web {
 		// We're using gRPC-Web and we've already sent the headers, so we write
 		// trailing metadata to the HTTP body.
-		if err := hc.marshaler.MarshalWebTrailers(mergedTrailers); err != nil {
+		if err := hc.writeWebTrailers(mergedTrailers); err != nil {
 			return err
 		}
 		return nil // must be a literal nil: nil *Error is a non-nil error
@@ -595,13 +630,17 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 	return nil
 }
 
-type grpcMarshaler struct {
-	envelopeWriter
+func (hc *grpcHandlerConn) writeWebTrailers(trailer http.Header) *Error {
+	buffer := hc.BufferPool.Get()
+	defer hc.BufferPool.Put(buffer)
+	if err := grpcMarshalWebTrailers(buffer, trailer); err != nil {
+		return errorf(CodeInternal, "format trailers: %v", err)
+	}
+	env := envelope{Data: buffer, Flags: grpcFlagEnvelopeTrailer}
+	return writeAll(hc.responseWriter, env)
 }
 
-func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *Error {
-	raw := m.envelopeWriter.bufferPool.Get()
-	defer m.envelopeWriter.bufferPool.Put(raw)
+func grpcMarshalWebTrailers(dst *bytes.Buffer, trailer http.Header) error {
 	for key, values := range trailer {
 		// Per the Go specification, keys inserted during iteration may be produced
 		// later in the iteration or may be skipped. For safety, avoid mutating the
@@ -613,56 +652,10 @@ func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *Error {
 		delete(trailer, key)
 		trailer[lower] = values
 	}
-	if err := trailer.Write(raw); err != nil {
+	if err := trailer.Write(dst); err != nil {
 		return errorf(CodeInternal, "format trailers: %w", err)
 	}
-	return m.Write(&envelope{
-		Data:  raw,
-		Flags: grpcFlagEnvelopeTrailer,
-	})
-}
-
-type grpcUnmarshaler struct {
-	envelopeReader envelopeReader
-	web            bool
-	webTrailer     http.Header
-}
-
-func (u *grpcUnmarshaler) Unmarshal(message any) *Error {
-	err := u.envelopeReader.Unmarshal(message)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, errSpecialEnvelope) {
-		return err
-	}
-	env := u.envelopeReader.last
-	if !u.web || !env.IsSet(grpcFlagEnvelopeTrailer) {
-		return errorf(CodeInternal, "protocol error: invalid envelope flags %d", env.Flags)
-	}
-
-	// Per the gRPC-Web specification, trailers should be encoded as an HTTP/1
-	// headers block _without_ the terminating newline. To make the headers
-	// parseable by net/textproto, we need to add the newline.
-	if err := env.Data.WriteByte('\n'); err != nil {
-		return errorf(CodeInternal, "unmarshal web trailers: %w", err)
-	}
-	bufferedReader := bufio.NewReader(env.Data)
-	mimeReader := textproto.NewReader(bufferedReader)
-	mimeHeader, mimeErr := mimeReader.ReadMIMEHeader()
-	if mimeErr != nil {
-		return errorf(
-			CodeInternal,
-			"gRPC-Web protocol error: trailers invalid: %w",
-			mimeErr,
-		)
-	}
-	u.webTrailer = http.Header(mimeHeader)
-	return errSpecialEnvelope
-}
-
-func (u *grpcUnmarshaler) WebTrailer() http.Header {
-	return u.webTrailer
+	return nil
 }
 
 func grpcValidateResponse(
@@ -687,12 +680,9 @@ func grpcValidateResponse(
 			availableCompressors.CommaSeparatedNames(),
 		)
 	}
-	// When there's no body, gRPC and gRPC-Web servers may send error information
-	// in the HTTP headers.
-	if err := grpcErrorFromTrailer(
-		protobuf,
-		response.Header,
-	); err != nil && !errors.Is(err, errTrailersWithoutGRPCStatus) {
+	if getHeaderCanonical(response.Header, grpcHeaderStatus) != "" {
+		// We got what gRPC calls a trailers-only response, which puts the trailing
+		// metadata (including errors) into HTTP headers.
 		// Per the specification, only the HTTP status code and Content-Type should
 		// be treated as headers. The rest should be treated as trailing metadata.
 		if contentType := getHeaderCanonical(response.Header, headerContentType); contentType != "" {
@@ -700,10 +690,7 @@ func grpcValidateResponse(
 		}
 		mergeHeaders(trailer, response.Header)
 		delHeaderCanonical(trailer, headerContentType)
-		// Also set the error metadata
-		err.meta = header.Clone()
-		mergeHeaders(err.meta, trailer)
-		return err
+		return grpcErrorFromTrailer(protobuf, trailer)
 	}
 	// The response is valid, so we should expose the headers.
 	mergeHeaders(header, response.Header)
@@ -738,7 +725,7 @@ func grpcHTTPToCode(httpCode int) Code {
 func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {
 	codeHeader := getHeaderCanonical(trailer, grpcHeaderStatus)
 	if codeHeader == "" {
-		return NewError(CodeInternal, errTrailersWithoutGRPCStatus)
+		return errorf(CodeInternal, "protocol error: no %s trailer", grpcHeaderStatus)
 	}
 	if codeHeader == "0" {
 		return nil
@@ -750,6 +737,7 @@ func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {
 	}
 	message := grpcPercentDecode(getHeaderCanonical(trailer, grpcHeaderMessage))
 	retErr := NewWireError(Code(code), errors.New(message))
+	retErr.meta = trailer.Clone()
 
 	detailsBinaryEncoded := getHeaderCanonical(trailer, grpcHeaderDetails)
 	if len(detailsBinaryEncoded) > 0 {
@@ -768,7 +756,6 @@ func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {
 		retErr.code = Code(status.Code)
 		retErr.err = errors.New(status.Message)
 	}
-
 	return retErr
 }
 

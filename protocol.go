@@ -40,7 +40,7 @@ const (
 	headerUserAgent   = "User-Agent"
 	headerTrailer     = "Trailer"
 
-	discardLimit = 1024 * 1024 * 4 // 4MiB
+	discardLimit = 1024 * 1024 * 8 // 8MiB
 )
 
 var errNoTimeout = errors.New("no timeout")
@@ -284,13 +284,15 @@ func isCommaOrSpace(c rune) bool {
 }
 
 func discard(reader io.Reader) (int64, error) {
-	if lr, ok := reader.(*io.LimitedReader); ok {
-		return io.Copy(io.Discard, lr)
-	}
 	// We don't want to get stuck throwing data away forever, so limit how much
 	// we're willing to do here.
-	lr := &io.LimitedReader{R: reader, N: discardLimit}
-	return io.Copy(io.Discard, lr)
+	n, err := io.CopyN(io.Discard, reader, discardLimit)
+	if errors.Is(err, io.EOF) {
+		err = nil
+	} else if n == discardLimit {
+		err = io.ErrShortBuffer
+	}
+	return n, err
 }
 
 // negotiateCompression determines and validates the request compression and

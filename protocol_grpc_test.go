@@ -15,6 +15,7 @@
 package connect
 
 import (
+	"bytes"
 	"errors"
 	"math"
 	"net/http"
@@ -33,7 +34,6 @@ func TestGRPCHandlerSender(t *testing.T) {
 	t.Parallel()
 	newConn := func(web bool) *grpcHandlerConn {
 		responseWriter := httptest.NewRecorder()
-		protobufCodec := &protoBinaryCodec{}
 		bufferPool := newBufferPool()
 		request, err := http.NewRequest(
 			http.MethodPost,
@@ -42,28 +42,17 @@ func TestGRPCHandlerSender(t *testing.T) {
 		)
 		assert.Nil(t, err)
 		return &grpcHandlerConn{
-			spec:       Spec{},
-			web:        web,
-			bufferPool: bufferPool,
-			protobuf:   protobufCodec,
-			marshaler: grpcMarshaler{
-				envelopeWriter: envelopeWriter{
-					writer:     responseWriter,
-					codec:      protobufCodec,
-					bufferPool: bufferPool,
+			grpcHandler: &grpcHandler{
+				protocolHandlerParams: protocolHandlerParams{
+					Codecs:     newReadOnlyCodecs(map[string]Codec{}),
+					BufferPool: bufferPool,
 				},
+				web: web,
 			},
+			request:         request,
 			responseWriter:  responseWriter,
 			responseHeader:  make(http.Header),
 			responseTrailer: make(http.Header),
-			request:         request,
-			unmarshaler: grpcUnmarshaler{
-				envelopeReader: envelopeReader{
-					reader:     request.Body,
-					codec:      protobufCodec,
-					bufferPool: bufferPool,
-				},
-			},
 		}
 	}
 	t.Run("web", func(t *testing.T) {
@@ -175,21 +164,13 @@ func TestGRPCPercentEncoding(t *testing.T) {
 
 func TestGRPCWebTrailerMarshalling(t *testing.T) {
 	t.Parallel()
-	responseWriter := httptest.NewRecorder()
-	marshaler := grpcMarshaler{
-		envelopeWriter: envelopeWriter{
-			writer:     responseWriter,
-			bufferPool: newBufferPool(),
-		},
-	}
 	trailer := http.Header{}
 	trailer.Add("grpc-status", "0")
 	trailer.Add("Grpc-Message", "Foo")
 	trailer.Add("User-Provided", "bar")
-	err := marshaler.MarshalWebTrailers(trailer)
-	assert.Nil(t, err)
-	responseWriter.Body.Next(5) // skip flags and message length
-	marshalled := responseWriter.Body.String()
+	var buf bytes.Buffer
+	assert.Nil(t, grpcMarshalWebTrailers(&buf, trailer))
+	marshalled := buf.String()
 	assert.Equal(t, marshalled, "grpc-message: Foo\r\ngrpc-status: 0\r\nuser-provided: bar\r\n")
 }
 

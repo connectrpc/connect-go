@@ -707,7 +707,7 @@ func TestGRPCMissingTrailersError(t *testing.T) {
 		assert.Equal(t, connectErr.Code(), connect.CodeInternal)
 		assert.True(
 			t,
-			strings.HasSuffix(connectErr.Message(), "protocol error: no Grpc-Status trailer: unexpected EOF"),
+			strings.HasSuffix(connectErr.Message(), "protocol error: no Grpc-Status trailer"),
 		)
 	}
 
@@ -2165,7 +2165,7 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			assert.Nil(t, err)
 		},
 		expectCode: connect.CodeInternal,
-		expectMsg:  "internal: protocol error: no Grpc-Status trailer: unexpected EOF",
+		expectMsg:  "internal: protocol error: no Grpc-Status trailer",
 	}, {
 		name:    "grpc-web_missing_end",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
@@ -2178,7 +2178,7 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			assert.Nil(t, err)
 		},
 		expectCode: connect.CodeInternal,
-		expectMsg:  "internal: protocol error: no Grpc-Status trailer: unexpected EOF",
+		expectMsg:  "internal: protocol error: no Grpc-Status trailer",
 	}, {
 		name:    "connect_partial_payload",
 		options: []connect.ClientOption{connect.WithProtoJSON()},
@@ -2190,8 +2190,8 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err = responseWriter.Write(payload[:len(payload)-1])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+		expectCode: connect.CodeInternal,
+		expectMsg:  "internal: incomplete envelope: unexpected EOF",
 	}, {
 		name:    "grpc_partial_payload",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPC()},
@@ -2203,8 +2203,8 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err = responseWriter.Write(payload[:len(payload)-1])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+		expectCode: connect.CodeInternal,
+		expectMsg:  "internal: incomplete envelope: unexpected EOF",
 	}, {
 		name:    "grpc-web_partial_payload",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
@@ -2216,8 +2216,8 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err = responseWriter.Write(payload[:len(payload)-1])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+		expectCode: connect.CodeInternal,
+		expectMsg:  "internal: incomplete envelope: unexpected EOF",
 	}, {
 		name:    "connect_partial_frame",
 		options: []connect.ClientOption{connect.WithProtoJSON()},
@@ -2227,8 +2227,8 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err := responseWriter.Write(head[:4])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
+		expectCode: connect.CodeInternal,
+		expectMsg:  "internal: incomplete envelope: unexpected EOF",
 	}, {
 		name:    "grpc_partial_frame",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPC()},
@@ -2238,8 +2238,8 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err := responseWriter.Write(head[:4])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
+		expectCode: connect.CodeInternal,
+		expectMsg:  "internal: incomplete envelope: unexpected EOF",
 	}, {
 		name:    "grpc-web_partial_frame",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
@@ -2249,8 +2249,8 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err := responseWriter.Write(head[:4])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
+		expectCode: connect.CodeInternal,
+		expectMsg:  "internal: incomplete envelope: unexpected EOF",
 	}, {
 		name:    "connect_excess_eof",
 		options: []connect.ClientOption{connect.WithProtoJSON()},

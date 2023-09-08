@@ -130,16 +130,18 @@ func (w *ErrorWriter) writeConnectUnary(response http.ResponseWriter, err error)
 }
 
 func (w *ErrorWriter) writeConnectStreaming(response http.ResponseWriter, err error) error {
-	response.WriteHeader(http.StatusOK)
-	marshaler := &connectStreamingMarshaler{
-		envelopeWriter: envelopeWriter{
-			writer:     response,
-			bufferPool: w.bufferPool,
-		},
+	buffer := w.bufferPool.Get()
+	defer w.bufferPool.Put(buffer)
+
+	end := newConnectEndStreamMessage(err, make(http.Header))
+	if err := connectMarshalEndStreamMessage(buffer, end); err != nil {
+		return err
 	}
-	// MarshalEndStream returns *Error: check return value to avoid typed nils.
-	if marshalErr := marshaler.MarshalEndStream(err, make(http.Header)); marshalErr != nil {
-		return marshalErr
+
+	response.WriteHeader(http.StatusOK)
+	env := envelope{Data: buffer, Flags: connectFlagEnvelopeEndStream}
+	if err := writeAll(response, env); err != nil {
+		return err
 	}
 	return nil
 }
