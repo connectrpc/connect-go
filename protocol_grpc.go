@@ -319,14 +319,11 @@ func (cc *grpcClientConn) Send(msg any) error {
 	}
 	var flags uint8
 	if buffer.Len() > cc.CompressMinBytes && cc.sendCompressionPool != nil {
-		compressionBuffer := cc.BufferPool.Get()
-		defer cc.BufferPool.Put(compressionBuffer)
 		if err := cc.sendCompressionPool.Compress(
-			compressionBuffer, buffer,
+			cc.BufferPool, buffer,
 		); err != nil {
 			return err
 		}
-		buffer = compressionBuffer // swap buffers
 		flags |= flagEnvelopeCompressed
 	}
 	if err := checkSendMaxBytes(buffer.Len(), cc.SendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
@@ -371,14 +368,11 @@ func (cc *grpcClientConn) Receive(msg any) error {
 				grpcHeaderCompression,
 			)
 		}
-		compressionBuffer := cc.BufferPool.Get()
-		defer cc.BufferPool.Put(compressionBuffer)
 		if err := cc.recvCompressionPool.Decompress(
-			compressionBuffer, buffer, int64(cc.ReadMaxBytes),
+			cc.BufferPool, buffer, int64(cc.ReadMaxBytes),
 		); err != nil {
 			return err
 		}
-		buffer = compressionBuffer // swap buffers
 	}
 	if flags&grpcFlagEnvelopeTrailer != 0 {
 		if !cc.web {
@@ -477,14 +471,11 @@ func (hc *grpcHandlerConn) Receive(msg any) error {
 		return err
 	}
 	if flags&flagEnvelopeCompressed != 0 {
-		compressionBuffer := hc.BufferPool.Get()
-		defer hc.BufferPool.Put(compressionBuffer)
 		if err := hc.recvCompressionPool.Decompress(
-			compressionBuffer, buffer, int64(hc.ReadMaxBytes),
+			hc.BufferPool, buffer, int64(hc.ReadMaxBytes),
 		); err != nil {
 			return err
 		}
-		buffer = compressionBuffer
 	}
 	if flags != 0 && flags != flagEnvelopeCompressed {
 		return newErrInvalidEnvelopeFlags(flags)
@@ -512,14 +503,11 @@ func (hc *grpcHandlerConn) Send(msg any) error {
 	}
 	var flags uint8
 	if buffer.Len() > hc.CompressMinBytes && hc.sendCompressionPool != nil {
-		compressionBuffer := hc.BufferPool.Get()
-		defer hc.BufferPool.Put(compressionBuffer)
 		if err := hc.sendCompressionPool.Compress(
-			compressionBuffer, buffer,
+			hc.BufferPool, buffer,
 		); err != nil {
 			return err
 		}
-		buffer = compressionBuffer // swap buffers
 		flags |= flagEnvelopeCompressed
 	}
 	if err := checkSendMaxBytes(buffer.Len(), hc.SendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {

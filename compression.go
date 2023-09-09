@@ -78,7 +78,10 @@ func newCompressionPool(
 	}
 }
 
-func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readMaxBytes int64) *Error {
+func (c *compressionPool) Decompress(pool *bufferPool, src *bytes.Buffer, readMaxBytes int64) *Error {
+	tmp := pool.Get()
+	defer pool.Put(tmp)
+
 	decompressor, err := c.getDecompressor(src)
 	if err != nil {
 		return errorf(CodeInvalidArgument, "get decompressor: %w", err)
@@ -87,7 +90,7 @@ func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readM
 	if readMaxBytes > 0 && readMaxBytes < math.MaxInt64 {
 		reader = io.LimitReader(decompressor, readMaxBytes+1)
 	}
-	bytesRead, err := dst.ReadFrom(reader)
+	bytesRead, err := tmp.ReadFrom(reader)
 	if err != nil {
 		_ = c.putDecompressor(decompressor)
 		return errorf(CodeInvalidArgument, "decompress: %w", err)
@@ -103,11 +106,15 @@ func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readM
 	if err := c.putDecompressor(decompressor); err != nil {
 		return errorf(CodeUnknown, "recycle decompressor: %w", err)
 	}
+	*tmp, *src = *src, *tmp // swap buffers
 	return nil
 }
 
-func (c *compressionPool) Compress(dst *bytes.Buffer, src *bytes.Buffer) *Error {
-	compressor, err := c.getCompressor(dst)
+func (c *compressionPool) Compress(pool *bufferPool, src *bytes.Buffer) *Error {
+	tmp := pool.Get()
+	defer pool.Put(tmp)
+
+	compressor, err := c.getCompressor(tmp)
 	if err != nil {
 		return errorf(CodeUnknown, "get compressor: %w", err)
 	}
@@ -118,6 +125,7 @@ func (c *compressionPool) Compress(dst *bytes.Buffer, src *bytes.Buffer) *Error 
 	if err := c.putCompressor(compressor); err != nil {
 		return errorf(CodeInternal, "recycle compressor: %w", err)
 	}
+	*tmp, *src = *src, *tmp // swap buffers
 	return nil
 }
 

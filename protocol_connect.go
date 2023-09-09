@@ -432,15 +432,9 @@ func (cc *connectUnaryClientConn) Receive(msg any) error {
 		return err
 	}
 	if cc.compressionPool != nil {
-		compressionBuffer := cc.BufferPool.Get()
-		defer cc.BufferPool.Put(compressionBuffer)
-
-		if err := cc.compressionPool.Decompress(
-			compressionBuffer, buffer, int64(cc.ReadMaxBytes),
-		); err != nil {
+		if err := cc.compressionPool.Decompress(cc.BufferPool, buffer, int64(cc.ReadMaxBytes)); err != nil {
 			return err
 		}
-		buffer = compressionBuffer // swap buffers
 	}
 	if err := unmarshal(buffer, msg, cc.Codec); err != nil {
 		return err
@@ -502,14 +496,9 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 		return err
 	}
 	if cc.compressionPool != nil {
-		compressionBuffer := cc.BufferPool.Get()
-		defer cc.BufferPool.Put(compressionBuffer)
-		if err := cc.compressionPool.Decompress(
-			compressionBuffer, buffer, int64(cc.ReadMaxBytes),
-		); err != nil {
+		if err := cc.compressionPool.Compress(cc.BufferPool, buffer); err != nil {
 			return err
 		}
-		buffer = compressionBuffer
 	}
 	var wireErr connectWireError
 	if err := json.Unmarshal(buffer.Bytes(), &wireErr); err != nil {
@@ -553,14 +542,9 @@ func (cc *connectStreamingClientConn) Send(msg any) error {
 	}
 	var flags uint8
 	if cc.sendCompressionPool != nil && buffer.Len() > cc.CompressMinBytes {
-		compressionBuffer := cc.BufferPool.Get()
-		defer cc.BufferPool.Put(compressionBuffer)
-		if err := cc.sendCompressionPool.Compress(
-			compressionBuffer, buffer,
-		); err != nil {
+		if err := cc.sendCompressionPool.Compress(cc.BufferPool, buffer); err != nil {
 			return err
 		}
-		buffer = compressionBuffer // swap buffers
 		flags |= flagEnvelopeCompressed
 	}
 	if err := checkSendMaxBytes(buffer.Len(), cc.SendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
@@ -602,14 +586,9 @@ func (cc *connectStreamingClientConn) Receive(msg any) error {
 				connectStreamingHeaderCompression,
 			)
 		}
-		compressionBuffer := cc.BufferPool.Get()
-		defer cc.BufferPool.Put(compressionBuffer)
-		if err := cc.recvCompressionPool.Decompress(
-			compressionBuffer, buffer, int64(cc.ReadMaxBytes),
-		); err != nil {
+		if err := cc.recvCompressionPool.Decompress(cc.BufferPool, buffer, int64(cc.ReadMaxBytes)); err != nil {
 			return err
 		}
-		buffer = compressionBuffer
 	}
 	if flags != 0 && flags != flagEnvelopeCompressed {
 		end, err := connectUnmarshalEndStreamMessage(buffer, flags)
@@ -717,14 +696,11 @@ func (hc *connectUnaryHandlerConn) Receive(msg any) error {
 		return err
 	}
 	if buffer.Len() > 0 && hc.recvCompressionPool != nil {
-		compressionBuffer := hc.BufferPool.Get()
-		defer hc.BufferPool.Put(compressionBuffer)
 		if err := hc.recvCompressionPool.Decompress(
-			compressionBuffer, buffer, int64(hc.ReadMaxBytes),
+			hc.BufferPool, buffer, int64(hc.ReadMaxBytes),
 		); err != nil {
 			return err
 		}
-		buffer = compressionBuffer
 	}
 	if err := unmarshal(buffer, msg, hc.codec); err != nil {
 		return err
@@ -750,19 +726,12 @@ func (hc *connectUnaryHandlerConn) Send(msg any) error {
 	if err := marshal(buffer, msg, hc.codec); err != nil {
 		return err
 	}
-	var isCompressed bool
-	if buffer.Len() > hc.CompressMinBytes && hc.sendCompressionPool != nil {
-		compressionBuffer := hc.BufferPool.Get()
-		defer hc.BufferPool.Put(compressionBuffer)
-
-		if err := hc.sendCompressionPool.Compress(
-			compressionBuffer, buffer,
-		); err != nil {
+	isCompressed := buffer.Len() > hc.CompressMinBytes && hc.sendCompressionPool != nil
+	if isCompressed {
+		if err := hc.sendCompressionPool.Compress(hc.BufferPool, buffer); err != nil {
 			return err
 		}
-		buffer = compressionBuffer // swap buffers
 		setHeaderCanonical(header, connectUnaryHeaderCompression, hc.sendCompressionName)
-		isCompressed = true
 	}
 	if err := checkSendMaxBytes(buffer.Len(), hc.SendMaxBytes, isCompressed); err != nil {
 		delHeaderCanonical(header, connectUnaryHeaderCompression)
@@ -869,14 +838,11 @@ func (hc *connectStreamingHandlerConn) Receive(msg any) error {
 				connectStreamingHeaderCompression,
 			)
 		}
-		compressionBuffer := hc.BufferPool.Get()
-		defer hc.BufferPool.Put(compressionBuffer)
 		if err := hc.recvCompressionPool.Decompress(
-			compressionBuffer, buffer, int64(hc.ReadMaxBytes),
+			hc.BufferPool, buffer, int64(hc.ReadMaxBytes),
 		); err != nil {
 			return err
 		}
-		buffer = compressionBuffer
 	}
 	if flags != 0 && flags != flagEnvelopeCompressed {
 		end, err := connectUnmarshalEndStreamMessage(buffer, flags)
@@ -910,15 +876,9 @@ func (hc *connectStreamingHandlerConn) Send(msg any) error {
 	}
 	var flags uint8
 	if buffer.Len() > hc.CompressMinBytes && hc.sendCompressionPool != nil {
-		compressionBuffer := hc.BufferPool.Get()
-		defer hc.BufferPool.Put(compressionBuffer)
-
-		if err := hc.sendCompressionPool.Compress(
-			compressionBuffer, buffer,
-		); err != nil {
+		if err := hc.sendCompressionPool.Compress(hc.BufferPool, buffer); err != nil {
 			return err
 		}
-		buffer = compressionBuffer // swap buffers
 		flags |= flagEnvelopeCompressed
 	}
 	if err := checkSendMaxBytes(buffer.Len(), hc.SendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
@@ -976,19 +936,12 @@ func (cc *connectUnaryClientConn) sendMsg(buffer *bytes.Buffer, msg any) error {
 	if err := marshal(buffer, msg, cc.Codec); err != nil {
 		return err
 	}
-	var isCompressed bool
-	if cc.compressionPool != nil && buffer.Len() > cc.CompressMinBytes {
-		compressionBuffer := cc.BufferPool.Get()
-		defer cc.BufferPool.Put(compressionBuffer)
-
-		if err := cc.compressionPool.Compress(
-			compressionBuffer, buffer,
-		); err != nil {
+	isCompressed := cc.compressionPool != nil && buffer.Len() > cc.CompressMinBytes
+	if isCompressed {
+		if err := cc.compressionPool.Compress(cc.BufferPool, buffer); err != nil {
 			return err
 		}
-		buffer = compressionBuffer // swap buffers
 		setHeaderCanonical(cc.duplexCall.Header(), connectUnaryHeaderCompression, cc.CompressionName)
-		isCompressed = true
 	}
 	if err := checkSendMaxBytes(buffer.Len(), cc.SendMaxBytes, isCompressed); err != nil {
 		delHeaderCanonical(cc.duplexCall.Header(), connectUnaryHeaderCompression)
@@ -1016,19 +969,12 @@ func (cc *connectUnaryClientConn) trySendGet(buffer *bytes.Buffer, msg any) erro
 	}
 
 	isTooBig := cc.SendMaxBytes > 0 && buffer.Len() > cc.SendMaxBytes
-	isCompressed := false
+	isCompressed := isTooBig && cc.compressionPool != nil
 
-	if isTooBig && cc.compressionPool != nil {
-		compressionBuffer := cc.BufferPool.Get()
-		defer cc.BufferPool.Put(compressionBuffer)
-
-		if err := cc.compressionPool.Compress(
-			compressionBuffer, buffer,
-		); err != nil {
+	if isCompressed {
+		if err := cc.compressionPool.Compress(cc.BufferPool, buffer); err != nil {
 			return err
 		}
-		buffer = compressionBuffer // swap buffers
-		isCompressed = true
 		isTooBig = cc.SendMaxBytes > 0 && buffer.Len() > cc.SendMaxBytes
 	}
 
