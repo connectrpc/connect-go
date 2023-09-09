@@ -137,10 +137,8 @@ func (w *ErrorWriter) writeConnectStreaming(response http.ResponseWriter, err er
 	if err := connectMarshalEndStreamMessage(buffer, end); err != nil {
 		return err
 	}
-
 	response.WriteHeader(http.StatusOK)
-	env := envelope{Data: buffer, Flags: connectFlagEnvelopeEndStream}
-	if err := writeAll(response, env); err != nil {
+	if err := writeEnvelope(response, buffer, connectFlagEnvelopeEndStream); err != nil {
 		return err
 	}
 	return nil

@@ -439,6 +439,9 @@ func (cc *connectUnaryClientConn) Receive(msg any) error {
 	if err := unmarshal(buffer, msg, cc.Codec); err != nil {
 		return err
 	}
+	if err := ensureEOF(cc.duplexCall); !errors.Is(err, io.EOF) {
+		return err
+	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
@@ -550,8 +553,7 @@ func (cc *connectStreamingClientConn) Send(msg any) error {
 	if err := checkSendMaxBytes(buffer.Len(), cc.SendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
 		return err
 	}
-	env := envelope{Data: buffer, Flags: flags}
-	if err := writeAll(cc.duplexCall, env); err != nil {
+	if err := writeEnvelope(cc.duplexCall, buffer, flags); err != nil {
 		return err
 	}
 	return nil // must be a literal nil: nil *error is a non-nil error
@@ -884,8 +886,7 @@ func (hc *connectStreamingHandlerConn) Send(msg any) error {
 	if err := checkSendMaxBytes(buffer.Len(), hc.SendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
 		return err
 	}
-	env := envelope{Data: buffer, Flags: flags}
-	if err := writeAll(hc.responseWriter, env); err != nil {
+	if err := writeEnvelope(hc.responseWriter, buffer, flags); err != nil {
 		return err
 	}
 	flushResponseWriter(hc.responseWriter)
@@ -928,8 +929,7 @@ func (hc *connectStreamingHandlerConn) marshalEndStream(err error, trailer http.
 	if err := connectMarshalEndStreamMessage(buffer, end); err != nil {
 		return err
 	}
-	env := envelope{Data: buffer, Flags: connectFlagEnvelopeEndStream}
-	return writeAll(hc.responseWriter, env)
+	return writeEnvelope(hc.responseWriter, buffer, connectFlagEnvelopeEndStream)
 }
 
 func (cc *connectUnaryClientConn) sendMsg(buffer *bytes.Buffer, msg any) error {

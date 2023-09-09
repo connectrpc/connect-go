@@ -43,6 +43,7 @@ func TestGRPCHandlerSender(t *testing.T) {
 		assert.Nil(t, err)
 		return &grpcHandlerConn{
 			grpcHandler: &grpcHandler{
+				//nolint:exhaustruct
 				protocolHandlerParams: protocolHandlerParams{
 					Codecs:     newReadOnlyCodecs(map[string]Codec{}),
 					BufferPool: bufferPool,

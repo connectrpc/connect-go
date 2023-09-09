@@ -25,34 +25,7 @@ import (
 // same meaning in the gRPC-Web, gRPC-HTTP2, and Connect protocols.
 const flagEnvelopeCompressed = 0b00000001
 
-// envelope is a block of arbitrary bytes wrapped in gRPC and Connect's framing
-// protocol.
-//
-// Each message is preceded by a 5-byte prefix. The first byte is a uint8 used
-// as a set of bitwise flags, and the remainder is a uint32 indicating the
-// message length. gRPC and Connect interpret the bitwise flags differently, so
-// envelope leaves their interpretation up to the caller.
-type envelope struct {
-	Data  *bytes.Buffer
-	Flags uint8
-}
-
-func (e envelope) WriteTo(w io.Writer) (n int64, err error) {
-	prefix := [5]byte{}
-	prefix[0] = e.Flags
-	binary.BigEndian.PutUint32(prefix[1:5], uint32(e.Data.Len()))
-	for _, b := range [2][]byte{prefix[:], e.Data.Bytes()} {
-		wroteN, err := w.Write(b)
-		if err != nil {
-			if writeErr, ok := asError(err); ok {
-				return n, writeErr
-			}
-			return n, errorf(CodeUnknown, "write envelope: %w", err)
-		}
-		n += int64(wroteN)
-	}
-	return n, nil
-}
+var errEOF = errorf(CodeInternal, "%w", io.EOF)
 
 func marshal(dst *bytes.Buffer, message any, codec Codec) *Error {
 	if message == nil {
@@ -134,8 +107,6 @@ func readAll(dst *bytes.Buffer, src io.Reader, readMaxBytes int) *Error {
 	}
 }
 
-var errEOF = errorf(CodeInternal, "%w", io.EOF)
-
 func readEnvelope(dst *bytes.Buffer, src io.Reader, readMaxBytes int) (uint8, *Error) {
 	prefix := [5]byte{}
 	if _, err := io.ReadFull(src, prefix[:]); err != nil {
@@ -179,7 +150,8 @@ func readEnvelope(dst *bytes.Buffer, src io.Reader, readMaxBytes int) (uint8, *E
 	}
 	return prefix[0], nil
 }
-func writeAll(dst io.Writer, src io.WriterTo) *Error {
+
+func writeAll(dst io.Writer, src *bytes.Buffer) *Error {
 	if _, err := src.WriteTo(dst); err != nil {
 		if writeErr, ok := asError(err); ok {
 			return writeErr
@@ -187,6 +159,19 @@ func writeAll(dst io.Writer, src io.WriterTo) *Error {
 		return errorf(CodeInternal, "write message: %w", err)
 	}
 	return nil
+}
+
+func writeEnvelope(dst io.Writer, src *bytes.Buffer, flags uint8) *Error {
+	prefix := [5]byte{}
+	prefix[0] = flags
+	binary.BigEndian.PutUint32(prefix[1:5], uint32(src.Len()))
+	if _, err := dst.Write(prefix[:]); err != nil {
+		if writeErr, ok := asError(err); ok {
+			return writeErr
+		}
+		return errorf(CodeUnknown, "write envelope: %w", err)
+	}
+	return writeAll(dst, src)
 }
 
 func checkSendMaxBytes(length, sendMaxBytes int, isCompressed bool) *Error {

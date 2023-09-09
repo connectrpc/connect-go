@@ -70,7 +70,7 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 	assert.Nil(t, err)
 
 	output := &bytes.Buffer{}
-	err = writeAll(output, envelope{Data: buffer, Flags: connectFlagEnvelopeEndStream})
+	err = writeEnvelope(output, buffer, connectFlagEnvelopeEndStream)
 	assert.Nil(t, err)
 
 	input := &bytes.Buffer{}

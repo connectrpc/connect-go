@@ -314,14 +314,13 @@ func (cc *grpcClientConn) Peer() Peer {
 func (cc *grpcClientConn) Send(msg any) error {
 	buffer := cc.BufferPool.Get()
 	defer cc.BufferPool.Put(buffer)
+
 	if err := marshal(buffer, msg, cc.Codec); err != nil {
 		return err
 	}
 	var flags uint8
 	if buffer.Len() > cc.CompressMinBytes && cc.sendCompressionPool != nil {
-		if err := cc.sendCompressionPool.Compress(
-			cc.BufferPool, buffer,
-		); err != nil {
+		if err := cc.sendCompressionPool.Compress(cc.BufferPool, buffer); err != nil {
 			return err
 		}
 		flags |= flagEnvelopeCompressed
@@ -329,8 +328,7 @@ func (cc *grpcClientConn) Send(msg any) error {
 	if err := checkSendMaxBytes(buffer.Len(), cc.SendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
 		return err
 	}
-	env := envelope{Data: buffer, Flags: flags}
-	if err := writeAll(cc.duplexCall, env); err != nil {
+	if err := writeEnvelope(cc.duplexCall, buffer, flags); err != nil {
 		return err
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
@@ -513,8 +511,7 @@ func (hc *grpcHandlerConn) Send(msg any) error {
 	if err := checkSendMaxBytes(buffer.Len(), hc.SendMaxBytes, flags&flagEnvelopeCompressed > 0); err != nil {
 		return err
 	}
-	env := envelope{Data: buffer, Flags: flags}
-	if err := writeAll(hc.responseWriter, env); err != nil {
+	if err := writeEnvelope(hc.responseWriter, buffer, flags); err != nil {
 		return err
 	}
 	flushResponseWriter(hc.responseWriter)
@@ -624,8 +621,7 @@ func (hc *grpcHandlerConn) writeWebTrailers(trailer http.Header) *Error {
 	if err := grpcMarshalWebTrailers(buffer, trailer); err != nil {
 		return errorf(CodeInternal, "format trailers: %v", err)
 	}
-	env := envelope{Data: buffer, Flags: grpcFlagEnvelopeTrailer}
-	return writeAll(hc.responseWriter, env)
+	return writeEnvelope(hc.responseWriter, buffer, grpcFlagEnvelopeTrailer)
 }
 
 func grpcMarshalWebTrailers(dst *bytes.Buffer, trailer http.Header) error {
