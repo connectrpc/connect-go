@@ -69,10 +69,9 @@ func unmarshal(src *bytes.Buffer, message any, codec Codec) *Error {
 
 func read(dst *bytes.Buffer, src io.Reader) (int, error) {
 	dst.Grow(bytes.MinRead)
-	b := dst.Bytes()
-	b = b[len(b):cap(b)]
+	b := dst.Bytes()[dst.Len():dst.Cap()]
 	n, err := src.Read(b)
-	_, _ = dst.Write(b[:n])
+	_, _ = dst.Write(b[:n]) // noop
 	return n, err
 }
 
@@ -125,28 +124,30 @@ func readEnvelope(dst *bytes.Buffer, src io.Reader, readMaxBytes int) (uint8, *E
 	}
 
 	size := int(binary.BigEndian.Uint32(prefix[1:5]))
-	if size < 0 {
+	switch {
+	case size < 0:
 		return 0, errorf(CodeInvalidArgument, "message size %d overflowed uint32", size)
-	}
-	if readMaxBytes > 0 && size > readMaxBytes {
+	case readMaxBytes > 0 && size > readMaxBytes:
 		if _, err := discard(src); err != nil {
 			return 0, errorf(CodeUnknown, "read enveloped message: %w", err)
 		}
 		return 0, errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", size, readMaxBytes)
+	case size == 0:
+		return prefix[0], nil
 	}
-	if size > 0 {
-		dst.Grow(size)
-		data := dst.Bytes()[dst.Len() : dst.Len()+size]
-		if _, err := io.ReadFull(src, data); err != nil {
-			if maxBytesErr := asMaxBytesError(err, "read %d byte message", size); maxBytesErr != nil {
-				// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.
-				return 0, maxBytesErr
-			}
-			return 0, errorf(CodeInternal, "incomplete envelope: %w", err)
+
+	// Don't allocate the entire buffer up front to avoid malicious clients.
+	// Instead, limit the size of the source to the message size.
+	src = io.LimitReader(src, int64(size))
+	if readN, err := dst.ReadFrom(src); err != nil {
+		if maxBytesErr := asMaxBytesError(err, "read %d byte message", size); maxBytesErr != nil {
+			// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.
+			return 0, maxBytesErr
 		}
-		if _, err := dst.Write(data); err != nil {
-			return 0, errorf(CodeInternal, "read enveloped message: %w", err)
-		}
+		return 0, errorf(CodeInternal, "incomplete envelope: %w", err)
+	} else if readN != int64(size) {
+		err = io.ErrUnexpectedEOF
+		return 0, errorf(CodeInternal, "incomplete envelope: %w", err)
 	}
 	return prefix[0], nil
 }

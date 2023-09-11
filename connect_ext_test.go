@@ -2320,6 +2320,7 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			for i := 0; stream.Receive() && i < upTo; i++ {
 				assert.Equal(t, stream.Msg().Number, 42)
 			}
+			t.Log("err:", stream.Err())
 			assert.NotNil(t, stream.Err())
 			assert.Equal(t, connect.CodeOf(stream.Err()), testcase.expectCode)
 			assert.Equal(t, stream.Err().Error(), testcase.expectMsg)
