@@ -284,12 +284,19 @@ func isCommaOrSpace(c rune) bool {
 }
 
 func discard(reader io.Reader) (int64, error) {
+	lreader, ok := reader.(*io.LimitedReader)
+	if !ok {
+		lreader = &io.LimitedReader{R: reader, N: discardLimit}
+	}
+	limit := lreader.N
 	// We don't want to get stuck throwing data away forever, so limit how much
 	// we're willing to do here.
-	wroteN, err := io.CopyN(io.Discard, reader, discardLimit)
+	wroteN, err := io.Copy(io.Discard, lreader)
 	if errors.Is(err, io.EOF) {
 		err = nil
-	} else if wroteN == discardLimit {
+	}
+	if wroteN == limit {
+		// Ensure we error if we hit the limit.
 		err = io.ErrShortBuffer
 	}
 	return wroteN, err
