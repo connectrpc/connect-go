@@ -1273,10 +1273,9 @@ func connectUnmarshalEndStreamMessage(src *bytes.Buffer, flags uint8) (*connectE
 	return &end, nil
 }
 func connectMarshalEndStreamMessage(dst *bytes.Buffer, end *connectEndStreamMessage) *Error {
-	data, marshalErr := json.Marshal(end)
-	if marshalErr != nil {
-		return errorf(CodeInternal, "marshal end stream: %w", marshalErr)
+	enc := json.NewEncoder(dst)
+	if err := enc.Encode(end); err != nil {
+		return errorf(CodeInternal, "marshal end stream: %w", err)
 	}
-	dst.Write(data)
 	return nil
 }
