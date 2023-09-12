@@ -225,6 +225,8 @@ func (e *Error) AddDetail(d *ErrorDetail) {
 // When clients receive errors, the metadata contains the union of the HTTP
 // headers and the protocol-specific trailers (either HTTP trailers or in-body
 // metadata).
+//
+// Note that Meta returns a http.Header and is not safe for concurrent use.
 func (e *Error) Meta() http.Header {
 	return e.meta
 }
