@@ -16,6 +16,8 @@ package connect_test
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 
 	connect "connectrpc.com/connect"
@@ -40,6 +42,46 @@ func (*ExamplePingServer) Ping(
 			Text:   request.Msg.Text,
 		},
 	), nil
+}
+
+// Sum implements pingv1connect.PingServiceHandler.
+func (p *ExamplePingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+	var sum int64
+	for stream.Receive() {
+		sum += stream.Msg().Number
+	}
+	if stream.Err() != nil {
+		return nil, stream.Err()
+	}
+	response := connect.NewResponse(&pingv1.SumResponse{Sum: sum})
+	return response, nil
+}
+
+// CountUp implements pingv1connect.PingServiceHandler.
+func (p *ExamplePingServer) CountUp(ctx context.Context, request *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+	for number := int64(1); number <= request.Msg.Number; number++ {
+		if err := stream.Send(&pingv1.CountUpResponse{Number: number}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CumSum implements pingv1connect.PingServiceHandler.
+func (p *ExamplePingServer) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+	var sum int64
+	for {
+		msg, err := stream.Receive()
+		if errors.Is(err, io.EOF) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		sum += msg.Number
+		if err := stream.Send(&pingv1.CumSumResponse{Sum: sum}); err != nil {
+			return err
+		}
+	}
 }
 
 func Example_handler() {

@@ -48,25 +48,122 @@ func BenchmarkConnect(b *testing.B) {
 	assert.True(b, ok)
 	httpTransport.DisableCompression = true
 
-	client := pingv1connect.NewPingServiceClient(
-		httpClient,
-		server.URL,
-		connect.WithGRPC(),
-		connect.WithSendGzip(),
-	)
-	twoMiB := strings.Repeat("a", 2*1024*1024)
-	b.ResetTimer()
+	clients := []struct {
+		name string
+		opts []connect.ClientOption
+	}{{
+		name: "connect",
+		opts: []connect.ClientOption{
+			connect.WithSendGzip(),
+		},
+	}, {
+		name: "grpc",
+		opts: []connect.ClientOption{
+			connect.WithSendGzip(),
+			connect.WithGRPC(),
+		},
+	}, {
+		name: "grpcweb",
+		opts: []connect.ClientOption{
+			connect.WithSendGzip(),
+			connect.WithGRPCWeb(),
+		},
+	}}
 
-	b.Run("unary", func(b *testing.B) {
-		b.RunParallel(func(pb *testing.PB) {
-			for pb.Next() {
-				_, _ = client.Ping(
-					context.Background(),
-					connect.NewRequest(&pingv1.PingRequest{Text: twoMiB}),
-				)
-			}
+	twoMiB := strings.Repeat("a", 2*1024*1024)
+	for _, client := range clients {
+		b.Run(client.name, func(b *testing.B) {
+			client := pingv1connect.NewPingServiceClient(
+				httpClient,
+				server.URL,
+				client.opts...,
+			)
+
+			ctx := context.Background()
+			b.Run("unary_big", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						_, err := client.Ping(
+							ctx, connect.NewRequest(&pingv1.PingRequest{Text: twoMiB}),
+						)
+						assert.Nil(b, err)
+					}
+				})
+			})
+			b.Run("unary_small", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						response, err := client.Ping(
+							ctx, connect.NewRequest(&pingv1.PingRequest{Number: 42}),
+						)
+						assert.Nil(b, err)
+						assert.Equal(b, response.Msg.Number, int64(42))
+					}
+				})
+			})
+			b.Run("client_stream", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						const (
+							upTo   = 1
+							expect = 1
+						)
+						stream := client.Sum(ctx)
+						for number := int64(1); number <= upTo; number++ {
+							err := stream.Send(&pingv1.SumRequest{Number: number})
+							assert.Nil(b, err, assert.Sprintf("send %d", number))
+						}
+						response, err := stream.CloseAndReceive()
+						assert.Nil(b, err)
+						assert.Equal(b, response.Msg.Sum, expect)
+					}
+				})
+			})
+			b.Run("server_stream", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						const (
+							upTo = 1
+						)
+						request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
+						stream, err := client.CountUp(ctx, request)
+						assert.Nil(b, err)
+						number := int64(1)
+						for ; stream.Receive(); number++ {
+							assert.Equal(b, stream.Msg().Number, number)
+						}
+						assert.Equal(b, number, upTo+1)
+					}
+				})
+			})
+			b.Run("bidi_stream", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						const (
+							upTo = 1
+						)
+						stream := client.CumSum(ctx)
+						number := int64(1)
+						for ; number <= upTo; number++ {
+							err := stream.Send(&pingv1.CumSumRequest{Number: number})
+							assert.Nil(b, err, assert.Sprintf("send %d", number))
+
+							msg, err := stream.Receive()
+							assert.Nil(b, err)
+							assert.Equal(b, msg.Sum, number*(number+1)/2)
+						}
+						assert.Nil(b, stream.CloseRequest())
+						assert.Nil(b, stream.CloseResponse())
+					}
+				})
+			})
 		})
-	})
+	}
 }
 
 type ping struct {
