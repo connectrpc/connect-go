@@ -53,19 +53,15 @@ func BenchmarkConnect(b *testing.B) {
 		opts []connect.ClientOption
 	}{{
 		name: "connect",
-		opts: []connect.ClientOption{
-			connect.WithSendGzip(),
-		},
+		opts: []connect.ClientOption{},
 	}, {
 		name: "grpc",
 		opts: []connect.ClientOption{
-			connect.WithSendGzip(),
 			connect.WithGRPC(),
 		},
 	}, {
 		name: "grpcweb",
 		opts: []connect.ClientOption{
-			connect.WithSendGzip(),
 			connect.WithGRPCWeb(),
 		},
 	}}
@@ -76,7 +72,8 @@ func BenchmarkConnect(b *testing.B) {
 			client := pingv1connect.NewPingServiceClient(
 				httpClient,
 				server.URL,
-				client.opts...,
+				connect.WithSendGzip(),
+				connect.WithClientOptions(client.opts...),
 			)
 
 			ctx := context.Background()
@@ -84,10 +81,11 @@ func BenchmarkConnect(b *testing.B) {
 				b.ReportAllocs()
 				b.RunParallel(func(pb *testing.PB) {
 					for pb.Next() {
-						_, err := client.Ping(
+						if _, err := client.Ping(
 							ctx, connect.NewRequest(&pingv1.PingRequest{Text: twoMiB}),
-						)
-						assert.Nil(b, err)
+						); err != nil {
+							b.Error(err)
+						}
 					}
 				})
 			})
@@ -98,8 +96,11 @@ func BenchmarkConnect(b *testing.B) {
 						response, err := client.Ping(
 							ctx, connect.NewRequest(&pingv1.PingRequest{Number: 42}),
 						)
-						assert.Nil(b, err)
-						assert.Equal(b, response.Msg.Number, int64(42))
+						if err != nil {
+							b.Error(err)
+						} else if response.Msg.Number != 42 {
+							b.Errorf("expected 42, got %d", response.Msg.Number)
+						}
 					}
 				})
 			})
@@ -113,12 +114,16 @@ func BenchmarkConnect(b *testing.B) {
 						)
 						stream := client.Sum(ctx)
 						for number := int64(1); number <= upTo; number++ {
-							err := stream.Send(&pingv1.SumRequest{Number: number})
-							assert.Nil(b, err, assert.Sprintf("send %d", number))
+							if err := stream.Send(&pingv1.SumRequest{Number: number}); err != nil {
+								b.Error(err)
+							}
 						}
 						response, err := stream.CloseAndReceive()
-						assert.Nil(b, err)
-						assert.Equal(b, response.Msg.Sum, expect)
+						if err != nil {
+							b.Error(err)
+						} else if response.Msg.Sum != expect {
+							b.Errorf("expected %d, got %d", expect, response.Msg.Sum)
+						}
 					}
 				})
 			})
@@ -131,12 +136,19 @@ func BenchmarkConnect(b *testing.B) {
 						)
 						request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
 						stream, err := client.CountUp(ctx, request)
-						assert.Nil(b, err)
+						if err != nil {
+							b.Error(err)
+							return
+						}
 						number := int64(1)
 						for ; stream.Receive(); number++ {
-							assert.Equal(b, stream.Msg().Number, number)
+							if stream.Msg().Number != number {
+								b.Errorf("expected %d, got %d", number, stream.Msg().Number)
+							}
 						}
-						assert.Equal(b, number, upTo+1)
+						if number != upTo+1 {
+							b.Errorf("expected %d, got %d", upTo+1, number)
+						}
 					}
 				})
 			})
@@ -150,15 +162,24 @@ func BenchmarkConnect(b *testing.B) {
 						stream := client.CumSum(ctx)
 						number := int64(1)
 						for ; number <= upTo; number++ {
-							err := stream.Send(&pingv1.CumSumRequest{Number: number})
-							assert.Nil(b, err, assert.Sprintf("send %d", number))
+							if err := stream.Send(&pingv1.CumSumRequest{Number: number}); err != nil {
+								b.Error(err)
+							}
 
 							msg, err := stream.Receive()
-							assert.Nil(b, err)
-							assert.Equal(b, msg.Sum, number*(number+1)/2)
+							if err != nil {
+								b.Error(err)
+							}
+							if msg.Sum != number*(number+1)/2 {
+								b.Errorf("expected %d, got %d", number*(number+1)/2, msg.Sum)
+							}
 						}
-						assert.Nil(b, stream.CloseRequest())
-						assert.Nil(b, stream.CloseResponse())
+						if err := stream.CloseRequest(); err != nil {
+							b.Error(err)
+						}
+						if err := stream.CloseResponse(); err != nil {
+							b.Error(err)
+						}
 					}
 				})
 			})

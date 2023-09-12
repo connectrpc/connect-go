@@ -53,8 +53,7 @@ func (p *ExamplePingServer) Sum(ctx context.Context, stream *connect.ClientStrea
 	if stream.Err() != nil {
 		return nil, stream.Err()
 	}
-	response := connect.NewResponse(&pingv1.SumResponse{Sum: sum})
-	return response, nil
+	return connect.NewResponse(&pingv1.SumResponse{Sum: sum}), nil
 }
 
 // CountUp implements pingv1connect.PingServiceHandler.

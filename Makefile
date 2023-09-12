@@ -30,6 +30,10 @@ clean: ## Delete intermediate build artifacts
 test: build ## Run unit tests
 	go test -vet=off -race -cover ./...
 
+.PHONY: bench
+bench: ## Run benchmarks
+	go test . -run="^$$" -bench=. -benchmem
+
 .PHONY: build
 build: generate ## Build all packages
 	go build ./...
