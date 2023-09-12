@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -106,4 +107,18 @@ func TestErrorIs(t *testing.T) {
 	connectErr := NewError(CodeUnavailable, err)
 	assert.False(t, errors.Is(connectErr, NewError(CodeUnavailable, err)))
 	assert.True(t, errors.Is(connectErr, connectErr))
+}
+
+func TestErrorNoRace(t *testing.T) {
+	t.Parallel()
+	err := NewError(CodeUnauthenticated, errors.New("unauthenticated"))
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = err.Meta()
+		}()
+	}
+	wg.Wait()
 }
