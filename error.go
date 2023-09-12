@@ -123,7 +123,7 @@ type Error struct {
 
 // NewError annotates any Go error with a status code.
 func NewError(c Code, underlying error) *Error {
-	return &Error{code: c, err: underlying}
+	return &Error{code: c, err: underlying, meta: make(http.Header)}
 }
 
 // NewWireError is similar to [NewError], but the resulting *Error returns true
@@ -226,9 +226,6 @@ func (e *Error) AddDetail(d *ErrorDetail) {
 // headers and the protocol-specific trailers (either HTTP trailers or in-body
 // metadata).
 func (e *Error) Meta() http.Header {
-	if e.meta == nil {
-		e.meta = make(http.Header)
-	}
 	return e.meta
 }
 
