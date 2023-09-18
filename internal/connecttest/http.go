@@ -28,18 +28,19 @@ import (
 
 // StartHTTPTestServer starts an HTTP server that listens on a in memory
 // network. The returned server is configured to use the in memory network.
-func StartHTTPTestServer(t testing.TB, handler http.Handler) *httptest.Server {
+func StartHTTPTestServer(tb testing.TB, handler http.Handler) *httptest.Server {
+	tb.Helper()
 	lis := NewMemoryListener()
 	svr := httptest.NewUnstartedServer(handler)
-	svr.Config.ErrorLog = log.New(NewTestWriter(t), "", 0)
+	svr.Config.ErrorLog = log.New(NewTestWriter(tb), "", 0) //nolint:forbidigo
 	svr.Listener = lis
 	svr.Start()
-	t.Cleanup(svr.Close)
+	tb.Cleanup(svr.Close)
 	client := svr.Client()
 	if transport, ok := client.Transport.(*http.Transport); ok {
 		transport.DialContext = lis.DialContext
 	} else {
-		t.Fatalf("unexpected transport type: %T", client.Transport)
+		tb.Fatalf("unexpected transport type: %T", client.Transport)
 	}
 	return svr
 }
@@ -47,19 +48,20 @@ func StartHTTPTestServer(t testing.TB, handler http.Handler) *httptest.Server {
 // StartHTTP2TestServer starts an HTTP/2 server that listens on a in memory
 // network. The returned server is configured to use the in memory network and
 // TLS.
-func StartHTTP2TestServer(t testing.TB, handler http.Handler) *httptest.Server {
+func StartHTTP2TestServer(tb testing.TB, handler http.Handler) *httptest.Server {
+	tb.Helper()
 	lis := NewMemoryListener()
 	svr := httptest.NewUnstartedServer(handler)
-	svr.Config.ErrorLog = log.New(NewTestWriter(t), "", 0)
+	svr.Config.ErrorLog = log.New(NewTestWriter(tb), "", 0) //nolint:forbidigo
 	svr.Listener = lis
 	svr.EnableHTTP2 = true
 	svr.StartTLS()
-	t.Cleanup(svr.Close)
+	tb.Cleanup(svr.Close)
 	client := svr.Client()
 	if transport, ok := client.Transport.(*http.Transport); ok {
 		transport.DialContext = lis.DialContext
 	} else {
-		t.Fatalf("unexpected transport type: %T", client.Transport)
+		tb.Fatalf("unexpected transport type: %T", client.Transport)
 	}
 	return svr
 }
@@ -68,13 +70,14 @@ type testWriter struct {
 	tb testing.TB
 }
 
-func (l *testWriter) Write(p []byte) (n int, err error) {
+func (l *testWriter) Write(p []byte) (int, error) {
 	l.tb.Log(string(p))
-	return
+	return len(p), nil
 }
 
 // NewTestWriter returns a writer that logs to the given testing.TB.
 func NewTestWriter(tb testing.TB) io.Writer {
+	tb.Helper()
 	return &testWriter{tb}
 }
 
