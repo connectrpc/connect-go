@@ -137,7 +137,6 @@ func (l *MemoryListener) DialContext(ctx context.Context, network, addr string) 
 			Err: err,
 		}
 	}
-
 	accepted := make(chan net.Conn)
 	select {
 	case <-ctx.Done():

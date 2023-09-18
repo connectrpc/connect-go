@@ -108,6 +108,8 @@ func TestClientPeer(t *testing.T) {
 		// server streaming
 		serverStream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{}))
 		t.Cleanup(func() {
+			// TODO(emcfarlane): debug flaky test close with error:
+			// "unknown: io: read/write on closed pipe"
 			assert.Nil(t, serverStream.Close())
 		})
 		assert.Nil(t, err)
