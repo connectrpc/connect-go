@@ -18,11 +18,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
+	"connectrpc.com/connect/internal/connecttest"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
@@ -77,10 +77,7 @@ func TestWithRecover(t *testing.T) {
 	pinger := &panicPingServer{}
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pinger, connect.WithRecover(handle)))
-	server := httptest.NewUnstartedServer(mux)
-	server.EnableHTTP2 = true
-	server.StartTLS()
-	t.Cleanup(server.Close)
+	server := connecttest.StartHTTP2TestServer(t, mux)
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL,

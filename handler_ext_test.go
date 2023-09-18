@@ -21,13 +21,13 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
+	"connectrpc.com/connect/internal/connecttest"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
@@ -42,11 +42,8 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	mux.Handle("/prefixed/", http.StripPrefix("/prefixed", prefixed))
 	const pingProcedure = pingv1connect.PingServicePingProcedure
 	const sumProcedure = pingv1connect.PingServiceSumProcedure
-	server := httptest.NewServer(mux)
+	server := connecttest.StartHTTPTestServer(t, mux)
 	client := server.Client()
-	t.Cleanup(func() {
-		server.Close()
-	})
 
 	t.Run("get_method_no_encoding", func(t *testing.T) {
 		t.Parallel()
@@ -217,8 +214,7 @@ func TestHandlerMaliciousPrefix(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(successPingServer{}))
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
+	server := connecttest.StartHTTPTestServer(t, mux)
 
 	const (
 		concurrency  = 256

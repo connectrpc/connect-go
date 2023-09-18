@@ -17,11 +17,11 @@ package connect
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"connectrpc.com/connect/internal/assert"
+	"connectrpc.com/connect/internal/connecttest"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 )
 
@@ -38,10 +38,7 @@ func TestClientUnaryGetFallback(t *testing.T) {
 		},
 		WithIdempotency(IdempotencyNoSideEffects),
 	))
-	server := httptest.NewUnstartedServer(mux)
-	server.EnableHTTP2 = true
-	server.StartTLS()
-	t.Cleanup(server.Close)
+	server := connecttest.StartHTTP2TestServer(t, mux)
 
 	client := NewClient[pingv1.PingRequest, pingv1.PingResponse](
 		server.Client(),

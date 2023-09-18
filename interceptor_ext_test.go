@@ -18,12 +18,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
+	"connectrpc.com/connect/internal/connecttest"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
@@ -127,9 +127,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 			handlerOnion,
 		),
 	)
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-
+	server := connecttest.StartHTTPTestServer(t, mux)
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL,
@@ -174,8 +172,7 @@ func TestEmptyUnaryInterceptorFunc(t *testing.T) {
 		}
 	})
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}, connect.WithInterceptors(interceptor)))
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
+	server := connecttest.StartHTTPTestServer(t, mux)
 	connectClient := pingv1connect.NewPingServiceClient(server.Client(), server.URL, connect.WithInterceptors(interceptor))
 	_, err := connectClient.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
 	assert.Nil(t, err)
@@ -204,9 +201,7 @@ func TestInterceptorFuncAccessingHTTPMethod(t *testing.T) {
 			connect.WithInterceptors(handlerChecker),
 		),
 	)
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-
+	server := connecttest.StartHTTPTestServer(t, mux)
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL,

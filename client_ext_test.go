@@ -18,12 +18,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
+	"connectrpc.com/connect/internal/connecttest"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
@@ -75,10 +75,7 @@ func TestClientPeer(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
-	server := httptest.NewUnstartedServer(mux)
-	server.EnableHTTP2 = true
-	server.StartTLS()
-	t.Cleanup(server.Close)
+	server := connecttest.StartHTTP2TestServer(t, mux)
 
 	run := func(t *testing.T, unaryHTTPMethod string, opts ...connect.ClientOption) {
 		t.Helper()
@@ -157,11 +154,7 @@ func TestGetNotModified(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(&notModifiedPingServer{etag: etag}))
-	server := httptest.NewUnstartedServer(mux)
-	server.EnableHTTP2 = true
-	server.StartTLS()
-	t.Cleanup(server.Close)
-
+	server := connecttest.StartHTTP2TestServer(t, mux)
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL,

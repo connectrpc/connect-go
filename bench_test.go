@@ -21,12 +21,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
+	"connectrpc.com/connect/internal/connecttest"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
@@ -38,10 +38,7 @@ func BenchmarkConnect(b *testing.B) {
 			&ExamplePingServer{},
 		),
 	)
-	server := httptest.NewUnstartedServer(mux)
-	server.EnableHTTP2 = true
-	server.StartTLS()
-	b.Cleanup(server.Close)
+	server := connecttest.StartHTTP2TestServer(b, mux)
 
 	httpClient := server.Client()
 	httpTransport, ok := httpClient.Transport.(*http.Transport)
@@ -113,10 +110,7 @@ func BenchmarkREST(b *testing.B) {
 		assert.Nil(b, err)
 	}
 
-	server := httptest.NewUnstartedServer(http.HandlerFunc(handler))
-	server.EnableHTTP2 = true
-	server.StartTLS()
-	b.Cleanup(server.Close)
+	server := connecttest.StartHTTP2TestServer(b, http.HandlerFunc(handler))
 	twoMiB := strings.Repeat("a", 2*1024*1024)
 	b.ResetTimer()
 

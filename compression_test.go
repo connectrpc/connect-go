@@ -17,10 +17,10 @@ package connect
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"connectrpc.com/connect/internal/assert"
+	"connectrpc.com/connect/internal/connecttest"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -42,9 +42,7 @@ func TestAcceptEncodingOrdering(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		called = true
 	})
-	server := httptest.NewServer(verify)
-	t.Cleanup(server.Close)
-
+	server := connecttest.StartHTTPTestServer(t, verify)
 	client := NewClient[emptypb.Empty, emptypb.Empty](
 		server.Client(),
 		server.URL,
