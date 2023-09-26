@@ -751,7 +751,7 @@ func grpcParseTimeout(timeout string) (time.Duration, error) {
 	if timeout == "" {
 		return 0, errNoTimeout
 	}
-	unit := grpcTimeoutUnitLookup(timeout[len(timeout)-1:])
+	unit := grpcTimeoutUnitLookup(timeout[len(timeout)-1])
 	if unit == 0 {
 		return 0, fmt.Errorf("protocol error: timeout %q has invalid unit", timeout)
 	}
@@ -795,19 +795,19 @@ func grpcEncodeTimeout(timeout time.Duration) string {
 	return strconv.FormatInt(div(timeout, time.Hour), 10) + "H"
 }
 
-func grpcTimeoutUnitLookup(unit string) time.Duration {
+func grpcTimeoutUnitLookup(unit byte) time.Duration {
 	switch unit {
-	case "n":
+	case 'n':
 		return time.Nanosecond
-	case "u":
+	case 'u':
 		return time.Microsecond
-	case "m":
+	case 'm':
 		return time.Millisecond
-	case "S":
+	case 'S':
 		return time.Second
-	case "M":
+	case 'M':
 		return time.Minute
-	case "H":
+	case 'H':
 		return time.Hour
 	default:
 		return 0
