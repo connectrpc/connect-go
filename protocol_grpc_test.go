@@ -127,6 +127,10 @@ func TestGRPCEncodeTimeout(t *testing.T) {
 	assert.Equal(t, timeout, "0n")
 	timeout = grpcEncodeTimeout(45 * time.Second) // 8 digits, shouldn't overflow
 	assert.Equal(t, timeout, "45000000u")
+	timeout = grpcEncodeTimeout(99999999 * time.Nanosecond)
+	assert.Equal(t, timeout, "99999999n")
+	timeout = grpcEncodeTimeout(100 * time.Second)
+	assert.Equal(t, timeout, "100000m")
 }
 
 func TestGRPCEncodeTimeoutQuick(t *testing.T) {
@@ -148,7 +152,7 @@ func TestGRPCPercentEncodingQuick(t *testing.T) {
 			return true
 		}
 		encoded := grpcPercentEncode(input)
-		decoded := grpcPercentDecode(encoded)
+		decoded, _ := grpcPercentDecode(encoded)
 		return decoded == input
 	}
 	if err := quick.Check(roundtrip, nil /* config */); err != nil {
@@ -162,7 +166,7 @@ func TestGRPCPercentEncoding(t *testing.T) {
 		assert.True(t, utf8.ValidString(input), assert.Sprintf("input invalid UTF-8"))
 		encoded := grpcPercentEncode(input)
 		t.Logf("%q encoded as %q", input, encoded)
-		decoded := grpcPercentDecode(encoded)
+		decoded, _ := grpcPercentDecode(encoded)
 		assert.Equal(t, decoded, input)
 	}
 
@@ -208,7 +212,7 @@ func BenchmarkGRPCPercentDecoding(b *testing.B) {
 	want := "Hello, 世界"
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		got := grpcPercentDecode(input)
+		got, _ := grpcPercentDecode(input)
 		if got != want {
 			b.Fatalf("grpcPercentDecode(%q) = %s, want %s", input, got, want)
 		}
