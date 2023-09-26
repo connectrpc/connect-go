@@ -119,23 +119,22 @@ func TestGRPCParseTimeout(t *testing.T) {
 
 func TestGRPCEncodeTimeout(t *testing.T) {
 	t.Parallel()
-	timeout, err := grpcEncodeTimeout(time.Hour + time.Second)
-	assert.Nil(t, err)
+	timeout := grpcEncodeTimeout(time.Hour + time.Second)
 	assert.Equal(t, timeout, "3601000m")
-	timeout, err = grpcEncodeTimeout(time.Duration(math.MaxInt64))
-	assert.Nil(t, err)
+	timeout = grpcEncodeTimeout(time.Duration(math.MaxInt64))
 	assert.Equal(t, timeout, "2562047H")
-	timeout, err = grpcEncodeTimeout(-1 * time.Hour)
-	assert.Nil(t, err)
+	timeout = grpcEncodeTimeout(-1 * time.Hour)
 	assert.Equal(t, timeout, "0n")
+	timeout = grpcEncodeTimeout(45 * time.Second) // 8 digits, shouldn't overflow
+	assert.Equal(t, timeout, "45000000u")
 }
 
 func TestGRPCEncodeTimeoutQuick(t *testing.T) {
 	t.Parallel()
 	// Ensure that the error case is actually unreachable.
 	encode := func(d time.Duration) bool {
-		_, err := grpcEncodeTimeout(d)
-		return err == nil
+		val := grpcEncodeTimeout(d)
+		return val > ""
 	}
 	if err := quick.Check(encode, nil); err != nil {
 		t.Error(err)
@@ -192,7 +191,6 @@ func TestGRPCWebTrailerMarshalling(t *testing.T) {
 	marshalled := responseWriter.Body.String()
 	assert.Equal(t, marshalled, "grpc-message: Foo\r\ngrpc-status: 0\r\nuser-provided: bar\r\n")
 }
-
 func BenchmarkGRPCPercentEncoding(b *testing.B) {
 	input := "Hello, 世界"
 	want := "Hello, %E4%B8%96%E7%95%8C"
@@ -200,7 +198,7 @@ func BenchmarkGRPCPercentEncoding(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		got := grpcPercentEncode(input)
 		if got != want {
-			b.Fatalf("encodeGrpcMessage(%q) = %s, want %s", input, got, want)
+			b.Fatalf("grpcPercentEnccode(%q) = %s, want %s", input, got, want)
 		}
 	}
 }
@@ -212,7 +210,19 @@ func BenchmarkGRPCPercentDecoding(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		got := grpcPercentDecode(input)
 		if got != want {
-			b.Fatalf("decodeGrpcMessage(%q) = %s, want %s", input, got, want)
+			b.Fatalf("grpcPercentDecode(%q) = %s, want %s", input, got, want)
+		}
+	}
+}
+
+func BenchmarkGRPCTimeoutEncoding(b *testing.B) {
+	input := time.Second * 45
+	want := "45000000u"
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		got := grpcEncodeTimeout(input)
+		if got != want {
+			b.Fatalf("grpcEncodeTimeout(%q) = %s, want %s", input, got, want)
 		}
 	}
 }
