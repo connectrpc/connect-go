@@ -64,6 +64,9 @@ var (
 	//
 	//	User-Agent → "grpc-" Language ?("-" Variant) "/" Version ?( " ("  *(AdditionalProperty ";") ")" )
 	defaultGrpcUserAgent = fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())
+	grpcAllowedMethods   = map[string]struct{}{
+		http.MethodPost: {},
+	}
 )
 
 type protocolGRPC struct {
@@ -111,7 +114,7 @@ type grpcHandler struct {
 }
 
 func (g *grpcHandler) Methods() map[string]struct{} {
-	return map[string]struct{}{http.MethodPost: {}}
+	return grpcAllowedMethods
 }
 
 func (g *grpcHandler) ContentTypes() map[string]struct{} {
