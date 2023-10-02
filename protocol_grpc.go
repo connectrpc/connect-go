@@ -798,8 +798,10 @@ func grpcEncodeTimeout(timeout time.Duration) string {
 		// expressible duration is less than 1e8 hours.
 		size, unit = time.Hour, 'H'
 	}
-	value := timeout / size
-	return strconv.FormatInt(int64(value), 10 /* base */) + string(unit)
+	buf := make([]byte, 0, 9)
+	buf = strconv.AppendInt(buf, int64(timeout/size), 10 /* base */)
+	buf = append(buf, unit)
+	return string(buf)
 }
 
 func grpcTimeoutUnitLookup(unit byte) time.Duration {
