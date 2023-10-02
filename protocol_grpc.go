@@ -751,9 +751,9 @@ func grpcParseTimeout(timeout string) (time.Duration, error) {
 	if timeout == "" {
 		return 0, errNoTimeout
 	}
-	unit := grpcTimeoutUnitLookup(timeout[len(timeout)-1])
-	if unit == 0 {
-		return 0, fmt.Errorf("protocol error: timeout %q has invalid unit", timeout)
+	unit, err := grpcTimeoutUnitLookup(timeout[len(timeout)-1])
+	if err != nil {
+		return 0, err
 	}
 	num, err := strconv.ParseInt(timeout[:len(timeout)-1], 10 /* base */, 64 /* bitsize */)
 	if err != nil || num < 0 {
@@ -804,22 +804,22 @@ func grpcEncodeTimeout(timeout time.Duration) string {
 	return string(buf)
 }
 
-func grpcTimeoutUnitLookup(unit byte) time.Duration {
+func grpcTimeoutUnitLookup(unit byte) (time.Duration, error) {
 	switch unit {
 	case 'n':
-		return time.Nanosecond
+		return time.Nanosecond, nil
 	case 'u':
-		return time.Microsecond
+		return time.Microsecond, nil
 	case 'm':
-		return time.Millisecond
+		return time.Millisecond, nil
 	case 'S':
-		return time.Second
+		return time.Second, nil
 	case 'M':
-		return time.Minute
+		return time.Minute, nil
 	case 'H':
-		return time.Hour
+		return time.Hour, nil
 	default:
-		return 0
+		return 0, fmt.Errorf("protocol error: timeout has invalid unit %q", unit)
 	}
 }
 
