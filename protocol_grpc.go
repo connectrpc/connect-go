@@ -47,6 +47,8 @@ const (
 	grpcWebContentTypePrefix  = grpcWebContentTypeDefault + "+"
 
 	headerXUserAgent = "X-User-Agent"
+
+	upperhex = "0123456789ABCDEF"
 )
 
 var (
@@ -963,8 +965,6 @@ func grpcShouldEscape(char byte) bool {
 	return char < ' ' || char > '~' || char == '%'
 }
 
-const upperhex = "0123456789ABCDEF"
-
 func unhex(char byte) byte {
 	switch {
 	case '0' <= char && char <= '9':
@@ -976,6 +976,7 @@ func unhex(char byte) byte {
 	}
 	return 0
 }
+
 func isHex(char byte) bool {
 	return ('0' <= char && char <= '9') || ('a' <= char && char <= 'f') || ('A' <= char && char <= 'F')
 }
