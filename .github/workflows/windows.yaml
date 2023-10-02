@@ -25,15 +25,6 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: ${{ matrix.go-version }}
-      - id: go-cache-paths
-        shell: bash
-        run: |
-          echo "go-mod=$(go env GOMODCACHE)" >> $GITHUB_OUTPUT
-      - name: Mod Cache
-        uses: actions/cache@v3
-        with:
-          path: ${{ steps.go-cache-paths.outputs.go-mod }}
-          key: ${{ runner.os }}-connect-ci-go-mod-${{ hashFiles('**/go.sum') }}
       - name: Test
         shell: bash
         run: |
