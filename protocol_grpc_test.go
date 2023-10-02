@@ -120,17 +120,28 @@ func TestGRPCParseTimeout(t *testing.T) {
 func TestGRPCEncodeTimeout(t *testing.T) {
 	t.Parallel()
 	timeout := grpcEncodeTimeout(time.Hour + time.Second)
-	assert.Equal(t, timeout, "3601000m")
+	assert.Equal(t, timeout, "3601000m") // NB, m is milliseconds
+
+	// overflow and underflow
 	timeout = grpcEncodeTimeout(time.Duration(math.MaxInt64))
 	assert.Equal(t, timeout, "2562047H")
+	timeout = grpcEncodeTimeout(-1)
+	assert.Equal(t, timeout, "0n")
 	timeout = grpcEncodeTimeout(-1 * time.Hour)
 	assert.Equal(t, timeout, "0n")
-	timeout = grpcEncodeTimeout(45 * time.Second) // 8 digits, shouldn't overflow
-	assert.Equal(t, timeout, "45000000u")
-	timeout = grpcEncodeTimeout(99999999 * time.Nanosecond)
+
+	// unit conversions
+	const eightDigitsNanos = 99999999 * time.Nanosecond
+	timeout = grpcEncodeTimeout(eightDigitsNanos) // shouldn't need unit conversion
 	assert.Equal(t, timeout, "99999999n")
-	timeout = grpcEncodeTimeout(100 * time.Second)
-	assert.Equal(t, timeout, "100000m")
+	timeout = grpcEncodeTimeout(eightDigitsNanos + 1) // 9 digits, convert to micros
+	assert.Equal(t, timeout, "100000u")
+
+	// rounding
+	timeout = grpcEncodeTimeout(10*time.Millisecond + 1) // shouldn't round
+	assert.Equal(t, timeout, "10000001n")
+	timeout = grpcEncodeTimeout(10*time.Second + 1) // should round down
+	assert.Equal(t, timeout, "10000000u")
 }
 
 func TestGRPCEncodeTimeoutQuick(t *testing.T) {

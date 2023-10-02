@@ -775,6 +775,8 @@ func grpcEncodeTimeout(timeout time.Duration) string {
 	if timeout <= 0 {
 		return "0n"
 	}
+	// The gRPC protocol limits timeouts to 8 characters (not counting the unit),
+	// so timeouts must be strictly less than 1e8 of the appropriate unit.
 	const grpcTimeoutMaxValue = 1e8
 	var (
 		size time.Duration
@@ -792,6 +794,8 @@ func grpcEncodeTimeout(timeout time.Duration) string {
 	case timeout < time.Minute*grpcTimeoutMaxValue:
 		size, unit = time.Minute, 'M'
 	default:
+		// time.Duration is an int64 number of nanoseconds, so the largest
+		// expressible duration is less than 1e8 hours.
 		size, unit = time.Hour, 'H'
 	}
 	value := timeout / size
