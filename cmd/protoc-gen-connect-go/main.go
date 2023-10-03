@@ -511,7 +511,7 @@ func procedureHandlerName(m *protogen.Method) string {
 }
 
 func reflectionName(service *protogen.Service) string {
-	return fmt.Sprintf("%s.%s", service.Desc.ParentFile().Package(), service.Desc.Name())
+	return string(service.Desc.FullName())
 }
 
 func isDeprecatedService(service *protogen.Service) bool {
