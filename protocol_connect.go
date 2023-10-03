@@ -1099,7 +1099,7 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 		data = decompressed
 	}
 	if err := unmarshal(data.Bytes(), message); err != nil {
-		return NewError(CodeInvalidArgument, err)
+		return errorf(CodeInvalidArgument, "unmarshal message: %w", err)
 	}
 	return nil
 }

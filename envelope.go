@@ -219,7 +219,7 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 	}
 
 	if err := r.codec.Unmarshal(data.Bytes(), message); err != nil {
-		return errorf(CodeInvalidArgument, "unmarshal into %T: %w", message, err)
+		return errorf(CodeInvalidArgument, "unmarshal message: %w", err)
 	}
 	return nil
 }
