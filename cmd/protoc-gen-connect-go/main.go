@@ -425,7 +425,7 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 		}
 		g.P(")")
 	}
-	g.P(`return "/`, string(service.Desc.FullName()), `/", `, httpPackage.Ident("HandlerFunc"), `(func(w `, httpPackage.Ident("ResponseWriter"), `, r *`, httpPackage.Ident("Request"), `){`)
+	g.P(`return "/`, service.Desc.FullName(), `/", `, httpPackage.Ident("HandlerFunc"), `(func(w `, httpPackage.Ident("ResponseWriter"), `, r *`, httpPackage.Ident("Request"), `){`)
 	g.P("switch r.URL.Path {")
 	for _, method := range service.Methods {
 		g.P("case ", procedureConstName(method), ":")
