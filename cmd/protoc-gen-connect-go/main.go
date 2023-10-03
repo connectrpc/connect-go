@@ -425,7 +425,7 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 		}
 		g.P(")")
 	}
-	g.P(`return "/`, reflectionName(service), `/", `, httpPackage.Ident("HandlerFunc"), `(func(w `, httpPackage.Ident("ResponseWriter"), `, r *`, httpPackage.Ident("Request"), `){`)
+	g.P(`return "/`, service.Desc.FullName(), `/", `, httpPackage.Ident("HandlerFunc"), `(func(w `, httpPackage.Ident("ResponseWriter"), `, r *`, httpPackage.Ident("Request"), `){`)
 	g.P("switch r.URL.Path {")
 	for _, method := range service.Methods {
 		g.P("case ", procedureConstName(method), ":")
@@ -508,10 +508,6 @@ func procedureConstName(m *protogen.Method) string {
 
 func procedureHandlerName(m *protogen.Method) string {
 	return fmt.Sprintf("%s%sHandler", unexport(m.Parent.GoName), m.GoName)
-}
-
-func reflectionName(service *protogen.Service) string {
-	return fmt.Sprintf("%s.%s", service.Desc.ParentFile().Package(), service.Desc.Name())
 }
 
 func isDeprecatedService(service *protogen.Service) bool {
