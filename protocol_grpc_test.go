@@ -1,4 +1,4 @@
-// Copyright 2021-2023 Buf Technologies, Inc.
+// Copyright 2021-2023 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -119,27 +119,29 @@ func TestGRPCParseTimeout(t *testing.T) {
 
 func TestGRPCEncodeTimeout(t *testing.T) {
 	t.Parallel()
-	timeout, err := grpcEncodeTimeout(time.Hour + time.Second)
-	assert.Nil(t, err)
-	assert.Equal(t, timeout, "3601000m")
-	timeout, err = grpcEncodeTimeout(time.Duration(math.MaxInt64))
-	assert.Nil(t, err)
-	assert.Equal(t, timeout, "2562047H")
-	timeout, err = grpcEncodeTimeout(-1 * time.Hour)
-	assert.Nil(t, err)
-	assert.Equal(t, timeout, "0n")
-}
+	timeout := grpcEncodeTimeout(time.Hour + time.Second)
+	assert.Equal(t, timeout, "3601000m") // NB, m is milliseconds
 
-func TestGRPCEncodeTimeoutQuick(t *testing.T) {
-	t.Parallel()
-	// Ensure that the error case is actually unreachable.
-	encode := func(d time.Duration) bool {
-		_, err := grpcEncodeTimeout(d)
-		return err == nil
-	}
-	if err := quick.Check(encode, nil); err != nil {
-		t.Error(err)
-	}
+	// overflow and underflow
+	timeout = grpcEncodeTimeout(time.Duration(math.MaxInt64))
+	assert.Equal(t, timeout, "2562047H")
+	timeout = grpcEncodeTimeout(-1)
+	assert.Equal(t, timeout, "0n")
+	timeout = grpcEncodeTimeout(-1 * time.Hour)
+	assert.Equal(t, timeout, "0n")
+
+	// unit conversions
+	const eightDigitsNanos = 99999999 * time.Nanosecond
+	timeout = grpcEncodeTimeout(eightDigitsNanos) // shouldn't need unit conversion
+	assert.Equal(t, timeout, "99999999n")
+	timeout = grpcEncodeTimeout(eightDigitsNanos + 1) // 9 digits, convert to micros
+	assert.Equal(t, timeout, "100000u")
+
+	// rounding
+	timeout = grpcEncodeTimeout(10*time.Millisecond + 1) // shouldn't round
+	assert.Equal(t, timeout, "10000001n")
+	timeout = grpcEncodeTimeout(10*time.Second + 1) // should round down
+	assert.Equal(t, timeout, "10000000u")
 }
 
 func TestGRPCPercentEncodingQuick(t *testing.T) {
@@ -149,8 +151,8 @@ func TestGRPCPercentEncodingQuick(t *testing.T) {
 			return true
 		}
 		encoded := grpcPercentEncode(input)
-		decoded := grpcPercentDecode(encoded)
-		return decoded == input
+		decoded, err := grpcPercentDecode(encoded)
+		return err == nil && decoded == input
 	}
 	if err := quick.Check(roundtrip, nil /* config */); err != nil {
 		t.Error(err)
@@ -163,7 +165,8 @@ func TestGRPCPercentEncoding(t *testing.T) {
 		assert.True(t, utf8.ValidString(input), assert.Sprintf("input invalid UTF-8"))
 		encoded := grpcPercentEncode(input)
 		t.Logf("%q encoded as %q", input, encoded)
-		decoded := grpcPercentDecode(encoded)
+		decoded, err := grpcPercentDecode(encoded)
+		assert.Nil(t, err)
 		assert.Equal(t, decoded, input)
 	}
 
@@ -192,7 +195,6 @@ func TestGRPCWebTrailerMarshalling(t *testing.T) {
 	marshalled := responseWriter.Body.String()
 	assert.Equal(t, marshalled, "grpc-message: Foo\r\ngrpc-status: 0\r\nuser-provided: bar\r\n")
 }
-
 func BenchmarkGRPCPercentEncoding(b *testing.B) {
 	input := "Hello, 世界"
 	want := "Hello, %E4%B8%96%E7%95%8C"
@@ -200,7 +202,7 @@ func BenchmarkGRPCPercentEncoding(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		got := grpcPercentEncode(input)
 		if got != want {
-			b.Fatalf("encodeGrpcMessage(%q) = %s, want %s", input, got, want)
+			b.Fatalf("grpcPercentEncode(%q) = %s, want %s", input, got, want)
 		}
 	}
 }
@@ -210,9 +212,21 @@ func BenchmarkGRPCPercentDecoding(b *testing.B) {
 	want := "Hello, 世界"
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		got := grpcPercentDecode(input)
+		got, _ := grpcPercentDecode(input)
 		if got != want {
-			b.Fatalf("decodeGrpcMessage(%q) = %s, want %s", input, got, want)
+			b.Fatalf("grpcPercentDecode(%q) = %s, want %s", input, got, want)
+		}
+	}
+}
+
+func BenchmarkGRPCTimeoutEncoding(b *testing.B) {
+	input := time.Second * 45
+	want := "45000000u"
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		got := grpcEncodeTimeout(input)
+		if got != want {
+			b.Fatalf("grpcEncodeTimeout(%q) = %s, want %s", input, got, want)
 		}
 	}
 }
