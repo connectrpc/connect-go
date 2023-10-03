@@ -30,6 +30,11 @@ clean: ## Delete intermediate build artifacts
 test: build ## Run unit tests
 	go test -vet=off -race -cover ./...
 
+.PHONY: bench
+bench: BENCH ?= .*
+bench: build ## Run benchmarks for root package
+	go test -vet=off -run '^$$' -bench '$(BENCH)' -benchmem -cpuprofile cpu.pprof -memprofile mem.pprof .
+
 .PHONY: build
 build: generate ## Build all packages
 	go build ./...
@@ -56,7 +61,7 @@ generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/li
 	PATH="$(abspath $(BIN))" buf generate
 	license-header \
 		--license-type apache \
-		--copyright-holder "Buf Technologies, Inc." \
+		--copyright-holder "The Connect Authors" \
 		--year-range "$(COPYRIGHT_YEARS)" $(LICENSE_IGNORE)
 
 .PHONY: upgrade

@@ -1,4 +1,4 @@
-// Copyright 2021-2023 Buf Technologies, Inc.
+// Copyright 2021-2023 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,8 +58,6 @@ const (
 )
 
 // defaultConnectUserAgent returns a User-Agent string similar to those used in gRPC.
-//
-//nolint:gochecknoglobals
 var defaultConnectUserAgent = fmt.Sprintf("connect-go/%s (%s)", Version, runtime.Version())
 
 type protocolConnect struct{}
