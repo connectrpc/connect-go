@@ -56,7 +56,11 @@ func marshal(dst *bytes.Buffer, message any, codec Codec) *Error {
 	if err != nil {
 		return errorf(CodeInternal, "marshal message: %w", err)
 	}
-	dst.Write(raw)
+	if dst.Cap() < len(raw) {
+		*dst = *bytes.NewBuffer(raw)
+	} else {
+		dst.Write(raw)
+	}
 	return nil
 }
 
