@@ -66,7 +66,7 @@ func marshal(dst *bytes.Buffer, message any, codec Codec) *Error {
 
 func unmarshal(src *bytes.Buffer, message any, codec Codec) *Error {
 	if err := codec.Unmarshal(src.Bytes(), message); err != nil {
-		return errorf(CodeInvalidArgument, "unmarshal into %T: %w", message, err)
+		return errorf(CodeInvalidArgument, "unmarshal message: %w", err)
 	}
 	return nil
 }
