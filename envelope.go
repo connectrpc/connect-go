@@ -226,7 +226,7 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 
 func (r *envelopeReader) Read(env *envelope) *Error {
 	prefixes := [5]byte{}
-	prefixBytesRead, err := r.reader.Read(prefixes[:])
+	prefixBytesRead, err := io.ReadFull(r.reader, prefixes[:])
 
 	switch {
 	case (err == nil || errors.Is(err, io.EOF)) &&
@@ -240,7 +240,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		// to the user so that they know that the stream has ended. We shouldn't
 		// add any alarming text about protocol errors, though.
 		return NewError(CodeUnknown, err)
-	case err != nil || prefixBytesRead < 5:
+	case err != nil:
 		// Something else has gone wrong - the stream didn't end cleanly.
 		if connectErr, ok := asError(err); ok {
 			return connectErr
@@ -248,9 +248,6 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		if maxBytesErr := asMaxBytesError(err, "read 5 byte message prefix"); maxBytesErr != nil {
 			// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.
 			return maxBytesErr
-		}
-		if err == nil {
-			err = io.ErrUnexpectedEOF
 		}
 		return errorf(
 			CodeInvalidArgument,
