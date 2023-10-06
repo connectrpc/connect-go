@@ -43,7 +43,7 @@ func ExampleUnaryInterceptorFunc() {
 	)
 	client := pingv1connect.NewPingServiceClient(
 		examplePingServer.Client(),
-		examplePingServer.URL,
+		examplePingServer.URL(),
 		connect.WithInterceptors(loggingInterceptor),
 	)
 	if _, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 42})); err != nil {
@@ -81,7 +81,7 @@ func ExampleWithInterceptors() {
 	)
 	client := pingv1connect.NewPingServiceClient(
 		examplePingServer.Client(),
-		examplePingServer.URL,
+		examplePingServer.URL(),
 		connect.WithInterceptors(outer, inner),
 	)
 	if _, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{})); err != nil {

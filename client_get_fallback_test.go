@@ -21,8 +21,8 @@ import (
 	"testing"
 
 	"connectrpc.com/connect/internal/assert"
-	"connectrpc.com/connect/internal/connecttest"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
+	"connectrpc.com/connect/internal/memhttp/memhttptest"
 )
 
 func TestClientUnaryGetFallback(t *testing.T) {
@@ -38,11 +38,11 @@ func TestClientUnaryGetFallback(t *testing.T) {
 		},
 		WithIdempotency(IdempotencyNoSideEffects),
 	))
-	server := connecttest.StartHTTP2TestServer(t, mux)
+	server := memhttptest.NewServer(t, mux)
 
 	client := NewClient[pingv1.PingRequest, pingv1.PingResponse](
 		server.Client(),
-		server.URL+"/connect.ping.v1.PingService/Ping",
+		server.URL()+"/connect.ping.v1.PingService/Ping",
 		WithHTTPGet(),
 		WithHTTPGetMaxURLSize(1, true),
 		WithSendGzip(),

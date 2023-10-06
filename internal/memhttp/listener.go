@@ -12,85 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package connecttest
+package memhttp
 
 import (
 	"context"
 	"errors"
-	"io"
-	"log"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"sync"
-	"testing"
 )
-
-// StartHTTPTestServer starts an HTTP server that listens on a in memory
-// network. The returned server is configured to use the in memory network.
-func StartHTTPTestServer(tb testing.TB, handler http.Handler) *httptest.Server {
-	tb.Helper()
-	lis := NewMemoryListener()
-	svr := httptest.NewUnstartedServer(handler)
-	svr.Config.ErrorLog = log.New(NewTestWriter(tb), "", 0) //nolint:forbidigo
-	svr.Listener = lis
-	svr.Start()
-	tb.Cleanup(svr.Close)
-	client := svr.Client()
-	if transport, ok := client.Transport.(*http.Transport); ok {
-		transport.DialContext = lis.DialContext
-	} else {
-		tb.Fatalf("unexpected transport type: %T", client.Transport)
-	}
-	return svr
-}
-
-// StartHTTP2TestServer starts an HTTP/2 server that listens on a in memory
-// network. The returned server is configured to use the in memory network and
-// TLS.
-func StartHTTP2TestServer(tb testing.TB, handler http.Handler) *httptest.Server {
-	tb.Helper()
-	lis := NewMemoryListener()
-	svr := httptest.NewUnstartedServer(handler)
-	svr.Config.ErrorLog = log.New(NewTestWriter(tb), "", 0) //nolint:forbidigo
-	svr.Listener = lis
-	svr.EnableHTTP2 = true
-	svr.StartTLS()
-	tb.Cleanup(svr.Close)
-	client := svr.Client()
-	if transport, ok := client.Transport.(*http.Transport); ok {
-		transport.DialContext = lis.DialContext
-	} else {
-		tb.Fatalf("unexpected transport type: %T", client.Transport)
-	}
-	return svr
-}
-
-type testWriter struct {
-	tb testing.TB
-}
-
-func (l *testWriter) Write(p []byte) (int, error) {
-	l.tb.Log(string(p))
-	return len(p), nil
-}
-
-// NewTestWriter returns a writer that logs to the given testing.TB.
-func NewTestWriter(tb testing.TB) io.Writer {
-	tb.Helper()
-	return &testWriter{tb}
-}
 
 // MemoryListener is a net.Listener that listens on an in memory network.
 type MemoryListener struct {
-	conns  chan chan net.Conn
+	conns  chan net.Conn
 	once   sync.Once
 	closed chan struct{}
 }
 
+// NewMemoryListener returns a new in-memory listener.
 func NewMemoryListener() *MemoryListener {
 	return &MemoryListener{
-		conns:  make(chan chan net.Conn),
+		conns:  make(chan net.Conn),
 		closed: make(chan struct{}),
 	}
 }
@@ -108,9 +49,7 @@ func (l *MemoryListener) Accept() (net.Conn, error) {
 	select {
 	case <-l.closed:
 		return nil, aerr(errors.New("listener closed"))
-	case accept := <-l.conns:
-		server, client := net.Pipe()
-		accept <- client
+	case server := <-l.conns:
 		return server, nil
 	}
 }
@@ -137,12 +76,12 @@ func (l *MemoryListener) DialContext(ctx context.Context, network, addr string) 
 			Err: err,
 		}
 	}
-	accepted := make(chan net.Conn)
+	server, client := net.Pipe()
 	select {
 	case <-ctx.Done():
 		return nil, derr(ctx.Err())
-	case l.conns <- accepted:
-		return <-accepted, nil
+	case l.conns <- server:
+		return client, nil
 	case <-l.closed:
 		return nil, derr(errors.New("listener closed"))
 	}

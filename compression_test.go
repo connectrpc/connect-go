@@ -20,7 +20,8 @@ import (
 	"testing"
 
 	"connectrpc.com/connect/internal/assert"
-	"connectrpc.com/connect/internal/connecttest"
+	"connectrpc.com/connect/internal/memhttp"
+	"connectrpc.com/connect/internal/memhttp/memhttptest"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -42,10 +43,10 @@ func TestAcceptEncodingOrdering(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		called = true
 	})
-	server := connecttest.StartHTTPTestServer(t, verify)
+	server := memhttptest.NewServer(t, verify, memhttp.WithoutHTTP2())
 	client := NewClient[emptypb.Empty, emptypb.Empty](
 		server.Client(),
-		server.URL,
+		server.URL(),
 		withFakeBrotli,
 		withGzip(),
 	)

@@ -22,9 +22,9 @@ import (
 
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
-	"connectrpc.com/connect/internal/connecttest"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/memhttp/memhttptest"
 )
 
 type panicPingServer struct {
@@ -77,10 +77,10 @@ func TestWithRecover(t *testing.T) {
 	pinger := &panicPingServer{}
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pinger, connect.WithRecover(handle)))
-	server := connecttest.StartHTTP2TestServer(t, mux)
+	server := memhttptest.NewServer(t, mux)
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
-		server.URL,
+		server.URL(),
 	)
 
 	for _, panicWith := range []any{42, nil} {

@@ -16,13 +16,12 @@ package connect_test
 
 import (
 	"net/http"
-	"net/http/httptest"
 
-	"connectrpc.com/connect/internal/connecttest"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/memhttp"
 )
 
-var examplePingServer *httptest.Server
+var examplePingServer *memhttp.Server
 
 func init() {
 	// Generally, init functions are bad. However, we need to set up the server
@@ -34,22 +33,5 @@ func init() {
 	// (https://github.com/golang/go/issues/48394)
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
-	examplePingServer = newInMemoryServer(mux)
-}
-
-// newInMemoryServer constructs and starts an inMemoryServer.
-func newInMemoryServer(handler http.Handler) *httptest.Server {
-	lis := connecttest.NewMemoryListener()
-	server := httptest.NewUnstartedServer(handler)
-	server.Listener = lis
-	server.EnableHTTP2 = true
-	server.StartTLS()
-	client := server.Client()
-	// Configure the httptest.Server client to use the in-memory listener.
-	// Automatic HTTP-level gzip  compression is disabled.
-	if transport, ok := client.Transport.(*http.Transport); ok {
-		transport.DialContext = lis.DialContext
-		transport.DisableCompression = true
-	}
-	return server
+	examplePingServer = memhttp.NewServer(mux)
 }

@@ -23,9 +23,9 @@ import (
 
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
-	"connectrpc.com/connect/internal/connecttest"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/memhttp/memhttptest"
 )
 
 func TestNewClient_InitFailure(t *testing.T) {
@@ -75,13 +75,13 @@ func TestClientPeer(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
-	server := connecttest.StartHTTP2TestServer(t, mux)
+	server := memhttptest.NewServer(t, mux)
 
 	run := func(t *testing.T, unaryHTTPMethod string, opts ...connect.ClientOption) {
 		t.Helper()
 		client := pingv1connect.NewPingServiceClient(
 			server.Client(),
-			server.URL,
+			server.URL(),
 			connect.WithClientOptions(opts...),
 			connect.WithInterceptors(&assertPeerInterceptor{t}),
 		)
@@ -156,10 +156,10 @@ func TestGetNotModified(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(&notModifiedPingServer{etag: etag}))
-	server := connecttest.StartHTTP2TestServer(t, mux)
+	server := memhttptest.NewServer(t, mux)
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
-		server.URL,
+		server.URL(),
 		connect.WithHTTPGet(),
 	)
 	ctx := context.Background()

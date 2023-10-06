@@ -36,7 +36,7 @@ func Example_client() {
 	// connect.WithGRPCWeb() to switch protocols.
 	client := pingv1connect.NewPingServiceClient(
 		httpClient,
-		examplePingServer.URL,
+		examplePingServer.URL(),
 	)
 	response, err := client.Ping(
 		context.Background(),
