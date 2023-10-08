@@ -50,6 +50,7 @@ linters:
     - maintidx          # covered by gocyclo
     - maligned          # readability trumps efficient struct packing
     - nlreturn          # generous whitespace violates house style
+    - nonamedreturns    # named returns are fine; it's *bare* returns that are bad
     - nosnakecase       # deprecated in https://github.com/golangci/golangci-lint/pull/3065
     - scopelint         # deprecated by author
     - structcheck       # abandoned
