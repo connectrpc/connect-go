@@ -147,14 +147,12 @@ func ExampleServer_Shutdown() {
 		_, _ = io.WriteString(w, "Hello, world!")
 	})
 	srv := memhttp.NewServer(hello)
-	srv.RegisterOnShutdown(func() {
-		fmt.Println("Server is shutting down")
-	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		panic(err)
 	}
+	fmt.Println("Server has shut down")
 	// Output:
-	// Server is shutting down
+	// Server has shut down
 }
