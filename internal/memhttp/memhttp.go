@@ -69,12 +69,8 @@ func NewServer(handler http.Handler, opts ...Option) *Server {
 	return server
 }
 
-// Transport returns an [http.Transport] configured to use in-memory pipes
-// rather than TCP, disable automatic compression, trust the server's TLS
-// certificate (if any), and use HTTP/2 (if the server supports it).
-//
-// Callers may reconfigure the returned Transport without affecting other
-// transports or clients.
+// Transport returns a [http.RoundTripper] configured to use in-memory pipes
+// rather than TCP and talk HTTP/2 (if the server supports it).
 func (s *Server) Transport() http.RoundTripper {
 	if s.disableHTTP2 {
 		return &http.Transport{
