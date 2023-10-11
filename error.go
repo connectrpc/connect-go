@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -408,4 +409,18 @@ func asMaxBytesError(err error, tmpl string, args ...any) *Error {
 	}
 	prefix := fmt.Sprintf(tmpl, args...)
 	return errorf(CodeResourceExhausted, "%s: exceeded %d byte http.MaxBytesReader limit", prefix, maxBytesErr.Limit)
+}
+
+// errMaxReadLimitExceeded returns an ResourceExhausted error and attempts
+// to discard the remaining bytes in the reader.
+func errMaxReadLimitExceeded(src io.Reader, readBytes, limitBytes int64) *Error {
+	discardedBytes, err := discard(src)
+	if err != nil {
+		return errorf(CodeResourceExhausted,
+			"message is larger than configured max %d - unable to determine message size: %w",
+			limitBytes, err)
+	}
+	return errorf(CodeResourceExhausted,
+		"message size %d is larger than configured max %d",
+		readBytes+discardedBytes, limitBytes)
 }

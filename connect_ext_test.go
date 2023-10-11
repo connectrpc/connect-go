@@ -1038,8 +1038,8 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 			if testing.Short() {
 				t.Skipf("skipping %s test in short mode", t.Name())
 			}
-			// Serializes to much larger than readMaxBytes (5 MiB)
-			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("abcde", 1024*1024)}
+			// Serializes to much larger than readMaxBytes (2.5 MiB)
+			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("abcde", 512*1024)}
 			expectedSize := proto.Size(pingRequest)
 			// With gzip request compression, the error should indicate the envelope size (before decompression) is too large.
 			if compressed {
@@ -1233,9 +1233,10 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 			if testing.Short() {
 				t.Skipf("skipping %s test in short mode", t.Name())
 			}
-			// Serializes to much larger than readMaxBytes (5 MiB)
-			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("abcde", 1024*1024)}
+			// Serializes to much larger than readMaxBytes (2.5 MiB)
+			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("abcde", 512*1024)}
 			expectedSize := proto.Size(pingRequest)
+			t.Log("expectedSize", expectedSize)
 			// With gzip response compression, the error should indicate the envelope size (before decompression) is too large.
 			if compressed {
 				expectedSize = gzipCompressedSize(t, pingRequest)

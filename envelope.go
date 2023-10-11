@@ -259,11 +259,8 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		return errorf(CodeInvalidArgument, "message size %d overflowed uint32", size)
 	}
 	if r.readMaxBytes > 0 && size > r.readMaxBytes {
-		_, err := io.CopyN(io.Discard, r.reader, int64(size))
-		if err != nil && !errors.Is(err, io.EOF) {
-			return errorf(CodeUnknown, "read enveloped message: %w", err)
-		}
-		return errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", size, r.readMaxBytes)
+		src := io.LimitReader(r.reader, int64(size))
+		return errMaxReadLimitExceeded(src, 0, int64(r.readMaxBytes))
 	}
 	if size > 0 {
 		// At layer 7, we don't know exactly what's happening down in L4. Large
