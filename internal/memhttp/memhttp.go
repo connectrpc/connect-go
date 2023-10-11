@@ -96,7 +96,7 @@ func (s *Server) TransportHTTP1() *http.Transport {
 }
 
 // Client returns an [http.Client] configured to use in-memory pipes rather
-// than TCP, and speak HTTP/2. It is configured to use the same
+// than TCP and speak HTTP/2. It is configured to use the same
 // [http2.Transport] as [Transport].
 //
 // Callers may reconfigure the returned client without affecting other clients.
