@@ -25,7 +25,6 @@ import (
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
-	"connectrpc.com/connect/internal/memhttp"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 )
 
@@ -128,7 +127,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 			handlerOnion,
 		),
 	)
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL(),
@@ -173,7 +172,7 @@ func TestEmptyUnaryInterceptorFunc(t *testing.T) {
 		}
 	})
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}, connect.WithInterceptors(interceptor)))
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 	connectClient := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithInterceptors(interceptor))
 	_, err := connectClient.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
 	assert.Nil(t, err)

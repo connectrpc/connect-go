@@ -352,10 +352,10 @@ func TestServer(t *testing.T) {
 			assertIsHTTPMiddlewareError(t, stream.Err())
 		})
 	}
-	testMatrix := func(t *testing.T, server *memhttp.Server, bidi bool) { //nolint:thelper
+	testMatrix := func(t *testing.T, client *http.Client, url string, bidi bool) { //nolint:thelper
 		run := func(t *testing.T, opts ...connect.ClientOption) {
 			t.Helper()
-			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), opts...)
+			client := pingv1connect.NewPingServiceClient(client, url, opts...)
 			testPing(t, client)
 			testSum(t, client)
 			testCountUp(t, client)
@@ -436,13 +436,15 @@ func TestServer(t *testing.T) {
 
 	t.Run("http1", func(t *testing.T) {
 		t.Parallel()
-		server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
-		testMatrix(t, server, false /* bidi */)
+		server := memhttptest.NewServer(t, mux)
+		client := &http.Client{Transport: server.TransportHTTP1()}
+		testMatrix(t, client, server.URL(), false /* bidi */)
 	})
 	t.Run("http2", func(t *testing.T) {
 		t.Parallel()
 		server := memhttptest.NewServer(t, mux)
-		testMatrix(t, server, true /* bidi */)
+		client := server.Client()
+		testMatrix(t, client, server.URL(), true /* bidi */)
 	})
 }
 
@@ -511,7 +513,7 @@ func TestHeaderBasic(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 
 	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
 	request := connect.NewRequest(&pingv1.PingRequest{})
@@ -591,7 +593,7 @@ func TestTimeoutParsing(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -603,7 +605,7 @@ func TestTimeoutParsing(t *testing.T) {
 func TestFailCodec(t *testing.T) {
 	t.Parallel()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	server := memhttptest.NewServer(t, handler, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, handler)
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL(),
@@ -766,9 +768,9 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 		_, err := io.WriteString(w, "hello world")
 		assert.Nil(t, err)
 	})
-	server := memhttptest.NewServer(t, handler, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, handler)
 	client := pingv1connect.NewPingServiceClient(
-		server.Client(),
+		&http.Client{Transport: server.TransportHTTP1()},
 		server.URL(),
 	)
 	stream := client.CumSum(context.Background())
@@ -831,7 +833,7 @@ func TestCompressMinBytes(t *testing.T) {
 		pingServer{},
 		connect.WithCompressMinBytes(8),
 	))
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 	client := server.Client()
 
 	getPingResponse := func(t *testing.T, pingText string) *http.Response {
@@ -885,7 +887,7 @@ func TestCustomCompression(t *testing.T) {
 		pingServer{},
 		connect.WithCompression(compressionName, decompressor, compressor),
 	))
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 	client := pingv1connect.NewPingServiceClient(server.Client(),
 		server.URL(),
 		connect.WithAcceptCompression(compressionName, decompressor, compressor),
@@ -904,7 +906,7 @@ func TestClientWithoutGzipSupport(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 	client := pingv1connect.NewPingServiceClient(server.Client(),
 		server.URL(),
 		connect.WithAcceptCompression("gzip", nil, nil),
@@ -954,7 +956,7 @@ func TestInterceptorReturnsWrongType(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithInterceptors(connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, request connect.AnyRequest) (connect.AnyResponse, error) {
 			if _, err := next(ctx, request); err != nil {
@@ -1659,7 +1661,7 @@ func TestConnectHTTPErrorCodes(t *testing.T) {
 			},
 		}
 		mux.Handle(pingv1connect.NewPingServiceHandler(pluggableServer))
-		server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+		server := memhttptest.NewServer(t, mux)
 		req, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodPost,
@@ -1889,7 +1891,7 @@ func TestConnectProtocolHeaderRequired(t *testing.T) {
 		pingServer{},
 		connect.WithRequireConnectProtocolHeader(),
 	))
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 
 	tests := []struct {
 		headers http.Header
@@ -1928,7 +1930,7 @@ func TestAllowCustomUserAgent(t *testing.T) {
 			return connect.NewResponse(&pingv1.PingResponse{Number: req.Msg.Number}), nil
 		},
 	}))
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 
 	// If the user has set a User-Agent, we shouldn't clobber it.
 	tests := []struct {
@@ -1964,7 +1966,7 @@ func TestWebXUserAgent(t *testing.T) {
 			return connect.NewResponse(&pingv1.PingResponse{Number: req.Msg.Number}), nil
 		},
 	}))
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 
 	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
 	req := connect.NewRequest(&pingv1.PingRequest{Number: 42})
@@ -1976,12 +1978,15 @@ func TestBidiOverHTTP1(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 
 	// Clients expecting a full-duplex connection that end up with a simplex
 	// HTTP/1.1 connection shouldn't hang. Instead, the server should close the
 	// TCP connection.
-	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+	client := pingv1connect.NewPingServiceClient(
+		&http.Client{Transport: server.TransportHTTP1()},
+		server.URL(),
+	)
 	stream := client.CumSum(context.Background())
 	if err := stream.Send(&pingv1.CumSumRequest{Number: 2}); err != nil {
 		assert.ErrorIs(t, err, io.EOF)
@@ -2021,7 +2026,7 @@ func TestHandlerReturnsNilResponse(t *testing.T) {
 			return nil, nil //nolint: nilnil
 		},
 	}, connect.WithRecover(recoverPanic)))
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
 
 	_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))

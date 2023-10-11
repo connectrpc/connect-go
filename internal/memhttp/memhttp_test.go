@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,53 +28,34 @@ import (
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 )
 
-func TestServer(t *testing.T) {
+func TestServerTransport(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name    string
-		opts    []memhttp.Option
-		handler func(t *testing.T, w http.ResponseWriter, r *http.Request)
-	}{{
-		name: "http2",
-		opts: nil,
-		handler: func(t *testing.T, _ http.ResponseWriter, r *http.Request) {
-			t.Helper()
-			assert.Equal(t, r.ProtoMajor, 2)
-			assert.Equal(t, r.ProtoMinor, 0)
-		},
-	}, {
-		name: "http1",
-		opts: []memhttp.Option{memhttp.WithoutHTTP2()},
-		handler: func(t *testing.T, _ http.ResponseWriter, r *http.Request) {
-			t.Helper()
-			assert.Equal(t, r.ProtoMajor, 1)
-			assert.Equal(t, r.ProtoMinor, 1)
-		},
-	}}
-	for _, testcase := range tests {
-		testcase := testcase
-		t.Run(testcase.name, func(t *testing.T) {
-			t.Parallel()
-			const concurrency = 100
-			const greeting = "Hello, world!"
+	const concurrency = 100
+	const greeting = "Hello, world!"
 
-			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				testcase.handler(t, w, r)
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(greeting))
-			})
-			server := memhttptest.NewServer(t, handler, testcase.opts...)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(greeting))
+	})
+	server := memhttptest.NewServer(t, handler)
+
+	for _, transport := range []http.RoundTripper{
+		server.Transport(),
+		server.TransportHTTP1(),
+	} {
+		client := &http.Client{Transport: transport}
+		t.Run(fmt.Sprintf("%T", transport), func(t *testing.T) {
+			t.Parallel()
 			var wg sync.WaitGroup
 			for i := 0; i < concurrency; i++ {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					client := server.Client()
 					req, err := http.NewRequestWithContext(
 						context.Background(),
 						http.MethodGet,
 						server.URL(),
-						strings.NewReader(""),
+						nil,
 					)
 					assert.Nil(t, err)
 					res, err := client.Do(req)
@@ -120,6 +100,7 @@ func Example() {
 	if err != nil {
 		panic(err)
 	}
+	defer res.Body.Close()
 	fmt.Println(res.Status)
 	// Output:
 	// 200 OK
@@ -137,6 +118,7 @@ func ExampleServer_Client() {
 	if err != nil {
 		panic(err)
 	}
+	defer res.Body.Close()
 	fmt.Println(res.Status)
 	// Output:
 	// 200 OK

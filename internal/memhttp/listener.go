@@ -21,41 +21,45 @@ import (
 	"sync"
 )
 
-// MemoryListener is a net.Listener that listens on an in memory network.
-type MemoryListener struct {
+var (
+	errListenerClosed = errors.New("listener closed")
+)
+
+// memoryListener is a net.Listener that listens on an in memory network.
+type memoryListener struct {
+	addr memoryAddr
+
 	conns  chan net.Conn
 	once   sync.Once
 	closed chan struct{}
 }
 
-// NewMemoryListener returns a new in-memory listener.
-func NewMemoryListener() *MemoryListener {
-	return &MemoryListener{
+// newMemoryListener returns a new in-memory listener.
+func newMemoryListener(addr string) *memoryListener {
+	return &memoryListener{
+		addr:   memoryAddr(addr),
 		conns:  make(chan net.Conn),
 		closed: make(chan struct{}),
 	}
 }
 
 // Accept implements net.Listener.
-func (l *MemoryListener) Accept() (net.Conn, error) {
-	aerr := func(err error) error {
-		return &net.OpError{
-			Op:   "accept",
-			Net:  memoryAddr{}.Network(),
-			Addr: memoryAddr{},
-			Err:  err,
-		}
-	}
+func (l *memoryListener) Accept() (net.Conn, error) {
 	select {
 	case <-l.closed:
-		return nil, aerr(errors.New("listener closed"))
+		return nil, &net.OpError{
+			Op:   "accept",
+			Net:  l.addr.Network(),
+			Addr: l.addr,
+			Err:  errListenerClosed,
+		}
 	case server := <-l.conns:
 		return server, nil
 	}
 }
 
 // Close implements net.Listener.
-func (l *MemoryListener) Close() error {
+func (l *memoryListener) Close() error {
 	l.once.Do(func() {
 		close(l.closed)
 	})
@@ -63,35 +67,28 @@ func (l *MemoryListener) Close() error {
 }
 
 // Addr implements net.Listener.
-func (l *MemoryListener) Addr() net.Addr {
-	return &memoryAddr{}
+func (l *memoryListener) Addr() net.Addr {
+	return l.addr
 }
 
 // DialContext is the type expected by http.Transport.DialContext.
-func (l *MemoryListener) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	derr := func(err error) error {
-		return &net.OpError{
-			Op:  "dial",
-			Net: memoryAddr{}.Network(),
-			Err: err,
-		}
-	}
+func (l *memoryListener) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	server, client := net.Pipe()
 	select {
 	case <-ctx.Done():
-		return nil, derr(ctx.Err())
+		return nil, &net.OpError{Op: "dial", Net: l.addr.Network(), Err: ctx.Err()}
 	case l.conns <- server:
 		return client, nil
 	case <-l.closed:
-		return nil, derr(errors.New("listener closed"))
+		return nil, &net.OpError{Op: "dial", Net: l.addr.Network(), Err: errListenerClosed}
 	}
 }
 
-type memoryAddr struct{}
+type memoryAddr string
 
 // Network implements net.Addr.
 func (memoryAddr) Network() string { return "memory" }
 
 // String implements io.Stringer, returning a value that matches the
 // certificates used by net/http/httptest.
-func (memoryAddr) String() string { return "example.com" }
+func (a memoryAddr) String() string { return string(a) }

@@ -29,7 +29,6 @@ import (
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
-	"connectrpc.com/connect/internal/memhttp"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 )
 
@@ -43,7 +42,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	mux.Handle("/prefixed/", http.StripPrefix("/prefixed", prefixed))
 	const pingProcedure = pingv1connect.PingServicePingProcedure
 	const sumProcedure = pingv1connect.PingServiceSumProcedure
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 	client := server.Client()
 
 	t.Run("get_method_no_encoding", func(t *testing.T) {
@@ -215,7 +214,7 @@ func TestHandlerMaliciousPrefix(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(successPingServer{}))
-	server := memhttptest.NewServer(t, mux, memhttp.WithoutHTTP2())
+	server := memhttptest.NewServer(t, mux)
 
 	const (
 		concurrency  = 256

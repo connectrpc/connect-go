@@ -20,10 +20,8 @@ import (
 )
 
 type config struct {
-	DisableTLS     bool
-	DisableHTTP2   bool
-	CleanupTimeout time.Duration
-	ErrorLog       *log.Logger
+	ShutdownTimeout time.Duration
+	ErrorLog        *log.Logger
 }
 
 // An Option configures a Server.
@@ -35,13 +33,6 @@ type optionFunc func(*config)
 
 func (f optionFunc) apply(cfg *config) { f(cfg) }
 
-// WithoutHTTP2 disables HTTP/2 on the server and client.
-func WithoutHTTP2() Option {
-	return optionFunc(func(cfg *config) {
-		cfg.DisableHTTP2 = true
-	})
-}
-
 // WithOptions composes multiple Options into one.
 func WithOptions(opts ...Option) Option {
 	return optionFunc(func(cfg *config) {
@@ -51,11 +42,11 @@ func WithOptions(opts ...Option) Option {
 	})
 }
 
-// WithCleanupTimeout customizes the default five-second timeout for the
-// server's Cleanup method. It's most useful with the memhttptest subpackage.
-func WithCleanupTimeout(d time.Duration) Option {
+// WithShutdownTimeout customizes the default five-second timeout for the
+// server's Shutdown method.
+func WithShutdownTimeout(d time.Duration) Option {
 	return optionFunc(func(cfg *config) {
-		cfg.CleanupTimeout = d
+		cfg.ShutdownTimeout = d
 	})
 }
 

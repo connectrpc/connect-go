@@ -34,7 +34,7 @@ import (
 func NewServer(tb testing.TB, handler http.Handler, opts ...memhttp.Option) *memhttp.Server {
 	tb.Helper()
 	logger := log.New(&testWriter{tb}, "" /* prefix */, log.Lshortfile)
-	opts = append(opts, memhttp.WithErrorLog(logger))
+	opts = append([]memhttp.Option{memhttp.WithErrorLog(logger)}, opts...)
 	server := memhttp.NewServer(handler, opts...)
 	tb.Cleanup(func() {
 		tb.Logf("shutting down server")

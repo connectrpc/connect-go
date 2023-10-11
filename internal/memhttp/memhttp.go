@@ -31,11 +31,10 @@ import (
 // default, it supports http/2 via h2c. It otherwise uses the same configuration
 // as the zero value of [http.Server].
 type Server struct {
-	server         http.Server
-	listener       *MemoryListener
-	url            string
-	cleanupTimeout time.Duration
-	disableHTTP2   bool
+	server          http.Server
+	listener        *memoryListener
+	url             string
+	shutdownTimeout time.Duration
 
 	serverWG  sync.WaitGroup
 	serverErr error
@@ -45,38 +44,36 @@ type Server struct {
 // options may be provided via [Option]s.
 func NewServer(handler http.Handler, opts ...Option) *Server {
 	var cfg config
-	WithCleanupTimeout(5 * time.Second).apply(&cfg)
+	WithShutdownTimeout(5 * time.Second).apply(&cfg)
 	for _, opt := range opts {
 		opt.apply(&cfg)
 	}
 
-	if !cfg.DisableHTTP2 {
-		h2s := &http2.Server{}
-		handler = h2c.NewHandler(handler, h2s)
-	}
-	listener := NewMemoryListener()
+	h2s := &http2.Server{}
+	handler = h2c.NewHandler(handler, h2s)
+	listener := newMemoryListener("1.2.3.4") // httptest.DefaultRemoteAddr
 	server := &Server{
 		server: http.Server{
 			Handler:           handler,
 			ReadHeaderTimeout: 5 * time.Second,
 		},
-		listener:       listener,
-		cleanupTimeout: cfg.CleanupTimeout,
-		url:            "http://" + listener.Addr().String(),
-		disableHTTP2:   cfg.DisableHTTP2,
+		listener:        listener,
+		shutdownTimeout: cfg.ShutdownTimeout,
+		url:             "http://" + listener.Addr().String(),
 	}
-	server.goServe()
+	server.serverWG.Add(1)
+	go func() {
+		defer server.serverWG.Done()
+		server.serverErr = server.server.Serve(server.listener)
+	}()
 	return server
 }
 
-// Transport returns a [http.RoundTripper] configured to use in-memory pipes
-// rather than TCP and talk HTTP/2 (if the server supports it).
-func (s *Server) Transport() http.RoundTripper {
-	if s.disableHTTP2 {
-		return &http.Transport{
-			DialContext: s.listener.DialContext,
-		}
-	}
+// Transport returns a [http2.Transport] configured to use in-memory pipes
+// rather than TCP and speak both HTTP/1.1 and HTTP/2.
+//
+// Callers may reconfigure the returned transport without affecting other transports.
+func (s *Server) Transport() *http2.Transport {
 	return &http2.Transport{
 		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
 			return s.listener.DialContext(ctx, network, addr)
@@ -85,9 +82,22 @@ func (s *Server) Transport() http.RoundTripper {
 	}
 }
 
+// TransportHTTP1 returns a [http.Transport] configured to use in-memory pipes
+// rather than TCP and speak HTTP/1.1.
+//
+// Callers may reconfigure the returned transport without affecting other transports.
+func (s *Server) TransportHTTP1() *http.Transport {
+	return &http.Transport{
+		DialContext: s.listener.DialContext,
+		// TODO(emcfarlane): DisableKeepAlives false can causes tests
+		// to hang on shutdown.
+		DisableKeepAlives: true,
+	}
+}
+
 // Client returns an [http.Client] configured to use in-memory pipes rather
-// than TCP, disable automatic compression, trust the server's TLS certificate
-// (if any), and use HTTP/2 (if the server supports it).
+// than TCP, and speak HTTP/2. It is configured to use the same
+// [http2.Transport] as [Transport].
 //
 // Callers may reconfigure the returned client without affecting other clients.
 func (s *Server) Client() *http.Client {
@@ -102,7 +112,7 @@ func (s *Server) URL() string {
 // Shutdown gracefully shuts down the server, without interrupting any active
 // connections. See [http.Server.Shutdown] for details.
 func (s *Server) Shutdown(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, s.cleanupTimeout)
+	ctx, cancel := context.WithTimeout(ctx, s.shutdownTimeout)
 	defer cancel()
 	if err := s.server.Shutdown(ctx); err != nil {
 		return err
@@ -122,19 +132,12 @@ func (s *Server) RegisterOnShutdown(f func()) {
 	s.server.RegisterOnShutdown(f)
 }
 
-// Wait blocks until the server exits, then returns its error.
+// Wait blocks until the server exits, then returns an error if not
+// a [http.ErrServerClosed] error.
 func (s *Server) Wait() error {
 	s.serverWG.Wait()
 	if !errors.Is(s.serverErr, http.ErrServerClosed) {
 		return s.serverErr
 	}
 	return nil
-}
-
-func (s *Server) goServe() {
-	s.serverWG.Add(1)
-	go func() {
-		defer s.serverWG.Done()
-		s.serverErr = s.server.Serve(s.listener)
-	}()
 }
