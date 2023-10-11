@@ -226,15 +226,13 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 
 func (r *envelopeReader) Read(env *envelope) *Error {
 	prefixes := [5]byte{}
-	prefixBytesRead, err := io.ReadFull(r.reader, prefixes[:])
-
-	switch {
-	case err != nil && errors.Is(err, io.EOF) && prefixBytesRead == 0:
-		// The stream ended cleanly. That's expected, but we need to propagate them
-		// to the user so that they know that the stream has ended. We shouldn't
-		// add any alarming text about protocol errors, though.
-		return NewError(CodeUnknown, err)
-	case err != nil:
+	if _, err := io.ReadFull(r.reader, prefixes[:]); err != nil {
+		if errors.Is(err, io.EOF) {
+			// The stream ended cleanly. That's expected, but we need to propagate them
+			// to the user so that they know that the stream has ended. We shouldn't
+			// add any alarming text about protocol errors, though.
+			return NewError(CodeUnknown, err)
+		}
 		// Something else has gone wrong - the stream didn't end cleanly.
 		if connectErr, ok := asError(err); ok {
 			return connectErr
