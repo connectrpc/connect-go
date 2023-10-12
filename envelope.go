@@ -226,6 +226,8 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 
 func (r *envelopeReader) Read(env *envelope) *Error {
 	prefixes := [5]byte{}
+	// io.ReadFull reads the number of bytes requested, or returns an error.
+	// io.EOF will only be returned if no bytes were read.
 	if _, err := io.ReadFull(r.reader, prefixes[:]); err != nil {
 		if errors.Is(err, io.EOF) {
 			// The stream ended cleanly. That's expected, but we need to propagate an EOF
