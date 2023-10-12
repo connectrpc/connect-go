@@ -228,7 +228,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 	prefixes := [5]byte{}
 	if _, err := io.ReadFull(r.reader, prefixes[:]); err != nil {
 		if errors.Is(err, io.EOF) {
-			// The stream ended cleanly. That's expected, but we need to propagate them
+			// The stream ended cleanly. That's expected, but we need to propagate an EOF
 			// to the user so that they know that the stream has ended. We shouldn't
 			// add any alarming text about protocol errors, though.
 			return NewError(CodeUnknown, err)
