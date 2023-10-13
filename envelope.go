@@ -265,8 +265,8 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 			return maxBytesErr
 		}
 		if errors.Is(err, io.EOF) {
-			// We've gotten zero-length chunk of data. Message is likely malformed,
-			// don't wait for additional chunks.
+			// We've gotten fewer bytes than we expected, so the stream has ended
+			// unexpectedly.
 			return errorf(
 				CodeInvalidArgument,
 				"protocol error: promised %d bytes in enveloped message, got %d bytes",
