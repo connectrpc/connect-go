@@ -256,27 +256,25 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		}
 		return errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", size, r.readMaxBytes)
 	}
-	if size > 0 {
-		// We've read the prefix, so we know how many bytes to expect.
-		// CopyN will return an error if it doesn't read the requested
-		// number of bytes.
-		if readN, err := io.CopyN(env.Data, r.reader, size); err != nil {
-			if maxBytesErr := asMaxBytesError(err, "read %d byte message", size); maxBytesErr != nil {
-				// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.
-				return maxBytesErr
-			}
-			if errors.Is(err, io.EOF) {
-				// We've gotten zero-length chunk of data. Message is likely malformed,
-				// don't wait for additional chunks.
-				return errorf(
-					CodeInvalidArgument,
-					"protocol error: promised %d bytes in enveloped message, got %d bytes",
-					size,
-					readN,
-				)
-			}
-			return errorf(CodeUnknown, "read enveloped message: %w", err)
+	// We've read the prefix, so we know how many bytes to expect.
+	// CopyN will return an error if it doesn't read the requested
+	// number of bytes.
+	if readN, err := io.CopyN(env.Data, r.reader, size); err != nil {
+		if maxBytesErr := asMaxBytesError(err, "read %d byte message", size); maxBytesErr != nil {
+			// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.
+			return maxBytesErr
 		}
+		if errors.Is(err, io.EOF) {
+			// We've gotten zero-length chunk of data. Message is likely malformed,
+			// don't wait for additional chunks.
+			return errorf(
+				CodeInvalidArgument,
+				"protocol error: promised %d bytes in enveloped message, got %d bytes",
+				size,
+				readN,
+			)
+		}
+		return errorf(CodeUnknown, "read enveloped message: %w", err)
 	}
 	env.Flags = prefixes[0]
 	return nil
