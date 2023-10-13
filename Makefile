@@ -27,8 +27,8 @@ clean: ## Delete intermediate build artifacts
 	git clean -Xdf
 
 .PHONY: test
-test: build ## Run unit tests
-	go test -vet=off -race -cover ./...
+test: build $(BIN)/tparse ## Run unit tests
+	go test -vet=off -race -cover -json ./... | tparse
 
 .PHONY: bench
 bench: BENCH ?= .*
@@ -94,4 +94,8 @@ $(BIN)/protoc-gen-go: Makefile go.mod
 	@mkdir -p $(@D)
 	@# The version of protoc-gen-go is determined by the version in go.mod
 	go install google.golang.org/protobuf/cmd/protoc-gen-go
+
+$(BIN)/tparse: Makefile
+	@mkdir -p $(@D)
+	go install github.com/mfridman/tparse@v0.13.1
 
