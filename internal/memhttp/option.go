@@ -17,24 +17,35 @@ package memhttp
 import (
 	"log"
 	"time"
-
-	"connectrpc.com/connect/internal/memhttp/internal"
 )
 
-type Option = internal.Option
+// config is the configuration for a Server.
+type config struct {
+	CleanupTimeout time.Duration
+	ErrorLog       *log.Logger
+}
+
+// An Option configures a Server.
+type Option interface {
+	apply(*config)
+}
+
+type optionFunc func(*config)
+
+func (f optionFunc) apply(cfg *config) { f(cfg) }
 
 // WithOptions composes multiple Options into one.
 func WithOptions(opts ...Option) Option {
-	return internal.OptionFunc(func(cfg *internal.Config) {
+	return optionFunc(func(cfg *config) {
 		for _, opt := range opts {
-			opt.Apply(cfg)
+			opt.apply(cfg)
 		}
 	})
 }
 
 // WithErrorLog sets [http.Server.ErrorLog].
 func WithErrorLog(l *log.Logger) Option {
-	return internal.OptionFunc(func(cfg *internal.Config) {
+	return optionFunc(func(cfg *config) {
 		cfg.ErrorLog = l
 	})
 }
@@ -42,7 +53,7 @@ func WithErrorLog(l *log.Logger) Option {
 // WithCleanupTimeout customizes the default five-second timeout for the
 // server's Cleanup method.
 func WithCleanupTimeout(d time.Duration) Option {
-	return internal.OptionFunc(func(cfg *internal.Config) {
+	return optionFunc(func(cfg *config) {
 		cfg.CleanupTimeout = d
 	})
 }

@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"connectrpc.com/connect/internal/memhttp/internal"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
@@ -44,10 +43,10 @@ type Server struct {
 // NewServer creates a new Server that uses the given handler. Configuration
 // options may be provided via [Option]s.
 func NewServer(handler http.Handler, opts ...Option) *Server {
-	var cfg internal.Config
-	WithCleanupTimeout(5 * time.Second).Apply(&cfg)
+	var cfg config
+	WithCleanupTimeout(5 * time.Second).apply(&cfg)
 	for _, opt := range opts {
-		opt.Apply(&cfg)
+		opt.apply(&cfg)
 	}
 
 	h2s := &http2.Server{}
