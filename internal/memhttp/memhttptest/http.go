@@ -15,7 +15,6 @@
 package memhttptest
 
 import (
-	"context"
 	"log"
 	"net/http"
 	"testing"
@@ -37,8 +36,7 @@ func NewServer(tb testing.TB, handler http.Handler, opts ...memhttp.Option) *mem
 	opts = append([]memhttp.Option{memhttp.WithErrorLog(logger)}, opts...)
 	server := memhttp.NewServer(handler, opts...)
 	tb.Cleanup(func() {
-		tb.Logf("shutting down server")
-		if err := server.Shutdown(context.Background()); err != nil {
+		if err := server.Cleanup(); err != nil {
 			tb.Error(err)
 		}
 	})

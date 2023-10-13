@@ -17,42 +17,32 @@ package memhttp
 import (
 	"log"
 	"time"
+
+	"connectrpc.com/connect/internal/memhttp/internal"
 )
 
-type config struct {
-	ShutdownTimeout time.Duration
-	ErrorLog        *log.Logger
-}
-
-// An Option configures a Server.
-type Option interface {
-	apply(*config)
-}
-
-type optionFunc func(*config)
-
-func (f optionFunc) apply(cfg *config) { f(cfg) }
+type Option = internal.Option
 
 // WithOptions composes multiple Options into one.
 func WithOptions(opts ...Option) Option {
-	return optionFunc(func(cfg *config) {
+	return internal.OptionFunc(func(cfg *internal.Config) {
 		for _, opt := range opts {
-			opt.apply(cfg)
+			opt.Apply(cfg)
 		}
-	})
-}
-
-// WithShutdownTimeout customizes the default five-second timeout for the
-// server's Shutdown method.
-func WithShutdownTimeout(d time.Duration) Option {
-	return optionFunc(func(cfg *config) {
-		cfg.ShutdownTimeout = d
 	})
 }
 
 // WithErrorLog sets [http.Server.ErrorLog].
 func WithErrorLog(l *log.Logger) Option {
-	return optionFunc(func(cfg *config) {
+	return internal.OptionFunc(func(cfg *internal.Config) {
 		cfg.ErrorLog = l
+	})
+}
+
+// WithCleanupTimeout customizes the default five-second timeout for the
+// server's Cleanup method.
+func WithCleanupTimeout(d time.Duration) Option {
+	return internal.OptionFunc(func(cfg *internal.Config) {
+		cfg.CleanupTimeout = d
 	})
 }

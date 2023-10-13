@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"connectrpc.com/connect/internal/memhttp/internal"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
@@ -31,10 +32,10 @@ import (
 // default, it supports http/2 via h2c. It otherwise uses the same configuration
 // as the zero value of [http.Server].
 type Server struct {
-	server          http.Server
-	listener        *memoryListener
-	url             string
-	shutdownTimeout time.Duration
+	server         http.Server
+	listener       *memoryListener
+	url            string
+	cleanupTimeout time.Duration
 
 	serverWG  sync.WaitGroup
 	serverErr error
@@ -43,10 +44,10 @@ type Server struct {
 // NewServer creates a new Server that uses the given handler. Configuration
 // options may be provided via [Option]s.
 func NewServer(handler http.Handler, opts ...Option) *Server {
-	var cfg config
-	WithShutdownTimeout(5 * time.Second).apply(&cfg)
+	var cfg internal.Config
+	WithCleanupTimeout(5 * time.Second).Apply(&cfg)
 	for _, opt := range opts {
-		opt.apply(&cfg)
+		opt.Apply(&cfg)
 	}
 
 	h2s := &http2.Server{}
@@ -57,9 +58,9 @@ func NewServer(handler http.Handler, opts ...Option) *Server {
 			Handler:           handler,
 			ReadHeaderTimeout: 5 * time.Second,
 		},
-		listener:        listener,
-		shutdownTimeout: cfg.ShutdownTimeout,
-		url:             "http://" + listener.Addr().String(),
+		listener:       listener,
+		url:            "http://" + listener.Addr().String(),
+		cleanupTimeout: cfg.CleanupTimeout,
 	}
 	server.serverWG.Add(1)
 	go func() {
@@ -112,12 +113,19 @@ func (s *Server) URL() string {
 // Shutdown gracefully shuts down the server, without interrupting any active
 // connections. See [http.Server.Shutdown] for details.
 func (s *Server) Shutdown(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, s.shutdownTimeout)
-	defer cancel()
 	if err := s.server.Shutdown(ctx); err != nil {
 		return err
 	}
 	return s.Wait()
+}
+
+// Cleanup calls shutdown with a background context set with the cleanup timeout.
+// The default timeout duration is 5 seconds.
+func (s *Server) Cleanup() error {
+	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(ctx, s.cleanupTimeout)
+	defer cancel()
+	return s.Shutdown(ctx)
 }
 
 // Close closes the server's listener. It does not wait for connections to
