@@ -40,27 +40,7 @@ func newUnaryHTTPCall(
 	url *url.URL,
 	header http.Header,
 ) *unaryHTTPCall {
-	// ensure we make a copy of the url before we pass along to the
-	// Request. This ensures if a transport out of our control wants
-	// to mutate the req.URL, we don't feel the effects of it.
-	url = cloneURL(url)
-
-	// This is mirroring what http.NewRequestContext did, but
-	// using an already parsed url.URL object, rather than a string
-	// and parsing it again. This is a bit funny with HTTP/1.1
-	// explicitly, but this is logic copied over from
-	// NewRequestContext and doesn't effect the actual version
-	// being transmitted.
-	request := (&http.Request{
-		Method:     http.MethodPost,
-		URL:        url,
-		Header:     header,
-		Proto:      "HTTP/1.1",
-		ProtoMajor: 1,
-		ProtoMinor: 1,
-		Body:       nil, // Set in Do.
-		Host:       url.Host,
-	}).WithContext(ctx)
+	request := makeRequest(ctx, url, header, nil)
 	return &unaryHTTPCall{
 		httpClient: httpClient,
 		request:    request,
@@ -155,28 +135,8 @@ func newDuplexHTTPCall(
 	spec Spec,
 	header http.Header,
 ) *duplexHTTPCall {
-	// ensure we make a copy of the url before we pass along to the
-	// Request. This ensures if a transport out of our control wants
-	// to mutate the req.URL, we don't feel the effects of it.
-	url = cloneURL(url)
 	pipeReader, pipeWriter := io.Pipe()
-
-	// This is mirroring what http.NewRequestContext did, but
-	// using an already parsed url.URL object, rather than a string
-	// and parsing it again. This is a bit funny with HTTP/1.1
-	// explicitly, but this is logic copied over from
-	// NewRequestContext and doesn't effect the actual version
-	// being transmitted.
-	request := (&http.Request{
-		Method:     http.MethodPost,
-		URL:        url,
-		Header:     header,
-		Proto:      "HTTP/1.1",
-		ProtoMajor: 1,
-		ProtoMinor: 1,
-		Body:       pipeReader,
-		Host:       url.Host,
-	}).WithContext(ctx)
+	request := makeRequest(ctx, url, header, pipeReader)
 	return &duplexHTTPCall{
 		ctx:               ctx,
 		httpClient:        httpClient,
@@ -412,4 +372,28 @@ func cloneURL(oldURL *url.URL) *url.URL {
 		*newURL.User = *oldURL.User
 	}
 	return newURL
+}
+
+func makeRequest(ctx context.Context, url *url.URL, header http.Header, body io.ReadCloser) *http.Request {
+	// ensure we make a copy of the url before we pass along to the
+	// Request. This ensures if a transport out of our control wants
+	// to mutate the req.URL, we don't feel the effects of it.
+	url = cloneURL(url)
+	// This is mirroring what http.NewRequestContext did, but
+	// using an already parsed url.URL object, rather than a string
+	// and parsing it again. This is a bit funny with HTTP/1.1
+	// explicitly, but this is logic copied over from
+	// NewRequestContext and doesn't effect the actual version
+	// being transmitted.
+	return (&http.Request{
+		Method:     http.MethodPost,
+		URL:        url,
+		Header:     header,
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Body:       nil, // Set in Do.
+		Host:       url.Host,
+	}).WithContext(ctx)
+
 }
