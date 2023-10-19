@@ -15,6 +15,7 @@
 package connect
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -23,6 +24,102 @@ import (
 	"net/url"
 	"sync"
 )
+
+type unaryHTTPCall struct {
+	httpClient       HTTPClient
+	onRequestSend    func(*http.Request)
+	validateResponse func(*http.Response) *Error
+
+	request  *http.Request
+	response *http.Response // nil until the request has been sent
+}
+
+func newUnaryHTTPCall(
+	ctx context.Context,
+	httpClient HTTPClient,
+	url *url.URL,
+	header http.Header,
+) *unaryHTTPCall {
+	// ensure we make a copy of the url before we pass along to the
+	// Request. This ensures if a transport out of our control wants
+	// to mutate the req.URL, we don't feel the effects of it.
+	url = cloneURL(url)
+
+	// This is mirroring what http.NewRequestContext did, but
+	// using an already parsed url.URL object, rather than a string
+	// and parsing it again. This is a bit funny with HTTP/1.1
+	// explicitly, but this is logic copied over from
+	// NewRequestContext and doesn't effect the actual version
+	// being transmitted.
+	request := (&http.Request{
+		Method:     http.MethodPost,
+		URL:        url,
+		Header:     header,
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Body:       nil, // Set in Do.
+		Host:       url.Host,
+	}).WithContext(ctx)
+	return &unaryHTTPCall{
+		httpClient: httpClient,
+		request:    request,
+	}
+}
+
+// Do sends the request and waits for the response.
+func (u *unaryHTTPCall) Do(body *bytes.Buffer) *Error {
+	// Body can be nil for GET requests.
+	if body != nil {
+		u.request.Body = io.NopCloser(body)
+		u.request.ContentLength = int64(body.Len())
+
+		// We need to set the GetBody function so that net/http can re-send the
+		// request if required.
+		bodyBytes := body.Bytes()
+		u.request.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+		}
+	}
+	// Promote the header Host to the request object.
+	if host := u.request.Header.Get(headerHost); len(host) > 0 {
+		u.request.Host = host
+	}
+	if u.onRequestSend != nil {
+		u.onRequestSend(u.request)
+	}
+	// Complete the request.
+	response, err := u.httpClient.Do(u.request)
+	if err != nil {
+		err = wrapIfContextError(err)
+		err = wrapIfLikelyH2CNotConfiguredError(u.request, err)
+		err = wrapIfLikelyWithGRPCNotUsedError(err)
+		err = wrapIfRSTError(err)
+		if cerr, ok := asError(err); ok {
+			return cerr
+		}
+		return NewError(CodeUnavailable, err)
+	}
+	u.response = response
+	return u.validateResponse(response)
+}
+
+func (u *unaryHTTPCall) Header() http.Header {
+	return u.request.Header
+}
+
+func (u *unaryHTTPCall) SetMethod(method string) {
+	u.request.Method = method
+}
+func (u *unaryHTTPCall) URL() *url.URL {
+	return u.request.URL
+}
+
+// SetValidateResponse sets the response validation function. The function runs
+// in a background goroutine.
+func (u *unaryHTTPCall) SetValidateResponse(validate func(*http.Response) *Error) {
+	u.validateResponse = validate
+}
 
 // duplexHTTPCall is a full-duplex stream between the client and server. The
 // request body is the stream from client to server, and the response body is
@@ -267,7 +364,7 @@ func (d *duplexHTTPCall) makeRequest() {
 	}
 	// Once we send a message to the server, they send a message back and
 	// establish the receive side of the stream.
-	response, err := d.httpClient.Do(d.request) //nolint:bodyclose
+	response, err := d.httpClient.Do(d.request)
 	if err != nil {
 		err = wrapIfContextError(err)
 		err = wrapIfLikelyH2CNotConfiguredError(d.request, err)

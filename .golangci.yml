@@ -68,9 +68,9 @@ issues:
     # If future reflect.Kinds are nil-able, we'll find out when a test fails.
     - linters: [exhaustive]
       path: internal/assert/assert.go
-    # We need our duplex HTTP call to have access to the context.
-    - linters: [containedctx]
-      path: duplex_http_call.go
+    # We need our HTTP call to have access to the context and ignore body close.
+    - linters: [containedctx, bodyclose]
+      path: http_call.go
     # We need to init a global in-mem HTTP server for testable examples.
     - linters: [gochecknoinits, gochecknoglobals]
       path: example_init_test.go

@@ -90,6 +90,9 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		resp, err := client.Do(request)
 		assert.Nil(t, err)
 		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		assert.Nil(t, err)
+		assert.Equal(t, string(body), "{}")
 		assert.Equal(t, resp.StatusCode, http.StatusOK)
 	})
 
