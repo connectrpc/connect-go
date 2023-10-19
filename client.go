@@ -76,7 +76,17 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 	// once at client creation.
 	unarySpec := config.newSpec(StreamTypeUnary)
 	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
-		conn := client.protocolClient.NewConn(ctx, unarySpec, request.Header())
+
+		var responseMsg Res
+		response := &Response[Res]{
+			Msg: &responseMsg,
+		}
+		if err := client.protocolClient.Invoke(ctx, unarySpec, request, response); err != nil {
+			return nil, err
+		}
+		return response, nil
+
+		/*conn := client.protocolClient.NewConn(ctx, unarySpec, request.Header())
 		conn.onRequestSend(func(r *http.Request) {
 			request.setRequestMethod(r.Method)
 		})
@@ -97,7 +107,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 			_ = conn.CloseResponse()
 			return nil, err
 		}
-		return response, conn.CloseResponse()
+		return response, conn.CloseResponse()*/
 	})
 	if interceptor := config.Interceptor; interceptor != nil {
 		unaryFunc = interceptor.WrapUnary(unaryFunc)

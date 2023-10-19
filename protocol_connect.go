@@ -348,11 +348,7 @@ func (c *connectClient) WriteRequestHeader(streamType StreamType, header http.He
 	}
 }
 
-func (c *connectClient) NewConn(
-	ctx context.Context,
-	spec Spec,
-	header http.Header,
-) streamingClientConn {
+func (c *connectClient) encodeDeadlineFromContext(ctx context.Context, header http.Header) {
 	if deadline, ok := ctx.Deadline(); ok {
 		millis := int64(time.Until(deadline) / time.Millisecond)
 		if millis > 0 {
@@ -362,86 +358,117 @@ func (c *connectClient) NewConn(
 			} // else effectively unbounded
 		}
 	}
-	var conn streamingClientConn
-	if spec.StreamType == StreamTypeUnary {
-		unaryCall := newUnaryHTTPCall(ctx, c.HTTPClient, c.URL, header)
-		unaryConn := &connectUnaryClientConn{
-			spec:             spec,
-			peer:             c.Peer(),
-			unaryCall:        unaryCall,
-			compressionPools: c.CompressionPools,
-			bufferPool:       c.BufferPool,
-			marshaler: connectUnaryRequestMarshaler{
-				connectUnaryMarshaler: connectUnaryMarshaler{
-					codec:            c.Codec,
-					compressMinBytes: c.CompressMinBytes,
-					compressionName:  c.CompressionName,
-					compressionPool:  c.CompressionPools.Get(c.CompressionName),
-					bufferPool:       c.BufferPool,
-					header:           header,
-					sendMaxBytes:     c.SendMaxBytes,
-				},
-				unaryCall: unaryCall,
+}
+
+func (c *connectClient) NewConn(
+	ctx context.Context,
+	spec Spec,
+	header http.Header,
+) streamingClientConn {
+	c.encodeDeadlineFromContext(ctx, header)
+	duplexCall := newDuplexHTTPCall(ctx, c.HTTPClient, c.URL, spec, header)
+	streamingConn := &connectStreamingClientConn{
+		spec:             spec,
+		peer:             c.Peer(),
+		duplexCall:       duplexCall,
+		compressionPools: c.CompressionPools,
+		bufferPool:       c.BufferPool,
+		codec:            c.Codec,
+		marshaler: connectStreamingMarshaler{
+			envelopeWriter: envelopeWriter{
+				codec:            c.Codec,
+				compressMinBytes: c.CompressMinBytes,
+				compressionPool:  c.CompressionPools.Get(c.CompressionName),
+				bufferPool:       c.BufferPool,
+				sendMaxBytes:     c.SendMaxBytes,
 			},
-			unmarshaler: connectUnaryUnmarshaler{
+		},
+		unmarshaler: connectStreamingUnmarshaler{
+			envelopeReader: envelopeReader{
 				codec:        c.Codec,
 				bufferPool:   c.BufferPool,
 				readMaxBytes: c.ReadMaxBytes,
 			},
-			responseHeader:  make(http.Header),
-			responseTrailer: make(http.Header),
-		}
-		if spec.IdempotencyLevel == IdempotencyNoSideEffects {
-			unaryConn.marshaler.enableGet = c.EnableGet
-			unaryConn.marshaler.getURLMaxBytes = c.GetURLMaxBytes
-			unaryConn.marshaler.getUseFallback = c.GetUseFallback
-			if stableCodec, ok := c.Codec.(stableCodec); ok {
-				unaryConn.marshaler.stableCodec = stableCodec
-			}
-		}
-		conn = unaryConn
-		unaryCall.SetValidateResponse(unaryConn.validateResponse)
-	} else {
-		duplexCall := newDuplexHTTPCall(ctx, c.HTTPClient, c.URL, spec, header)
-		streamingConn := &connectStreamingClientConn{
-			spec:             spec,
-			peer:             c.Peer(),
-			duplexCall:       duplexCall,
-			compressionPools: c.CompressionPools,
-			bufferPool:       c.BufferPool,
-			codec:            c.Codec,
-			marshaler: connectStreamingMarshaler{
-				envelopeWriter: envelopeWriter{
-					codec:            c.Codec,
-					compressMinBytes: c.CompressMinBytes,
-					compressionPool:  c.CompressionPools.Get(c.CompressionName),
-					bufferPool:       c.BufferPool,
-					sendMaxBytes:     c.SendMaxBytes,
-				},
-			},
-			unmarshaler: connectStreamingUnmarshaler{
-				envelopeReader: envelopeReader{
-					codec:        c.Codec,
-					bufferPool:   c.BufferPool,
-					readMaxBytes: c.ReadMaxBytes,
-				},
-			},
-			responseHeader:  make(http.Header),
-			responseTrailer: make(http.Header),
-		}
-		conn = streamingConn
-		duplexCall.SetValidateResponse(streamingConn.validateResponse)
+		},
+		responseHeader:  make(http.Header),
+		responseTrailer: make(http.Header),
 	}
-	return wrapClientConnWithCodedErrors(conn)
+	duplexCall.SetValidateResponse(streamingConn.validateResponse)
+	return wrapClientConnWithCodedErrors(streamingConn)
 }
 
 func (c *connectClient) Invoke(
-	ctx context.Context,
-	spec Spec, metadata http.Header,
-	reqMsg, respMsg any,
-) (http.Header, http.Header, error) {
-	// TODO: invoke...
-	return nil, nil, nil
+	ctx context.Context, spec Spec, request AnyRequest, response AnyResponse,
+) error {
+	header := request.Header()
+	c.encodeDeadlineFromContext(ctx, header)
+
+	unaryCall := newUnaryHTTPCall(ctx, c.HTTPClient, c.URL, header)
+	conn := &connectUnaryClientConn{
+		spec:             spec,
+		peer:             c.Peer(),
+		unaryCall:        unaryCall,
+		compressionPools: c.CompressionPools,
+		bufferPool:       c.BufferPool,
+		marshaler: connectUnaryRequestMarshaler{
+			connectUnaryMarshaler: connectUnaryMarshaler{
+				codec:            c.Codec,
+				compressMinBytes: c.CompressMinBytes,
+				compressionName:  c.CompressionName,
+				compressionPool:  c.CompressionPools.Get(c.CompressionName),
+				bufferPool:       c.BufferPool,
+				header:           header,
+				sendMaxBytes:     c.SendMaxBytes,
+			},
+			unaryCall: unaryCall,
+		},
+		unmarshaler: connectUnaryUnmarshaler{
+			codec:        c.Codec,
+			bufferPool:   c.BufferPool,
+			readMaxBytes: c.ReadMaxBytes,
+		},
+		responseHeader:  make(http.Header),
+		responseTrailer: make(http.Header),
+	}
+	if spec.IdempotencyLevel == IdempotencyNoSideEffects {
+		conn.marshaler.enableGet = c.EnableGet
+		conn.marshaler.getURLMaxBytes = c.GetURLMaxBytes
+		conn.marshaler.getUseFallback = c.GetUseFallback
+		if stableCodec, ok := c.Codec.(stableCodec); ok {
+			conn.marshaler.stableCodec = stableCodec
+		}
+	}
+	unaryCall.SetValidateResponse(conn.validateResponse)
+
+	conn.onRequestSend(func(r *http.Request) {
+		request.setRequestMethod(r.Method)
+	})
+
+	// Send always returns an io.EOF unless the error is from the client-side.
+	// We want the user to continue to call Receive in those cases to get the
+	// full error from the server-side.
+	if err := conn.Send(request.Any()); err != nil && !errors.Is(err, io.EOF) {
+		_ = conn.CloseRequest()
+		_ = conn.CloseResponse()
+		return err
+	}
+	if err := conn.CloseRequest(); err != nil {
+		_ = conn.CloseResponse()
+		return err
+	}
+
+	if err := conn.Receive(response.Any()); err != nil {
+		return err
+	}
+	// In a well-formed stream, the response message may be followed by a block
+	// of in-stream trailers or HTTP trailers. To ensure that we receive the
+	// trailers, try to read another message from the stream.
+	if err := conn.Receive(nil); err == nil {
+		return NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
+	} else if err != nil && !errors.Is(err, io.EOF) {
+		return NewError(CodeUnknown, err)
+	}
+	return conn.CloseResponse()
 }
 
 type connectUnaryClientConn struct {

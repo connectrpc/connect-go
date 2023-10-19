@@ -316,12 +316,48 @@ func (g *grpcClient) NewConn(
 }
 
 func (g *grpcClient) Invoke(
-	ctx context.Context,
-	spec Spec, metadata http.Header,
-	reqMsg, respMsg any,
-) (http.Header, http.Header, error) {
-	// TODO: invoke...
-	return nil, nil, nil
+	ctx context.Context, spec Spec, request AnyRequest, response AnyResponse,
+) error {
+	// TODO: should we have a grpcUnaryClient struct?
+	unaryCall := newUnaryHTTPCall(
+		ctx, g.HTTPClient, g.URL, request.Header(),
+	)
+	marshaler := grpcMarshaler{
+		envelopeWriter: envelopeWriter{
+			compressionPool:  g.CompressionPools.Get(g.CompressionName),
+			codec:            g.Codec,
+			compressMinBytes: g.CompressMinBytes,
+			bufferPool:       g.BufferPool,
+			sendMaxBytes:     g.SendMaxBytes,
+		},
+	}
+	unmarshaler := grpcUnmarshaler{
+		envelopeReader: envelopeReader{
+			codec:        g.Codec,
+			bufferPool:   g.BufferPool,
+			readMaxBytes: g.ReadMaxBytes,
+		},
+	}
+	var (
+		responseHeader  http.Header
+		responseTrailer http.Header
+	)
+	unaryCall.SetValidateResponse(func(response *http.Response) *Error {
+		if err := grpcValidateResponse(
+			response,
+			responseHeader,
+			responseTrailer,
+			g.CompressionPools,
+			g.Protobuf,
+		); err != nil {
+			return err
+		}
+		compression := getHeaderCanonical(response.Header, grpcHeaderCompression)
+		unmarshaler.envelopeReader.compressionPool = g.CompressionPools.Get(compression)
+		return nil
+	})
+
+	return nil
 }
 
 // grpcClientConn works for both gRPC and gRPC-Web.

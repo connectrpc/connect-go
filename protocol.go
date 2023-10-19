@@ -149,7 +149,7 @@ type protocolClient interface {
 	NewConn(context.Context, Spec, http.Header) streamingClientConn
 
 	// Invoke a unary RPC.
-	Invoke(context.Context, Spec, http.Header, any, any) (http.Header, http.Header, error)
+	Invoke(context.Context, Spec, AnyRequest, AnyResponse) error
 }
 
 // streamingClientConn extends StreamingClientConn with a method for registering
