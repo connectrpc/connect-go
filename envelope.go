@@ -49,7 +49,6 @@ func (e *envelope) IsSet(flag uint8) bool {
 }
 
 type envelopeWriter struct {
-	writer           io.Writer
 	codec            Codec
 	compressMinBytes int
 	compressionPool  *compressionPool
@@ -57,9 +56,9 @@ type envelopeWriter struct {
 	sendMaxBytes     int
 }
 
-func (w *envelopeWriter) Marshal(message any) *Error {
+func (w *envelopeWriter) Marshal(dst io.Writer, message any) *Error {
 	if message == nil {
-		if _, err := w.writer.Write(nil); err != nil {
+		if _, err := dst.Write(nil); err != nil {
 			if connectErr, ok := asError(err); ok {
 				return connectErr
 			}
@@ -68,21 +67,21 @@ func (w *envelopeWriter) Marshal(message any) *Error {
 		return nil
 	}
 	if appender, ok := w.codec.(marshalAppender); ok {
-		return w.marshalAppend(message, appender)
+		return w.marshalAppend(dst, message, appender)
 	}
-	return w.marshal(message)
+	return w.marshal(dst, message)
 }
 
 // Write writes the enveloped message, compressing as necessary. It doesn't
 // retain any references to the supplied envelope or its underlying data.
-func (w *envelopeWriter) Write(env *envelope) *Error {
+func (w *envelopeWriter) Write(dst io.Writer, env *envelope) *Error {
 	if env.IsSet(flagEnvelopeCompressed) ||
 		w.compressionPool == nil ||
 		env.Data.Len() < w.compressMinBytes {
 		if w.sendMaxBytes > 0 && env.Data.Len() > w.sendMaxBytes {
 			return errorf(CodeResourceExhausted, "message size %d exceeds sendMaxBytes %d", env.Data.Len(), w.sendMaxBytes)
 		}
-		return w.write(env)
+		return w.write(dst, env)
 	}
 	data := w.bufferPool.Get()
 	defer w.bufferPool.Put(data)
@@ -92,13 +91,13 @@ func (w *envelopeWriter) Write(env *envelope) *Error {
 	if w.sendMaxBytes > 0 && data.Len() > w.sendMaxBytes {
 		return errorf(CodeResourceExhausted, "compressed message size %d exceeds sendMaxBytes %d", data.Len(), w.sendMaxBytes)
 	}
-	return w.write(&envelope{
+	return w.write(dst, &envelope{
 		Data:  data,
 		Flags: env.Flags | flagEnvelopeCompressed,
 	})
 }
 
-func (w *envelopeWriter) marshalAppend(message any, codec marshalAppender) *Error {
+func (w *envelopeWriter) marshalAppend(dst io.Writer, message any, codec marshalAppender) *Error {
 	// Codec supports MarshalAppend; try to re-use a []byte from the pool.
 	buffer := w.bufferPool.Get()
 	defer w.bufferPool.Put(buffer)
@@ -120,10 +119,10 @@ func (w *envelopeWriter) marshalAppend(message any, codec marshalAppender) *Erro
 		buffer.Write(raw)
 	}
 	envelope := &envelope{Data: buffer}
-	return w.Write(envelope)
+	return w.Write(dst, envelope)
 }
 
-func (w *envelopeWriter) marshal(message any) *Error {
+func (w *envelopeWriter) marshal(dst io.Writer, message any) *Error {
 	// Codec doesn't support MarshalAppend; let Marshal allocate a []byte.
 	raw, err := w.codec.Marshal(message)
 	if err != nil {
@@ -133,27 +132,26 @@ func (w *envelopeWriter) marshal(message any) *Error {
 	// Put our new []byte into the pool for later reuse.
 	defer w.bufferPool.Put(buffer)
 	envelope := &envelope{Data: buffer}
-	return w.Write(envelope)
+	return w.Write(dst, envelope)
 }
 
-func (w *envelopeWriter) write(env *envelope) *Error {
+func (w *envelopeWriter) write(dst io.Writer, env *envelope) *Error {
 	prefix := [5]byte{}
 	prefix[0] = env.Flags
 	binary.BigEndian.PutUint32(prefix[1:5], uint32(env.Data.Len()))
-	if _, err := w.writer.Write(prefix[:]); err != nil {
+	if _, err := dst.Write(prefix[:]); err != nil {
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
 		return errorf(CodeUnknown, "write envelope: %w", err)
 	}
-	if _, err := io.Copy(w.writer, env.Data); err != nil {
+	if _, err := io.Copy(dst, env.Data); err != nil {
 		return errorf(CodeUnknown, "write message: %w", err)
 	}
 	return nil
 }
 
 type envelopeReader struct {
-	reader          io.Reader
 	codec           Codec
 	last            envelope
 	compressionPool *compressionPool
@@ -161,12 +159,12 @@ type envelopeReader struct {
 	readMaxBytes    int
 }
 
-func (r *envelopeReader) Unmarshal(message any) *Error {
+func (r *envelopeReader) Unmarshal(message any, src io.Reader) *Error {
 	buffer := r.bufferPool.Get()
 	defer r.bufferPool.Put(buffer)
 
 	env := &envelope{Data: buffer}
-	err := r.Read(env)
+	err := r.Read(env, src)
 	switch {
 	case err == nil &&
 		(env.Flags == 0 || env.Flags == flagEnvelopeCompressed) &&
@@ -200,7 +198,7 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 
 	if env.Flags != 0 && env.Flags != flagEnvelopeCompressed {
 		// Drain the rest of the stream to ensure there is no extra data.
-		if n, err := discard(r.reader); err != nil {
+		if n, err := discard(src); err != nil {
 			return errorf(CodeInternal, "corrupt response: I/O error after end-stream message: %w", err)
 		} else if n > 0 {
 			return errorf(CodeInternal, "corrupt response: %d extra bytes after end of stream", n)
@@ -224,11 +222,11 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 	return nil
 }
 
-func (r *envelopeReader) Read(env *envelope) *Error {
+func (r *envelopeReader) Read(env *envelope, src io.Reader) *Error {
 	prefixes := [5]byte{}
 	// io.ReadFull reads the number of bytes requested, or returns an error.
 	// io.EOF will only be returned if no bytes were read.
-	if _, err := io.ReadFull(r.reader, prefixes[:]); err != nil {
+	if _, err := io.ReadFull(src, prefixes[:]); err != nil {
 		if errors.Is(err, io.EOF) {
 			// The stream ended cleanly. That's expected, but we need to propagate an EOF
 			// to the user so that they know that the stream has ended. We shouldn't
@@ -250,7 +248,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 	}
 	size := int64(binary.BigEndian.Uint32(prefixes[1:5]))
 	if r.readMaxBytes > 0 && size > int64(r.readMaxBytes) {
-		_, err := io.CopyN(io.Discard, r.reader, size)
+		_, err := io.CopyN(io.Discard, src, size)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return errorf(CodeUnknown, "read enveloped message: %w", err)
 		}
@@ -263,7 +261,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		// forever if the message is malformed.
 		remaining := size
 		for remaining > 0 {
-			bytesRead, err := io.CopyN(env.Data, r.reader, remaining)
+			bytesRead, err := io.CopyN(env.Data, src, remaining)
 			if err != nil && !errors.Is(err, io.EOF) {
 				if maxBytesErr := asMaxBytesError(err, "read %d byte message", size); maxBytesErr != nil {
 					// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.

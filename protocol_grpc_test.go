@@ -48,7 +48,6 @@ func TestGRPCHandlerSender(t *testing.T) {
 			protobuf:   protobufCodec,
 			marshaler: grpcMarshaler{
 				envelopeWriter: envelopeWriter{
-					writer:     responseWriter,
 					codec:      protobufCodec,
 					bufferPool: bufferPool,
 				},
@@ -59,7 +58,6 @@ func TestGRPCHandlerSender(t *testing.T) {
 			request:         request,
 			unmarshaler: grpcUnmarshaler{
 				envelopeReader: envelopeReader{
-					reader:     request.Body,
 					codec:      protobufCodec,
 					bufferPool: bufferPool,
 				},
@@ -181,7 +179,6 @@ func TestGRPCWebTrailerMarshalling(t *testing.T) {
 	responseWriter := httptest.NewRecorder()
 	marshaler := grpcMarshaler{
 		envelopeWriter: envelopeWriter{
-			writer:     responseWriter,
 			bufferPool: newBufferPool(),
 		},
 	}
@@ -189,7 +186,7 @@ func TestGRPCWebTrailerMarshalling(t *testing.T) {
 	trailer.Add("grpc-status", "0")
 	trailer.Add("Grpc-Message", "Foo")
 	trailer.Add("User-Provided", "bar")
-	err := marshaler.MarshalWebTrailers(trailer)
+	err := marshaler.MarshalWebTrailers(responseWriter, trailer)
 	assert.Nil(t, err)
 	responseWriter.Body.Next(5) // skip flags and message length
 	marshalled := responseWriter.Body.String()

@@ -37,21 +37,19 @@ func TestEnvelope_read(t *testing.T) {
 	t.Run("full", func(t *testing.T) {
 		t.Parallel()
 		env := &envelope{Data: &bytes.Buffer{}}
-		rdr := envelopeReader{
-			reader: bytes.NewReader(buf.Bytes()),
-		}
-		assert.Nil(t, rdr.Read(env))
+		rdr := envelopeReader{}
+		src := bytes.NewReader(buf.Bytes())
+		assert.Nil(t, rdr.Read(env, src))
 		assert.Equal(t, payload, env.Data.Bytes())
 	})
 	t.Run("byteByByte", func(t *testing.T) {
 		t.Parallel()
 		env := &envelope{Data: &bytes.Buffer{}}
-		rdr := envelopeReader{
-			reader: byteByByteReader{
-				reader: bytes.NewReader(buf.Bytes()),
-			},
+		rdr := envelopeReader{}
+		src := byteByByteReader{
+			reader: bytes.NewReader(buf.Bytes()),
 		}
-		assert.Nil(t, rdr.Read(env))
+		assert.Nil(t, rdr.Read(env, src))
 		assert.Equal(t, payload, env.Data.Bytes())
 	})
 }

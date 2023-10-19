@@ -147,6 +147,9 @@ type protocolClient interface {
 	// unary call, implementations may assume that the Sender's Send and Close
 	// methods return before the Receiver's Receive or Close methods are called.
 	NewConn(context.Context, Spec, http.Header) streamingClientConn
+
+	// Invoke a unary RPC.
+	Invoke(context.Context, Spec, http.Header, any, any) (http.Header, http.Header, error)
 }
 
 // streamingClientConn extends StreamingClientConn with a method for registering

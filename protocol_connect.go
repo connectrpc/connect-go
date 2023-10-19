@@ -276,10 +276,10 @@ func (h *connectHandler) NewConn(
 			spec:           h.Spec,
 			peer:           peer,
 			request:        request,
+			requestBody:    requestBody,
 			responseWriter: responseWriter,
 			marshaler: connectStreamingMarshaler{
 				envelopeWriter: envelopeWriter{
-					writer:           responseWriter,
 					codec:            codec,
 					compressMinBytes: h.CompressMinBytes,
 					compressionPool:  h.CompressionPools.Get(responseCompression),
@@ -289,7 +289,6 @@ func (h *connectHandler) NewConn(
 			},
 			unmarshaler: connectStreamingUnmarshaler{
 				envelopeReader: envelopeReader{
-					reader:          requestBody,
 					codec:           codec,
 					compressionPool: h.CompressionPools.Get(requestCompression),
 					bufferPool:      h.BufferPool,
@@ -413,7 +412,6 @@ func (c *connectClient) NewConn(
 			codec:            c.Codec,
 			marshaler: connectStreamingMarshaler{
 				envelopeWriter: envelopeWriter{
-					writer:           duplexCall,
 					codec:            c.Codec,
 					compressMinBytes: c.CompressMinBytes,
 					compressionPool:  c.CompressionPools.Get(c.CompressionName),
@@ -423,7 +421,6 @@ func (c *connectClient) NewConn(
 			},
 			unmarshaler: connectStreamingUnmarshaler{
 				envelopeReader: envelopeReader{
-					reader:       duplexCall,
 					codec:        c.Codec,
 					bufferPool:   c.BufferPool,
 					readMaxBytes: c.ReadMaxBytes,
@@ -436,6 +433,15 @@ func (c *connectClient) NewConn(
 		duplexCall.SetValidateResponse(streamingConn.validateResponse)
 	}
 	return wrapClientConnWithCodedErrors(conn)
+}
+
+func (c *connectClient) Invoke(
+	ctx context.Context,
+	spec Spec, metadata http.Header,
+	reqMsg, respMsg any,
+) (http.Header, http.Header, error) {
+	// TODO: invoke...
+	return nil, nil, nil
 }
 
 type connectUnaryClientConn struct {
@@ -570,7 +576,8 @@ func (cc *connectStreamingClientConn) Peer() Peer {
 }
 
 func (cc *connectStreamingClientConn) Send(msg any) error {
-	if err := cc.marshaler.Marshal(msg); err != nil {
+	dst := cc.duplexCall
+	if err := cc.marshaler.Marshal(dst, msg); err != nil {
 		return err
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
@@ -586,7 +593,8 @@ func (cc *connectStreamingClientConn) CloseRequest() error {
 
 func (cc *connectStreamingClientConn) Receive(msg any) error {
 	cc.duplexCall.BlockUntilResponseReady()
-	err := cc.unmarshaler.Unmarshal(msg)
+	src := cc.duplexCall
+	err := cc.unmarshaler.Unmarshal(msg, src)
 	if err == nil {
 		return nil
 	}
@@ -757,6 +765,7 @@ type connectStreamingHandlerConn struct {
 	spec            Spec
 	peer            Peer
 	request         *http.Request
+	requestBody     io.ReadCloser
 	responseWriter  http.ResponseWriter
 	marshaler       connectStreamingMarshaler
 	unmarshaler     connectStreamingUnmarshaler
@@ -772,7 +781,8 @@ func (hc *connectStreamingHandlerConn) Peer() Peer {
 }
 
 func (hc *connectStreamingHandlerConn) Receive(msg any) error {
-	if err := hc.unmarshaler.Unmarshal(msg); err != nil {
+	src := hc.request.Body
+	if err := hc.unmarshaler.Unmarshal(msg, src); err != nil {
 		// Clients may not send end-of-stream metadata, so we don't need to handle
 		// errSpecialEnvelope.
 		return err
@@ -785,8 +795,9 @@ func (hc *connectStreamingHandlerConn) RequestHeader() http.Header {
 }
 
 func (hc *connectStreamingHandlerConn) Send(msg any) error {
-	defer flushResponseWriter(hc.responseWriter)
-	if err := hc.marshaler.Marshal(msg); err != nil {
+	dst := hc.responseWriter
+	defer flushResponseWriter(dst)
+	if err := hc.marshaler.Marshal(dst, msg); err != nil {
 		return err
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
@@ -802,7 +813,7 @@ func (hc *connectStreamingHandlerConn) ResponseTrailer() http.Header {
 
 func (hc *connectStreamingHandlerConn) Close(err error) error {
 	defer flushResponseWriter(hc.responseWriter)
-	if err := hc.marshaler.MarshalEndStream(err, hc.responseTrailer); err != nil {
+	if err := hc.marshaler.MarshalEndStream(hc.responseWriter, err, hc.responseTrailer); err != nil {
 		_ = hc.request.Body.Close()
 		return err
 	}
@@ -825,7 +836,7 @@ type connectStreamingMarshaler struct {
 	envelopeWriter
 }
 
-func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Header) *Error {
+func (m *connectStreamingMarshaler) MarshalEndStream(dst io.Writer, err error, trailer http.Header) *Error {
 	end := &connectEndStreamMessage{Trailer: trailer}
 	if err != nil {
 		end.Error = newConnectWireError(err)
@@ -839,7 +850,7 @@ func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Hea
 	}
 	raw := bytes.NewBuffer(data)
 	defer m.envelopeWriter.bufferPool.Put(raw)
-	return m.Write(&envelope{
+	return m.Write(dst, &envelope{
 		Data:  raw,
 		Flags: connectFlagEnvelopeEndStream,
 	})
@@ -852,8 +863,8 @@ type connectStreamingUnmarshaler struct {
 	trailer      http.Header
 }
 
-func (u *connectStreamingUnmarshaler) Unmarshal(message any) *Error {
-	err := u.envelopeReader.Unmarshal(message)
+func (u *connectStreamingUnmarshaler) Unmarshal(message any, src io.Reader) *Error {
+	err := u.envelopeReader.Unmarshal(message, src)
 	if err == nil {
 		return nil
 	}
