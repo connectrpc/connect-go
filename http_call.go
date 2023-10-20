@@ -392,7 +392,7 @@ func makeRequest(ctx context.Context, url *url.URL, header http.Header, body io.
 		Proto:      "HTTP/1.1",
 		ProtoMajor: 1,
 		ProtoMinor: 1,
-		Body:       nil, // Set in Do.
+		Body:       body,
 		Host:       url.Host,
 	}).WithContext(ctx)
 
