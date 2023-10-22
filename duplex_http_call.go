@@ -42,13 +42,11 @@ type duplexHTTPCall struct {
 	requestBodyReader *io.PipeReader
 	requestBodyWriter *io.PipeWriter
 
-	sendRequestOnce sync.Once
-	responseReady   chan struct{}
-	request         *http.Request
-	response        *http.Response
-
-	errMu sync.Mutex
-	err   error
+	requestSent   bool
+	responseReady sync.WaitGroup
+	request       *http.Request
+	response      *http.Response
+	responseErr   error
 }
 
 func newDuplexHTTPCall(
@@ -80,24 +78,23 @@ func newDuplexHTTPCall(
 		Body:       pipeReader,
 		Host:       url.Host,
 	}).WithContext(ctx)
-	return &duplexHTTPCall{
+	call := &duplexHTTPCall{
 		ctx:               ctx,
 		httpClient:        httpClient,
 		streamType:        spec.StreamType,
 		requestBodyReader: pipeReader,
 		requestBodyWriter: pipeWriter,
 		request:           request,
-		responseReady:     make(chan struct{}),
 	}
+	call.responseReady.Add(1)
+	return call
 }
 
-// Write to the request body. Returns an error wrapping io.EOF after SetError
-// is called.
+// Write to the request body.
 func (d *duplexHTTPCall) Write(data []byte) (int, error) {
 	d.ensureRequestMade()
 	// Before we send any data, check if the context has been canceled.
 	if err := d.ctx.Err(); err != nil {
-		d.SetError(err)
 		return 0, wrapIfContextError(err)
 	}
 	// It's safe to write to this side of the pipe while net/http concurrently
@@ -157,14 +154,12 @@ func (d *duplexHTTPCall) SetMethod(method string) {
 func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 	// First, we wait until we've gotten the response headers and established the
 	// server-to-client side of the stream.
-	d.BlockUntilResponseReady()
-	if err := d.getError(); err != nil {
+	if err := d.BlockUntilResponseReady(); err != nil {
 		// The stream is already closed or corrupted.
 		return 0, err
 	}
 	// Before we read, check if the context has been canceled.
 	if err := d.ctx.Err(); err != nil {
-		d.SetError(err)
 		return 0, wrapIfContextError(err)
 	}
 	if d.response == nil {
@@ -175,7 +170,7 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 }
 
 func (d *duplexHTTPCall) CloseRead() error {
-	d.BlockUntilResponseReady()
+	d.responseReady.Wait()
 	if d.response == nil {
 		return nil
 	}
@@ -188,7 +183,9 @@ func (d *duplexHTTPCall) CloseRead() error {
 
 // ResponseStatusCode is the response's HTTP status code.
 func (d *duplexHTTPCall) ResponseStatusCode() (int, error) {
-	d.BlockUntilResponseReady()
+	if err := d.BlockUntilResponseReady(); err != nil {
+		return 0, err
+	}
 	if d.response == nil {
 		return 0, fmt.Errorf("nil response from %v", d.request.URL)
 	}
@@ -197,7 +194,7 @@ func (d *duplexHTTPCall) ResponseStatusCode() (int, error) {
 
 // ResponseHeader returns the response HTTP headers.
 func (d *duplexHTTPCall) ResponseHeader() http.Header {
-	d.BlockUntilResponseReady()
+	_ = d.BlockUntilResponseReady()
 	if d.response != nil {
 		return d.response.Header
 	}
@@ -206,34 +203,11 @@ func (d *duplexHTTPCall) ResponseHeader() http.Header {
 
 // ResponseTrailer returns the response HTTP trailers.
 func (d *duplexHTTPCall) ResponseTrailer() http.Header {
-	d.BlockUntilResponseReady()
+	_ = d.BlockUntilResponseReady()
 	if d.response != nil {
 		return d.response.Trailer
 	}
 	return make(http.Header)
-}
-
-// SetError stores any error encountered processing the response. All
-// subsequent calls to Read return this error, and all subsequent calls to
-// Write return an error wrapping io.EOF. It's safe to call concurrently with
-// any other method.
-func (d *duplexHTTPCall) SetError(err error) {
-	d.errMu.Lock()
-	if d.err == nil {
-		d.err = wrapIfContextError(err)
-	}
-	// Closing the read side of the request body pipe acquires an internal lock,
-	// so we want to scope errMu's usage narrowly and avoid defer.
-	d.errMu.Unlock()
-
-	// We've already hit an error, so we should stop writing to the request body.
-	// It's safe to call Close more than once and/or concurrently (calls after
-	// the first are no-ops), so it's okay for us to call this even though
-	// net/http sometimes closes the reader too.
-	//
-	// It's safe to ignore the returned error here. Under the hood, Close calls
-	// CloseWithError, which is documented to always return nil.
-	_ = d.requestBodyReader.Close()
 }
 
 // SetValidateResponse sets the response validation function. The function runs
@@ -242,20 +216,26 @@ func (d *duplexHTTPCall) SetValidateResponse(validate func(*http.Response) *Erro
 	d.validateResponse = validate
 }
 
-func (d *duplexHTTPCall) BlockUntilResponseReady() {
-	<-d.responseReady
+func (d *duplexHTTPCall) BlockUntilResponseReady() error {
+	d.responseReady.Wait()
+	return d.responseErr
 }
 
+// ensureRequestMade sends the request headers and starts the response stream.
+// It is not safe to call this concurrently. Write and CloseWrite call this but
+// ensure that they're not called concurrently.
 func (d *duplexHTTPCall) ensureRequestMade() {
-	d.sendRequestOnce.Do(func() {
-		go d.makeRequest()
-	})
+	if d.requestSent {
+		return // already sent
+	}
+	d.requestSent = true
+	go d.makeRequest()
 }
 
 func (d *duplexHTTPCall) makeRequest() {
 	// This runs concurrently with Write and CloseWrite. Read and CloseRead wait
 	// on d.responseReady, so we can't race with them.
-	defer close(d.responseReady)
+	defer d.responseReady.Done()
 
 	// Promote the header Host to the request object.
 	if host := d.request.Header.Get(headerHost); len(host) > 0 {
@@ -276,31 +256,30 @@ func (d *duplexHTTPCall) makeRequest() {
 		if _, ok := asError(err); !ok {
 			err = NewError(CodeUnavailable, err)
 		}
-		d.SetError(err)
+		d.responseErr = err
+		d.requestBodyReader.CloseWithError(io.EOF)
 		return
 	}
 	d.response = response
 	if err := d.validateResponse(response); err != nil {
-		d.SetError(err)
+		d.responseErr = err
+		d.response.Body.Close()
+		d.requestBodyReader.CloseWithError(io.EOF)
 		return
 	}
 	if (d.streamType&StreamTypeBidi) == StreamTypeBidi && response.ProtoMajor < 2 {
 		// If we somehow dialed an HTTP/1.x server, fail with an explicit message
 		// rather than returning a more cryptic error later on.
-		d.SetError(errorf(
+		d.responseErr = errorf(
 			CodeUnimplemented,
 			"response from %v is HTTP/%d.%d: bidi streams require at least HTTP/2",
 			d.request.URL,
 			response.ProtoMajor,
 			response.ProtoMinor,
-		))
+		)
+		d.response.Body.Close()
+		d.requestBodyReader.CloseWithError(io.EOF)
 	}
-}
-
-func (d *duplexHTTPCall) getError() error {
-	d.errMu.Lock()
-	defer d.errMu.Unlock()
-	return d.err
 }
 
 // See: https://cs.opensource.google/go/go/+/refs/tags/go1.20.1:src/net/http/clone.go;l=22-33

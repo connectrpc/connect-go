@@ -774,15 +774,15 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 		server.URL(),
 	)
 	stream := client.CumSum(context.Background())
-	// Stream creates an async request, can error on Send or Receive.
-	err := stream.Send(&pingv1.CumSumRequest{})
-	if err == nil {
-		assert.Nil(t, stream.CloseRequest())
-		_, err = stream.Receive()
+	if err := stream.Send(&pingv1.CumSumRequest{}); err != nil {
+		assert.ErrorIs(t, err, io.EOF)
 	}
+	assert.Nil(t, stream.CloseRequest())
+	_, err := stream.Receive()
 	assert.NotNil(t, err)
 	var connectErr *connect.Error
 	assert.True(t, errors.As(err, &connectErr))
+	t.Log(err)
 	assert.Equal(t, connectErr.Code(), connect.CodeUnimplemented)
 	assert.True(
 		t,
@@ -1988,13 +1988,14 @@ func TestBidiOverHTTP1(t *testing.T) {
 		server.URL(),
 	)
 	stream := client.CumSum(context.Background())
+	// Stream creates an async request, can error on Send or Receive.
 	if err := stream.Send(&pingv1.CumSumRequest{Number: 2}); err != nil {
 		assert.ErrorIs(t, err, io.EOF)
 	}
 	_, err := stream.Receive()
 	assert.NotNil(t, err)
 	assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
-	assert.Equal(t, err.Error(), "unknown: HTTP status 505 HTTP Version Not Supported")
+	assert.True(t, strings.HasSuffix(err.Error(), "HTTP status 505 HTTP Version Not Supported"))
 	assert.Nil(t, stream.CloseRequest())
 	assert.Nil(t, stream.CloseResponse())
 }
@@ -2342,6 +2343,7 @@ func (p *pluggablePingServer) CumSum(
 
 func failNoHTTP2(tb testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]) {
 	tb.Helper()
+
 	if err := stream.Send(&pingv1.CumSumRequest{}); err != nil {
 		assert.ErrorIs(tb, err, io.EOF)
 		assert.Equal(tb, connect.CodeOf(err), connect.CodeUnknown)
