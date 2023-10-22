@@ -194,7 +194,7 @@ func (d *duplexHTTPCall) ResponseStatusCode() (int, error) {
 
 // ResponseHeader returns the response HTTP headers.
 func (d *duplexHTTPCall) ResponseHeader() http.Header {
-	_ = d.BlockUntilResponseReady()
+	d.responseReady.Wait()
 	if d.response != nil {
 		return d.response.Header
 	}
@@ -203,7 +203,7 @@ func (d *duplexHTTPCall) ResponseHeader() http.Header {
 
 // ResponseTrailer returns the response HTTP trailers.
 func (d *duplexHTTPCall) ResponseTrailer() http.Header {
-	_ = d.BlockUntilResponseReady()
+	d.responseReady.Wait()
 	if d.response != nil {
 		return d.response.Trailer
 	}
@@ -216,6 +216,8 @@ func (d *duplexHTTPCall) SetValidateResponse(validate func(*http.Response) *Erro
 	d.validateResponse = validate
 }
 
+// BlockUntilResponseReady returns when the response is ready or reports an
+// error from initializing the request.
 func (d *duplexHTTPCall) BlockUntilResponseReady() error {
 	d.responseReady.Wait()
 	return d.responseErr

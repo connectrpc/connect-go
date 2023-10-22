@@ -478,7 +478,9 @@ func (cc *connectUnaryClientConn) CloseRequest() error {
 }
 
 func (cc *connectUnaryClientConn) Receive(msg any) error {
-	cc.duplexCall.BlockUntilResponseReady()
+	if err := cc.duplexCall.BlockUntilResponseReady(); err != nil {
+		return err
+	}
 	if err := cc.unmarshaler.Unmarshal(msg); err != nil {
 		return err
 	}
@@ -486,12 +488,12 @@ func (cc *connectUnaryClientConn) Receive(msg any) error {
 }
 
 func (cc *connectUnaryClientConn) ResponseHeader() http.Header {
-	cc.duplexCall.BlockUntilResponseReady()
+	_ = cc.duplexCall.BlockUntilResponseReady()
 	return cc.responseHeader
 }
 
 func (cc *connectUnaryClientConn) ResponseTrailer() http.Header {
-	cc.duplexCall.BlockUntilResponseReady()
+	_ = cc.duplexCall.BlockUntilResponseReady()
 	return cc.responseTrailer
 }
 
@@ -621,12 +623,12 @@ func (cc *connectStreamingClientConn) Receive(msg any) error {
 }
 
 func (cc *connectStreamingClientConn) ResponseHeader() http.Header {
-	cc.duplexCall.BlockUntilResponseReady()
+	_ = cc.duplexCall.BlockUntilResponseReady()
 	return cc.responseHeader
 }
 
 func (cc *connectStreamingClientConn) ResponseTrailer() http.Header {
-	cc.duplexCall.BlockUntilResponseReady()
+	_ = cc.duplexCall.BlockUntilResponseReady()
 	return cc.responseTrailer
 }
 
