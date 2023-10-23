@@ -607,6 +607,7 @@ func (cc *connectStreamingClientConn) Receive(msg any) error {
 		// error.
 		serverErr.meta = cc.responseHeader.Clone()
 		mergeHeaders(serverErr.meta, cc.responseTrailer)
+		_ = cc.duplexCall.CloseWrite()
 		return serverErr
 	}
 	// If the error is EOF but not from a last message, we want to return

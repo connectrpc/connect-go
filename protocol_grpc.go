@@ -411,6 +411,7 @@ func (cc *grpcClientConn) Receive(msg any) error {
 		// the stream has ended, Receive must return an error.
 		serverErr.meta = cc.responseHeader.Clone()
 		mergeHeaders(serverErr.meta, cc.responseTrailer)
+		_ = cc.duplexCall.CloseWrite()
 		return serverErr
 	}
 	// This was probably an error converting the bytes to a message or an error

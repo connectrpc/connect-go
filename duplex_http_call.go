@@ -186,9 +186,6 @@ func (d *duplexHTTPCall) ResponseStatusCode() (int, error) {
 	if err := d.BlockUntilResponseReady(); err != nil {
 		return 0, err
 	}
-	if d.response == nil {
-		return 0, fmt.Errorf("nil response from %v", d.request.URL)
-	}
 	return d.response.StatusCode, nil
 }
 
