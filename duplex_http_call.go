@@ -42,10 +42,14 @@ type duplexHTTPCall struct {
 	requestBodyReader *io.PipeReader
 	requestBodyWriter *io.PipeWriter
 
-	requestSent   bool
-	responseReady sync.WaitGroup
-	request       *http.Request
-	response      *http.Response
+	sendRequestOnce sync.Once
+	request         *http.Request
+	response        *http.Response
+
+	// responseReady is closed when the response is ready or when the request
+	// fails. Any error on request initialisation will be set on the
+	// responseErr. There's always a response if responseErr is nil.
+	responseReady chan struct{}
 	responseErr   error
 }
 
@@ -78,16 +82,15 @@ func newDuplexHTTPCall(
 		Body:       pipeReader,
 		Host:       url.Host,
 	}).WithContext(ctx)
-	call := &duplexHTTPCall{
+	return &duplexHTTPCall{
 		ctx:               ctx,
 		httpClient:        httpClient,
 		streamType:        spec.StreamType,
 		requestBodyReader: pipeReader,
 		requestBodyWriter: pipeWriter,
 		request:           request,
+		responseReady:     make(chan struct{}),
 	}
-	call.responseReady.Add(1)
-	return call
 }
 
 // Write to the request body.
@@ -170,7 +173,7 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 }
 
 func (d *duplexHTTPCall) CloseRead() error {
-	d.responseReady.Wait()
+	_ = d.BlockUntilResponseReady()
 	if d.response == nil {
 		return nil
 	}
@@ -191,7 +194,7 @@ func (d *duplexHTTPCall) ResponseStatusCode() (int, error) {
 
 // ResponseHeader returns the response HTTP headers.
 func (d *duplexHTTPCall) ResponseHeader() http.Header {
-	d.responseReady.Wait()
+	_ = d.BlockUntilResponseReady()
 	if d.response != nil {
 		return d.response.Header
 	}
@@ -200,7 +203,7 @@ func (d *duplexHTTPCall) ResponseHeader() http.Header {
 
 // ResponseTrailer returns the response HTTP trailers.
 func (d *duplexHTTPCall) ResponseTrailer() http.Header {
-	d.responseReady.Wait()
+	_ = d.BlockUntilResponseReady()
 	if d.response != nil {
 		return d.response.Trailer
 	}
@@ -216,7 +219,7 @@ func (d *duplexHTTPCall) SetValidateResponse(validate func(*http.Response) *Erro
 // BlockUntilResponseReady returns when the response is ready or reports an
 // error from initializing the request.
 func (d *duplexHTTPCall) BlockUntilResponseReady() error {
-	d.responseReady.Wait()
+	<-d.responseReady
 	return d.responseErr
 }
 
@@ -224,17 +227,15 @@ func (d *duplexHTTPCall) BlockUntilResponseReady() error {
 // It is not safe to call this concurrently. Write and CloseWrite call this but
 // ensure that they're not called concurrently.
 func (d *duplexHTTPCall) ensureRequestMade() {
-	if d.requestSent {
-		return // already sent
-	}
-	d.requestSent = true
-	go d.makeRequest()
+	d.sendRequestOnce.Do(func() {
+		go d.makeRequest()
+	})
 }
 
 func (d *duplexHTTPCall) makeRequest() {
 	// This runs concurrently with Write and CloseWrite. Read and CloseRead wait
 	// on d.responseReady, so we can't race with them.
-	defer d.responseReady.Done()
+	defer close(d.responseReady)
 
 	// Promote the header Host to the request object.
 	if host := d.request.Header.Get(headerHost); len(host) > 0 {

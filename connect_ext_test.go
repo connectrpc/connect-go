@@ -782,7 +782,6 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 	assert.NotNil(t, err)
 	var connectErr *connect.Error
 	assert.True(t, errors.As(err, &connectErr))
-	t.Log(err)
 	assert.Equal(t, connectErr.Code(), connect.CodeUnimplemented)
 	assert.True(
 		t,
@@ -1995,7 +1994,7 @@ func TestBidiOverHTTP1(t *testing.T) {
 	_, err := stream.Receive()
 	assert.NotNil(t, err)
 	assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
-	assert.True(t, strings.HasSuffix(err.Error(), "HTTP status 505 HTTP Version Not Supported"))
+	assert.Equal(t, err.Error(), "unknown: HTTP status 505 HTTP Version Not Supported")
 	assert.Nil(t, stream.CloseRequest())
 	assert.Nil(t, stream.CloseResponse())
 }
