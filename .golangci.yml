@@ -122,6 +122,7 @@ issues:
     # We want to set http.Server's logger
     - linters: [forbidigo]
       path: internal/memhttp
+      text: "use of `log.(New|Logger|Lshortfile)` forbidden by pattern .*"
     # We want to show examples with http.Get
     - linters: [noctx]
       path: internal/memhttp/memhttp_test.go
