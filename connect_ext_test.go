@@ -774,6 +774,7 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 		server.URL(),
 	)
 	stream := client.CumSum(context.Background())
+	// Stream creates an async request, can error on Send or Receive.
 	if err := stream.Send(&pingv1.CumSumRequest{}); err != nil {
 		assert.ErrorIs(t, err, io.EOF)
 	}
