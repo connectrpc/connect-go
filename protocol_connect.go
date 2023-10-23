@@ -348,7 +348,11 @@ func (c *connectClient) WriteRequestHeader(streamType StreamType, header http.He
 	}
 }
 
-func (c *connectClient) encodeDeadlineFromContext(ctx context.Context, header http.Header) {
+func (c *connectClient) NewConn(
+	ctx context.Context,
+	spec Spec,
+	header http.Header,
+) streamingClientConn {
 	if deadline, ok := ctx.Deadline(); ok {
 		millis := int64(time.Until(deadline) / time.Millisecond)
 		if millis > 0 {
@@ -358,123 +362,82 @@ func (c *connectClient) encodeDeadlineFromContext(ctx context.Context, header ht
 			} // else effectively unbounded
 		}
 	}
-}
-
-func (c *connectClient) NewConn(
-	ctx context.Context,
-	spec Spec,
-	header http.Header,
-) streamingClientConn {
-	c.encodeDeadlineFromContext(ctx, header)
-	duplexCall := newDuplexHTTPCall(ctx, c.HTTPClient, c.URL, spec, header)
-	streamingConn := &connectStreamingClientConn{
-		spec:             spec,
-		peer:             c.Peer(),
-		duplexCall:       duplexCall,
-		compressionPools: c.CompressionPools,
-		bufferPool:       c.BufferPool,
-		codec:            c.Codec,
-		marshaler: connectStreamingMarshaler{
-			envelopeWriter: envelopeWriter{
-				codec:            c.Codec,
-				compressMinBytes: c.CompressMinBytes,
-				compressionPool:  c.CompressionPools.Get(c.CompressionName),
-				bufferPool:       c.BufferPool,
-				sendMaxBytes:     c.SendMaxBytes,
+	call := newHTTPCall(ctx, c.HTTPClient, c.URL, spec, header)
+	var conn streamingClientConn
+	if spec.StreamType == StreamTypeUnary {
+		unaryConn := &connectUnaryClientConn{
+			spec:             spec,
+			peer:             c.Peer(),
+			call:             call,
+			compressionPools: c.CompressionPools,
+			bufferPool:       c.BufferPool,
+			marshaler: connectUnaryRequestMarshaler{
+				connectUnaryMarshaler: connectUnaryMarshaler{
+					codec:            c.Codec,
+					compressMinBytes: c.CompressMinBytes,
+					compressionName:  c.CompressionName,
+					compressionPool:  c.CompressionPools.Get(c.CompressionName),
+					bufferPool:       c.BufferPool,
+					header:           call.Header(),
+					sendMaxBytes:     c.SendMaxBytes,
+				},
 			},
-		},
-		unmarshaler: connectStreamingUnmarshaler{
-			envelopeReader: envelopeReader{
+			unmarshaler: connectUnaryUnmarshaler{
 				codec:        c.Codec,
 				bufferPool:   c.BufferPool,
 				readMaxBytes: c.ReadMaxBytes,
 			},
-		},
-		responseHeader:  make(http.Header),
-		responseTrailer: make(http.Header),
-	}
-	duplexCall.SetValidateResponse(streamingConn.validateResponse)
-	return wrapClientConnWithCodedErrors(streamingConn)
-}
-
-func (c *connectClient) Invoke(
-	ctx context.Context, spec Spec, request AnyRequest, response AnyResponse,
-) error {
-	header := request.Header()
-	c.encodeDeadlineFromContext(ctx, header)
-
-	unaryCall := newUnaryHTTPCall(ctx, c.HTTPClient, c.URL, header)
-	conn := &connectUnaryClientConn{
-		spec:             spec,
-		peer:             c.Peer(),
-		unaryCall:        unaryCall,
-		compressionPools: c.CompressionPools,
-		bufferPool:       c.BufferPool,
-		marshaler: connectUnaryRequestMarshaler{
-			connectUnaryMarshaler: connectUnaryMarshaler{
-				codec:            c.Codec,
-				compressMinBytes: c.CompressMinBytes,
-				compressionName:  c.CompressionName,
-				compressionPool:  c.CompressionPools.Get(c.CompressionName),
-				bufferPool:       c.BufferPool,
-				header:           header,
-				sendMaxBytes:     c.SendMaxBytes,
-			},
-			unaryCall: unaryCall,
-		},
-		unmarshaler: connectUnaryUnmarshaler{
-			codec:        c.Codec,
-			bufferPool:   c.BufferPool,
-			readMaxBytes: c.ReadMaxBytes,
-		},
-		responseHeader:  make(http.Header),
-		responseTrailer: make(http.Header),
-	}
-	if spec.IdempotencyLevel == IdempotencyNoSideEffects {
-		conn.marshaler.enableGet = c.EnableGet
-		conn.marshaler.getURLMaxBytes = c.GetURLMaxBytes
-		conn.marshaler.getUseFallback = c.GetUseFallback
-		if stableCodec, ok := c.Codec.(stableCodec); ok {
-			conn.marshaler.stableCodec = stableCodec
+			responseHeader:  make(http.Header),
+			responseTrailer: make(http.Header),
 		}
+		if spec.IdempotencyLevel == IdempotencyNoSideEffects {
+			unaryConn.marshaler.enableGet = c.EnableGet
+			unaryConn.marshaler.getURLMaxBytes = c.GetURLMaxBytes
+			unaryConn.marshaler.getUseFallback = c.GetUseFallback
+			unaryConn.marshaler.call = call
+			if stableCodec, ok := c.Codec.(stableCodec); ok {
+				unaryConn.marshaler.stableCodec = stableCodec
+			}
+		}
+		conn = unaryConn
+		call.SetValidateResponse(unaryConn.validateResponse)
+	} else {
+		streamingConn := &connectStreamingClientConn{
+			spec:             spec,
+			peer:             c.Peer(),
+			call:             call,
+			compressionPools: c.CompressionPools,
+			bufferPool:       c.BufferPool,
+			codec:            c.Codec,
+			marshaler: connectStreamingMarshaler{
+				envelopeWriter: envelopeWriter{
+					codec:            c.Codec,
+					compressMinBytes: c.CompressMinBytes,
+					compressionPool:  c.CompressionPools.Get(c.CompressionName),
+					bufferPool:       c.BufferPool,
+					sendMaxBytes:     c.SendMaxBytes,
+				},
+			},
+			unmarshaler: connectStreamingUnmarshaler{
+				envelopeReader: envelopeReader{
+					codec:        c.Codec,
+					bufferPool:   c.BufferPool,
+					readMaxBytes: c.ReadMaxBytes,
+				},
+			},
+			responseHeader:  make(http.Header),
+			responseTrailer: make(http.Header),
+		}
+		conn = streamingConn
+		call.SetValidateResponse(streamingConn.validateResponse)
 	}
-	unaryCall.SetValidateResponse(conn.validateResponse)
-
-	conn.onRequestSend(func(r *http.Request) {
-		request.setRequestMethod(r.Method)
-	})
-
-	// Send always returns an io.EOF unless the error is from the client-side.
-	// We want the user to continue to call Receive in those cases to get the
-	// full error from the server-side.
-	if err := conn.Send(request.Any()); err != nil && !errors.Is(err, io.EOF) {
-		_ = conn.CloseRequest()
-		_ = conn.CloseResponse()
-		return err
-	}
-	if err := conn.CloseRequest(); err != nil {
-		_ = conn.CloseResponse()
-		return err
-	}
-
-	if err := conn.Receive(response.Any()); err != nil {
-		return err
-	}
-	// In a well-formed stream, the response message may be followed by a block
-	// of in-stream trailers or HTTP trailers. To ensure that we receive the
-	// trailers, try to read another message from the stream.
-	if err := conn.Receive(nil); err == nil {
-		return NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
-	} else if err != nil && !errors.Is(err, io.EOF) {
-		return NewError(CodeUnknown, err)
-	}
-	return conn.CloseResponse()
+	return wrapClientConnWithCodedErrors(conn)
 }
 
 type connectUnaryClientConn struct {
 	spec             Spec
 	peer             Peer
-	unaryCall        *unaryHTTPCall
+	call             *httpCall
 	compressionPools readOnlyCompressionPools
 	bufferPool       *bufferPool
 	marshaler        connectUnaryRequestMarshaler
@@ -492,45 +455,57 @@ func (cc *connectUnaryClientConn) Peer() Peer {
 }
 
 func (cc *connectUnaryClientConn) Send(msg any) error {
-	if err := cc.marshaler.Marshal(msg); err != nil {
+	buffer := cc.bufferPool.Get()
+	defer cc.bufferPool.Put(buffer)
+	if err := cc.marshaler.Marshal(buffer, msg); err != nil {
 		return err
+	}
+	if err := cc.call.Send(buffer); err != nil {
+		if cerr, ok := asError(err); ok {
+			return cerr
+		}
+		return errorf(CodeUnknown, "send message: %w", err)
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
 func (cc *connectUnaryClientConn) RequestHeader() http.Header {
-	return cc.unaryCall.Header()
+	return cc.call.Header()
 }
 
 func (cc *connectUnaryClientConn) CloseRequest() error {
-	return nil // nop for unary requests.
+	return cc.call.CloseWrite() // nop for unary
 }
 
 func (cc *connectUnaryClientConn) Receive(msg any) error {
-	defer cc.unaryCall.response.Body.Close()
-	if err := cc.unmarshaler.Unmarshal(msg, cc.unaryCall.response.Body); err != nil {
+	if err := cc.call.BlockUntilResponseReady(); err != nil {
+		return err
+	}
+	if err := cc.unmarshaler.Unmarshal(msg, cc.call.response.Body); err != nil {
 		return err
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
 func (cc *connectUnaryClientConn) ResponseHeader() http.Header {
+	_ = cc.call.BlockUntilResponseReady()
 	return cc.responseHeader
 }
 
 func (cc *connectUnaryClientConn) ResponseTrailer() http.Header {
+	_ = cc.call.BlockUntilResponseReady()
 	return cc.responseTrailer
 }
 
 func (cc *connectUnaryClientConn) CloseResponse() error {
-	if response := cc.unaryCall.response; response != nil {
+	if response := cc.call.response; response != nil {
 		return response.Body.Close()
 	}
 	return nil
 }
 
 func (cc *connectUnaryClientConn) onRequestSend(fn func(*http.Request)) {
-	cc.unaryCall.onRequestSend = fn
+	cc.call.onRequestSend = fn
 }
 
 func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Error {
@@ -584,7 +559,7 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 type connectStreamingClientConn struct {
 	spec             Spec
 	peer             Peer
-	duplexCall       *duplexHTTPCall
+	call             *httpCall
 	compressionPools readOnlyCompressionPools
 	bufferPool       *bufferPool
 	codec            Codec
@@ -603,24 +578,27 @@ func (cc *connectStreamingClientConn) Peer() Peer {
 }
 
 func (cc *connectStreamingClientConn) Send(msg any) error {
-	dst := cc.duplexCall
-	if err := cc.marshaler.Marshal(dst, msg); err != nil {
+	buffer := cc.bufferPool.Get()
+	defer cc.bufferPool.Put(buffer)
+	if err := cc.marshaler.Marshal(buffer, msg); err != nil {
 		return err
 	}
-	return nil // must be a literal nil: nil *Error is a non-nil error
+	return cc.call.Send(buffer)
 }
 
 func (cc *connectStreamingClientConn) RequestHeader() http.Header {
-	return cc.duplexCall.Header()
+	return cc.call.Header()
 }
 
 func (cc *connectStreamingClientConn) CloseRequest() error {
-	return cc.duplexCall.CloseWrite()
+	return cc.call.CloseWrite()
 }
 
 func (cc *connectStreamingClientConn) Receive(msg any) error {
-	cc.duplexCall.BlockUntilResponseReady()
-	src := cc.duplexCall
+	if err := cc.call.BlockUntilResponseReady(); err != nil {
+		return err
+	}
+	src := cc.call
 	err := cc.unmarshaler.Unmarshal(msg, src)
 	if err == nil {
 		return nil
@@ -634,7 +612,7 @@ func (cc *connectStreamingClientConn) Receive(msg any) error {
 		// error.
 		serverErr.meta = cc.responseHeader.Clone()
 		mergeHeaders(serverErr.meta, cc.responseTrailer)
-		cc.duplexCall.SetError(serverErr)
+		_ = cc.call.CloseWrite()
 		return serverErr
 	}
 	// If the error is EOF but not from a last message, we want to return
@@ -645,27 +623,27 @@ func (cc *connectStreamingClientConn) Receive(msg any) error {
 	// There's no error in the trailers, so this was probably an error
 	// converting the bytes to a message, an error reading from the network, or
 	// just an EOF. We're going to return it to the user, but we also want to
-	// setResponseError so Send errors out.
-	cc.duplexCall.SetError(err)
+	// close the writer so Send errors out.
+	_ = cc.call.CloseWrite()
 	return err
 }
 
 func (cc *connectStreamingClientConn) ResponseHeader() http.Header {
-	cc.duplexCall.BlockUntilResponseReady()
+	_ = cc.call.BlockUntilResponseReady()
 	return cc.responseHeader
 }
 
 func (cc *connectStreamingClientConn) ResponseTrailer() http.Header {
-	cc.duplexCall.BlockUntilResponseReady()
+	_ = cc.call.BlockUntilResponseReady()
 	return cc.responseTrailer
 }
 
 func (cc *connectStreamingClientConn) CloseResponse() error {
-	return cc.duplexCall.CloseRead()
+	return cc.call.CloseRead()
 }
 
 func (cc *connectStreamingClientConn) onRequestSend(fn func(*http.Request)) {
-	cc.duplexCall.onRequestSend = fn
+	cc.call.onRequestSend = fn
 }
 
 func (cc *connectStreamingClientConn) validateResponse(response *http.Response) *Error {
@@ -988,12 +966,10 @@ type connectUnaryRequestMarshaler struct {
 	getURLMaxBytes int
 	getUseFallback bool
 	stableCodec    stableCodec
-	unaryCall      *unaryHTTPCall
+	call           *httpCall
 }
 
-func (m *connectUnaryRequestMarshaler) Marshal(message any) *Error {
-	buffer := m.bufferPool.Get()
-	defer m.bufferPool.Put(buffer)
+func (m *connectUnaryRequestMarshaler) Marshal(buffer *bytes.Buffer, message any) *Error {
 	if m.enableGet {
 		if m.stableCodec == nil && !m.getUseFallback {
 			return errorf(CodeInternal, "codec %s doesn't support stable marshal; can't use get", m.codec.Name())
@@ -1001,15 +977,8 @@ func (m *connectUnaryRequestMarshaler) Marshal(message any) *Error {
 		if err := m.marshalWithGet(buffer, message); err != nil {
 			return err
 		}
-	} else {
-		if err := m.connectUnaryMarshaler.Marshal(buffer, message); err != nil {
-			return err
-		}
 	}
-	if err := m.unaryCall.Do(buffer); err != nil {
-		return err
-	}
-	return nil
+	return m.connectUnaryMarshaler.Marshal(buffer, message)
 }
 
 func (m *connectUnaryRequestMarshaler) marshalWithGet(dst io.Writer, message any) *Error {
@@ -1070,7 +1039,7 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(dst io.Writer, message any
 }
 
 func (m *connectUnaryRequestMarshaler) buildGetURL(data []byte, compressed bool) *url.URL {
-	url := *m.unaryCall.URL()
+	url := *m.call.URL()
 	query := url.Query()
 	query.Set(connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue)
 	query.Set(connectUnaryEncodingQueryParameter, m.codec.Name())
@@ -1089,8 +1058,8 @@ func (m *connectUnaryRequestMarshaler) buildGetURL(data []byte, compressed bool)
 
 func (m *connectUnaryRequestMarshaler) writeWithGet(url *url.URL) *Error {
 	delete(m.header, connectHeaderProtocolVersion)
-	m.unaryCall.SetMethod(http.MethodGet)
-	*m.unaryCall.URL() = *url
+	m.call.SetMethod(http.MethodGet)
+	*m.call.URL() = *url
 	return nil
 }
 
