@@ -247,6 +247,9 @@ func (d *duplexHTTPCall) makeRequest() {
 	}
 	// Once we send a message to the server, they send a message back and
 	// establish the receive side of the stream.
+	// On error, we close the request body using the Write side of the pipe.
+	// This ensures HTTP2 streams receive an io.EOF from the Read side of the
+	// pipe. Write's check for io.ErrClosedPipe and will convert this to io.EOF.
 	response, err := d.httpClient.Do(d.request) //nolint:bodyclose
 	if err != nil {
 		err = wrapIfContextError(err)
@@ -257,15 +260,15 @@ func (d *duplexHTTPCall) makeRequest() {
 			err = NewError(CodeUnavailable, err)
 		}
 		d.responseErr = err
-		d.requestBodyReader.CloseWithError(io.EOF)
+		d.requestBodyWriter.Close()
 		return
 	}
 	// We've got a response. We can now read from the response body.
-	// Closing the response body is delegated to the caller.
+	// Closing the response body is delegated to the caller even on error.
 	d.response = response
 	if err := d.validateResponse(response); err != nil {
 		d.responseErr = err
-		d.requestBodyReader.CloseWithError(io.EOF)
+		d.requestBodyWriter.Close()
 		return
 	}
 	if (d.streamType&StreamTypeBidi) == StreamTypeBidi && response.ProtoMajor < 2 {
@@ -278,7 +281,7 @@ func (d *duplexHTTPCall) makeRequest() {
 			response.ProtoMajor,
 			response.ProtoMinor,
 		)
-		d.requestBodyReader.CloseWithError(io.EOF)
+		d.requestBodyWriter.Close()
 	}
 }
 
