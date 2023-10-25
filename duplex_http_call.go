@@ -42,14 +42,15 @@ type duplexHTTPCall struct {
 	requestBodyReader *io.PipeReader
 	requestBodyWriter *io.PipeWriter
 
+	// sendRequestOnce ensures we only send the request once.
 	sendRequestOnce sync.Once
 	request         *http.Request
-	response        *http.Response
 
 	// responseReady is closed when the response is ready or when the request
 	// fails. Any error on request initialisation will be set on the
 	// responseErr. There's always a response if responseErr is nil.
 	responseReady chan struct{}
+	response      *http.Response
 	responseErr   error
 }
 
