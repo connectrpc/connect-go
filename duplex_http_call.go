@@ -178,7 +178,9 @@ func (d *duplexHTTPCall) CloseRead() error {
 	if d.response == nil {
 		return nil
 	}
-	if _, err := discard(d.response.Body); err != nil {
+	if _, err := discard(d.response.Body); err != nil &&
+		!errors.Is(err, context.Canceled) &&
+		!errors.Is(err, context.DeadlineExceeded) {
 		_ = d.response.Body.Close()
 		return wrapIfRSTError(err)
 	}

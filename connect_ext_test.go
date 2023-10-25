@@ -183,13 +183,27 @@ func TestServer(t *testing.T) {
 				connect.CodeOf(stream.Err()),
 				connect.CodeInvalidArgument,
 			)
+			assert.Nil(t, stream.Close())
 		})
 		t.Run("count_up_timeout", func(t *testing.T) {
 			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-			defer cancel()
+			t.Cleanup(cancel)
 			_, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 1}))
 			assert.NotNil(t, err)
 			assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded)
+		})
+		t.Run("count_up_cancel_after_first_response", func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			request := connect.NewRequest(&pingv1.CountUpRequest{Number: 5})
+			request.Header().Set(clientHeader, headerValue)
+			stream, err := client.CountUp(ctx, request)
+			assert.Nil(t, err)
+			assert.True(t, stream.Receive())
+			cancel()
+			assert.False(t, stream.Receive())
+			assert.NotNil(t, stream.Err())
+			assert.Equal(t, connect.CodeOf(stream.Err()), connect.CodeCanceled)
+			assert.Nil(t, stream.Close())
 		})
 	}
 	testCumSum := func(t *testing.T, client pingv1connect.PingServiceClient, expectSuccess bool) { //nolint:thelper
@@ -285,6 +299,7 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
 			assert.Equal(t, got, expect)
 			assert.False(t, connect.IsWireError(err))
+			assert.Nil(t, stream.CloseResponse())
 		})
 		t.Run("cumsum_cancel_before_send", func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -302,6 +317,8 @@ func TestServer(t *testing.T) {
 			err := stream.Send(&pingv1.CumSumRequest{Number: 19})
 			assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled, assert.Sprintf("%v", err))
 			assert.False(t, connect.IsWireError(err))
+			assert.Nil(t, stream.CloseRequest())
+			assert.Nil(t, stream.CloseResponse())
 		})
 	}
 	testErrors := func(t *testing.T, client pingv1connect.PingServiceClient) { //nolint:thelper
