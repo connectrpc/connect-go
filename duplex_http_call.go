@@ -260,10 +260,11 @@ func (d *duplexHTTPCall) makeRequest() {
 		d.requestBodyReader.CloseWithError(io.EOF)
 		return
 	}
+	// We've got a response. We can now read from the response body.
+	// Closing the response body is delegated to the caller.
 	d.response = response
 	if err := d.validateResponse(response); err != nil {
 		d.responseErr = err
-		d.response.Body.Close()
 		d.requestBodyReader.CloseWithError(io.EOF)
 		return
 	}
@@ -277,7 +278,6 @@ func (d *duplexHTTPCall) makeRequest() {
 			response.ProtoMajor,
 			response.ProtoMinor,
 		)
-		d.response.Body.Close()
 		d.requestBodyReader.CloseWithError(io.EOF)
 	}
 }

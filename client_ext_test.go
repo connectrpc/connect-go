@@ -86,41 +86,45 @@ func TestClientPeer(t *testing.T) {
 			connect.WithInterceptors(&assertPeerInterceptor{t}),
 		)
 		ctx := context.Background()
-		// unary
-		unaryReq := connect.NewRequest[pingv1.PingRequest](nil)
-		_, err := client.Ping(ctx, unaryReq)
-		assert.Nil(t, err)
-		assert.Equal(t, unaryHTTPMethod, unaryReq.HTTPMethod())
-		text := strings.Repeat(".", 256)
-		r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
-		assert.Nil(t, err)
-		assert.Equal(t, r.Msg.Text, text)
-		// client streaming
-		clientStream := client.Sum(ctx)
-		t.Cleanup(func() {
-			_, closeErr := clientStream.CloseAndReceive()
-			assert.Nil(t, closeErr)
+		t.Run("unary", func(t *testing.T) {
+			unaryReq := connect.NewRequest[pingv1.PingRequest](nil)
+			_, err := client.Ping(ctx, unaryReq)
+			assert.Nil(t, err)
+			assert.Equal(t, unaryHTTPMethod, unaryReq.HTTPMethod())
+			text := strings.Repeat(".", 256)
+			r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
+			assert.Nil(t, err)
+			assert.Equal(t, r.Msg.Text, text)
 		})
-		assert.NotZero(t, clientStream.Peer().Addr)
-		assert.NotZero(t, clientStream.Peer().Protocol)
-		err = clientStream.Send(&pingv1.SumRequest{})
-		assert.Nil(t, err)
-		// server streaming
-		serverStream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 1}))
-		t.Cleanup(func() {
-			assert.Nil(t, serverStream.Close())
+		t.Run("client_stream", func(t *testing.T) {
+			clientStream := client.Sum(ctx)
+			t.Cleanup(func() {
+				_, closeErr := clientStream.CloseAndReceive()
+				assert.Nil(t, closeErr)
+			})
+			assert.NotZero(t, clientStream.Peer().Addr)
+			assert.NotZero(t, clientStream.Peer().Protocol)
+			err := clientStream.Send(&pingv1.SumRequest{})
+			assert.Nil(t, err)
 		})
-		assert.Nil(t, err)
-		// bidi streaming
-		bidiStream := client.CumSum(ctx)
-		t.Cleanup(func() {
-			assert.Nil(t, bidiStream.CloseRequest())
-			assert.Nil(t, bidiStream.CloseResponse())
+		t.Run("server_stream", func(t *testing.T) {
+			serverStream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{}))
+			t.Cleanup(func() {
+				assert.Nil(t, serverStream.Close())
+			})
+			assert.Nil(t, err)
 		})
-		assert.NotZero(t, bidiStream.Peer().Addr)
-		assert.NotZero(t, bidiStream.Peer().Protocol)
-		err = bidiStream.Send(&pingv1.CumSumRequest{})
-		assert.Nil(t, err)
+		t.Run("bidi_stream", func(t *testing.T) {
+			bidiStream := client.CumSum(ctx)
+			t.Cleanup(func() {
+				assert.Nil(t, bidiStream.CloseRequest())
+				assert.Nil(t, bidiStream.CloseResponse())
+			})
+			assert.NotZero(t, bidiStream.Peer().Addr)
+			assert.NotZero(t, bidiStream.Peer().Protocol)
+			err := bidiStream.Send(&pingv1.CumSumRequest{})
+			assert.Nil(t, err)
+		})
 	}
 
 	t.Run("connect", func(t *testing.T) {
