@@ -52,7 +52,7 @@ lint: $(BIN)/golangci-lint $(BIN)/buf ## Lint Go and protobuf
 
 .PHONY: lintfix
 lintfix: $(BIN)/golangci-lint $(BIN)/buf ## Automatically fix some lint errors
-	golangci-lint run --fix
+	golangci-lint run --fix --modules-download-mode=readonly --timeout=3m0s
 	buf format -w
 
 .PHONY: generate
