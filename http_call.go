@@ -122,8 +122,9 @@ func (c *httpCall) CloseWrite() error {
 	// CloseWrite automatically rather than requiring the user to do it.
 	if c.requestBodyWriter != nil {
 		return c.requestBodyWriter.Close()
+	} else {
+		return c.request.Body.Close()
 	}
-	return nil
 }
 
 // Header returns the HTTP request headers.
@@ -323,12 +324,15 @@ func cloneURL(oldURL *url.URL) *url.URL {
 }
 
 // payloadCloser is a ReadCloser that wraps a bytes.Buffer. It's used to
-// implement the request body for unary calls.
+// implement the request body for unary calls. On full reads or Close, it
+// signals that the payload has been fully read.
 type payloadCloser struct {
+	wait sync.WaitGroup
+
+	mu     sync.Mutex
 	buf    *bytes.Buffer
 	readN  int
-	isDone atomic.Bool // true if the payload has been fully read
-	wait   sync.WaitGroup
+	isDone bool // true if the payload has been fully read
 }
 
 func newPayloadCloser(buf *bytes.Buffer) *payloadCloser {
@@ -340,23 +344,27 @@ func newPayloadCloser(buf *bytes.Buffer) *payloadCloser {
 }
 
 // Read implements io.Reader.
-func (p *payloadCloser) Read(dst []byte) (int, error) {
+func (p *payloadCloser) Read(dst []byte) (readN int, err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.buf == nil {
 		return 0, io.EOF
 	}
 	src := p.buf.Bytes()
-	readN := copy(dst, src[p.readN:])
+	readN = copy(dst, src[p.readN:])
 	p.readN += readN
 	if readN == 0 && p.readN == len(src) {
-		p.complete()
-		return 0, io.EOF
+		p.completeWithLock()
+		err = io.EOF
 	}
-	return readN, nil
+	return readN, err
 }
 
 // Close implements io.Closer. It signals that the payload has been fully read.
 func (p *payloadCloser) Close() error {
-	p.complete()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.completeWithLock()
 	return nil
 }
 
@@ -365,8 +373,11 @@ func (p *payloadCloser) Close() error {
 // Note: it should not be possible for GetBody to be called after the response
 // is received.
 func (p *payloadCloser) Rewind() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.readN = 0
-	if p.isDone.CompareAndSwap(true, false) {
+	if p.isDone {
+		p.isDone = false
 		p.wait.Add(1)
 	}
 }
@@ -374,11 +385,13 @@ func (p *payloadCloser) Rewind() {
 // Wait blocks until the payload has been fully read.
 func (p *payloadCloser) Wait() {
 	p.wait.Wait()
+	p.buf = nil // Discard the buffer
 }
 
 // complete signals that the payload has been fully read.
-func (p *payloadCloser) complete() {
-	if p.isDone.CompareAndSwap(false, true) && p.buf != nil {
+func (p *payloadCloser) completeWithLock() {
+	if !p.isDone {
+		p.isDone = true
 		p.wait.Done()
 	}
 }
