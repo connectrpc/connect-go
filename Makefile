@@ -46,7 +46,7 @@ install: ## Install all binaries
 .PHONY: lint
 lint: $(BIN)/golangci-lint $(BIN)/buf ## Lint Go and protobuf
 	go vet ./...
-	golangci-lint run
+	golangci-lint run --modules-download-mode=readonly --timeout=3m0s
 	buf lint
 	buf format -d --exit-code
 
