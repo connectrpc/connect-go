@@ -22,6 +22,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
+	"sync/atomic"
 )
 
 // httpCall is a full-duplex stream between the client and server. The
@@ -41,7 +43,7 @@ type httpCall struct {
 	// safe to use concurrently.
 	requestBodyWriter *io.PipeWriter
 
-	requestSent bool
+	requestSent atomic.Bool
 	request     *http.Request
 
 	responseReady chan struct{}
@@ -104,8 +106,7 @@ func (c *httpCall) CloseWrite() error {
 	// Even if Send was never called, we need to make an HTTP request. This
 	// ensures that we've sent any headers to the server and that we have an HTTP
 	// response to read from.
-	if !c.requestSent {
-		c.requestSent = true
+	if c.requestSent.CompareAndSwap(false, true) {
 		go c.makeRequest()
 	}
 	// The user calls CloseWrite to indicate that they're done sending data. It's
@@ -209,28 +210,31 @@ func (c *httpCall) isClientStream() bool {
 }
 
 func (c *httpCall) sendUnary(buffer *bytes.Buffer) error {
-	if c.requestSent {
+	if !c.requestSent.CompareAndSwap(false, true) {
 		return fmt.Errorf("unary call already sent")
 	}
-	c.requestSent = true
 	// Client request is unary, build the full request body and block on
 	// sending the request.
 	if c.request.Method != http.MethodGet && buffer != nil {
-		payload := buffer.Bytes()
-		c.request.Body = io.NopCloser(buffer)
+		payload := newPayloadCloser(buffer)
+		c.request.Body = payload
 		c.request.ContentLength = int64(buffer.Len())
 		c.request.GetBody = func() (io.ReadCloser, error) {
-			buffer = bytes.NewBuffer(payload)
-			return io.NopCloser(buffer), nil
+			if !payload.Rewind() {
+				return nil, errors.New("payload already sent")
+			}
+			return payload, nil
 		}
+		// Wait for the payload to be fully drained before we return
+		// from Send to ensure the buffer can safely be reused.
+		defer payload.Wait()
 	}
 	c.makeRequest() // blocks until the response is ready
 	return nil      // Only report response errors on Read
 }
 
 func (c *httpCall) sendStream(buffer *bytes.Buffer) error {
-	if !c.requestSent {
-		c.requestSent = true
+	if c.requestSent.CompareAndSwap(false, true) {
 		// Client request is streaming, so we need to start sending the request
 		// before we start writing to the request body. This ensures that we've
 		// sent any headers to the server.
@@ -318,4 +322,70 @@ func cloneURL(oldURL *url.URL) *url.URL {
 		*newURL.User = *oldURL.User
 	}
 	return newURL
+}
+
+// payloadCloser is a ReadCloser that wraps a bytes.Buffer. It's used to
+// implement the request body for unary calls.
+type payloadCloser struct {
+	buf    *bytes.Buffer
+	readN  int
+	isDone atomic.Bool // true if the payload has been fully read
+	wait   sync.WaitGroup
+}
+
+func newPayloadCloser(buf *bytes.Buffer) *payloadCloser {
+	payload := &payloadCloser{
+		buf: buf,
+	}
+	payload.wait.Add(1)
+	return payload
+}
+
+// Read implements io.Reader.
+func (p *payloadCloser) Read(dst []byte) (int, error) {
+	if p.buf == nil {
+		return 0, io.EOF
+	}
+	src := p.buf.Bytes()
+	readN := copy(dst, src[p.readN:])
+	p.readN += readN
+	if readN == 0 && p.readN == len(src) {
+		p.complete()
+		return 0, io.EOF
+	}
+	return readN, nil
+}
+
+// Close implements io.Closer. It signals that the payload has been fully read.
+func (p *payloadCloser) Close() error {
+	p.complete()
+	return nil
+}
+
+// Rewind resets the payload to the beginning. It returns false if the buffer
+// has been discarded.
+// Note: it should not be possible for GetBody to be called after the response
+// is received.
+func (p *payloadCloser) Rewind() bool {
+	if p.buf == nil {
+		return false
+	}
+	p.readN = 0
+	if p.isDone.CompareAndSwap(true, false) {
+		p.wait.Add(1)
+	}
+	return true
+}
+
+// Wait blocks until the payload has been fully read.
+func (p *payloadCloser) Wait() {
+	p.wait.Wait()
+	p.buf = nil // release the buffer
+}
+
+// complete signals that the payload has been fully read.
+func (p *payloadCloser) complete() {
+	if p.isDone.CompareAndSwap(false, true) && p.buf != nil {
+		p.wait.Done()
+	}
 }
