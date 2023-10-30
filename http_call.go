@@ -221,8 +221,10 @@ func (c *httpCall) sendUnary(buffer *bytes.Buffer) error {
 		c.request.Body = payload
 		c.request.ContentLength = int64(buffer.Len())
 		c.request.GetBody = func() (io.ReadCloser, error) {
-			payload.Rewind()
-			return payload, nil
+			if payload.Rewind() {
+				return payload, nil
+			}
+			return nil, errors.New("payload cannot be rewound")
 		}
 		// Wait for the payload to be fully drained before we return
 		// from Send to ensure the buffer can safely be reused.
@@ -372,19 +374,25 @@ func (p *payloadCloser) Close() error {
 // has been discarded.
 // Note: it should not be possible for GetBody to be called after the response
 // is received.
-func (p *payloadCloser) Rewind() {
+func (p *payloadCloser) Rewind() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.buf == nil {
+		return false
+	}
 	p.readN = 0
 	if p.isDone {
 		p.isDone = false
 		p.wait.Add(1)
 	}
+	return true
 }
 
 // Wait blocks until the payload has been fully read.
 func (p *payloadCloser) Wait() {
 	p.wait.Wait()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.buf = nil // Discard the buffer
 }
 
