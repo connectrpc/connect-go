@@ -220,9 +220,7 @@ func (c *httpCall) sendUnary(buffer *bytes.Buffer) error {
 		c.request.Body = payload
 		c.request.ContentLength = int64(buffer.Len())
 		c.request.GetBody = func() (io.ReadCloser, error) {
-			if !payload.Rewind() {
-				return nil, errors.New("payload already sent")
-			}
+			payload.Rewind()
 			return payload, nil
 		}
 		// Wait for the payload to be fully drained before we return
@@ -366,21 +364,16 @@ func (p *payloadCloser) Close() error {
 // has been discarded.
 // Note: it should not be possible for GetBody to be called after the response
 // is received.
-func (p *payloadCloser) Rewind() bool {
-	if p.buf == nil {
-		return false
-	}
+func (p *payloadCloser) Rewind() {
 	p.readN = 0
 	if p.isDone.CompareAndSwap(true, false) {
 		p.wait.Add(1)
 	}
-	return true
 }
 
 // Wait blocks until the payload has been fully read.
 func (p *payloadCloser) Wait() {
 	p.wait.Wait()
-	p.buf = nil // release the buffer
 }
 
 // complete signals that the payload has been fully read.
