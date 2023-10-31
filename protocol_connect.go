@@ -498,10 +498,7 @@ func (cc *connectUnaryClientConn) ResponseTrailer() http.Header {
 }
 
 func (cc *connectUnaryClientConn) CloseResponse() error {
-	if response := cc.call.response; response != nil {
-		return response.Body.Close()
-	}
-	return nil
+	return cc.call.CloseRead()
 }
 
 func (cc *connectUnaryClientConn) onRequestSend(fn func(*http.Request)) {
