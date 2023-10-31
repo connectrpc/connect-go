@@ -277,17 +277,13 @@ func (c *httpCall) makeRequest() {
 			err = NewError(CodeUnavailable, err)
 		}
 		c.responseErr = err
-		if c.requestBodyWriter != nil {
-			c.requestBodyWriter.Close()
-		}
+		_ = c.CloseWrite()
 		return
 	}
 	c.response = response
 	if err := c.validateResponse(response); err != nil {
 		c.responseErr = err
-		if c.requestBodyWriter != nil {
-			c.requestBodyWriter.Close()
-		}
+		_ = c.CloseWrite()
 		return
 	}
 	if (c.streamType&StreamTypeBidi) == StreamTypeBidi && response.ProtoMajor < 2 {
@@ -300,9 +296,7 @@ func (c *httpCall) makeRequest() {
 			response.ProtoMajor,
 			response.ProtoMinor,
 		)
-		if c.requestBodyWriter != nil {
-			c.requestBodyWriter.Close()
-		}
+		_ = c.CloseWrite()
 	}
 }
 
