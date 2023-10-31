@@ -122,9 +122,8 @@ func (c *httpCall) CloseWrite() error {
 	// CloseWrite automatically rather than requiring the user to do it.
 	if c.requestBodyWriter != nil {
 		return c.requestBodyWriter.Close()
-	} else {
-		return c.request.Body.Close()
 	}
+	return c.request.Body.Close()
 }
 
 // Header returns the HTTP request headers.
