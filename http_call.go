@@ -26,11 +26,8 @@ import (
 	"sync/atomic"
 )
 
-// httpCall is a full-duplex stream between the client and server. The
-// request body is the stream from client to server, and the response body is
-// the reverse.
-//
-// Be warned: we need to use some lesser-known APIs to do this with net/http.
+// httpCall builds a HTTP request and sends it to a servcer. Unary calls block
+// until the response is received. Streaming calls return immediately.
 type httpCall struct {
 	ctx              context.Context
 	client           HTTPClient
@@ -38,9 +35,8 @@ type httpCall struct {
 	onRequestSend    func(*http.Request)
 	validateResponse func(*http.Response) *Error
 
-	// We'll use a pipe as the request body. We hand the read side of the pipe to
-	// net/http, and we write to the write side (naturally). The two ends are
-	// safe to use concurrently.
+	// io.Pipe is used to implement the request body for client streaming calls.
+	// If the request is unary, this is nil.
 	requestBodyWriter *io.PipeWriter
 
 	requestSent atomic.Bool
@@ -229,7 +225,7 @@ func (c *httpCall) sendUnary(buffer *bytes.Buffer) error {
 		// from Send to ensure the buffer can safely be reused.
 		defer payload.Wait()
 	}
-	c.makeRequest() // blocks until the response is ready
+	c.makeRequest() // Blocks until the response is ready
 	return nil      // Only report response errors on Read
 }
 
@@ -325,8 +321,9 @@ func cloneURL(oldURL *url.URL) *url.URL {
 }
 
 // payloadCloser is a ReadCloser that wraps a bytes.Buffer. It's used to
-// implement the request body for unary calls. On full reads or Close, it
-// signals that the payload has been fully read.
+// implement the request body for unary calls. To safely reuse the buffer
+// call Wait after the response is received to ensure the payload has been
+// fully read.
 type payloadCloser struct {
 	wait sync.WaitGroup
 
@@ -340,7 +337,7 @@ func newPayloadCloser(buf *bytes.Buffer) *payloadCloser {
 	payload := &payloadCloser{
 		buf: buf,
 	}
-	payload.wait.Add(1)
+	payload.wait.Add(1) // Wait until complete is called
 	return payload
 }
 
@@ -370,9 +367,7 @@ func (p *payloadCloser) Close() error {
 }
 
 // Rewind resets the payload to the beginning. It returns false if the buffer
-// has been discarded.
-// Note: it should not be possible for GetBody to be called after the response
-// is received.
+// has been discarded from a previous call to Wait.
 func (p *payloadCloser) Rewind() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()

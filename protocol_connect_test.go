@@ -87,7 +87,7 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 		},
 	}
 	src := &buffer
-	err = unmarshaler.Unmarshal(nil, src) // parameter won't be used
+	err = unmarshaler.Unmarshal(nil /* message unused */, src)
 	assert.ErrorIs(t, err, errSpecialEnvelope)
 	assert.Equal(t, unmarshaler.Trailer().Values("Not-Canonical-Header"), []string{"a"})
 	assert.Equal(t, unmarshaler.Trailer().Values("Mixed-Canonical"), []string{"b", "b"})

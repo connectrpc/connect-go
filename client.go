@@ -135,7 +135,7 @@ func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamFo
 	if c.err != nil {
 		return &ClientStreamForClient[Req, Res]{err: c.err}
 	}
-	return &ClientStreamForClient[Req, Res]{conn: c.newConn(ctx, StreamTypeClient, nil /* header */, nil /* onRequestSend */)}
+	return &ClientStreamForClient[Req, Res]{conn: c.newConn(ctx, StreamTypeClient, nil /* onRequestSend */)}
 }
 
 // CallServerStream calls a server streaming procedure.
@@ -143,11 +143,12 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 	if c.err != nil {
 		return nil, c.err
 	}
-	conn := c.newConn(ctx, StreamTypeServer, request.header, func(r *http.Request) {
+	conn := c.newConn(ctx, StreamTypeServer, func(r *http.Request) {
 		request.method = r.Method
 	})
 	request.spec = conn.Spec()
 	request.peer = conn.Peer()
+	mergeHeaders(conn.RequestHeader(), request.header)
 	// Send always returns an io.EOF unless the error is from the client-side.
 	// We want the user to continue to call Receive in those cases to get the
 	// full error from the server-side.
@@ -167,14 +168,12 @@ func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForCli
 	if c.err != nil {
 		return &BidiStreamForClient[Req, Res]{err: c.err}
 	}
-	return &BidiStreamForClient[Req, Res]{conn: c.newConn(ctx, StreamTypeBidi, nil /* header */, nil /* onRequestSend */)}
+	return &BidiStreamForClient[Req, Res]{conn: c.newConn(ctx, StreamTypeBidi, nil /* onRequestSend */)}
 }
 
-func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType, header http.Header, onRequestSend func(r *http.Request)) StreamingClientConn {
-	if header == nil {
-		header = make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
-	}
+func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType, onRequestSend func(r *http.Request)) StreamingClientConn {
 	newConn := func(ctx context.Context, spec Spec) StreamingClientConn {
+		header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
 		c.protocolClient.WriteRequestHeader(streamType, header)
 		conn := c.protocolClient.NewConn(ctx, spec, header)
 		conn.onRequestSend(onRequestSend)

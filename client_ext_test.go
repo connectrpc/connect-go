@@ -109,7 +109,7 @@ func TestClientPeer(t *testing.T) {
 		err = clientStream.Send(&pingv1.SumRequest{})
 		assert.Nil(t, err)
 		// server streaming
-		serverStream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 1}))
+		serverStream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{}))
 		t.Cleanup(func() {
 			assert.Nil(t, serverStream.Close())
 		})
