@@ -476,7 +476,9 @@ func (cc *connectUnaryClientConn) CloseRequest() error {
 }
 
 func (cc *connectUnaryClientConn) Receive(msg any) error {
-	cc.duplexCall.BlockUntilResponseReady()
+	if err := cc.duplexCall.BlockUntilResponseReady(); err != nil {
+		return err
+	}
 	if err := cc.unmarshaler.Unmarshal(msg); err != nil {
 		return err
 	}
@@ -484,12 +486,12 @@ func (cc *connectUnaryClientConn) Receive(msg any) error {
 }
 
 func (cc *connectUnaryClientConn) ResponseHeader() http.Header {
-	cc.duplexCall.BlockUntilResponseReady()
+	_ = cc.duplexCall.BlockUntilResponseReady()
 	return cc.responseHeader
 }
 
 func (cc *connectUnaryClientConn) ResponseTrailer() http.Header {
-	cc.duplexCall.BlockUntilResponseReady()
+	_ = cc.duplexCall.BlockUntilResponseReady()
 	return cc.responseTrailer
 }
 
@@ -587,7 +589,9 @@ func (cc *connectStreamingClientConn) CloseRequest() error {
 }
 
 func (cc *connectStreamingClientConn) Receive(msg any) error {
-	cc.duplexCall.BlockUntilResponseReady()
+	if err := cc.duplexCall.BlockUntilResponseReady(); err != nil {
+		return err
+	}
 	err := cc.unmarshaler.Unmarshal(msg)
 	if err == nil {
 		return nil
@@ -601,7 +605,7 @@ func (cc *connectStreamingClientConn) Receive(msg any) error {
 		// error.
 		serverErr.meta = cc.responseHeader.Clone()
 		mergeHeaders(serverErr.meta, cc.responseTrailer)
-		cc.duplexCall.SetError(serverErr)
+		_ = cc.duplexCall.CloseWrite()
 		return serverErr
 	}
 	// If the error is EOF but not from a last message, we want to return
@@ -612,18 +616,18 @@ func (cc *connectStreamingClientConn) Receive(msg any) error {
 	// There's no error in the trailers, so this was probably an error
 	// converting the bytes to a message, an error reading from the network, or
 	// just an EOF. We're going to return it to the user, but we also want to
-	// setResponseError so Send errors out.
-	cc.duplexCall.SetError(err)
+	// close the writer so Send errors out.
+	_ = cc.duplexCall.CloseWrite()
 	return err
 }
 
 func (cc *connectStreamingClientConn) ResponseHeader() http.Header {
-	cc.duplexCall.BlockUntilResponseReady()
+	_ = cc.duplexCall.BlockUntilResponseReady()
 	return cc.responseHeader
 }
 
 func (cc *connectStreamingClientConn) ResponseTrailer() http.Header {
-	cc.duplexCall.BlockUntilResponseReady()
+	_ = cc.duplexCall.BlockUntilResponseReady()
 	return cc.responseTrailer
 }
 

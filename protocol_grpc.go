@@ -358,7 +358,9 @@ func (cc *grpcClientConn) CloseRequest() error {
 }
 
 func (cc *grpcClientConn) Receive(msg any) error {
-	cc.duplexCall.BlockUntilResponseReady()
+	if err := cc.duplexCall.BlockUntilResponseReady(); err != nil {
+		return err
+	}
 	err := cc.unmarshaler.Unmarshal(msg)
 	if err == nil {
 		return nil
@@ -386,23 +388,23 @@ func (cc *grpcClientConn) Receive(msg any) error {
 		// the stream has ended, Receive must return an error.
 		serverErr.meta = cc.responseHeader.Clone()
 		mergeHeaders(serverErr.meta, cc.responseTrailer)
-		cc.duplexCall.SetError(serverErr)
+		_ = cc.duplexCall.CloseWrite()
 		return serverErr
 	}
 	// This was probably an error converting the bytes to a message or an error
 	// reading from the network. We're going to return it to the
-	// user, but we also want to setResponseError so Send errors out.
-	cc.duplexCall.SetError(err)
+	// user, but we also want to close writes so Send errors out.
+	_ = cc.duplexCall.CloseWrite()
 	return err
 }
 
 func (cc *grpcClientConn) ResponseHeader() http.Header {
-	cc.duplexCall.BlockUntilResponseReady()
+	_ = cc.duplexCall.BlockUntilResponseReady()
 	return cc.responseHeader
 }
 
 func (cc *grpcClientConn) ResponseTrailer() http.Header {
-	cc.duplexCall.BlockUntilResponseReady()
+	_ = cc.duplexCall.BlockUntilResponseReady()
 	return cc.responseTrailer
 }
 
