@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -30,6 +29,7 @@ import (
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/memhttp/memhttptest"
 )
 
 func TestHandler_ServeHTTP(t *testing.T) {
@@ -42,18 +42,15 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	mux.Handle("/prefixed/", http.StripPrefix("/prefixed", prefixed))
 	const pingProcedure = pingv1connect.PingServicePingProcedure
 	const sumProcedure = pingv1connect.PingServiceSumProcedure
-	server := httptest.NewServer(mux)
+	server := memhttptest.NewServer(t, mux)
 	client := server.Client()
-	t.Cleanup(func() {
-		server.Close()
-	})
 
 	t.Run("get_method_no_encoding", func(t *testing.T) {
 		t.Parallel()
 		request, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodGet,
-			server.URL+pingProcedure,
+			server.URL()+pingProcedure,
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err)
@@ -68,7 +65,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		request, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodGet,
-			server.URL+pingProcedure+`?encoding=unk&message={}`,
+			server.URL()+pingProcedure+`?encoding=unk&message={}`,
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err)
@@ -83,7 +80,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		request, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodGet,
-			server.URL+pingProcedure+`?encoding=json&message={}`,
+			server.URL()+pingProcedure+`?encoding=json&message={}`,
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err)
@@ -98,7 +95,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		request, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodGet,
-			server.URL+"/prefixed"+pingProcedure+`?encoding=json&message={}`,
+			server.URL()+"/prefixed"+pingProcedure+`?encoding=json&message={}`,
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err)
@@ -113,7 +110,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		request, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodGet,
-			server.URL+sumProcedure,
+			server.URL()+sumProcedure,
 			strings.NewReader(""),
 		)
 		assert.Nil(t, err)
@@ -129,7 +126,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		request, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodPost,
-			server.URL+pingProcedure,
+			server.URL()+pingProcedure,
 			strings.NewReader("{}"),
 		)
 		assert.Nil(t, err)
@@ -158,7 +155,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		req, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodPost,
-			server.URL+pingProcedure,
+			server.URL()+pingProcedure,
 			strings.NewReader("{}"),
 		)
 		assert.Nil(t, err)
@@ -174,7 +171,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		req, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodPost,
-			server.URL+pingProcedure,
+			server.URL()+pingProcedure,
 			strings.NewReader("{}"),
 		)
 		assert.Nil(t, err)
@@ -190,7 +187,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		req, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodPost,
-			server.URL+pingProcedure,
+			server.URL()+pingProcedure,
 			strings.NewReader("{}"),
 		)
 		assert.Nil(t, err)
@@ -217,8 +214,7 @@ func TestHandlerMaliciousPrefix(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(successPingServer{}))
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
+	server := memhttptest.NewServer(t, mux)
 
 	const (
 		concurrency  = 256
@@ -234,7 +230,7 @@ func TestHandlerMaliciousPrefix(t *testing.T) {
 		req, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodPost,
-			server.URL+pingv1connect.PingServicePingProcedure,
+			server.URL()+pingv1connect.PingServicePingProcedure,
 			bytes.NewReader(body),
 		)
 		assert.Nil(t, err)
