@@ -186,7 +186,6 @@ func (g *grpcHandler) NewConn(
 		protobuf:   g.Codecs.Protobuf(), // for errors
 		marshaler: grpcMarshaler{
 			envelopeWriter: envelopeWriter{
-				writer:           responseWriter,
 				compressionPool:  g.CompressionPools.Get(responseCompression),
 				codec:            codec,
 				compressMinBytes: g.CompressMinBytes,
@@ -200,7 +199,6 @@ func (g *grpcHandler) NewConn(
 		request:         request,
 		unmarshaler: grpcUnmarshaler{
 			envelopeReader: envelopeReader{
-				reader:          request.Body,
 				codec:           codec,
 				compressionPool: g.CompressionPools.Get(requestCompression),
 				bufferPool:      g.BufferPool,
@@ -284,7 +282,6 @@ func (g *grpcClient) NewConn(
 		protobuf:         g.Protobuf,
 		marshaler: grpcMarshaler{
 			envelopeWriter: envelopeWriter{
-				writer:           duplexCall,
 				compressionPool:  g.CompressionPools.Get(g.CompressionName),
 				codec:            g.Codec,
 				compressMinBytes: g.CompressMinBytes,
@@ -294,7 +291,6 @@ func (g *grpcClient) NewConn(
 		},
 		unmarshaler: grpcUnmarshaler{
 			envelopeReader: envelopeReader{
-				reader:       duplexCall,
 				codec:        g.Codec,
 				bufferPool:   g.BufferPool,
 				readMaxBytes: g.ReadMaxBytes,
@@ -343,7 +339,7 @@ func (cc *grpcClientConn) Peer() Peer {
 }
 
 func (cc *grpcClientConn) Send(msg any) error {
-	if err := cc.marshaler.Marshal(msg); err != nil {
+	if err := cc.marshaler.Marshal(cc.duplexCall, msg); err != nil {
 		return err
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
@@ -361,7 +357,7 @@ func (cc *grpcClientConn) Receive(msg any) error {
 	if err := cc.duplexCall.BlockUntilResponseReady(); err != nil {
 		return err
 	}
-	err := cc.unmarshaler.Unmarshal(msg)
+	err := cc.unmarshaler.Unmarshal(msg, cc.duplexCall)
 	if err == nil {
 		return nil
 	}
@@ -455,7 +451,7 @@ func (hc *grpcHandlerConn) Peer() Peer {
 }
 
 func (hc *grpcHandlerConn) Receive(msg any) error {
-	if err := hc.unmarshaler.Unmarshal(msg); err != nil {
+	if err := hc.unmarshaler.Unmarshal(msg, hc.request.Body); err != nil {
 		return err // already coded
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
@@ -471,7 +467,7 @@ func (hc *grpcHandlerConn) Send(msg any) error {
 		mergeHeaders(hc.responseWriter.Header(), hc.responseHeader)
 		hc.wroteToBody = true
 	}
-	if err := hc.marshaler.Marshal(msg); err != nil {
+	if err := hc.marshaler.Marshal(hc.responseWriter, msg); err != nil {
 		return err
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
@@ -526,7 +522,7 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 	if hc.web {
 		// We're using gRPC-Web and we've already sent the headers, so we write
 		// trailing metadata to the HTTP body.
-		if err := hc.marshaler.MarshalWebTrailers(mergedTrailers); err != nil {
+		if err := hc.marshaler.MarshalWebTrailers(hc.responseWriter, mergedTrailers); err != nil {
 			return err
 		}
 		return nil // must be a literal nil: nil *Error is a non-nil error
@@ -578,7 +574,7 @@ type grpcMarshaler struct {
 	envelopeWriter
 }
 
-func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *Error {
+func (m *grpcMarshaler) MarshalWebTrailers(dst io.Writer, trailer http.Header) *Error {
 	raw := m.envelopeWriter.bufferPool.Get()
 	defer m.envelopeWriter.bufferPool.Put(raw)
 	for key, values := range trailer {
@@ -595,7 +591,7 @@ func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *Error {
 	if err := trailer.Write(raw); err != nil {
 		return errorf(CodeInternal, "format trailers: %w", err)
 	}
-	return m.Write(&envelope{
+	return m.Write(dst, &envelope{
 		Data:  raw,
 		Flags: grpcFlagEnvelopeTrailer,
 	})
@@ -607,8 +603,8 @@ type grpcUnmarshaler struct {
 	webTrailer     http.Header
 }
 
-func (u *grpcUnmarshaler) Unmarshal(message any) *Error {
-	err := u.envelopeReader.Unmarshal(message)
+func (u *grpcUnmarshaler) Unmarshal(message any, src io.Reader) *Error {
+	err := u.envelopeReader.Unmarshal(message, src)
 	if err == nil {
 		return nil
 	}

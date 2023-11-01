@@ -72,10 +72,10 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 	assert.Nil(t, err)
 
 	writer := envelopeWriter{
-		writer:     &buffer,
 		bufferPool: bufferPool,
 	}
-	err = writer.Write(&envelope{
+	dst := &buffer
+	err = writer.Write(dst, &envelope{
 		Flags: connectFlagEnvelopeEndStream,
 		Data:  bytes.NewBuffer(endStreamData),
 	})
@@ -83,11 +83,11 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 
 	unmarshaler := connectStreamingUnmarshaler{
 		envelopeReader: envelopeReader{
-			reader:     &buffer,
 			bufferPool: bufferPool,
 		},
 	}
-	err = unmarshaler.Unmarshal(nil) // parameter won't be used
+	src := &buffer
+	err = unmarshaler.Unmarshal(nil /* message unused */, src)
 	assert.ErrorIs(t, err, errSpecialEnvelope)
 	assert.Equal(t, unmarshaler.Trailer().Values("Not-Canonical-Header"), []string{"a"})
 	assert.Equal(t, unmarshaler.Trailer().Values("Mixed-Canonical"), []string{"b", "b"})

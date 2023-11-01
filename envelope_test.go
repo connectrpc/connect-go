@@ -29,7 +29,6 @@ func TestEnvelope_read(t *testing.T) {
 	head := [5]byte{}
 	payload := []byte(`{"number": 42}`)
 	binary.BigEndian.PutUint32(head[1:], uint32(len(payload)))
-
 	buf := &bytes.Buffer{}
 	buf.Write(head[:])
 	buf.Write(payload)
@@ -37,22 +36,51 @@ func TestEnvelope_read(t *testing.T) {
 	t.Run("full", func(t *testing.T) {
 		t.Parallel()
 		env := &envelope{Data: &bytes.Buffer{}}
-		rdr := envelopeReader{
-			reader: bytes.NewReader(buf.Bytes()),
-		}
-		assert.Nil(t, rdr.Read(env))
+		rdr := envelopeReader{}
+		src := bytes.NewReader(buf.Bytes())
+		assert.Nil(t, rdr.Read(env, src))
 		assert.Equal(t, payload, env.Data.Bytes())
 	})
 	t.Run("byteByByte", func(t *testing.T) {
 		t.Parallel()
 		env := &envelope{Data: &bytes.Buffer{}}
-		rdr := envelopeReader{
-			reader: byteByByteReader{
-				reader: bytes.NewReader(buf.Bytes()),
-			},
+		rdr := envelopeReader{}
+		src := byteByByteReader{
+			reader: bytes.NewReader(buf.Bytes()),
 		}
-		assert.Nil(t, rdr.Read(env))
+		assert.Nil(t, rdr.Read(env, src))
 		assert.Equal(t, payload, env.Data.Bytes())
+	})
+}
+
+func TestEnvelope_write(t *testing.T) {
+	t.Parallel()
+
+	head := [5]byte{}
+	payload := []byte(`{"number": 42}`)
+	binary.BigEndian.PutUint32(head[1:], uint32(len(payload)))
+	buf := &bytes.Buffer{}
+	buf.Write(head[:])
+	buf.Write(payload)
+
+	t.Run("match", func(t *testing.T) {
+		t.Parallel()
+		dst := &bytes.Buffer{}
+		wtr := envelopeWriter{}
+		env := &envelope{Data: bytes.NewBuffer(payload)}
+		err := wtr.Write(dst, env)
+		assert.Nil(t, err)
+		assert.Equal(t, buf.Bytes(), dst.Bytes())
+	})
+	t.Run("partial", func(t *testing.T) {
+		t.Parallel()
+		dst := &bytes.Buffer{}
+		env := &envelope{Data: bytes.NewBuffer(payload)}
+		_, err := io.CopyN(dst, env, 2)
+		assert.Nil(t, err)
+		_, err = env.WriteTo(dst)
+		assert.Nil(t, err)
+		assert.Equal(t, buf.Bytes(), dst.Bytes())
 	})
 }
 
