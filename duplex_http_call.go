@@ -39,9 +39,13 @@ type httpCall struct {
 	// If the request is unary, this is nil.
 	requestBodyWriter *io.PipeWriter
 
+	// requestSent ensures we only send the request once.
 	requestSent atomic.Bool
 	request     *http.Request
 
+	// responseReady is closed when the response is ready or when the request
+	// fails. Any error on request initialisation will be set on the
+	// responseErr. There's always a response if responseErr is nil.
 	responseReady chan struct{}
 	response      *http.Response
 	responseErr   error
@@ -117,6 +121,9 @@ func (c *httpCall) CloseWrite() error {
 	// code for unary, client streaming, and server streaming RPCs must call
 	// CloseWrite automatically rather than requiring the user to do it.
 	if c.requestBodyWriter != nil {
+		// On error, we close the request body using the Write side of the pipe.
+		// This ensures HTTP2 streams receive an io.EOF from the Read side of the
+		// pipe. Write's check for io.ErrClosedPipe and will convert this to io.EOF.
 		return c.requestBodyWriter.Close()
 	}
 	return c.request.Body.Close()
@@ -140,8 +147,8 @@ func (c *httpCall) SetMethod(method string) {
 // Read from the response body.
 func (c *httpCall) Read(data []byte) (int, error) {
 	// First, we wait until we've gotten the response headers and established the
-	// server-to-client side of the stream.
 	if err := c.BlockUntilResponseReady(); err != nil {
+		// The stream is already closed or corrupted.
 		return 0, err
 	}
 	// Before we read, check if the context has been canceled.
@@ -157,7 +164,9 @@ func (c *httpCall) CloseRead() error {
 	if c.response == nil {
 		return nil
 	}
-	if _, err := discard(c.response.Body); err != nil {
+	if _, err := discard(c.response.Body); err != nil &&
+		!errors.Is(err, context.Canceled) &&
+		!errors.Is(err, context.DeadlineExceeded) {
 		_ = c.response.Body.Close()
 		return wrapIfRSTError(err)
 	}
@@ -196,6 +205,8 @@ func (c *httpCall) SetValidateResponse(validate func(*http.Response) *Error) {
 	c.validateResponse = validate
 }
 
+// BlockUntilResponseReady returns when the response is ready or reports an
+// error from initializing the request.
 func (c *httpCall) BlockUntilResponseReady() error {
 	<-c.responseReady
 	return c.responseErr
@@ -267,7 +278,7 @@ func (c *httpCall) makeRequest() {
 	}
 	// Once we send a message to the server, they send a message back and
 	// establish the receive side of the stream.
-	response, err := c.client.Do(c.request)
+	response, err := c.client.Do(c.request) //nolint:bodyclose
 	if err != nil {
 		err = wrapIfContextError(err)
 		err = wrapIfLikelyH2CNotConfiguredError(c.request, err)
@@ -280,6 +291,8 @@ func (c *httpCall) makeRequest() {
 		_ = c.CloseWrite()
 		return
 	}
+	// We've got a response. We can now read from the response body.
+	// Closing the response body is delegated to the caller even on error.
 	c.response = response
 	if err := c.validateResponse(response); err != nil {
 		c.responseErr = err

@@ -27,9 +27,8 @@ import (
 
 func Example_client() {
 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
-	// Unfortunately, pkg.go.dev can't run examples that actually use the
-	// network. To keep this example runnable, we'll use an HTTP server and
-	// client that communicate over in-memory pipes. The client is still a plain
+	// To keep this example runnable, we'll use an HTTP server and client
+	// that communicate over in-memory pipes. The client is still a plain
 	// *http.Client!
 	var httpClient *http.Client = examplePingServer.Client()
 
