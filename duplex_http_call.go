@@ -278,7 +278,7 @@ func (c *httpCall) makeRequest() {
 	}
 	// Once we send a message to the server, they send a message back and
 	// establish the receive side of the stream.
-	response, err := c.client.Do(c.request) //nolint:bodyclose
+	response, err := c.client.Do(c.request)
 	if err != nil {
 		err = wrapIfContextError(err)
 		err = wrapIfLikelyH2CNotConfiguredError(c.request, err)
