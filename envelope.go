@@ -187,7 +187,7 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 		if r.compressionPool == nil {
 			return errorf(
 				CodeInvalidArgument,
-				"protocol error: sent compressed message without Grpc-Encoding header",
+				"protocol error: sent compressed message without compression support",
 			)
 		}
 		decompressed := r.bufferPool.Get()
@@ -219,28 +219,22 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 	}
 
 	if err := r.codec.Unmarshal(data.Bytes(), message); err != nil {
-		return errorf(CodeInvalidArgument, "unmarshal into %T: %w", message, err)
+		return errorf(CodeInvalidArgument, "unmarshal message: %w", err)
 	}
 	return nil
 }
 
 func (r *envelopeReader) Read(env *envelope) *Error {
 	prefixes := [5]byte{}
-	prefixBytesRead, err := r.reader.Read(prefixes[:])
-
-	switch {
-	case (err == nil || errors.Is(err, io.EOF)) &&
-		prefixBytesRead == 5 &&
-		isSizeZeroPrefix(prefixes):
-		// Successfully read prefix and expect no additional data.
-		env.Flags = prefixes[0]
-		return nil
-	case err != nil && errors.Is(err, io.EOF) && prefixBytesRead == 0:
-		// The stream ended cleanly. That's expected, but we need to propagate them
-		// to the user so that they know that the stream has ended. We shouldn't
-		// add any alarming text about protocol errors, though.
-		return NewError(CodeUnknown, err)
-	case err != nil || prefixBytesRead < 5:
+	// io.ReadFull reads the number of bytes requested, or returns an error.
+	// io.EOF will only be returned if no bytes were read.
+	if _, err := io.ReadFull(r.reader, prefixes[:]); err != nil {
+		if errors.Is(err, io.EOF) {
+			// The stream ended cleanly. That's expected, but we need to propagate an EOF
+			// to the user so that they know that the stream has ended. We shouldn't
+			// add any alarming text about protocol errors, though.
+			return NewError(CodeUnknown, err)
+		}
 		// Something else has gone wrong - the stream didn't end cleanly.
 		if connectErr, ok := asError(err); ok {
 			return connectErr
@@ -249,20 +243,14 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 			// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.
 			return maxBytesErr
 		}
-		if err == nil {
-			err = io.ErrUnexpectedEOF
-		}
 		return errorf(
 			CodeInvalidArgument,
 			"protocol error: incomplete envelope: %w", err,
 		)
 	}
-	size := int(binary.BigEndian.Uint32(prefixes[1:5]))
-	if size < 0 {
-		return errorf(CodeInvalidArgument, "message size %d overflowed uint32", size)
-	}
-	if r.readMaxBytes > 0 && size > r.readMaxBytes {
-		_, err := io.CopyN(io.Discard, r.reader, int64(size))
+	size := int64(binary.BigEndian.Uint32(prefixes[1:5]))
+	if r.readMaxBytes > 0 && size > int64(r.readMaxBytes) {
+		_, err := io.CopyN(io.Discard, r.reader, size)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return errorf(CodeUnknown, "read enveloped message: %w", err)
 		}
@@ -273,7 +261,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		// length-prefixed messages may arrive in chunks, so we may need to read
 		// the request body past EOF. We also need to take care that we don't retry
 		// forever if the message is malformed.
-		remaining := int64(size)
+		remaining := size
 		for remaining > 0 {
 			bytesRead, err := io.CopyN(env.Data, r.reader, remaining)
 			if err != nil && !errors.Is(err, io.EOF) {
@@ -290,7 +278,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 					CodeInvalidArgument,
 					"protocol error: promised %d bytes in enveloped message, got %d bytes",
 					size,
-					int64(size)-remaining,
+					size-remaining,
 				)
 			}
 			remaining -= bytesRead
@@ -298,13 +286,4 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 	}
 	env.Flags = prefixes[0]
 	return nil
-}
-
-func isSizeZeroPrefix(prefix [5]byte) bool {
-	for i := 1; i < 5; i++ {
-		if prefix[i] != 0 {
-			return false
-		}
-	}
-	return true
 }

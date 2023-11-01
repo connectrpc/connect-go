@@ -48,25 +48,143 @@ func BenchmarkConnect(b *testing.B) {
 	assert.True(b, ok)
 	httpTransport.DisableCompression = true
 
-	client := pingv1connect.NewPingServiceClient(
-		httpClient,
-		server.URL,
-		connect.WithGRPC(),
-		connect.WithSendGzip(),
-	)
-	twoMiB := strings.Repeat("a", 2*1024*1024)
-	b.ResetTimer()
+	clients := []struct {
+		name string
+		opts []connect.ClientOption
+	}{{
+		name: "connect",
+		opts: []connect.ClientOption{},
+	}, {
+		name: "grpc",
+		opts: []connect.ClientOption{
+			connect.WithGRPC(),
+		},
+	}, {
+		name: "grpcweb",
+		opts: []connect.ClientOption{
+			connect.WithGRPCWeb(),
+		},
+	}}
 
-	b.Run("unary", func(b *testing.B) {
-		b.RunParallel(func(pb *testing.PB) {
-			for pb.Next() {
-				_, _ = client.Ping(
-					context.Background(),
-					connect.NewRequest(&pingv1.PingRequest{Text: twoMiB}),
-				)
-			}
+	twoMiB := strings.Repeat("a", 2*1024*1024)
+	for _, client := range clients {
+		b.Run(client.name, func(b *testing.B) {
+			client := pingv1connect.NewPingServiceClient(
+				httpClient,
+				server.URL,
+				connect.WithSendGzip(),
+				connect.WithClientOptions(client.opts...),
+			)
+
+			ctx := context.Background()
+			b.Run("unary_big", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						if _, err := client.Ping(
+							ctx, connect.NewRequest(&pingv1.PingRequest{Text: twoMiB}),
+						); err != nil {
+							b.Error(err)
+						}
+					}
+				})
+			})
+			b.Run("unary_small", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						response, err := client.Ping(
+							ctx, connect.NewRequest(&pingv1.PingRequest{Number: 42}),
+						)
+						if err != nil {
+							b.Error(err)
+						} else if response.Msg.Number != 42 {
+							b.Errorf("expected 42, got %d", response.Msg.Number)
+						}
+					}
+				})
+			})
+			b.Run("client_stream", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						const (
+							upTo   = 1
+							expect = 1
+						)
+						stream := client.Sum(ctx)
+						for number := int64(1); number <= upTo; number++ {
+							if err := stream.Send(&pingv1.SumRequest{Number: number}); err != nil {
+								b.Error(err)
+							}
+						}
+						response, err := stream.CloseAndReceive()
+						if err != nil {
+							b.Error(err)
+						} else if response.Msg.Sum != expect {
+							b.Errorf("expected %d, got %d", expect, response.Msg.Sum)
+						}
+					}
+				})
+			})
+			b.Run("server_stream", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						const (
+							upTo = 1
+						)
+						request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
+						stream, err := client.CountUp(ctx, request)
+						if err != nil {
+							b.Error(err)
+							return
+						}
+						number := int64(1)
+						for ; stream.Receive(); number++ {
+							if stream.Msg().Number != number {
+								b.Errorf("expected %d, got %d", number, stream.Msg().Number)
+							}
+						}
+						if number != upTo+1 {
+							b.Errorf("expected %d, got %d", upTo+1, number)
+						}
+					}
+				})
+			})
+			b.Run("bidi_stream", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						const (
+							upTo = 1
+						)
+						stream := client.CumSum(ctx)
+						number := int64(1)
+						for ; number <= upTo; number++ {
+							if err := stream.Send(&pingv1.CumSumRequest{Number: number}); err != nil {
+								b.Error(err)
+							}
+
+							msg, err := stream.Receive()
+							if err != nil {
+								b.Error(err)
+							}
+							if msg.Sum != number*(number+1)/2 {
+								b.Errorf("expected %d, got %d", number*(number+1)/2, msg.Sum)
+							}
+						}
+						if err := stream.CloseRequest(); err != nil {
+							b.Error(err)
+						}
+						if err := stream.CloseResponse(); err != nil {
+							b.Error(err)
+						}
+					}
+				})
+			})
 		})
-	})
+	}
 }
 
 type ping struct {

@@ -59,8 +59,6 @@ const (
 )
 
 // defaultConnectUserAgent returns a User-Agent string similar to those used in gRPC.
-//
-//nolint:gochecknoglobals
 var defaultConnectUserAgent = fmt.Sprintf("connect-go/%s (%s)", Version, runtime.Version())
 
 type protocolConnect struct{}
@@ -1105,7 +1103,7 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 		data = decompressed
 	}
 	if err := unmarshal(data.Bytes(), message); err != nil {
-		return errorf(CodeInvalidArgument, "unmarshal into %T: %w", message, err)
+		return errorf(CodeInvalidArgument, "unmarshal message: %w", err)
 	}
 	return nil
 }

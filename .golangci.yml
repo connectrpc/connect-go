@@ -50,6 +50,7 @@ linters:
     - maintidx          # covered by gocyclo
     - maligned          # readability trumps efficient struct packing
     - nlreturn          # generous whitespace violates house style
+    - nonamedreturns    # named returns are fine; it's *bare* returns that are bad
     - nosnakecase       # deprecated in https://github.com/golangci/golangci-lint/pull/3065
     - scopelint         # deprecated by author
     - structcheck       # abandoned
@@ -73,9 +74,12 @@ issues:
     # We need to init a global in-mem HTTP server for testable examples.
     - linters: [gochecknoinits, gochecknoglobals]
       path: example_init_test.go
-    # We need to initialize a global map from a slice.
-    - linters: [gochecknoinits, gochecknoglobals]
+    # We need to initialize default grpc User-Agent
+    - linters: [gochecknoglobals]
       path: protocol_grpc.go
+    # We need to initialize default connect User-Agent
+    - linters: [gochecknoglobals]
+      path: protocol_connect.go
     # We purposefully do an ineffectual assignment for an example.
     - linters: [ineffassign]
       path: client_example_test.go
