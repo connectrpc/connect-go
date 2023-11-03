@@ -475,7 +475,7 @@ func TestConcurrentStreams(t *testing.T) {
 	server := memhttptest.NewServer(t, mux)
 	var done, start sync.WaitGroup
 	start.Add(1)
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1000; i++ {
 		done.Add(1)
 		go func() {
 			defer done.Done()
