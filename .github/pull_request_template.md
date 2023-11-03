@@ -1,1 +1,5 @@
-**Before submitting your PR:** Please read through the contribution guide at https://connectrpc.com/connect/blob/main/.github/CONTRIBUTING.md
+<!--
+Before submitting your PR, please read through the contribution guide!
+
+https://github.com/connectrpc/connect-go/blob/main/.github/CONTRIBUTING.md
+-->
