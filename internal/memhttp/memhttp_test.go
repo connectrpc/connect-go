@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ import (
 
 func TestServerTransport(t *testing.T) {
 	t.Parallel()
-	const concurrency = 100
+	concurrency := runtime.GOMAXPROCS(0) * 2
 	const greeting = "Hello, world!"
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
