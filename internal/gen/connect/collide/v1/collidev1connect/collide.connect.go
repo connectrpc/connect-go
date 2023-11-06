@@ -65,11 +65,12 @@ type CollideServiceClient interface {
 // http://api.acme.com or https://acme.com/grpc).
 func NewCollideServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) CollideServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
+	serviceDescriptor := v1.File_connect_collide_v1_collide_proto.Services().ByName("CollideService")
 	return &collideServiceClient{
 		_import: connect.NewClient[v1.ImportRequest, v1.ImportResponse](
 			httpClient,
 			baseURL+CollideServiceImportProcedure,
-			connect.WithSchema(v1.File_connect_collide_v1_collide_proto.Services().ByName("CollideService").Methods().ByName("Import")),
+			connect.WithSchema(serviceDescriptor.Methods().ByName("Import")),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -96,10 +97,11 @@ type CollideServiceHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewCollideServiceHandler(svc CollideServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	serviceDescriptor := v1.File_connect_collide_v1_collide_proto.Services().ByName("CollideService")
 	collideServiceImportHandler := connect.NewUnaryHandler(
 		CollideServiceImportProcedure,
 		svc.Import,
-		connect.WithSchema(v1.File_connect_collide_v1_collide_proto.Services().ByName("CollideService").Methods().ByName("Import")),
+		connect.WithSchema(serviceDescriptor.Methods().ByName("Import")),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/connect.collide.v1.CollideService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

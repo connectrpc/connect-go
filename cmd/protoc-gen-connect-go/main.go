@@ -258,7 +258,11 @@ func generateClientImplementation(g *protogen.GeneratedFile, file *protogen.File
 	}
 	g.P("func ", names.ClientConstructor, " (httpClient ", connectPackage.Ident("HTTPClient"),
 		", baseURL string, opts ...", clientOption, ") ", names.Client, " {")
-	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
+	if len(service.Methods) > 0 {
+		g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
+		g.P("serviceDescriptor := ", g.QualifiedGoIdent(file.GoDescriptorIdent),
+			`.Services().ByName("`, service.Desc.Name(), `")`)
+	}
 	g.P("return &", names.ClientImpl, "{")
 	for _, method := range service.Methods {
 		g.P(unexport(method.GoName), ": ",
@@ -269,9 +273,7 @@ func generateClientImplementation(g *protogen.GeneratedFile, file *protogen.File
 		g.P("httpClient,")
 		g.P(`baseURL + `, procedureConstName(method), `,`)
 		g.P(connectPackage.Ident("WithSchema"), "(",
-			g.QualifiedGoIdent(file.GoDescriptorIdent),
-			`.Services().ByName("`, service.Desc.Name(), `")`,
-			`.Methods().ByName("`, method.Desc.Name(), `")),`)
+			`serviceDescriptor.Methods().ByName("`, method.Desc.Name(), `")),`)
 		idempotency := methodIdempotency(method)
 		switch idempotency {
 		case connect.IdempotencyNoSideEffects:
@@ -390,6 +392,10 @@ func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, s
 	handlerOption := connectPackage.Ident("HandlerOption")
 	g.P("func ", names.ServerConstructor, "(svc ", names.Server, ", opts ...", handlerOption,
 		") (string, ", httpPackage.Ident("Handler"), ") {")
+	if len(service.Methods) > 0 {
+		g.P("serviceDescriptor := ", g.QualifiedGoIdent(file.GoDescriptorIdent),
+			`.Services().ByName("`, service.Desc.Name(), `")`)
+	}
 	for _, method := range service.Methods {
 		isStreamingServer := method.Desc.IsStreamingServer()
 		isStreamingClient := method.Desc.IsStreamingClient()
@@ -407,9 +413,7 @@ func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, s
 		g.P(procedureConstName(method), `,`)
 		g.P("svc.", method.GoName, ",")
 		g.P(connectPackage.Ident("WithSchema"), "(",
-			g.QualifiedGoIdent(file.GoDescriptorIdent),
-			`.Services().ByName("`, service.Desc.Name(), `")`,
-			`.Methods().ByName("`, method.Desc.Name(), `")),`)
+			`serviceDescriptor.Methods().ByName("`, method.Desc.Name(), `")),`)
 		switch idempotency {
 		case connect.IdempotencyNoSideEffects:
 			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyNoSideEffects"), "),")

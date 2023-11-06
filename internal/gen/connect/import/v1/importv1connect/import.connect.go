@@ -22,7 +22,6 @@ import (
 	connect "connectrpc.com/connect"
 	_ "connectrpc.com/connect/internal/gen/connect/import/v1"
 	http "net/http"
-	strings "strings"
 )
 
 // This is a compile-time assertion to ensure that this generated file and the connect package are
@@ -49,7 +48,6 @@ type ImportServiceClient interface {
 // The URL supplied here should be the base URL for the Connect or gRPC server (for example,
 // http://api.acme.com or https://acme.com/grpc).
 func NewImportServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) ImportServiceClient {
-	baseURL = strings.TrimRight(baseURL, "/")
 	return &importServiceClient{}
 }
 
