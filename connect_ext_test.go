@@ -1511,6 +1511,7 @@ func TestBidiStreamServerSendsFirstMessage(t *testing.T) {
 func TestStreamForServer(t *testing.T) {
 	t.Parallel()
 	newPingClient := func(t *testing.T, pingServer pingv1connect.PingServiceHandler) pingv1connect.PingServiceClient {
+		t.Helper()
 		mux := http.NewServeMux()
 		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
 		server := memhttptest.NewServer(t, mux)
