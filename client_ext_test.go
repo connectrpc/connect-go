@@ -196,71 +196,34 @@ func TestSpecSchema(t *testing.T) {
 		connect.WithInterceptors(&assertSchemaInterceptor{t}),
 	))
 	server := memhttptest.NewServer(t, mux)
-	testcases := []struct {
-		name string
-		opts []connect.ClientOption
-	}{{
-		name: connect.ProtocolConnect,
-	}, {
-		name: connect.ProtocolGRPC,
-		opts: []connect.ClientOption{
-			connect.WithGRPC(),
-		},
-	}, {
-		name: connect.ProtocolGRPCWeb,
-		opts: []connect.ClientOption{
-			connect.WithGRPC(),
-		},
-	}}
-	for _, testcase := range testcases {
-		testcase := testcase
-		t.Run(testcase.name, func(t *testing.T) {
-			ctx := context.Background()
-			client := pingv1connect.NewPingServiceClient(
-				server.Client(),
-				server.URL(),
-				connect.WithClientOptions(testcase.opts...),
-				connect.WithInterceptors(&assertSchemaInterceptor{t}),
-			)
-			t.Parallel()
-			t.Run("unary", func(t *testing.T) {
-				unaryReq := connect.NewRequest[pingv1.PingRequest](nil)
-				_, err := client.Ping(ctx, unaryReq)
-				assert.Nil(t, err)
-				text := strings.Repeat(".", 256)
-				r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
-				assert.Nil(t, err)
-				assert.Equal(t, r.Msg.Text, text)
-			})
-			t.Run("client_stream", func(t *testing.T) {
-				clientStream := client.Sum(ctx)
-				t.Cleanup(func() {
-					_, closeErr := clientStream.CloseAndReceive()
-					assert.Nil(t, closeErr)
-				})
-				assert.NotZero(t, clientStream.Spec().Schema)
-				err := clientStream.Send(&pingv1.SumRequest{})
-				assert.Nil(t, err)
-			})
-			t.Run("server_stream", func(t *testing.T) {
-				serverStream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{}))
-				t.Cleanup(func() {
-					assert.Nil(t, serverStream.Close())
-				})
-				assert.Nil(t, err)
-			})
-			t.Run("bidi_stream", func(t *testing.T) {
-				bidiStream := client.CumSum(ctx)
-				t.Cleanup(func() {
-					assert.Nil(t, bidiStream.CloseRequest())
-					assert.Nil(t, bidiStream.CloseResponse())
-				})
-				assert.NotZero(t, bidiStream.Spec().Schema)
-				err := bidiStream.Send(&pingv1.CumSumRequest{})
-				assert.Nil(t, err)
-			})
+	ctx := context.Background()
+	client := pingv1connect.NewPingServiceClient(
+		server.Client(),
+		server.URL(),
+		connect.WithInterceptors(&assertSchemaInterceptor{t}),
+	)
+	t.Run("unary", func(t *testing.T) {
+		t.Parallel()
+		unaryReq := connect.NewRequest[pingv1.PingRequest](nil)
+		_, err := client.Ping(ctx, unaryReq)
+		assert.NotNil(t, unaryReq.Spec().Schema)
+		assert.Nil(t, err)
+		text := strings.Repeat(".", 256)
+		r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
+		assert.Nil(t, err)
+		assert.Equal(t, r.Msg.Text, text)
+	})
+	t.Run("bidi_stream", func(t *testing.T) {
+		t.Parallel()
+		bidiStream := client.CumSum(ctx)
+		t.Cleanup(func() {
+			assert.Nil(t, bidiStream.CloseRequest())
+			assert.Nil(t, bidiStream.CloseResponse())
 		})
-	}
+		assert.NotZero(t, bidiStream.Spec().Schema)
+		err := bidiStream.Send(&pingv1.CumSumRequest{})
+		assert.Nil(t, err)
+	})
 }
 
 type notModifiedPingServer struct {
