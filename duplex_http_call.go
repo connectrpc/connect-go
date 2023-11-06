@@ -105,6 +105,12 @@ func (d *duplexHTTPCall) Write(data []byte) (int, error) {
 	// reads from the other side.
 	bytesWritten, err := d.requestBodyWriter.Write(data)
 	if err != nil && errors.Is(err, io.ErrClosedPipe) {
+		// On sending headers we write a zero-length message to the server.
+		// If the server closes the connection without reading the body,
+		// we'll get an io.ErrClosedPipe. We can ignore this error.
+		if len(data) == 0 {
+			return 0, nil
+		}
 		// Signal that the stream is closed with the more-typical io.EOF instead of
 		// io.ErrClosedPipe. This makes it easier for protocol-specific wrappers to
 		// match grpc-go's behavior.
