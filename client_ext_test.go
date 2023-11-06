@@ -281,7 +281,7 @@ type assertSchemaInterceptor struct {
 func (a *assertSchemaInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 		if !assert.NotNil(a.tb, req.Spec().Schema) {
-			return nil, fmt.Errorf("nil spec")
+			return next(ctx, req)
 		}
 		methodDesc, ok := req.Spec().Schema.(protoreflect.MethodDescriptor)
 		assert.True(a.tb, ok)
@@ -308,7 +308,7 @@ func (a *assertSchemaInterceptor) WrapStreamingClient(next connect.StreamingClie
 func (a *assertSchemaInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
 		if !assert.NotNil(a.tb, conn.Spec().Schema) {
-			return fmt.Errorf("nil spec")
+			return next(ctx, conn)
 		}
 		methodDesc, ok := conn.Spec().Schema.(protoreflect.MethodDescriptor)
 		assert.True(a.tb, ok)
