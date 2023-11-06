@@ -189,6 +189,7 @@ type clientConfig struct {
 	URL                    *url.URL
 	Protocol               protocol
 	Procedure              string
+	Schema                 any
 	CompressMinBytes       int
 	Interceptor            Interceptor
 	CompressionPools       map[string]*compressionPool
@@ -251,6 +252,7 @@ func (c *clientConfig) newSpec(t StreamType) Spec {
 	return Spec{
 		StreamType:       t,
 		Procedure:        c.Procedure,
+		Schema:           c.Schema,
 		IsClient:         true,
 		IdempotencyLevel: c.IdempotencyLevel,
 	}

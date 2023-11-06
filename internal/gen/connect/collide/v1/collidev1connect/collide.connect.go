@@ -32,7 +32,7 @@ import (
 // generated with a version of connect newer than the one compiled into your binary. You can fix the
 // problem by either regenerating this code with an older version of connect or updating the connect
 // version compiled into your binary.
-const _ = connect.IsAtLeastVersion0_1_0
+const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// CollideServiceName is the fully-qualified name of the CollideService service.
@@ -69,7 +69,8 @@ func NewCollideServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 		_import: connect.NewClient[v1.ImportRequest, v1.ImportResponse](
 			httpClient,
 			baseURL+CollideServiceImportProcedure,
-			opts...,
+			connect.WithSchema(v1.File_connect_collide_v1_collide_proto.Services().ByName("CollideService").Methods().ByName("Import")),
+			connect.WithClientOptions(opts...),
 		),
 	}
 }
@@ -98,7 +99,8 @@ func NewCollideServiceHandler(svc CollideServiceHandler, opts ...connect.Handler
 	collideServiceImportHandler := connect.NewUnaryHandler(
 		CollideServiceImportProcedure,
 		svc.Import,
-		opts...,
+		connect.WithSchema(v1.File_connect_collide_v1_collide_proto.Services().ByName("CollideService").Methods().ByName("Import")),
+		connect.WithHandlerOptions(opts...),
 	)
 	return "/connect.collide.v1.CollideService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

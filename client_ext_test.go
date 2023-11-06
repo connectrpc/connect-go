@@ -17,6 +17,7 @@ package connect_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 func TestNewClient_InitFailure(t *testing.T) {
@@ -186,6 +188,81 @@ func TestGetNotModified(t *testing.T) {
 	assert.Equal(t, http.MethodGet, unaryReq.HTTPMethod())
 }
 
+func TestSpecSchema(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(
+		pingServer{},
+		connect.WithInterceptors(&assertSchemaInterceptor{t}),
+	))
+	server := memhttptest.NewServer(t, mux)
+	testcases := []struct {
+		name string
+		opts []connect.ClientOption
+	}{{
+		name: connect.ProtocolConnect,
+	}, {
+		name: connect.ProtocolGRPC,
+		opts: []connect.ClientOption{
+			connect.WithGRPC(),
+		},
+	}, {
+		name: connect.ProtocolGRPCWeb,
+		opts: []connect.ClientOption{
+			connect.WithGRPC(),
+		},
+	}}
+	for _, testcase := range testcases {
+		testcase := testcase
+		t.Run(testcase.name, func(t *testing.T) {
+			ctx := context.Background()
+			client := pingv1connect.NewPingServiceClient(
+				server.Client(),
+				server.URL(),
+				connect.WithClientOptions(testcase.opts...),
+				connect.WithInterceptors(&assertSchemaInterceptor{t}),
+			)
+			t.Parallel()
+			t.Run("unary", func(t *testing.T) {
+				unaryReq := connect.NewRequest[pingv1.PingRequest](nil)
+				_, err := client.Ping(ctx, unaryReq)
+				assert.Nil(t, err)
+				text := strings.Repeat(".", 256)
+				r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
+				assert.Nil(t, err)
+				assert.Equal(t, r.Msg.Text, text)
+			})
+			t.Run("client_stream", func(t *testing.T) {
+				clientStream := client.Sum(ctx)
+				t.Cleanup(func() {
+					_, closeErr := clientStream.CloseAndReceive()
+					assert.Nil(t, closeErr)
+				})
+				assert.NotZero(t, clientStream.Spec().Schema)
+				err := clientStream.Send(&pingv1.SumRequest{})
+				assert.Nil(t, err)
+			})
+			t.Run("server_stream", func(t *testing.T) {
+				serverStream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{}))
+				t.Cleanup(func() {
+					assert.Nil(t, serverStream.Close())
+				})
+				assert.Nil(t, err)
+			})
+			t.Run("bidi_stream", func(t *testing.T) {
+				bidiStream := client.CumSum(ctx)
+				t.Cleanup(func() {
+					assert.Nil(t, bidiStream.CloseRequest())
+					assert.Nil(t, bidiStream.CloseResponse())
+				})
+				assert.NotZero(t, bidiStream.Spec().Schema)
+				err := bidiStream.Send(&pingv1.CumSumRequest{})
+				assert.Nil(t, err)
+			})
+		})
+	}
+}
+
 type notModifiedPingServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
 
@@ -230,6 +307,50 @@ func (a *assertPeerInterceptor) WrapStreamingHandler(next connect.StreamingHandl
 		assert.NotZero(a.tb, conn.Peer().Addr)
 		assert.NotZero(a.tb, conn.Peer().Protocol)
 		assert.NotZero(a.tb, conn.Spec())
+		return next(ctx, conn)
+	}
+}
+
+type assertSchemaInterceptor struct {
+	tb testing.TB
+}
+
+func (a *assertSchemaInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		if !assert.NotNil(a.tb, req.Spec().Schema) {
+			return nil, fmt.Errorf("nil spec")
+		}
+		methodDesc, ok := req.Spec().Schema.(protoreflect.MethodDescriptor)
+		assert.True(a.tb, ok)
+		procedure := fmt.Sprintf("/%s/%s", methodDesc.Parent().FullName(), methodDesc.Name())
+		assert.Equal(a.tb, procedure, req.Spec().Procedure)
+		return next(ctx, req)
+	}
+}
+
+func (a *assertSchemaInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
+		conn := next(ctx, spec)
+		if !assert.NotNil(a.tb, spec.Schema) {
+			return conn
+		}
+		methodDescriptor, ok := spec.Schema.(protoreflect.MethodDescriptor)
+		assert.True(a.tb, ok)
+		procedure := fmt.Sprintf("/%s/%s", methodDescriptor.Parent().FullName(), methodDescriptor.Name())
+		assert.Equal(a.tb, procedure, spec.Procedure)
+		return conn
+	}
+}
+
+func (a *assertSchemaInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
+		if !assert.NotNil(a.tb, conn.Spec().Schema) {
+			return fmt.Errorf("nil spec")
+		}
+		methodDesc, ok := conn.Spec().Schema.(protoreflect.MethodDescriptor)
+		assert.True(a.tb, ok)
+		procedure := fmt.Sprintf("/%s/%s", methodDesc.Parent().FullName(), methodDesc.Name())
+		assert.Equal(a.tb, procedure, conn.Spec().Procedure)
 		return next(ctx, conn)
 	}
 }
