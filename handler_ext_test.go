@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -30,6 +31,9 @@ import (
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/dynamicpb"
 )
 
 func TestHandler_ServeHTTP(t *testing.T) {
@@ -248,6 +252,178 @@ func TestHandlerMaliciousPrefix(t *testing.T) {
 	}
 	close(start)
 	wg.Wait()
+}
+
+func TestDynamicHandler(t *testing.T) {
+	t.Parallel()
+	t.Run("unary", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Ping")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		dynamicPing := func(_ context.Context, req *connect.Request[dynamicpb.Message]) (*connect.Response[dynamicpb.Message], error) {
+			got := req.Msg.Get(methodDesc.Input().Fields().ByName("number")).Int()
+			msg := dynamicpb.NewMessage(methodDesc.Output())
+			msg.Set(
+				methodDesc.Output().Fields().ByName("number"),
+				protoreflect.ValueOfInt64(got),
+			)
+			return connect.NewResponse(msg), nil
+		}
+		mux := http.NewServeMux()
+		mux.Handle("/connect.ping.v1.PingService/Ping",
+			connect.NewUnaryHandler(
+				"/connect.ping.v1.PingService/Ping",
+				dynamicPing,
+				connect.WithSchema(methodDesc),
+				connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			),
+		)
+		server := memhttptest.NewServer(t, mux)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		rsp, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{
+			Number: 42,
+		}))
+		if !assert.Nil(t, err) {
+			return
+		}
+		got := rsp.Msg.Number
+		assert.Equal(t, got, 42)
+	})
+	t.Run("clientStream", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Sum")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		dynamicSum := func(_ context.Context, stream *connect.ClientStream[dynamicpb.Message]) (*connect.Response[dynamicpb.Message], error) {
+			var sum int64
+			for stream.Receive() {
+				got := stream.Msg().Get(
+					methodDesc.Input().Fields().ByName("number"),
+				).Int()
+				sum += got
+			}
+			msg := dynamicpb.NewMessage(methodDesc.Output())
+			msg.Set(
+				methodDesc.Output().Fields().ByName("sum"),
+				protoreflect.ValueOfInt64(sum),
+			)
+			return connect.NewResponse(msg), nil
+		}
+		mux := http.NewServeMux()
+		mux.Handle("/connect.ping.v1.PingService/Sum",
+			connect.NewClientStreamHandler(
+				"/connect.ping.v1.PingService/Sum",
+				dynamicSum,
+				connect.WithSchema(methodDesc),
+			),
+		)
+		server := memhttptest.NewServer(t, mux)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		stream := client.Sum(context.Background())
+		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 42}))
+		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 42}))
+		rsp, err := stream.CloseAndReceive()
+		if !assert.Nil(t, err) {
+			return
+		}
+		assert.Equal(t, rsp.Msg.Sum, 42*2)
+	})
+	t.Run("serverStream", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.CountUp")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		dynamicCountUp := func(_ context.Context, req *connect.Request[dynamicpb.Message], stream *connect.ServerStream[dynamicpb.Message]) error {
+			number := req.Msg.Get(methodDesc.Input().Fields().ByName("number")).Int()
+			for i := int64(1); i <= number; i++ {
+				msg := dynamicpb.NewMessage(methodDesc.Output())
+				msg.Set(
+					methodDesc.Output().Fields().ByName("number"),
+					protoreflect.ValueOfInt64(i),
+				)
+				if err := stream.Send(msg); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		mux := http.NewServeMux()
+		mux.Handle("/connect.ping.v1.PingService/CountUp",
+			connect.NewServerStreamHandler(
+				"/connect.ping.v1.PingService/CountUp",
+				dynamicCountUp,
+				connect.WithSchema(methodDesc),
+			),
+		)
+		server := memhttptest.NewServer(t, mux)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{
+			Number: 2,
+		}))
+		if !assert.Nil(t, err) {
+			return
+		}
+		var sum int64
+		for stream.Receive() {
+			sum += stream.Msg().Number
+		}
+		assert.Nil(t, stream.Err())
+		assert.Equal(t, sum, 3) // 1 + 2
+	})
+	t.Run("bidi", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.CumSum")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		dynamicCumSum := func(
+			_ context.Context,
+			stream *connect.BidiStream[dynamicpb.Message, dynamicpb.Message],
+		) error {
+			var sum int64
+			for {
+				msg, err := stream.Receive()
+				if errors.Is(err, io.EOF) {
+					return nil
+				} else if err != nil {
+					return err
+				}
+				got := msg.Get(methodDesc.Input().Fields().ByName("number")).Int()
+				sum += got
+				out := dynamicpb.NewMessage(methodDesc.Output())
+				out.Set(
+					methodDesc.Output().Fields().ByName("sum"),
+					protoreflect.ValueOfInt64(sum),
+				)
+				if err := stream.Send(out); err != nil {
+					return err
+				}
+			}
+		}
+		mux := http.NewServeMux()
+		mux.Handle("/connect.ping.v1.PingService/CumSum",
+			connect.NewBidiStreamHandler(
+				"/connect.ping.v1.PingService/CumSum",
+				dynamicCumSum,
+				connect.WithSchema(methodDesc),
+			),
+		)
+		server := memhttptest.NewServer(t, mux)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		stream := client.CumSum(context.Background())
+		assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+		msg, err := stream.Receive()
+		if !assert.Nil(t, err) {
+			return
+		}
+		assert.Equal(t, msg.Sum, int64(1))
+		assert.Nil(t, stream.CloseRequest())
+		assert.Nil(t, stream.CloseResponse())
+	})
 }
 
 type successPingServer struct {

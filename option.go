@@ -194,6 +194,22 @@ func WithSchema(schema any) Option {
 	return &schemaOption{Schema: schema}
 }
 
+// InitializerFunc is a function that initializes a message. It may be used to
+// dynamically construct messages. It is called on client and handler Receive to
+// construct the message to be unmarshaled into.
+type InitializerFunc func(spec Spec, msg any) error
+
+// WithInitializer provides a function that initializes a message. It may be
+// used to dynamically construct messages.
+//
+// By default, an initializer is provided to support [dynamicpb.Message]
+// messages. This initializer sets the descriptor from the Schema field of the
+// [Spec]. The Schema must be of type [protoreflect.MethodDescriptor] to use
+// dynamicpb.Message.
+func WithInitializer(initializer InitializerFunc) Option {
+	return &initializerOption{Initializer: initializer}
+}
+
 // WithCodec registers a serialization method with a client or handler.
 // Handlers may have multiple codecs registered, and use whichever the client
 // chooses. Clients may only have a single codec.
@@ -348,6 +364,18 @@ func (o *schemaOption) applyToClient(config *clientConfig) {
 
 func (o *schemaOption) applyToHandler(config *handlerConfig) {
 	config.Schema = o.Schema
+}
+
+type initializerOption struct {
+	Initializer InitializerFunc
+}
+
+func (o *initializerOption) applyToClient(config *clientConfig) {
+	config.Initializer = o.Initializer
+}
+
+func (o *initializerOption) applyToHandler(config *handlerConfig) {
+	config.Initializer = o.Initializer
 }
 
 type clientOptionsOption struct {

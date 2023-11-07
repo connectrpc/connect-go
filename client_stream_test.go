@@ -55,7 +55,12 @@ func TestServerStreamForClient_NoPanics(t *testing.T) {
 
 func TestServerStreamForClient(t *testing.T) {
 	t.Parallel()
-	stream := &ServerStreamForClient[pingv1.PingResponse]{conn: &nopStreamingClientConn{}}
+	config, cerr := newClientConfig("http://localhost:1234", nil)
+	assert.Nil(t, cerr)
+	stream := &ServerStreamForClient[pingv1.PingResponse]{
+		conn:   &nopStreamingClientConn{},
+		config: config,
+	}
 	// Ensure that each call to Receive allocates a new message. This helps
 	// vtprotobuf, which doesn't automatically zero messages before unmarshaling
 	// (see https://connectrpc.com/connect/issues/345), and it's also
@@ -103,4 +108,8 @@ type nopStreamingClientConn struct {
 
 func (c *nopStreamingClientConn) Receive(msg any) error {
 	return nil
+}
+
+func (c *nopStreamingClientConn) Spec() Spec {
+	return Spec{}
 }

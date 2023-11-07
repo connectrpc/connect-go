@@ -25,7 +25,8 @@ import (
 // It's returned from [Client].CallClientStream, but doesn't currently have an
 // exported constructor function.
 type ClientStreamForClient[Req, Res any] struct {
-	conn StreamingClientConn
+	conn   StreamingClientConn
+	config *clientConfig
 	// Error from client construction. If non-nil, return for all calls.
 	err error
 }
@@ -78,7 +79,7 @@ func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Response[Res], err
 		_ = c.conn.CloseResponse()
 		return nil, err
 	}
-	response, err := receiveUnaryResponse[Res](c.conn)
+	response, err := receiveUnaryResponse[Res](c.conn, c.config)
 	if err != nil {
 		_ = c.conn.CloseResponse()
 		return nil, err
@@ -97,8 +98,9 @@ func (c *ClientStreamForClient[Req, Res]) Conn() (StreamingClientConn, error) {
 // It's returned from [Client].CallServerStream, but doesn't currently have an
 // exported constructor function.
 type ServerStreamForClient[Res any] struct {
-	conn StreamingClientConn
-	msg  *Res
+	conn   StreamingClientConn
+	config *clientConfig
+	msg    *Res
 	// Error from client construction. If non-nil, return for all calls.
 	constructErr error
 	// Error from conn.Receive().
@@ -115,6 +117,10 @@ func (s *ServerStreamForClient[Res]) Receive() bool {
 		return false
 	}
 	s.msg = new(Res)
+	if err := s.config.Initializer(s.conn.Spec(), s.msg); err != nil {
+		s.receiveErr = err
+		return false
+	}
 	s.receiveErr = s.conn.Receive(s.msg)
 	return s.receiveErr == nil
 }
@@ -175,7 +181,8 @@ func (s *ServerStreamForClient[Res]) Conn() (StreamingClientConn, error) {
 // It's returned from [Client].CallBidiStream, but doesn't currently have an
 // exported constructor function.
 type BidiStreamForClient[Req, Res any] struct {
-	conn StreamingClientConn
+	conn   StreamingClientConn
+	config *clientConfig
 	// Error from client construction. If non-nil, return for all calls.
 	err error
 }
@@ -234,6 +241,9 @@ func (b *BidiStreamForClient[Req, Res]) Receive() (*Res, error) {
 		return nil, b.err
 	}
 	var msg Res
+	if err := b.config.Initializer(b.conn.Spec(), &msg); err != nil {
+		return nil, err
+	}
 	if err := b.conn.Receive(&msg); err != nil {
 		return nil, err
 	}

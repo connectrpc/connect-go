@@ -358,15 +358,18 @@ type handlerConnCloser interface {
 // envelopes the message and attaches headers and trailers. It attempts to
 // consume the response stream and isn't appropriate when receiving multiple
 // messages.
-func receiveUnaryResponse[T any](conn StreamingClientConn) (*Response[T], error) {
+func receiveUnaryResponse[T any](conn StreamingClientConn, config *clientConfig) (*Response[T], error) {
 	var msg T
+	if err := config.Initializer(conn.Spec(), &msg); err != nil {
+		return nil, err
+	}
 	if err := conn.Receive(&msg); err != nil {
 		return nil, err
 	}
 	// In a well-formed stream, the response message may be followed by a block
 	// of in-stream trailers or HTTP trailers. To ensure that we receive the
 	// trailers, try to read another message from the stream.
-	if err := conn.Receive(new(T)); err == nil {
+	if err := conn.Receive(nil); err == nil {
 		return nil, NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
 	} else if err != nil && !errors.Is(err, io.EOF) {
 		return nil, NewError(CodeUnknown, err)

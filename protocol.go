@@ -24,6 +24,9 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/dynamicpb"
 )
 
 // The names of the Connect, gRPC, and gRPC-Web protocols (as exposed by
@@ -393,4 +396,25 @@ func canonicalizeContentTypeSlow(contentType string) string {
 		params["charset"] = strings.ToLower(charset)
 	}
 	return mime.FormatMediaType(base, params)
+}
+
+// defaultInitializer is the default initializer for dynamic messages. It
+// initializes the message to the type specified in the Spec.
+func defaultInitializer(spec Spec, msg any) error {
+	dynamic, ok := msg.(*dynamicpb.Message)
+	if !ok {
+		return nil
+	}
+	desc, ok := spec.Schema.(protoreflect.MethodDescriptor)
+	if !ok {
+		return fmt.Errorf("invalid schema type %T for %T message", spec.Schema, dynamic)
+	}
+	// If the message is a client message, initialize it to the output type of
+	// the RPC. Otherwise, initialize it to the input type.
+	if spec.IsClient {
+		*dynamic = *dynamicpb.NewMessage(desc.Output())
+	} else {
+		*dynamic = *dynamicpb.NewMessage(desc.Input())
+	}
+	return nil
 }
