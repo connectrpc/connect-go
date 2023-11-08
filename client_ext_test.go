@@ -336,6 +336,43 @@ func TestDynamicClient(t *testing.T) {
 		got := out.Get(methodDesc.Output().Fields().ByName("number")).Int()
 		assert.Equal(t, got, 42)
 	})
+	t.Run("option", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Ping")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		optionCalled := false
+		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
+			server.Client(),
+			server.URL()+"/connect.ping.v1.PingService/Ping",
+			connect.WithSchema(methodDesc),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithResponseInitializer(
+				func(spec connect.Spec, msg any) error {
+					assert.NotNil(t, spec)
+					assert.NotNil(t, msg)
+					dynamic, ok := msg.(*dynamicpb.Message)
+					if !assert.True(t, ok) {
+						return fmt.Errorf("unexpected message type: %T", msg)
+					}
+					*dynamic = *dynamicpb.NewMessage(methodDesc.Output())
+					optionCalled = true
+					return nil
+				},
+			),
+		)
+		msg := dynamicpb.NewMessage(methodDesc.Input())
+		msg.Set(
+			methodDesc.Input().Fields().ByName("number"),
+			protoreflect.ValueOfInt64(42),
+		)
+		res, err := client.CallUnary(ctx, connect.NewRequest(msg))
+		assert.Nil(t, err)
+		got := res.Msg.Get(methodDesc.Output().Fields().ByName("number")).Int()
+		assert.Equal(t, got, 42)
+		assert.True(t, optionCalled)
+	})
 }
 
 type notModifiedPingServer struct {

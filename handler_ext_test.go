@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -423,6 +424,56 @@ func TestDynamicHandler(t *testing.T) {
 		assert.Equal(t, msg.Sum, int64(1))
 		assert.Nil(t, stream.CloseRequest())
 		assert.Nil(t, stream.CloseResponse())
+	})
+	t.Run("option", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Ping")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		dynamicPing := func(_ context.Context, req *connect.Request[dynamicpb.Message]) (*connect.Response[dynamicpb.Message], error) {
+			got := req.Msg.Get(methodDesc.Input().Fields().ByName("number")).Int()
+			msg := dynamicpb.NewMessage(methodDesc.Output())
+			msg.Set(
+				methodDesc.Output().Fields().ByName("number"),
+				protoreflect.ValueOfInt64(got),
+			)
+			return connect.NewResponse(msg), nil
+		}
+		optionCalled := false
+		mux := http.NewServeMux()
+		mux.Handle("/connect.ping.v1.PingService/Ping",
+			connect.NewUnaryHandler(
+				"/connect.ping.v1.PingService/Ping",
+				dynamicPing,
+				connect.WithSchema(methodDesc),
+				connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+				connect.WithRequestInitializer(
+					func(spec connect.Spec, msg any) error {
+						assert.NotNil(t, spec)
+						assert.NotNil(t, msg)
+						dynamic, ok := msg.(*dynamicpb.Message)
+						if !assert.True(t, ok) {
+							return fmt.Errorf("unexpected message type: %T", msg)
+						}
+						*dynamic = *dynamicpb.NewMessage(methodDesc.Input())
+						optionCalled = true
+						return nil
+					},
+				),
+			),
+		)
+		server := memhttptest.NewServer(t, mux)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		rsp, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{
+			Number: 42,
+		}))
+		if !assert.Nil(t, err) {
+			return
+		}
+		got := rsp.Msg.Number
+		assert.Equal(t, got, 42)
+		assert.True(t, optionCalled)
 	})
 }
 

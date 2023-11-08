@@ -398,8 +398,9 @@ func canonicalizeContentTypeSlow(contentType string) string {
 	return mime.FormatMediaType(base, params)
 }
 
-// defaultInitializer is the default initializer for dynamic messages. It
-// initializes the message to the type specified in the Spec.
+// defaultInitializer is the default initializer that adds support for
+// dynamicpb.Message. If of message type the Schema is cast to access the
+// method descriptor and initialized with the message descriptor.
 func defaultInitializer(spec Spec, msg any) error {
 	dynamic, ok := msg.(*dynamicpb.Message)
 	if !ok {
@@ -409,8 +410,8 @@ func defaultInitializer(spec Spec, msg any) error {
 	if !ok {
 		return fmt.Errorf("invalid schema type %T for %T message", spec.Schema, dynamic)
 	}
-	// If the message is a client message, initialize it to the output type of
-	// the RPC. Otherwise, initialize it to the input type.
+	// If the message is a client message, initialize it to the output type
+	// of the method. Otherwise, initialize it to the input type.
 	if spec.IsClient {
 		*dynamic = *dynamicpb.NewMessage(desc.Output())
 	} else {
