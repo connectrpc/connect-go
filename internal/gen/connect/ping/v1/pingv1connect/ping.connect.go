@@ -64,6 +64,16 @@ const (
 	PingServiceCumSumProcedure = "/connect.ping.v1.PingService/CumSum"
 )
 
+// These variables are the protoreflect.Descriptor objects for the v1 service's methods.
+var (
+	pingServiceServiceDescriptor       = v1.File_connect_ping_v1_ping_proto.Services().ByName("PingService")
+	pingServicePingMethodDescriptor    = pingServiceServiceDescriptor.Methods().ByName("Ping")
+	pingServiceFailMethodDescriptor    = pingServiceServiceDescriptor.Methods().ByName("Fail")
+	pingServiceSumMethodDescriptor     = pingServiceServiceDescriptor.Methods().ByName("Sum")
+	pingServiceCountUpMethodDescriptor = pingServiceServiceDescriptor.Methods().ByName("CountUp")
+	pingServiceCumSumMethodDescriptor  = pingServiceServiceDescriptor.Methods().ByName("CumSum")
+)
+
 // PingServiceClient is a client for the connect.ping.v1.PingService service.
 type PingServiceClient interface {
 	// Ping sends a ping to the server to determine if it's reachable.
@@ -87,37 +97,36 @@ type PingServiceClient interface {
 // http://api.acme.com or https://acme.com/grpc).
 func NewPingServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) PingServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
-	serviceDescriptor := v1.File_connect_ping_v1_ping_proto.Services().ByName("PingService")
 	return &pingServiceClient{
 		ping: connect.NewClient[v1.PingRequest, v1.PingResponse](
 			httpClient,
 			baseURL+PingServicePingProcedure,
-			connect.WithSchema(serviceDescriptor.Methods().ByName("Ping")),
+			connect.WithSchema(pingServicePingMethodDescriptor),
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		fail: connect.NewClient[v1.FailRequest, v1.FailResponse](
 			httpClient,
 			baseURL+PingServiceFailProcedure,
-			connect.WithSchema(serviceDescriptor.Methods().ByName("Fail")),
+			connect.WithSchema(pingServiceFailMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		sum: connect.NewClient[v1.SumRequest, v1.SumResponse](
 			httpClient,
 			baseURL+PingServiceSumProcedure,
-			connect.WithSchema(serviceDescriptor.Methods().ByName("Sum")),
+			connect.WithSchema(pingServiceSumMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		countUp: connect.NewClient[v1.CountUpRequest, v1.CountUpResponse](
 			httpClient,
 			baseURL+PingServiceCountUpProcedure,
-			connect.WithSchema(serviceDescriptor.Methods().ByName("CountUp")),
+			connect.WithSchema(pingServiceCountUpMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		cumSum: connect.NewClient[v1.CumSumRequest, v1.CumSumResponse](
 			httpClient,
 			baseURL+PingServiceCumSumProcedure,
-			connect.WithSchema(serviceDescriptor.Methods().ByName("CumSum")),
+			connect.WithSchema(pingServiceCumSumMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -177,36 +186,35 @@ type PingServiceHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	serviceDescriptor := v1.File_connect_ping_v1_ping_proto.Services().ByName("PingService")
 	pingServicePingHandler := connect.NewUnaryHandler(
 		PingServicePingProcedure,
 		svc.Ping,
-		connect.WithSchema(serviceDescriptor.Methods().ByName("Ping")),
+		connect.WithSchema(pingServicePingMethodDescriptor),
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	pingServiceFailHandler := connect.NewUnaryHandler(
 		PingServiceFailProcedure,
 		svc.Fail,
-		connect.WithSchema(serviceDescriptor.Methods().ByName("Fail")),
+		connect.WithSchema(pingServiceFailMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	pingServiceSumHandler := connect.NewClientStreamHandler(
 		PingServiceSumProcedure,
 		svc.Sum,
-		connect.WithSchema(serviceDescriptor.Methods().ByName("Sum")),
+		connect.WithSchema(pingServiceSumMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	pingServiceCountUpHandler := connect.NewServerStreamHandler(
 		PingServiceCountUpProcedure,
 		svc.CountUp,
-		connect.WithSchema(serviceDescriptor.Methods().ByName("CountUp")),
+		connect.WithSchema(pingServiceCountUpMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	pingServiceCumSumHandler := connect.NewBidiStreamHandler(
 		PingServiceCumSumProcedure,
 		svc.CumSum,
-		connect.WithSchema(serviceDescriptor.Methods().ByName("CumSum")),
+		connect.WithSchema(pingServiceCumSumMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/connect.ping.v1.PingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
