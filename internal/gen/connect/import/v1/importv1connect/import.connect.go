@@ -36,7 +36,7 @@ const (
 	ImportServiceName = "connect.import.v1.ImportService"
 )
 
-// These variables are the protoreflect.Descriptor objects for the v1 service's methods.
+// These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
 var (
 	importServiceServiceDescriptor = v1.File_connect_import_v1_import_proto.Services().ByName("ImportService")
 )

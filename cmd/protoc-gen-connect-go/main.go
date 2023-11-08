@@ -212,8 +212,7 @@ func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protoge
 }
 
 func generateServiceNameVariables(g *protogen.GeneratedFile, file *protogen.File) {
-	wrapComments(g, "These variables are the protoreflect.Descriptor objects for the ", file.Desc.Name(),
-		" service's methods.")
+	wrapComments(g, "These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.")
 	g.P("var (")
 	for _, service := range file.Services {
 		serviceDescName := unexport(fmt.Sprintf("%sServiceDescriptor", service.Desc.Name()))

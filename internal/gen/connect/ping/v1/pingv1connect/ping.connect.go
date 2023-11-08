@@ -64,7 +64,7 @@ const (
 	PingServiceCumSumProcedure = "/connect.ping.v1.PingService/CumSum"
 )
 
-// These variables are the protoreflect.Descriptor objects for the v1 service's methods.
+// These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
 var (
 	pingServiceServiceDescriptor       = v1.File_connect_ping_v1_ping_proto.Services().ByName("PingService")
 	pingServicePingMethodDescriptor    = pingServiceServiceDescriptor.Methods().ByName("Ping")

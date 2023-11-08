@@ -51,7 +51,7 @@ const (
 	CollideServiceImportProcedure = "/connect.collide.v1.CollideService/Import"
 )
 
-// These variables are the protoreflect.Descriptor objects for the v1 service's methods.
+// These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
 var (
 	collideServiceServiceDescriptor      = v1.File_connect_collide_v1_collide_proto.Services().ByName("CollideService")
 	collideServiceImportMethodDescriptor = collideServiceServiceDescriptor.Methods().ByName("Import")
