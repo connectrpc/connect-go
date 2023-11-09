@@ -197,26 +197,20 @@ func WithSchema(schema any) Option {
 // InitializerFunc is a function that initializes a message. It may be used to
 // dynamically construct messages. It is called on client and handler receives
 // to construct the message to be unmarshaled into.
-type InitializerFunc func(spec Spec, msg any) error
+//
+// The message will be a non nil pointer to the type created by the client or
+// handler. Use the Schema field of the [Spec] to determine the type of the
+// message.
+type InitializerFunc func(spec Spec, message any) error
 
 // WithRequestInitializer provides a function that initializes a new message.
 // It may be used to dynamically construct request messages.
-//
-// By default, an initializer is provided to support [dynamicpb.Message]
-// messages. This initializer sets the input descriptor from the Schema field
-// of the [Spec]. The Schema must be of type [protoreflect.MethodDescriptor]
-// to use dynamicpb.Message.
 func WithRequestInitializer(initializer InitializerFunc) HandlerOption {
 	return &requestInitializerOption{Initializer: initializer}
 }
 
 // WithResponseInitializer provides a function that initializes a new message.
 // It may be used to dynamically construct response messages.
-//
-// By default, an initializer is provided to support [dynamicpb.Message]
-// messages. This initializer sets the output descriptor from the Schema field
-// of the [Spec]. The Schema must be of type [protoreflect.MethodDescriptor]
-// to use dynamicpb.Message.
 func WithResponseInitializer(initializer InitializerFunc) ClientOption {
 	return &responseInitializerOption{Initializer: initializer}
 }
