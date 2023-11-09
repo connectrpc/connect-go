@@ -42,7 +42,7 @@ type duplexHTTPCall struct {
 	requestBodyReader *io.PipeReader
 	requestBodyWriter *io.PipeWriter
 
-	// sendRequestOnce ensures we only send the request once.
+	// requestSent ensures we only send the request once.
 	requestSent atomic.Bool
 	request     *http.Request
 
