@@ -117,9 +117,11 @@ func (s *ServerStreamForClient[Res]) Receive() bool {
 		return false
 	}
 	s.msg = new(Res)
-	if err := s.config.Initializer(s.conn.Spec(), s.msg); err != nil {
-		s.receiveErr = err
-		return false
+	if s.config.Initializer != nil {
+		if err := s.config.Initializer(s.conn.Spec(), s.msg); err != nil {
+			s.receiveErr = err
+			return false
+		}
 	}
 	s.receiveErr = s.conn.Receive(s.msg)
 	return s.receiveErr == nil
@@ -241,8 +243,10 @@ func (b *BidiStreamForClient[Req, Res]) Receive() (*Res, error) {
 		return nil, b.err
 	}
 	var msg Res
-	if err := b.config.Initializer(b.conn.Spec(), &msg); err != nil {
-		return nil, err
+	if b.config.Initializer != nil {
+		if err := b.config.Initializer(b.conn.Spec(), &msg); err != nil {
+			return nil, err
+		}
 	}
 	if err := b.conn.Receive(&msg); err != nil {
 		return nil, err

@@ -360,8 +360,10 @@ type handlerConnCloser interface {
 // messages.
 func receiveUnaryResponse[T any](conn StreamingClientConn, config *clientConfig) (*Response[T], error) {
 	var msg T
-	if err := config.Initializer(conn.Spec(), &msg); err != nil {
-		return nil, err
+	if config.Initializer != nil {
+		if err := config.Initializer(conn.Spec(), &msg); err != nil {
+			return nil, err
+		}
 	}
 	if err := conn.Receive(&msg); err != nil {
 		return nil, err

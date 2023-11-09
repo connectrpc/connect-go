@@ -56,9 +56,11 @@ func (c *ClientStream[Req]) Receive() bool {
 		return false
 	}
 	c.msg = new(Req)
-	if err := c.config.Initializer(c.Spec(), c.msg); err != nil {
-		c.err = err
-		return false
+	if c.config.Initializer != nil {
+		if err := c.config.Initializer(c.Spec(), c.msg); err != nil {
+			c.err = err
+			return false
+		}
 	}
 	c.err = c.conn.Receive(c.msg)
 	return c.err == nil
@@ -155,8 +157,10 @@ func (b *BidiStream[Req, Res]) RequestHeader() http.Header {
 // return an error that wraps [io.EOF].
 func (b *BidiStream[Req, Res]) Receive() (*Req, error) {
 	var req Req
-	if err := b.config.Initializer(b.Spec(), &req); err != nil {
-		return nil, err
+	if b.config.Initializer != nil {
+		if err := b.config.Initializer(b.Spec(), &req); err != nil {
+			return nil, err
+		}
 	}
 	if err := b.conn.Receive(&req); err != nil {
 		return nil, err

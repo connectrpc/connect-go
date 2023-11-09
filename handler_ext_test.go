@@ -257,6 +257,22 @@ func TestHandlerMaliciousPrefix(t *testing.T) {
 
 func TestDynamicHandler(t *testing.T) {
 	t.Parallel()
+	initializer := func(spec connect.Spec, msg any) error {
+		dynamic, ok := msg.(*dynamicpb.Message)
+		if !ok {
+			return nil
+		}
+		desc, ok := spec.Schema.(protoreflect.MethodDescriptor)
+		if !ok {
+			return fmt.Errorf("invalid schema type %T for %T message", spec.Schema, dynamic)
+		}
+		if spec.IsClient {
+			*dynamic = *dynamicpb.NewMessage(desc.Output())
+		} else {
+			*dynamic = *dynamicpb.NewMessage(desc.Input())
+		}
+		return nil
+	}
 	t.Run("unary", func(t *testing.T) {
 		t.Parallel()
 		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Ping")
@@ -279,6 +295,7 @@ func TestDynamicHandler(t *testing.T) {
 				dynamicPing,
 				connect.WithSchema(methodDesc),
 				connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+				connect.WithRequestInitializer(initializer),
 			),
 		)
 		server := memhttptest.NewServer(t, mux)
@@ -319,6 +336,7 @@ func TestDynamicHandler(t *testing.T) {
 				"/connect.ping.v1.PingService/Sum",
 				dynamicSum,
 				connect.WithSchema(methodDesc),
+				connect.WithRequestInitializer(initializer),
 			),
 		)
 		server := memhttptest.NewServer(t, mux)
@@ -358,6 +376,7 @@ func TestDynamicHandler(t *testing.T) {
 				"/connect.ping.v1.PingService/CountUp",
 				dynamicCountUp,
 				connect.WithSchema(methodDesc),
+				connect.WithRequestInitializer(initializer),
 			),
 		)
 		server := memhttptest.NewServer(t, mux)
@@ -411,6 +430,7 @@ func TestDynamicHandler(t *testing.T) {
 				"/connect.ping.v1.PingService/CumSum",
 				dynamicCumSum,
 				connect.WithSchema(methodDesc),
+				connect.WithRequestInitializer(initializer),
 			),
 		)
 		server := memhttptest.NewServer(t, mux)

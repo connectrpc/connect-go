@@ -234,6 +234,22 @@ func TestDynamicClient(t *testing.T) {
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
 	server := memhttptest.NewServer(t, mux)
 	ctx := context.Background()
+	initializer := func(spec connect.Spec, msg any) error {
+		dynamic, ok := msg.(*dynamicpb.Message)
+		if !ok {
+			return nil
+		}
+		desc, ok := spec.Schema.(protoreflect.MethodDescriptor)
+		if !ok {
+			return fmt.Errorf("invalid schema type %T for %T message", spec.Schema, dynamic)
+		}
+		if spec.IsClient {
+			*dynamic = *dynamicpb.NewMessage(desc.Output())
+		} else {
+			*dynamic = *dynamicpb.NewMessage(desc.Input())
+		}
+		return nil
+	}
 	t.Run("unary", func(t *testing.T) {
 		t.Parallel()
 		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Ping")
@@ -245,6 +261,7 @@ func TestDynamicClient(t *testing.T) {
 			server.URL()+"/connect.ping.v1.PingService/Ping",
 			connect.WithSchema(methodDesc),
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithResponseInitializer(initializer),
 		)
 		msg := dynamicpb.NewMessage(methodDesc.Input())
 		msg.Set(
@@ -266,6 +283,7 @@ func TestDynamicClient(t *testing.T) {
 			server.Client(),
 			server.URL()+"/connect.ping.v1.PingService/Sum",
 			connect.WithSchema(methodDesc),
+			connect.WithResponseInitializer(initializer),
 		)
 		stream := client.CallClientStream(ctx)
 		msg := dynamicpb.NewMessage(methodDesc.Input())
@@ -292,6 +310,7 @@ func TestDynamicClient(t *testing.T) {
 			server.Client(),
 			server.URL()+"/connect.ping.v1.PingService/CountUp",
 			connect.WithSchema(methodDesc),
+			connect.WithResponseInitializer(initializer),
 		)
 		msg := dynamicpb.NewMessage(methodDesc.Input())
 		msg.Set(
@@ -320,6 +339,7 @@ func TestDynamicClient(t *testing.T) {
 			server.Client(),
 			server.URL()+"/connect.ping.v1.PingService/CumSum",
 			connect.WithSchema(methodDesc),
+			connect.WithResponseInitializer(initializer),
 		)
 		stream := client.CallBidiStream(ctx)
 		msg := dynamicpb.NewMessage(methodDesc.Input())

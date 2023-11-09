@@ -64,8 +64,10 @@ func NewUnaryHandler[Req, Res any](
 	// Given a stream, how should we call the unary function?
 	implementation := func(ctx context.Context, conn StreamingHandlerConn) error {
 		var msg Req
-		if err := config.Initializer(conn.Spec(), &msg); err != nil {
-			return err
+		if config.Initializer != nil {
+			if err := config.Initializer(conn.Spec(), &msg); err != nil {
+				return err
+			}
 		}
 		if err := conn.Receive(&msg); err != nil {
 			return err
@@ -141,8 +143,10 @@ func NewServerStreamHandler[Req, Res any](
 		config,
 		func(ctx context.Context, conn StreamingHandlerConn) error {
 			var msg Req
-			if err := config.Initializer(conn.Spec(), &msg); err != nil {
-				return err
+			if config.Initializer != nil {
+				if err := config.Initializer(conn.Spec(), &msg); err != nil {
+					return err
+				}
 			}
 			if err := conn.Receive(&msg); err != nil {
 				return err
@@ -277,7 +281,6 @@ func newHandlerConfig(procedure string, streamType StreamType, options []Handler
 		HandleGRPCWeb:    true,
 		BufferPool:       newBufferPool(),
 		StreamType:       streamType,
-		Initializer:      defaultInitializer,
 	}
 	withProtoBinaryCodec().applyToHandler(&config)
 	withProtoJSONCodecs().applyToHandler(&config)
