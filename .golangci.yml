@@ -58,6 +58,7 @@ linters:
     - varcheck          # abandoned
     - wrapcheck         # don't _always_ need to wrap errors
     - wsl               # generous whitespace violates house style
+    - inamedparam       # convention is not followed
 issues:
   exclude:
     # Don't ban use of fmt.Errorf to create new errors, but the remaining
