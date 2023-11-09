@@ -246,6 +246,7 @@ type handlerConfig struct {
 	CompressMinBytes             int
 	Interceptor                  Interceptor
 	Procedure                    string
+	Schema                       any
 	HandleGRPC                   bool
 	HandleGRPCWeb                bool
 	RequireConnectProtocolHeader bool
@@ -279,6 +280,7 @@ func newHandlerConfig(procedure string, streamType StreamType, options []Handler
 func (c *handlerConfig) newSpec() Spec {
 	return Spec{
 		Procedure:        c.Procedure,
+		Schema:           c.Schema,
 		StreamType:       c.StreamType,
 		IdempotencyLevel: c.IdempotencyLevel,
 	}

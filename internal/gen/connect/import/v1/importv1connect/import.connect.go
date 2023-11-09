@@ -20,9 +20,8 @@ package importv1connect
 
 import (
 	connect "connectrpc.com/connect"
-	_ "connectrpc.com/connect/internal/gen/connect/import/v1"
+	v1 "connectrpc.com/connect/internal/gen/connect/import/v1"
 	http "net/http"
-	strings "strings"
 )
 
 // This is a compile-time assertion to ensure that this generated file and the connect package are
@@ -30,11 +29,16 @@ import (
 // generated with a version of connect newer than the one compiled into your binary. You can fix the
 // problem by either regenerating this code with an older version of connect or updating the connect
 // version compiled into your binary.
-const _ = connect.IsAtLeastVersion0_1_0
+const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// ImportServiceName is the fully-qualified name of the ImportService service.
 	ImportServiceName = "connect.import.v1.ImportService"
+)
+
+// These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
+var (
+	importServiceServiceDescriptor = v1.File_connect_import_v1_import_proto.Services().ByName("ImportService")
 )
 
 // ImportServiceClient is a client for the connect.import.v1.ImportService service.
@@ -49,7 +53,6 @@ type ImportServiceClient interface {
 // The URL supplied here should be the base URL for the Connect or gRPC server (for example,
 // http://api.acme.com or https://acme.com/grpc).
 func NewImportServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) ImportServiceClient {
-	baseURL = strings.TrimRight(baseURL, "/")
 	return &importServiceClient{}
 }
 
