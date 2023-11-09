@@ -96,21 +96,20 @@ func newDuplexHTTPCall(
 
 // Write to the request body.
 func (d *duplexHTTPCall) Write(data []byte) (int, error) {
-	d.ensureRequestMade()
+	isFirst := d.ensureRequestMade()
 	// Before we send any data, check if the context has been canceled.
 	if err := d.ctx.Err(); err != nil {
 		return 0, wrapIfContextError(err)
+	}
+	if isFirst && data == nil {
+		// On first write a nil Send is used to send request headers. Avoid
+		// writing a zero-length payload to avoid superfluous errors with close.
+		return 0, nil
 	}
 	// It's safe to write to this side of the pipe while net/http concurrently
 	// reads from the other side.
 	bytesWritten, err := d.requestBodyWriter.Write(data)
 	if err != nil && errors.Is(err, io.ErrClosedPipe) {
-		// On sending headers we write a zero-length message to the server.
-		// If the server closes the connection without reading the body,
-		// we'll get an io.ErrClosedPipe. We can ignore this error.
-		if len(data) == 0 {
-			return 0, nil
-		}
 		// Signal that the stream is closed with the more-typical io.EOF instead of
 		// io.ErrClosedPipe. This makes it easier for protocol-specific wrappers to
 		// match grpc-go's behavior.
@@ -235,10 +234,12 @@ func (d *duplexHTTPCall) BlockUntilResponseReady() error {
 // ensureRequestMade sends the request headers and starts the response stream.
 // It is not safe to call this concurrently. Write and CloseWrite call this but
 // ensure that they're not called concurrently.
-func (d *duplexHTTPCall) ensureRequestMade() {
+func (d *duplexHTTPCall) ensureRequestMade() (isFirst bool) {
 	d.sendRequestOnce.Do(func() {
+		isFirst = true
 		go d.makeRequest()
 	})
+	return isFirst
 }
 
 func (d *duplexHTTPCall) makeRequest() {
