@@ -31,7 +31,7 @@ import (
 
 func TestServerTransport(t *testing.T) {
 	t.Parallel()
-	concurrency := runtime.GOMAXPROCS(0) * 2
+	concurrency := runtime.GOMAXPROCS(0) * 8
 	const greeting = "Hello, world!"
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
