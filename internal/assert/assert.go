@@ -183,7 +183,7 @@ func report(tb testing.TB, got, want any, desc string, showWant bool, options ..
 	if showWant {
 		fmt.Fprintf(buffer, "want:\t%+v\n", want)
 	}
-	tb.Fatal(buffer.String())
+	tb.Error(buffer.String())
 }
 
 func isNil(got any) bool {

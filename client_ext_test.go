@@ -433,9 +433,10 @@ func (a *assertSchemaInterceptor) WrapUnary(next connect.UnaryFunc) connect.Unar
 			return next(ctx, req)
 		}
 		methodDesc, ok := req.Spec().Schema.(protoreflect.MethodDescriptor)
-		assert.True(a.tb, ok)
-		procedure := fmt.Sprintf("/%s/%s", methodDesc.Parent().FullName(), methodDesc.Name())
-		assert.Equal(a.tb, procedure, req.Spec().Procedure)
+		if assert.True(a.tb, ok) {
+			procedure := fmt.Sprintf("/%s/%s", methodDesc.Parent().FullName(), methodDesc.Name())
+			assert.Equal(a.tb, procedure, req.Spec().Procedure)
+		}
 		return next(ctx, req)
 	}
 }
@@ -447,9 +448,10 @@ func (a *assertSchemaInterceptor) WrapStreamingClient(next connect.StreamingClie
 			return conn
 		}
 		methodDescriptor, ok := spec.Schema.(protoreflect.MethodDescriptor)
-		assert.True(a.tb, ok)
-		procedure := fmt.Sprintf("/%s/%s", methodDescriptor.Parent().FullName(), methodDescriptor.Name())
-		assert.Equal(a.tb, procedure, spec.Procedure)
+		if assert.True(a.tb, ok) {
+			procedure := fmt.Sprintf("/%s/%s", methodDescriptor.Parent().FullName(), methodDescriptor.Name())
+			assert.Equal(a.tb, procedure, spec.Procedure)
+		}
 		return conn
 	}
 }
@@ -460,9 +462,10 @@ func (a *assertSchemaInterceptor) WrapStreamingHandler(next connect.StreamingHan
 			return next(ctx, conn)
 		}
 		methodDesc, ok := conn.Spec().Schema.(protoreflect.MethodDescriptor)
-		assert.True(a.tb, ok)
-		procedure := fmt.Sprintf("/%s/%s", methodDesc.Parent().FullName(), methodDesc.Name())
-		assert.Equal(a.tb, procedure, conn.Spec().Procedure)
+		if assert.True(a.tb, ok) {
+			procedure := fmt.Sprintf("/%s/%s", methodDesc.Parent().FullName(), methodDesc.Name())
+			assert.Equal(a.tb, procedure, conn.Spec().Procedure)
+		}
 		return next(ctx, conn)
 	}
 }

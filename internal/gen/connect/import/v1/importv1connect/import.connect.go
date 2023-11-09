@@ -20,7 +20,7 @@ package importv1connect
 
 import (
 	connect "connectrpc.com/connect"
-	_ "connectrpc.com/connect/internal/gen/connect/import/v1"
+	v1 "connectrpc.com/connect/internal/gen/connect/import/v1"
 	http "net/http"
 )
 
@@ -34,6 +34,11 @@ const _ = connect.IsAtLeastVersion1_13_0
 const (
 	// ImportServiceName is the fully-qualified name of the ImportService service.
 	ImportServiceName = "connect.import.v1.ImportService"
+)
+
+// These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
+var (
+	importServiceServiceDescriptor = v1.File_connect_import_v1_import_proto.Services().ByName("ImportService")
 )
 
 // ImportServiceClient is a client for the connect.import.v1.ImportService service.
