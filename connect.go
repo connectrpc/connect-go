@@ -371,7 +371,14 @@ func receiveUnaryResponse[T any](conn StreamingClientConn, config *clientConfig)
 	// In a well-formed stream, the response message may be followed by a block
 	// of in-stream trailers or HTTP trailers. To ensure that we receive the
 	// trailers, try to read another message from the stream.
-	if err := conn.Receive(nil); err == nil {
+	// TODO: optimise unary calls to avoid this extra receive.
+	var msg2 T
+	if config.Initializer != nil {
+		if err := config.Initializer(conn.Spec(), &msg2); err != nil {
+			return nil, err
+		}
+	}
+	if err := conn.Receive(&msg2); err == nil {
 		return nil, NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
 	} else if err != nil && !errors.Is(err, io.EOF) {
 		return nil, NewError(CodeUnknown, err)
