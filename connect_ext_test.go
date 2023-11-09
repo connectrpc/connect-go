@@ -511,6 +511,8 @@ func TestConcurrentStreams(t *testing.T) {
 	}
 	start.Done()
 	done.Wait()
+	t.Error("NUMCPU", runtime.NumCPU())
+	t.Error("GOMAXPROCS", runtime.GOMAXPROCS(0))
 }
 
 func TestHeaderBasic(t *testing.T) {
