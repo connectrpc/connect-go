@@ -38,8 +38,8 @@ func (*ExamplePingServer) Ping(
 ) (*connect.Response[pingv1.PingResponse], error) {
 	return connect.NewResponse(
 		&pingv1.PingResponse{
-			Number: request.Msg.Number,
-			Text:   request.Msg.Text,
+			Number: request.Msg.GetNumber(),
+			Text:   request.Msg.GetText(),
 		},
 	), nil
 }
@@ -48,7 +48,7 @@ func (*ExamplePingServer) Ping(
 func (p *ExamplePingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
 	var sum int64
 	for stream.Receive() {
-		sum += stream.Msg().Number
+		sum += stream.Msg().GetNumber()
 	}
 	if stream.Err() != nil {
 		return nil, stream.Err()
@@ -58,7 +58,7 @@ func (p *ExamplePingServer) Sum(ctx context.Context, stream *connect.ClientStrea
 
 // CountUp implements pingv1connect.PingServiceHandler.
 func (p *ExamplePingServer) CountUp(ctx context.Context, request *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
-	for number := int64(1); number <= request.Msg.Number; number++ {
+	for number := int64(1); number <= request.Msg.GetNumber(); number++ {
 		if err := stream.Send(&pingv1.CountUpResponse{Number: number}); err != nil {
 			return err
 		}
@@ -76,7 +76,7 @@ func (p *ExamplePingServer) CumSum(ctx context.Context, stream *connect.BidiStre
 		} else if err != nil {
 			return err
 		}
-		sum += msg.Number
+		sum += msg.GetNumber()
 		if err := stream.Send(&pingv1.CumSumResponse{Sum: sum}); err != nil {
 			return err
 		}

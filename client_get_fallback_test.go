@@ -32,8 +32,8 @@ func TestClientUnaryGetFallback(t *testing.T) {
 		"/connect.ping.v1.PingService/Ping",
 		func(ctx context.Context, r *Request[pingv1.PingRequest]) (*Response[pingv1.PingResponse], error) {
 			return NewResponse(&pingv1.PingResponse{
-				Number: r.Msg.Number,
-				Text:   r.Msg.Text,
+				Number: r.Msg.GetNumber(),
+				Text:   r.Msg.GetText(),
 			}), nil
 		},
 		WithIdempotency(IdempotencyNoSideEffects),
@@ -55,5 +55,5 @@ func TestClientUnaryGetFallback(t *testing.T) {
 	text := strings.Repeat(".", 256)
 	r, err := client.CallUnary(ctx, NewRequest(&pingv1.PingRequest{Text: text}))
 	assert.Nil(t, err)
-	assert.Equal(t, r.Msg.Text, text)
+	assert.Equal(t, r.Msg.GetText(), text)
 }

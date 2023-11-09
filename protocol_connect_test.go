@@ -46,7 +46,7 @@ func TestConnectErrorDetailMarshalingNoDescriptor(t *testing.T) {
 		`"debug":{"@type":"acme.user.v1.User","email":"someone@connectrpc.com"}}`
 	var detail connectWireDetail
 	assert.Nil(t, json.Unmarshal([]byte(raw), &detail))
-	assert.Equal(t, detail.pb.TypeUrl, defaultAnyResolverPrefix+"acme.user.v1.User")
+	assert.Equal(t, detail.pb.GetTypeUrl(), defaultAnyResolverPrefix+"acme.user.v1.User")
 
 	_, err := (*ErrorDetail)(&detail).Value()
 	assert.NotNil(t, err)

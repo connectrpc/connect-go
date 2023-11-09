@@ -149,7 +149,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	assert.Nil(t, err)
 	var sum int64
 	for responses.Receive() {
-		sum += responses.Msg().Number
+		sum += responses.Msg().GetNumber()
 	}
 	assert.Equal(t, sum, 55)
 	assert.Nil(t, responses.Close())
@@ -224,7 +224,7 @@ func TestInterceptorFuncAccessingHTTPMethod(t *testing.T) {
 	assert.Nil(t, err)
 	var sum int64
 	for responses.Receive() {
-		sum += responses.Msg().Number
+		sum += responses.Msg().GetNumber()
 	}
 	assert.Equal(t, sum, 55)
 	assert.Nil(t, responses.Close())

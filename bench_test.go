@@ -98,8 +98,8 @@ func BenchmarkConnect(b *testing.B) {
 						)
 						if err != nil {
 							b.Error(err)
-						} else if response.Msg.Number != 42 {
-							b.Errorf("expected 42, got %d", response.Msg.Number)
+						} else if num := response.Msg.GetNumber(); num != 42 {
+							b.Errorf("expected 42, got %d", num)
 						}
 					}
 				})
@@ -121,8 +121,8 @@ func BenchmarkConnect(b *testing.B) {
 						response, err := stream.CloseAndReceive()
 						if err != nil {
 							b.Error(err)
-						} else if response.Msg.Sum != expect {
-							b.Errorf("expected %d, got %d", expect, response.Msg.Sum)
+						} else if got := response.Msg.GetSum(); got != expect {
+							b.Errorf("expected %d, got %d", expect, got)
 						}
 					}
 				})
@@ -142,8 +142,8 @@ func BenchmarkConnect(b *testing.B) {
 						}
 						number := int64(1)
 						for ; stream.Receive(); number++ {
-							if stream.Msg().Number != number {
-								b.Errorf("expected %d, got %d", number, stream.Msg().Number)
+							if got := stream.Msg().GetNumber(); got != number {
+								b.Errorf("expected %d, got %d", number, got)
 							}
 						}
 						if number != upTo+1 {
@@ -170,8 +170,8 @@ func BenchmarkConnect(b *testing.B) {
 							if err != nil {
 								b.Error(err)
 							}
-							if msg.Sum != number*(number+1)/2 {
-								b.Errorf("expected %d, got %d", number*(number+1)/2, msg.Sum)
+							if got, expected := msg.GetSum(), number*(number+1)/2; got != expected {
+								b.Errorf("expected %d, got %d", expected, got)
 							}
 						}
 						if err := stream.CloseRequest(); err != nil {
