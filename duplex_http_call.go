@@ -21,7 +21,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sync"
+	"sync/atomic"
 )
 
 // duplexHTTPCall is a full-duplex stream between the client and server. The
@@ -43,8 +43,8 @@ type duplexHTTPCall struct {
 	requestBodyWriter *io.PipeWriter
 
 	// sendRequestOnce ensures we only send the request once.
-	sendRequestOnce sync.Once
-	request         *http.Request
+	requestSent atomic.Bool
+	request     *http.Request
 
 	// responseReady is closed when the response is ready or when the request
 	// fails. Any error on request initialisation will be set on the
@@ -235,11 +235,11 @@ func (d *duplexHTTPCall) BlockUntilResponseReady() error {
 // It is not safe to call this concurrently. Write and CloseWrite call this but
 // ensure that they're not called concurrently.
 func (d *duplexHTTPCall) ensureRequestMade() (isFirst bool) {
-	d.sendRequestOnce.Do(func() {
-		isFirst = true
+	if d.requestSent.CompareAndSwap(false, true) {
 		go d.makeRequest()
-	})
-	return isFirst
+		return true
+	}
+	return false
 }
 
 func (d *duplexHTTPCall) makeRequest() {
