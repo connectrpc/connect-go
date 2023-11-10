@@ -906,28 +906,20 @@ func (m *connectUnaryMarshaler) Marshal(message any) *Error {
 	if message == nil {
 		return m.write(nil)
 	}
-	var data []byte
-	var err error
-	if appender, ok := m.codec.(marshalAppender); ok {
-		data, err = appender.MarshalAppend(m.bufferPool.Get().Bytes(), message)
-	} else {
-		// Can't avoid allocating the slice, but we'll reuse it.
-		data, err = m.codec.Marshal(message)
-	}
+	buffer, err := marshal(message, m.codec, m.bufferPool)
 	if err != nil {
-		return errorf(CodeInternal, "marshal message: %w", err)
+		return err
 	}
-	uncompressed := bytes.NewBuffer(data)
-	defer m.bufferPool.Put(uncompressed)
-	if len(data) < m.compressMinBytes || m.compressionPool == nil {
-		if m.sendMaxBytes > 0 && len(data) > m.sendMaxBytes {
-			return NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", len(data), m.sendMaxBytes))
+	defer m.bufferPool.Put(buffer)
+	if buffer.Len() < m.compressMinBytes || m.compressionPool == nil {
+		if m.sendMaxBytes > 0 && buffer.Len() > m.sendMaxBytes {
+			return NewError(CodeResourceExhausted, fmt.Errorf("message size %d exceeds sendMaxBytes %d", buffer.Len(), m.sendMaxBytes))
 		}
-		return m.write(data)
+		return m.write(buffer.Bytes())
 	}
 	compressed := m.bufferPool.Get()
 	defer m.bufferPool.Put(compressed)
-	if err := m.compressionPool.Compress(compressed, uncompressed); err != nil {
+	if err := m.compressionPool.Compress(compressed, buffer); err != nil {
 		return err
 	}
 	if m.sendMaxBytes > 0 && compressed.Len() > m.sendMaxBytes {
