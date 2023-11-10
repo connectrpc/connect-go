@@ -102,17 +102,6 @@ func main() {
 	)
 }
 
-func needsWithIdempotency(file *protogen.File) bool {
-	for _, service := range file.Services {
-		for _, method := range service.Methods {
-			if methodIdempotency(method) != connect.IdempotencyUnknown {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func generate(plugin *protogen.Plugin, file *protogen.File) {
 	if len(file.Services) == 0 {
 		return
@@ -135,6 +124,7 @@ func generate(plugin *protogen.Plugin, file *protogen.File) {
 	generatedFile.Import(file.GoImportPath)
 	generatePreamble(generatedFile, file)
 	generateServiceNameConstants(generatedFile, file.Services)
+	generateServiceNameVariables(generatedFile, file)
 	for _, service := range file.Services {
 		generateService(generatedFile, service)
 	}
@@ -180,11 +170,7 @@ func generatePreamble(g *protogen.GeneratedFile, file *protogen.File) {
 		"is not defined, this code was generated with a version of connect newer than the one ",
 		"compiled into your binary. You can fix the problem by either regenerating this code ",
 		"with an older version of connect or updating the connect version compiled into your binary.")
-	if needsWithIdempotency(file) {
-		g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion1_7_0"))
-	} else {
-		g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion0_1_0"))
-	}
+	g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion1_13_0"))
 	g.P()
 }
 
@@ -223,6 +209,23 @@ func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protoge
 	}
 	g.P(")")
 	g.P()
+}
+
+func generateServiceNameVariables(g *protogen.GeneratedFile, file *protogen.File) {
+	wrapComments(g, "These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.")
+	g.P("var (")
+	for _, service := range file.Services {
+		serviceDescName := unexport(fmt.Sprintf("%sServiceDescriptor", service.Desc.Name()))
+		g.P(serviceDescName, ` = `,
+			g.QualifiedGoIdent(file.GoDescriptorIdent),
+			`.Services().ByName("`, service.Desc.Name(), `")`)
+		for _, method := range service.Methods {
+			g.P(procedureVarMethodDescriptor(method), ` = `,
+				serviceDescName,
+				`.Methods().ByName("`, method.Desc.Name(), `")`)
+		}
+	}
+	g.P(")")
 }
 
 func generateService(g *protogen.GeneratedFile, service *protogen.Service) {
@@ -273,7 +276,9 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 	}
 	g.P("func ", names.ClientConstructor, " (httpClient ", connectPackage.Ident("HTTPClient"),
 		", baseURL string, opts ...", clientOption, ") ", names.Client, " {")
-	g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
+	if len(service.Methods) > 0 {
+		g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
+	}
 	g.P("return &", names.ClientImpl, "{")
 	for _, method := range service.Methods {
 		g.P(unexport(method.GoName), ": ",
@@ -283,17 +288,16 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 		)
 		g.P("httpClient,")
 		g.P(`baseURL + `, procedureConstName(method), `,`)
+		g.P(connectPackage.Ident("WithSchema"), "(", procedureVarMethodDescriptor(method), "),")
 		idempotency := methodIdempotency(method)
 		switch idempotency {
 		case connect.IdempotencyNoSideEffects:
 			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyNoSideEffects"), "),")
-			g.P(connectPackage.Ident("WithClientOptions"), "(opts...),")
 		case connect.IdempotencyIdempotent:
 			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyIdempotent"), "),")
-			g.P(connectPackage.Ident("WithClientOptions"), "(opts...),")
 		case connect.IdempotencyUnknown:
-			g.P("opts...,")
 		}
+		g.P(connectPackage.Ident("WithClientOptions"), "(opts...),")
 		g.P("),")
 	}
 	g.P("}")
@@ -419,16 +423,15 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 		}
 		g.P(procedureConstName(method), `,`)
 		g.P("svc.", method.GoName, ",")
+		g.P(connectPackage.Ident("WithSchema"), "(", procedureVarMethodDescriptor(method), "),")
 		switch idempotency {
 		case connect.IdempotencyNoSideEffects:
 			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyNoSideEffects"), "),")
-			g.P(connectPackage.Ident("WithHandlerOptions"), "(opts...),")
 		case connect.IdempotencyIdempotent:
 			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyIdempotent"), "),")
-			g.P(connectPackage.Ident("WithHandlerOptions"), "(opts...),")
 		case connect.IdempotencyUnknown:
-			g.P("opts...,")
 		}
+		g.P(connectPackage.Ident("WithHandlerOptions"), "(opts...),")
 		g.P(")")
 	}
 	g.P(`return "/`, service.Desc.FullName(), `/", `, httpPackage.Ident("HandlerFunc"), `(func(w `, httpPackage.Ident("ResponseWriter"), `, r *`, httpPackage.Ident("Request"), `){`)
@@ -514,6 +517,10 @@ func procedureConstName(m *protogen.Method) string {
 
 func procedureHandlerName(m *protogen.Method) string {
 	return fmt.Sprintf("%s%sHandler", unexport(m.Parent.GoName), m.GoName)
+}
+
+func procedureVarMethodDescriptor(m *protogen.Method) string {
+	return unexport(fmt.Sprintf("%s%sMethodDescriptor", m.Parent.GoName, m.GoName))
 }
 
 func isDeprecatedService(service *protogen.Service) bool {

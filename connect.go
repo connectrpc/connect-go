@@ -38,9 +38,10 @@ const Version = "1.13.0-dev"
 // These constants are used in compile-time handshakes with connect's generated
 // code.
 const (
-	IsAtLeastVersion0_0_1 = true
-	IsAtLeastVersion0_1_0 = true
-	IsAtLeastVersion1_7_0 = true
+	IsAtLeastVersion0_0_1  = true
+	IsAtLeastVersion0_1_0  = true
+	IsAtLeastVersion1_7_0  = true
+	IsAtLeastVersion1_13_0 = true
 )
 
 // StreamType describes whether the client, server, neither, or both is
@@ -314,6 +315,7 @@ type HTTPClient interface {
 // fully-qualified Procedure corresponding to each RPC in your schema.
 type Spec struct {
 	StreamType       StreamType
+	Schema           any    // for protobuf RPCs, a protoreflect.MethodDescriptor
 	Procedure        string // for example, "/acme.foo.v1.FooService/Bar"
 	IsClient         bool   // otherwise we're in a handler
 	IdempotencyLevel IdempotencyLevel

@@ -37,7 +37,7 @@ import (
 // generated with a version of connect newer than the one compiled into your binary. You can fix the
 // problem by either regenerating this code with an older version of connect or updating the connect
 // version compiled into your binary.
-const _ = connect.IsAtLeastVersion1_7_0
+const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// PingServiceName is the fully-qualified name of the PingService service.
@@ -62,6 +62,16 @@ const (
 	PingServiceCountUpProcedure = "/connect.ping.v1.PingService/CountUp"
 	// PingServiceCumSumProcedure is the fully-qualified name of the PingService's CumSum RPC.
 	PingServiceCumSumProcedure = "/connect.ping.v1.PingService/CumSum"
+)
+
+// These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
+var (
+	pingServiceServiceDescriptor       = v1.File_connect_ping_v1_ping_proto.Services().ByName("PingService")
+	pingServicePingMethodDescriptor    = pingServiceServiceDescriptor.Methods().ByName("Ping")
+	pingServiceFailMethodDescriptor    = pingServiceServiceDescriptor.Methods().ByName("Fail")
+	pingServiceSumMethodDescriptor     = pingServiceServiceDescriptor.Methods().ByName("Sum")
+	pingServiceCountUpMethodDescriptor = pingServiceServiceDescriptor.Methods().ByName("CountUp")
+	pingServiceCumSumMethodDescriptor  = pingServiceServiceDescriptor.Methods().ByName("CumSum")
 )
 
 // PingServiceClient is a client for the connect.ping.v1.PingService service.
@@ -91,28 +101,33 @@ func NewPingServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 		ping: connect.NewClient[v1.PingRequest, v1.PingResponse](
 			httpClient,
 			baseURL+PingServicePingProcedure,
+			connect.WithSchema(pingServicePingMethodDescriptor),
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		fail: connect.NewClient[v1.FailRequest, v1.FailResponse](
 			httpClient,
 			baseURL+PingServiceFailProcedure,
-			opts...,
+			connect.WithSchema(pingServiceFailMethodDescriptor),
+			connect.WithClientOptions(opts...),
 		),
 		sum: connect.NewClient[v1.SumRequest, v1.SumResponse](
 			httpClient,
 			baseURL+PingServiceSumProcedure,
-			opts...,
+			connect.WithSchema(pingServiceSumMethodDescriptor),
+			connect.WithClientOptions(opts...),
 		),
 		countUp: connect.NewClient[v1.CountUpRequest, v1.CountUpResponse](
 			httpClient,
 			baseURL+PingServiceCountUpProcedure,
-			opts...,
+			connect.WithSchema(pingServiceCountUpMethodDescriptor),
+			connect.WithClientOptions(opts...),
 		),
 		cumSum: connect.NewClient[v1.CumSumRequest, v1.CumSumResponse](
 			httpClient,
 			baseURL+PingServiceCumSumProcedure,
-			opts...,
+			connect.WithSchema(pingServiceCumSumMethodDescriptor),
+			connect.WithClientOptions(opts...),
 		),
 	}
 }
@@ -174,28 +189,33 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption
 	pingServicePingHandler := connect.NewUnaryHandler(
 		PingServicePingProcedure,
 		svc.Ping,
+		connect.WithSchema(pingServicePingMethodDescriptor),
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	pingServiceFailHandler := connect.NewUnaryHandler(
 		PingServiceFailProcedure,
 		svc.Fail,
-		opts...,
+		connect.WithSchema(pingServiceFailMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
 	)
 	pingServiceSumHandler := connect.NewClientStreamHandler(
 		PingServiceSumProcedure,
 		svc.Sum,
-		opts...,
+		connect.WithSchema(pingServiceSumMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
 	)
 	pingServiceCountUpHandler := connect.NewServerStreamHandler(
 		PingServiceCountUpProcedure,
 		svc.CountUp,
-		opts...,
+		connect.WithSchema(pingServiceCountUpMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
 	)
 	pingServiceCumSumHandler := connect.NewBidiStreamHandler(
 		PingServiceCumSumProcedure,
 		svc.CumSum,
-		opts...,
+		connect.WithSchema(pingServiceCumSumMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
 	)
 	return "/connect.ping.v1.PingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

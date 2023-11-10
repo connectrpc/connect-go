@@ -184,6 +184,16 @@ type Option interface {
 	HandlerOption
 }
 
+// WithSchema provides a parsed representation of the schema for an RPC to a
+// client or handler. The supplied schema is exposed as [Spec.Schema]. This
+// option is typically added by generated code.
+//
+// For services using protobuf schemas, the supplied schema should be a
+// [protoreflect.MethodDescriptor].
+func WithSchema(schema any) Option {
+	return &schemaOption{Schema: schema}
+}
+
 // WithCodec registers a serialization method with a client or handler.
 // Handlers may have multiple codecs registered, and use whichever the client
 // chooses. Clients may only have a single codec.
@@ -326,6 +336,18 @@ func WithInterceptors(interceptors ...Interceptor) Option {
 // WithOptions composes multiple Options into one.
 func WithOptions(options ...Option) Option {
 	return &optionsOption{options}
+}
+
+type schemaOption struct {
+	Schema any
+}
+
+func (o *schemaOption) applyToClient(config *clientConfig) {
+	config.Schema = o.Schema
+}
+
+func (o *schemaOption) applyToHandler(config *handlerConfig) {
+	config.Schema = o.Schema
 }
 
 type clientOptionsOption struct {
