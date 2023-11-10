@@ -48,7 +48,7 @@ func TestGRPCHandlerSender(t *testing.T) {
 			protobuf:   protobufCodec,
 			marshaler: grpcMarshaler{
 				envelopeWriter: envelopeWriter{
-					writer:     responseWriter,
+					sender:     writeSender{writer: responseWriter},
 					codec:      protobufCodec,
 					bufferPool: bufferPool,
 				},
@@ -181,7 +181,7 @@ func TestGRPCWebTrailerMarshalling(t *testing.T) {
 	responseWriter := httptest.NewRecorder()
 	marshaler := grpcMarshaler{
 		envelopeWriter: envelopeWriter{
-			writer:     responseWriter,
+			sender:     writeSender{writer: responseWriter},
 			bufferPool: newBufferPool(),
 		},
 	}

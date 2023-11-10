@@ -16,43 +16,87 @@ package connect
 
 import (
 	"bytes"
-	"encoding/binary"
 	"io"
 	"testing"
 
 	"connectrpc.com/connect/internal/assert"
 )
 
-func TestEnvelope_read(t *testing.T) {
+func TestEnvelope(t *testing.T) {
 	t.Parallel()
-
-	head := [5]byte{}
 	payload := []byte(`{"number": 42}`)
-	binary.BigEndian.PutUint32(head[1:], uint32(len(payload)))
-
+	head := makeEnvelopePrefix(0, len(payload))
 	buf := &bytes.Buffer{}
 	buf.Write(head[:])
 	buf.Write(payload)
-
-	t.Run("full", func(t *testing.T) {
+	t.Run("read", func(t *testing.T) {
 		t.Parallel()
-		env := &envelope{Data: &bytes.Buffer{}}
-		rdr := envelopeReader{
-			reader: bytes.NewReader(buf.Bytes()),
-		}
-		assert.Nil(t, rdr.Read(env))
-		assert.Equal(t, payload, env.Data.Bytes())
-	})
-	t.Run("byteByByte", func(t *testing.T) {
-		t.Parallel()
-		env := &envelope{Data: &bytes.Buffer{}}
-		rdr := envelopeReader{
-			reader: byteByByteReader{
+		t.Run("full", func(t *testing.T) {
+			t.Parallel()
+			env := &envelope{Data: &bytes.Buffer{}}
+			rdr := envelopeReader{
 				reader: bytes.NewReader(buf.Bytes()),
-			},
-		}
-		assert.Nil(t, rdr.Read(env))
-		assert.Equal(t, payload, env.Data.Bytes())
+			}
+			assert.Nil(t, rdr.Read(env))
+			assert.Equal(t, payload, env.Data.Bytes())
+		})
+		t.Run("byteByByte", func(t *testing.T) {
+			t.Parallel()
+			env := &envelope{Data: &bytes.Buffer{}}
+			rdr := envelopeReader{
+				reader: byteByByteReader{
+					reader: bytes.NewReader(buf.Bytes()),
+				},
+			}
+			assert.Nil(t, rdr.Read(env))
+			assert.Equal(t, payload, env.Data.Bytes())
+		})
+	})
+	t.Run("write", func(t *testing.T) {
+		t.Parallel()
+		t.Run("full", func(t *testing.T) {
+			t.Parallel()
+			dst := &bytes.Buffer{}
+			wtr := envelopeWriter{
+				sender: writeSender{writer: dst},
+			}
+			env := &envelope{Data: bytes.NewBuffer(payload)}
+			err := wtr.Write(env)
+			assert.Nil(t, err)
+			assert.Equal(t, buf.Bytes(), dst.Bytes())
+		})
+		t.Run("partial", func(t *testing.T) {
+			t.Parallel()
+			dst := &bytes.Buffer{}
+			env := &envelope{Data: bytes.NewBuffer(payload)}
+			_, err := io.CopyN(dst, env, 2)
+			assert.Nil(t, err)
+			_, err = env.WriteTo(dst)
+			assert.Nil(t, err)
+			assert.Equal(t, buf.Bytes(), dst.Bytes())
+		})
+	})
+	t.Run("seek", func(t *testing.T) {
+		t.Parallel()
+		t.Run("start", func(t *testing.T) {
+			t.Parallel()
+			dst1 := &bytes.Buffer{}
+			dst2 := &bytes.Buffer{}
+			env := &envelope{Data: bytes.NewBuffer(payload)}
+			_, err := io.CopyN(dst1, env, 2)
+			assert.Nil(t, err)
+			assert.Equal(t, env.Len(), len(payload)+3)
+			_, err = env.Seek(0, io.SeekStart)
+			assert.Nil(t, err)
+			assert.Equal(t, env.Len(), len(payload)+5)
+			_, err = io.CopyN(dst2, env, 2)
+			assert.Nil(t, err)
+			assert.Equal(t, dst1.Bytes(), dst2.Bytes())
+			_, err = env.WriteTo(dst2)
+			assert.Nil(t, err)
+			assert.Equal(t, dst2.Bytes(), buf.Bytes())
+			assert.Equal(t, env.Len(), 0)
+		})
 	})
 }
 

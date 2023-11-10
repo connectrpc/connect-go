@@ -72,7 +72,7 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 	assert.Nil(t, err)
 
 	writer := envelopeWriter{
-		writer:     &buffer,
+		sender:     writeSender{writer: &buffer},
 		bufferPool: bufferPool,
 	}
 	err = writer.Write(&envelope{
