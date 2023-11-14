@@ -96,7 +96,7 @@ func TestClientPeer(t *testing.T) {
 			text := strings.Repeat(".", 256)
 			r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
 			assert.Nil(t, err)
-			assert.Equal(t, r.Msg.Text, text)
+			assert.Equal(t, r.Msg.GetText(), text)
 		})
 		t.Run("client_stream", func(t *testing.T) {
 			clientStream := client.Sum(ctx)
@@ -211,7 +211,7 @@ func TestSpecSchema(t *testing.T) {
 		text := strings.Repeat(".", 256)
 		r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
 		assert.Nil(t, err)
-		assert.Equal(t, r.Msg.Text, text)
+		assert.Equal(t, r.Msg.GetText(), text)
 	})
 	t.Run("bidi_stream", func(t *testing.T) {
 		t.Parallel()

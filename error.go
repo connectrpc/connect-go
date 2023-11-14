@@ -78,13 +78,13 @@ func (d *ErrorDetail) Type() string {
 	//
 	// If we ever want to support remote registries, we can add an explicit
 	// `TypeURL` method.
-	return strings.TrimPrefix(d.pb.TypeUrl, defaultAnyResolverPrefix)
+	return strings.TrimPrefix(d.pb.GetTypeUrl(), defaultAnyResolverPrefix)
 }
 
 // Bytes returns a copy of the Protobuf-serialized detail.
 func (d *ErrorDetail) Bytes() []byte {
-	out := make([]byte, len(d.pb.Value))
-	copy(out, d.pb.Value)
+	out := make([]byte, len(d.pb.GetValue()))
+	copy(out, d.pb.GetValue())
 	return out
 }
 
