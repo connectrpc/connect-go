@@ -1,0 +1,28 @@
+name: Add issues and PRs to project
+
+on:
+  issues:
+    types:
+      - opened
+      - reopened
+      - transferred
+  pull_request:
+    types:
+      - opened
+      - reopened
+
+jobs:
+  add-to-project:
+    name: Add issue to project
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get GitHub app token
+        uses: actions/create-github-app-token@v1
+        id: app_token
+        with:
+          app-id: ${{ secrets.CONNECT_EXPORT_APP_ID }}
+          private-key: ${{ secrets.CONNECT_EXPORT_APP_KEY }}
+      - uses: actions/add-to-project@v0.5.0
+        with:
+          project-url: https://github.com/orgs/connectrpc/projects/1
+          github-token: ${{ steps.app_token.outputs.token }}
