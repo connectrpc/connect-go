@@ -107,3 +107,45 @@ func TestErrorIs(t *testing.T) {
 	assert.False(t, errors.Is(connectErr, NewError(CodeUnavailable, err)))
 	assert.True(t, errors.Is(connectErr, connectErr))
 }
+
+func TestTypeNameFromURL(t *testing.T) {
+	t.Parallel()
+	testCases := []struct {
+		name     string
+		url      string
+		typeName string
+	}{
+		{
+			name:     "no-prefix",
+			url:      "foo.bar.Baz",
+			typeName: "foo.bar.Baz",
+		},
+		{
+			name:     "standard-prefix",
+			url:      defaultAnyResolverPrefix + "foo.bar.Baz",
+			typeName: "foo.bar.Baz",
+		},
+		{
+			name:     "different-hostname",
+			url:      "abc.com/foo.bar.Baz",
+			typeName: "foo.bar.Baz",
+		},
+		{
+			name:     "additional-path-elements",
+			url:      defaultAnyResolverPrefix + "abc/def/foo.bar.Baz",
+			typeName: "foo.bar.Baz",
+		},
+		{
+			name:     "full-url",
+			url:      "https://abc.com/abc/def/foo.bar.Baz",
+			typeName: "foo.bar.Baz",
+		},
+	}
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, typeNameFromURL(testCase.url), testCase.typeName)
+		})
+	}
+}
