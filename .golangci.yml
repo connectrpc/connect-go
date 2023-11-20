@@ -44,6 +44,7 @@ linters:
     - golint            # deprecated by Go team
     - gomnd             # some unnamed constants are okay
     - ifshort           # deprecated by author
+    - inamedparam       # convention is not followed
     - interfacer        # deprecated by author
     - ireturn           # "accept interfaces, return structs" isn't ironclad
     - lll               # don't want hard limits for line length
@@ -52,6 +53,7 @@ linters:
     - nlreturn          # generous whitespace violates house style
     - nonamedreturns    # named returns are fine; it's *bare* returns that are bad
     - nosnakecase       # deprecated in https://github.com/golangci/golangci-lint/pull/3065
+    - protogetter       # too many false positives
     - scopelint         # deprecated by author
     - structcheck       # abandoned
     - testpackage       # internal tests are fine

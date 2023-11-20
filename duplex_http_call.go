@@ -21,7 +21,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sync"
+	"sync/atomic"
 )
 
 // duplexHTTPCall is a full-duplex stream between the client and server. The
@@ -42,9 +42,9 @@ type duplexHTTPCall struct {
 	requestBodyReader *io.PipeReader
 	requestBodyWriter *io.PipeWriter
 
-	// sendRequestOnce ensures we only send the request once.
-	sendRequestOnce sync.Once
-	request         *http.Request
+	// requestSent ensures we only send the request once.
+	requestSent atomic.Bool
+	request     *http.Request
 
 	// responseReady is closed when the response is ready or when the request
 	// fails. Any error on request initialisation will be set on the
@@ -96,10 +96,15 @@ func newDuplexHTTPCall(
 
 // Write to the request body.
 func (d *duplexHTTPCall) Write(data []byte) (int, error) {
-	d.ensureRequestMade()
+	isFirst := d.ensureRequestMade()
 	// Before we send any data, check if the context has been canceled.
 	if err := d.ctx.Err(); err != nil {
 		return 0, wrapIfContextError(err)
+	}
+	if isFirst && data == nil {
+		// On first write a nil Send is used to send request headers. Avoid
+		// writing a zero-length payload to avoid superfluous errors with close.
+		return 0, nil
 	}
 	// It's safe to write to this side of the pipe while net/http concurrently
 	// reads from the other side.
@@ -229,10 +234,12 @@ func (d *duplexHTTPCall) BlockUntilResponseReady() error {
 // ensureRequestMade sends the request headers and starts the response stream.
 // It is not safe to call this concurrently. Write and CloseWrite call this but
 // ensure that they're not called concurrently.
-func (d *duplexHTTPCall) ensureRequestMade() {
-	d.sendRequestOnce.Do(func() {
+func (d *duplexHTTPCall) ensureRequestMade() (isFirst bool) {
+	if d.requestSent.CompareAndSwap(false, true) {
 		go d.makeRequest()
-	})
+		return true
+	}
+	return false
 }
 
 func (d *duplexHTTPCall) makeRequest() {

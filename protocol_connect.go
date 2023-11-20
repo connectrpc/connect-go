@@ -1121,8 +1121,8 @@ func (d *connectWireDetail) MarshalJSON() ([]byte, error) {
 		Value string          `json:"value"`
 		Debug json.RawMessage `json:"debug,omitempty"`
 	}{
-		Type:  strings.TrimPrefix(d.pb.TypeUrl, defaultAnyResolverPrefix),
-		Value: base64.RawStdEncoding.EncodeToString(d.pb.Value),
+		Type:  typeNameFromURL(d.pb.GetTypeUrl()),
+		Value: base64.RawStdEncoding.EncodeToString(d.pb.GetValue()),
 	}
 	// Try to produce debug info, but expect failure when we don't have
 	// descriptors.

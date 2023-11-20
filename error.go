@@ -74,17 +74,17 @@ func (d *ErrorDetail) Type() string {
 	// than plain type names, but there aren't any descriptor registries
 	// deployed. With the current state of the `Any` code, it's not possible to
 	// build a useful type registry either. To hide this from users, we should
-	// trim the static hostname that `Any` adds to the type name.
+	// trim the URL prefix is added to the type name.
 	//
 	// If we ever want to support remote registries, we can add an explicit
 	// `TypeURL` method.
-	return strings.TrimPrefix(d.pb.TypeUrl, defaultAnyResolverPrefix)
+	return typeNameFromURL(d.pb.GetTypeUrl())
 }
 
 // Bytes returns a copy of the Protobuf-serialized detail.
 func (d *ErrorDetail) Bytes() []byte {
-	out := make([]byte, len(d.pb.Value))
-	copy(out, d.pb.Value)
+	out := make([]byte, len(d.pb.GetValue()))
+	copy(out, d.pb.GetValue())
 	return out
 }
 
@@ -408,4 +408,8 @@ func asMaxBytesError(err error, tmpl string, args ...any) *Error {
 	}
 	prefix := fmt.Sprintf(tmpl, args...)
 	return errorf(CodeResourceExhausted, "%s: exceeded %d byte http.MaxBytesReader limit", prefix, maxBytesErr.Limit)
+}
+
+func typeNameFromURL(url string) string {
+	return url[strings.LastIndexByte(url, '/')+1:]
 }

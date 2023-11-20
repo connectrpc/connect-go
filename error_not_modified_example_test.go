@@ -16,8 +16,8 @@ package connect_test
 
 import (
 	"context"
-	"fmt"
 	"net/http"
+	"strconv"
 
 	connect "connectrpc.com/connect"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
@@ -39,10 +39,10 @@ func (*ExampleCachingPingServer) Ping(
 	req *connect.Request[pingv1.PingRequest],
 ) (*connect.Response[pingv1.PingResponse], error) {
 	resp := connect.NewResponse(&pingv1.PingResponse{
-		Number: req.Msg.Number,
+		Number: req.Msg.GetNumber(),
 	})
 	// Our hashing logic is simple: we use the number in the PingResponse.
-	hash := fmt.Sprint(resp.Msg.Number)
+	hash := strconv.FormatInt(resp.Msg.GetNumber(), 10)
 	// If the request was an HTTP GET, we'll need to check if the client already
 	// has the response cached.
 	if req.HTTPMethod() == http.MethodGet && req.Header().Get("If-None-Match") == hash {

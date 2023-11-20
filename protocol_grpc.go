@@ -743,12 +743,12 @@ func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {
 		if err := protobuf.Unmarshal(detailsBinary, &status); err != nil {
 			return errorf(CodeInternal, "server returned invalid protobuf for error details: %w", err)
 		}
-		for _, d := range status.Details {
+		for _, d := range status.GetDetails() {
 			retErr.details = append(retErr.details, &ErrorDetail{pb: d})
 		}
 		// Prefer the Protobuf-encoded data to the headers (grpc-go does this too).
-		retErr.code = Code(status.Code)
-		retErr.err = errors.New(status.Message)
+		retErr.code = Code(status.GetCode())
+		retErr.err = errors.New(status.GetMessage())
 	}
 
 	return retErr
@@ -856,7 +856,7 @@ func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) {
 		return
 	}
 	status := grpcStatusFromError(err)
-	code := strconv.Itoa(int(status.Code))
+	code := strconv.Itoa(int(status.GetCode()))
 	bin, binErr := protobuf.Marshal(status)
 	if binErr != nil {
 		setHeaderCanonical(
@@ -877,7 +877,7 @@ func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) {
 		mergeHeaders(trailer, connectErr.meta)
 	}
 	setHeaderCanonical(trailer, grpcHeaderStatus, code)
-	setHeaderCanonical(trailer, grpcHeaderMessage, grpcPercentEncode(status.Message))
+	setHeaderCanonical(trailer, grpcHeaderMessage, grpcPercentEncode(status.GetMessage()))
 	setHeaderCanonical(trailer, grpcHeaderDetails, EncodeBinaryHeader(bin))
 }
 
