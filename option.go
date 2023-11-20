@@ -200,7 +200,7 @@ func WithSchema(schema any) Option {
 // will be a non nil pointer to the type created by the handler. Use the Schema
 // field of the [Spec] to determine the type of the message.
 func WithRequestInitializer(initializer func(spec Spec, message any) error) HandlerOption {
-	return &requestInitializerOption{Initializer: initializer}
+	return &initializerOption{Initializer: initializer}
 }
 
 // WithResponseInitializer provides a function that initializes a new message.
@@ -209,7 +209,7 @@ func WithRequestInitializer(initializer func(spec Spec, message any) error) Hand
 // will be a non nil pointer to the type created by the client. Use the Schema
 // field of the [Spec] to determine the type of the message.
 func WithResponseInitializer(initializer func(spec Spec, message any) error) ClientOption {
-	return &responseInitializerOption{Initializer: initializer}
+	return &initializerOption{Initializer: initializer}
 }
 
 // WithCodec registers a serialization method with a client or handler.
@@ -368,19 +368,15 @@ func (o *schemaOption) applyToHandler(config *handlerConfig) {
 	config.Schema = o.Schema
 }
 
-type requestInitializerOption struct {
+type initializerOption struct {
 	Initializer func(spec Spec, message any) error
 }
 
-func (o *requestInitializerOption) applyToHandler(config *handlerConfig) {
+func (o *initializerOption) applyToHandler(config *handlerConfig) {
 	config.Initializer = o.Initializer
 }
 
-type responseInitializerOption struct {
-	Initializer func(spec Spec, message any) error
-}
-
-func (o *responseInitializerOption) applyToClient(config *clientConfig) {
+func (o *initializerOption) applyToClient(config *clientConfig) {
 	config.Initializer = o.Initializer
 }
 
