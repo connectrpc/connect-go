@@ -194,24 +194,21 @@ func WithSchema(schema any) Option {
 	return &schemaOption{Schema: schema}
 }
 
-// InitializerFunc is a function that initializes a message. It may be used to
-// dynamically construct messages. It is called on client and handler receives
-// to construct the message to be unmarshaled into.
-//
-// The message will be a non nil pointer to the type created by the client or
-// handler. Use the Schema field of the [Spec] to determine the type of the
-// message.
-type InitializerFunc func(spec Spec, message any) error
-
 // WithRequestInitializer provides a function that initializes a new message.
-// It may be used to dynamically construct request messages.
-func WithRequestInitializer(initializer InitializerFunc) HandlerOption {
+// It may be used to dynamically construct request messages. It is called on
+// server receives to construct the message to be unmarshaled into. The message
+// will be a non nil pointer to the type created by the handler. Use the Schema
+// field of the [Spec] to determine the type of the message.
+func WithRequestInitializer(initializer func(spec Spec, message any) error) HandlerOption {
 	return &requestInitializerOption{Initializer: initializer}
 }
 
 // WithResponseInitializer provides a function that initializes a new message.
-// It may be used to dynamically construct response messages.
-func WithResponseInitializer(initializer InitializerFunc) ClientOption {
+// It may be used to dynamically construct response messages. It is called on
+// client receives to construct the message to be unmarshaled into. The message
+// will be a non nil pointer to the type created by the client. Use the Schema
+// field of the [Spec] to determine the type of the message.
+func WithResponseInitializer(initializer func(spec Spec, message any) error) ClientOption {
 	return &responseInitializerOption{Initializer: initializer}
 }
 
@@ -372,7 +369,7 @@ func (o *schemaOption) applyToHandler(config *handlerConfig) {
 }
 
 type requestInitializerOption struct {
-	Initializer InitializerFunc
+	Initializer func(spec Spec, message any) error
 }
 
 func (o *requestInitializerOption) applyToHandler(config *handlerConfig) {
@@ -380,7 +377,7 @@ func (o *requestInitializerOption) applyToHandler(config *handlerConfig) {
 }
 
 type responseInitializerOption struct {
-	Initializer InitializerFunc
+	Initializer func(spec Spec, message any) error
 }
 
 func (o *responseInitializerOption) applyToClient(config *clientConfig) {

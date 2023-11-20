@@ -260,7 +260,7 @@ type handlerConfig struct {
 	Interceptor                  Interceptor
 	Procedure                    string
 	Schema                       any
-	Initializer                  InitializerFunc
+	Initializer                  func(Spec, any) error
 	HandleGRPC                   bool
 	HandleGRPCWeb                bool
 	RequireConnectProtocolHeader bool

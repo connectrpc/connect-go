@@ -199,7 +199,7 @@ type clientConfig struct {
 	Protocol               protocol
 	Procedure              string
 	Schema                 any
-	Initializer            InitializerFunc
+	Initializer            func(Spec, any) error
 	CompressMinBytes       int
 	Interceptor            Interceptor
 	CompressionPools       map[string]*compressionPool
