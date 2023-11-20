@@ -373,11 +373,22 @@ type initializerOption struct {
 }
 
 func (o *initializerOption) applyToHandler(config *handlerConfig) {
-	config.Initializer = o.Initializer
+	config.Initializer = maybeInitializer{initializer: o.Initializer}
 }
 
 func (o *initializerOption) applyToClient(config *clientConfig) {
-	config.Initializer = o.Initializer
+	config.Initializer = maybeInitializer{initializer: o.Initializer}
+}
+
+type maybeInitializer struct {
+	initializer func(spec Spec, message any) error
+}
+
+func (o maybeInitializer) maybe(spec Spec, message any) error {
+	if o.initializer != nil {
+		return o.initializer(spec, message)
+	}
+	return nil
 }
 
 type clientOptionsOption struct {

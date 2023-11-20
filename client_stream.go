@@ -26,7 +26,7 @@ import (
 // exported constructor function.
 type ClientStreamForClient[Req, Res any] struct {
 	conn        StreamingClientConn
-	initializer func(Spec, any) error
+	initializer maybeInitializer
 	// Error from client construction. If non-nil, return for all calls.
 	err error
 }
@@ -99,7 +99,7 @@ func (c *ClientStreamForClient[Req, Res]) Conn() (StreamingClientConn, error) {
 // exported constructor function.
 type ServerStreamForClient[Res any] struct {
 	conn        StreamingClientConn
-	initializer func(Spec, any) error
+	initializer maybeInitializer
 	msg         *Res
 	// Error from client construction. If non-nil, return for all calls.
 	constructErr error
@@ -117,11 +117,9 @@ func (s *ServerStreamForClient[Res]) Receive() bool {
 		return false
 	}
 	s.msg = new(Res)
-	if s.initializer != nil {
-		if err := s.initializer(s.conn.Spec(), s.msg); err != nil {
-			s.receiveErr = err
-			return false
-		}
+	if err := s.initializer.maybe(s.conn.Spec(), s.msg); err != nil {
+		s.receiveErr = err
+		return false
 	}
 	s.receiveErr = s.conn.Receive(s.msg)
 	return s.receiveErr == nil
@@ -184,7 +182,7 @@ func (s *ServerStreamForClient[Res]) Conn() (StreamingClientConn, error) {
 // exported constructor function.
 type BidiStreamForClient[Req, Res any] struct {
 	conn        StreamingClientConn
-	initializer func(Spec, any) error
+	initializer maybeInitializer
 	// Error from client construction. If non-nil, return for all calls.
 	err error
 }
@@ -243,10 +241,8 @@ func (b *BidiStreamForClient[Req, Res]) Receive() (*Res, error) {
 		return nil, b.err
 	}
 	var msg Res
-	if b.initializer != nil {
-		if err := b.initializer(b.conn.Spec(), &msg); err != nil {
-			return nil, err
-		}
+	if err := b.initializer.maybe(b.conn.Spec(), &msg); err != nil {
+		return nil, err
 	}
 	if err := b.conn.Receive(&msg); err != nil {
 		return nil, err

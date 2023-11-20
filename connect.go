@@ -358,12 +358,10 @@ type handlerConnCloser interface {
 // envelopes the message and attaches headers and trailers. It attempts to
 // consume the response stream and isn't appropriate when receiving multiple
 // messages.
-func receiveUnaryResponse[T any](conn StreamingClientConn, initializer func(Spec, any) error) (*Response[T], error) {
+func receiveUnaryResponse[T any](conn StreamingClientConn, initializer maybeInitializer) (*Response[T], error) {
 	var msg T
-	if initializer != nil {
-		if err := initializer(conn.Spec(), &msg); err != nil {
-			return nil, err
-		}
+	if err := initializer.maybe(conn.Spec(), &msg); err != nil {
+		return nil, err
 	}
 	if err := conn.Receive(&msg); err != nil {
 		return nil, err
@@ -373,10 +371,8 @@ func receiveUnaryResponse[T any](conn StreamingClientConn, initializer func(Spec
 	// trailers, try to read another message from the stream.
 	// TODO: optimise unary calls to avoid this extra receive.
 	var msg2 T
-	if initializer != nil {
-		if err := initializer(conn.Spec(), &msg2); err != nil {
-			return nil, err
-		}
+	if err := initializer.maybe(conn.Spec(), &msg2); err != nil {
+		return nil, err
 	}
 	if err := conn.Receive(&msg2); err == nil {
 		return nil, NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
