@@ -27,10 +27,8 @@ func TestClientStreamIterator(t *testing.T) {
 	// The server's view of a client streaming RPC is an iterator. For safety,
 	// and to match grpc-go's behavior, we should allocate a new message for each
 	// iteration.
-	config := newHandlerConfig("/connect.ping.v1.PingService/Ping", StreamTypeUnary, nil)
 	stream := &ClientStream[pingv1.PingRequest]{
-		conn:   &nopStreamingHandlerConn{},
-		config: config,
+		conn: &nopStreamingHandlerConn{},
 	}
 	assert.True(t, stream.Receive())
 	first := fmt.Sprintf("%p", stream.Msg())

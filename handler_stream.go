@@ -25,10 +25,10 @@ import (
 // It's constructed as part of [Handler] invocation, but doesn't currently have
 // an exported constructor.
 type ClientStream[Req any] struct {
-	conn   StreamingHandlerConn
-	config *handlerConfig
-	msg    *Req
-	err    error
+	conn        StreamingHandlerConn
+	initializer func(Spec, any) error
+	msg         *Req
+	err         error
 }
 
 // Spec returns the specification for the RPC.
@@ -56,8 +56,8 @@ func (c *ClientStream[Req]) Receive() bool {
 		return false
 	}
 	c.msg = new(Req)
-	if c.config.Initializer != nil {
-		if err := c.config.Initializer(c.Spec(), c.msg); err != nil {
+	if c.initializer != nil {
+		if err := c.initializer(c.Spec(), c.msg); err != nil {
 			c.err = err
 			return false
 		}
@@ -134,8 +134,8 @@ func (s *ServerStream[Res]) Conn() StreamingHandlerConn {
 // It's constructed as part of [Handler] invocation, but doesn't currently have
 // an exported constructor.
 type BidiStream[Req, Res any] struct {
-	conn   StreamingHandlerConn
-	config *handlerConfig
+	conn        StreamingHandlerConn
+	initializer func(Spec, any) error
 }
 
 // Spec returns the specification for the RPC.
@@ -157,8 +157,8 @@ func (b *BidiStream[Req, Res]) RequestHeader() http.Header {
 // return an error that wraps [io.EOF].
 func (b *BidiStream[Req, Res]) Receive() (*Req, error) {
 	var req Req
-	if b.config.Initializer != nil {
-		if err := b.config.Initializer(b.Spec(), &req); err != nil {
+	if b.initializer != nil {
+		if err := b.initializer(b.Spec(), &req); err != nil {
 			return nil, err
 		}
 	}

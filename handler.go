@@ -113,8 +113,8 @@ func NewClientStreamHandler[Req, Res any](
 		config,
 		func(ctx context.Context, conn StreamingHandlerConn) error {
 			stream := &ClientStream[Req]{
-				conn:   conn,
-				config: config,
+				conn:        conn,
+				initializer: config.Initializer,
 			}
 			res, err := implementation(ctx, stream)
 			if err != nil {
@@ -179,8 +179,8 @@ func NewBidiStreamHandler[Req, Res any](
 			return implementation(
 				ctx,
 				&BidiStream[Req, Res]{
-					conn:   conn,
-					config: config,
+					conn:        conn,
+					initializer: config.Initializer,
 				},
 			)
 		},

@@ -92,7 +92,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 			_ = conn.CloseResponse()
 			return nil, err
 		}
-		response, err := receiveUnaryResponse[Res](conn, config)
+		response, err := receiveUnaryResponse[Res](conn, config.Initializer)
 		if err != nil {
 			_ = conn.CloseResponse()
 			return nil, err
@@ -136,8 +136,8 @@ func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamFo
 		return &ClientStreamForClient[Req, Res]{err: c.err}
 	}
 	return &ClientStreamForClient[Req, Res]{
-		conn:   c.newConn(ctx, StreamTypeClient, nil),
-		config: c.config,
+		conn:        c.newConn(ctx, StreamTypeClient, nil),
+		initializer: c.config.Initializer,
 	}
 }
 
@@ -164,8 +164,8 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 		return nil, err
 	}
 	return &ServerStreamForClient[Res]{
-		conn:   conn,
-		config: c.config,
+		conn:        conn,
+		initializer: c.config.Initializer,
 	}, nil
 }
 
@@ -175,8 +175,8 @@ func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForCli
 		return &BidiStreamForClient[Req, Res]{err: c.err}
 	}
 	return &BidiStreamForClient[Req, Res]{
-		conn:   c.newConn(ctx, StreamTypeBidi, nil),
-		config: c.config,
+		conn:        c.newConn(ctx, StreamTypeBidi, nil),
+		initializer: c.config.Initializer,
 	}
 }
 

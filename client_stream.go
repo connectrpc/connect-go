@@ -25,8 +25,8 @@ import (
 // It's returned from [Client].CallClientStream, but doesn't currently have an
 // exported constructor function.
 type ClientStreamForClient[Req, Res any] struct {
-	conn   StreamingClientConn
-	config *clientConfig
+	conn        StreamingClientConn
+	initializer func(Spec, any) error
 	// Error from client construction. If non-nil, return for all calls.
 	err error
 }
@@ -79,7 +79,7 @@ func (c *ClientStreamForClient[Req, Res]) CloseAndReceive() (*Response[Res], err
 		_ = c.conn.CloseResponse()
 		return nil, err
 	}
-	response, err := receiveUnaryResponse[Res](c.conn, c.config)
+	response, err := receiveUnaryResponse[Res](c.conn, c.initializer)
 	if err != nil {
 		_ = c.conn.CloseResponse()
 		return nil, err
@@ -98,9 +98,9 @@ func (c *ClientStreamForClient[Req, Res]) Conn() (StreamingClientConn, error) {
 // It's returned from [Client].CallServerStream, but doesn't currently have an
 // exported constructor function.
 type ServerStreamForClient[Res any] struct {
-	conn   StreamingClientConn
-	config *clientConfig
-	msg    *Res
+	conn        StreamingClientConn
+	initializer func(Spec, any) error
+	msg         *Res
 	// Error from client construction. If non-nil, return for all calls.
 	constructErr error
 	// Error from conn.Receive().
@@ -117,8 +117,8 @@ func (s *ServerStreamForClient[Res]) Receive() bool {
 		return false
 	}
 	s.msg = new(Res)
-	if s.config.Initializer != nil {
-		if err := s.config.Initializer(s.conn.Spec(), s.msg); err != nil {
+	if s.initializer != nil {
+		if err := s.initializer(s.conn.Spec(), s.msg); err != nil {
 			s.receiveErr = err
 			return false
 		}
@@ -183,8 +183,8 @@ func (s *ServerStreamForClient[Res]) Conn() (StreamingClientConn, error) {
 // It's returned from [Client].CallBidiStream, but doesn't currently have an
 // exported constructor function.
 type BidiStreamForClient[Req, Res any] struct {
-	conn   StreamingClientConn
-	config *clientConfig
+	conn        StreamingClientConn
+	initializer func(Spec, any) error
 	// Error from client construction. If non-nil, return for all calls.
 	err error
 }
@@ -243,8 +243,8 @@ func (b *BidiStreamForClient[Req, Res]) Receive() (*Res, error) {
 		return nil, b.err
 	}
 	var msg Res
-	if b.config.Initializer != nil {
-		if err := b.config.Initializer(b.conn.Spec(), &msg); err != nil {
+	if b.initializer != nil {
+		if err := b.initializer(b.conn.Spec(), &msg); err != nil {
 			return nil, err
 		}
 	}

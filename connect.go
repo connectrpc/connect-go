@@ -358,10 +358,10 @@ type handlerConnCloser interface {
 // envelopes the message and attaches headers and trailers. It attempts to
 // consume the response stream and isn't appropriate when receiving multiple
 // messages.
-func receiveUnaryResponse[T any](conn StreamingClientConn, config *clientConfig) (*Response[T], error) {
+func receiveUnaryResponse[T any](conn StreamingClientConn, initializer func(Spec, any) error) (*Response[T], error) {
 	var msg T
-	if config.Initializer != nil {
-		if err := config.Initializer(conn.Spec(), &msg); err != nil {
+	if initializer != nil {
+		if err := initializer(conn.Spec(), &msg); err != nil {
 			return nil, err
 		}
 	}
@@ -373,8 +373,8 @@ func receiveUnaryResponse[T any](conn StreamingClientConn, config *clientConfig)
 	// trailers, try to read another message from the stream.
 	// TODO: optimise unary calls to avoid this extra receive.
 	var msg2 T
-	if config.Initializer != nil {
-		if err := config.Initializer(conn.Spec(), &msg2); err != nil {
+	if initializer != nil {
+		if err := initializer(conn.Spec(), &msg2); err != nil {
 			return nil, err
 		}
 	}
