@@ -16,6 +16,7 @@ package connect
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -83,6 +84,7 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 
 	unmarshaler := connectStreamingUnmarshaler{
 		envelopeReader: envelopeReader{
+			ctx:        context.Background(),
 			reader:     &buffer,
 			bufferPool: bufferPool,
 		},

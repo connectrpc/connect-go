@@ -144,6 +144,7 @@ func (g *grpcHandler) NewConn(
 	responseWriter http.ResponseWriter,
 	request *http.Request,
 ) (handlerConnCloser, bool) {
+	ctx := request.Context()
 	// We need to parse metadata before entering the interceptor stack; we'll
 	// send the error to the client later on.
 	requestCompression, responseCompression, failed := negotiateCompression(
@@ -186,6 +187,7 @@ func (g *grpcHandler) NewConn(
 		protobuf:   g.Codecs.Protobuf(), // for errors
 		marshaler: grpcMarshaler{
 			envelopeWriter: envelopeWriter{
+				ctx:              ctx,
 				sender:           writeSender{writer: responseWriter},
 				compressionPool:  g.CompressionPools.Get(responseCompression),
 				codec:            codec,
@@ -200,6 +202,7 @@ func (g *grpcHandler) NewConn(
 		request:         request,
 		unmarshaler: grpcUnmarshaler{
 			envelopeReader: envelopeReader{
+				ctx:             ctx,
 				reader:          request.Body,
 				codec:           codec,
 				compressionPool: g.CompressionPools.Get(requestCompression),
@@ -284,6 +287,7 @@ func (g *grpcClient) NewConn(
 		protobuf:         g.Protobuf,
 		marshaler: grpcMarshaler{
 			envelopeWriter: envelopeWriter{
+				ctx:              ctx,
 				sender:           duplexCall,
 				compressionPool:  g.CompressionPools.Get(g.CompressionName),
 				codec:            g.Codec,
@@ -294,6 +298,7 @@ func (g *grpcClient) NewConn(
 		},
 		unmarshaler: grpcUnmarshaler{
 			envelopeReader: envelopeReader{
+				ctx:          ctx,
 				reader:       duplexCall,
 				codec:        g.Codec,
 				bufferPool:   g.BufferPool,

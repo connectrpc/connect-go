@@ -16,6 +16,7 @@ package connect
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -117,6 +118,7 @@ func (e *envelope) Len() int {
 }
 
 type envelopeWriter struct {
+	ctx              context.Context
 	sender           messageSender
 	codec            Codec
 	compressMinBytes int
@@ -209,6 +211,7 @@ func (w *envelopeWriter) marshal(message any) *Error {
 func (w *envelopeWriter) write(env *envelope) *Error {
 	if _, err := w.sender.Send(env); err != nil {
 		err = wrapIfContextError(err)
+		err = wrapWithContextError(w.ctx, err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
@@ -218,6 +221,7 @@ func (w *envelopeWriter) write(env *envelope) *Error {
 }
 
 type envelopeReader struct {
+	ctx             context.Context
 	reader          io.Reader
 	codec           Codec
 	last            envelope
@@ -305,17 +309,12 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 			return NewError(CodeUnknown, err)
 		}
 		err = wrapIfContextError(err)
+		err = wrapWithContextError(r.ctx, err)
+		err = wrapIfMaxBytesError(err, "read 5 byte message prefix")
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
 		// Something else has gone wrong - the stream didn't end cleanly.
-		if connectErr, ok := asError(err); ok {
-			return connectErr
-		}
-		if maxBytesErr := asMaxBytesError(err, "read 5 byte message prefix"); maxBytesErr != nil {
-			// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.
-			return maxBytesErr
-		}
 		return errorf(
 			CodeInvalidArgument,
 			"protocol error: incomplete envelope: %w", err,
@@ -333,10 +332,6 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 	// CopyN will return an error if it doesn't read the requested
 	// number of bytes.
 	if readN, err := io.CopyN(env.Data, r.reader, size); err != nil {
-		if maxBytesErr := asMaxBytesError(err, "read %d byte message", size); maxBytesErr != nil {
-			// We're reading from an http.MaxBytesHandler, and we've exceeded the read limit.
-			return maxBytesErr
-		}
 		if errors.Is(err, io.EOF) {
 			// We've gotten fewer bytes than we expected, so the stream has ended
 			// unexpectedly.
@@ -348,6 +343,8 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 			)
 		}
 		err = wrapIfContextError(err)
+		err = wrapWithContextError(r.ctx, err)
+		err = wrapIfMaxBytesError(err, "read %d byte message", size)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}

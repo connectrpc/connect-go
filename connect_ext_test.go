@@ -19,12 +19,14 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"runtime"
 	"strings"
@@ -2274,6 +2276,132 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			assert.Equal(t, stream.Err().Error(), testcase.expectMsg)
 		})
 	}
+}
+
+// TestClientDisconnect tests that the handler receives a CodeCanceled error when
+// the client abruptly disconnects.
+func TestClientDisconnect(t *testing.T) {
+	t.Parallel()
+	captureTransportConn := func(server *memhttp.Server, clientConn *net.Conn, onError chan struct{}, http2 bool) http.RoundTripper {
+		if http2 {
+			transport := server.Transport()
+			dialContext := transport.DialTLSContext
+			transport.DialTLSContext = func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+				conn, err := dialContext(ctx, network, addr, cfg)
+				if err != nil {
+					close(onError)
+					return nil, err
+				}
+				*clientConn = conn // Capture the client connection.
+				return conn, nil
+			}
+			return transport
+		}
+		transport := server.TransportHTTP1()
+		dialContext := transport.DialContext
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			conn, err := dialContext(ctx, network, addr)
+			if err != nil {
+				close(onError)
+				return nil, err
+			}
+			*clientConn = conn // Capture the client connection.
+			return conn, nil
+		}
+		return transport
+	}
+	testTransportClosure := func(t *testing.T, http2 bool) { //nolint:thelper
+		t.Run("handler_reads", func(t *testing.T) {
+			var (
+				handlerReceiveErr error
+				handlerContextErr error
+				gotRequest        = make(chan struct{})
+				gotResponse       = make(chan struct{})
+			)
+			pingServer := &pluggablePingServer{
+				sum: func(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+					close(gotRequest)
+					for stream.Receive() {
+						// Do nothing
+					}
+					handlerReceiveErr = stream.Err()
+					handlerContextErr = ctx.Err()
+					close(gotResponse)
+					return connect.NewResponse(&pingv1.SumResponse{}), nil
+				},
+			}
+			mux := http.NewServeMux()
+			mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+			server := memhttptest.NewServer(t, mux)
+			var clientConn net.Conn
+			transport := captureTransportConn(server, &clientConn, gotRequest, http2)
+			serverClient := &http.Client{Transport: transport}
+			client := pingv1connect.NewPingServiceClient(serverClient, server.URL())
+			stream := client.Sum(context.Background())
+			// Send header.
+			assert.Nil(t, stream.Send(nil))
+			<-gotRequest
+			// Client abruptly disconnects.
+			if !assert.NotNil(t, clientConn) {
+				return
+			}
+			assert.Nil(t, clientConn.Close())
+			_, err := stream.CloseAndReceive()
+			assert.NotNil(t, err)
+			<-gotResponse
+			assert.NotNil(t, handlerReceiveErr)
+			assert.Equal(t, connect.CodeOf(handlerReceiveErr), connect.CodeCanceled)
+			assert.ErrorIs(t, handlerContextErr, context.Canceled)
+		})
+		t.Run("handler_writes", func(t *testing.T) {
+			var (
+				handlerReceiveErr error
+				handlerContextErr error
+				gotRequest        = make(chan struct{})
+				gotResponse       = make(chan struct{})
+			)
+			pingServer := &pluggablePingServer{
+				countUp: func(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+					close(gotRequest)
+					var err error
+					for err == nil {
+						err = stream.Send(&pingv1.CountUpResponse{})
+					}
+					handlerReceiveErr = err
+					handlerContextErr = ctx.Err()
+					close(gotResponse)
+					return nil
+				},
+			}
+			mux := http.NewServeMux()
+			mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+			server := memhttptest.NewServer(t, mux)
+			var clientConn net.Conn
+			transport := captureTransportConn(server, &clientConn, gotRequest, http2)
+			serverClient := &http.Client{Transport: transport}
+			client := pingv1connect.NewPingServiceClient(serverClient, server.URL())
+			stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
+			if !assert.Nil(t, err) {
+				return
+			}
+			<-gotRequest
+			// Client abruptly disconnects.
+			if !assert.NotNil(t, clientConn) {
+				return
+			}
+			assert.Nil(t, clientConn.Close())
+			for stream.Receive() {
+				// Do nothing
+			}
+			assert.NotNil(t, stream.Err())
+			<-gotResponse
+			assert.NotNil(t, handlerReceiveErr)
+			assert.Equal(t, connect.CodeOf(handlerReceiveErr), connect.CodeCanceled)
+			assert.ErrorIs(t, handlerContextErr, context.Canceled)
+		})
+	}
+	testTransportClosure(t, true)
+	testTransportClosure(t, false)
 }
 
 // TestBlankImportCodeGeneration tests that services.connect.go is generated with
