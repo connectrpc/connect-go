@@ -194,6 +194,24 @@ func WithSchema(schema any) Option {
 	return &schemaOption{Schema: schema}
 }
 
+// WithRequestInitializer provides a function that initializes a new message.
+// It may be used to dynamically construct request messages. It is called on
+// server receives to construct the message to be unmarshaled into. The message
+// will be a non nil pointer to the type created by the handler. Use the Schema
+// field of the [Spec] to determine the type of the message.
+func WithRequestInitializer(initializer func(spec Spec, message any) error) HandlerOption {
+	return &initializerOption{Initializer: initializer}
+}
+
+// WithResponseInitializer provides a function that initializes a new message.
+// It may be used to dynamically construct response messages. It is called on
+// client receives to construct the message to be unmarshaled into. The message
+// will be a non nil pointer to the type created by the client. Use the Schema
+// field of the [Spec] to determine the type of the message.
+func WithResponseInitializer(initializer func(spec Spec, message any) error) ClientOption {
+	return &initializerOption{Initializer: initializer}
+}
+
 // WithCodec registers a serialization method with a client or handler.
 // Handlers may have multiple codecs registered, and use whichever the client
 // chooses. Clients may only have a single codec.
@@ -348,6 +366,29 @@ func (o *schemaOption) applyToClient(config *clientConfig) {
 
 func (o *schemaOption) applyToHandler(config *handlerConfig) {
 	config.Schema = o.Schema
+}
+
+type initializerOption struct {
+	Initializer func(spec Spec, message any) error
+}
+
+func (o *initializerOption) applyToHandler(config *handlerConfig) {
+	config.Initializer = maybeInitializer{initializer: o.Initializer}
+}
+
+func (o *initializerOption) applyToClient(config *clientConfig) {
+	config.Initializer = maybeInitializer{initializer: o.Initializer}
+}
+
+type maybeInitializer struct {
+	initializer func(spec Spec, message any) error
+}
+
+func (o maybeInitializer) maybe(spec Spec, message any) error {
+	if o.initializer != nil {
+		return o.initializer(spec, message)
+	}
+	return nil
 }
 
 type clientOptionsOption struct {

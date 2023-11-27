@@ -28,6 +28,8 @@ import (
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/dynamicpb"
 )
 
 func TestNewClient_InitFailure(t *testing.T) {
@@ -223,6 +225,173 @@ func TestSpecSchema(t *testing.T) {
 		assert.NotZero(t, bidiStream.Spec().Schema)
 		err := bidiStream.Send(&pingv1.CumSumRequest{})
 		assert.Nil(t, err)
+	})
+}
+
+func TestDynamicClient(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	server := memhttptest.NewServer(t, mux)
+	ctx := context.Background()
+	initializer := func(spec connect.Spec, msg any) error {
+		dynamic, ok := msg.(*dynamicpb.Message)
+		if !ok {
+			return nil
+		}
+		desc, ok := spec.Schema.(protoreflect.MethodDescriptor)
+		if !ok {
+			return fmt.Errorf("invalid schema type %T for %T message", spec.Schema, dynamic)
+		}
+		if spec.IsClient {
+			*dynamic = *dynamicpb.NewMessage(desc.Output())
+		} else {
+			*dynamic = *dynamicpb.NewMessage(desc.Input())
+		}
+		return nil
+	}
+	t.Run("unary", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Ping")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
+			server.Client(),
+			server.URL()+"/connect.ping.v1.PingService/Ping",
+			connect.WithSchema(methodDesc),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithResponseInitializer(initializer),
+		)
+		msg := dynamicpb.NewMessage(methodDesc.Input())
+		msg.Set(
+			methodDesc.Input().Fields().ByName("number"),
+			protoreflect.ValueOfInt64(42),
+		)
+		res, err := client.CallUnary(ctx, connect.NewRequest(msg))
+		assert.Nil(t, err)
+		got := res.Msg.Get(methodDesc.Output().Fields().ByName("number")).Int()
+		assert.Equal(t, got, 42)
+	})
+	t.Run("clientStream", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Sum")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
+			server.Client(),
+			server.URL()+"/connect.ping.v1.PingService/Sum",
+			connect.WithSchema(methodDesc),
+			connect.WithResponseInitializer(initializer),
+		)
+		stream := client.CallClientStream(ctx)
+		msg := dynamicpb.NewMessage(methodDesc.Input())
+		msg.Set(
+			methodDesc.Input().Fields().ByName("number"),
+			protoreflect.ValueOfInt64(42),
+		)
+		assert.Nil(t, stream.Send(msg))
+		assert.Nil(t, stream.Send(msg))
+		rsp, err := stream.CloseAndReceive()
+		if !assert.Nil(t, err) {
+			return
+		}
+		got := rsp.Msg.Get(methodDesc.Output().Fields().ByName("sum")).Int()
+		assert.Equal(t, got, 42*2)
+	})
+	t.Run("serverStream", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.CountUp")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
+			server.Client(),
+			server.URL()+"/connect.ping.v1.PingService/CountUp",
+			connect.WithSchema(methodDesc),
+			connect.WithResponseInitializer(initializer),
+		)
+		msg := dynamicpb.NewMessage(methodDesc.Input())
+		msg.Set(
+			methodDesc.Input().Fields().ByName("number"),
+			protoreflect.ValueOfInt64(2),
+		)
+		req := connect.NewRequest(msg)
+		stream, err := client.CallServerStream(ctx, req)
+		if !assert.Nil(t, err) {
+			return
+		}
+		for i := 1; stream.Receive(); i++ {
+			out := stream.Msg()
+			got := out.Get(methodDesc.Output().Fields().ByName("number")).Int()
+			assert.Equal(t, got, int64(i))
+		}
+		assert.Nil(t, stream.Close())
+	})
+	t.Run("bidi", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.CumSum")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
+			server.Client(),
+			server.URL()+"/connect.ping.v1.PingService/CumSum",
+			connect.WithSchema(methodDesc),
+			connect.WithResponseInitializer(initializer),
+		)
+		stream := client.CallBidiStream(ctx)
+		msg := dynamicpb.NewMessage(methodDesc.Input())
+		msg.Set(
+			methodDesc.Input().Fields().ByName("number"),
+			protoreflect.ValueOfInt64(42),
+		)
+		assert.Nil(t, stream.Send(msg))
+		assert.Nil(t, stream.CloseRequest())
+		out, err := stream.Receive()
+		if assert.Nil(t, err) {
+			return
+		}
+		got := out.Get(methodDesc.Output().Fields().ByName("number")).Int()
+		assert.Equal(t, got, 42)
+	})
+	t.Run("option", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Ping")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		optionCalled := false
+		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
+			server.Client(),
+			server.URL()+"/connect.ping.v1.PingService/Ping",
+			connect.WithSchema(methodDesc),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithResponseInitializer(
+				func(spec connect.Spec, msg any) error {
+					assert.NotNil(t, spec)
+					assert.NotNil(t, msg)
+					dynamic, ok := msg.(*dynamicpb.Message)
+					if !assert.True(t, ok) {
+						return fmt.Errorf("unexpected message type: %T", msg)
+					}
+					*dynamic = *dynamicpb.NewMessage(methodDesc.Output())
+					optionCalled = true
+					return nil
+				},
+			),
+		)
+		msg := dynamicpb.NewMessage(methodDesc.Input())
+		msg.Set(
+			methodDesc.Input().Fields().ByName("number"),
+			protoreflect.ValueOfInt64(42),
+		)
+		res, err := client.CallUnary(ctx, connect.NewRequest(msg))
+		assert.Nil(t, err)
+		got := res.Msg.Get(methodDesc.Output().Fields().ByName("number")).Int()
+		assert.Equal(t, got, 42)
+		assert.True(t, optionCalled)
 	})
 }
 

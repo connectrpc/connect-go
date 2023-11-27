@@ -64,6 +64,9 @@ func NewUnaryHandler[Req, Res any](
 	// Given a stream, how should we call the unary function?
 	implementation := func(ctx context.Context, conn StreamingHandlerConn) error {
 		var msg Req
+		if err := config.Initializer.maybe(conn.Spec(), &msg); err != nil {
+			return err
+		}
 		if err := conn.Receive(&msg); err != nil {
 			return err
 		}
@@ -103,11 +106,14 @@ func NewClientStreamHandler[Req, Res any](
 	implementation func(context.Context, *ClientStream[Req]) (*Response[Res], error),
 	options ...HandlerOption,
 ) *Handler {
+	config := newHandlerConfig(procedure, StreamTypeClient, options)
 	return newStreamHandler(
-		procedure,
-		StreamTypeClient,
+		config,
 		func(ctx context.Context, conn StreamingHandlerConn) error {
-			stream := &ClientStream[Req]{conn: conn}
+			stream := &ClientStream[Req]{
+				conn:        conn,
+				initializer: config.Initializer,
+			}
 			res, err := implementation(ctx, stream)
 			if err != nil {
 				return err
@@ -121,7 +127,6 @@ func NewClientStreamHandler[Req, Res any](
 			mergeHeaders(conn.ResponseTrailer(), res.trailer)
 			return conn.Send(res.Msg)
 		},
-		options...,
 	)
 }
 
@@ -131,11 +136,14 @@ func NewServerStreamHandler[Req, Res any](
 	implementation func(context.Context, *Request[Req], *ServerStream[Res]) error,
 	options ...HandlerOption,
 ) *Handler {
+	config := newHandlerConfig(procedure, StreamTypeServer, options)
 	return newStreamHandler(
-		procedure,
-		StreamTypeServer,
+		config,
 		func(ctx context.Context, conn StreamingHandlerConn) error {
 			var msg Req
+			if err := config.Initializer.maybe(conn.Spec(), &msg); err != nil {
+				return err
+			}
 			if err := conn.Receive(&msg); err != nil {
 				return err
 			}
@@ -151,7 +159,6 @@ func NewServerStreamHandler[Req, Res any](
 				&ServerStream[Res]{conn: conn},
 			)
 		},
-		options...,
 	)
 }
 
@@ -161,16 +168,18 @@ func NewBidiStreamHandler[Req, Res any](
 	implementation func(context.Context, *BidiStream[Req, Res]) error,
 	options ...HandlerOption,
 ) *Handler {
+	config := newHandlerConfig(procedure, StreamTypeBidi, options)
 	return newStreamHandler(
-		procedure,
-		StreamTypeBidi,
+		config,
 		func(ctx context.Context, conn StreamingHandlerConn) error {
 			return implementation(
 				ctx,
-				&BidiStream[Req, Res]{conn: conn},
+				&BidiStream[Req, Res]{
+					conn:        conn,
+					initializer: config.Initializer,
+				},
 			)
 		},
-		options...,
 	)
 }
 
@@ -247,6 +256,7 @@ type handlerConfig struct {
 	Interceptor                  Interceptor
 	Procedure                    string
 	Schema                       any
+	Initializer                  maybeInitializer
 	HandleGRPC                   bool
 	HandleGRPCWeb                bool
 	RequireConnectProtocolHeader bool
@@ -317,12 +327,9 @@ func (c *handlerConfig) newProtocolHandlers() []protocolHandler {
 }
 
 func newStreamHandler(
-	procedure string,
-	streamType StreamType,
+	config *handlerConfig,
 	implementation StreamingHandlerFunc,
-	options ...HandlerOption,
 ) *Handler {
-	config := newHandlerConfig(procedure, streamType, options)
 	if ic := config.Interceptor; ic != nil {
 		implementation = ic.WrapStreamingHandler(implementation)
 	}

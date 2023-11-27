@@ -25,9 +25,10 @@ import (
 // It's constructed as part of [Handler] invocation, but doesn't currently have
 // an exported constructor.
 type ClientStream[Req any] struct {
-	conn StreamingHandlerConn
-	msg  *Req
-	err  error
+	conn        StreamingHandlerConn
+	initializer maybeInitializer
+	msg         *Req
+	err         error
 }
 
 // Spec returns the specification for the RPC.
@@ -55,6 +56,10 @@ func (c *ClientStream[Req]) Receive() bool {
 		return false
 	}
 	c.msg = new(Req)
+	if err := c.initializer.maybe(c.Spec(), c.msg); err != nil {
+		c.err = err
+		return false
+	}
 	c.err = c.conn.Receive(c.msg)
 	return c.err == nil
 }
@@ -127,7 +132,8 @@ func (s *ServerStream[Res]) Conn() StreamingHandlerConn {
 // It's constructed as part of [Handler] invocation, but doesn't currently have
 // an exported constructor.
 type BidiStream[Req, Res any] struct {
-	conn StreamingHandlerConn
+	conn        StreamingHandlerConn
+	initializer maybeInitializer
 }
 
 // Spec returns the specification for the RPC.
@@ -149,6 +155,9 @@ func (b *BidiStream[Req, Res]) RequestHeader() http.Header {
 // return an error that wraps [io.EOF].
 func (b *BidiStream[Req, Res]) Receive() (*Req, error) {
 	var req Req
+	if err := b.initializer.maybe(b.Spec(), &req); err != nil {
+		return nil, err
+	}
 	if err := b.conn.Receive(&req); err != nil {
 		return nil, err
 	}
