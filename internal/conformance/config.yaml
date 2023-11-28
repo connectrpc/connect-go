@@ -1,0 +1,21 @@
+features:
+  versions:
+    - HTTP_VERSION_1
+    - HTTP_VERSION_2
+    - HTTP_VERSION_3
+  protocols:
+    - PROTOCOL_CONNECT
+    - PROTOCOL_GRPC
+    - PROTOCOL_GRPC_WEB
+  codecs:
+    - CODEC_PROTO
+    - CODEC_JSON
+    - CODEC_TEXT
+  compressions:
+    - COMPRESSION_IDENTITY
+    - COMPRESSION_GZIP
+    - COMPRESSION_BR
+    - COMPRESSION_ZSTD
+    - COMPRESSION_DEFLATE
+    - COMPRESSION_SNAPPY
+  supportsTlsClientCerts: true
