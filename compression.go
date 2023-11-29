@@ -90,6 +90,10 @@ func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readM
 	bytesRead, err := dst.ReadFrom(reader)
 	if err != nil {
 		_ = c.putDecompressor(decompressor)
+		err = wrapIfContextError(err)
+		if connectErr, ok := asError(err); ok {
+			return connectErr
+		}
 		return errorf(CodeInvalidArgument, "decompress: %w", err)
 	}
 	if readMaxBytes > 0 && bytesRead > readMaxBytes {
@@ -111,8 +115,12 @@ func (c *compressionPool) Compress(dst *bytes.Buffer, src *bytes.Buffer) *Error 
 	if err != nil {
 		return errorf(CodeUnknown, "get compressor: %w", err)
 	}
-	if _, err := io.Copy(compressor, src); err != nil {
+	if _, err := src.WriteTo(compressor); err != nil {
 		_ = c.putCompressor(compressor)
+		err = wrapIfContextError(err)
+		if connectErr, ok := asError(err); ok {
+			return connectErr
+		}
 		return errorf(CodeInternal, "compress: %w", err)
 	}
 	if err := c.putCompressor(compressor); err != nil {

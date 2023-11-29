@@ -141,12 +141,17 @@ func (w *envelopeWriter) write(env *envelope) *Error {
 	prefix[0] = env.Flags
 	binary.BigEndian.PutUint32(prefix[1:5], uint32(env.Data.Len()))
 	if _, err := w.writer.Write(prefix[:]); err != nil {
+		err = wrapIfContextError(err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
 		return errorf(CodeUnknown, "write envelope: %w", err)
 	}
 	if _, err := io.Copy(w.writer, env.Data); err != nil {
+		err = wrapIfContextError(err)
+		if connectErr, ok := asError(err); ok {
+			return connectErr
+		}
 		return errorf(CodeUnknown, "write message: %w", err)
 	}
 	return nil
@@ -235,6 +240,10 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 			// add any alarming text about protocol errors, though.
 			return NewError(CodeUnknown, err)
 		}
+		err = wrapIfContextError(err)
+		if connectErr, ok := asError(err); ok {
+			return connectErr
+		}
 		// Something else has gone wrong - the stream didn't end cleanly.
 		if connectErr, ok := asError(err); ok {
 			return connectErr
@@ -252,7 +261,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 	if r.readMaxBytes > 0 && size > int64(r.readMaxBytes) {
 		_, err := io.CopyN(io.Discard, r.reader, size)
 		if err != nil && !errors.Is(err, io.EOF) {
-			return errorf(CodeUnknown, "read enveloped message: %w", err)
+			return errorf(CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %w", r.readMaxBytes, err)
 		}
 		return errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", size, r.readMaxBytes)
 	}
@@ -273,6 +282,10 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 				size,
 				readN,
 			)
+		}
+		err = wrapIfContextError(err)
+		if connectErr, ok := asError(err); ok {
+			return connectErr
 		}
 		return errorf(CodeUnknown, "read enveloped message: %w", err)
 	}
