@@ -1,6 +1,6 @@
 #!/bin/bash
-set -e
-cd "$(dirname $0)"
+set -euo pipefail
+cd "$(dirname "$0")"
 
 BINDIR="../../.tmp/bin"
 mkdir -p $BINDIR
@@ -10,9 +10,9 @@ GO="${GO:-go}"
 # thanks to replace directive in go.mod. So by testing the reference
 # implementations (which are written with connect-go), we are effectively
 # testing changes in this repo.
-"$GO" build -o $BINDIR/connectconformance connectrpc.com/conformance/cmd/connectconformance
-"$GO" build -o $BINDIR/referenceclient connectrpc.com/conformance/cmd/referenceclient
-"$GO" build -o $BINDIR/referenceserver connectrpc.com/conformance/cmd/referenceserver
+$GO build -o $BINDIR/connectconformance connectrpc.com/conformance/cmd/connectconformance
+$GO build -o $BINDIR/referenceclient connectrpc.com/conformance/cmd/referenceclient
+$GO build -o $BINDIR/referenceserver connectrpc.com/conformance/cmd/referenceserver
 
 echo "Running conformance tests against client..."
 $BINDIR/connectconformance --mode client --conf config.yaml -- $BINDIR/referenceclient
