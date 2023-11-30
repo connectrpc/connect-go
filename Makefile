@@ -30,6 +30,10 @@ clean: ## Delete intermediate build artifacts
 test: build ## Run unit tests
 	go test -vet=off -race -cover ./...
 
+.PHONY: runconformance
+runconformance: build ## Run conformance test suite
+	cd internal/conformance && ./runconformance.sh
+
 .PHONY: bench
 bench: BENCH ?= .*
 bench: build ## Run benchmarks for root package
