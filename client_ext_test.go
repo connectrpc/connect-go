@@ -190,6 +190,32 @@ func TestGetNotModified(t *testing.T) {
 	assert.Equal(t, http.MethodGet, unaryReq.HTTPMethod())
 }
 
+func TestGetNoContentHeaders(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(&pingServer{}))
+	server := memhttptest.NewServer(t, http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
+		if len(req.Header.Values("content-type")) > 0 ||
+			len(req.Header.Values("content-encoding")) > 0 ||
+			len(req.Header.Values("content-length")) > 0 {
+			http.Error(respWriter, "GET request should not include content headers", http.StatusBadRequest)
+		}
+		mux.ServeHTTP(respWriter, req)
+	}))
+	client := pingv1connect.NewPingServiceClient(
+		server.Client(),
+		server.URL(),
+		connect.WithHTTPGet(),
+	)
+	ctx := context.Background()
+
+	unaryReq := connect.NewRequest(&pingv1.PingRequest{})
+	_, err := client.Ping(ctx, unaryReq)
+	assert.Nil(t, err)
+	assert.Equal(t, http.MethodGet, unaryReq.HTTPMethod())
+}
+
 func TestSpecSchema(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
