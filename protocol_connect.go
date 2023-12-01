@@ -874,7 +874,7 @@ func (u *connectStreamingUnmarshaler) Unmarshal(message any) *Error {
 	for name, value := range end.Trailer {
 		canonical := http.CanonicalHeaderKey(name)
 		if name != canonical {
-			delete(end.Trailer, name)
+			delHeaderCanonical(end.Trailer, name)
 			end.Trailer[canonical] = append(end.Trailer[canonical], value...)
 		}
 	}
@@ -1045,7 +1045,10 @@ func (m *connectUnaryRequestMarshaler) buildGetURL(data []byte, compressed bool)
 }
 
 func (m *connectUnaryRequestMarshaler) writeWithGet(url *url.URL) *Error {
-	delete(m.header, connectHeaderProtocolVersion)
+	delHeaderCanonical(m.header, connectHeaderProtocolVersion)
+	delHeaderCanonical(m.header, headerContentType)
+	delHeaderCanonical(m.header, headerContentEncoding)
+	delHeaderCanonical(m.header, headerContentLength)
 	m.duplexCall.SetMethod(http.MethodGet)
 	*m.duplexCall.URL() = *url
 	return nil

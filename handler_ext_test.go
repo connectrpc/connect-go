@@ -80,6 +80,36 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		assert.Equal(t, resp.StatusCode, http.StatusUnsupportedMediaType)
 	})
 
+	t.Run("get_method_body_not_allowed", func(t *testing.T) {
+		t.Parallel()
+		const queryStringSuffix = `?encoding=json&message={}`
+		request, err := http.NewRequestWithContext(
+			context.Background(),
+			http.MethodGet,
+			server.URL()+pingProcedure+queryStringSuffix,
+			strings.NewReader("!"), // non-empty body
+		)
+		assert.Nil(t, err)
+		resp, err := client.Do(request)
+		assert.Nil(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, resp.StatusCode, http.StatusUnsupportedMediaType)
+
+		// Same thing, but this time w/ a content-length header
+		request, err = http.NewRequestWithContext(
+			context.Background(),
+			http.MethodGet,
+			server.URL()+pingProcedure+queryStringSuffix,
+			strings.NewReader("!"), // non-empty body
+		)
+		assert.Nil(t, err)
+		request.Header.Set("content-length", "1")
+		resp, err = client.Do(request)
+		assert.Nil(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, resp.StatusCode, http.StatusUnsupportedMediaType)
+	})
+
 	t.Run("idempotent_get_method", func(t *testing.T) {
 		t.Parallel()
 		request, err := http.NewRequestWithContext(
