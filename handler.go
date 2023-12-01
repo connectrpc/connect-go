@@ -222,6 +222,23 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 		return
 	}
 
+	if request.Method == http.MethodGet {
+		// A body must not be present.
+		hasBody := request.ContentLength > 0
+		if request.ContentLength < 0 {
+			// No content-length header.
+			// Test if body is empty by trying to read a single byte.
+			var b [1]byte
+			n, _ := request.Body.Read(b[:])
+			hasBody = n > 0
+		}
+		if hasBody {
+			responseWriter.WriteHeader(http.StatusUnsupportedMediaType)
+			return
+		}
+		_ = request.Body.Close()
+	}
+
 	// Establish a stream and serve the RPC.
 	setHeaderCanonical(request.Header, headerContentType, contentType)
 	setHeaderCanonical(request.Header, headerHost, request.Host)

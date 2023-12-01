@@ -35,10 +35,12 @@ const (
 )
 
 const (
-	headerContentType = "Content-Type"
-	headerHost        = "Host"
-	headerUserAgent   = "User-Agent"
-	headerTrailer     = "Trailer"
+	headerContentType     = "Content-Type"
+	headerContentEncoding = "Content-Encoding"
+	headerContentLength   = "Content-Length"
+	headerHost            = "Host"
+	headerUserAgent       = "User-Agent"
+	headerTrailer         = "Trailer"
 
 	discardLimit = 1024 * 1024 * 4 // 4MiB
 )
