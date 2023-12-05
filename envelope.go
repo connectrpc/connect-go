@@ -110,8 +110,8 @@ func (e *envelope) Seek(offset int64, whence int) (int64, error) {
 
 // Len returns the number of bytes of the unread portion of the envelope.
 func (e *envelope) Len() int {
-	if length := int64(e.Data.Len()) + 5 - e.offset; length > 0 {
-		return int(length)
+	if length := int(int64(e.Data.Len()) + 5 - e.offset); length > 0 {
+		return length
 	}
 	return 0
 }
