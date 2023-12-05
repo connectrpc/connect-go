@@ -183,13 +183,15 @@ func (d *duplexHTTPCall) CloseRead() error {
 	if d.response == nil {
 		return nil
 	}
-	if _, err := discard(d.response.Body); err != nil &&
-		!errors.Is(err, context.Canceled) &&
-		!errors.Is(err, context.DeadlineExceeded) {
-		_ = d.response.Body.Close()
-		return wrapIfRSTError(err)
+	_, err := discard(d.response.Body)
+	closeErr := d.response.Body.Close()
+	if err == nil ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
+		err = closeErr
 	}
-	return wrapIfRSTError(d.response.Body.Close())
+	err = wrapIfContextError(err)
+	return wrapIfRSTError(err)
 }
 
 // ResponseStatusCode is the response's HTTP status code.
