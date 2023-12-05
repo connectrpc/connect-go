@@ -24,33 +24,6 @@ import (
 	"sync/atomic"
 )
 
-// messsagePayload is a sized and seekable message payload. The interface is
-// implemented by [*bytes.Reader] and [*envelope].
-type messsagePayload interface {
-	io.Reader
-	io.WriterTo
-	io.Seeker
-	Len() int
-}
-
-// messageSender sends a message payload. The interface is implemented by
-// [*duplexHTTPCall] and [*writeSender].
-type messageSender interface {
-	Send(messsagePayload) (int64, error)
-}
-
-// writeSender is a sender that writes to an [io.Writer]. Useful for wrapping
-// [http.ResponseWriter].
-type writeSender struct {
-	writer io.Writer
-}
-
-var _ messageSender = writeSender{}
-
-func (w writeSender) Send(payload messsagePayload) (int64, error) {
-	return payload.WriteTo(w.writer)
-}
-
 // duplexHTTPCall is a full-duplex stream between the client and server. The
 // request body is the stream from client to server, and the response body is
 // the reverse.
@@ -320,6 +293,52 @@ func (d *duplexHTTPCall) makeRequest() {
 		)
 		d.requestBodyWriter.Close()
 	}
+}
+
+// messsagePayload is a sized and seekable message payload. The interface is
+// implemented by [*bytes.Reader] and *envelope.
+type messsagePayload interface {
+	io.Reader
+	io.WriterTo
+	io.Seeker
+	Len() int
+}
+
+// nopPayload is a message payload that does nothing. It's used to send headers
+// to the server.
+type nopPayload struct{}
+
+var _ messsagePayload = nopPayload{}
+
+func (nopPayload) Read([]byte) (int, error) {
+	return 0, io.EOF
+}
+func (nopPayload) WriteTo(io.Writer) (int64, error) {
+	return 0, nil
+}
+func (nopPayload) Seek(int64, int) (int64, error) {
+	return 0, nil
+}
+func (nopPayload) Len() int {
+	return 0
+}
+
+// messageSender sends a message payload. The interface is implemented by
+// [*duplexHTTPCall] and writeSender.
+type messageSender interface {
+	Send(messsagePayload) (int64, error)
+}
+
+// writeSender is a sender that writes to an [io.Writer]. Useful for wrapping
+// [http.ResponseWriter].
+type writeSender struct {
+	writer io.Writer
+}
+
+var _ messageSender = writeSender{}
+
+func (w writeSender) Send(payload messsagePayload) (int64, error) {
+	return payload.WriteTo(w.writer)
 }
 
 // See: https://cs.opensource.google/go/go/+/refs/tags/go1.20.1:src/net/http/clone.go;l=22-33

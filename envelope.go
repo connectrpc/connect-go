@@ -110,10 +110,10 @@ func (e *envelope) Seek(offset int64, whence int) (int64, error) {
 
 // Len returns the number of bytes of the unread portion of the envelope.
 func (e *envelope) Len() int {
-	if e.offset >= int64(e.Data.Len()+5) {
-		return 0
+	if length := int64(e.Data.Len()) + 5 - e.offset; length > 0 {
+		return int(length)
 	}
-	return int(int64(e.Data.Len()+5) - e.offset)
+	return 0
 }
 
 type envelopeWriter struct {
@@ -127,8 +127,8 @@ type envelopeWriter struct {
 
 func (w *envelopeWriter) Marshal(message any) *Error {
 	if message == nil {
-		// Send a zero-length message.
-		payload := bytes.NewReader(nil)
+		// Send no-op message to create the request and send headers.
+		payload := nopPayload{}
 		if _, err := w.sender.Send(payload); err != nil {
 			if connectErr, ok := asError(err); ok {
 				return connectErr
