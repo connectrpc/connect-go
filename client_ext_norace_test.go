@@ -32,7 +32,7 @@ import (
 	"testing"
 	"time"
 
-	"connectrpc.com/connect"
+	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
@@ -61,10 +61,13 @@ func TestClientDeadlineHandling(t *testing.T) {
 	// issues related to overwhelming the loopback interface and exhausting ephemeral ports.
 	t.Run("dial", func(t *testing.T) {
 		t.Parallel()
+		transport, ok := svr.Client().Transport.(*http.Transport)
+		if !assert.True(t, ok) {
+			t.FailNow()
+		}
 		testClientDeadlineBruteForceLoop(t,
 			5*time.Second, 5, 1,
-			func(t *testing.T, ctx context.Context) (string, rpcErrors) {
-				transport := svr.Client().Transport.(*http.Transport)
+			func(ctx context.Context) (string, rpcErrors) {
 				httpClient := &http.Client{
 					Transport: transport.Clone(),
 				}
@@ -105,17 +108,17 @@ func TestClientDeadlineHandling(t *testing.T) {
 		var count atomic.Int32
 		testClientDeadlineBruteForceLoop(t,
 			20*time.Second, 200, runtime.GOMAXPROCS(0),
-			func(t *testing.T, ctx context.Context) (string, rpcErrors) {
+			func(ctx context.Context) (string, rpcErrors) {
 				var procedure string
 				var errs rpcErrors
-				n := count.Add(1)
+				rpcNum := count.Add(1)
 				var client pingv1connect.PingServiceClient
-				if n&4 == 0 {
+				if rpcNum&4 == 0 {
 					client = clientConnect
 				} else {
 					client = clientGRPC
 				}
-				switch n & 3 {
+				switch rpcNum & 3 {
 				case 0:
 					procedure = pingv1connect.PingServicePingProcedure
 					_, errs.recvErr = client.Ping(ctx, connect.NewRequest(addUnrecognizedBytes(&pingv1.PingRequest{Text: "foo"}, extraField)))
@@ -163,7 +166,7 @@ func testClientDeadlineBruteForceLoop(
 	duration time.Duration,
 	iterationsPerDeadline int,
 	parallelism int,
-	loopBody func(t *testing.T, ctx context.Context) (string, rpcErrors),
+	loopBody func(ctx context.Context) (string, rpcErrors),
 ) {
 	t.Helper()
 	testContext, testCancel := context.WithTimeout(context.Background(), duration)
@@ -191,7 +194,7 @@ func testClientDeadlineBruteForceLoop(
 						ctx, cancel := context.WithTimeout(context.Background(), timeout)
 						// We are intentionally not inheriting from testContext, which signals when the
 						// test loop should stop and return but need not influence the RPC deadline.
-						proc, errs := loopBody(t, ctx)
+						proc, errs := loopBody(ctx) //nolint:contextcheck
 						rpcCount.Add(1)
 						cancel()
 						type errCase struct {
