@@ -23,6 +23,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -62,7 +63,7 @@ func TestClientDeadlineHandling(t *testing.T) {
 		t.Parallel()
 		testClientDeadlineBruteForceLoop(t,
 			5*time.Second, 5, 1,
-			func(t *testing.T, ctx context.Context) error {
+			func(t *testing.T, ctx context.Context) (string, rpcErrors) {
 				transport := svr.Client().Transport.(*http.Transport)
 				httpClient := &http.Client{
 					Transport: transport.Clone(),
@@ -73,7 +74,7 @@ func TestClientDeadlineHandling(t *testing.T) {
 				// Make sure to give a little time for the OS to release socket resources
 				// to prevent resource exhaustion.
 				time.Sleep(time.Millisecond / 2)
-				return err
+				return pingv1connect.PingServicePingProcedure, rpcErrors{recvErr: err}
 			},
 		)
 	})
@@ -92,52 +93,66 @@ func TestClientDeadlineHandling(t *testing.T) {
 		var extraField []byte
 		extraField = protowire.AppendTag(extraField, 999, protowire.BytesType)
 		extraData := make([]byte, 16*1024)
-		_, err := rand.Read(extraData) // use good random data so it's not very compressible
-		if err != nil {
+		// use good random data so it's not very compressible
+		if _, err := rand.Read(extraData); err != nil {
 			t.Fatalf("failed to generate extra payload: %v", err)
 			return
 		}
 		extraField = protowire.AppendBytes(extraField, extraData)
 
-		client := pingv1connect.NewPingServiceClient(svr.Client(), svr.URL, connect.WithSendGzip())
+		clientConnect := pingv1connect.NewPingServiceClient(svr.Client(), svr.URL, connect.WithSendGzip())
+		clientGRPC := pingv1connect.NewPingServiceClient(svr.Client(), svr.URL, connect.WithSendGzip(), connect.WithGRPCWeb())
 		var count atomic.Int32
 		testClientDeadlineBruteForceLoop(t,
 			20*time.Second, 200, runtime.GOMAXPROCS(0),
-			func(t *testing.T, ctx context.Context) error {
-				var err error
-				switch count.Add(1) % 4 {
+			func(t *testing.T, ctx context.Context) (string, rpcErrors) {
+				var procedure string
+				var errs rpcErrors
+				n := count.Add(1)
+				var client pingv1connect.PingServiceClient
+				if n&4 == 0 {
+					client = clientConnect
+				} else {
+					client = clientGRPC
+				}
+				switch n & 3 {
 				case 0:
-					_, err = client.Ping(ctx, connect.NewRequest(addUnrecognizedBytes(&pingv1.PingRequest{Text: "foo"}, extraField)))
+					procedure = pingv1connect.PingServicePingProcedure
+					_, errs.recvErr = client.Ping(ctx, connect.NewRequest(addUnrecognizedBytes(&pingv1.PingRequest{Text: "foo"}, extraField)))
 				case 1:
+					procedure = pingv1connect.PingServiceSumProcedure
 					stream := client.Sum(ctx)
 					for i := 0; i < 3; i++ {
-						err = stream.Send(addUnrecognizedBytes(&pingv1.SumRequest{Number: 1}, extraField))
-						if err != nil {
+						errs.sendErr = stream.Send(addUnrecognizedBytes(&pingv1.SumRequest{Number: 1}, extraField))
+						if errs.sendErr != nil {
 							break
 						}
 					}
-					_, err = stream.CloseAndReceive()
+					_, errs.recvErr = stream.CloseAndReceive()
 				case 2:
-					stream, err := client.CountUp(ctx, connect.NewRequest(addUnrecognizedBytes(&pingv1.CountUpRequest{Number: 3}, extraField)))
-					if err == nil {
+					procedure = pingv1connect.PingServiceCountUpProcedure
+					var stream *connect.ServerStreamForClient[pingv1.CountUpResponse]
+					stream, errs.recvErr = client.CountUp(ctx, connect.NewRequest(addUnrecognizedBytes(&pingv1.CountUpRequest{Number: 3}, extraField)))
+					if errs.recvErr == nil {
 						for stream.Receive() {
 						}
-						err = stream.Err()
-						_ = stream.Close()
+						errs.recvErr = stream.Err()
+						errs.closeRecvErr = stream.Close()
 					}
 				case 3:
+					procedure = pingv1connect.PingServiceCumSumProcedure
 					stream := client.CumSum(ctx)
 					for i := 0; i < 3; i++ {
-						_ = stream.Send(addUnrecognizedBytes(&pingv1.CumSumRequest{Number: 1}, extraField))
-						_, err = stream.Receive()
-						if err != nil {
+						errs.sendErr = stream.Send(addUnrecognizedBytes(&pingv1.CumSumRequest{Number: 1}, extraField))
+						_, errs.recvErr = stream.Receive()
+						if errs.recvErr != nil {
 							break
 						}
 					}
-					_ = stream.CloseRequest()
-					_ = stream.CloseResponse()
+					errs.closeSendErr = stream.CloseRequest()
+					errs.closeRecvErr = stream.CloseResponse()
 				}
-				return err
+				return procedure, errs
 			},
 		)
 	})
@@ -148,7 +163,7 @@ func testClientDeadlineBruteForceLoop(
 	duration time.Duration,
 	iterationsPerDeadline int,
 	parallelism int,
-	loopBody func(t *testing.T, ctx context.Context) error,
+	loopBody func(t *testing.T, ctx context.Context) (string, rpcErrors),
 ) {
 	t.Helper()
 	testContext, testCancel := context.WithTimeout(context.Background(), duration)
@@ -176,25 +191,56 @@ func testClientDeadlineBruteForceLoop(
 						ctx, cancel := context.WithTimeout(context.Background(), timeout)
 						// We are intentionally not inheriting from testContext, which signals when the
 						// test loop should stop and return but need not influence the RPC deadline.
-						err := loopBody(t, ctx)
+						proc, errs := loopBody(t, ctx)
 						rpcCount.Add(1)
 						cancel()
-						if err == nil {
-							// operation completed before timeout, try again
-							continue
+						type errCase struct {
+							err      error
+							name     string
+							allowEOF bool
 						}
-						if !assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded) {
-							var buf bytes.Buffer
-							_, _ = fmt.Fprintf(&buf, "actual error: %v\n%#v", err, err)
-							for {
-								err = errors.Unwrap(err)
-								if err == nil {
-									break
-								}
-								_, _ = fmt.Fprintf(&buf, "\n  caused by: %#v", err)
+						errCases := []errCase{
+							{
+								err:      errs.sendErr,
+								name:     "send error",
+								allowEOF: true,
+							},
+							{
+								err:  errs.recvErr,
+								name: "receive error",
+							},
+							{
+								err:  errs.closeSendErr,
+								name: "close-send error",
+							},
+							{
+								err:  errs.closeRecvErr,
+								name: "close-receive error",
+							},
+						}
+						for _, errCase := range errCases {
+							err := errCase.err
+							if err == nil {
+								// operation completed before timeout, try again
+								continue
 							}
-							t.Log(buf.String())
-							testCancel()
+							if errCase.allowEOF && errors.Is(err, io.EOF) {
+								continue
+							}
+
+							if !assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded) {
+								var buf bytes.Buffer
+								_, _ = fmt.Fprintf(&buf, "actual %v from %s: %v\n%#v", errCase.name, proc, err, err)
+								for {
+									err = errors.Unwrap(err)
+									if err == nil {
+										break
+									}
+									_, _ = fmt.Fprintf(&buf, "\n  caused by: %#v", err)
+								}
+								t.Log(buf.String())
+								testCancel()
+							}
 						}
 					}
 				}
@@ -204,6 +250,13 @@ func testClientDeadlineBruteForceLoop(
 	}
 	wg.Wait()
 	t.Logf("Issued %d RPCs.", rpcCount.Load())
+}
+
+type rpcErrors struct {
+	sendErr      error
+	recvErr      error
+	closeSendErr error
+	closeRecvErr error
 }
 
 func addUnrecognizedBytes[M proto.Message](msg M, data []byte) M {
