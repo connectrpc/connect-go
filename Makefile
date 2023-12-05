@@ -29,6 +29,9 @@ clean: ## Delete intermediate build artifacts
 .PHONY: test
 test: build ## Run unit tests
 	go test -vet=off -race -cover ./...
+	@# also run this test that is disabled with the race detector
+	@# because it can't really repro issues with it enabled.
+	go test -run TestClientDeadline ./
 
 .PHONY: runconformance
 runconformance: build ## Run conformance test suite
