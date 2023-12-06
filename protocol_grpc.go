@@ -186,7 +186,7 @@ func (g *grpcHandler) NewConn(
 		protobuf:   g.Codecs.Protobuf(), // for errors
 		marshaler: grpcMarshaler{
 			envelopeWriter: envelopeWriter{
-				writer:           responseWriter,
+				sender:           writeSender{writer: responseWriter},
 				compressionPool:  g.CompressionPools.Get(responseCompression),
 				codec:            codec,
 				compressMinBytes: g.CompressMinBytes,
@@ -284,7 +284,7 @@ func (g *grpcClient) NewConn(
 		protobuf:         g.Protobuf,
 		marshaler: grpcMarshaler{
 			envelopeWriter: envelopeWriter{
-				writer:           duplexCall,
+				sender:           duplexCall,
 				compressionPool:  g.CompressionPools.Get(g.CompressionName),
 				codec:            g.Codec,
 				compressMinBytes: g.CompressMinBytes,
