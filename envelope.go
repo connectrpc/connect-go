@@ -40,16 +40,84 @@ var errSpecialEnvelope = errorf(
 // message length. gRPC and Connect interpret the bitwise flags differently, so
 // envelope leaves their interpretation up to the caller.
 type envelope struct {
-	Data  *bytes.Buffer
-	Flags uint8
+	Data   *bytes.Buffer
+	Flags  uint8
+	offset int64
 }
+
+var _ messsagePayload = (*envelope)(nil)
 
 func (e *envelope) IsSet(flag uint8) bool {
 	return e.Flags&flag == flag
 }
 
+// Read implements [io.Reader].
+func (e *envelope) Read(data []byte) (readN int, err error) {
+	if e.offset < 5 {
+		prefix := makeEnvelopePrefix(e.Flags, e.Data.Len())
+		readN = copy(data, prefix[e.offset:])
+		e.offset += int64(readN)
+		if e.offset < 5 {
+			return readN, nil
+		}
+		data = data[readN:]
+	}
+	n := copy(data, e.Data.Bytes()[e.offset-5:])
+	e.offset += int64(n)
+	readN += n
+	if readN == 0 && e.offset == int64(e.Data.Len()+5) {
+		err = io.EOF
+	}
+	return readN, err
+}
+
+// WriteTo implements [io.WriterTo].
+func (e *envelope) WriteTo(dst io.Writer) (wroteN int64, err error) {
+	if e.offset < 5 {
+		prefix := makeEnvelopePrefix(e.Flags, e.Data.Len())
+		prefixN, err := dst.Write(prefix[e.offset:])
+		e.offset += int64(prefixN)
+		wroteN += int64(prefixN)
+		if e.offset < 5 {
+			return wroteN, err
+		}
+	}
+	n, err := dst.Write(e.Data.Bytes()[e.offset-5:])
+	e.offset += int64(n)
+	wroteN += int64(n)
+	return wroteN, err
+}
+
+// Seek implements [io.Seeker]. Based on the implementation of [bytes.Reader].
+func (e *envelope) Seek(offset int64, whence int) (int64, error) {
+	var abs int64
+	switch whence {
+	case io.SeekStart:
+		abs = offset
+	case io.SeekCurrent:
+		abs = e.offset + offset
+	case io.SeekEnd:
+		abs = int64(e.Data.Len()) + offset
+	default:
+		return 0, errors.New("connect.envelope.Seek: invalid whence")
+	}
+	if abs < 0 {
+		return 0, errors.New("connect.envelope.Seek: negative position")
+	}
+	e.offset = abs
+	return abs, nil
+}
+
+// Len returns the number of bytes of the unread portion of the envelope.
+func (e *envelope) Len() int {
+	if length := int(int64(e.Data.Len()) + 5 - e.offset); length > 0 {
+		return length
+	}
+	return 0
+}
+
 type envelopeWriter struct {
-	writer           io.Writer
+	sender           messageSender
 	codec            Codec
 	compressMinBytes int
 	compressionPool  *compressionPool
@@ -59,7 +127,9 @@ type envelopeWriter struct {
 
 func (w *envelopeWriter) Marshal(message any) *Error {
 	if message == nil {
-		if _, err := w.writer.Write(nil); err != nil {
+		// Send no-op message to create the request and send headers.
+		payload := nopPayload{}
+		if _, err := w.sender.Send(payload); err != nil {
 			if connectErr, ok := asError(err); ok {
 				return connectErr
 			}
@@ -137,22 +207,12 @@ func (w *envelopeWriter) marshal(message any) *Error {
 }
 
 func (w *envelopeWriter) write(env *envelope) *Error {
-	prefix := [5]byte{}
-	prefix[0] = env.Flags
-	binary.BigEndian.PutUint32(prefix[1:5], uint32(env.Data.Len()))
-	if _, err := w.writer.Write(prefix[:]); err != nil {
+	if _, err := w.sender.Send(env); err != nil {
 		err = wrapIfContextError(err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
 		return errorf(CodeUnknown, "write envelope: %w", err)
-	}
-	if _, err := io.Copy(w.writer, env.Data); err != nil {
-		err = wrapIfContextError(err)
-		if connectErr, ok := asError(err); ok {
-			return connectErr
-		}
-		return errorf(CodeUnknown, "write message: %w", err)
 	}
 	return nil
 }
@@ -295,4 +355,11 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 	}
 	env.Flags = prefixes[0]
 	return nil
+}
+
+func makeEnvelopePrefix(flags uint8, size int) [5]byte {
+	prefix := [5]byte{}
+	prefix[0] = flags
+	binary.BigEndian.PutUint32(prefix[1:5], uint32(size))
+	return prefix
 }

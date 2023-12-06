@@ -94,21 +94,21 @@ func newDuplexHTTPCall(
 	}
 }
 
-// Write to the request body.
-func (d *duplexHTTPCall) Write(data []byte) (int, error) {
+// Send sends a message to the server.
+func (d *duplexHTTPCall) Send(payload messsagePayload) (int64, error) {
 	isFirst := d.ensureRequestMade()
 	// Before we send any data, check if the context has been canceled.
 	if err := d.ctx.Err(); err != nil {
 		return 0, wrapIfContextError(err)
 	}
-	if isFirst && data == nil {
+	if isFirst && payload.Len() == 0 {
 		// On first write a nil Send is used to send request headers. Avoid
 		// writing a zero-length payload to avoid superfluous errors with close.
 		return 0, nil
 	}
 	// It's safe to write to this side of the pipe while net/http concurrently
 	// reads from the other side.
-	bytesWritten, err := d.requestBodyWriter.Write(data)
+	bytesWritten, err := payload.WriteTo(d.requestBodyWriter)
 	if err != nil && errors.Is(err, io.ErrClosedPipe) {
 		// Signal that the stream is closed with the more-typical io.EOF instead of
 		// io.ErrClosedPipe. This makes it easier for protocol-specific wrappers to
@@ -295,6 +295,52 @@ func (d *duplexHTTPCall) makeRequest() {
 		)
 		d.requestBodyWriter.Close()
 	}
+}
+
+// messsagePayload is a sized and seekable message payload. The interface is
+// implemented by [*bytes.Reader] and *envelope.
+type messsagePayload interface {
+	io.Reader
+	io.WriterTo
+	io.Seeker
+	Len() int
+}
+
+// nopPayload is a message payload that does nothing. It's used to send headers
+// to the server.
+type nopPayload struct{}
+
+var _ messsagePayload = nopPayload{}
+
+func (nopPayload) Read([]byte) (int, error) {
+	return 0, io.EOF
+}
+func (nopPayload) WriteTo(io.Writer) (int64, error) {
+	return 0, nil
+}
+func (nopPayload) Seek(int64, int) (int64, error) {
+	return 0, nil
+}
+func (nopPayload) Len() int {
+	return 0
+}
+
+// messageSender sends a message payload. The interface is implemented by
+// [*duplexHTTPCall] and writeSender.
+type messageSender interface {
+	Send(messsagePayload) (int64, error)
+}
+
+// writeSender is a sender that writes to an [io.Writer]. Useful for wrapping
+// [http.ResponseWriter].
+type writeSender struct {
+	writer io.Writer
+}
+
+var _ messageSender = writeSender{}
+
+func (w writeSender) Send(payload messsagePayload) (int64, error) {
+	return payload.WriteTo(w.writer)
 }
 
 // See: https://cs.opensource.google/go/go/+/refs/tags/go1.20.1:src/net/http/clone.go;l=22-33

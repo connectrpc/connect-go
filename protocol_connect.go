@@ -254,7 +254,7 @@ func (h *connectHandler) NewConn(
 			request:        request,
 			responseWriter: responseWriter,
 			marshaler: connectUnaryMarshaler{
-				writer:           responseWriter,
+				sender:           writeSender{writer: responseWriter},
 				codec:            codec,
 				compressMinBytes: h.CompressMinBytes,
 				compressionName:  responseCompression,
@@ -280,7 +280,7 @@ func (h *connectHandler) NewConn(
 			responseWriter: responseWriter,
 			marshaler: connectStreamingMarshaler{
 				envelopeWriter: envelopeWriter{
-					writer:           responseWriter,
+					sender:           writeSender{responseWriter},
 					codec:            codec,
 					compressMinBytes: h.CompressMinBytes,
 					compressionPool:  h.CompressionPools.Get(responseCompression),
@@ -375,7 +375,7 @@ func (c *connectClient) NewConn(
 			bufferPool:       c.BufferPool,
 			marshaler: connectUnaryRequestMarshaler{
 				connectUnaryMarshaler: connectUnaryMarshaler{
-					writer:           duplexCall,
+					sender:           duplexCall,
 					codec:            c.Codec,
 					compressMinBytes: c.CompressMinBytes,
 					compressionName:  c.CompressionName,
@@ -415,7 +415,7 @@ func (c *connectClient) NewConn(
 			codec:            c.Codec,
 			marshaler: connectStreamingMarshaler{
 				envelopeWriter: envelopeWriter{
-					writer:           duplexCall,
+					sender:           duplexCall,
 					codec:            c.Codec,
 					compressMinBytes: c.CompressMinBytes,
 					compressionPool:  c.CompressionPools.Get(c.CompressionName),
@@ -892,7 +892,7 @@ func (u *connectStreamingUnmarshaler) EndStreamError() *Error {
 }
 
 type connectUnaryMarshaler struct {
-	writer           io.Writer
+	sender           messageSender
 	codec            Codec
 	compressMinBytes int
 	compressionName  string
@@ -938,7 +938,8 @@ func (m *connectUnaryMarshaler) Marshal(message any) *Error {
 }
 
 func (m *connectUnaryMarshaler) write(data []byte) *Error {
-	if _, err := m.writer.Write(data); err != nil {
+	payload := bytes.NewReader(data)
+	if _, err := m.sender.Send(payload); err != nil {
 		err = wrapIfContextError(err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
