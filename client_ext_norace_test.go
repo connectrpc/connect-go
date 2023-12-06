@@ -60,7 +60,7 @@ func TestClientDeadlineHandling(t *testing.T) {
 	svr.StartTLS()
 	t.Cleanup(svr.Close)
 
-	// This run creates a new connection for each RPC to verify that timeouts during dialing
+	// This case creates a new connection for each RPC to verify that timeouts during dialing
 	// won't cause issues. This is historically easier to reproduce, so it uses a smaller
 	// duration, no concurrency, and fewer iterations. This is important because if we used
 	// a new connection for each RPC in the bigger test scenario below, we'd encounter other
@@ -79,23 +79,24 @@ func TestClientDeadlineHandling(t *testing.T) {
 				}
 				client := pingv1connect.NewPingServiceClient(httpClient, svr.URL)
 				_, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: "foo"}))
+				// Close all connections and make sure to give a little time for the OS to
+				// release socket resources to prevent resource exhaustion (such as running
+				// out of ephemeral ports).
 				httpClient.CloseIdleConnections()
-				// Make sure to give a little time for the OS to release socket resources
-				// to prevent resource exhaustion.
 				time.Sleep(time.Millisecond / 2)
 				return pingv1connect.PingServicePingProcedure, rpcErrors{recvErr: err}
 			},
 		)
 	})
 
-	// This run is much creates significantly more load than the above one, but re-uses
-	// connections. It also uses all stream types to send messages, to make sure that all
-	// stream implementations handle deadlines correctly. The I/O errors related to
-	// deadlines are historically harder to reproduce, so it throws a lot more effort into
-	// reproducing, particularly a longer duration for which it will run. It also uses
-	// larger messages (by packing requests with unrecognized fields) and compression, to
-	// make it more likely to encounter the deadline in the middle of read and write
-	// operations.
+	// This case creates significantly more load than the above one, but uses a normal
+	// client so pools and re-uses connections. It also uses all stream types to send
+	// messages, to make sure that all stream implementations handle deadlines correctly.
+	// The I/O errors related to deadlines are historically harder to reproduce, so it
+	// throws a lot more effort into reproducing, particularly a longer duration for
+	// which it will run. It also uses larger messages (by packing requests with
+	// unrecognized fields) and compression, to make it more likely to encounter the
+	// deadline in the middle of read and write operations.
 	t.Run("read-write", func(t *testing.T) {
 		t.Parallel()
 
