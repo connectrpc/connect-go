@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// These tests are not able to reproduce issues with the race detector
+// enabled. So they are only build with race detection off. This means
+// these tests, for now, are run manually, since CI runs tests with the
+// race detector enabled. Since these tests are slow (take 20s), it's
+// probably okay that they don't run with every commit.
+
 //go:build !race
 // +build !race
 
