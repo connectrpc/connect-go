@@ -30,6 +30,13 @@ clean: ## Delete intermediate build artifacts
 test: build ## Run unit tests
 	go test -vet=off -race -cover ./...
 
+.PHONY: slowtest
+# We may want a better way to classify these and run them as we add more.
+# We don't run these with the race detector, and we only run them in CI
+# for Linux and the latest version of Go.
+slowtest: build
+	go test -run TestClientDeadline ./
+
 .PHONY: runconformance
 runconformance: build ## Run conformance test suite
 	cd internal/conformance && ./runconformance.sh

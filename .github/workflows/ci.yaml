@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: [1.19.x, 1.20.x, 1.21.x]
+        go-version: [1.19.x, 1.20.x, 1.21.x] # when editing, also update steps and job below
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -39,3 +39,17 @@ jobs:
         # Go 1.20. So we skip this step for Go 1.19.
         if: matrix.go-version != '1.19.x'
         run: make runconformance
+  slowtest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Install Go
+        uses: actions/setup-go@v4
+        with:
+          # only the latest
+          go-version: 1.21.x
+      - name: Run Slow Tests
+        run: make slowtest
