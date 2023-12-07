@@ -19,6 +19,7 @@ help: ## Describe useful make targets
 .PHONY: all
 all: ## Build, test, and lint (default)
 	$(MAKE) test
+	$(MAKE) slowtest
 	$(MAKE) lint
 
 .PHONY: clean
@@ -28,14 +29,20 @@ clean: ## Delete intermediate build artifacts
 
 .PHONY: test
 test: build ## Run unit tests
-	go test -vet=off -race -cover ./...
+	go test -vet=off -race -cover -short ./...
 
 .PHONY: slowtest
-# We may want a better way to classify these and run them as we add more.
-# We don't run these with the race detector, and we only run them in CI
-# for Linux and the latest version of Go.
+# Runs all tests, including known long/slow ones. The
+# race detector is not used for a few reasons:
+#  1. Race coverage of the short tests should be
+#     adequate to catch race conditions.
+#  2. It slows tests down, which is not good if we
+#     know these are already slow tests.
+#  3. Some of the slow tests can't repro issues and
+#     find regressions as reliably with the race
+#     detector enabled.
 slowtest: build
-	go test -run TestClientDeadline ./
+	go test ./...
 
 .PHONY: runconformance
 runconformance: build ## Run conformance test suite
