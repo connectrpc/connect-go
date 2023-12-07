@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
@@ -290,6 +291,12 @@ func wrapIfContextError(err error) error {
 		return NewError(CodeCanceled, err)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
+		return NewError(CodeDeadlineExceeded, err)
+	}
+	// Ick, some dial errors can be returned as os.ErrDeadlineExceeded
+	// instead of context.DeadlineExceeded :(
+	// https://github.com/golang/go/issues/64449
+	if errors.Is(err, os.ErrDeadlineExceeded) {
 		return NewError(CodeDeadlineExceeded, err)
 	}
 	return err

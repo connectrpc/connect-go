@@ -208,6 +208,7 @@ func (w *envelopeWriter) marshal(message any) *Error {
 
 func (w *envelopeWriter) write(env *envelope) *Error {
 	if _, err := w.sender.Send(env); err != nil {
+		err = wrapIfContextError(err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
@@ -264,10 +265,14 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 
 	if env.Flags != 0 && env.Flags != flagEnvelopeCompressed {
 		// Drain the rest of the stream to ensure there is no extra data.
-		if n, err := discard(r.reader); err != nil {
+		if numBytes, err := discard(r.reader); err != nil {
+			err = wrapIfContextError(err)
+			if connErr, ok := asError(err); ok {
+				return connErr
+			}
 			return errorf(CodeInternal, "corrupt response: I/O error after end-stream message: %w", err)
-		} else if n > 0 {
-			return errorf(CodeInternal, "corrupt response: %d extra bytes after end of stream", n)
+		} else if numBytes > 0 {
+			return errorf(CodeInternal, "corrupt response: %d extra bytes after end of stream", numBytes)
 		}
 		// One of the protocol-specific flags are set, so this is the end of the
 		// stream. Save the message for protocol-specific code to process and
@@ -299,6 +304,10 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 			// add any alarming text about protocol errors, though.
 			return NewError(CodeUnknown, err)
 		}
+		err = wrapIfContextError(err)
+		if connectErr, ok := asError(err); ok {
+			return connectErr
+		}
 		// Something else has gone wrong - the stream didn't end cleanly.
 		if connectErr, ok := asError(err); ok {
 			return connectErr
@@ -316,7 +325,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 	if r.readMaxBytes > 0 && size > int64(r.readMaxBytes) {
 		_, err := io.CopyN(io.Discard, r.reader, size)
 		if err != nil && !errors.Is(err, io.EOF) {
-			return errorf(CodeUnknown, "read enveloped message: %w", err)
+			return errorf(CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %w", r.readMaxBytes, err)
 		}
 		return errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", size, r.readMaxBytes)
 	}
@@ -337,6 +346,10 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 				size,
 				readN,
 			)
+		}
+		err = wrapIfContextError(err)
+		if connectErr, ok := asError(err); ok {
+			return connectErr
 		}
 		return errorf(CodeUnknown, "read enveloped message: %w", err)
 	}

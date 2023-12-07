@@ -940,6 +940,7 @@ func (m *connectUnaryMarshaler) Marshal(message any) *Error {
 func (m *connectUnaryMarshaler) write(data []byte) *Error {
 	payload := bytes.NewReader(data)
 	if _, err := m.sender.Send(payload); err != nil {
+		err = wrapIfContextError(err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
@@ -1082,6 +1083,7 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 	// ReadFrom ignores io.EOF, so any error here is real.
 	bytesRead, err := data.ReadFrom(reader)
 	if err != nil {
+		err = wrapIfContextError(err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}

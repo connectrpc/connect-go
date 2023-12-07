@@ -27,8 +27,24 @@ clean: ## Delete intermediate build artifacts
 	git clean -Xdf
 
 .PHONY: test
-test: build ## Run unit tests
-	go test -vet=off -race -cover ./...
+test: shorttest slowtest
+
+.PHONY: shorttest
+shorttest: build ## Run unit tests
+	go test -vet=off -race -cover -short ./...
+
+.PHONY: slowtest
+# Runs all tests, including known long/slow ones. The
+# race detector is not used for a few reasons:
+#  1. Race coverage of the short tests should be
+#     adequate to catch race conditions.
+#  2. It slows tests down, which is not good if we
+#     know these are already slow tests.
+#  3. Some of the slow tests can't repro issues and
+#     find regressions as reliably with the race
+#     detector enabled.
+slowtest: build
+	go test ./...
 
 .PHONY: runconformance
 runconformance: build ## Run conformance test suite

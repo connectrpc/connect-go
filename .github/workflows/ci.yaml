@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
+        # when editing this list, also update steps and jobs below
         go-version: [1.19.x, 1.20.x, 1.21.x]
     steps:
       - name: Checkout Code
@@ -25,8 +26,8 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: ${{ matrix.go-version }}
-      - name: Test
-        run: make test
+      - name: Unit Test
+        run: make shorttest
       - name: Lint
         # Often, lint & gofmt guidelines depend on the Go version. To prevent
         # conflicting guidance, run only on the most recent supported version.
@@ -34,8 +35,34 @@ jobs:
         # supported version.
         if: matrix.go-version == '1.21.x'
         run: make checkgenerate && make lint
+  conformance:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 1.19 is omitted because conformance test runner requires 1.20+
+        go-version: [1.20.x, 1.21.x]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Install Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.go-version }}
       - name: Run Conformance Tests
-        # A dependency of conformance tests (for testing http/3) requires
-        # Go 1.20. So we skip this step for Go 1.19.
-        if: matrix.go-version != '1.19.x'
         run: make runconformance
+  slowtest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Install Go
+        uses: actions/setup-go@v4
+        with:
+          # only the latest
+          go-version: 1.21.x
+      - name: Run Slow Tests
+        run: make slowtest
