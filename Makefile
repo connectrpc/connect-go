@@ -19,7 +19,6 @@ help: ## Describe useful make targets
 .PHONY: all
 all: ## Build, test, and lint (default)
 	$(MAKE) test
-	$(MAKE) slowtest
 	$(MAKE) lint
 
 .PHONY: clean
@@ -28,7 +27,10 @@ clean: ## Delete intermediate build artifacts
 	git clean -Xdf
 
 .PHONY: test
-test: build ## Run unit tests
+test: shorttest slowtest
+
+.PHONY: shorttest
+shorttest: build ## Run unit tests
 	go test -vet=off -race -cover -short ./...
 
 .PHONY: slowtest
