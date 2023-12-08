@@ -434,8 +434,9 @@ func TestServer(t *testing.T) {
 		pingServer{checkMetadata: true},
 	)
 	errorWriter := connect.NewErrorWriter()
-	// Add some net/http middleware to the ping service so we can also exercise ErrorWriter.
+	// Add net/http middleware to the ping service to evaluate HTTP state.
 	mux.Handle(pingRoute, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		// Exercise ErrorWriter for HTTP middleware errors.
 		if request.Header.Get(clientMiddlewareErrorHeader) != "" {
 			defer request.Body.Close()
 			if _, err := io.Copy(io.Discard, request.Body); err != nil {
@@ -448,6 +449,19 @@ func TestServer(t *testing.T) {
 				t.Errorf("send RPC error from HTTP middleware: %v", err)
 			}
 			return
+		}
+		// Check Content-Length is set correctly.
+		switch request.URL.Path {
+		case pingv1connect.PingServicePingProcedure,
+			pingv1connect.PingServiceFailProcedure,
+			pingv1connect.PingServiceCountUpProcedure:
+			if request.ContentLength < 0 {
+				t.Errorf("%s: expected Content-Length >= 0, got %d", request.URL.Path, request.ContentLength)
+			}
+		default:
+			if request.ContentLength > 0 {
+				t.Errorf("%s: expected Content-Length -1 or 0, got %d", request.URL.Path, request.ContentLength)
+			}
 		}
 		pingHandler.ServeHTTP(response, request)
 	}))

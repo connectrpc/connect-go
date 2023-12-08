@@ -37,7 +37,7 @@ func NewServer(tb testing.TB, handler http.Handler, opts ...memhttp.Option) *mem
 	server := memhttp.NewServer(handler, opts...)
 	tb.Cleanup(func() {
 		if err := server.Cleanup(); err != nil {
-			tb.Error(err)
+			tb.Errorf("shutdown failed: %v", err)
 		}
 	})
 	return server
