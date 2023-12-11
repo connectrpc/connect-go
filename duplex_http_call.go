@@ -79,6 +79,7 @@ func newDuplexHTTPCall(
 		ProtoMajor:    1,
 		ProtoMinor:    1,
 		Body:          http.NoBody,
+		GetBody:       getNoBody,
 		ContentLength: 0,
 		Host:          url.Host,
 	}).WithContext(ctx)
@@ -103,6 +104,7 @@ func (d *duplexHTTPCall) Send(payload messagePayload) (int64, error) {
 		pipeReader, pipeWriter := io.Pipe()
 		d.requestBodyWriter = pipeWriter
 		d.request.Body = pipeReader
+		d.request.GetBody = nil // GetBody not supported for client streaming
 		d.request.ContentLength = -1
 		go d.makeRequest() // concurrent request
 	}
@@ -148,10 +150,6 @@ func (d *duplexHTTPCall) sendUnary(payload messagePayload) (int64, error) {
 		// returning from Send. This ensures that the payload can be reused
 		// after Send returns. See [http.RoundTripper] for more details.
 		defer payloadBody.Wait()
-	} else {
-		d.request.GetBody = func() (io.ReadCloser, error) {
-			return http.NoBody, nil
-		}
 	}
 	d.makeRequest() // synchronous request
 	if err := d.ctx.Err(); err != nil {
@@ -328,6 +326,11 @@ func (d *duplexHTTPCall) makeRequest() {
 		)
 		_ = d.CloseWrite()
 	}
+}
+
+// getNoBody is a GetBody function for http.NoBody.
+func getNoBody() (io.ReadCloser, error) {
+	return http.NoBody, nil
 }
 
 // messagePayload is a sized and seekable message payload. The interface is
