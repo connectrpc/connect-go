@@ -394,6 +394,14 @@ func TestServer(t *testing.T) {
 					connect.WithSendGzip(),
 				)
 			})
+			t.Run("json_get", func(t *testing.T) {
+				run(
+					t,
+					connect.WithProtoJSON(),
+					connect.WithHTTPGet(),
+					connect.WithHTTPGetMaxURLSize(1024, true),
+				)
+			})
 		})
 		t.Run("grpc", func(t *testing.T) {
 			t.Run("proto", func(t *testing.T) {
