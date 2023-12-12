@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -448,6 +449,7 @@ func TestClientDeadlineHandling(t *testing.T) {
 		}
 		handler.ServeHTTP(respWriter, req)
 	}))
+	svr.Config.ErrorLog = log.New(io.Discard, "", 0) //nolint:forbidigo
 	svr.EnableHTTP2 = true
 	svr.StartTLS()
 	t.Cleanup(svr.Close)
