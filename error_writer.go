@@ -21,6 +21,17 @@ import (
 	"strings"
 )
 
+// protocolType is one of the supported RPC protocols.
+type protocolType uint8
+
+const (
+	unknownProtocol protocolType = iota
+	connectUnaryProtocol
+	connectStreamProtocol
+	grpcProtocol
+	grpcWebProtocol
+)
+
 // An ErrorWriter writes errors to an [http.ResponseWriter] in the format
 // expected by an RPC client. This is especially useful in server-side net/http
 // middleware, where you may wish to handle requests from RPC and non-RPC
@@ -72,17 +83,6 @@ func NewErrorWriter(opts ...HandlerOption) *ErrorWriter {
 	}
 	return writer
 }
-
-// protocolType is one of the supported RPC protocols.
-type protocolType uint8
-
-const (
-	unknownProtocol protocolType = iota
-	connectUnaryProtocol
-	connectStreamProtocol
-	grpcProtocol
-	grpcWebProtocol
-)
 
 func (w *ErrorWriter) classifyRequest(request *http.Request) protocolType {
 	ctype := canonicalizeContentType(getHeaderCanonical(request.Header, headerContentType))
