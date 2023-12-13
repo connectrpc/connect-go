@@ -101,7 +101,7 @@ func (w *ErrorWriter) classifyRequest(request *http.Request) protocolType {
 	// Check for Connect-Protocol-Version header or connect protocol query
 	// parameter to support connect GET requests.
 	if request.Method == http.MethodGet {
-		connectVersion := request.Header.Get(connectProtocolVersion)
+		connectVersion := getHeaderCanonical(request.Header, connectProtocolVersion)
 		if connectVersion == connectProtocolVersion {
 			return connectUnaryProtocol
 		}
