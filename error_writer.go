@@ -122,18 +122,12 @@ func (w *ErrorWriter) IsSupported(request *http.Request) bool {
 // Write an error, using the format appropriate for the RPC protocol in use.
 // Callers should first use IsSupported to verify that the request is using one
 // of the ErrorWriter's supported RPC protocols. If the protocol is unknown,
-// Write will send the error in the Connect unary format.
+// Write will send the error as unprefixed, Connect-formatted JSON.
 //
 // Write does not read or close the request body.
 func (w *ErrorWriter) Write(response http.ResponseWriter, request *http.Request, err error) error {
 	ctype := canonicalizeContentType(getHeaderCanonical(request.Header, headerContentType))
 	switch protocolType := w.classifyRequest(request); protocolType {
-	case connectUnaryProtocol, unknownProtocol:
-		// Unary errors are always JSON. Unknown protocols are treated as unary
-		// because they are likely to be Connect clients and will still be able to
-		// parse the error as it's in a human-readable format.
-		setHeaderCanonical(response.Header(), headerContentType, connectUnaryContentTypeJSON)
-		return w.writeConnectUnary(response, err)
 	case connectStreamProtocol:
 		setHeaderCanonical(response.Header(), headerContentType, ctype)
 		return w.writeConnectStreaming(response, err)
@@ -144,7 +138,11 @@ func (w *ErrorWriter) Write(response http.ResponseWriter, request *http.Request,
 		setHeaderCanonical(response.Header(), headerContentType, ctype)
 		return w.writeGRPCWeb(response, err)
 	default:
-		return fmt.Errorf("unknown protocol type %q", protocolType)
+		// Unary errors are always JSON. Unknown protocols are treated as unary
+		// because they are likely to be Connect clients and will still be able to
+		// parse the error as it's in a human-readable format.
+		setHeaderCanonical(response.Header(), headerContentType, connectUnaryContentTypeJSON)
+		return w.writeConnectUnary(response, err)
 	}
 }
 
