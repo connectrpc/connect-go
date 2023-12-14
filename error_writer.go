@@ -137,6 +137,8 @@ func (w *ErrorWriter) Write(response http.ResponseWriter, request *http.Request,
 	case grpcWebProtocol:
 		setHeaderCanonical(response.Header(), headerContentType, ctype)
 		return w.writeGRPCWeb(response, err)
+	case unknownProtocol, connectUnaryProtocol:
+		fallthrough
 	default:
 		// Unary errors are always JSON. Unknown protocols are treated as unary
 		// because they are likely to be Connect clients and will still be able to
