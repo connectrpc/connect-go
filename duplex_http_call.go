@@ -72,16 +72,15 @@ func newDuplexHTTPCall(
 	// NewRequestContext and doesn't effect the actual version
 	// being transmitted.
 	request := (&http.Request{
-		Method:        http.MethodPost,
-		URL:           url,
-		Header:        header,
-		Proto:         "HTTP/1.1",
-		ProtoMajor:    1,
-		ProtoMinor:    1,
-		Body:          http.NoBody,
-		GetBody:       getNoBody,
-		ContentLength: 0,
-		Host:          url.Host,
+		Method:     http.MethodPost,
+		URL:        url,
+		Header:     header,
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Body:       http.NoBody,
+		GetBody:    getNoBody,
+		Host:       url.Host,
 	}).WithContext(ctx)
 	return &duplexHTTPCall{
 		ctx:           ctx,
@@ -152,8 +151,12 @@ func (d *duplexHTTPCall) sendUnary(payload messagePayload) (int64, error) {
 		defer payloadBody.Wait()
 	}
 	d.makeRequest() // synchronous request
-	if err := d.ctx.Err(); err != nil {
-		return 0, wrapIfContextError(err)
+	if d.responseErr != nil {
+		// Check on response errors for context errors. Other errors are
+		// handled on read.
+		if err := d.ctx.Err(); err != nil {
+			return 0, wrapIfContextError(err)
+		}
 	}
 	return payloadLength, nil
 }
@@ -418,7 +421,7 @@ func newPayloadCloser(payload messagePayload) *payloadCloser {
 func (p *payloadCloser) Read(dst []byte) (readN int, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.payload == nil {
+	if p.isDone {
 		return 0, io.EOF
 	}
 	readN, err = p.payload.Read(dst)
