@@ -455,13 +455,18 @@ func TestServer(t *testing.T) {
 		case pingv1connect.PingServicePingProcedure,
 			pingv1connect.PingServiceFailProcedure,
 			pingv1connect.PingServiceCountUpProcedure:
+			// Unary requests set Content-Length to the length of the request body.
 			if request.ContentLength < 0 {
 				t.Errorf("%s: expected Content-Length >= 0, got %d", request.URL.Path, request.ContentLength)
 			}
-		default:
+		case pingv1connect.PingServiceSumProcedure,
+			pingv1connect.PingServiceCumSumProcedure:
+			// Streaming requests set Content-Length to -1 or 0 on empty requests.
 			if request.ContentLength > 0 {
 				t.Errorf("%s: expected Content-Length -1 or 0, got %d", request.URL.Path, request.ContentLength)
 			}
+		default:
+			t.Errorf("unexpected path %q", request.URL.Path)
 		}
 		pingHandler.ServeHTTP(response, request)
 	}))
