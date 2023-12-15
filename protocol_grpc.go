@@ -846,6 +846,10 @@ func grpcContentTypeFromCodecName(web bool, name string) string {
 	if web {
 		return grpcWebContentTypePrefix + name
 	}
+	if name == codecNameProto {
+		// for compatibility with some servers prefer an implicit default codec
+		return grpcContentTypeDefault
+	}
 	return grpcContentTypePrefix + name
 }
 
