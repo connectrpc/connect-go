@@ -145,10 +145,10 @@ func (d *duplexHTTPCall) sendUnary(payload messagePayload) (int64, error) {
 			}
 			return payloadBody, nil
 		}
-		// Wait on the payloadBody to be completly read or closed before
-		// returning from Send. This ensures that the payload can be reused
-		// after Send returns. See [http.RoundTripper] for more details.
-		defer payloadBody.Wait()
+		// Release the payload ensuring that after Send returns the
+		// payload is safe to be reused. See [http.RoundTripper] for
+		// more details.
+		defer payloadBody.Release()
 	}
 	d.makeRequest() // synchronous request
 	if d.responseErr != nil {
@@ -398,62 +398,46 @@ func cloneURL(oldURL *url.URL) *url.URL {
 
 // payloadCloser is an [io.ReadCloser] that wraps a messagePayload. It's used to
 // implement the request body for unary calls. To safely reuse the buffer
-// call Wait after the response is received to ensure the payload has been
-// drained or closed. After Wait, the payload cannot be rewound. It's safe to
-// call Close multiple times.
+// call Release after the response is received to ensure the payload is safe for
+// reuse.
 type payloadCloser struct {
 	mu      sync.Mutex
-	cond    sync.Cond
-	payload messagePayload
-	isDone  bool // true if the payload has been fully read
+	payload messagePayload // nil after Release
 }
 
 func newPayloadCloser(payload messagePayload) *payloadCloser {
-	closer := &payloadCloser{
+	return &payloadCloser{
 		payload: payload,
 	}
-	closer.cond.L = &closer.mu
-	return closer
 }
 
-// Read implements [io.Reader], on error it signals that the payload has been
-// fully read.
+// Read implements [io.Reader].
 func (p *payloadCloser) Read(dst []byte) (readN int, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.isDone {
+	if p.payload == nil {
 		return 0, io.EOF
 	}
-	readN, err = p.payload.Read(dst)
-	if err != nil || p.payload.Len() == 0 {
-		p.completeWithLock()
-	}
-	return readN, err
+	return p.payload.Read(dst)
 }
 
-// WriteTo implements [io.WriterTo]. It signals that the payload has been fully
-// read.
+// WriteTo implements [io.WriterTo].
 func (p *payloadCloser) WriteTo(dst io.Writer) (int64, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.isDone {
+	if p.payload == nil {
 		return 0, nil
 	}
-	n, err := p.payload.WriteTo(dst)
-	p.completeWithLock()
-	return n, err
+	return p.payload.WriteTo(dst)
 }
 
-// Close implements [io.Closer]. It signals completion of the payload.
+// Close implements [io.Closer].
 func (p *payloadCloser) Close() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.completeWithLock()
 	return nil
 }
 
 // Rewind rewinds the payload to the beginning. It returns false if the
-// payload has been discarded from a previous call to Wait.
+// payload has been discarded from a previous call to Release.
 func (p *payloadCloser) Rewind() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -463,24 +447,13 @@ func (p *payloadCloser) Rewind() bool {
 	if _, err := p.payload.Seek(0, io.SeekStart); err != nil {
 		return false
 	}
-	p.isDone = false
 	return true
 }
 
-// Wait blocks until the payload has been fully read or closed. After Wait, the
-// payload is discarded and cannot be rewound. It's then safe to reuse the
-// payload.
-func (p *payloadCloser) Wait() {
+// Release discards the payload. After Release is called, the payload cannot be
+// rewound and the payload is safe to reuse.
+func (p *payloadCloser) Release() {
 	p.mu.Lock()
-	for !p.isDone {
-		p.cond.Wait()
-	}
 	p.payload = nil
 	p.mu.Unlock()
-}
-
-// completeWithLock signals that the payload has been fully read.
-func (p *payloadCloser) completeWithLock() {
-	p.isDone = true
-	p.cond.Broadcast()
 }
