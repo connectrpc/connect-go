@@ -2282,21 +2282,8 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 // the client abruptly disconnects.
 func TestClientDisconnect(t *testing.T) {
 	t.Parallel()
-	captureTransportConn := func(server *memhttp.Server, clientConn *net.Conn, onError chan struct{}, http2 bool) http.RoundTripper {
-		if http2 {
-			transport := server.Transport()
-			dialContext := transport.DialTLSContext
-			transport.DialTLSContext = func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-				conn, err := dialContext(ctx, network, addr, cfg)
-				if err != nil {
-					close(onError)
-					return nil, err
-				}
-				*clientConn = conn // Capture the client connection.
-				return conn, nil
-			}
-			return transport
-		}
+	type httpRoundTripFunc func(server *memhttp.Server, clientConn *net.Conn, onError chan struct{}) http.RoundTripper
+	http1RoundTripper := func(server *memhttp.Server, clientConn *net.Conn, onError chan struct{}) http.RoundTripper {
 		transport := server.TransportHTTP1()
 		dialContext := transport.DialContext
 		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -2310,7 +2297,21 @@ func TestClientDisconnect(t *testing.T) {
 		}
 		return transport
 	}
-	testTransportClosure := func(t *testing.T, http2 bool) { //nolint:thelper
+	http2RoundTripper := func(server *memhttp.Server, clientConn *net.Conn, onError chan struct{}) http.RoundTripper {
+		transport := server.Transport()
+		dialContext := transport.DialTLSContext
+		transport.DialTLSContext = func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+			conn, err := dialContext(ctx, network, addr, cfg)
+			if err != nil {
+				close(onError)
+				return nil, err
+			}
+			*clientConn = conn // Capture the client connection.
+			return conn, nil
+		}
+		return transport
+	}
+	testTransportClosure := func(t *testing.T, captureTransport httpRoundTripFunc) { //nolint:thelper
 		t.Run("handler_reads", func(t *testing.T) {
 			var (
 				handlerReceiveErr error
@@ -2334,7 +2335,7 @@ func TestClientDisconnect(t *testing.T) {
 			mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
 			server := memhttptest.NewServer(t, mux)
 			var clientConn net.Conn
-			transport := captureTransportConn(server, &clientConn, gotRequest, http2)
+			transport := captureTransport(server, &clientConn, gotRequest)
 			serverClient := &http.Client{Transport: transport}
 			client := pingv1connect.NewPingServiceClient(serverClient, server.URL())
 			stream := client.Sum(context.Background())
@@ -2377,7 +2378,7 @@ func TestClientDisconnect(t *testing.T) {
 			mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
 			server := memhttptest.NewServer(t, mux)
 			var clientConn net.Conn
-			transport := captureTransportConn(server, &clientConn, gotRequest, http2)
+			transport := captureTransport(server, &clientConn, gotRequest)
 			serverClient := &http.Client{Transport: transport}
 			client := pingv1connect.NewPingServiceClient(serverClient, server.URL())
 			stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
@@ -2400,8 +2401,14 @@ func TestClientDisconnect(t *testing.T) {
 			assert.ErrorIs(t, handlerContextErr, context.Canceled)
 		})
 	}
-	testTransportClosure(t, true)
-	testTransportClosure(t, false)
+	t.Run("http1", func(t *testing.T) {
+		t.Parallel()
+		testTransportClosure(t, http1RoundTripper)
+	})
+	t.Run("http2", func(t *testing.T) {
+		t.Parallel()
+		testTransportClosure(t, http2RoundTripper)
+	})
 }
 
 // TestBlankImportCodeGeneration tests that services.connect.go is generated with
