@@ -1,8 +1,14 @@
 # Releasing connect-go
 
+This document outlines how to create a release of connect-go.
+
 1. Clone the repo, ensuring you have the latest main.
 
-2. On a new branch, open [connect.go](connect.go) and change the `Version` constant. Do not just remove the `-dev` suffix: look at the release history and the unreleased commits to choose a new semantic version number.
+2. On a new branch, open [connect.go](connect.go) and change the `Version` constant. Do not just remove the `-dev` suffix: look at the release history and the unreleased commits to choose a new semantic version number. Example: #661
+```patch
+-const Version = "1.14.0-dev"
++const Version = "1.14.0"
+```
 
 3. Open a PR titled "Prepare for vX.Y.Z". Once it's reviewed and CI passes, merge it. *Make sure no new commits are added to merged until the release is complete.*
 
@@ -16,6 +22,13 @@
 
 5. Publish the release.
 
-6. Open a new PR titled "Back to development" changing the `Version` to increment the minor tag and append the `-dev` suffix. Use the next minor release - we never anticipate bugs and patch releases.
+6. Take the newly created release, click on the button to edit the release, and then update the release. See this [issue](https://github.com/orgs/community/discussions/8226) for guidelines.
 
-7. Take the newly created release, click on the button to edit the release, and then update the release. See this [issue](https://github.com/orgs/community/discussions/8226) for guidelines.
+7. On a new branch, open [connect.go](connect.go) and change the `Version` to increment the minor tag and append the `-dev` suffix. Use the next minor release - we never anticipate bugs and patch releases. Example: #662
+```patch
+-const Version = "1.14.0"
++const Version = "1.15.0-dev"
+```
+
+8. Open a PR titled "Back to developement". Once it's reviewed and CI passes, merge it. The release is complete.
+
