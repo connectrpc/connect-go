@@ -34,5 +34,8 @@ This document outlines how to create a release of connect-go.
 
 7. Open a PR titled "Back to developement" ([Example PR #662](https://github.com/connectrpc/connect-go/pull/662)). Once it's reviewed and CI passes, merge it.
 
-8. Check the [releases](https://github.com/connectrpc/connect-go/releases) page to see if releases are out of order. If they are, first take the release you just did, click on the button to edit the release, and then update the release. If that doesn't work, contact GitHub support (see this [issue](https://github.com/orgs/community/discussions/8226)) and explain the problem to them. They can trigger a re-index.
+8. Check the [releases](https://github.com/connectrpc/connect-go/releases) page to see if [releases are out of order](https://github.com/orgs/community/discussions/8226). If they are, take the release you just did, click on the button to edit the release, and then update the release. If that doesn't work, [contact GitHub support](https://support.github.com/contact?tags=rr-general-technical) to request that they trigger a re-index of the repository:
 
+   > Subject: connect-go releases appearing out of order
+   >
+   > The [connect-go releases page](https://github.com/connectrpc/connect-go/releases) is showing releases out of order. I have tried editing the most recent release to trigger a re-index and it doesn't seem to have resolved the issue. Can you please trigger a re-index for this repo? Thanks!
