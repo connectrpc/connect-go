@@ -1,52 +1,21 @@
-# Release Process for `connect-go`
+# Releasing connect-go
 
-## Preparing for Release
+1. Clone the repo, ensuring you have the latest main.
 
-1. **Update Version Number**
-   - In `connect.go`, modify the `Version` constant to match the target release according to [semver](https://semver.org/) standards. Remove the `-dev` suffix.
-     ```go
-     const Version = "X.Y.Z"
-     ```
+2. On a new branch, open [connect.go](connect.go) and change the `Version` constant. Do not just remove the `-dev` suffix: look at the release history and the unreleased commits to choose a new semantic version number.
 
-2. **Version Requirements (Optional)**
-   - If changes require a new API in `connect-go`, declare a constant referencing the updated code.
-     ```go
-     const (
-         IsAtLeastVersionX_Y_Z = true
-     )
-     ```
-   - Ensure the generated code refers to this constant. This is used as a compile time check of source compatibilty.
+3. Open a PR titled "Prepare for vX.Y.Z". Once it's reviewed and CI passes, merge it. *Make sure no new commits are added to merged until the release is complete.*
 
-3. **Branch and PR Creation**
-   - Create a branch, commit the version changes, and open a PR titled "Prepare for vX.Y.Z".
-   - Merge this PR into the main branch. No other changes should be merged until the release is complete.
+4. Using the Github UI, create a new release.
+    - Under “Choose a tag”, type in “vX.Y.Z” to create a new tag for the release upon publish.
+    - Target the main branch.
+    - Title the Release “vX.Y.Z”.
+    - Click “set as latest release”.
+    - Set the last version as the “Previous tag”.
+    - Click “Generate release notes” to autogenerate release notes, sort them into ### Enhancements and ### Bugfixes, and edit the PR titles to be meaningful to end users. Feel free to collect multiple small changes to docs or Github config into one line, but try to tag every contributor. Make especially sure to credit new external contributors!
 
-## Creating the Release
+5. Publish the release.
 
-1. **Draft a Release**
-   - Navigate to the [releases](https://github.com/connectrpc/connect-go/releases) page using the GitHub UI.
-   - Click **Draft a new release** at the top of the page.
+6. Open a new PR titled "Back to development" changing the `Version` to increment the minor tag and append the `-dev` suffix. Use the next minor release - we never anticipate bugs and patch releases.
 
-2. **Tagging and Title**
-   - Enter “vX.Y.Z” in the "Choose a tag” field to create a new tag for the release upon publishing.
-   - Target the main branch and title the release as “vX.Y.Z”.
-
-3. **Additional Configuration**
-   - Click “set as latest release” and specify the last version as the “Previous tag”.
-   - Use **Generate release notes** to auto-create meaningful release notes, sorting them into `### Enhancements` and `### Bugfixes`. Ensure contributors are credited, especially new external contributors.
-
-4. **Publishing the Release**
-   - When ready, click **Publish release**.
-   - For proper sorting, edit and update the newly created release. See this [issue](https://github.com/orgs/community/discussions/8226) for guidelines.
-
-## Returning to Development
-
-1. **Update for Development**
-   - In `connect.go`, modify the `Version` constant to the next minor release with the suffix `-dev`.
-     ```go
-     const Version = "X.Y+1.0-dev"
-     ```
-   - Use the next minor release. Bugs and patch releases aren't used.
-
-2. **PR Creation**
-   - Open a PR with the title "Back to development".
+7. Take the newly created release, click on the button to edit the release, and then update the release. See this [issue](https://github.com/orgs/community/discussions/8226) for guidelines.
