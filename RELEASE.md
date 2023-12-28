@@ -34,7 +34,7 @@ This document outlines how to create a release of connect-go.
    +const Version = "1.15.0-dev"
    ```
 
-8. Open a PR titled "Back to developement" ([Example PR #662](https://github.com/connectrpc/connect-go/pull/662)). Once it's reviewed and CI passes, merge it.
+8. Open a PR titled "Back to development" ([Example PR #662](https://github.com/connectrpc/connect-go/pull/662)). Once it's reviewed and CI passes, merge it.
 
 9. Check the [releases](https://github.com/connectrpc/connect-go/releases) page to see if [releases are out of order](https://github.com/orgs/community/discussions/8226). If they are, take the release you just did, click on the button to edit the release, and then update the release. If that doesn't work, [contact GitHub support](https://support.github.com/contact?tags=rr-general-technical) to request that they trigger a re-index of the repository:
 
