@@ -11,9 +11,11 @@ This document outlines how to create a release of connect-go.
    +const Version = "1.14.0"
    ```
 
-4. Open a PR titled "Prepare for vX.Y.Z" ([Example PR #661](https://github.com/connectrpc/connect-go/pull/661)). Once it's reviewed and CI passes, merge it. *Make sure no new commits are merged until the release is complete.*
+3. Open a PR titled "Prepare for vX.Y.Z" ([Example PR #661](https://github.com/connectrpc/connect-go/pull/661)). Once it's reviewed and CI passes, merge it.
 
-5. Using the Github UI, create a new release.
+    *Make sure no new commits are merged until the release is complete.*
+
+4. Using the Github UI, create a new release.
     - Under “Choose a tag”, type in “vX.Y.Z” to create a new tag for the release upon publish.
     - Target the main branch.
     - Title the Release “vX.Y.Z”.
@@ -21,16 +23,16 @@ This document outlines how to create a release of connect-go.
     - Set the last version as the “Previous tag”.
     - Click “Generate release notes” to autogenerate release notes, sort them into ### Enhancements and ### Bugfixes, and edit the PR titles to be meaningful to end users. Feel free to collect multiple small changes to docs or Github config into one line, but try to tag every contributor. Make especially sure to credit new external contributors!
 
-6. Publish the release.
+5. Publish the release.
 
-7. Take the newly created release, click on the button to edit the release, and then update the release. See this [issue](https://github.com/orgs/community/discussions/8226) for guidelines.
-
-8. On a new branch, open [connect.go](connect.go) and change the `Version` to increment the minor tag and append the `-dev` suffix. Use the next minor release - we never anticipate bugs and patch releases.
+6. On a new branch, open [connect.go](connect.go) and change the `Version` to increment the minor tag and append the `-dev` suffix. Use the next minor release - we never anticipate bugs and patch releases.
 
    ```patch
    -const Version = "1.14.0"
    +const Version = "1.15.0-dev"
    ```
 
-8. Open a PR titled "Back to developement" ([Example PR #662](https://github.com/connectrpc/connect-go/pull/662)). Once it's reviewed and CI passes, merge it. The release is complete.
+7. Open a PR titled "Back to developement" ([Example PR #662](https://github.com/connectrpc/connect-go/pull/662)). Once it's reviewed and CI passes, merge it.
+
+8. Check the [releases](https://github.com/connectrpc/connect-go/releases) page to see if releases are out of order. If they are, first take the release you just did, click on the button to edit the release, and then update the release. If that doesn't work, contact GitHub support (see this [issue](https://github.com/orgs/community/discussions/8226)) and explain the problem to them. They can trigger a re-index.
 
