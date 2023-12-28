@@ -4,7 +4,7 @@ This document outlines how to create a release of connect-go.
 
 1. Clone the repo, ensuring you have the latest main.
 
-2. On a new branch, open [connect.go](connect.go) and change the `Version` constant. Do not just remove the `-dev` suffix: look at the release history and the unreleased commits to choose a new semantic version number. Example: #661
+2. On a new branch, open [connect.go](connect.go) and change the `Version` constant. Do not just remove the `-dev` suffix: look at the release history and the unreleased commits to choose a new semantic version number. Example: [#661](https://github.com/connectrpc/connect-go/pull/661)
 ```patch
 -const Version = "1.14.0-dev"
 +const Version = "1.14.0"
@@ -24,7 +24,7 @@ This document outlines how to create a release of connect-go.
 
 6. Take the newly created release, click on the button to edit the release, and then update the release. See this [issue](https://github.com/orgs/community/discussions/8226) for guidelines.
 
-7. On a new branch, open [connect.go](connect.go) and change the `Version` to increment the minor tag and append the `-dev` suffix. Use the next minor release - we never anticipate bugs and patch releases. Example: #662
+7. On a new branch, open [connect.go](connect.go) and change the `Version` to increment the minor tag and append the `-dev` suffix. Use the next minor release - we never anticipate bugs and patch releases. Example: [#662](https://github.com/connectrpc/connect-go/pull/662)
 ```patch
 -const Version = "1.14.0"
 +const Version = "1.15.0-dev"
