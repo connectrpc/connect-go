@@ -11,7 +11,7 @@ This document outlines how to create a release of connect-go.
    +const Version = "1.14.0"
    ```
 
-3. Check for changes in [cmd/protoc-gen-connect-go/main.go](cmd/protoc-gen-connect-go/main.go) to use an appropriate version restriction that matches the current release. A constant `IsAtLeastVersion_X_Y_Z` should be defined in [connect.go](connect.go) if generated code has begun using a new API. Update as required ([Example PR #496](https://github.com/connectrpc/connect-go/pull/496)).
+3. Check for changes in [cmd/protoc-gen-connect-go/main.go](cmd/protoc-gen-connect-go/main.go) to use an appropriate version restriction that matches the current release. A constant `IsAtLeastVersionX_Y_Z` should be defined in [connect.go](connect.go) if generated code has begun using a new API. Update as required ([Example PR #496](https://github.com/connectrpc/connect-go/pull/496)).
 
 4. Open a PR titled "Prepare for vX.Y.Z" ([Example PR #661](https://github.com/connectrpc/connect-go/pull/661)). Once it's reviewed and CI passes, merge it.
 
