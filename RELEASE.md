@@ -13,32 +13,35 @@ This document outlines how to create a release of connect-go.
    +const Version = "1.14.0"
    ```
 
-3. Check [cmd/protoc-gen-connect-go/main.go](cmd/protoc-gen-connect-go/main.go) to see if a new `IsAtLeastVersionX_Y_Z` constant was added since the [latest release](https://github.com/connectrpc/connect-go/releases/latest). If one was added (this is rare), ensure that the version number matches the version number that you are currently releasing. If it doesn't match, update the name to match the version you are about to release. [Example PR #496](https://github.com/connectrpc/connect-go/pull/496).
+3. Check for any changes in [cmd/protoc-gen-connect-go/main.go](cmd/protoc-gen-connect-go/main.go) that require a version restriction. A constant `IsAtLeastVersionX_Y_Z` should be defined in [connect.go](connect.go) if generated code has begun to use a new API. Make sure the generated code references this constant. Update as required ([Example PR #496](https://github.com/connectrpc/connect-go/pull/496)).
 
-4. Open a PR titled "Prepare for vX.Y.Z" ([Example PR #661](https://github.com/connectrpc/connect-go/pull/661)). Once it's reviewed and CI passes, merge it.
+4. Open a PR titled "Prepare for vX.Y.Z" ([Example PR #661](https://github.com/connectrpc/connect-go/pull/661)) and a description tagging all current maintainers. Once it's reviewed and CI passes, merge it.
 
     *Make sure no new commits are merged until the release is complete.*
 
-5. Using the Github UI, create a new release.
+5. Review all commits in the new release and for each PR check an appropriate label is used and edit the title to be meaninful to end users. This will help auto-generated release notes match the final notes as closely as possible.
+
+6. Using the Github UI, create a new release.
     - Under “Choose a tag”, type in “vX.Y.Z” to create a new tag for the release upon publish.
     - Target the main branch.
     - Title the Release “vX.Y.Z”.
     - Click “set as latest release”.
     - Set the last version as the “Previous tag”.
-    - Click “Generate release notes” to autogenerate release notes, sort them into ### Enhancements and ### Bugfixes, and edit the PR titles to be meaningful to end users. Feel free to collect multiple small changes to docs or Github config into one line, but try to tag every contributor. Make especially sure to credit new external contributors!
+    - Click “Generate release notes” to autogenerate release notes.
+    - Edit the release notes. A summary and other sub categories may be added if required but should, in most cases, be left as ### Enhancements and ### Bugfixes. Feel free to collect multiple small changes to docs or Github config into one line, but try to tag every contributor. Make especially sure to credit new external contributors!
 
-6. Publish the release.
+7. Publish the release.
 
-7. On a new branch, open [connect.go](connect.go) and change the `Version` to increment the minor tag and append the `-dev` suffix. Use the next minor release - we never anticipate bugs and patch releases.
+8. On a new branch, open [connect.go](connect.go) and change the `Version` to increment the minor tag and append the `-dev` suffix. Use the next minor release - we never anticipate bugs and patch releases.
 
    ```patch
    -const Version = "1.14.0"
    +const Version = "1.15.0-dev"
    ```
 
-8. Open a PR titled "Back to development" ([Example PR #662](https://github.com/connectrpc/connect-go/pull/662)). Once it's reviewed and CI passes, merge it.
+9. Open a PR titled "Back to development" ([Example PR #662](https://github.com/connectrpc/connect-go/pull/662)). Once it's reviewed and CI passes, merge it.
 
-9. Check the [releases](https://github.com/connectrpc/connect-go/releases) page to see if [releases are out of order](https://github.com/orgs/community/discussions/8226). If they are, take the release you just did, click on the button to edit the release, and then update the release. If that doesn't work, [contact GitHub support](https://support.github.com/contact?tags=rr-general-technical) to request that they trigger a re-index of the repository:
+10. Check the [releases](https://github.com/connectrpc/connect-go/releases) page to see if [releases are out of order](https://github.com/orgs/community/discussions/8226). If they are, take the release you just did, click on the button to edit the release, and then update the release. If that doesn't work, [contact GitHub support](https://support.github.com/contact?tags=rr-general-technical) to request that they trigger a re-index of the repository:
 
    > Subject: connect-go releases appearing out of order
    >
