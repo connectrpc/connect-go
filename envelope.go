@@ -45,7 +45,7 @@ type envelope struct {
 	offset int64
 }
 
-var _ messsagePayload = (*envelope)(nil)
+var _ messagePayload = (*envelope)(nil)
 
 func (e *envelope) IsSet(flag uint8) bool {
 	return e.Flags&flag == flag
