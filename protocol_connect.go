@@ -1266,10 +1266,14 @@ func connectHTTPToCode(httpCode int) Code {
 		return CodeUnimplemented
 	case 408:
 		return CodeDeadlineExceeded
+	case 409:
+		return CodeAborted
 	case 412:
 		return CodeFailedPrecondition
 	case 413:
 		return CodeResourceExhausted
+	case 415:
+		return CodeInternal
 	case 429:
 		return CodeUnavailable
 	case 431:
