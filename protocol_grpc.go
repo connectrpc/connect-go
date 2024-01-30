@@ -512,14 +512,10 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 	)
 	mergeHeaders(mergedTrailers, hc.responseTrailer)
 	grpcErrorToTrailer(mergedTrailers, hc.protobuf, err)
-	if hc.web && !hc.wroteToBody {
-		// We're using gRPC-Web and we haven't yet written to the body. Since we're
-		// not sending any response messages, the gRPC specification calls this a
-		// "trailers-only" response. Under those circumstances, the gRPC-Web spec
-		// says that implementations _may_ send trailing metadata as HTTP headers
-		// instead. Envoy is the canonical implementation of the gRPC-Web protocol,
-		// so we emulate Envoy's behavior and put the trailing metadata in the HTTP
-		// headers.
+	if hc.web && !hc.wroteToBody && len(hc.responseHeader) == 0 {
+		// We're using gRPC-Web, we haven't yet written to the body, and there are no
+		// custom headers. That means we can send a "trailers-only" response and send
+		// trailing metadata as HTTP headers (instead of as trailers).
 		mergeHeaders(hc.responseWriter.Header(), mergedTrailers)
 		return nil
 	}
