@@ -16,6 +16,8 @@ package connect
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -85,6 +87,36 @@ func TestAppendCodec(t *testing.T) {
 	}
 	if err := quick.Check(makeRoundtrip(&protoJSONCodec{}), nil /* config */); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestMarshalAppendWhenOptionsSetEmitsUnpopulated(t *testing.T) {
+	t.Parallel()
+
+	req := pingv1.PingRequest{Text: "", Number: 1}
+	expectedJSON := `{"number":"1","text":""}`
+	codec := protoJSONCodec{emitDefaultValues: true}
+	var data []byte
+	data, err := codec.MarshalAppend(data, &req)
+	if err != nil {
+		t.Fatal(fmt.Errorf("doing MarshalAppend: %w", err))
+	}
+	// JSON produced by protojson is indeterministic by design: https://protobuf.dev/reference/go/faq/#unstable-json,
+	// so we normalize the json here
+	normalize := func(src string) string {
+		var blob interface{}
+		err := json.Unmarshal([]byte(src), &blob)
+		if err != nil {
+			t.Fatalf("Unmarshalling %s: %v", src, err)
+		}
+		normalized, err := json.Marshal(blob)
+		if err != nil {
+			t.Fatalf("Marshalling %s: %v", src, err)
+		}
+		return string(normalized)
+	}
+	if normalize(string(data)) != normalize(expectedJSON) {
+		t.Errorf("expected: %s, got: %s", expectedJSON, string(data))
 	}
 }
 

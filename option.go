@@ -77,7 +77,20 @@ func WithGRPCWeb() ClientOption {
 // lowerCamelCase, zero values are omitted, missing required fields are errors,
 // enums are emitted as strings, etc.
 func WithProtoJSON() ClientOption {
-	return WithCodec(&protoJSONCodec{codecNameJSON})
+	return WithCodec(&protoJSONCodec{name: codecNameJSON})
+}
+
+type ProtoJsonOptions struct {
+	EmitDefaultValues     bool
+	EmitUnpopulatedValues bool
+}
+
+func WithCustomProtoJSON(options ProtoJsonOptions) ClientOption {
+	return WithCodec(&protoJSONCodec{
+		name:                  codecNameJSON,
+		emitDefaultValues:     options.EmitDefaultValues,
+		emitUnpopulatedValues: options.EmitUnpopulatedValues,
+	})
 }
 
 // WithSendCompression configures the client to use the specified algorithm to
@@ -627,8 +640,8 @@ func withProtoBinaryCodec() Option {
 
 func withProtoJSONCodecs() HandlerOption {
 	return WithHandlerOptions(
-		WithCodec(&protoJSONCodec{codecNameJSON}),
-		WithCodec(&protoJSONCodec{codecNameJSONCharsetUTF8}),
+		WithCodec(&protoJSONCodec{name: codecNameJSON}),
+		WithCodec(&protoJSONCodec{name: codecNameJSONCharsetUTF8}),
 	)
 }
 

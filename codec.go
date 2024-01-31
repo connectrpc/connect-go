@@ -144,7 +144,9 @@ func (c *protoBinaryCodec) IsBinary() bool {
 }
 
 type protoJSONCodec struct {
-	name string
+	name                  string
+	emitDefaultValues     bool
+	emitUnpopulatedValues bool
 }
 
 var _ Codec = (*protoJSONCodec)(nil)
@@ -156,7 +158,7 @@ func (c *protoJSONCodec) Marshal(message any) ([]byte, error) {
 	if !ok {
 		return nil, errNotProto(message)
 	}
-	return protojson.MarshalOptions{}.Marshal(protoMessage)
+	return protojson.MarshalOptions{EmitUnpopulated: true, EmitDefaultValues: true}.Marshal(protoMessage)
 }
 
 func (c *protoJSONCodec) MarshalAppend(dst []byte, message any) ([]byte, error) {
@@ -164,7 +166,10 @@ func (c *protoJSONCodec) MarshalAppend(dst []byte, message any) ([]byte, error) 
 	if !ok {
 		return nil, errNotProto(message)
 	}
-	return protojson.MarshalOptions{}.MarshalAppend(dst, protoMessage)
+	return protojson.MarshalOptions{
+		EmitDefaultValues: c.emitDefaultValues,
+		EmitUnpopulated:   c.emitUnpopulatedValues,
+	}.MarshalAppend(dst, protoMessage)
 }
 
 func (c *protoJSONCodec) Unmarshal(binary []byte, message any) error {
