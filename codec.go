@@ -158,7 +158,10 @@ func (c *protoJSONCodec) Marshal(message any) ([]byte, error) {
 	if !ok {
 		return nil, errNotProto(message)
 	}
-	return protojson.MarshalOptions{EmitUnpopulated: true, EmitDefaultValues: true}.Marshal(protoMessage)
+	return protojson.MarshalOptions{
+		EmitDefaultValues: c.emitDefaultValues,
+		EmitUnpopulated:   c.emitUnpopulatedValues,
+	}.Marshal(protoMessage)
 }
 
 func (c *protoJSONCodec) MarshalAppend(dst []byte, message any) ([]byte, error) {

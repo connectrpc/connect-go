@@ -80,12 +80,12 @@ func WithProtoJSON() ClientOption {
 	return WithCodec(&protoJSONCodec{name: codecNameJSON})
 }
 
-type ProtoJsonOptions struct {
+type ProtoJSONOptions struct {
 	EmitDefaultValues     bool
 	EmitUnpopulatedValues bool
 }
 
-func WithCustomProtoJSON(options ProtoJsonOptions) ClientOption {
+func WithCustomProtoJSON(options ProtoJSONOptions) ClientOption {
 	return WithCodec(&protoJSONCodec{
 		name:                  codecNameJSON,
 		emitDefaultValues:     options.EmitDefaultValues,
