@@ -312,14 +312,12 @@ func wrapWithContextError(ctx context.Context, err error) error {
 		return err
 	}
 	ctxErr := ctx.Err()
-	switch {
-	case errors.Is(ctxErr, context.Canceled):
+	if errors.Is(ctxErr, context.Canceled) {
 		return NewError(CodeCanceled, err)
-	case errors.Is(ctxErr, context.DeadlineExceeded):
+	} else if errors.Is(ctxErr, context.DeadlineExceeded) {
 		return NewError(CodeDeadlineExceeded, err)
-	default:
-		return err
 	}
+	return err
 }
 
 // wrapIfLikelyH2CNotConfiguredError adds a wrapping error that has a message

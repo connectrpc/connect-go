@@ -132,9 +132,3 @@ issues:
     # We want to show examples with http.Get
     - linters: [noctx]
       path: internal/memhttp/memhttp_test.go
-    # We need envelope readers and writers to have access to the context for error handling.
-    - linters: [containedctx]
-      path: envelope.go
-    # We need marshallers and unmarshallers to have access to the context for error handling.
-    - linters: [containedctx]
-      path: protocol_connect.go

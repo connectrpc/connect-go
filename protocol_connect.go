@@ -901,7 +901,7 @@ func (u *connectStreamingUnmarshaler) EndStreamError() *Error {
 }
 
 type connectUnaryMarshaler struct {
-	ctx              context.Context
+	ctx              context.Context //nolint:containedctx
 	sender           messageSender
 	codec            Codec
 	compressMinBytes int
@@ -1067,7 +1067,7 @@ func (m *connectUnaryRequestMarshaler) writeWithGet(url *url.URL) *Error {
 }
 
 type connectUnaryUnmarshaler struct {
-	ctx             context.Context
+	ctx             context.Context //nolint:containedctx
 	reader          io.Reader
 	codec           Codec
 	compressionPool *compressionPool
@@ -1094,9 +1094,9 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 	// ReadFrom ignores io.EOF, so any error here is real.
 	bytesRead, err := data.ReadFrom(reader)
 	if err != nil {
+		err = wrapIfMaxBytesError(err, "read first %d bytes of message", bytesRead)
 		err = wrapIfContextError(err)
 		err = wrapWithContextError(u.ctx, err)
-		err = wrapIfMaxBytesError(err, "read first %d bytes of message", bytesRead)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}

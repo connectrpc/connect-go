@@ -118,7 +118,7 @@ func (e *envelope) Len() int {
 }
 
 type envelopeWriter struct {
-	ctx              context.Context
+	ctx              context.Context //nolint:containedctx
 	sender           messageSender
 	codec            Codec
 	compressMinBytes int
@@ -221,7 +221,7 @@ func (w *envelopeWriter) write(env *envelope) *Error {
 }
 
 type envelopeReader struct {
-	ctx             context.Context
+	ctx             context.Context //nolint:containedctx
 	reader          io.Reader
 	codec           Codec
 	last            envelope
@@ -308,9 +308,9 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 			// add any alarming text about protocol errors, though.
 			return NewError(CodeUnknown, err)
 		}
+		err = wrapIfMaxBytesError(err, "read 5 byte message prefix")
 		err = wrapIfContextError(err)
 		err = wrapWithContextError(r.ctx, err)
-		err = wrapIfMaxBytesError(err, "read 5 byte message prefix")
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
@@ -342,9 +342,9 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 				readN,
 			)
 		}
+		err = wrapIfMaxBytesError(err, "read %d byte message", size)
 		err = wrapIfContextError(err)
 		err = wrapWithContextError(r.ctx, err)
-		err = wrapIfMaxBytesError(err, "read %d byte message", size)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
