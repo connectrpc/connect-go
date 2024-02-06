@@ -847,7 +847,10 @@ func grpcContentTypeFromCodecName(web bool, name string) string {
 		return grpcWebContentTypePrefix + name
 	}
 	if name == codecNameProto {
-		// for compatibility with some servers prefer an implicit default codec
+		// For compatibility with Google Cloud Platform's frontends, prefer an
+		// implicit default codec. See
+		// https://github.com/connectrpc/connect-go/pull/655#issuecomment-1915754523
+		// for details.
 		return grpcContentTypeDefault
 	}
 	return grpcContentTypePrefix + name
