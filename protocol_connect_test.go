@@ -239,11 +239,12 @@ func TestConnectValidateUnaryResponseContentType(t *testing.T) {
 				assert.Nil(t, err)
 			} else if assert.NotNil(t, err) {
 				assert.Equal(t, CodeOf(err), testCase.expectCode)
-				if testCase.expectNotModified {
+				switch {
+				case testCase.expectNotModified:
 					assert.ErrorIs(t, err, errNotModified)
-				} else if testCase.expectBadContentType {
+				case testCase.expectBadContentType:
 					assert.True(t, strings.Contains(err.Message(), fmt.Sprintf("invalid content-type: %q; expecting", testCase.responseContentType)))
-				} else {
+				default:
 					assert.Equal(t, err.Message(), http.StatusText(testCase.statusCode))
 				}
 			}
