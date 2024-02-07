@@ -17,6 +17,7 @@ package connect
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -92,4 +93,223 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 	assert.Equal(t, unmarshaler.Trailer().Values("Not-Canonical-Header"), []string{"a"})
 	assert.Equal(t, unmarshaler.Trailer().Values("Mixed-Canonical"), []string{"b", "b"})
 	assert.Equal(t, unmarshaler.Trailer().Values("Canonical-Header"), []string{"c"})
+}
+
+func TestConnectValidateUnaryResponseContentType(t *testing.T) {
+	t.Parallel()
+	testCases := []struct {
+		codecName            string
+		get                  bool
+		statusCode           int
+		responseContentType  string
+		expectCode           Code
+		expectBadContentType bool
+		expectNotModified    bool
+	}{
+		// Allowed content-types for OK responses.
+		{
+			codecName:           codecNameProto,
+			statusCode:          http.StatusOK,
+			responseContentType: "application/proto",
+		},
+		{
+			codecName:           codecNameJSON,
+			statusCode:          http.StatusOK,
+			responseContentType: "application/json",
+		},
+		{
+			codecName:           codecNameJSON,
+			statusCode:          http.StatusOK,
+			responseContentType: "application/json; charset=utf-8",
+		},
+		{
+			codecName:           codecNameJSONCharsetUTF8,
+			statusCode:          http.StatusOK,
+			responseContentType: "application/json",
+		},
+		{
+			codecName:           codecNameJSONCharsetUTF8,
+			statusCode:          http.StatusOK,
+			responseContentType: "application/json; charset=utf-8",
+		},
+		// Allowed content-types for error responses.
+		{
+			codecName:           codecNameProto,
+			statusCode:          http.StatusNotFound,
+			responseContentType: "application/json",
+		},
+		{
+			codecName:           codecNameProto,
+			statusCode:          http.StatusBadRequest,
+			responseContentType: "application/json; charset=utf-8",
+		},
+		{
+			codecName:           codecNameJSON,
+			statusCode:          http.StatusInternalServerError,
+			responseContentType: "application/json",
+		},
+		{
+			codecName:           codecNameJSON,
+			statusCode:          http.StatusPreconditionFailed,
+			responseContentType: "application/json; charset=utf-8",
+		},
+		// 304 Not Modified for GET request gets a special error, regardless of content-type
+		{
+			codecName:           codecNameProto,
+			get:                 true,
+			statusCode:          http.StatusNotModified,
+			responseContentType: "application/json",
+			expectCode:          CodeUnknown,
+			expectNotModified:   true,
+		},
+		{
+			codecName:           codecNameJSON,
+			get:                 true,
+			statusCode:          http.StatusNotModified,
+			responseContentType: "application/json",
+			expectCode:          CodeUnknown,
+			expectNotModified:   true,
+		},
+		// OK status, invalid content-type
+		{
+			codecName:            codecNameProto,
+			statusCode:           http.StatusOK,
+			responseContentType:  "application/proto; charset=utf-8",
+			expectCode:           CodeInternal,
+			expectBadContentType: true,
+		},
+		{
+			codecName:            codecNameProto,
+			statusCode:           http.StatusOK,
+			responseContentType:  "application/json",
+			expectCode:           CodeInternal,
+			expectBadContentType: true,
+		},
+		{
+			codecName:            codecNameJSON,
+			statusCode:           http.StatusOK,
+			responseContentType:  "application/proto",
+			expectCode:           CodeInternal,
+			expectBadContentType: true,
+		},
+		{
+			codecName:            codecNameJSON,
+			statusCode:           http.StatusOK,
+			responseContentType:  "some/garbage",
+			expectCode:           CodeInternal,
+			expectBadContentType: true,
+		},
+		// Error status, invalid content-type, returns code based on HTTP status code
+		{
+			codecName:           codecNameProto,
+			statusCode:          http.StatusNotFound,
+			responseContentType: "application/proto",
+			expectCode:          connectHTTPToCode(http.StatusNotFound),
+		},
+		{
+			codecName:           codecNameJSON,
+			statusCode:          http.StatusBadRequest,
+			responseContentType: "some/garbage",
+			expectCode:          connectHTTPToCode(http.StatusBadRequest),
+		},
+		{
+			codecName:           codecNameJSON,
+			statusCode:          http.StatusTooManyRequests,
+			responseContentType: "some/garbage",
+			expectCode:          connectHTTPToCode(http.StatusTooManyRequests),
+		},
+	}
+	for _, testCase := range testCases {
+		testCase := testCase
+		httpMethod := http.MethodPost
+		if testCase.get {
+			httpMethod = http.MethodGet
+		}
+		testCaseName := fmt.Sprintf("%s_%s->%d_%s", httpMethod, testCase.codecName, testCase.statusCode, testCase.responseContentType)
+		t.Run(testCaseName, func(t *testing.T) {
+			t.Parallel()
+			err := connectValidateUnaryResponseContentType(
+				testCase.codecName,
+				httpMethod,
+				testCase.statusCode,
+				http.StatusText(testCase.statusCode),
+				testCase.responseContentType,
+			)
+			if testCase.expectCode == 0 {
+				assert.Nil(t, err)
+			} else if assert.NotNil(t, err) {
+				assert.Equal(t, CodeOf(err), testCase.expectCode)
+				if testCase.expectNotModified {
+					assert.ErrorIs(t, err, errNotModified)
+				} else if testCase.expectBadContentType {
+					assert.True(t, strings.Contains(err.Message(), fmt.Sprintf("invalid content-type: %q; expecting", testCase.responseContentType)))
+				} else {
+					assert.Equal(t, err.Message(), http.StatusText(testCase.statusCode))
+				}
+			}
+		})
+	}
+}
+
+func TestConnectValidateStreamResponseContentType(t *testing.T) {
+	t.Parallel()
+	testCases := []struct {
+		codecName           string
+		responseContentType string
+		expectErr           bool
+	}{
+		// Allowed content-types
+		{
+			codecName:           codecNameProto,
+			responseContentType: "application/connect+proto",
+		},
+		{
+			codecName:           codecNameJSON,
+			responseContentType: "application/connect+json",
+		},
+		// Disallowed content-types
+		{
+			codecName:           codecNameProto,
+			responseContentType: "application/proto",
+			expectErr:           true,
+		},
+		{
+			codecName:           codecNameJSON,
+			responseContentType: "application/json",
+			expectErr:           true,
+		},
+		{
+			codecName:           codecNameJSON,
+			responseContentType: "application/json; charset=utf-8",
+			expectErr:           true,
+		},
+		{
+			codecName:           codecNameJSON,
+			responseContentType: "application/connect+json; charset=utf-8",
+			expectErr:           true,
+		},
+		{
+			codecName:           codecNameProto,
+			responseContentType: "some/garbage",
+			expectErr:           true,
+		},
+	}
+	for _, testCase := range testCases {
+		testCase := testCase
+		testCaseName := fmt.Sprintf("%s->%s", testCase.codecName, testCase.responseContentType)
+		t.Run(testCaseName, func(t *testing.T) {
+			t.Parallel()
+			err := connectValidateStreamResponseContentType(
+				testCase.codecName,
+				StreamTypeServer,
+				testCase.responseContentType,
+			)
+			if !testCase.expectErr {
+				assert.Nil(t, err)
+			} else if assert.NotNil(t, err) {
+				assert.Equal(t, CodeOf(err), CodeInternal)
+				assert.True(t, strings.Contains(err.Message(), fmt.Sprintf("invalid content-type: %q; expecting", testCase.responseContentType)))
+			}
+		})
+	}
 }

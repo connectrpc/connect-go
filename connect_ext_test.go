@@ -810,6 +810,7 @@ func TestUnavailableIfHostInvalid(t *testing.T) {
 func TestBidiRequiresHTTP2(t *testing.T) {
 	t.Parallel()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/connect+proto")
 		_, err := io.WriteString(w, "hello world")
 		assert.Nil(t, err)
 	})
@@ -841,6 +842,7 @@ func TestCompressMinBytesClient(t *testing.T) {
 		tb.Helper()
 		mux := http.NewServeMux()
 		mux.Handle("/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			writer.Header().Set("Content-Type", "application/proto")
 			assert.Equal(tb, request.Header.Get("Content-Encoding"), expect)
 		}))
 		server := memhttptest.NewServer(t, mux)
@@ -2231,6 +2233,7 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		name:    "connect_excess_eof",
 		options: []connect.ClientOption{connect.WithProtoJSON()},
 		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			responseWriter.Header().Set("Content-Type", "application/connect+json")
 			_, err := responseWriter.Write(head[:])
 			assert.Nil(t, err)
 			_, err = responseWriter.Write(payload)
@@ -2252,6 +2255,7 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		name:    "grpc-web_excess_eof",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
 		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			responseWriter.Header().Set("Content-Type", "application/grpc-web+json")
 			_, err := responseWriter.Write(head[:])
 			assert.Nil(t, err)
 			_, err = responseWriter.Write(payload)
