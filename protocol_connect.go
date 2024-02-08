@@ -511,14 +511,13 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 		}
 		cc.responseTrailer[strings.TrimPrefix(k, connectUnaryTrailerPrefix)] = v
 	}
-	err := connectValidateUnaryResponseContentType(
+	if err := connectValidateUnaryResponseContentType(
 		cc.marshaler.codec.Name(),
 		cc.duplexCall.Method(),
 		response.StatusCode,
 		response.Status,
 		getHeaderCanonical(response.Header, headerContentType),
-	)
-	if err != nil {
+	); err != nil {
 		if IsNotModifiedError(err) {
 			// Allow access to response headers for this kind of error.
 			// RFC 9110 doesn't allow trailers on 304s, so we only need to include headers.
@@ -653,12 +652,11 @@ func (cc *connectStreamingClientConn) validateResponse(response *http.Response) 
 	if response.StatusCode != http.StatusOK {
 		return errorf(connectHTTPToCode(response.StatusCode), "HTTP status %v", response.Status)
 	}
-	err := connectValidateStreamResponseContentType(
+	if err := connectValidateStreamResponseContentType(
 		cc.codec.Name(),
 		cc.spec.StreamType,
 		getHeaderCanonical(response.Header, headerContentType),
-	)
-	if err != nil {
+	); err != nil {
 		return err
 	}
 	compression := getHeaderCanonical(response.Header, connectStreamingHeaderCompression)
