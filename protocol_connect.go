@@ -509,7 +509,7 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 			cc.responseHeader[k] = v
 			continue
 		}
-		cc.responseTrailer[strings.TrimPrefix(k, connectUnaryTrailerPrefix)] = v
+		cc.responseTrailer[k[len(connectUnaryTrailerPrefix):]] = v
 	}
 	if err := connectValidateUnaryResponseContentType(
 		cc.marshaler.codec.Name(),
