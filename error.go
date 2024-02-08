@@ -133,7 +133,7 @@ func NewError(c Code, underlying error) *Error {
 // This is useful for clients trying to propagate partial failures from
 // streaming RPCs. Often, these RPCs include error information in their
 // response messages (for example, [gRPC server reflection] and
-// OpenTelemtetry's [OTLP]). Clients propagating these errors up the stack
+// OpenTelemetry's [OTLP]). Clients propagating these errors up the stack
 // should use NewWireError to clarify that the error code, message, and details
 // (if any) were explicitly sent by the server rather than inferred from a
 // lower-level networking error or timeout.

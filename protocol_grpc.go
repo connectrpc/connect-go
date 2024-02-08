@@ -135,7 +135,7 @@ func (*grpcHandler) SetTimeout(request *http.Request) (context.Context, context.
 	return ctx, cancel, nil
 }
 
-func (g *grpcHandler) CanHandlePayload(request *http.Request, contentType string) bool {
+func (g *grpcHandler) CanHandlePayload(_ *http.Request, contentType string) bool {
 	_, ok := g.accept[contentType]
 	return ok
 }
@@ -422,6 +422,8 @@ func (cc *grpcClientConn) validateResponse(response *http.Response) *Error {
 		cc.responseHeader,
 		cc.responseTrailer,
 		cc.compressionPools,
+		cc.unmarshaler.web,
+		cc.marshaler.codec.Name(),
 		cc.protobuf,
 	); err != nil {
 		return err
@@ -644,10 +646,15 @@ func grpcValidateResponse(
 	response *http.Response,
 	header, trailer http.Header,
 	availableCompressors readOnlyCompressionPools,
+	web bool,
+	codecName string,
 	protobuf Codec,
 ) *Error {
 	if response.StatusCode != http.StatusOK {
 		return errorf(grpcHTTPToCode(response.StatusCode), "HTTP status %v", response.Status)
+	}
+	if err := grpcValidateResponseContentType(web, codecName, getHeaderCanonical(response.Header, headerContentType)); err != nil {
+		return err
 	}
 	if compression := getHeaderCanonical(response.Header, grpcHeaderCompression); compression != "" &&
 		compression != compressionIdentity &&
@@ -997,4 +1004,26 @@ func validateHex(input string) error {
 		return fmt.Errorf("invalid percent-encoded string %q", input)
 	}
 	return nil
+}
+
+func grpcValidateResponseContentType(web bool, requestCodecName string, responseContentType string) *Error {
+	// Responses must have valid content-type that indicates same codec as the request.
+	bare, prefix := grpcContentTypeDefault, grpcContentTypePrefix
+	if web {
+		bare, prefix = grpcWebContentTypeDefault, grpcWebContentTypePrefix
+	}
+	if responseContentType == prefix+requestCodecName ||
+		(requestCodecName == codecNameProto && responseContentType == bare) {
+		return nil
+	}
+	expectedContentType := bare
+	if requestCodecName != codecNameProto {
+		expectedContentType = prefix + requestCodecName
+	}
+	return errorf(
+		CodeInternal,
+		"invalid content-type: %q; expecting %q",
+		responseContentType,
+		expectedContentType,
+	)
 }

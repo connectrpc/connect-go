@@ -511,6 +511,21 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 		}
 		cc.responseTrailer[strings.TrimPrefix(k, connectUnaryTrailerPrefix)] = v
 	}
+	err := connectValidateUnaryResponseContentType(
+		cc.marshaler.codec.Name(),
+		cc.duplexCall.Method(),
+		response.StatusCode,
+		response.Status,
+		getHeaderCanonical(response.Header, headerContentType),
+	)
+	if err != nil {
+		if IsNotModifiedError(err) {
+			// Allow access to response headers for this kind of error.
+			// RFC 9110 doesn't allow trailers on 304s, so we only need to include headers.
+			err.meta = cc.responseHeader.Clone()
+		}
+		return err
+	}
 	compression := getHeaderCanonical(response.Header, connectUnaryHeaderCompression)
 	if compression != "" &&
 		compression != compressionIdentity &&
@@ -522,12 +537,7 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 			cc.compressionPools.CommaSeparatedNames(),
 		)
 	}
-	if response.StatusCode == http.StatusNotModified && cc.Spec().IdempotencyLevel == IdempotencyNoSideEffects {
-		serverErr := NewWireError(CodeUnknown, errNotModifiedClient)
-		// RFC 9110 doesn't allow trailers on 304s, so we only need to include headers.
-		serverErr.meta = cc.responseHeader.Clone()
-		return serverErr
-	} else if response.StatusCode != http.StatusOK {
+	if response.StatusCode != http.StatusOK {
 		unmarshaler := connectUnaryUnmarshaler{
 			reader:          response.Body,
 			compressionPool: cc.compressionPools.Get(compression),
@@ -642,6 +652,14 @@ func (cc *connectStreamingClientConn) onRequestSend(fn func(*http.Request)) {
 func (cc *connectStreamingClientConn) validateResponse(response *http.Response) *Error {
 	if response.StatusCode != http.StatusOK {
 		return errorf(connectHTTPToCode(response.StatusCode), "HTTP status %v", response.Status)
+	}
+	err := connectValidateStreamResponseContentType(
+		cc.codec.Name(),
+		cc.spec.StreamType,
+		getHeaderCanonical(response.Header, headerContentType),
+	)
+	if err != nil {
+		return err
 	}
 	compression := getHeaderCanonical(response.Header, connectStreamingHeaderCompression)
 	if compression != "" &&
@@ -1323,4 +1341,65 @@ func queryValueReader(data string, base64Encoded bool) io.Reader {
 		return binaryQueryValueReader(data)
 	}
 	return strings.NewReader(data)
+}
+
+func connectValidateUnaryResponseContentType(
+	requestCodecName string,
+	httpMethod string,
+	statusCode int,
+	statusMsg string,
+	responseContentType string,
+) *Error {
+	if statusCode != http.StatusOK {
+		if statusCode == http.StatusNotModified && httpMethod == http.MethodGet {
+			return NewWireError(CodeUnknown, errNotModifiedClient)
+		}
+		// Error responses must be JSON-encoded.
+		if responseContentType == connectUnaryContentTypePrefix+codecNameJSON ||
+			responseContentType == connectUnaryContentTypePrefix+codecNameJSONCharsetUTF8 {
+			return nil
+		}
+		return NewError(
+			connectHTTPToCode(statusCode),
+			errors.New(statusMsg),
+		)
+	}
+	// Normal responses must have valid content-type that indicates same codec as the request.
+	responseCodecName := connectCodecFromContentType(
+		StreamTypeUnary,
+		responseContentType,
+	)
+	if responseCodecName == requestCodecName {
+		return nil
+	}
+	// HACK: We likely want a better way to handle the optional "charset" parameter
+	//       for application/json, instead of hard-coding. But this suffices for now.
+	if (responseCodecName == codecNameJSON && requestCodecName == codecNameJSONCharsetUTF8) ||
+		(responseCodecName == codecNameJSONCharsetUTF8 && requestCodecName == codecNameJSON) {
+		// Both are JSON
+		return nil
+	}
+	return errorf(
+		CodeInternal,
+		"invalid content-type: %q; expecting %q",
+		responseContentType,
+		connectUnaryContentTypePrefix+requestCodecName,
+	)
+}
+
+func connectValidateStreamResponseContentType(requestCodecName string, streamType StreamType, responseContentType string) *Error {
+	// Responses must have valid content-type that indicates same codec as the request.
+	responseCodecName := connectCodecFromContentType(
+		streamType,
+		responseContentType,
+	)
+	if responseCodecName != requestCodecName {
+		return errorf(
+			CodeInternal,
+			"invalid content-type: %q; expecting %q",
+			responseContentType,
+			connectStreamingContentTypePrefix+requestCodecName,
+		)
+	}
+	return nil
 }

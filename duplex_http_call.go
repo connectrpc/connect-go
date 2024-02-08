@@ -203,6 +203,11 @@ func (d *duplexHTTPCall) URL() *url.URL {
 	return d.request.URL
 }
 
+// Method returns the HTTP method for the request (GET or POST).
+func (d *duplexHTTPCall) Method() string {
+	return d.request.Method
+}
+
 // SetMethod changes the method of the request before it is sent.
 func (d *duplexHTTPCall) SetMethod(method string) {
 	d.request.Method = method
