@@ -290,7 +290,7 @@ func (d *duplexHTTPCall) makeRequest() {
 	defer close(d.responseReady)
 
 	// Promote the header Host to the request object.
-	if host := d.request.Header.Get(headerHost); len(host) > 0 {
+	if host := getHeaderCanonical(d.request.Header, headerHost); len(host) > 0 {
 		d.request.Host = host
 	}
 	if d.onRequestSend != nil {
