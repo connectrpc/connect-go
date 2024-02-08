@@ -653,7 +653,11 @@ func grpcValidateResponse(
 	if response.StatusCode != http.StatusOK {
 		return errorf(grpcHTTPToCode(response.StatusCode), "HTTP status %v", response.Status)
 	}
-	if err := grpcValidateResponseContentType(web, codecName, getHeaderCanonical(response.Header, headerContentType)); err != nil {
+	if err := grpcValidateResponseContentType(
+		web,
+		codecName,
+		getHeaderCanonical(response.Header, headerContentType),
+	); err != nil {
 		return err
 	}
 	if compression := getHeaderCanonical(response.Header, grpcHeaderCompression); compression != "" &&
