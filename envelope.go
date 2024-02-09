@@ -305,9 +305,6 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 			return NewError(CodeUnknown, err)
 		}
 		err = wrapIfContextError(err)
-		if connectErr, ok := asError(err); ok {
-			return connectErr
-		}
 		// Something else has gone wrong - the stream didn't end cleanly.
 		if connectErr, ok := asError(err); ok {
 			return connectErr
