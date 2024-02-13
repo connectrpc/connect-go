@@ -1148,10 +1148,15 @@ func (d *connectWireDetail) MarshalJSON() ([]byte, error) {
 	}
 	// Try to produce debug info, but expect failure when we don't have
 	// descriptors.
-	var codec protoJSONCodec
-	debug, err := codec.Marshal(d.pb)
-	if err == nil && len(debug) > 2 { // don't bother sending `{}`
-		wire.Debug = json.RawMessage(debug)
+	if wire.Value != "" { // don't bother sending `{}`
+		msg, err := d.pb.UnmarshalNew()
+		if err == nil {
+			var codec protoJSONCodec
+			debug, err := codec.Marshal(msg)
+			if err == nil {
+				wire.Debug = debug
+			}
+		}
 	}
 	return json.Marshal(wire)
 }
