@@ -727,7 +727,7 @@ func grpcVerifyTrailersOnly(response *http.Response) *Error {
 		// response) AND trailers after the body.
 		return errorf(
 			CodeInternal,
-			"corrupt response: HTTP trailers should not be present in trailers-only response",
+			"corrupt response from server: gRPC trailers-only response may not contain HTTP trailers",
 		)
 	}
 
