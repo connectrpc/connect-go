@@ -674,11 +674,16 @@ func grpcValidateResponse(
 		)
 	}
 	// When there's no body, gRPC and gRPC-Web servers may send error information
-	// in the HTTP headers.
+	// in the HTTP headers. When this happens, it's called a "trailers-only" response.
 	if err := grpcErrorFromTrailer(
 		protobuf,
 		response.Header,
 	); err != nil && !errors.Is(err, errTrailersWithoutGRPCStatus) {
+		// Trailers-only responses may not have data in the body or HTTP trailers.
+		if bodyErr := grpcVerifyTrailersOnly(response); bodyErr != nil {
+			return bodyErr
+		}
+
 		// Per the specification, only the HTTP status code and Content-Type should
 		// be treated as headers. The rest should be treated as trailing metadata.
 		if contentType := getHeaderCanonical(response.Header, headerContentType); contentType != "" {
@@ -693,6 +698,39 @@ func grpcValidateResponse(
 	}
 	// The response is valid, so we should expose the headers.
 	mergeHeaders(header, response.Header)
+	return nil
+}
+
+func grpcVerifyTrailersOnly(response *http.Response) *Error {
+	// Make sure there's nothing in the body.
+	if numBytes, err := discard(response.Body); err != nil {
+		err = wrapIfContextError(err)
+		if connErr, ok := asError(err); ok {
+			return connErr
+		}
+		return errorf(CodeInternal, "corrupt response: I/O error after trailers-only response: %w", err)
+	} else if numBytes > 0 {
+		return errorf(CodeInternal, "corrupt response: %d extra bytes after trailers-only response", numBytes)
+	}
+
+	// Now we know we've reached EOF, so we can look at HTTP trailers.
+	// If headers included "Trailer" key, net/http pre-populates response.Trailer with nil
+	// values. So we need to exclude those to see if there were actually any trailers.
+	var trailerCount int
+	for _, v := range response.Trailer {
+		if len(v) > 0 {
+			trailerCount++
+		}
+	}
+	if trailerCount > 0 {
+		// Invalid response: cannot have both trailers in the header (trailers-only
+		// response) AND trailers after the body.
+		return errorf(
+			CodeInternal,
+			"corrupt response from server: gRPC trailers-only response may not contain HTTP trailers",
+		)
+	}
+
 	return nil
 }
 
