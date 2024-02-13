@@ -2307,6 +2307,97 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 	}
 }
 
+func TestTrailersOnlyErrors(t *testing.T) {
+	t.Parallel()
+
+	head := [3]byte{}
+	testcases := []struct {
+		name       string
+		handler    http.HandlerFunc
+		options    []connect.ClientOption
+		expectCode connect.Code
+		expectMsg  string
+	}{{
+		name:    "grpc_body_after_trailers-only",
+		options: []connect.ClientOption{connect.WithGRPC()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc")
+			header.Set("Grpc-Status", "3")
+			_, err := responseWriter.Write(head[:])
+			assert.Nil(t, err)
+		},
+		expectCode: connect.CodeInternal,
+		expectMsg:  fmt.Sprintf("internal: corrupt response: %d extra bytes after trailers-only response", len(head)),
+	}, {
+		name:    "grpc-web_body_after_trailers-only",
+		options: []connect.ClientOption{connect.WithGRPCWeb()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc-web")
+			header.Set("Grpc-Status", "3")
+			_, err := responseWriter.Write(head[:])
+			assert.Nil(t, err)
+		},
+		expectCode: connect.CodeInternal,
+		expectMsg:  fmt.Sprintf("internal: corrupt response: %d extra bytes after trailers-only response", len(head)),
+	}, {
+		name:    "grpc_trailers_after_trailers-only",
+		options: []connect.ClientOption{connect.WithGRPC()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc")
+			header.Set("Grpc-Status", "3")
+			responseWriter.WriteHeader(http.StatusOK)
+			responseWriter.(http.Flusher).Flush() //nolint:forcetypeassert
+			header.Set(http.TrailerPrefix+"Foo", "abc")
+		},
+		expectCode: connect.CodeInternal,
+		expectMsg:  "internal: corrupt response from server: gRPC trailers-only response may not contain HTTP trailers",
+	}, {
+		name:    "grpc-web_trailers_after_trailers-only",
+		options: []connect.ClientOption{connect.WithGRPCWeb()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc-web")
+			header.Set("Grpc-Status", "3")
+			responseWriter.WriteHeader(http.StatusOK)
+			responseWriter.(http.Flusher).Flush() //nolint:forcetypeassert
+			header.Set(http.TrailerPrefix+"Foo", "abc")
+		},
+		expectCode: connect.CodeInternal,
+		expectMsg:  "internal: corrupt response from server: gRPC trailers-only response may not contain HTTP trailers",
+	}}
+	for _, testcase := range testcases {
+		testcase := testcase
+		t.Run(testcase.name, func(t *testing.T) {
+			t.Parallel()
+			mux := http.NewServeMux()
+			mux.HandleFunc("/", func(responseWriter http.ResponseWriter, request *http.Request) {
+				_, _ = io.Copy(io.Discard, request.Body)
+				testcase.handler(responseWriter, request)
+			})
+			server := memhttptest.NewServer(t, mux)
+			client := pingv1connect.NewPingServiceClient(
+				server.Client(),
+				server.URL(),
+				testcase.options...,
+			)
+			const upTo = 2
+			request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
+			request.Header().Set("Test-Case", t.Name())
+			stream, err := client.CountUp(context.Background(), request)
+			assert.Nil(t, err)
+			for i := 0; stream.Receive() && i < upTo; i++ {
+				assert.Equal(t, stream.Msg().GetNumber(), 42)
+			}
+			assert.NotNil(t, stream.Err())
+			assert.Equal(t, connect.CodeOf(stream.Err()), testcase.expectCode)
+			assert.Equal(t, stream.Err().Error(), testcase.expectMsg)
+		})
+	}
+}
+
 // TestBlankImportCodeGeneration tests that services.connect.go is generated with
 // blank import statements to services.pb.go so that the service's Descriptor is
 // available in the global proto registry.

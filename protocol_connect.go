@@ -879,12 +879,15 @@ func (u *connectStreamingUnmarshaler) Unmarshal(message any) *Error {
 	if !errors.Is(err, errSpecialEnvelope) {
 		return err
 	}
-	env := u.envelopeReader.last
+	env := u.last
+	data := env.Data
+	u.last.Data = nil // don't keep a reference to it
+	defer u.bufferPool.Put(data)
 	if !env.IsSet(connectFlagEnvelopeEndStream) {
 		return errorf(CodeInternal, "protocol error: invalid envelope flags %d", env.Flags)
 	}
 	var end connectEndStreamMessage
-	if err := json.Unmarshal(env.Data.Bytes(), &end); err != nil {
+	if err := json.Unmarshal(data.Bytes(), &end); err != nil {
 		return errorf(CodeInternal, "unmarshal end stream message: %w", err)
 	}
 	for name, value := range end.Trailer {

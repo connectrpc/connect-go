@@ -228,7 +228,12 @@ type envelopeReader struct {
 
 func (r *envelopeReader) Unmarshal(message any) *Error {
 	buffer := r.bufferPool.Get()
-	defer r.bufferPool.Put(buffer)
+	var dontRelease *bytes.Buffer
+	defer func() {
+		if buffer != dontRelease {
+			r.bufferPool.Put(buffer)
+		}
+	}()
 
 	env := &envelope{Data: buffer}
 	err := r.Read(env)
@@ -256,7 +261,11 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 			)
 		}
 		decompressed := r.bufferPool.Get()
-		defer r.bufferPool.Put(decompressed)
+		defer func() {
+			if decompressed != dontRelease {
+				r.bufferPool.Put(decompressed)
+			}
+		}()
 		if err := r.compressionPool.Decompress(decompressed, data, int64(r.readMaxBytes)); err != nil {
 			return err
 		}
@@ -276,14 +285,13 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 		}
 		// One of the protocol-specific flags are set, so this is the end of the
 		// stream. Save the message for protocol-specific code to process and
-		// return a sentinel error. Since we've deferred functions to return env's
-		// underlying buffer to a pool, we need to keep a copy.
-		copiedData := make([]byte, data.Len())
-		copy(copiedData, data.Bytes())
+		// return a sentinel error. We alias the buffer with dontRelease as a
+		// way of marking it so above defers don't release it to the pool.
 		r.last = envelope{
-			Data:  bytes.NewBuffer(copiedData),
+			Data:  data,
 			Flags: env.Flags,
 		}
+		dontRelease = data
 		return errSpecialEnvelope
 	}
 
@@ -305,9 +313,6 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 			return NewError(CodeUnknown, err)
 		}
 		err = wrapIfContextError(err)
-		if connectErr, ok := asError(err); ok {
-			return connectErr
-		}
 		// Something else has gone wrong - the stream didn't end cleanly.
 		if connectErr, ok := asError(err); ok {
 			return connectErr
