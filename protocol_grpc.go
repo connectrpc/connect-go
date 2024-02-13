@@ -600,9 +600,10 @@ func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *Error {
 }
 
 type grpcUnmarshaler struct {
-	envelopeReader envelopeReader
-	web            bool
-	webTrailer     http.Header
+	envelopeReader
+
+	web        bool
+	webTrailer http.Header
 }
 
 func (u *grpcUnmarshaler) Unmarshal(message any) *Error {
@@ -613,7 +614,10 @@ func (u *grpcUnmarshaler) Unmarshal(message any) *Error {
 	if !errors.Is(err, errSpecialEnvelope) {
 		return err
 	}
-	env := u.envelopeReader.last
+	env := u.last
+	data := env.Data
+	u.last.Data = nil // don't keep a reference to it
+	defer u.bufferPool.Put(data)
 	if !u.web || !env.IsSet(grpcFlagEnvelopeTrailer) {
 		return errorf(CodeInternal, "protocol error: invalid envelope flags %d", env.Flags)
 	}
@@ -621,10 +625,10 @@ func (u *grpcUnmarshaler) Unmarshal(message any) *Error {
 	// Per the gRPC-Web specification, trailers should be encoded as an HTTP/1
 	// headers block _without_ the terminating newline. To make the headers
 	// parseable by net/textproto, we need to add the newline.
-	if err := env.Data.WriteByte('\n'); err != nil {
+	if err := data.WriteByte('\n'); err != nil {
 		return errorf(CodeInternal, "unmarshal web trailers: %w", err)
 	}
-	bufferedReader := bufio.NewReader(env.Data)
+	bufferedReader := bufio.NewReader(data)
 	mimeReader := textproto.NewReader(bufferedReader)
 	mimeHeader, mimeErr := mimeReader.ReadMIMEHeader()
 	if mimeErr != nil {
