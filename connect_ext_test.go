@@ -2353,7 +2353,7 @@ func TestTrailersOnlyErrors(t *testing.T) {
 			header.Set(http.TrailerPrefix+"Foo", "abc")
 		},
 		expectCode: connect.CodeInternal,
-		expectMsg:  "internal: corrupt response: HTTP trailers should not be present in trailers-only response",
+		expectMsg:  "internal: corrupt response from server: gRPC trailers-only response may not contain HTTP trailers",
 	}, {
 		name:    "grpc-web_trailers_after_trailers-only",
 		options: []connect.ClientOption{connect.WithGRPCWeb()},
@@ -2366,7 +2366,7 @@ func TestTrailersOnlyErrors(t *testing.T) {
 			header.Set(http.TrailerPrefix+"Foo", "abc")
 		},
 		expectCode: connect.CodeInternal,
-		expectMsg:  "internal: corrupt response: HTTP trailers should not be present in trailers-only response",
+		expectMsg:  "internal: corrupt response from server: gRPC trailers-only response may not contain HTTP trailers",
 	}}
 	for _, testcase := range testcases {
 		testcase := testcase
