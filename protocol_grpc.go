@@ -603,6 +603,7 @@ func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *Error {
 
 type grpcUnmarshaler struct {
 	envelopeReader
+
 	web        bool
 	webTrailer http.Header
 }
