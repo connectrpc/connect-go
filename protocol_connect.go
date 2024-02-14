@@ -1146,13 +1146,13 @@ func (d *connectWireDetail) MarshalJSON() ([]byte, error) {
 		Value string          `json:"value"`
 		Debug json.RawMessage `json:"debug,omitempty"`
 	}{
-		Type:  typeNameFromURL(d.pb.GetTypeUrl()),
-		Value: base64.RawStdEncoding.EncodeToString(d.pb.GetValue()),
+		Type:  typeNameFromURL(d.pbAny.GetTypeUrl()),
+		Value: base64.RawStdEncoding.EncodeToString(d.pbAny.GetValue()),
 	}
 	// Try to produce debug info, but expect failure when we don't have
 	// descriptors.
 	if wire.Value != "" { // don't bother sending `{}`
-		msg, err := d.pb.UnmarshalNew()
+		msg, err := (*ErrorDetail)(d).Value()
 		if err == nil {
 			var codec protoJSONCodec
 			debug, err := codec.Marshal(msg)
@@ -1180,7 +1180,7 @@ func (d *connectWireDetail) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("decode base64: %w", err)
 	}
 	*d = connectWireDetail{
-		pb: &anypb.Any{
+		pbAny: &anypb.Any{
 			TypeUrl: wire.Type,
 			Value:   decoded,
 		},

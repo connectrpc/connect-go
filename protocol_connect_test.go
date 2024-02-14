@@ -67,7 +67,7 @@ func TestConnectErrorDetailMarshaling(t *testing.T) {
 			var unmarshaled connectWireDetail
 			assert.Nil(t, json.Unmarshal(data, &unmarshaled))
 			assert.Equal(t, unmarshaled.wireJSON, string(data))
-			assert.Equal(t, unmarshaled.pb, detail.pb)
+			assert.Equal(t, unmarshaled.pbAny, detail.pbAny)
 
 			var extractDetails struct {
 				Debug any `json:"debug"`
@@ -84,7 +84,7 @@ func TestConnectErrorDetailMarshalingNoDescriptor(t *testing.T) {
 		`"debug":{"email":"someone@connectrpc.com"}}`
 	var detail connectWireDetail
 	assert.Nil(t, json.Unmarshal([]byte(raw), &detail))
-	assert.Equal(t, detail.pb.GetTypeUrl(), defaultAnyResolverPrefix+"acme.user.v1.User")
+	assert.Equal(t, detail.pbAny.GetTypeUrl(), defaultAnyResolverPrefix+"acme.user.v1.User")
 
 	_, err := (*ErrorDetail)(&detail).Value()
 	assert.NotNil(t, err)
