@@ -95,7 +95,9 @@ func (d *ErrorDetail) Bytes() []byte {
 // assertions to cast from the proto.Message interface to concrete types.
 func (d *ErrorDetail) Value() (proto.Message, error) {
 	if d.pbInner != nil {
-		return d.pbInner, nil
+		// We clone it so that if the caller mutates the returned value,
+		// they don't inadvertently corrupt this error detail value.
+		return proto.Clone(d.pbInner), nil
 	}
 	return d.pbAny.UnmarshalNew()
 }

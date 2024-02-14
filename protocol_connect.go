@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -1151,14 +1152,13 @@ func (d *connectWireDetail) MarshalJSON() ([]byte, error) {
 	}
 	// Try to produce debug info, but expect failure when we don't have
 	// descriptors.
-	if wire.Value != "" { // don't bother sending `{}`
-		msg, err := (*ErrorDetail)(d).Value()
-		if err == nil {
-			var codec protoJSONCodec
-			debug, err := codec.Marshal(msg)
-			if err == nil {
-				wire.Debug = debug
-			}
+	msg, err := d.getInner()
+	if err == nil {
+		var codec protoJSONCodec
+		debug, err := codec.Marshal(msg)
+		// don't bother sending {} for empty messages
+		if err == nil && (wire.Value != "" || !bytes.Equal(debug, []byte{'{', '}'})) {
+			wire.Debug = debug
 		}
 	}
 	return json.Marshal(wire)
@@ -1187,6 +1187,13 @@ func (d *connectWireDetail) UnmarshalJSON(data []byte) error {
 		wireJSON: string(data),
 	}
 	return nil
+}
+
+func (d *connectWireDetail) getInner() (proto.Message, error) {
+	if d.pbInner != nil {
+		return d.pbInner, nil
+	}
+	return d.pbAny.UnmarshalNew()
 }
 
 type connectWireError struct {
