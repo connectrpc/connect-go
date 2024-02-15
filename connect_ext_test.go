@@ -2309,7 +2309,6 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 // TestClientDisconnect tests that the handler receives a CodeCanceled error when
 // the client abruptly disconnects.
 func TestClientDisconnect(t *testing.T) {
