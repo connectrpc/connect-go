@@ -1116,7 +1116,7 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 	if err != nil {
 		err = wrapIfMaxBytesError(err, "read first %d bytes of message", bytesRead)
 		err = wrapIfContextError(err)
-		err = wrapWithContextError(u.ctx, err)
+		err = wrapIfContextDone(u.ctx, err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}

@@ -308,9 +308,9 @@ func wrapIfContextError(err error) error {
 	return err
 }
 
-// wrapWithContextError wraps errors with CodeCanceled or CodeDeadlineExceeded
+// wrapIfContextDone wraps errors with CodeCanceled or CodeDeadlineExceeded
 // if the context is done. It leaves already-wrapped errors unchanged.
-func wrapWithContextError(ctx context.Context, err error) error {
+func wrapIfContextDone(ctx context.Context, err error) error {
 	if err == nil {
 		return nil
 	}
