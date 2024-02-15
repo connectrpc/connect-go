@@ -49,8 +49,9 @@ var (
 // The [google.golang.org/genproto/googleapis/rpc/errdetails] package contains a
 // variety of Protobuf messages commonly used as error details.
 type ErrorDetail struct {
-	pb       *anypb.Any
-	wireJSON string // preserve human-readable JSON
+	pbAny    *anypb.Any
+	pbInner  proto.Message // if nil, must be extracted from pbAny
+	wireJSON string        // preserve human-readable JSON
 }
 
 // NewErrorDetail constructs a new error detail. If msg is an *[anypb.Any] then
@@ -59,13 +60,13 @@ type ErrorDetail struct {
 func NewErrorDetail(msg proto.Message) (*ErrorDetail, error) {
 	// If it's already an Any, don't wrap it inside another.
 	if pb, ok := msg.(*anypb.Any); ok {
-		return &ErrorDetail{pb: pb}, nil
+		return &ErrorDetail{pbAny: pb}, nil
 	}
 	pb, err := anypb.New(msg)
 	if err != nil {
 		return nil, err
 	}
-	return &ErrorDetail{pb: pb}, nil
+	return &ErrorDetail{pbAny: pb, pbInner: msg}, nil
 }
 
 // Type is the fully-qualified name of the detail's Protobuf message (for
@@ -79,13 +80,13 @@ func (d *ErrorDetail) Type() string {
 	//
 	// If we ever want to support remote registries, we can add an explicit
 	// `TypeURL` method.
-	return typeNameFromURL(d.pb.GetTypeUrl())
+	return typeNameFromURL(d.pbAny.GetTypeUrl())
 }
 
 // Bytes returns a copy of the Protobuf-serialized detail.
 func (d *ErrorDetail) Bytes() []byte {
-	out := make([]byte, len(d.pb.GetValue()))
-	copy(out, d.pb.GetValue())
+	out := make([]byte, len(d.pbAny.GetValue()))
+	copy(out, d.pbAny.GetValue())
 	return out
 }
 
@@ -93,7 +94,12 @@ func (d *ErrorDetail) Bytes() []byte {
 // Detail into a strongly-typed message. Typically, clients use Go type
 // assertions to cast from the proto.Message interface to concrete types.
 func (d *ErrorDetail) Value() (proto.Message, error) {
-	return d.pb.UnmarshalNew()
+	if d.pbInner != nil {
+		// We clone it so that if the caller mutates the returned value,
+		// they don't inadvertently corrupt this error detail value.
+		return proto.Clone(d.pbInner), nil
+	}
+	return d.pbAny.UnmarshalNew()
 }
 
 // An Error captures four key pieces of information: a [Code], an underlying Go
@@ -236,7 +242,7 @@ func (e *Error) Meta() http.Header {
 func (e *Error) detailsAsAny() []*anypb.Any {
 	anys := make([]*anypb.Any, 0, len(e.details))
 	for _, detail := range e.details {
-		anys = append(anys, detail.pb)
+		anys = append(anys, detail.pbAny)
 	}
 	return anys
 }

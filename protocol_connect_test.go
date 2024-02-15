@@ -24,30 +24,67 @@ import (
 	"time"
 
 	"connectrpc.com/connect/internal/assert"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 func TestConnectErrorDetailMarshaling(t *testing.T) {
 	t.Parallel()
-	detail, err := NewErrorDetail(durationpb.New(time.Second))
-	assert.Nil(t, err)
-	data, err := json.Marshal((*connectWireDetail)(detail))
-	assert.Nil(t, err)
-	t.Logf("marshaled error detail: %s", string(data))
+	testCases := []struct {
+		name        string
+		errorDetail proto.Message
+		expectDebug any
+	}{
+		{
+			name: "normal",
+			errorDetail: &descriptorpb.FieldOptions{
+				Deprecated: proto.Bool(true),
+				Jstype:     descriptorpb.FieldOptions_JS_STRING.Enum(),
+			},
+			expectDebug: map[string]any{
+				"deprecated": true,
+				"jstype":     "JS_STRING",
+			},
+		},
+		{
+			name:        "well-known type with custom JSON",
+			errorDetail: durationpb.New(time.Second),
+			expectDebug: "1s", // special JS representation as duration string
+		},
+	}
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-	var unmarshaled connectWireDetail
-	assert.Nil(t, json.Unmarshal(data, &unmarshaled))
-	assert.Equal(t, unmarshaled.wireJSON, string(data))
-	assert.Equal(t, unmarshaled.pb, detail.pb)
+			detail, err := NewErrorDetail(testCase.errorDetail)
+			assert.Nil(t, err)
+			data, err := json.Marshal((*connectWireDetail)(detail))
+			assert.Nil(t, err)
+			t.Logf("marshaled error detail: %s", string(data))
+
+			var unmarshaled connectWireDetail
+			assert.Nil(t, json.Unmarshal(data, &unmarshaled))
+			assert.Equal(t, unmarshaled.wireJSON, string(data))
+			assert.Equal(t, unmarshaled.pbAny, detail.pbAny)
+
+			var extractDetails struct {
+				Debug any `json:"debug"`
+			}
+			assert.Nil(t, json.Unmarshal(data, &extractDetails))
+			assert.Equal(t, extractDetails.Debug, testCase.expectDebug)
+		})
+	}
 }
 
 func TestConnectErrorDetailMarshalingNoDescriptor(t *testing.T) {
 	t.Parallel()
 	raw := `{"type":"acme.user.v1.User","value":"DEADBF",` +
-		`"debug":{"@type":"acme.user.v1.User","email":"someone@connectrpc.com"}}`
+		`"debug":{"email":"someone@connectrpc.com"}}`
 	var detail connectWireDetail
 	assert.Nil(t, json.Unmarshal([]byte(raw), &detail))
-	assert.Equal(t, detail.pb.GetTypeUrl(), defaultAnyResolverPrefix+"acme.user.v1.User")
+	assert.Equal(t, detail.pbAny.GetTypeUrl(), defaultAnyResolverPrefix+"acme.user.v1.User")
 
 	_, err := (*ErrorDetail)(&detail).Value()
 	assert.NotNil(t, err)

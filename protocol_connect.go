@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -1146,15 +1147,18 @@ func (d *connectWireDetail) MarshalJSON() ([]byte, error) {
 		Value string          `json:"value"`
 		Debug json.RawMessage `json:"debug,omitempty"`
 	}{
-		Type:  typeNameFromURL(d.pb.GetTypeUrl()),
-		Value: base64.RawStdEncoding.EncodeToString(d.pb.GetValue()),
+		Type:  typeNameFromURL(d.pbAny.GetTypeUrl()),
+		Value: base64.RawStdEncoding.EncodeToString(d.pbAny.GetValue()),
 	}
 	// Try to produce debug info, but expect failure when we don't have
 	// descriptors.
-	var codec protoJSONCodec
-	debug, err := codec.Marshal(d.pb)
-	if err == nil && len(debug) > 2 { // don't bother sending `{}`
-		wire.Debug = json.RawMessage(debug)
+	msg, err := d.getInner()
+	if err == nil {
+		var codec protoJSONCodec
+		debug, err := codec.Marshal(msg)
+		if err == nil {
+			wire.Debug = debug
+		}
 	}
 	return json.Marshal(wire)
 }
@@ -1175,13 +1179,20 @@ func (d *connectWireDetail) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("decode base64: %w", err)
 	}
 	*d = connectWireDetail{
-		pb: &anypb.Any{
+		pbAny: &anypb.Any{
 			TypeUrl: wire.Type,
 			Value:   decoded,
 		},
 		wireJSON: string(data),
 	}
 	return nil
+}
+
+func (d *connectWireDetail) getInner() (proto.Message, error) {
+	if d.pbInner != nil {
+		return d.pbInner, nil
+	}
+	return d.pbAny.UnmarshalNew()
 }
 
 type connectWireError struct {

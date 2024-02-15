@@ -793,7 +793,7 @@ func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {
 			return errorf(CodeInternal, "server returned invalid protobuf for error details: %w", err)
 		}
 		for _, d := range status.GetDetails() {
-			retErr.details = append(retErr.details, &ErrorDetail{pb: d})
+			retErr.details = append(retErr.details, &ErrorDetail{pbAny: d})
 		}
 		// Prefer the Protobuf-encoded data to the headers (grpc-go does this too).
 		retErr.code = Code(status.GetCode())
