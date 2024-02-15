@@ -1156,8 +1156,7 @@ func (d *connectWireDetail) MarshalJSON() ([]byte, error) {
 	if err == nil {
 		var codec protoJSONCodec
 		debug, err := codec.Marshal(msg)
-		// don't bother sending {} for empty messages
-		if err == nil && (wire.Value != "" || !bytes.Equal(debug, []byte{'{', '}'})) {
+		if err == nil {
 			wire.Debug = debug
 		}
 	}
