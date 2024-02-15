@@ -1,4 +1,4 @@
-// Copyright 2021-2023 The Connect Authors
+// Copyright 2021-2024 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -135,7 +135,7 @@ func (*grpcHandler) SetTimeout(request *http.Request) (context.Context, context.
 	return ctx, cancel, nil
 }
 
-func (g *grpcHandler) CanHandlePayload(request *http.Request, contentType string) bool {
+func (g *grpcHandler) CanHandlePayload(_ *http.Request, contentType string) bool {
 	_, ok := g.accept[contentType]
 	return ok
 }
@@ -427,6 +427,8 @@ func (cc *grpcClientConn) validateResponse(response *http.Response) *Error {
 		cc.responseHeader,
 		cc.responseTrailer,
 		cc.compressionPools,
+		cc.unmarshaler.web,
+		cc.marshaler.codec.Name(),
 		cc.protobuf,
 	); err != nil {
 		return err
@@ -517,14 +519,10 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 	)
 	mergeHeaders(mergedTrailers, hc.responseTrailer)
 	grpcErrorToTrailer(mergedTrailers, hc.protobuf, err)
-	if hc.web && !hc.wroteToBody {
-		// We're using gRPC-Web and we haven't yet written to the body. Since we're
-		// not sending any response messages, the gRPC specification calls this a
-		// "trailers-only" response. Under those circumstances, the gRPC-Web spec
-		// says that implementations _may_ send trailing metadata as HTTP headers
-		// instead. Envoy is the canonical implementation of the gRPC-Web protocol,
-		// so we emulate Envoy's behavior and put the trailing metadata in the HTTP
-		// headers.
+	if hc.web && !hc.wroteToBody && len(hc.responseHeader) == 0 {
+		// We're using gRPC-Web, we haven't yet written to the body, and there are no
+		// custom headers. That means we can send a "trailers-only" response and send
+		// trailing metadata as HTTP headers (instead of as trailers).
 		mergeHeaders(hc.responseWriter.Header(), mergedTrailers)
 		return nil
 	}
@@ -607,9 +605,10 @@ func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *Error {
 }
 
 type grpcUnmarshaler struct {
-	envelopeReader envelopeReader
-	web            bool
-	webTrailer     http.Header
+	envelopeReader
+
+	web        bool
+	webTrailer http.Header
 }
 
 func (u *grpcUnmarshaler) Unmarshal(message any) *Error {
@@ -620,7 +619,10 @@ func (u *grpcUnmarshaler) Unmarshal(message any) *Error {
 	if !errors.Is(err, errSpecialEnvelope) {
 		return err
 	}
-	env := u.envelopeReader.last
+	env := u.last
+	data := env.Data
+	u.last.Data = nil // don't keep a reference to it
+	defer u.bufferPool.Put(data)
 	if !u.web || !env.IsSet(grpcFlagEnvelopeTrailer) {
 		return errorf(CodeInternal, "protocol error: invalid envelope flags %d", env.Flags)
 	}
@@ -628,10 +630,10 @@ func (u *grpcUnmarshaler) Unmarshal(message any) *Error {
 	// Per the gRPC-Web specification, trailers should be encoded as an HTTP/1
 	// headers block _without_ the terminating newline. To make the headers
 	// parseable by net/textproto, we need to add the newline.
-	if err := env.Data.WriteByte('\n'); err != nil {
+	if err := data.WriteByte('\n'); err != nil {
 		return errorf(CodeInternal, "unmarshal web trailers: %w", err)
 	}
-	bufferedReader := bufio.NewReader(env.Data)
+	bufferedReader := bufio.NewReader(data)
 	mimeReader := textproto.NewReader(bufferedReader)
 	mimeHeader, mimeErr := mimeReader.ReadMIMEHeader()
 	if mimeErr != nil {
@@ -653,10 +655,19 @@ func grpcValidateResponse(
 	response *http.Response,
 	header, trailer http.Header,
 	availableCompressors readOnlyCompressionPools,
+	web bool,
+	codecName string,
 	protobuf Codec,
 ) *Error {
 	if response.StatusCode != http.StatusOK {
 		return errorf(grpcHTTPToCode(response.StatusCode), "HTTP status %v", response.Status)
+	}
+	if err := grpcValidateResponseContentType(
+		web,
+		codecName,
+		getHeaderCanonical(response.Header, headerContentType),
+	); err != nil {
+		return err
 	}
 	if compression := getHeaderCanonical(response.Header, grpcHeaderCompression); compression != "" &&
 		compression != compressionIdentity &&
@@ -672,11 +683,16 @@ func grpcValidateResponse(
 		)
 	}
 	// When there's no body, gRPC and gRPC-Web servers may send error information
-	// in the HTTP headers.
+	// in the HTTP headers. When this happens, it's called a "trailers-only" response.
 	if err := grpcErrorFromTrailer(
 		protobuf,
 		response.Header,
 	); err != nil && !errors.Is(err, errTrailersWithoutGRPCStatus) {
+		// Trailers-only responses may not have data in the body or HTTP trailers.
+		if bodyErr := grpcVerifyTrailersOnly(response); bodyErr != nil {
+			return bodyErr
+		}
+
 		// Per the specification, only the HTTP status code and Content-Type should
 		// be treated as headers. The rest should be treated as trailing metadata.
 		if contentType := getHeaderCanonical(response.Header, headerContentType); contentType != "" {
@@ -691,6 +707,39 @@ func grpcValidateResponse(
 	}
 	// The response is valid, so we should expose the headers.
 	mergeHeaders(header, response.Header)
+	return nil
+}
+
+func grpcVerifyTrailersOnly(response *http.Response) *Error {
+	// Make sure there's nothing in the body.
+	if numBytes, err := discard(response.Body); err != nil {
+		err = wrapIfContextError(err)
+		if connErr, ok := asError(err); ok {
+			return connErr
+		}
+		return errorf(CodeInternal, "corrupt response: I/O error after trailers-only response: %w", err)
+	} else if numBytes > 0 {
+		return errorf(CodeInternal, "corrupt response: %d extra bytes after trailers-only response", numBytes)
+	}
+
+	// Now we know we've reached EOF, so we can look at HTTP trailers.
+	// If headers included "Trailer" key, net/http pre-populates response.Trailer with nil
+	// values. So we need to exclude those to see if there were actually any trailers.
+	var trailerCount int
+	for _, v := range response.Trailer {
+		if len(v) > 0 {
+			trailerCount++
+		}
+	}
+	if trailerCount > 0 {
+		// Invalid response: cannot have both trailers in the header (trailers-only
+		// response) AND trailers after the body.
+		return errorf(
+			CodeInternal,
+			"corrupt response from server: gRPC trailers-only response may not contain HTTP trailers",
+		)
+	}
+
 	return nil
 }
 
@@ -749,7 +798,7 @@ func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {
 			return errorf(CodeInternal, "server returned invalid protobuf for error details: %w", err)
 		}
 		for _, d := range status.GetDetails() {
-			retErr.details = append(retErr.details, &ErrorDetail{pb: d})
+			retErr.details = append(retErr.details, &ErrorDetail{pbAny: d})
 		}
 		// Prefer the Protobuf-encoded data to the headers (grpc-go does this too).
 		retErr.code = Code(status.GetCode())
@@ -850,6 +899,13 @@ func grpcCodecFromContentType(web bool, contentType string) string {
 func grpcContentTypeFromCodecName(web bool, name string) string {
 	if web {
 		return grpcWebContentTypePrefix + name
+	}
+	if name == codecNameProto {
+		// For compatibility with Google Cloud Platform's frontends, prefer an
+		// implicit default codec. See
+		// https://github.com/connectrpc/connect-go/pull/655#issuecomment-1915754523
+		// for details.
+		return grpcContentTypeDefault
 	}
 	return grpcContentTypePrefix + name
 }
@@ -999,4 +1055,26 @@ func validateHex(input string) error {
 		return fmt.Errorf("invalid percent-encoded string %q", input)
 	}
 	return nil
+}
+
+func grpcValidateResponseContentType(web bool, requestCodecName string, responseContentType string) *Error {
+	// Responses must have valid content-type that indicates same codec as the request.
+	bare, prefix := grpcContentTypeDefault, grpcContentTypePrefix
+	if web {
+		bare, prefix = grpcWebContentTypeDefault, grpcWebContentTypePrefix
+	}
+	if responseContentType == prefix+requestCodecName ||
+		(requestCodecName == codecNameProto && responseContentType == bare) {
+		return nil
+	}
+	expectedContentType := bare
+	if requestCodecName != codecNameProto {
+		expectedContentType = prefix + requestCodecName
+	}
+	return errorf(
+		CodeInternal,
+		"invalid content-type: %q; expecting %q",
+		responseContentType,
+		expectedContentType,
+	)
 }

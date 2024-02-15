@@ -1,4 +1,4 @@
-// Copyright 2021-2023 The Connect Authors
+// Copyright 2021-2024 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -396,6 +396,14 @@ func TestServer(t *testing.T) {
 					connect.WithSendGzip(),
 				)
 			})
+			t.Run("json_get", func(t *testing.T) {
+				run(
+					t,
+					connect.WithProtoJSON(),
+					connect.WithHTTPGet(),
+					connect.WithHTTPGetMaxURLSize(1024, true),
+				)
+			})
 		})
 		t.Run("grpc", func(t *testing.T) {
 			t.Run("proto", func(t *testing.T) {
@@ -436,8 +444,9 @@ func TestServer(t *testing.T) {
 		pingServer{checkMetadata: true},
 	)
 	errorWriter := connect.NewErrorWriter()
-	// Add some net/http middleware to the ping service so we can also exercise ErrorWriter.
+	// Add net/http middleware to the ping service to evaluate HTTP state.
 	mux.Handle(pingRoute, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		// Exercise ErrorWriter for HTTP middleware errors.
 		if request.Header.Get(clientMiddlewareErrorHeader) != "" {
 			defer request.Body.Close()
 			if _, err := io.Copy(io.Discard, request.Body); err != nil {
@@ -450,6 +459,24 @@ func TestServer(t *testing.T) {
 				t.Errorf("send RPC error from HTTP middleware: %v", err)
 			}
 			return
+		}
+		// Check Content-Length is set correctly.
+		switch request.URL.Path {
+		case pingv1connect.PingServicePingProcedure,
+			pingv1connect.PingServiceFailProcedure,
+			pingv1connect.PingServiceCountUpProcedure:
+			// Unary requests set Content-Length to the length of the request body.
+			if request.ContentLength < 0 {
+				t.Errorf("%s: expected Content-Length >= 0, got %d", request.URL.Path, request.ContentLength)
+			}
+		case pingv1connect.PingServiceSumProcedure,
+			pingv1connect.PingServiceCumSumProcedure:
+			// Streaming requests set Content-Length to -1 or 0 on empty requests.
+			if request.ContentLength > 0 {
+				t.Errorf("%s: expected Content-Length -1 or 0, got %d", request.URL.Path, request.ContentLength)
+			}
+		default:
+			t.Errorf("unexpected path %q", request.URL.Path)
 		}
 		pingHandler.ServeHTTP(response, request)
 	}))
@@ -785,6 +812,7 @@ func TestUnavailableIfHostInvalid(t *testing.T) {
 func TestBidiRequiresHTTP2(t *testing.T) {
 	t.Parallel()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/connect+proto")
 		_, err := io.WriteString(w, "hello world")
 		assert.Nil(t, err)
 	})
@@ -816,6 +844,7 @@ func TestCompressMinBytesClient(t *testing.T) {
 		tb.Helper()
 		mux := http.NewServeMux()
 		mux.Handle("/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			writer.Header().Set("Content-Type", "application/proto")
 			assert.Equal(tb, request.Header.Get("Content-Encoding"), expect)
 		}))
 		server := memhttptest.NewServer(t, mux)
@@ -2206,6 +2235,7 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		name:    "connect_excess_eof",
 		options: []connect.ClientOption{connect.WithProtoJSON()},
 		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			responseWriter.Header().Set("Content-Type", "application/connect+json")
 			_, err := responseWriter.Write(head[:])
 			assert.Nil(t, err)
 			_, err = responseWriter.Write(payload)
@@ -2227,6 +2257,7 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		name:    "grpc-web_excess_eof",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
 		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			responseWriter.Header().Set("Content-Type", "application/grpc-web+json")
 			_, err := responseWriter.Write(head[:])
 			assert.Nil(t, err)
 			_, err = responseWriter.Write(payload)
@@ -2278,6 +2309,7 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
 // TestClientDisconnect tests that the handler receives a CodeCanceled error when
 // the client abruptly disconnects.
 func TestClientDisconnect(t *testing.T) {
@@ -2409,6 +2441,97 @@ func TestClientDisconnect(t *testing.T) {
 		t.Parallel()
 		testTransportClosure(t, http2RoundTripper)
 	})
+}
+
+func TestTrailersOnlyErrors(t *testing.T) {
+	t.Parallel()
+
+	head := [3]byte{}
+	testcases := []struct {
+		name       string
+		handler    http.HandlerFunc
+		options    []connect.ClientOption
+		expectCode connect.Code
+		expectMsg  string
+	}{{
+		name:    "grpc_body_after_trailers-only",
+		options: []connect.ClientOption{connect.WithGRPC()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc")
+			header.Set("Grpc-Status", "3")
+			_, err := responseWriter.Write(head[:])
+			assert.Nil(t, err)
+		},
+		expectCode: connect.CodeInternal,
+		expectMsg:  fmt.Sprintf("internal: corrupt response: %d extra bytes after trailers-only response", len(head)),
+	}, {
+		name:    "grpc-web_body_after_trailers-only",
+		options: []connect.ClientOption{connect.WithGRPCWeb()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc-web")
+			header.Set("Grpc-Status", "3")
+			_, err := responseWriter.Write(head[:])
+			assert.Nil(t, err)
+		},
+		expectCode: connect.CodeInternal,
+		expectMsg:  fmt.Sprintf("internal: corrupt response: %d extra bytes after trailers-only response", len(head)),
+	}, {
+		name:    "grpc_trailers_after_trailers-only",
+		options: []connect.ClientOption{connect.WithGRPC()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc")
+			header.Set("Grpc-Status", "3")
+			responseWriter.WriteHeader(http.StatusOK)
+			responseWriter.(http.Flusher).Flush() //nolint:forcetypeassert
+			header.Set(http.TrailerPrefix+"Foo", "abc")
+		},
+		expectCode: connect.CodeInternal,
+		expectMsg:  "internal: corrupt response from server: gRPC trailers-only response may not contain HTTP trailers",
+	}, {
+		name:    "grpc-web_trailers_after_trailers-only",
+		options: []connect.ClientOption{connect.WithGRPCWeb()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc-web")
+			header.Set("Grpc-Status", "3")
+			responseWriter.WriteHeader(http.StatusOK)
+			responseWriter.(http.Flusher).Flush() //nolint:forcetypeassert
+			header.Set(http.TrailerPrefix+"Foo", "abc")
+		},
+		expectCode: connect.CodeInternal,
+		expectMsg:  "internal: corrupt response from server: gRPC trailers-only response may not contain HTTP trailers",
+	}}
+	for _, testcase := range testcases {
+		testcase := testcase
+		t.Run(testcase.name, func(t *testing.T) {
+			t.Parallel()
+			mux := http.NewServeMux()
+			mux.HandleFunc("/", func(responseWriter http.ResponseWriter, request *http.Request) {
+				_, _ = io.Copy(io.Discard, request.Body)
+				testcase.handler(responseWriter, request)
+			})
+			server := memhttptest.NewServer(t, mux)
+			client := pingv1connect.NewPingServiceClient(
+				server.Client(),
+				server.URL(),
+				testcase.options...,
+			)
+			const upTo = 2
+			request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
+			request.Header().Set("Test-Case", t.Name())
+			stream, err := client.CountUp(context.Background(), request)
+			assert.Nil(t, err)
+			for i := 0; stream.Receive() && i < upTo; i++ {
+				assert.Equal(t, stream.Msg().GetNumber(), 42)
+			}
+			assert.NotNil(t, stream.Err())
+			assert.Equal(t, connect.CodeOf(stream.Err()), testcase.expectCode)
+			assert.Equal(t, stream.Err().Error(), testcase.expectMsg)
+		})
+	}
 }
 
 // TestBlankImportCodeGeneration tests that services.connect.go is generated with

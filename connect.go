@@ -1,4 +1,4 @@
-// Copyright 2021-2023 The Connect Authors
+// Copyright 2021-2024 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ import (
 )
 
 // Version is the semantic version of the connect module.
-const Version = "1.14.0-dev"
+const Version = "1.15.0-dev"
 
 // These constants are used in compile-time handshakes with connect's generated
 // code.

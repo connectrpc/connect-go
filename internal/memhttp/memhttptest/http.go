@@ -1,4 +1,4 @@
-// Copyright 2021-2023 The Connect Authors
+// Copyright 2021-2024 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ func NewServer(tb testing.TB, handler http.Handler, opts ...memhttp.Option) *mem
 	server := memhttp.NewServer(handler, opts...)
 	tb.Cleanup(func() {
 		if err := server.Cleanup(); err != nil {
-			tb.Error(err)
+			tb.Errorf("shutdown failed: %v", err)
 		}
 	})
 	return server

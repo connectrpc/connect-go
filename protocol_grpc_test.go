@@ -1,4 +1,4 @@
-// Copyright 2021-2023 The Connect Authors
+// Copyright 2021-2024 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ package connect
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -228,5 +229,127 @@ func BenchmarkGRPCTimeoutEncoding(b *testing.B) {
 		if got != want {
 			b.Fatalf("grpcEncodeTimeout(%q) = %s, want %s", input, got, want)
 		}
+	}
+}
+
+func TestGRPCValidateResponseContentType(t *testing.T) {
+	t.Parallel()
+	testCases := []struct {
+		web                 bool
+		codecName           string
+		responseContentType string
+		expectErr           bool
+	}{
+		// Allowed content-types
+		{
+			codecName:           codecNameProto,
+			responseContentType: "application/grpc",
+		},
+		{
+			codecName:           codecNameProto,
+			responseContentType: "application/grpc+proto",
+		},
+		{
+			codecName:           codecNameJSON,
+			responseContentType: "application/grpc+json",
+		},
+		{
+			codecName:           codecNameProto,
+			web:                 true,
+			responseContentType: "application/grpc-web",
+		},
+		{
+			codecName:           codecNameProto,
+			web:                 true,
+			responseContentType: "application/grpc-web+proto",
+		},
+		{
+			codecName:           codecNameJSON,
+			web:                 true,
+			responseContentType: "application/grpc-web+json",
+		},
+		// Disallowed content-types
+		{
+			codecName:           codecNameProto,
+			responseContentType: "application/proto",
+			expectErr:           true,
+		},
+		{
+			codecName:           codecNameProto,
+			responseContentType: "application/grpc-web",
+			expectErr:           true,
+		},
+		{
+			codecName:           codecNameProto,
+			responseContentType: "application/grpc-web+proto",
+			expectErr:           true,
+		},
+		{
+			codecName:           codecNameJSON,
+			responseContentType: "application/json",
+			expectErr:           true,
+		},
+		{
+			codecName:           codecNameJSON,
+			responseContentType: "application/grpc-web+json",
+			expectErr:           true,
+		},
+		{
+			codecName:           codecNameProto,
+			web:                 true,
+			responseContentType: "application/proto",
+			expectErr:           true,
+		},
+		{
+			codecName:           codecNameProto,
+			web:                 true,
+			responseContentType: "application/grpc",
+			expectErr:           true,
+		},
+		{
+			codecName:           codecNameProto,
+			web:                 true,
+			responseContentType: "application/grpc+proto",
+			expectErr:           true,
+		},
+		{
+			codecName:           codecNameJSON,
+			web:                 true,
+			responseContentType: "application/json",
+			expectErr:           true,
+		},
+		{
+			codecName:           codecNameJSON,
+			web:                 true,
+			responseContentType: "application/grpc+json",
+			expectErr:           true,
+		},
+		{
+			codecName:           codecNameProto,
+			responseContentType: "some/garbage",
+			expectErr:           true,
+		},
+	}
+	for _, testCase := range testCases {
+		testCase := testCase
+		protocol := ProtocolGRPC
+		if testCase.web {
+			protocol = ProtocolGRPCWeb
+		}
+		testCaseName := fmt.Sprintf("%s_%s->%s", protocol, testCase.codecName, testCase.responseContentType)
+		t.Run(testCaseName, func(t *testing.T) {
+			t.Parallel()
+			err := grpcValidateResponseContentType(
+				testCase.web,
+				testCase.codecName,
+				testCase.responseContentType,
+			)
+			if !testCase.expectErr {
+				assert.Nil(t, err)
+			} else if assert.NotNil(t, err) {
+				assert.Equal(t, CodeOf(err), CodeInternal)
+				assert.True(t, strings.Contains(err.Message(), fmt.Sprintf("invalid content-type: %q; expecting", testCase.responseContentType)))
+			}
+		})
 	}
 }
