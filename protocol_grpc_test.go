@@ -238,7 +238,7 @@ func TestGRPCValidateResponseContentType(t *testing.T) {
 		web                 bool
 		codecName           string
 		responseContentType string
-		expectErr           bool
+		expectCode          Code
 	}{
 		// Allowed content-types
 		{
@@ -268,66 +268,100 @@ func TestGRPCValidateResponseContentType(t *testing.T) {
 			web:                 true,
 			responseContentType: "application/grpc-web+json",
 		},
+		// Mismatched response codec
+		{
+			codecName:           codecNameProto,
+			responseContentType: "application/grpc+json",
+			expectCode:          CodeInternal,
+		},
+		{
+			codecName:           codecNameJSON,
+			responseContentType: "application/grpc",
+			expectCode:          CodeInternal,
+		},
+		{
+			codecName:           codecNameJSON,
+			responseContentType: "application/grpc+proto",
+			expectCode:          CodeInternal,
+		},
+		{
+			codecName:           codecNameProto,
+			web:                 true,
+			responseContentType: "application/grpc-web+json",
+			expectCode:          CodeInternal,
+		},
+		{
+			codecName:           codecNameJSON,
+			web:                 true,
+			responseContentType: "application/grpc-web",
+			expectCode:          CodeInternal,
+		},
+		{
+			codecName:           codecNameJSON,
+			web:                 true,
+			responseContentType: "application/grpc-web+proto",
+			expectCode:          CodeInternal,
+		},
 		// Disallowed content-types
 		{
 			codecName:           codecNameProto,
 			responseContentType: "application/proto",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 		{
 			codecName:           codecNameProto,
 			responseContentType: "application/grpc-web",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 		{
 			codecName:           codecNameProto,
 			responseContentType: "application/grpc-web+proto",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 		{
 			codecName:           codecNameJSON,
 			responseContentType: "application/json",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 		{
 			codecName:           codecNameJSON,
 			responseContentType: "application/grpc-web+json",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 		{
 			codecName:           codecNameProto,
 			web:                 true,
 			responseContentType: "application/proto",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 		{
 			codecName:           codecNameProto,
 			web:                 true,
 			responseContentType: "application/grpc",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 		{
 			codecName:           codecNameProto,
 			web:                 true,
 			responseContentType: "application/grpc+proto",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 		{
 			codecName:           codecNameJSON,
 			web:                 true,
 			responseContentType: "application/json",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 		{
 			codecName:           codecNameJSON,
 			web:                 true,
 			responseContentType: "application/grpc+json",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 		{
 			codecName:           codecNameProto,
 			responseContentType: "some/garbage",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 	}
 	for _, testCase := range testCases {
@@ -344,10 +378,10 @@ func TestGRPCValidateResponseContentType(t *testing.T) {
 				testCase.codecName,
 				testCase.responseContentType,
 			)
-			if !testCase.expectErr {
+			if testCase.expectCode == 0 {
 				assert.Nil(t, err)
 			} else if assert.NotNil(t, err) {
-				assert.Equal(t, CodeOf(err), CodeInternal)
+				assert.Equal(t, CodeOf(err), testCase.expectCode)
 				assert.True(t, strings.Contains(err.Message(), fmt.Sprintf("invalid content-type: %q; expecting", testCase.responseContentType)))
 			}
 		})

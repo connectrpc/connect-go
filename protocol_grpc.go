@@ -370,17 +370,31 @@ func (cc *grpcClientConn) Receive(msg any) error {
 	if err == nil {
 		return nil
 	}
-	if getHeaderCanonical(cc.responseHeader, grpcHeaderStatus) != "" {
-		// We got what gRPC calls a trailers-only response, which puts the trailing
-		// metadata (including errors) into HTTP headers. validateResponse has
-		// already extracted the error.
-		return err
-	}
-	// See if the server sent an explicit error in the HTTP or gRPC-Web trailers.
 	mergeHeaders(
 		cc.responseTrailer,
 		cc.readTrailers(&cc.unmarshaler, cc.duplexCall),
 	)
+	if errors.Is(err, io.EOF) && cc.unmarshaler.bytesRead == 0 && len(cc.responseTrailer) == 0 {
+		// No body and no trailers means a trailers-only response.
+		// Note: per the specification, only the HTTP status code and Content-Type
+		// should be treated as headers. The rest should be treated as trailing
+		// metadata. But it would be unsafe to mutate cc.responseHeader at this
+		// point. So we'll leave cc.responseHeader alone but copy the relevant
+		// metadata into cc.responseTrailer.
+		mergeHeaders(cc.responseTrailer, cc.responseHeader)
+		delHeaderCanonical(cc.responseTrailer, headerContentType)
+
+		// Try to read the status out of the headers.
+		serverErr := grpcErrorFromTrailer(cc.protobuf, cc.responseHeader)
+		if serverErr == nil {
+			// Status says "OK". So return original error (io.EOF).
+			return err
+		}
+		serverErr.meta = cc.responseHeader.Clone()
+		return serverErr
+	}
+
+	// See if the server sent an explicit error in the HTTP or gRPC-Web trailers.
 	serverErr := grpcErrorFromTrailer(cc.protobuf, cc.responseTrailer)
 	if serverErr != nil && (errors.Is(err, io.EOF) || !errors.Is(serverErr, errTrailersWithoutGRPCStatus)) {
 		// We've either:
@@ -425,16 +439,14 @@ func (cc *grpcClientConn) validateResponse(response *http.Response) *Error {
 	if err := grpcValidateResponse(
 		response,
 		cc.responseHeader,
-		cc.responseTrailer,
 		cc.compressionPools,
 		cc.unmarshaler.web,
 		cc.marshaler.codec.Name(),
-		cc.protobuf,
 	); err != nil {
 		return err
 	}
 	compression := getHeaderCanonical(response.Header, grpcHeaderCompression)
-	cc.unmarshaler.envelopeReader.compressionPool = cc.compressionPools.Get(compression)
+	cc.unmarshaler.compressionPool = cc.compressionPools.Get(compression)
 	return nil
 }
 
@@ -653,11 +665,10 @@ func (u *grpcUnmarshaler) WebTrailer() http.Header {
 
 func grpcValidateResponse(
 	response *http.Response,
-	header, trailer http.Header,
+	header http.Header,
 	availableCompressors readOnlyCompressionPools,
 	web bool,
 	codecName string,
-	protobuf Codec,
 ) *Error {
 	if response.StatusCode != http.StatusOK {
 		return errorf(grpcHTTPToCode(response.StatusCode), "HTTP status %v", response.Status)
@@ -682,64 +693,8 @@ func grpcValidateResponse(
 			availableCompressors.CommaSeparatedNames(),
 		)
 	}
-	// When there's no body, gRPC and gRPC-Web servers may send error information
-	// in the HTTP headers. When this happens, it's called a "trailers-only" response.
-	if err := grpcErrorFromTrailer(
-		protobuf,
-		response.Header,
-	); err != nil && !errors.Is(err, errTrailersWithoutGRPCStatus) {
-		// Trailers-only responses may not have data in the body or HTTP trailers.
-		if bodyErr := grpcVerifyTrailersOnly(response); bodyErr != nil {
-			return bodyErr
-		}
-
-		// Per the specification, only the HTTP status code and Content-Type should
-		// be treated as headers. The rest should be treated as trailing metadata.
-		if contentType := getHeaderCanonical(response.Header, headerContentType); contentType != "" {
-			setHeaderCanonical(header, headerContentType, contentType)
-		}
-		mergeHeaders(trailer, response.Header)
-		delHeaderCanonical(trailer, headerContentType)
-		// Also set the error metadata
-		err.meta = header.Clone()
-		mergeHeaders(err.meta, trailer)
-		return err
-	}
 	// The response is valid, so we should expose the headers.
 	mergeHeaders(header, response.Header)
-	return nil
-}
-
-func grpcVerifyTrailersOnly(response *http.Response) *Error {
-	// Make sure there's nothing in the body.
-	if numBytes, err := discard(response.Body); err != nil {
-		err = wrapIfContextError(err)
-		if connErr, ok := asError(err); ok {
-			return connErr
-		}
-		return errorf(CodeInternal, "corrupt response: I/O error after trailers-only response: %w", err)
-	} else if numBytes > 0 {
-		return errorf(CodeInternal, "corrupt response: %d extra bytes after trailers-only response", numBytes)
-	}
-
-	// Now we know we've reached EOF, so we can look at HTTP trailers.
-	// If headers included "Trailer" key, net/http pre-populates response.Trailer with nil
-	// values. So we need to exclude those to see if there were actually any trailers.
-	var trailerCount int
-	for _, v := range response.Trailer {
-		if len(v) > 0 {
-			trailerCount++
-		}
-	}
-	if trailerCount > 0 {
-		// Invalid response: cannot have both trailers in the header (trailers-only
-		// response) AND trailers after the body.
-		return errorf(
-			CodeInternal,
-			"corrupt response from server: gRPC trailers-only response may not contain HTTP trailers",
-		)
-	}
-
 	return nil
 }
 
@@ -768,10 +723,21 @@ func grpcHTTPToCode(httpCode int) Code {
 // binary Protobuf format, even if the messages in the request/response stream
 // use a different codec. Consequently, this function needs a Protobuf codec to
 // unmarshal error information in the headers.
+//
+// A non-nil error is only returned when a grpc-status key IS present, but it
+// indicates a code of zero (no error). If no grpc-status key is present, this
+// returns a non-nil *Error that wraps errTrailersWithoutGRPCStatus.
 func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {
 	codeHeader := getHeaderCanonical(trailer, grpcHeaderStatus)
 	if codeHeader == "" {
-		return NewError(CodeInternal, errTrailersWithoutGRPCStatus)
+		// If there are no trailers at all, that's an internal error.
+		// But if it's an error determining the status code from the
+		// trailers, it's unknown.
+		code := CodeUnknown
+		if len(trailer) == 0 {
+			code = CodeInternal
+		}
+		return NewError(code, errTrailersWithoutGRPCStatus)
 	}
 	if codeHeader == "0" {
 		return nil
@@ -779,7 +745,7 @@ func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {
 
 	code, err := strconv.ParseUint(codeHeader, 10 /* base */, 32 /* bitsize */)
 	if err != nil {
-		return errorf(CodeInternal, "protocol error: invalid error code %q", codeHeader)
+		return errorf(CodeUnknown, "protocol error: invalid error code %q", codeHeader)
 	}
 	message, err := grpcPercentDecode(getHeaderCanonical(trailer, grpcHeaderMessage))
 	if err != nil {
@@ -1071,8 +1037,13 @@ func grpcValidateResponseContentType(web bool, requestCodecName string, response
 	if requestCodecName != codecNameProto {
 		expectedContentType = prefix + requestCodecName
 	}
+	code := CodeInternal
+	if responseContentType != bare && !strings.HasPrefix(responseContentType, prefix) {
+		// Doesn't even look like a gRPC response? Use code "unknown".
+		code = CodeUnknown
+	}
 	return errorf(
-		CodeInternal,
+		code,
 		"invalid content-type: %q; expecting %q",
 		responseContentType,
 		expectedContentType,

@@ -222,6 +222,7 @@ func (w *envelopeWriter) write(env *envelope) *Error {
 type envelopeReader struct {
 	ctx             context.Context //nolint:containedctx
 	reader          io.Reader
+	bytesRead       int64
 	codec           Codec
 	last            envelope
 	compressionPool *compressionPool
@@ -241,6 +242,11 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 	env := &envelope{Data: buffer}
 	err := r.Read(env)
 	switch {
+	case err == nil && env.IsSet(flagEnvelopeCompressed) && r.compressionPool == nil:
+		return errorf(
+			CodeInternal,
+			"protocol error: sent compressed message without compression support",
+		)
 	case err == nil &&
 		(env.Flags == 0 || env.Flags == flagEnvelopeCompressed) &&
 		env.Data.Len() == 0:
@@ -257,12 +263,6 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 
 	data := env.Data
 	if data.Len() > 0 && env.IsSet(flagEnvelopeCompressed) {
-		if r.compressionPool == nil {
-			return errorf(
-				CodeInvalidArgument,
-				"protocol error: sent compressed message without compression support",
-			)
-		}
 		decompressed := r.bufferPool.Get()
 		defer func() {
 			if decompressed != dontRelease {
@@ -277,7 +277,9 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 
 	if env.Flags != 0 && env.Flags != flagEnvelopeCompressed {
 		// Drain the rest of the stream to ensure there is no extra data.
-		if numBytes, err := discard(r.reader); err != nil {
+		numBytes, err := discard(r.reader)
+		r.bytesRead += numBytes
+		if err != nil {
 			err = wrapIfContextError(err)
 			if connErr, ok := asError(err); ok {
 				return connErr
@@ -308,7 +310,9 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 	prefixes := [5]byte{}
 	// io.ReadFull reads the number of bytes requested, or returns an error.
 	// io.EOF will only be returned if no bytes were read.
-	if _, err := io.ReadFull(r.reader, prefixes[:]); err != nil {
+	n, err := io.ReadFull(r.reader, prefixes[:])
+	r.bytesRead += int64(n)
+	if err != nil {
 		if errors.Is(err, io.EOF) {
 			// The stream ended cleanly. That's expected, but we need to propagate an EOF
 			// to the user so that they know that the stream has ended. We shouldn't
@@ -328,7 +332,8 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 	}
 	size := int64(binary.BigEndian.Uint32(prefixes[1:5]))
 	if r.readMaxBytes > 0 && size > int64(r.readMaxBytes) {
-		_, err := io.CopyN(io.Discard, r.reader, size)
+		n, err := io.CopyN(io.Discard, r.reader, size)
+		r.bytesRead += n
 		if err != nil && !errors.Is(err, io.EOF) {
 			return errorf(CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %w", r.readMaxBytes, err)
 		}
@@ -337,7 +342,9 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 	// We've read the prefix, so we know how many bytes to expect.
 	// CopyN will return an error if it doesn't read the requested
 	// number of bytes.
-	if readN, err := io.CopyN(env.Data, r.reader, size); err != nil {
+	readN, err := io.CopyN(env.Data, r.reader, size)
+	r.bytesRead += readN
+	if err != nil {
 		if errors.Is(err, io.EOF) {
 			// We've gotten fewer bytes than we expected, so the stream has ended
 			// unexpectedly.

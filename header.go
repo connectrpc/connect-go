@@ -46,8 +46,14 @@ func DecodeBinaryHeader(data string) ([]byte, error) {
 }
 
 func mergeHeaders(into, from http.Header) {
-	for k, vals := range from {
-		into[k] = append(into[k], vals...)
+	for key, vals := range from {
+		if len(vals) == 0 {
+			// For response trailers, net/http will pre-populate entries
+			// with nil values based on the "Trailer" header. But if there
+			// are no actual values for those keys, we skip them.
+			continue
+		}
+		into[key] = append(into[key], vals...)
 	}
 }
 
