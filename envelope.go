@@ -210,7 +210,6 @@ func (w *envelopeWriter) marshal(message any) *Error {
 
 func (w *envelopeWriter) write(env *envelope) *Error {
 	if _, err := w.sender.Send(env); err != nil {
-		err = wrapIfContextError(err)
 		err = wrapIfContextDone(w.ctx, err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
@@ -317,7 +316,6 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 			return NewError(CodeUnknown, err)
 		}
 		err = wrapIfMaxBytesError(err, "read 5 byte message prefix")
-		err = wrapIfContextError(err)
 		err = wrapIfContextDone(r.ctx, err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
@@ -351,7 +349,6 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 			)
 		}
 		err = wrapIfMaxBytesError(err, "read %d byte message", size)
-		err = wrapIfContextError(err)
 		err = wrapIfContextDone(r.ctx, err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr

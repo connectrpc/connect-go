@@ -314,6 +314,7 @@ func wrapIfContextDone(ctx context.Context, err error) error {
 	if err == nil {
 		return nil
 	}
+	err = wrapIfContextError(err)
 	if _, ok := asError(err); ok {
 		return err
 	}

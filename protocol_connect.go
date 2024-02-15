@@ -1115,7 +1115,6 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 	bytesRead, err := data.ReadFrom(reader)
 	if err != nil {
 		err = wrapIfMaxBytesError(err, "read first %d bytes of message", bytesRead)
-		err = wrapIfContextError(err)
 		err = wrapIfContextDone(u.ctx, err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
