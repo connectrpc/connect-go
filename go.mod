@@ -1,6 +1,6 @@
 module connectrpc.com/connect
 
-go 1.19
+go 1.20
 
 retract (
 	v1.10.0 // module cache poisoned, use v1.10.1
@@ -9,8 +9,8 @@ retract (
 
 require (
 	github.com/google/go-cmp v0.5.9
-	golang.org/x/net v0.17.0
+	golang.org/x/net v0.21.0
 	google.golang.org/protobuf v1.32.0
 )
 
-require golang.org/x/text v0.13.0 // indirect
+require golang.org/x/text v0.14.0 // indirect

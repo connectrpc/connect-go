@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         # when editing this list, also update steps and jobs below
-        go-version: [1.19.x, 1.20.x, 1.21.x]
+        go-version: [1.20.x, 1.21.x, 1.22.x]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -33,14 +33,13 @@ jobs:
         # conflicting guidance, run only on the most recent supported version.
         # For the same reason, only check generated code on the most recent
         # supported version.
-        if: matrix.go-version == '1.21.x'
+        if: matrix.go-version == '1.22.x'
         run: make checkgenerate && make lint
   conformance:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # 1.19 is omitted because conformance test runner requires 1.20+
-        go-version: [1.20.x, 1.21.x]
+        go-version: [1.20.x, 1.21.x, 1.22.x]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -63,6 +62,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           # only the latest
-          go-version: 1.21.x
+          go-version: 1.22.x
       - name: Run Slow Tests
         run: make slowtest
