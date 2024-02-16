@@ -724,7 +724,7 @@ func grpcHTTPToCode(httpCode int) Code {
 // use a different codec. Consequently, this function needs a Protobuf codec to
 // unmarshal error information in the headers.
 //
-// A non-nil error is only returned when a grpc-status key IS present, but it
+// A nil error is only returned when a grpc-status key IS present, but it
 // indicates a code of zero (no error). If no grpc-status key is present, this
 // returns a non-nil *Error that wraps errTrailersWithoutGRPCStatus.
 func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {

@@ -222,7 +222,7 @@ func (w *envelopeWriter) write(env *envelope) *Error {
 type envelopeReader struct {
 	ctx             context.Context //nolint:containedctx
 	reader          io.Reader
-	bytesRead       int64
+	bytesRead       int64  // detect trailers-only gRPC responses
 	codec           Codec
 	last            envelope
 	compressionPool *compressionPool
