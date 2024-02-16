@@ -539,27 +539,7 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 	// as HTTP trailers. (If we had frame-level control of the HTTP/2 layer, we
 	// could send trailers-only responses as a single HEADER frame and no DATA
 	// frames, but net/http doesn't expose APIs that low-level.)
-	if !hc.wroteToBody {
-		// This block works around a bug in x/net/http2. Until Go 1.20, trailers
-		// written using http.TrailerPrefix were only sent if either (1) there's
-		// data in the body, or (2) the innermost http.ResponseWriter is flushed.
-		// To ensure that we always send a valid gRPC response, even if the user
-		// has wrapped the response writer in net/http middleware that doesn't
-		// implement http.Flusher, we must pre-declare our HTTP trailers. We can
-		// remove this when Go 1.21 ships and we drop support for Go 1.19.
-		for key := range mergedTrailers {
-			addHeaderCanonical(hc.responseWriter.Header(), headerTrailer, key)
-		}
-		hc.responseWriter.WriteHeader(http.StatusOK)
-		for key, values := range mergedTrailers {
-			for _, value := range values {
-				// These are potentially user-supplied, so we can't assume they're in
-				// canonical form. Don't use addHeaderCanonical.
-				hc.responseWriter.Header().Add(key, value)
-			}
-		}
-		return nil
-	}
+	//
 	// In net/http's ResponseWriter API, we send HTTP trailers by writing to the
 	// headers map with a special prefix. This prefixing is an implementation
 	// detail, so we should hide it and _not_ mutate the user-visible headers.
