@@ -78,10 +78,3 @@ func setHeaderCanonical(h http.Header, key, value string) {
 func delHeaderCanonical(h http.Header, key string) {
 	delete(h, key)
 }
-
-// addHeaderCanonical is a shortcut for Header.Add() which
-// bypasses the CanonicalMIMEHeaderKey operation when we
-// know the key is already in canonical form.
-func addHeaderCanonical(h http.Header, key, value string) {
-	h[key] = append(h[key], value)
-}
