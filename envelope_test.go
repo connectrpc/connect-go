@@ -16,6 +16,7 @@ package connect
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"testing"
 
@@ -44,6 +45,7 @@ func TestEnvelope(t *testing.T) {
 			t.Parallel()
 			env := &envelope{Data: &bytes.Buffer{}}
 			rdr := envelopeReader{
+				ctx: context.Background(),
 				reader: byteByByteReader{
 					reader: bytes.NewReader(buf.Bytes()),
 				},

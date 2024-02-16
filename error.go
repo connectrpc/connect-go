@@ -308,6 +308,25 @@ func wrapIfContextError(err error) error {
 	return err
 }
 
+// wrapIfContextDone wraps errors with CodeCanceled or CodeDeadlineExceeded
+// if the context is done. It leaves already-wrapped errors unchanged.
+func wrapIfContextDone(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	err = wrapIfContextError(err)
+	if _, ok := asError(err); ok {
+		return err
+	}
+	ctxErr := ctx.Err()
+	if errors.Is(ctxErr, context.Canceled) {
+		return NewError(CodeCanceled, err)
+	} else if errors.Is(ctxErr, context.DeadlineExceeded) {
+		return NewError(CodeDeadlineExceeded, err)
+	}
+	return err
+}
+
 // wrapIfLikelyH2CNotConfiguredError adds a wrapping error that has a message
 // telling the caller that they likely need to use h2c but are using a raw http.Client{}.
 //
@@ -414,10 +433,18 @@ func wrapIfRSTError(err error) error {
 	}
 }
 
-func asMaxBytesError(err error, tmpl string, args ...any) *Error {
+// wrapIfMaxBytesError wraps errors returned reading from a http.MaxBytesHandler
+// whose limit has been exceeded.
+func wrapIfMaxBytesError(err error, tmpl string, args ...any) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := asError(err); ok {
+		return err
+	}
 	var maxBytesErr *http.MaxBytesError
 	if ok := errors.As(err, &maxBytesErr); !ok {
-		return nil
+		return err
 	}
 	prefix := fmt.Sprintf(tmpl, args...)
 	return errorf(CodeResourceExhausted, "%s: exceeded %d byte http.MaxBytesReader limit", prefix, maxBytesErr.Limit)

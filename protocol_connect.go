@@ -148,6 +148,7 @@ func (h *connectHandler) NewConn(
 	responseWriter http.ResponseWriter,
 	request *http.Request,
 ) (handlerConnCloser, bool) {
+	ctx := request.Context()
 	query := request.URL.Query()
 	// We need to parse metadata before entering the interceptor stack; we'll
 	// send the error to the client later on.
@@ -255,6 +256,7 @@ func (h *connectHandler) NewConn(
 			request:        request,
 			responseWriter: responseWriter,
 			marshaler: connectUnaryMarshaler{
+				ctx:              ctx,
 				sender:           writeSender{writer: responseWriter},
 				codec:            codec,
 				compressMinBytes: h.CompressMinBytes,
@@ -265,6 +267,7 @@ func (h *connectHandler) NewConn(
 				sendMaxBytes:     h.SendMaxBytes,
 			},
 			unmarshaler: connectUnaryUnmarshaler{
+				ctx:             ctx,
 				reader:          requestBody,
 				codec:           codec,
 				compressionPool: h.CompressionPools.Get(requestCompression),
@@ -281,6 +284,7 @@ func (h *connectHandler) NewConn(
 			responseWriter: responseWriter,
 			marshaler: connectStreamingMarshaler{
 				envelopeWriter: envelopeWriter{
+					ctx:              ctx,
 					sender:           writeSender{responseWriter},
 					codec:            codec,
 					compressMinBytes: h.CompressMinBytes,
@@ -291,6 +295,7 @@ func (h *connectHandler) NewConn(
 			},
 			unmarshaler: connectStreamingUnmarshaler{
 				envelopeReader: envelopeReader{
+					ctx:             ctx,
 					reader:          requestBody,
 					codec:           codec,
 					compressionPool: h.CompressionPools.Get(requestCompression),
@@ -376,6 +381,7 @@ func (c *connectClient) NewConn(
 			bufferPool:       c.BufferPool,
 			marshaler: connectUnaryRequestMarshaler{
 				connectUnaryMarshaler: connectUnaryMarshaler{
+					ctx:              ctx,
 					sender:           duplexCall,
 					codec:            c.Codec,
 					compressMinBytes: c.CompressMinBytes,
@@ -387,6 +393,7 @@ func (c *connectClient) NewConn(
 				},
 			},
 			unmarshaler: connectUnaryUnmarshaler{
+				ctx:          ctx,
 				reader:       duplexCall,
 				codec:        c.Codec,
 				bufferPool:   c.BufferPool,
@@ -416,6 +423,7 @@ func (c *connectClient) NewConn(
 			codec:            c.Codec,
 			marshaler: connectStreamingMarshaler{
 				envelopeWriter: envelopeWriter{
+					ctx:              ctx,
 					sender:           duplexCall,
 					codec:            c.Codec,
 					compressMinBytes: c.CompressMinBytes,
@@ -426,6 +434,7 @@ func (c *connectClient) NewConn(
 			},
 			unmarshaler: connectStreamingUnmarshaler{
 				envelopeReader: envelopeReader{
+					ctx:          ctx,
 					reader:       duplexCall,
 					codec:        c.Codec,
 					bufferPool:   c.BufferPool,
@@ -912,6 +921,7 @@ func (u *connectStreamingUnmarshaler) EndStreamError() *Error {
 }
 
 type connectUnaryMarshaler struct {
+	ctx              context.Context //nolint:containedctx
 	sender           messageSender
 	codec            Codec
 	compressMinBytes int
@@ -1077,6 +1087,7 @@ func (m *connectUnaryRequestMarshaler) writeWithGet(url *url.URL) *Error {
 }
 
 type connectUnaryUnmarshaler struct {
+	ctx             context.Context //nolint:containedctx
 	reader          io.Reader
 	codec           Codec
 	compressionPool *compressionPool
@@ -1103,12 +1114,10 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 	// ReadFrom ignores io.EOF, so any error here is real.
 	bytesRead, err := data.ReadFrom(reader)
 	if err != nil {
-		err = wrapIfContextError(err)
+		err = wrapIfMaxBytesError(err, "read first %d bytes of message", bytesRead)
+		err = wrapIfContextDone(u.ctx, err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
-		}
-		if readMaxBytesErr := asMaxBytesError(err, "read first %d bytes of message", bytesRead); readMaxBytesErr != nil {
-			return readMaxBytesErr
 		}
 		return errorf(CodeUnknown, "read message: %w", err)
 	}
