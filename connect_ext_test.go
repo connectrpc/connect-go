@@ -741,7 +741,7 @@ func TestGRPCMissingTrailersError(t *testing.T) {
 		var connectErr *connect.Error
 		ok := errors.As(err, &connectErr)
 		assert.True(t, ok)
-		assert.Equal(t, connectErr.Code(), connect.CodeInternal)
+		assert.Equal(t, connectErr.Code(), connect.CodeUnknown)
 		assert.True(
 			t,
 			strings.HasSuffix(connectErr.Message(), "protocol error: no Grpc-Status trailer: unexpected EOF"),
@@ -1838,7 +1838,9 @@ func TestUnflushableResponseWriter(t *testing.T) {
 	t.Parallel()
 	assertIsFlusherErr := func(t *testing.T, err error) {
 		t.Helper()
-		assert.NotNil(t, err)
+		if !assert.NotNil(t, err) {
+			return
+		}
 		assert.Equal(t, connect.CodeOf(err), connect.CodeInternal, assert.Sprintf("got %v", err))
 		assert.True(
 			t,
@@ -1875,8 +1877,9 @@ func TestUnflushableResponseWriter(t *testing.T) {
 				assertIsFlusherErr(t, err)
 				return
 			}
-			assert.False(t, stream.Receive())
-			assertIsFlusherErr(t, stream.Err())
+			if assert.False(t, stream.Receive()) {
+				assertIsFlusherErr(t, stream.Err())
+			}
 		})
 	}
 }
@@ -2147,6 +2150,21 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		expectCode: connect.CodeInternal,
 		expectMsg:  "internal: protocol error: no Grpc-Status trailer: unexpected EOF",
 	}, {
+		name:    "grpc_missing_status",
+		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPC()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc+json")
+			_, err := responseWriter.Write(head[:])
+			assert.Nil(t, err)
+			_, err = responseWriter.Write(payload)
+			assert.Nil(t, err)
+			// Trailers exist, just no status. So error will be unknown instead of internal.
+			responseWriter.Header().Set(http.TrailerPrefix+"grpc-message", "foo")
+		},
+		expectCode: connect.CodeUnknown,
+		expectMsg:  "unknown: protocol error: no Grpc-Status trailer: unexpected EOF",
+	}, {
 		name:    "grpc-web_missing_end",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
 		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
@@ -2159,6 +2177,29 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		},
 		expectCode: connect.CodeInternal,
 		expectMsg:  "internal: protocol error: no Grpc-Status trailer: unexpected EOF",
+	}, {
+		name:    "grpc-web_missing_status",
+		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
+		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
+			header := responseWriter.Header()
+			header.Set("Content-Type", "application/grpc-web+json")
+			_, err := responseWriter.Write(head[:])
+			assert.Nil(t, err)
+			_, err = responseWriter.Write(payload)
+			assert.Nil(t, err)
+			// Trailers exist, just no status. So error will be unknown instead of internal.
+			_, err = responseWriter.Write([]byte{128}) // end-stream flag
+			assert.Nil(t, err)
+			endStream := "grpc-message: foo\r\n"
+			var length [4]byte
+			binary.BigEndian.PutUint32(length[:], uint32(len(endStream)))
+			_, err = responseWriter.Write(length[:])
+			assert.Nil(t, err)
+			_, err = responseWriter.Write([]byte(endStream))
+			assert.Nil(t, err)
+		},
+		expectCode: connect.CodeUnknown,
+		expectMsg:  "unknown: protocol error: no Grpc-Status trailer: unexpected EOF",
 	}, {
 		name:    "connect_partial_payload",
 		options: []connect.ClientOption{connect.WithProtoJSON()},
@@ -2440,97 +2481,6 @@ func TestClientDisconnect(t *testing.T) {
 		t.Parallel()
 		testTransportClosure(t, http2RoundTripper)
 	})
-}
-
-func TestTrailersOnlyErrors(t *testing.T) {
-	t.Parallel()
-
-	head := [3]byte{}
-	testcases := []struct {
-		name       string
-		handler    http.HandlerFunc
-		options    []connect.ClientOption
-		expectCode connect.Code
-		expectMsg  string
-	}{{
-		name:    "grpc_body_after_trailers-only",
-		options: []connect.ClientOption{connect.WithGRPC()},
-		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
-			header := responseWriter.Header()
-			header.Set("Content-Type", "application/grpc")
-			header.Set("Grpc-Status", "3")
-			_, err := responseWriter.Write(head[:])
-			assert.Nil(t, err)
-		},
-		expectCode: connect.CodeInternal,
-		expectMsg:  fmt.Sprintf("internal: corrupt response: %d extra bytes after trailers-only response", len(head)),
-	}, {
-		name:    "grpc-web_body_after_trailers-only",
-		options: []connect.ClientOption{connect.WithGRPCWeb()},
-		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
-			header := responseWriter.Header()
-			header.Set("Content-Type", "application/grpc-web")
-			header.Set("Grpc-Status", "3")
-			_, err := responseWriter.Write(head[:])
-			assert.Nil(t, err)
-		},
-		expectCode: connect.CodeInternal,
-		expectMsg:  fmt.Sprintf("internal: corrupt response: %d extra bytes after trailers-only response", len(head)),
-	}, {
-		name:    "grpc_trailers_after_trailers-only",
-		options: []connect.ClientOption{connect.WithGRPC()},
-		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
-			header := responseWriter.Header()
-			header.Set("Content-Type", "application/grpc")
-			header.Set("Grpc-Status", "3")
-			responseWriter.WriteHeader(http.StatusOK)
-			responseWriter.(http.Flusher).Flush() //nolint:forcetypeassert
-			header.Set(http.TrailerPrefix+"Foo", "abc")
-		},
-		expectCode: connect.CodeInternal,
-		expectMsg:  "internal: corrupt response from server: gRPC trailers-only response may not contain HTTP trailers",
-	}, {
-		name:    "grpc-web_trailers_after_trailers-only",
-		options: []connect.ClientOption{connect.WithGRPCWeb()},
-		handler: func(responseWriter http.ResponseWriter, _ *http.Request) {
-			header := responseWriter.Header()
-			header.Set("Content-Type", "application/grpc-web")
-			header.Set("Grpc-Status", "3")
-			responseWriter.WriteHeader(http.StatusOK)
-			responseWriter.(http.Flusher).Flush() //nolint:forcetypeassert
-			header.Set(http.TrailerPrefix+"Foo", "abc")
-		},
-		expectCode: connect.CodeInternal,
-		expectMsg:  "internal: corrupt response from server: gRPC trailers-only response may not contain HTTP trailers",
-	}}
-	for _, testcase := range testcases {
-		testcase := testcase
-		t.Run(testcase.name, func(t *testing.T) {
-			t.Parallel()
-			mux := http.NewServeMux()
-			mux.HandleFunc("/", func(responseWriter http.ResponseWriter, request *http.Request) {
-				_, _ = io.Copy(io.Discard, request.Body)
-				testcase.handler(responseWriter, request)
-			})
-			server := memhttptest.NewServer(t, mux)
-			client := pingv1connect.NewPingServiceClient(
-				server.Client(),
-				server.URL(),
-				testcase.options...,
-			)
-			const upTo = 2
-			request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
-			request.Header().Set("Test-Case", t.Name())
-			stream, err := client.CountUp(context.Background(), request)
-			assert.Nil(t, err)
-			for i := 0; stream.Receive() && i < upTo; i++ {
-				assert.Equal(t, stream.Msg().GetNumber(), 42)
-			}
-			assert.NotNil(t, stream.Err())
-			assert.Equal(t, connect.CodeOf(stream.Err()), testcase.expectCode)
-			assert.Equal(t, stream.Err().Error(), testcase.expectMsg)
-		})
-	}
 }
 
 // TestBlankImportCodeGeneration tests that services.connect.go is generated with

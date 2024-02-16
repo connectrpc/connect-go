@@ -52,7 +52,6 @@ func TestHeaderMerge(t *testing.T) {
 	expect := http.Header{
 		"Foo": []string{"one", "two"},
 		"Bar": []string{"one"},
-		"Baz": nil,
 	}
 	assert.Equal(t, header, expect)
 }

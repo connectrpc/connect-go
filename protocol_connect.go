@@ -1386,6 +1386,15 @@ func connectValidateUnaryResponseContentType(
 		)
 	}
 	// Normal responses must have valid content-type that indicates same codec as the request.
+	if !strings.HasPrefix(responseContentType, connectUnaryContentTypePrefix) {
+		// Doesn't even look like a Connect response? Use code "unknown".
+		return errorf(
+			CodeUnknown,
+			"invalid content-type: %q; expecting %q",
+			responseContentType,
+			connectUnaryContentTypePrefix+requestCodecName,
+		)
+	}
 	responseCodecName := connectCodecFromContentType(
 		StreamTypeUnary,
 		responseContentType,
@@ -1410,6 +1419,15 @@ func connectValidateUnaryResponseContentType(
 
 func connectValidateStreamResponseContentType(requestCodecName string, streamType StreamType, responseContentType string) *Error {
 	// Responses must have valid content-type that indicates same codec as the request.
+	if !strings.HasPrefix(responseContentType, connectStreamingContentTypePrefix) {
+		// Doesn't even look like a Connect response? Use code "unknown".
+		return errorf(
+			CodeUnknown,
+			"invalid content-type: %q; expecting %q",
+			responseContentType,
+			connectUnaryContentTypePrefix+requestCodecName,
+		)
+	}
 	responseCodecName := connectCodecFromContentType(
 		streamType,
 		responseContentType,

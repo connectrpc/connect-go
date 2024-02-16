@@ -235,7 +235,7 @@ func TestConnectValidateUnaryResponseContentType(t *testing.T) {
 			codecName:            codecNameJSON,
 			statusCode:           http.StatusOK,
 			responseContentType:  "some/garbage",
-			expectCode:           CodeInternal,
+			expectCode:           CodeUnknown, // doesn't even look like it could be connect protocol
 			expectBadContentType: true,
 		},
 		// Error status, invalid content-type, returns code based on HTTP status code
@@ -296,7 +296,7 @@ func TestConnectValidateStreamResponseContentType(t *testing.T) {
 	testCases := []struct {
 		codecName           string
 		responseContentType string
-		expectErr           bool
+		expectCode          Code
 	}{
 		// Allowed content-types
 		{
@@ -307,31 +307,42 @@ func TestConnectValidateStreamResponseContentType(t *testing.T) {
 			codecName:           codecNameJSON,
 			responseContentType: "application/connect+json",
 		},
+		// Mismatched response codec
+		{
+			codecName:           codecNameProto,
+			responseContentType: "application/connect+json",
+			expectCode:          CodeInternal,
+		},
+		{
+			codecName:           codecNameJSON,
+			responseContentType: "application/connect+proto",
+			expectCode:          CodeInternal,
+		},
 		// Disallowed content-types
+		{
+			codecName:           codecNameJSON,
+			responseContentType: "application/connect+json; charset=utf-8",
+			expectCode:          CodeInternal, // *almost* looks right
+		},
 		{
 			codecName:           codecNameProto,
 			responseContentType: "application/proto",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 		{
 			codecName:           codecNameJSON,
 			responseContentType: "application/json",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 		{
 			codecName:           codecNameJSON,
 			responseContentType: "application/json; charset=utf-8",
-			expectErr:           true,
-		},
-		{
-			codecName:           codecNameJSON,
-			responseContentType: "application/connect+json; charset=utf-8",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 		{
 			codecName:           codecNameProto,
 			responseContentType: "some/garbage",
-			expectErr:           true,
+			expectCode:          CodeUnknown,
 		},
 	}
 	for _, testCase := range testCases {
@@ -344,10 +355,10 @@ func TestConnectValidateStreamResponseContentType(t *testing.T) {
 				StreamTypeServer,
 				testCase.responseContentType,
 			)
-			if !testCase.expectErr {
+			if testCase.expectCode == 0 {
 				assert.Nil(t, err)
 			} else if assert.NotNil(t, err) {
-				assert.Equal(t, CodeOf(err), CodeInternal)
+				assert.Equal(t, CodeOf(err), testCase.expectCode)
 				assert.True(t, strings.Contains(err.Message(), fmt.Sprintf("invalid content-type: %q; expecting", testCase.responseContentType)))
 			}
 		})
