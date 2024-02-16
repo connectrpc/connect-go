@@ -550,7 +550,7 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 	for key, values := range mergedTrailers {
 		for _, value := range values {
 			// These are potentially user-supplied, so we can't assume they're in
-			// canonical form. Don't use addHeaderCanonical.
+			// canonical form.
 			hc.responseWriter.Header().Add(http.TrailerPrefix+key, value)
 		}
 	}
