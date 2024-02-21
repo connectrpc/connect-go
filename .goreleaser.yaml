@@ -1,0 +1,38 @@
+# The lines below are called `modelines`. See `:help modeline`
+# Feel free to remove those if you don't want/need to use them.
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+
+version: 1
+
+builds:
+  - id: protoc-gen-connect-go
+    binary: protoc-gen-connect-go
+    main: ./cmd/protoc-gen-connect-go
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - format: tar.gz
+    # Use zip for windows archives
+    format_overrides:
+      - goos: windows
+        format: zip
+    rlcp: true
+    # Follows same naming conventions as release artifacts for bufbuild/buf
+    name_template: >-
+      protoc-gen-connect-go-
+      {{- .Tag }}-
+      {{- title .Os }}-
+      {{- if and (eq .Os "linux") (eq .Arch "arm64")}}aarch64
+      {{- else if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
