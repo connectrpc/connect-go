@@ -1,6 +1,6 @@
 name: windows
 env:
-  go_versions: '["1.20.x","1.21.x","1.22.x"]'
+  go_versions: "[\"1.20.x\",\"1.21.x\",\"1.22.x\"]"
 on:
   push:
     branches: [main]
