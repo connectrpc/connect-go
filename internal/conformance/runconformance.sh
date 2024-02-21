@@ -15,7 +15,7 @@ $GO build -o $BINDIR/referenceclient connectrpc.com/conformance/cmd/referencecli
 $GO build -o $BINDIR/referenceserver connectrpc.com/conformance/cmd/referenceserver
 
 echo "Running conformance tests against client..."
-$BINDIR/connectconformance --mode client --conf config.yaml -- $BINDIR/referenceclient
+$BINDIR/connectconformance --mode client --conf config.yaml -v --trace -- $BINDIR/referenceclient
 
 echo "Running conformance tests against server..."
-$BINDIR/connectconformance --mode server --conf config.yaml -- $BINDIR/referenceserver
+$BINDIR/connectconformance --mode server --conf config.yaml -v --trace -- $BINDIR/referenceserver
