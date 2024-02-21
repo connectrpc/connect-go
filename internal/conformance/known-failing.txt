@@ -1,0 +1,14 @@
+# The current v1.0.0-rc3 of conformance suite wants to see "unknown"
+# as the status for Connect unary responses where the JSON error body
+# is missing the 'code' property. But we instead want clients to
+# synthesize an error code from the HTTP status code. That way, if
+# a proxy or middle-box happens to reply with a JSON error, but not
+# a valid *Connect* error, we can use the HTTP status to derive an
+# error code, just like we do when the response has an unexpected
+# content type.
+#
+# So after we fix the tests in the conformance suite, we can remove
+# these lines below.
+Connect Error and End-Stream/**/error/missing-code
+Connect Error and End-Stream/**/error/null
+Connect Error and End-Stream/**/error/null-code
