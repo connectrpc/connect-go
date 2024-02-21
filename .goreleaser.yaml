@@ -1,5 +1,3 @@
-# The lines below are called `modelines`. See `:help modeline`
-# Feel free to remove those if you don't want/need to use them.
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 # vim: set ts=2 sw=2 tw=0 fo=cnqoj
 
@@ -19,7 +17,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w
+      - -s -w  # Remove debugging information and symbol table for smaller builds
 
 archives:
   - format: tar.gz
