@@ -45,6 +45,7 @@ type ErrorWriter struct {
 	grpcWebContentTypes          map[string]struct{}
 	unaryConnectContentTypes     map[string]struct{}
 	streamingConnectContentTypes map[string]struct{}
+	requireConnectProtocolHeader bool
 }
 
 // NewErrorWriter constructs an ErrorWriter. To properly recognize supported
@@ -60,6 +61,7 @@ func NewErrorWriter(opts ...HandlerOption) *ErrorWriter {
 		grpcWebContentTypes:          make(map[string]struct{}),
 		unaryConnectContentTypes:     make(map[string]struct{}),
 		streamingConnectContentTypes: make(map[string]struct{}),
+		requireConnectProtocolHeader: config.RequireConnectProtocolHeader,
 	}
 	for name := range config.Codecs {
 		unary := connectContentTypeFromCodecName(StreamTypeUnary, name)
@@ -87,9 +89,15 @@ func NewErrorWriter(opts ...HandlerOption) *ErrorWriter {
 func (w *ErrorWriter) classifyRequest(request *http.Request) protocolType {
 	ctype := canonicalizeContentType(getHeaderCanonical(request.Header, headerContentType))
 	if _, ok := w.unaryConnectContentTypes[ctype]; ok {
+		if err := connectCheckProtocolVersion(request, w.requireConnectProtocolHeader); err != nil {
+			return unknownProtocol
+		}
 		return connectUnaryProtocol
 	}
 	if _, ok := w.streamingConnectContentTypes[ctype]; ok {
+		if err := connectCheckProtocolVersion(request, w.requireConnectProtocolHeader); err != nil {
+			return unknownProtocol
+		}
 		return connectStreamProtocol
 	}
 	if _, ok := w.grpcContentTypes[ctype]; ok {

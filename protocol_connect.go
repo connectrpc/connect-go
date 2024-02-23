@@ -48,7 +48,7 @@ const (
 	connectFlagEnvelopeEndStream = 0b00000010
 
 	connectUnaryContentTypePrefix     = "application/"
-	connectUnaryContentTypeJSON       = connectUnaryContentTypePrefix + "json"
+	connectUnaryContentTypeJSON       = connectUnaryContentTypePrefix + codecNameJSON
 	connectStreamingContentTypePrefix = "application/connect+"
 
 	connectUnaryEncodingQueryParameter    = "encoding"
@@ -172,21 +172,8 @@ func (h *connectHandler) NewConn(
 	if failed == nil {
 		failed = checkServerStreamsCanFlush(h.Spec, responseWriter)
 	}
-	if failed == nil && request.Method == http.MethodGet {
-		version := query.Get(connectUnaryConnectQueryParameter)
-		if version == "" && h.RequireConnectProtocolHeader {
-			failed = errorf(CodeInvalidArgument, "missing required query parameter: set %s to %q", connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue)
-		} else if version != "" && version != connectUnaryConnectQueryValue {
-			failed = errorf(CodeInvalidArgument, "%s must be %q: got %q", connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue, version)
-		}
-	}
-	if failed == nil && request.Method == http.MethodPost {
-		version := getHeaderCanonical(request.Header, connectHeaderProtocolVersion)
-		if version == "" && h.RequireConnectProtocolHeader {
-			failed = errorf(CodeInvalidArgument, "missing required header: set %s to %q", connectHeaderProtocolVersion, connectProtocolVersion)
-		} else if version != "" && version != connectProtocolVersion {
-			failed = errorf(CodeInvalidArgument, "%s must be %q: got %q", connectHeaderProtocolVersion, connectProtocolVersion, version)
-		}
+	if failed == nil {
+		failed = connectCheckProtocolVersion(request, h.RequireConnectProtocolHeader)
 	}
 
 	var requestBody io.ReadCloser
@@ -1439,6 +1426,28 @@ func connectValidateStreamResponseContentType(requestCodecName string, streamTyp
 			responseContentType,
 			connectStreamingContentTypePrefix+requestCodecName,
 		)
+	}
+	return nil
+}
+
+func connectCheckProtocolVersion(request *http.Request, required bool) *Error {
+	switch request.Method {
+	case http.MethodGet:
+		version := request.URL.Query().Get(connectUnaryConnectQueryParameter)
+		if version == "" && required {
+			return errorf(CodeInvalidArgument, "missing required query parameter: set %s to %q", connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue)
+		} else if version != "" && version != connectUnaryConnectQueryValue {
+			return errorf(CodeInvalidArgument, "%s must be %q: got %q", connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue, version)
+		}
+	case http.MethodPost:
+		version := getHeaderCanonical(request.Header, connectHeaderProtocolVersion)
+		if version == "" && required {
+			return errorf(CodeInvalidArgument, "missing required header: set %s to %q", connectHeaderProtocolVersion, connectProtocolVersion)
+		} else if version != "" && version != connectProtocolVersion {
+			return errorf(CodeInvalidArgument, "%s must be %q: got %q", connectHeaderProtocolVersion, connectProtocolVersion, version)
+		}
+	default:
+		return errorf(CodeInvalidArgument, "unsupported method: %q", request.Method)
 	}
 	return nil
 }
