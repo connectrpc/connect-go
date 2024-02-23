@@ -41,10 +41,8 @@ const (
 type ErrorWriter struct {
 	bufferPool                   *bufferPool
 	protobuf                     Codec
-	grpcContentTypes             map[string]struct{}
-	grpcWebContentTypes          map[string]struct{}
-	unaryConnectContentTypes     map[string]struct{}
-	streamingConnectContentTypes map[string]struct{}
+	handleGRPC                   bool
+	handleGRPCWeb                bool
 	requireConnectProtocolHeader bool
 }
 
@@ -54,71 +52,56 @@ type ErrorWriter struct {
 // Options supplied via [WithConditionalHandlerOptions] are ignored.
 func NewErrorWriter(opts ...HandlerOption) *ErrorWriter {
 	config := newHandlerConfig("", StreamTypeUnary, opts)
-	writer := &ErrorWriter{
+	codecs := newReadOnlyCodecs(config.Codecs)
+	return &ErrorWriter{
 		bufferPool:                   config.BufferPool,
-		protobuf:                     newReadOnlyCodecs(config.Codecs).Protobuf(),
-		grpcContentTypes:             make(map[string]struct{}),
-		grpcWebContentTypes:          make(map[string]struct{}),
-		unaryConnectContentTypes:     make(map[string]struct{}),
-		streamingConnectContentTypes: make(map[string]struct{}),
+		protobuf:                     codecs.Protobuf(),
+		handleGRPC:                   config.HandleGRPC,
+		handleGRPCWeb:                config.HandleGRPCWeb,
 		requireConnectProtocolHeader: config.RequireConnectProtocolHeader,
 	}
-	for name := range config.Codecs {
-		unary := connectContentTypeFromCodecName(StreamTypeUnary, name)
-		writer.unaryConnectContentTypes[unary] = struct{}{}
-		streaming := connectContentTypeFromCodecName(StreamTypeBidi, name)
-		writer.streamingConnectContentTypes[streaming] = struct{}{}
-	}
-	if config.HandleGRPC {
-		writer.grpcContentTypes[grpcContentTypeDefault] = struct{}{}
-		for name := range config.Codecs {
-			ct := grpcContentTypeFromCodecName(false /* web */, name)
-			writer.grpcContentTypes[ct] = struct{}{}
-		}
-	}
-	if config.HandleGRPCWeb {
-		writer.grpcWebContentTypes[grpcWebContentTypeDefault] = struct{}{}
-		for name := range config.Codecs {
-			ct := grpcContentTypeFromCodecName(true /* web */, name)
-			writer.grpcWebContentTypes[ct] = struct{}{}
-		}
-	}
-	return writer
 }
 
 func (w *ErrorWriter) classifyRequest(request *http.Request) protocolType {
 	ctype := canonicalizeContentType(getHeaderCanonical(request.Header, headerContentType))
-	if _, ok := w.unaryConnectContentTypes[ctype]; ok {
-		if err := connectCheckProtocolVersion(request, w.requireConnectProtocolHeader); err != nil {
-			return unknownProtocol
+	method := request.Method
+	switch {
+	case w.handleGRPC && (ctype == grpcContentTypeDefault || strings.HasPrefix(ctype, grpcContentTypePrefix)):
+		if method != http.MethodPost {
+			break
 		}
-		return connectUnaryProtocol
-	}
-	if _, ok := w.streamingConnectContentTypes[ctype]; ok {
+		return grpcProtocol
+	case w.handleGRPCWeb && (ctype == grpcWebContentTypeDefault || strings.HasPrefix(ctype, grpcWebContentTypePrefix)):
+		if method != http.MethodPost {
+			break
+		}
+		return grpcWebProtocol
+	case strings.HasPrefix(ctype, connectStreamingContentTypePrefix):
+		if method != http.MethodPost {
+			break
+		}
 		// Streaming ignores the requireConnectProtocolHeader option as the
 		// Content-Type is enough to determine the protocol.
 		if err := connectCheckProtocolVersion(request, false /* required */); err != nil {
-			return unknownProtocol
+			break
 		}
 		return connectStreamProtocol
-	}
-	if _, ok := w.grpcContentTypes[ctype]; ok {
-		return grpcProtocol
-	}
-	if _, ok := w.grpcWebContentTypes[ctype]; ok {
-		return grpcWebProtocol
-	}
-	// Check for Connect-Protocol-Version header or connect protocol query
-	// parameter to support connect GET requests.
-	if request.Method == http.MethodGet {
-		connectVersion := getHeaderCanonical(request.Header, connectProtocolVersion)
-		if connectVersion == connectProtocolVersion {
-			return connectUnaryProtocol
+	case strings.HasPrefix(ctype, connectUnaryContentTypePrefix):
+		if method != http.MethodPost {
+			break
 		}
-		connectVersion = request.URL.Query().Get(connectUnaryConnectQueryParameter)
-		if connectVersion == connectUnaryConnectQueryValue {
-			return connectUnaryProtocol
+		if err := connectCheckProtocolVersion(request, w.requireConnectProtocolHeader); err != nil {
+			break
 		}
+		return connectUnaryProtocol
+	case ctype == "":
+		if method != http.MethodGet {
+			break
+		}
+		if err := connectCheckProtocolVersion(request, w.requireConnectProtocolHeader); err != nil {
+			break
+		}
+		return connectUnaryProtocol
 	}
 	return unknownProtocol
 }
