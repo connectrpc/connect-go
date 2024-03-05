@@ -47,7 +47,7 @@ func TestErrorWriter(t *testing.T) {
 		t.Run("Stream", func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "http://localhost", nil)
 			req.Header.Set("Content-Type", connectStreamingContentTypePrefix+codecNameJSON)
-			assert.False(t, writer.IsSupported(req))
+			assert.True(t, writer.IsSupported(req)) // ignores WithRequireConnectProtocolHeader
 			req.Header.Set(connectHeaderProtocolVersion, connectProtocolVersion)
 			assert.True(t, writer.IsSupported(req))
 		})

@@ -95,7 +95,9 @@ func (w *ErrorWriter) classifyRequest(request *http.Request) protocolType {
 		return connectUnaryProtocol
 	}
 	if _, ok := w.streamingConnectContentTypes[ctype]; ok {
-		if err := connectCheckProtocolVersion(request, w.requireConnectProtocolHeader); err != nil {
+		// Streaming ignores the requireConnectProtocolHeader option as the
+		// Content-Type is enough to determine the protocol.
+		if err := connectCheckProtocolVersion(request, false /* required */); err != nil {
 			return unknownProtocol
 		}
 		return connectStreamProtocol
