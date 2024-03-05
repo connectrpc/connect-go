@@ -2423,9 +2423,7 @@ func TestClientDisconnect(t *testing.T) {
 			assert.NotNil(t, err)
 			<-gotResponse
 			assert.NotNil(t, handlerReceiveErr)
-			if !assert.Equal(t, connect.CodeOf(handlerReceiveErr), connect.CodeCanceled) {
-				t.Logf("handlerReceiveErr: %v", handlerReceiveErr)
-			}
+			assert.Equal(t, connect.CodeOf(handlerReceiveErr), connect.CodeCanceled, assert.Sprintf("got %v", handlerReceiveErr))
 			assert.ErrorIs(t, handlerContextErr, context.Canceled)
 		})
 		t.Run("handler_writes", func(t *testing.T) {

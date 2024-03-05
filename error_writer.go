@@ -46,9 +46,11 @@ type ErrorWriter struct {
 	requireConnectProtocolHeader bool
 }
 
-// NewErrorWriter constructs an ErrorWriter. To properly recognize supported
-// RPC Content-Types in net/http middleware, you must pass the same
-// HandlerOptions to NewErrorWriter and any wrapped Connect handlers.
+// NewErrorWriter constructs an ErrorWriter. Handler options may be passed to
+// configure the error writer behaviour to match the handlers.
+// [WithRequiredConnectProtocolHeader] will assert that Connect protocol
+// requests include the version header allowing the error writer to correctly
+// classify the request.
 // Options supplied via [WithConditionalHandlerOptions] are ignored.
 func NewErrorWriter(opts ...HandlerOption) *ErrorWriter {
 	config := newHandlerConfig("", StreamTypeUnary, opts)
@@ -64,46 +66,33 @@ func NewErrorWriter(opts ...HandlerOption) *ErrorWriter {
 
 func (w *ErrorWriter) classifyRequest(request *http.Request) protocolType {
 	ctype := canonicalizeContentType(getHeaderCanonical(request.Header, headerContentType))
-	method := request.Method
+	isPost := request.Method == http.MethodPost
+	isGet := request.Method == http.MethodGet
 	switch {
-	case w.handleGRPC && (ctype == grpcContentTypeDefault || strings.HasPrefix(ctype, grpcContentTypePrefix)):
-		if method != http.MethodPost {
-			break
-		}
+	case w.handleGRPC && isPost && (ctype == grpcContentTypeDefault || strings.HasPrefix(ctype, grpcContentTypePrefix)):
 		return grpcProtocol
-	case w.handleGRPCWeb && (ctype == grpcWebContentTypeDefault || strings.HasPrefix(ctype, grpcWebContentTypePrefix)):
-		if method != http.MethodPost {
-			break
-		}
+	case w.handleGRPCWeb && isPost && (ctype == grpcWebContentTypeDefault || strings.HasPrefix(ctype, grpcWebContentTypePrefix)):
 		return grpcWebProtocol
-	case strings.HasPrefix(ctype, connectStreamingContentTypePrefix):
-		if method != http.MethodPost {
-			break
-		}
+	case isPost && strings.HasPrefix(ctype, connectStreamingContentTypePrefix):
 		// Streaming ignores the requireConnectProtocolHeader option as the
 		// Content-Type is enough to determine the protocol.
 		if err := connectCheckProtocolVersion(request, false /* required */); err != nil {
-			break
+			return unknownProtocol
 		}
 		return connectStreamProtocol
-	case strings.HasPrefix(ctype, connectUnaryContentTypePrefix):
-		if method != http.MethodPost {
-			break
-		}
+	case isPost && strings.HasPrefix(ctype, connectUnaryContentTypePrefix):
 		if err := connectCheckProtocolVersion(request, w.requireConnectProtocolHeader); err != nil {
-			break
+			return unknownProtocol
 		}
 		return connectUnaryProtocol
-	case ctype == "":
-		if method != http.MethodGet {
-			break
-		}
+	case isGet && ctype == "":
 		if err := connectCheckProtocolVersion(request, w.requireConnectProtocolHeader); err != nil {
-			break
+			return unknownProtocol
 		}
 		return connectUnaryProtocol
+	default:
+		return unknownProtocol
 	}
-	return unknownProtocol
 }
 
 // IsSupported checks whether a request is using one of the ErrorWriter's
