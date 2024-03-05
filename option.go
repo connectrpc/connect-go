@@ -159,7 +159,7 @@ func WithRecover(handle func(context.Context, Spec, http.Header, any) error) Han
 // header. This ensures that HTTP proxies and net/http middleware can easily
 // identify valid Connect requests, even if they use a common Content-Type like
 // application/json. However, it makes ad-hoc requests with tools like cURL
-// more laborious.
+// more laborious. Streaming requests are not affected by this option.
 //
 // This option has no effect if the client uses the gRPC or gRPC-Web protocols.
 func WithRequireConnectProtocolHeader() HandlerOption {

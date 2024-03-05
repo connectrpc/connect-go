@@ -173,7 +173,8 @@ func (h *connectHandler) NewConn(
 		failed = checkServerStreamsCanFlush(h.Spec, responseWriter)
 	}
 	if failed == nil {
-		failed = connectCheckProtocolVersion(request, h.RequireConnectProtocolHeader)
+		required := h.RequireConnectProtocolHeader && (h.Spec.StreamType == StreamTypeUnary)
+		failed = connectCheckProtocolVersion(request, required)
 	}
 
 	var requestBody io.ReadCloser
