@@ -128,7 +128,7 @@ func TestStableCodec(t *testing.T) {
 func TestJSONCodec(t *testing.T) {
 	t.Parallel()
 
-	codec := &protoJSONCodec{name: "json"}
+	codec := &protoJSONCodec{name: codecNameJSON}
 
 	t.Run("success", func(t *testing.T) {
 		t.Parallel()
