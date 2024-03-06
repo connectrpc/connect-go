@@ -80,12 +80,12 @@ func (w *ErrorWriter) classifyRequest(request *http.Request) protocolType {
 			return unknownProtocol
 		}
 		return connectStreamProtocol
-	case isPost && strings.HasPrefix(ctype, connectUnaryContentTypePrefix):
+	case isPost && strings.HasPrefix(ctype, connectUnaryContentTypePrefix) && !strings.HasPrefix(ctype, grpcContentTypeDefault):
 		if err := connectCheckProtocolVersion(request, w.requireConnectProtocolHeader); err != nil {
 			return unknownProtocol
 		}
 		return connectUnaryProtocol
-	case isGet && ctype == "":
+	case isGet:
 		if err := connectCheckProtocolVersion(request, w.requireConnectProtocolHeader); err != nil {
 			return unknownProtocol
 		}
