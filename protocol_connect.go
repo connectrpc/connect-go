@@ -1255,8 +1255,8 @@ func (e *connectWireError) UnmarshalJSON(data []byte) error {
 	// the other fields from the input JSON.
 	var wireError struct {
 		Code    string               `json:"code"`
-		Message string               `json:"message,omitempty"`
-		Details []*connectWireDetail `json:"details,omitempty"`
+		Message string               `json:"message"`
+		Details []*connectWireDetail `json:"details"`
 	}
 	err := json.Unmarshal(data, &wireError)
 	if err != nil {
