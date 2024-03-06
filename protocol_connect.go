@@ -547,6 +547,10 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 				errors.New(response.Status),
 			)
 		}
+		if wireErr.Code == 0 {
+			// code not set? default to one implied by HTTP status
+			wireErr.Code = connectHTTPToCode(response.StatusCode)
+		}
 		serverErr := wireErr.asError()
 		if serverErr == nil {
 			return nil
@@ -1231,6 +1235,26 @@ func (e *connectWireError) asError() *Error {
 		}
 	}
 	return err
+}
+
+func (e *connectWireError) UnmarshalJSON(data []byte) error {
+	// We want to be lenient if the JSON has an unrecognized or invalid code.
+	// So if that occurs, we leave the code unset but can still de-serialize
+	// the other fields from the input JSON.
+	var wireError struct {
+		Code    string               `json:"code"`
+		Message string               `json:"message"`
+		Details []*connectWireDetail `json:"details"`
+	}
+	err := json.Unmarshal(data, &wireError)
+	if err != nil {
+		return err
+	}
+	e.Message = wireError.Message
+	e.Details = wireError.Details
+	// This will leave e.Code unset if we can't unmarshal the given string.
+	_ = e.Code.UnmarshalText([]byte(wireError.Code))
+	return nil
 }
 
 type connectEndStreamMessage struct {
