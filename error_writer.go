@@ -58,8 +58,6 @@ func NewErrorWriter(opts ...HandlerOption) *ErrorWriter {
 	return &ErrorWriter{
 		bufferPool:                   config.BufferPool,
 		protobuf:                     codecs.Protobuf(),
-		handleGRPC:                   config.HandleGRPC,
-		handleGRPCWeb:                config.HandleGRPCWeb,
 		requireConnectProtocolHeader: config.RequireConnectProtocolHeader,
 	}
 }
@@ -69,9 +67,9 @@ func (w *ErrorWriter) classifyRequest(request *http.Request) protocolType {
 	isPost := request.Method == http.MethodPost
 	isGet := request.Method == http.MethodGet
 	switch {
-	case w.handleGRPC && isPost && (ctype == grpcContentTypeDefault || strings.HasPrefix(ctype, grpcContentTypePrefix)):
+	case isPost && (ctype == grpcContentTypeDefault || strings.HasPrefix(ctype, grpcContentTypePrefix)):
 		return grpcProtocol
-	case w.handleGRPCWeb && isPost && (ctype == grpcWebContentTypeDefault || strings.HasPrefix(ctype, grpcWebContentTypePrefix)):
+	case isPost && (ctype == grpcWebContentTypeDefault || strings.HasPrefix(ctype, grpcWebContentTypePrefix)):
 		return grpcWebProtocol
 	case isPost && strings.HasPrefix(ctype, connectStreamingContentTypePrefix):
 		// Streaming ignores the requireConnectProtocolHeader option as the
@@ -80,7 +78,7 @@ func (w *ErrorWriter) classifyRequest(request *http.Request) protocolType {
 			return unknownProtocol
 		}
 		return connectStreamProtocol
-	case isPost && strings.HasPrefix(ctype, connectUnaryContentTypePrefix) && !strings.HasPrefix(ctype, grpcContentTypeDefault):
+	case isPost && strings.HasPrefix(ctype, connectUnaryContentTypePrefix):
 		if err := connectCheckProtocolVersion(request, w.requireConnectProtocolHeader); err != nil {
 			return unknownProtocol
 		}
