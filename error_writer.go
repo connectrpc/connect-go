@@ -41,8 +41,6 @@ const (
 type ErrorWriter struct {
 	bufferPool                   *bufferPool
 	protobuf                     Codec
-	handleGRPC                   bool
-	handleGRPCWeb                bool
 	requireConnectProtocolHeader bool
 }
 
