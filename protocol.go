@@ -396,3 +396,28 @@ func canonicalizeContentTypeSlow(contentType string) string {
 	}
 	return mime.FormatMediaType(base, params)
 }
+
+func httpToCode(httpCode int) Code {
+	// https://github.com/grpc/grpc/blob/master/doc/http-grpc-status-mapping.md
+	// Note that this is NOT the inverse of the gRPC-to-HTTP or Connect-to-HTTP
+	// mappings.
+
+	// Literals are easier to compare to the specification (vs named
+	// constants).
+	switch httpCode {
+	case 400:
+		return CodeInternal
+	case 401:
+		return CodeUnauthenticated
+	case 403:
+		return CodePermissionDenied
+	case 404:
+		return CodeUnimplemented
+	case 429:
+		return CodeUnavailable
+	case 502, 503, 504:
+		return CodeUnavailable
+	default:
+		return CodeUnknown
+	}
+}
