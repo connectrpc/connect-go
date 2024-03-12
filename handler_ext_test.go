@@ -231,7 +231,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		resp, err := client.Do(req)
 		assert.Nil(t, err)
 		defer resp.Body.Close()
-		assert.Equal(t, resp.StatusCode, http.StatusNotFound)
+		assert.Equal(t, resp.StatusCode, http.StatusNotImplemented)
 
 		type errorMessage struct {
 			Code    string `json:"code,omitempty"`

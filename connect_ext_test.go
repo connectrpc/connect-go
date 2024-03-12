@@ -1731,9 +1731,9 @@ func TestConnectHTTPErrorCodes(t *testing.T) {
 		assert.NotNil(t, err)
 		assert.Nil(t, connectResp)
 	}
-	t.Run("CodeCanceled-408", func(t *testing.T) {
+	t.Run("CodeCanceled-499", func(t *testing.T) {
 		t.Parallel()
-		checkHTTPStatus(t, connect.CodeCanceled, 408)
+		checkHTTPStatus(t, connect.CodeCanceled, 499)
 	})
 	t.Run("CodeUnknown-500", func(t *testing.T) {
 		t.Parallel()
@@ -1743,9 +1743,9 @@ func TestConnectHTTPErrorCodes(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeInvalidArgument, 400)
 	})
-	t.Run("CodeDeadlineExceeded-408", func(t *testing.T) {
+	t.Run("CodeDeadlineExceeded-504", func(t *testing.T) {
 		t.Parallel()
-		checkHTTPStatus(t, connect.CodeDeadlineExceeded, 408)
+		checkHTTPStatus(t, connect.CodeDeadlineExceeded, 504)
 	})
 	t.Run("CodeNotFound-404", func(t *testing.T) {
 		t.Parallel()
@@ -1763,9 +1763,9 @@ func TestConnectHTTPErrorCodes(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeResourceExhausted, 429)
 	})
-	t.Run("CodeFailedPrecondition-412", func(t *testing.T) {
+	t.Run("CodeFailedPrecondition-400", func(t *testing.T) {
 		t.Parallel()
-		checkHTTPStatus(t, connect.CodeFailedPrecondition, 412)
+		checkHTTPStatus(t, connect.CodeFailedPrecondition, 400)
 	})
 	t.Run("CodeAborted-409", func(t *testing.T) {
 		t.Parallel()
@@ -1775,9 +1775,9 @@ func TestConnectHTTPErrorCodes(t *testing.T) {
 		t.Parallel()
 		checkHTTPStatus(t, connect.CodeOutOfRange, 400)
 	})
-	t.Run("CodeUnimplemented-404", func(t *testing.T) {
+	t.Run("CodeUnimplemented-501", func(t *testing.T) {
 		t.Parallel()
-		checkHTTPStatus(t, connect.CodeUnimplemented, 404)
+		checkHTTPStatus(t, connect.CodeUnimplemented, 501)
 	})
 	t.Run("CodeInternal-500", func(t *testing.T) {
 		t.Parallel()

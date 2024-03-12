@@ -12,3 +12,16 @@
 Connect Error and End-Stream/**/error/missing-code
 Connect Error and End-Stream/**/error/null
 Connect Error and End-Stream/**/error/null-code
+
+# The current v1.0.0-rc3 of conformance suite has expectations based
+# on the old mappings of HTTP to RPC code. The mappings were revised
+# in the spec (https://github.com/connectrpc/connectrpc.com/pull/130),
+# and this repo implements those new mappings. So test cases based on
+# the old mappings fail for right now.
+Connect Unexpected Responses/**/unexpected-error-body
+HTTP to Connect Code Mapping/**/bad-request
+HTTP to Connect Code Mapping/**/conflict
+HTTP to Connect Code Mapping/**/payload-too-large
+HTTP to Connect Code Mapping/**/precondition-failed
+HTTP to Connect Code Mapping/**/request-header-fields-too-large
+HTTP to Connect Code Mapping/**/request-timeout

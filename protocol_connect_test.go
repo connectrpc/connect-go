@@ -243,19 +243,19 @@ func TestConnectValidateUnaryResponseContentType(t *testing.T) {
 			codecName:           codecNameProto,
 			statusCode:          http.StatusNotFound,
 			responseContentType: "application/proto",
-			expectCode:          connectHTTPToCode(http.StatusNotFound),
+			expectCode:          httpToCode(http.StatusNotFound),
 		},
 		{
 			codecName:           codecNameJSON,
 			statusCode:          http.StatusBadRequest,
 			responseContentType: "some/garbage",
-			expectCode:          connectHTTPToCode(http.StatusBadRequest),
+			expectCode:          httpToCode(http.StatusBadRequest),
 		},
 		{
 			codecName:           codecNameJSON,
 			statusCode:          http.StatusTooManyRequests,
 			responseContentType: "some/garbage",
-			expectCode:          connectHTTPToCode(http.StatusTooManyRequests),
+			expectCode:          httpToCode(http.StatusTooManyRequests),
 		},
 	}
 	for _, testCase := range testCases {

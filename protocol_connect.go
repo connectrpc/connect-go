@@ -543,13 +543,13 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 		var wireErr connectWireError
 		if err := unmarshaler.UnmarshalFunc(&wireErr, json.Unmarshal); err != nil {
 			return NewError(
-				connectHTTPToCode(response.StatusCode),
+				httpToCode(response.StatusCode),
 				errors.New(response.Status),
 			)
 		}
 		if wireErr.Code == 0 {
 			// code not set? default to one implied by HTTP status
-			wireErr.Code = connectHTTPToCode(response.StatusCode)
+			wireErr.Code = httpToCode(response.StatusCode)
 		}
 		serverErr := wireErr.asError()
 		if serverErr == nil {
@@ -652,7 +652,7 @@ func (cc *connectStreamingClientConn) onRequestSend(fn func(*http.Request)) {
 
 func (cc *connectStreamingClientConn) validateResponse(response *http.Response) *Error {
 	if response.StatusCode != http.StatusOK {
-		return errorf(connectHTTPToCode(response.StatusCode), "HTTP status %v", response.Status)
+		return errorf(httpToCode(response.StatusCode), "HTTP status %v", response.Status)
 	}
 	if err := connectValidateStreamResponseContentType(
 		cc.codec.Name(),
@@ -1267,13 +1267,13 @@ func connectCodeToHTTP(code Code) int {
 	// it easier to compare this function to the Connect specification.
 	switch code {
 	case CodeCanceled:
-		return 408
+		return 499
 	case CodeUnknown:
 		return 500
 	case CodeInvalidArgument:
 		return 400
 	case CodeDeadlineExceeded:
-		return 408
+		return 504
 	case CodeNotFound:
 		return 404
 	case CodeAlreadyExists:
@@ -1283,13 +1283,13 @@ func connectCodeToHTTP(code Code) int {
 	case CodeResourceExhausted:
 		return 429
 	case CodeFailedPrecondition:
-		return 412
+		return 400
 	case CodeAborted:
 		return 409
 	case CodeOutOfRange:
 		return 400
 	case CodeUnimplemented:
-		return 404
+		return 501
 	case CodeInternal:
 		return 500
 	case CodeUnavailable:
@@ -1300,39 +1300,6 @@ func connectCodeToHTTP(code Code) int {
 		return 401
 	default:
 		return 500 // same as CodeUnknown
-	}
-}
-
-func connectHTTPToCode(httpCode int) Code {
-	// As above, literals are easier to compare to the specificaton (vs named
-	// constants).
-	switch httpCode {
-	case 400:
-		return CodeInvalidArgument
-	case 401:
-		return CodeUnauthenticated
-	case 403:
-		return CodePermissionDenied
-	case 404:
-		return CodeUnimplemented
-	case 408:
-		return CodeDeadlineExceeded
-	case 409:
-		return CodeAborted
-	case 412:
-		return CodeFailedPrecondition
-	case 413:
-		return CodeResourceExhausted
-	case 415:
-		return CodeInternal
-	case 429:
-		return CodeUnavailable
-	case 431:
-		return CodeResourceExhausted
-	case 502, 503, 504:
-		return CodeUnavailable
-	default:
-		return CodeUnknown
 	}
 }
 
@@ -1393,7 +1360,7 @@ func connectValidateUnaryResponseContentType(
 			return nil
 		}
 		return NewError(
-			connectHTTPToCode(statusCode),
+			httpToCode(statusCode),
 			errors.New(statusMsg),
 		)
 	}
