@@ -2423,7 +2423,7 @@ func TestClientDisconnect(t *testing.T) {
 			assert.NotNil(t, err)
 			<-gotResponse
 			assert.NotNil(t, handlerReceiveErr)
-			assert.Equal(t, connect.CodeOf(handlerReceiveErr), connect.CodeCanceled)
+			assert.Equal(t, connect.CodeOf(handlerReceiveErr), connect.CodeCanceled, assert.Sprintf("got %v", handlerReceiveErr))
 			assert.ErrorIs(t, handlerContextErr, context.Canceled)
 		})
 		t.Run("handler_writes", func(t *testing.T) {
@@ -2434,7 +2434,7 @@ func TestClientDisconnect(t *testing.T) {
 				gotResponse       = make(chan struct{})
 			)
 			pingServer := &pluggablePingServer{
-				countUp: func(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+				countUp: func(ctx context.Context, _ *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
 					close(gotRequest)
 					var err error
 					for err == nil {

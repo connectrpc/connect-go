@@ -274,8 +274,6 @@ type handlerConfig struct {
 	Procedure                    string
 	Schema                       any
 	Initializer                  maybeInitializer
-	HandleGRPC                   bool
-	HandleGRPCWeb                bool
 	RequireConnectProtocolHeader bool
 	IdempotencyLevel             IdempotencyLevel
 	BufferPool                   *bufferPool
@@ -290,8 +288,6 @@ func newHandlerConfig(procedure string, streamType StreamType, options []Handler
 		Procedure:        protoPath,
 		CompressionPools: make(map[string]*compressionPool),
 		Codecs:           make(map[string]Codec),
-		HandleGRPC:       true,
-		HandleGRPCWeb:    true,
 		BufferPool:       newBufferPool(),
 		StreamType:       streamType,
 	}
@@ -314,12 +310,10 @@ func (c *handlerConfig) newSpec() Spec {
 }
 
 func (c *handlerConfig) newProtocolHandlers() []protocolHandler {
-	protocols := []protocol{&protocolConnect{}}
-	if c.HandleGRPC {
-		protocols = append(protocols, &protocolGRPC{web: false})
-	}
-	if c.HandleGRPCWeb {
-		protocols = append(protocols, &protocolGRPC{web: true})
+	protocols := []protocol{
+		&protocolConnect{},
+		&protocolGRPC{web: false},
+		&protocolGRPC{web: true},
 	}
 	handlers := make([]protocolHandler, 0, len(protocols))
 	codecs := newReadOnlyCodecs(c.Codecs)
