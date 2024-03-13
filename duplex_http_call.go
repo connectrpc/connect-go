@@ -161,7 +161,7 @@ func (d *duplexHTTPCall) sendUnary(payload messagePayload) (int64, error) {
 	return payloadLength, nil
 }
 
-// Close the request body. Callers *must* call CloseWrite before Read when
+// CloseWrite closes the request body. Callers *must* call CloseWrite before Read when
 // using HTTP/1.x.
 func (d *duplexHTTPCall) CloseWrite() error {
 	// Even if Write was never called, we need to make an HTTP request. This
@@ -226,7 +226,11 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 		return 0, wrapIfContextError(err)
 	}
 	n, err := d.response.Body.Read(data)
-	return n, wrapIfRSTError(err)
+	if err != nil && !errors.Is(err, io.EOF) {
+		err = wrapIfContextDone(d.ctx, err)
+		err = wrapIfRSTError(err)
+	}
+	return n, err
 }
 
 func (d *duplexHTTPCall) CloseRead() error {
@@ -241,7 +245,7 @@ func (d *duplexHTTPCall) CloseRead() error {
 		errors.Is(err, context.DeadlineExceeded) {
 		err = closeErr
 	}
-	err = wrapIfContextError(err)
+	err = wrapIfContextDone(d.ctx, err)
 	return wrapIfRSTError(err)
 }
 
