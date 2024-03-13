@@ -226,8 +226,11 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 		return 0, wrapIfContextError(err)
 	}
 	n, err := d.response.Body.Read(data)
-	err = wrapIfContextDone(d.ctx, err)
-	return n, wrapIfRSTError(err)
+	if err != nil && !errors.Is(err, io.EOF) {
+		err = wrapIfContextDone(d.ctx, err)
+		err = wrapIfRSTError(err)
+	}
+	return n, err
 }
 
 func (d *duplexHTTPCall) CloseRead() error {
