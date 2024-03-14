@@ -544,6 +544,7 @@ func TestConcurrentStreams(t *testing.T) {
 }
 
 func TestErrorHeaderPropagation(t *testing.T) {
+	t.Parallel()
 	pingServer := &pluggablePingServer{
 		ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
 			err := connect.NewError(connect.CodeInvalidArgument, errors.New("ping error"))
