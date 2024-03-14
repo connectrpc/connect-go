@@ -766,7 +766,7 @@ func (hc *connectUnaryHandlerConn) writeResponseHeader(err error) {
 		header[headerVary] = append(header[headerVary], connectUnaryHeaderAcceptCompression)
 	}
 	if err != nil {
-		if connectErr, ok := asError(err); ok {
+		if connectErr, ok := asError(err); ok && !connectErr.wireErr {
 			mergeMetadataHeaders(header, connectErr.meta)
 		}
 	}

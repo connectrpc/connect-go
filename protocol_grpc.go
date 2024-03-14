@@ -859,7 +859,7 @@ func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) {
 		)
 		return
 	}
-	if connectErr, ok := asError(err); ok {
+	if connectErr, ok := asError(err); ok && !connectErr.wireErr {
 		mergeMetadataHeaders(trailer, connectErr.meta)
 	}
 	setHeaderCanonical(trailer, grpcHeaderStatus, code)
