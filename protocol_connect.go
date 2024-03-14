@@ -534,10 +534,12 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 			cc.compressionPools.CommaSeparatedNames(),
 		)
 	}
+	cc.unmarshaler.compressionPool = cc.compressionPools.Get(compression)
 	if response.StatusCode != http.StatusOK {
 		unmarshaler := connectUnaryUnmarshaler{
+			ctx:             cc.unmarshaler.ctx,
 			reader:          response.Body,
-			compressionPool: cc.compressionPools.Get(compression),
+			compressionPool: cc.unmarshaler.compressionPool,
 			bufferPool:      cc.bufferPool,
 		}
 		var wireErr connectWireError
@@ -559,7 +561,6 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 		mergeHeaders(serverErr.meta, cc.responseTrailer)
 		return serverErr
 	}
-	cc.unmarshaler.compressionPool = cc.compressionPools.Get(compression)
 	return nil
 }
 
@@ -766,7 +767,7 @@ func (hc *connectUnaryHandlerConn) writeResponseHeader(err error) {
 	}
 	if err != nil {
 		if connectErr, ok := asError(err); ok {
-			mergeHeaders(header, connectErr.meta)
+			mergeMetadataHeaders(header, connectErr.meta)
 		}
 	}
 	for k, v := range hc.responseTrailer {

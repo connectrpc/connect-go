@@ -41,6 +41,7 @@ const (
 	headerHost            = "Host"
 	headerUserAgent       = "User-Agent"
 	headerTrailer         = "Trailer"
+	headerDate            = "Date"
 
 	discardLimit = 1024 * 1024 * 4 // 4MiB
 )

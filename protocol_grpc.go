@@ -860,7 +860,7 @@ func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) {
 		return
 	}
 	if connectErr, ok := asError(err); ok {
-		mergeHeaders(trailer, connectErr.meta)
+		mergeMetadataHeaders(trailer, connectErr.meta)
 	}
 	setHeaderCanonical(trailer, grpcHeaderStatus, code)
 	setHeaderCanonical(trailer, grpcHeaderMessage, grpcPercentEncode(status.GetMessage()))

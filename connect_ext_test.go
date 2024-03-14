@@ -43,6 +43,7 @@ import (
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 const errorMessage = "oh no"
@@ -540,6 +541,81 @@ func TestConcurrentStreams(t *testing.T) {
 	}
 	start.Done()
 	done.Wait()
+}
+
+func TestErrorHeaderPropagation(t *testing.T) {
+	pingServer := &pluggablePingServer{
+		ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+			err := connect.NewError(connect.CodeInvalidArgument, errors.New("ping error"))
+			msgDetail := &wrapperspb.StringValue{Value: "server details"}
+			errDetail, derr := connect.NewErrorDetail(msgDetail)
+			if derr != nil {
+				return nil, derr
+			}
+			err.AddDetail(errDetail)
+			err.Meta().Set("Content-Length", "1337")
+			err.Meta().Set("Content-Type", "application/xml")
+			err.Meta().Set("Accept-Encoding", "bogus")
+			err.Meta().Set("Date", "Thu, 01 Jan 1970 00:00:00 GMT")
+			err.Meta().Set("X-Test", "test") // Allow custom headers.
+			return nil, err
+		},
+	}
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+	server := memhttptest.NewServer(t, mux)
+
+	testPing := func(t *testing.T, client pingv1connect.PingServiceClient) {
+		t.Helper()
+		request := connect.NewRequest(&pingv1.PingRequest{})
+		request.Header().Set("X-Test", t.Name())
+		_, err := client.Ping(context.Background(), request)
+		if !assert.NotNil(t, err) {
+			return
+		}
+		assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
+		var connectErr *connect.Error
+		if !assert.True(t, errors.As(err, &connectErr)) {
+			return
+		}
+		assert.Equal(t, connectErr.Message(), "ping error")
+
+		details := connectErr.Details()
+		if assert.Equal(t, len(details), 1) {
+			detailMsg, err := details[0].Value()
+			if !assert.Nil(t, err) {
+				return
+			}
+			serverDetails, ok := detailMsg.(*wrapperspb.StringValue)
+			if !assert.True(t, ok) {
+				return
+			}
+			assert.Equal(t, serverDetails.Value, "server details")
+		}
+		meta := connectErr.Meta()
+		assert.NotEqual(t, meta.Values("Content-Length"), []string{"1337"})
+		assert.NotEqual(t, meta.Values("Accept-Encoding"), []string{"bogus"})
+		assert.NotEqual(t, meta.Values("Content-Type"), []string{"application/xml"})
+		assert.NotEqual(t, meta.Values("Content-Length"), []string{"1337"})
+		assert.NotEqual(t, meta.Values("Date"), []string{"Thu, 01 Jan 1970 00:00:00 GMT"})
+		assert.Equal(t, meta.Values("X-Test"), []string{"test"})
+	}
+
+	t.Run("connect", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		testPing(t, client)
+	})
+	t.Run("grpc", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
+		testPing(t, client)
+	})
+	t.Run("grpc-web", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
+		testPing(t, client)
+	})
 }
 
 func TestHeaderBasic(t *testing.T) {
