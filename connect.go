@@ -354,34 +354,85 @@ type handlerConnCloser interface {
 	Close(error) error
 }
 
+// receiveConn represents the shared methods of both StreamingClientConn and StreamingHandlerConn
+// that the below helper functions use for implementing the rules around a "unary" stream, that
+// is expected to have exactly one message (or zero messages followed by a non-EOF error).
+type receiveConn interface {
+	Spec() Spec
+	Receive(any) error
+}
+
+// hasHTTPMethod is implemented by streaming connections that support HTTP methods other than
+// POST.
+type hasHTTPMethod interface {
+	getHTTPMethod() string
+}
+
 // receiveUnaryResponse unmarshals a message from a StreamingClientConn, then
 // envelopes the message and attaches headers and trailers. It attempts to
 // consume the response stream and isn't appropriate when receiving multiple
 // messages.
 func receiveUnaryResponse[T any](conn StreamingClientConn, initializer maybeInitializer) (*Response[T], error) {
+	msg, err := receiveUnaryMessage[T](conn, initializer)
+	if err != nil {
+		return nil, err
+	}
+	return &Response[T]{
+		Msg:     msg,
+		header:  conn.ResponseHeader(),
+		trailer: conn.ResponseTrailer(),
+	}, nil
+}
+
+// receiveUnaryRequest unmarshals a message from a StreamingClientConn, then
+// envelopes the message and attaches headers and other request properties. It
+// attempts to consume the request stream and isn't appropriate when receiving
+// multiple messages.
+func receiveUnaryRequest[T any](conn StreamingHandlerConn, initializer maybeInitializer) (*Request[T], error) {
+	msg, err := receiveUnaryMessage[T](conn, initializer)
+	if err != nil {
+		return nil, err
+	}
+	method := http.MethodPost
+	if hasRequestMethod, ok := conn.(hasHTTPMethod); ok {
+		method = hasRequestMethod.getHTTPMethod()
+	}
+	return &Request[T]{
+		Msg:    msg,
+		spec:   conn.Spec(),
+		peer:   conn.Peer(),
+		header: conn.RequestHeader(),
+		method: method,
+	}, nil
+}
+
+func receiveUnaryMessage[T any](conn receiveConn, initializer maybeInitializer) (*T, error) {
 	var msg T
 	if err := initializer.maybe(conn.Spec(), &msg); err != nil {
 		return nil, err
 	}
+	// Possibly counter-intuitive, but the gRPC specs about error codes state that both clients
+	// and servers should return "unimplemented" when they encounter a cardinality violation: where
+	// the number of messages in the stream is wrong. Search for "cardinality violation" in the
+	// following docs:
+	//    https://grpc.github.io/grpc/core/md_doc_statuscodes.html
 	if err := conn.Receive(&msg); err != nil {
+		if errors.Is(err, io.EOF) {
+			err = NewError(CodeUnimplemented, errors.New("unary request has zero messages"))
+		}
 		return nil, err
 	}
-	// In a well-formed stream, the response message may be followed by a block
-	// of in-stream trailers or HTTP trailers. To ensure that we receive the
-	// trailers, try to read another message from the stream.
+	// In a well-formed stream, the one message must be the only content in the body.
+	// To verify that it is well-formed, try to read another message from the stream.
 	// TODO: optimise unary calls to avoid this extra receive.
 	var msg2 T
 	if err := initializer.maybe(conn.Spec(), &msg2); err != nil {
 		return nil, err
 	}
 	if err := conn.Receive(&msg2); err == nil {
-		return nil, NewError(CodeUnknown, errors.New("unary stream has multiple messages"))
+		return nil, NewError(CodeUnimplemented, errors.New("unary response has multiple messages"))
 	} else if err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
-	return &Response[T]{
-		Msg:     &msg,
-		header:  conn.ResponseHeader(),
-		trailer: conn.ResponseTrailer(),
-	}, nil
+	return &msg, nil
 }
