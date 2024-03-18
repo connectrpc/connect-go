@@ -545,8 +545,11 @@ func TestConcurrentStreams(t *testing.T) {
 
 func TestErrorHeaderPropagation(t *testing.T) {
 	t.Parallel()
-	newError := func(testname string) *connect.Error {
+	newError := func(testname string, isWire bool) *connect.Error {
 		err := connect.NewError(connect.CodeInvalidArgument, errors.New(testname))
+		if isWire {
+			err = connect.NewWireError(connect.CodeInvalidArgument, errors.New(testname))
+		}
 		msgDetail := &wrapperspb.StringValue{Value: "server details"}
 		errDetail, derr := connect.NewErrorDetail(msgDetail)
 		if assert.Nil(t, derr) {
@@ -557,24 +560,24 @@ func TestErrorHeaderPropagation(t *testing.T) {
 		err.Meta().Set("Accept-Encoding", "bogus")
 		err.Meta().Set("Date", "Thu, 01 Jan 1970 00:00:00 GMT")
 		err.Meta().Set("Grpc-Status", "0")
-		// Allow custom headers.
+		// Set custom headers.
 		err.Meta().Set("X-Test", testname)
 		err.Meta()["x-test-case"] = []string{testname}
 		return err
 	}
 	pingServer := &pluggablePingServer{
 		ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
-			return nil, newError(request.Header().Get("X-Test"))
+			return nil, newError(request.Header().Get("X-Test"), request.Header().Get("X-Test-Is-Wire") == "true")
 		},
 		cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
-			return newError(stream.RequestHeader().Get("X-Test"))
+			return newError(stream.RequestHeader().Get("X-Test"), stream.RequestHeader().Get("X-Test-Is-Wire") == "true")
 		},
 	}
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
 	server := memhttptest.NewServer(t, mux)
 
-	assertError := func(t *testing.T, err error) {
+	assertError := func(t *testing.T, err error, allowCustomHeaders bool) {
 		t.Helper()
 		var connectErr *connect.Error
 		if !assert.True(t, errors.As(err, &connectErr)) {
@@ -600,9 +603,13 @@ func TestErrorHeaderPropagation(t *testing.T) {
 		assert.NotEqual(t, meta.Values("Content-Type"), []string{"application/xml"})
 		assert.NotEqual(t, meta.Values("Content-Length"), []string{"1337"})
 		assert.NotEqual(t, meta.Values("Date"), []string{"Thu, 01 Jan 1970 00:00:00 GMT"})
-		// Check custom headers.
-		assert.Equal(t, meta.Values("x-test-case"), []string{t.Name()})
-		assert.Equal(t, meta.Values("X-Test"), []string{t.Name()})
+		if allowCustomHeaders {
+			assert.Equal(t, meta.Values("x-test-case"), []string{t.Name()})
+			assert.Equal(t, meta.Values("X-Test"), []string{t.Name()})
+		} else {
+			assert.Equal(t, meta.Values("x-test-case"), []string(nil))
+			assert.Equal(t, meta.Values("X-Test"), []string(nil))
+		}
 	}
 	testServices := func(t *testing.T, client pingv1connect.PingServiceClient) {
 		t.Helper()
@@ -613,7 +620,17 @@ func TestErrorHeaderPropagation(t *testing.T) {
 			if !assert.NotNil(t, err) {
 				return
 			}
-			assertError(t, err)
+			assertError(t, err, true /* allowCustomHeaders */)
+			t.Run("wire", func(t *testing.T) {
+				request := connect.NewRequest(&pingv1.PingRequest{})
+				request.Header().Set("X-Test", t.Name())
+				request.Header().Set("X-Test-Is-Wire", "true")
+				_, err := client.Ping(context.Background(), request)
+				if !assert.NotNil(t, err) {
+					return
+				}
+				assertError(t, err, false /* allowCustomHeaders */)
+			})
 		})
 		t.Run("bidi", func(t *testing.T) {
 			stream := client.CumSum(context.Background())
@@ -625,7 +642,19 @@ func TestErrorHeaderPropagation(t *testing.T) {
 			if !assert.NotNil(t, err) {
 				return
 			}
-			assertError(t, err)
+			assertError(t, err, true /* allowCustomHeaders */)
+			t.Run("wire", func(t *testing.T) {
+				stream := client.CumSum(context.Background())
+				stream.RequestHeader().Set("X-Test", t.Name())
+				stream.RequestHeader().Set("X-Test-Is-Wire", "true")
+				if err := stream.Send(nil); err != nil {
+					t.Fatal(err)
+				}
+				_, err := stream.Receive()
+				if !assert.NotNil(t, err) {
+					return
+				}
+			})
 		})
 	}
 	t.Run("connect", func(t *testing.T) {
@@ -642,74 +671,6 @@ func TestErrorHeaderPropagation(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
 		testServices(t, client)
-	})
-}
-
-func TestWireErrorHeaderPropagation(t *testing.T) {
-	t.Parallel()
-	pingServer := &pluggablePingServer{
-		ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
-			err := connect.NewWireError(connect.CodeInvalidArgument, errors.New("ping error"))
-			msgDetail := &wrapperspb.StringValue{Value: "server details"}
-			errDetail, derr := connect.NewErrorDetail(msgDetail)
-			if derr != nil {
-				return nil, derr
-			}
-			err.AddDetail(errDetail)
-			err.Meta().Set("X-Test", request.Header().Get("X-Test"))
-			return nil, err
-		},
-	}
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
-	server := memhttptest.NewServer(t, mux)
-
-	testPing := func(t *testing.T, client pingv1connect.PingServiceClient) {
-		t.Helper()
-		request := connect.NewRequest(&pingv1.PingRequest{})
-		request.Header().Set("X-Test", t.Name())
-		_, err := client.Ping(context.Background(), request)
-		if !assert.NotNil(t, err) {
-			return
-		}
-		assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
-		var connectErr *connect.Error
-		if !assert.True(t, errors.As(err, &connectErr)) {
-			return
-		}
-		assert.Equal(t, connectErr.Message(), "ping error")
-
-		details := connectErr.Details()
-		if assert.Equal(t, len(details), 1) {
-			detailMsg, err := details[0].Value()
-			if !assert.Nil(t, err) {
-				return
-			}
-			serverDetails, ok := detailMsg.(*wrapperspb.StringValue)
-			if !assert.True(t, ok) {
-				return
-			}
-			assert.Equal(t, serverDetails.Value, "server details")
-		}
-		meta := connectErr.Meta()
-		assert.NotNil(t, meta.Values("Content-Type"))
-		assert.NotNil(t, meta.Values("Date"))
-		assert.Equal(t, meta.Values("X-Test"), nil) // Wire errors don't propagate meta.
-	}
-	t.Run("connect", func(t *testing.T) {
-		t.Parallel()
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
-		testPing(t, client)
-	})
-	t.Run("grpc", func(t *testing.T) {
-		t.Parallel()
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
-		testPing(t, client)
-	})
-	t.Run("grpc-web", func(t *testing.T) {
-		t.Parallel()
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
-		testPing(t, client)
 	})
 }
 
