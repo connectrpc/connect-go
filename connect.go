@@ -373,7 +373,7 @@ type hasHTTPMethod interface {
 // consume the response stream and isn't appropriate when receiving multiple
 // messages.
 func receiveUnaryResponse[T any](conn StreamingClientConn, initializer maybeInitializer) (*Response[T], error) {
-	msg, err := receiveUnaryMessage[T](conn, initializer)
+	msg, err := receiveUnaryMessage[T](conn, initializer, "response")
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +389,7 @@ func receiveUnaryResponse[T any](conn StreamingClientConn, initializer maybeInit
 // attempts to consume the request stream and isn't appropriate when receiving
 // multiple messages.
 func receiveUnaryRequest[T any](conn StreamingHandlerConn, initializer maybeInitializer) (*Request[T], error) {
-	msg, err := receiveUnaryMessage[T](conn, initializer)
+	msg, err := receiveUnaryMessage[T](conn, initializer, "request")
 	if err != nil {
 		return nil, err
 	}
@@ -406,7 +406,7 @@ func receiveUnaryRequest[T any](conn StreamingHandlerConn, initializer maybeInit
 	}, nil
 }
 
-func receiveUnaryMessage[T any](conn receiveConn, initializer maybeInitializer) (*T, error) {
+func receiveUnaryMessage[T any](conn receiveConn, initializer maybeInitializer, what string) (*T, error) {
 	var msg T
 	if err := initializer.maybe(conn.Spec(), &msg); err != nil {
 		return nil, err
@@ -418,19 +418,21 @@ func receiveUnaryMessage[T any](conn receiveConn, initializer maybeInitializer) 
 	//    https://grpc.github.io/grpc/core/md_doc_statuscodes.html
 	if err := conn.Receive(&msg); err != nil {
 		if errors.Is(err, io.EOF) {
-			err = NewError(CodeUnimplemented, errors.New("unary request has zero messages"))
+			err = NewError(CodeUnimplemented, fmt.Errorf("unary %s has zero messages", what))
 		}
 		return nil, err
 	}
 	// In a well-formed stream, the one message must be the only content in the body.
 	// To verify that it is well-formed, try to read another message from the stream.
-	// TODO: optimise unary calls to avoid this extra receive.
+	// TODO: optimise this second receive: ideally do it w/out allocation, w/out
+	//       fully reading next message (if one is present), and w/out trying to
+	//       actually unmarshal the bytes)
 	var msg2 T
 	if err := initializer.maybe(conn.Spec(), &msg2); err != nil {
 		return nil, err
 	}
 	if err := conn.Receive(&msg2); err == nil {
-		return nil, NewError(CodeUnimplemented, errors.New("unary response has multiple messages"))
+		return nil, NewError(CodeUnimplemented, fmt.Errorf("unary %s has multiple messages", what))
 	} else if err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
