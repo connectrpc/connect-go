@@ -851,7 +851,7 @@ func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Hea
 	end := &connectEndStreamMessage{Trailer: trailer}
 	if err != nil {
 		end.Error = newConnectWireError(err)
-		if connectErr, ok := asError(err); ok {
+		if connectErr, ok := asError(err); ok && !connectErr.wireErr {
 			mergeMetadataHeaders(end.Trailer, connectErr.meta)
 		}
 	}
