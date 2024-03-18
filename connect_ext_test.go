@@ -618,7 +618,7 @@ func TestErrorHeaderPropagation(t *testing.T) {
 		t.Run("bidi", func(t *testing.T) {
 			stream := client.CumSum(context.Background())
 			stream.RequestHeader().Set("X-Test", t.Name())
-			if err := stream.Send(&pingv1.CumSumRequest{Number: 42}); err != nil {
+			if err := stream.Send(nil); err != nil {
 				t.Fatal(err)
 			}
 			_, err := stream.Receive()
