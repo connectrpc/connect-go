@@ -852,7 +852,7 @@ func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Hea
 	if err != nil {
 		end.Error = newConnectWireError(err)
 		if connectErr, ok := asError(err); ok {
-			mergeHeaders(end.Trailer, connectErr.meta)
+			mergeMetadataHeaders(end.Trailer, connectErr.meta)
 		}
 	}
 	data, marshalErr := json.Marshal(end)
