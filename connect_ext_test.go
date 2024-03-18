@@ -690,13 +690,16 @@ func TestGRPCMarshalStatusError(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(
-		pingServer{},
+		pingServer{
+			// Include error details in the response, so that the Status protobuf will be marshaled.
+			includeErrorDetails: true,
+		},
+		// We're using a codec that will fail to marshal the Status protobuf, which means the returned error will be ignored
 		connect.WithCodec(failCodec{}),
 	))
 	server := memhttptest.NewServer(t, mux)
 
 	assertInternalError := func(tb testing.TB, opts ...connect.ClientOption) {
-		tb.Helper()
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), opts...)
 		request := connect.NewRequest(&pingv1.FailRequest{Code: int32(connect.CodeResourceExhausted)})
 		_, err := client.Fail(context.Background(), request)
@@ -705,6 +708,7 @@ func TestGRPCMarshalStatusError(t *testing.T) {
 		var connectErr *connect.Error
 		ok := errors.As(err, &connectErr)
 		assert.True(t, ok)
+		// This should be Internal, not ResourceExhausted, because we're testing when the Status object itself fails to marshal
 		assert.Equal(t, connectErr.Code(), connect.CodeInternal)
 		assert.True(
 			t,
@@ -2609,7 +2613,8 @@ func expectMetadata(meta http.Header, metaType, key, value string) error {
 type pingServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
 
-	checkMetadata bool
+	checkMetadata       bool
+	includeErrorDetails bool
 }
 
 func (p pingServer) Ping(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
@@ -2646,6 +2651,13 @@ func (p pingServer) Fail(ctx context.Context, request *connect.Request[pingv1.Fa
 	err := connect.NewError(connect.Code(request.Msg.GetCode()), errors.New(errorMessage))
 	err.Meta().Set(handlerHeader, headerValue)
 	err.Meta().Set(handlerTrailer, trailerValue)
+	if p.includeErrorDetails {
+		detail, derr := connect.NewErrorDetail(&pingv1.FailRequest{Code: request.Msg.GetCode()})
+		if derr != nil {
+			return nil, derr
+		}
+		err.AddDetail(detail)
+	}
 	return nil, err
 }
 
