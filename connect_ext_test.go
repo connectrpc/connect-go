@@ -700,16 +700,17 @@ func TestGRPCMarshalStatusError(t *testing.T) {
 	server := memhttptest.NewServer(t, mux)
 
 	assertInternalError := func(tb testing.TB, opts ...connect.ClientOption) {
+		tb.Helper()
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), opts...)
 		request := connect.NewRequest(&pingv1.FailRequest{Code: int32(connect.CodeResourceExhausted)})
 		_, err := client.Fail(context.Background(), request)
 		tb.Log(err)
-		assert.NotNil(t, err)
+		assert.NotNil(t, err, assert.Sprintf("expected an error"))
 		var connectErr *connect.Error
 		ok := errors.As(err, &connectErr)
-		assert.True(t, ok)
+		assert.True(t, ok, assert.Sprintf("expected the error to be a connect.Error"))
 		// This should be Internal, not ResourceExhausted, because we're testing when the Status object itself fails to marshal
-		assert.Equal(t, connectErr.Code(), connect.CodeInternal)
+		assert.Equal(t, connectErr.Code(), connect.CodeInternal, assert.Sprintf("expected the error code to be Internal, was %s", connectErr.Code()))
 		assert.True(
 			t,
 			strings.HasSuffix(connectErr.Message(), ": boom"),
