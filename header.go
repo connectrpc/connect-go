@@ -57,6 +57,46 @@ func mergeHeaders(into, from http.Header) {
 	}
 }
 
+// mergeMetdataHeaders merges the metadata headers from the "from" header into
+// the "into" header. It skips over non metadata headers that should not be
+// propagated from the server to the client.
+func mergeMetadataHeaders(into, from http.Header) {
+	for key, vals := range from {
+		if len(vals) == 0 {
+			// For response trailers, net/http will pre-populate entries
+			// with nil values based on the "Trailer" header. But if there
+			// are no actual values for those keys, we skip them.
+			continue
+		}
+		switch http.CanonicalHeaderKey(key) {
+		case headerContentType,
+			headerContentLength,
+			headerContentEncoding,
+			headerHost,
+			headerUserAgent,
+			headerTrailer,
+			headerDate:
+			// HTTP headers.
+		case connectUnaryHeaderAcceptCompression,
+			connectUnaryTrailerPrefix,
+			connectStreamingHeaderCompression,
+			connectStreamingHeaderAcceptCompression,
+			connectHeaderTimeout,
+			connectHeaderProtocolVersion:
+			// Connect headers.
+		case grpcHeaderCompression,
+			grpcHeaderAcceptCompression,
+			grpcHeaderTimeout,
+			grpcHeaderStatus,
+			grpcHeaderMessage,
+			grpcHeaderDetails:
+			// gRPC headers.
+		default:
+			into[key] = append(into[key], vals...)
+		}
+	}
+}
+
 // getHeaderCanonical is a shortcut for Header.Get() which
 // bypasses the CanonicalMIMEHeaderKey operation when we
 // know the key is already in canonical form.

@@ -158,6 +158,10 @@ func NewWireError(c Code, underlying error) *Error {
 // Clients may find this useful when deciding how to propagate errors. For
 // example, an RPC-to-HTTP proxy might expose a server-sent CodeUnknown as an
 // HTTP 500 but a client-synthesized CodeUnknown as a 503.
+//
+// Handlers will strip [Error.Meta] headers propagated from wire errors to avoid
+// leaking response headers. To propagate headers recreate the error as a
+// non-wire error.
 func IsWireError(err error) bool {
 	se := new(Error)
 	if !errors.As(err, &se) {
@@ -228,6 +232,11 @@ func (e *Error) AddDetail(d *ErrorDetail) {
 // returned by streaming handlers may be sent as HTTP headers, HTTP trailers,
 // or a block of in-body metadata, depending on the protocol in use and whether
 // or not the handler has already written messages to the stream.
+//
+// Protocol-specific headers and trailers may be removed to avoid breaking
+// protocol semantics. For example, Content-Length and Content-Type headers
+// won't be propagated. See the documentation for each protocol for more
+// datails.
 //
 // When clients receive errors, the metadata contains the union of the HTTP
 // headers and the protocol-specific trailers (either HTTP trailers or in-body

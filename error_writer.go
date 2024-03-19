@@ -127,8 +127,8 @@ func (w *ErrorWriter) Write(response http.ResponseWriter, request *http.Request,
 }
 
 func (w *ErrorWriter) writeConnectUnary(response http.ResponseWriter, err error) error {
-	if connectErr, ok := asError(err); ok {
-		mergeHeaders(response.Header(), connectErr.meta)
+	if connectErr, ok := asError(err); ok && !connectErr.wireErr {
+		mergeMetadataHeaders(response.Header(), connectErr.meta)
 	}
 	response.WriteHeader(connectCodeToHTTP(CodeOf(err)))
 	data, marshalErr := json.Marshal(newConnectWireError(err))

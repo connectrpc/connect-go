@@ -534,10 +534,12 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 			cc.compressionPools.CommaSeparatedNames(),
 		)
 	}
+	cc.unmarshaler.compressionPool = cc.compressionPools.Get(compression)
 	if response.StatusCode != http.StatusOK {
 		unmarshaler := connectUnaryUnmarshaler{
+			ctx:             cc.unmarshaler.ctx,
 			reader:          response.Body,
-			compressionPool: cc.compressionPools.Get(compression),
+			compressionPool: cc.unmarshaler.compressionPool,
 			bufferPool:      cc.bufferPool,
 		}
 		var wireErr connectWireError
@@ -559,7 +561,6 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 		mergeHeaders(serverErr.meta, cc.responseTrailer)
 		return serverErr
 	}
-	cc.unmarshaler.compressionPool = cc.compressionPools.Get(compression)
 	return nil
 }
 
@@ -765,8 +766,8 @@ func (hc *connectUnaryHandlerConn) writeResponseHeader(err error) {
 		header[headerVary] = append(header[headerVary], connectUnaryHeaderAcceptCompression)
 	}
 	if err != nil {
-		if connectErr, ok := asError(err); ok {
-			mergeHeaders(header, connectErr.meta)
+		if connectErr, ok := asError(err); ok && !connectErr.wireErr {
+			mergeMetadataHeaders(header, connectErr.meta)
 		}
 	}
 	for k, v := range hc.responseTrailer {
@@ -850,8 +851,8 @@ func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Hea
 	end := &connectEndStreamMessage{Trailer: trailer}
 	if err != nil {
 		end.Error = newConnectWireError(err)
-		if connectErr, ok := asError(err); ok {
-			mergeHeaders(end.Trailer, connectErr.meta)
+		if connectErr, ok := asError(err); ok && !connectErr.wireErr {
+			mergeMetadataHeaders(end.Trailer, connectErr.meta)
 		}
 	}
 	data, marshalErr := json.Marshal(end)
