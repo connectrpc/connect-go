@@ -1689,6 +1689,7 @@ func TestStreamForServer(t *testing.T) {
 		client := newPingClient(t, &pluggablePingServer{
 			sum: func(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
 				assert.True(t, stream.Receive())
+				// We end up sending two response messages, but only one is expected.
 				assert.Nil(t, stream.Conn().Send(&pingv1.SumResponse{Sum: 2}))
 				return connect.NewResponse(&pingv1.SumResponse{}), nil
 			},
@@ -1697,7 +1698,7 @@ func TestStreamForServer(t *testing.T) {
 		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
 		res, err := stream.CloseAndReceive()
 		assert.NotNil(t, err)
-		assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
 		assert.Nil(t, res)
 	})
 }

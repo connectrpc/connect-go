@@ -25,3 +25,15 @@ HTTP to Connect Code Mapping/**/payload-too-large
 HTTP to Connect Code Mapping/**/precondition-failed
 HTTP to Connect Code Mapping/**/request-header-fields-too-large
 HTTP to Connect Code Mapping/**/request-timeout
+
+# The current v1.0.0-rc3 of conformance suite has expectations for these
+# conditions that were based on the behavior of grpc-go (which returns an
+# "unknown" error), with the incorrect idea that was authoritative (and,
+# honestly, that code makes sense). However, the actual correct behavior,
+# per the specification for gRPC error codes, is for these cardinality
+# violations to instead return "unimplemented":
+#    https://grpc.github.io/grpc/core/md_doc_statuscodes.html
+# This library returns the correct code, which (for now) is interpreted
+# as a failure by the conformance suite.
+**/unary-ok-but-no-response
+**/unary-multiple-responses
