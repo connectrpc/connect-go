@@ -838,33 +838,30 @@ func grpcContentTypeFromCodecName(web bool, name string) string {
 func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) {
 	if err == nil {
 		setHeaderCanonical(trailer, grpcHeaderStatus, "0") // zero is the gRPC OK status
-		setHeaderCanonical(trailer, grpcHeaderMessage, "")
-		return
-	}
-	status := grpcStatusFromError(err)
-	code := strconv.Itoa(int(status.GetCode()))
-	bin, binErr := protobuf.Marshal(status)
-	if binErr != nil {
-		setHeaderCanonical(
-			trailer,
-			grpcHeaderStatus,
-			strconv.FormatInt(int64(CodeInternal), 10 /* base */),
-		)
-		setHeaderCanonical(
-			trailer,
-			grpcHeaderMessage,
-			grpcPercentEncode(
-				fmt.Sprintf("marshal protobuf status: %v", binErr),
-			),
-		)
 		return
 	}
 	if connectErr, ok := asError(err); ok && !connectErr.wireErr {
 		mergeMetadataHeaders(trailer, connectErr.meta)
 	}
-	setHeaderCanonical(trailer, grpcHeaderStatus, code)
-	setHeaderCanonical(trailer, grpcHeaderMessage, grpcPercentEncode(status.GetMessage()))
-	setHeaderCanonical(trailer, grpcHeaderDetails, EncodeBinaryHeader(bin))
+	var (
+		status  = grpcStatusFromError(err)
+		code    = status.GetCode()
+		message = status.GetMessage()
+		bin     []byte
+	)
+	if len(status.Details) > 0 {
+		var binErr error
+		bin, binErr = protobuf.Marshal(status)
+		if binErr != nil {
+			code = int32(CodeInternal)
+			message = fmt.Sprintf("marshal protobuf status: %v", binErr)
+		}
+	}
+	setHeaderCanonical(trailer, grpcHeaderStatus, strconv.Itoa(int(code)))
+	setHeaderCanonical(trailer, grpcHeaderMessage, grpcPercentEncode(message))
+	if len(bin) > 0 {
+		setHeaderCanonical(trailer, grpcHeaderDetails, EncodeBinaryHeader(bin))
+	}
 }
 
 func grpcStatusFromError(err error) *statusv1.Status {
