@@ -159,7 +159,7 @@ func NewWireError(c Code, underlying error) *Error {
 // example, an RPC-to-HTTP proxy might expose a server-sent CodeUnknown as an
 // HTTP 500 but a client-synthesized CodeUnknown as a 503.
 //
-// Handlers will strip [Meta] headers propagated from wire errors to avoid
+// Handlers will strip [Error.Meta] headers propagated from wire errors to avoid
 // leaking response headers. To propagate headers recreate the error as a
 // non-wire error.
 func IsWireError(err error) bool {
