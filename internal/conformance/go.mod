@@ -2,7 +2,7 @@ module connectrpc.com/connect/internal/conformance
 
 go 1.20
 
-require connectrpc.com/conformance v1.0.1
+require connectrpc.com/conformance v1.0.2
 
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.31.0-20231106192134-1baebb0a1518.2 // indirect
