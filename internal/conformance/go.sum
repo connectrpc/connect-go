@@ -2,8 +2,8 @@ buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.31.0-2023110619213
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.31.0-20231106192134-1baebb0a1518.2/go.mod h1:xafc+XIsTxTy76GJQ1TKgvJWsSugFBqMaN27WhUblew=
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 cloud.google.com/go v0.34.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
-connectrpc.com/conformance v1.0.0-rc4 h1:G7s24l3jK8DpUUDeOjaN/+1M2xi7XZqvXAx0FAIRle0=
-connectrpc.com/conformance v1.0.0-rc4/go.mod h1:ZElnxe02Qtnm0bU3+y7sVvqoUg2r/ddulJdVcgcBO4g=
+connectrpc.com/conformance v1.0.1 h1:ztUJAlkcynw5J3j37VCWbrvz9IE6opb8qPEFG/6B0oE=
+connectrpc.com/conformance v1.0.1/go.mod h1:ZElnxe02Qtnm0bU3+y7sVvqoUg2r/ddulJdVcgcBO4g=
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
