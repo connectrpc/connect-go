@@ -709,11 +709,11 @@ func (hc *connectUnaryHandlerConn) RequestHeader() http.Header {
 }
 
 func (hc *connectUnaryHandlerConn) Send(msg any) error {
-	hc.wroteBody = true
-	hc.writeResponseHeader(nil /* error */)
+	hc.mergeResponseHeader(nil /* error */)
 	if err := hc.marshaler.Marshal(msg); err != nil {
 		return err
 	}
+	hc.wroteBody = true
 	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
@@ -727,7 +727,7 @@ func (hc *connectUnaryHandlerConn) ResponseTrailer() http.Header {
 
 func (hc *connectUnaryHandlerConn) Close(err error) error {
 	if !hc.wroteBody {
-		hc.writeResponseHeader(err)
+		hc.mergeResponseHeader(err)
 		// If the handler received a GET request and the resource hasn't changed,
 		// return a 304.
 		if len(hc.peer.Query) > 0 && IsNotModifiedError(err) {
@@ -735,7 +735,7 @@ func (hc *connectUnaryHandlerConn) Close(err error) error {
 			return hc.request.Body.Close()
 		}
 	}
-	if err == nil {
+	if err == nil || hc.wroteBody {
 		return hc.request.Body.Close()
 	}
 	// In unary Connect, errors always use application/json.
@@ -757,7 +757,7 @@ func (hc *connectUnaryHandlerConn) getHTTPMethod() string {
 	return hc.request.Method
 }
 
-func (hc *connectUnaryHandlerConn) writeResponseHeader(err error) {
+func (hc *connectUnaryHandlerConn) mergeResponseHeader(err error) {
 	header := hc.responseWriter.Header()
 	if hc.request.Method == http.MethodGet {
 		// The response content varies depending on the compression that the client

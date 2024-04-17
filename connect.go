@@ -431,9 +431,10 @@ func receiveUnaryMessage[T any](conn receiveConn, initializer maybeInitializer, 
 	if err := initializer.maybe(conn.Spec(), &msg2); err != nil {
 		return nil, err
 	}
-	if err := conn.Receive(&msg2); err == nil {
-		return nil, NewError(CodeUnimplemented, fmt.Errorf("unary %s has multiple messages", what))
-	} else if err != nil && !errors.Is(err, io.EOF) {
+	if err := conn.Receive(&msg2); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = NewError(CodeUnimplemented, fmt.Errorf("unary %s has multiple messages", what))
+		}
 		return nil, err
 	}
 	return &msg, nil
