@@ -686,7 +686,6 @@ type connectUnaryHandlerConn struct {
 	marshaler       connectUnaryMarshaler
 	unmarshaler     connectUnaryUnmarshaler
 	responseTrailer http.Header
-	wroteBody       bool
 }
 
 func (hc *connectUnaryHandlerConn) Spec() Spec {
@@ -713,7 +712,6 @@ func (hc *connectUnaryHandlerConn) Send(msg any) error {
 	if err := hc.marshaler.Marshal(msg); err != nil {
 		return err
 	}
-	hc.wroteBody = true
 	return nil // must be a literal nil: nil *Error is a non-nil error
 }
 
@@ -726,7 +724,7 @@ func (hc *connectUnaryHandlerConn) ResponseTrailer() http.Header {
 }
 
 func (hc *connectUnaryHandlerConn) Close(err error) error {
-	if !hc.wroteBody {
+	if !hc.marshaler.wroteHeader {
 		hc.mergeResponseHeader(err)
 		// If the handler received a GET request and the resource hasn't changed,
 		// return a 304.
@@ -735,7 +733,7 @@ func (hc *connectUnaryHandlerConn) Close(err error) error {
 			return hc.request.Body.Close()
 		}
 	}
-	if err == nil || hc.wroteBody {
+	if err == nil || hc.marshaler.wroteHeader {
 		return hc.request.Body.Close()
 	}
 	// In unary Connect, errors always use application/json.
@@ -923,6 +921,7 @@ type connectUnaryMarshaler struct {
 	bufferPool       *bufferPool
 	header           http.Header
 	sendMaxBytes     int
+	wroteHeader      bool
 }
 
 func (m *connectUnaryMarshaler) Marshal(message any) *Error {
@@ -961,6 +960,7 @@ func (m *connectUnaryMarshaler) Marshal(message any) *Error {
 }
 
 func (m *connectUnaryMarshaler) write(data []byte) *Error {
+	m.wroteHeader = true
 	payload := bytes.NewReader(data)
 	if _, err := m.sender.Send(payload); err != nil {
 		err = wrapIfContextError(err)
