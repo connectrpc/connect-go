@@ -27,7 +27,8 @@ import (
 func TestClientStreamForClient_NoPanics(t *testing.T) {
 	t.Parallel()
 	initErr := errors.New("client init failure")
-	clientStream := &ClientStreamForClient[pingv1.PingRequest, pingv1.PingResponse]{err: initErr}
+	clientStream := NewClientStreamForClient[pingv1.PingRequest, pingv1.PingResponse](nil)
+	clientStream.err = initErr
 	assert.ErrorIs(t, clientStream.Send(&pingv1.PingRequest{}), initErr)
 	verifyHeaders(t, clientStream.RequestHeader())
 	res, err := clientStream.CloseAndReceive()
@@ -41,7 +42,8 @@ func TestClientStreamForClient_NoPanics(t *testing.T) {
 func TestServerStreamForClient_NoPanics(t *testing.T) {
 	t.Parallel()
 	initErr := errors.New("client init failure")
-	serverStream := &ServerStreamForClient[pingv1.PingResponse]{constructErr: initErr}
+	serverStream := NewServerStreamForClient[pingv1.PingResponse](nil)
+	serverStream.constructErr = initErr
 	assert.ErrorIs(t, serverStream.Err(), initErr)
 	assert.ErrorIs(t, serverStream.Close(), initErr)
 	assert.NotNil(t, serverStream.Msg())
@@ -55,9 +57,9 @@ func TestServerStreamForClient_NoPanics(t *testing.T) {
 
 func TestServerStreamForClient(t *testing.T) {
 	t.Parallel()
-	stream := &ServerStreamForClient[pingv1.PingResponse]{
-		conn: &nopStreamingClientConn{},
-	}
+	stream := NewServerStreamForClient[pingv1.PingResponse](
+		&nopStreamingClientConn{},
+	)
 	// Ensure that each call to Receive allocates a new message. This helps
 	// vtprotobuf, which doesn't automatically zero messages before unmarshaling
 	// (see https://connectrpc.com/connect/issues/345), and it's also
@@ -75,7 +77,8 @@ func TestServerStreamForClient(t *testing.T) {
 func TestBidiStreamForClient_NoPanics(t *testing.T) {
 	t.Parallel()
 	initErr := errors.New("client init failure")
-	bidiStream := &BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]{err: initErr}
+	bidiStream := NewBidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse](nil)
+	bidiStream.err = initErr
 	res, err := bidiStream.Receive()
 	assert.Nil(t, res)
 	assert.ErrorIs(t, err, initErr)

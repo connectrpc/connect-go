@@ -31,6 +31,14 @@ type ClientStreamForClient[Req, Res any] struct {
 	err error
 }
 
+// NewClientStreamForClient creates a new ClientStream using the given
+// StreamingClientConn.
+func NewClientStreamForClient[Req, Res any](conn StreamingClientConn) *ClientStreamForClient[Req, Res] {
+	return &ClientStreamForClient[Req, Res]{
+		conn: conn,
+	}
+}
+
 // Spec returns the specification for the RPC.
 func (c *ClientStreamForClient[_, _]) Spec() Spec {
 	return c.conn.Spec()
@@ -105,6 +113,14 @@ type ServerStreamForClient[Res any] struct {
 	constructErr error
 	// Error from conn.Receive().
 	receiveErr error
+}
+
+// NewServerStreamForClient creates a new ServerStream using the given
+// StreamingClientConn.
+func NewServerStreamForClient[Res any](conn StreamingClientConn) *ServerStreamForClient[Res] {
+	return &ServerStreamForClient[Res]{
+		conn: conn,
+	}
 }
 
 // Receive advances the stream to the next message, which will then be
@@ -185,6 +201,14 @@ type BidiStreamForClient[Req, Res any] struct {
 	initializer maybeInitializer
 	// Error from client construction. If non-nil, return for all calls.
 	err error
+}
+
+// NewBidiStreamForClient creates a new BidiStream using the given
+// StreamingClientConn.
+func NewBidiStreamForClient[Req, Res any](conn StreamingClientConn) *BidiStreamForClient[Req, Res] {
+	return &BidiStreamForClient[Req, Res]{
+		conn: conn,
+	}
 }
 
 // Spec returns the specification for the RPC.

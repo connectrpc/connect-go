@@ -96,10 +96,8 @@ func NewClientStreamHandler[Req, Res any](
 	return newStreamHandler(
 		config,
 		func(ctx context.Context, conn StreamingHandlerConn) error {
-			stream := &ClientStream[Req]{
-				conn:        conn,
-				initializer: config.Initializer,
-			}
+			stream := NewClientStream[Req](conn)
+			stream.initializer = config.Initializer
 			res, err := implementation(ctx, stream)
 			if err != nil {
 				return err
@@ -130,7 +128,7 @@ func NewServerStreamHandler[Req, Res any](
 			if err != nil {
 				return err
 			}
-			return implementation(ctx, req, &ServerStream[Res]{conn: conn})
+			return implementation(ctx, req, NewServerStream[Res](conn))
 		},
 	)
 }
@@ -145,13 +143,9 @@ func NewBidiStreamHandler[Req, Res any](
 	return newStreamHandler(
 		config,
 		func(ctx context.Context, conn StreamingHandlerConn) error {
-			return implementation(
-				ctx,
-				&BidiStream[Req, Res]{
-					conn:        conn,
-					initializer: config.Initializer,
-				},
-			)
+			stream := NewBidiStream[Req, Res](conn)
+			stream.initializer = config.Initializer
+			return implementation(ctx, stream)
 		},
 	)
 }

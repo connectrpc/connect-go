@@ -20,10 +20,19 @@ import (
 	"net/http"
 )
 
+// NewClientStream creates a new ClientStream using the given
+// StreamingHandlerConn.
+func NewClientStream[Req any](conn StreamingHandlerConn) *ClientStream[Req] {
+	return &ClientStream[Req]{
+		conn:        conn,
+		initializer: maybeInitializer{nil},
+	}
+}
+
 // ClientStream is the handler's view of a client streaming RPC.
 //
-// It's constructed as part of [Handler] invocation, but doesn't currently have
-// an exported constructor.
+// It's constructed as part of [Handler] invocation or it can be created using
+// the NewClientStream constructor.
 type ClientStream[Req any] struct {
 	conn        StreamingHandlerConn
 	initializer maybeInitializer
@@ -86,10 +95,18 @@ func (c *ClientStream[Req]) Conn() StreamingHandlerConn {
 	return c.conn
 }
 
-// ServerStream is the handler's view of a server streaming RPC.
+// NewServerStream creates a new ServerStream using the given
+// StreamingHandlerConn.
+func NewServerStream[Res any](conn StreamingHandlerConn) *ServerStream[Res] {
+	return &ServerStream[Res]{
+		conn: conn,
+	}
+}
+
+// ServerStream is the handler's view Client streaming RPC.
 //
-// It's constructed as part of [Handler] invocation, but doesn't currently have
-// an exported constructor.
+// It's constructed as part of [Handler] invocation or it can be created using
+// the NewServerStream constructor.
 type ServerStream[Res any] struct {
 	conn StreamingHandlerConn
 }
@@ -127,10 +144,17 @@ func (s *ServerStream[Res]) Conn() StreamingHandlerConn {
 	return s.conn
 }
 
+// NewBidiStream creates a new BidiStream using the given StreamingHandlerConn.
+func NewBidiStream[Req, Res any](conn StreamingHandlerConn) *BidiStream[Req, Res] {
+	return &BidiStream[Req, Res]{
+		conn: conn,
+	}
+}
+
 // BidiStream is the handler's view of a bidirectional streaming RPC.
 //
-// It's constructed as part of [Handler] invocation, but doesn't currently have
-// an exported constructor.
+// It's constructed as part of [Handler] invocation or it can be created using
+// the NewBidiStream constructor.
 type BidiStream[Req, Res any] struct {
 	conn        StreamingHandlerConn
 	initializer maybeInitializer

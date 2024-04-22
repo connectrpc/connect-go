@@ -133,12 +133,13 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 // CallClientStream calls a client streaming procedure.
 func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamForClient[Req, Res] {
 	if c.err != nil {
-		return &ClientStreamForClient[Req, Res]{err: c.err}
+		stream := NewClientStreamForClient[Req, Res](nil)
+		stream.err = c.err
+		return stream
 	}
-	return &ClientStreamForClient[Req, Res]{
-		conn:        c.newConn(ctx, StreamTypeClient, nil),
-		initializer: c.config.Initializer,
-	}
+	stream := NewClientStreamForClient[Req, Res](c.newConn(ctx, StreamTypeClient, nil))
+	stream.initializer = c.config.Initializer
+	return stream
 }
 
 // CallServerStream calls a server streaming procedure.
@@ -163,21 +164,21 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 	if err := conn.CloseRequest(); err != nil {
 		return nil, err
 	}
-	return &ServerStreamForClient[Res]{
-		conn:        conn,
-		initializer: c.config.Initializer,
-	}, nil
+	stream := NewServerStreamForClient[Res](conn)
+	stream.initializer = c.config.Initializer
+	return stream, nil
 }
 
 // CallBidiStream calls a bidirectional streaming procedure.
 func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForClient[Req, Res] {
 	if c.err != nil {
-		return &BidiStreamForClient[Req, Res]{err: c.err}
+		stream := NewBidiStreamForClient[Req, Res](nil)
+		stream.err = c.err
+		return stream
 	}
-	return &BidiStreamForClient[Req, Res]{
-		conn:        c.newConn(ctx, StreamTypeBidi, nil),
-		initializer: c.config.Initializer,
-	}
+	stream := NewBidiStreamForClient[Req, Res](c.newConn(ctx, StreamTypeBidi, nil))
+	stream.initializer = c.config.Initializer
+	return stream
 }
 
 func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType, onRequestSend func(r *http.Request)) StreamingClientConn {
