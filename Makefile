@@ -100,11 +100,11 @@ $(BIN)/protoc-gen-connect-go:
 
 $(BIN)/buf: Makefile
 	@mkdir -p $(@D)
-	go install github.com/bufbuild/buf/cmd/buf@v1.27.2
+	go install github.com/bufbuild/buf/cmd/buf@v1.32.0
 
 $(BIN)/license-header: Makefile
 	@mkdir -p $(@D)
-	go install github.com/bufbuild/buf/private/pkg/licenseheader/cmd/license-header@v1.27.2
+	go install github.com/bufbuild/buf/private/pkg/licenseheader/cmd/license-header@v1.32.0
 
 $(BIN)/golangci-lint: Makefile
 	@mkdir -p $(@D)
