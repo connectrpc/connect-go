@@ -5,6 +5,7 @@ Connect
 [![Report Card](https://goreportcard.com/badge/connectrpc.com/connect)](https://goreportcard.com/report/connectrpc.com/connect)
 [![GoDoc](https://pkg.go.dev/badge/connectrpc.com/connect.svg)](https://pkg.go.dev/connectrpc.com/connect)
 [![Slack](https://img.shields.io/badge/slack-buf-%23e01563)][slack]
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/8972/badge)](https://www.bestpractices.dev/projects/8972)
 
 Connect is a slim library for building browser and gRPC-compatible HTTP APIs.
 You write a short [Protocol Buffer][protobuf] schema and implement your
