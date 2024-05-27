@@ -45,6 +45,7 @@ func DecodeBinaryHeader(data string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(data)
 }
 
+// mergeHeaders merges the headers from the "from" header into the "into" header.
 func mergeHeaders(into, from http.Header) {
 	for key, vals := range from {
 		if len(vals) == 0 {
@@ -68,30 +69,7 @@ func mergeMetadataHeaders(into, from http.Header) {
 			// are no actual values for those keys, we skip them.
 			continue
 		}
-		switch http.CanonicalHeaderKey(key) {
-		case headerContentType,
-			headerContentLength,
-			headerContentEncoding,
-			headerHost,
-			headerUserAgent,
-			headerTrailer,
-			headerDate:
-			// HTTP headers.
-		case connectUnaryHeaderAcceptCompression,
-			connectUnaryTrailerPrefix,
-			connectStreamingHeaderCompression,
-			connectStreamingHeaderAcceptCompression,
-			connectHeaderTimeout,
-			connectHeaderProtocolVersion:
-			// Connect headers.
-		case grpcHeaderCompression,
-			grpcHeaderAcceptCompression,
-			grpcHeaderTimeout,
-			grpcHeaderStatus,
-			grpcHeaderMessage,
-			grpcHeaderDetails:
-			// gRPC headers.
-		default:
+		if !isProtocolHeader(key) {
 			into[key] = append(into[key], vals...)
 		}
 	}
@@ -123,4 +101,33 @@ func setHeaderCanonical(h http.Header, key, value string) {
 // know the key is already in canonical form.
 func delHeaderCanonical(h http.Header, key string) {
 	delete(h, key)
+}
+
+func isProtocolHeader(key string) bool {
+	switch http.CanonicalHeaderKey(key) {
+	case headerContentType,
+		headerContentLength,
+		headerContentEncoding,
+		headerHost,
+		headerUserAgent,
+		headerTrailer,
+		headerDate:
+		return true // HTTP headers.
+	case connectUnaryHeaderAcceptCompression,
+		connectUnaryTrailerPrefix,
+		connectStreamingHeaderCompression,
+		connectStreamingHeaderAcceptCompression,
+		connectHeaderTimeout,
+		connectHeaderProtocolVersion:
+		return true // Connect headers.
+	case grpcHeaderCompression,
+		grpcHeaderAcceptCompression,
+		grpcHeaderTimeout,
+		grpcHeaderStatus,
+		grpcHeaderMessage,
+		grpcHeaderDetails:
+		return true // gRPC headers.
+	default:
+		return false
+	}
 }

@@ -71,8 +71,8 @@ func NewUnaryHandler[Req, Res any](
 		if err != nil {
 			return err
 		}
-		mergeHeaders(conn.ResponseHeader(), response.Header())
-		mergeHeaders(conn.ResponseTrailer(), response.Trailer())
+		mergeMetadataHeaders(conn.ResponseHeader(), response.Header())
+		mergeMetadataHeaders(conn.ResponseTrailer(), response.Trailer())
 		return conn.Send(response.Any())
 	}
 
