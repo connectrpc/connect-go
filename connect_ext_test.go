@@ -2637,23 +2637,18 @@ func TestSetProtocolHeaders(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name              string
-		clientOpts        []connect.ClientOption
-		proxyClientOpts   []connect.ClientOption
+		clientOption      connect.ClientOption
 		expectContentType string
 	}{{
 		name:              "connect",
-		clientOpts:        []connect.ClientOption{connect.WithGRPC()},
-		proxyClientOpts:   nil,
 		expectContentType: "application/proto",
 	}, {
 		name:              "grpc",
-		clientOpts:        nil,
-		proxyClientOpts:   []connect.ClientOption{connect.WithGRPC()},
+		clientOption:      connect.WithGRPC(),
 		expectContentType: "application/grpc",
 	}, {
 		name:              "grpcweb",
-		clientOpts:        nil,
-		proxyClientOpts:   []connect.ClientOption{connect.WithGRPCWeb()},
+		clientOption:      connect.WithGRPCWeb(),
 		expectContentType: "application/grpc-web+proto",
 	}}
 	for _, tt := range tests {
@@ -2665,7 +2660,12 @@ func TestSetProtocolHeaders(t *testing.T) {
 			mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
 			server := memhttptest.NewServer(t, mux)
 
-			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), testcase.clientOpts...)
+			clientOpts := []connect.ClientOption{}
+			if testcase.clientOption == nil {
+				// Use a different protocol to test the override.
+				clientOpts = append(clientOpts, connect.WithGRPC())
+			}
+			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), clientOpts...)
 
 			pingProxyServer := &pluggablePingServer{
 				ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
@@ -2676,7 +2676,11 @@ func TestSetProtocolHeaders(t *testing.T) {
 			proxyMux.Handle(pingv1connect.NewPingServiceHandler(pingProxyServer))
 			proxyServer := memhttptest.NewServer(t, proxyMux)
 
-			proxyClient := pingv1connect.NewPingServiceClient(proxyServer.Client(), proxyServer.URL(), testcase.proxyClientOpts...)
+			proxyClientOpts := []connect.ClientOption{}
+			if testcase.clientOption != nil {
+				proxyClientOpts = append(proxyClientOpts, testcase.clientOption)
+			}
+			proxyClient := pingv1connect.NewPingServiceClient(proxyServer.Client(), proxyServer.URL(), proxyClientOpts...)
 
 			request := connect.NewRequest(&pingv1.PingRequest{Number: 42})
 			request.Header().Set("X-Test", t.Name())
