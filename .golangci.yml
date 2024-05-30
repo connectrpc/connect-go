@@ -132,3 +132,6 @@ issues:
     # We want to show examples with http.Get
     - linters: [noctx]
       path: internal/memhttp/memhttp_test.go
+    # We need to initialize a map of all protocol headers
+    - linters: [gochecknoglobals]
+      path: header.go

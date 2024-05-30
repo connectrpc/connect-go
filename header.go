@@ -19,6 +19,33 @@ import (
 	"net/http"
 )
 
+var (
+	protocolHeaders = map[string]struct{}{
+		// HTTP headers.
+		headerContentType:     {},
+		headerContentLength:   {},
+		headerContentEncoding: {},
+		headerHost:            {},
+		headerUserAgent:       {},
+		headerTrailer:         {},
+		headerDate:            {},
+		// Connect headers.
+		connectUnaryHeaderAcceptCompression:     {},
+		connectUnaryTrailerPrefix:               {},
+		connectStreamingHeaderCompression:       {},
+		connectStreamingHeaderAcceptCompression: {},
+		connectHeaderTimeout:                    {},
+		connectHeaderProtocolVersion:            {},
+		// gRPC headers.
+		grpcHeaderCompression:       {},
+		grpcHeaderAcceptCompression: {},
+		grpcHeaderTimeout:           {},
+		grpcHeaderStatus:            {},
+		grpcHeaderMessage:           {},
+		grpcHeaderDetails:           {},
+	}
+)
+
 // EncodeBinaryHeader base64-encodes the data. It always emits unpadded values.
 //
 // In the Connect, gRPC, and gRPC-Web protocols, binary headers must have keys
@@ -45,7 +72,6 @@ func DecodeBinaryHeader(data string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(data)
 }
 
-// mergeHeaders merges the headers from the "from" header into the "into" header.
 func mergeHeaders(into, from http.Header) {
 	for key, vals := range from {
 		if len(vals) == 0 {
@@ -58,10 +84,9 @@ func mergeHeaders(into, from http.Header) {
 	}
 }
 
-// mergeMetdataHeaders merges the metadata headers from the "from" header into
-// the "into" header. It skips over non metadata headers that should not be
-// propagated from the server to the client.
-func mergeMetadataHeaders(into, from http.Header) {
+// mergeNonProtocolHeaders merges headers excluding protocol headers defined in
+// protocolHeaders.
+func mergeNonProtocolHeaders(into, from http.Header) {
 	for key, vals := range from {
 		if len(vals) == 0 {
 			// For response trailers, net/http will pre-populate entries
@@ -69,7 +94,7 @@ func mergeMetadataHeaders(into, from http.Header) {
 			// are no actual values for those keys, we skip them.
 			continue
 		}
-		if !isProtocolHeader(key) {
+		if _, isProtocolHeader := protocolHeaders[key]; !isProtocolHeader {
 			into[key] = append(into[key], vals...)
 		}
 	}
@@ -101,33 +126,4 @@ func setHeaderCanonical(h http.Header, key, value string) {
 // know the key is already in canonical form.
 func delHeaderCanonical(h http.Header, key string) {
 	delete(h, key)
-}
-
-func isProtocolHeader(key string) bool {
-	switch http.CanonicalHeaderKey(key) {
-	case headerContentType,
-		headerContentLength,
-		headerContentEncoding,
-		headerHost,
-		headerUserAgent,
-		headerTrailer,
-		headerDate:
-		return true // HTTP headers.
-	case connectUnaryHeaderAcceptCompression,
-		connectUnaryTrailerPrefix,
-		connectStreamingHeaderCompression,
-		connectStreamingHeaderAcceptCompression,
-		connectHeaderTimeout,
-		connectHeaderProtocolVersion:
-		return true // Connect headers.
-	case grpcHeaderCompression,
-		grpcHeaderAcceptCompression,
-		grpcHeaderTimeout,
-		grpcHeaderStatus,
-		grpcHeaderMessage,
-		grpcHeaderDetails:
-		return true // gRPC headers.
-	default:
-		return false
-	}
 }

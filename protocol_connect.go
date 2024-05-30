@@ -765,7 +765,7 @@ func (hc *connectUnaryHandlerConn) mergeResponseHeader(err error) {
 	}
 	if err != nil {
 		if connectErr, ok := asError(err); ok && !connectErr.wireErr {
-			mergeMetadataHeaders(header, connectErr.meta)
+			mergeNonProtocolHeaders(header, connectErr.meta)
 		}
 	}
 	for k, v := range hc.responseTrailer {
@@ -850,7 +850,7 @@ func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Hea
 	if err != nil {
 		end.Error = newConnectWireError(err)
 		if connectErr, ok := asError(err); ok && !connectErr.wireErr {
-			mergeMetadataHeaders(end.Trailer, connectErr.meta)
+			mergeNonProtocolHeaders(end.Trailer, connectErr.meta)
 		}
 	}
 	data, marshalErr := json.Marshal(end)
