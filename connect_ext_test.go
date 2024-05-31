@@ -2631,6 +2631,70 @@ func TestBlankImportCodeGeneration(t *testing.T) {
 	assert.NotNil(t, desc)
 }
 
+// TestSetProtocolHeaders tests that headers required by the protocols are set
+// overriding user provided headers.
+func TestSetProtocolHeaders(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name              string
+		clientOption      connect.ClientOption
+		expectContentType string
+	}{{
+		name:              "connect",
+		expectContentType: "application/proto",
+	}, {
+		name:              "grpc",
+		clientOption:      connect.WithGRPC(),
+		expectContentType: "application/grpc",
+	}, {
+		name:              "grpcweb",
+		clientOption:      connect.WithGRPCWeb(),
+		expectContentType: "application/grpc-web+proto",
+	}}
+	for _, tt := range tests {
+		testcase := tt
+		t.Run(testcase.name, func(t *testing.T) {
+			t.Parallel()
+			pingServer := &pingServer{}
+			mux := http.NewServeMux()
+			mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+			server := memhttptest.NewServer(t, mux)
+
+			clientOpts := []connect.ClientOption{}
+			if testcase.clientOption == nil {
+				// Use a different protocol to test the override.
+				clientOpts = append(clientOpts, connect.WithGRPC())
+			}
+			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), clientOpts...)
+
+			pingProxyServer := &pluggablePingServer{
+				ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+					return client.Ping(ctx, request)
+				},
+			}
+			proxyMux := http.NewServeMux()
+			proxyMux.Handle(pingv1connect.NewPingServiceHandler(pingProxyServer))
+			proxyServer := memhttptest.NewServer(t, proxyMux)
+
+			proxyClientOpts := []connect.ClientOption{}
+			if testcase.clientOption != nil {
+				proxyClientOpts = append(proxyClientOpts, testcase.clientOption)
+			}
+			proxyClient := pingv1connect.NewPingServiceClient(proxyServer.Client(), proxyServer.URL(), proxyClientOpts...)
+
+			request := connect.NewRequest(&pingv1.PingRequest{Number: 42})
+			request.Header().Set("X-Test", t.Name())
+			response, err := proxyClient.Ping(context.Background(), request)
+			if !assert.Nil(t, err) {
+				return
+			}
+			// Assert the Content-Type is set for the proxy clients protocol and not the client's.
+			assert.Equal(t, response.Header().Get("Content-Type"), testcase.expectContentType)
+			assert.Equal(t, len(response.Header().Values("Content-Type")), 1)
+		})
+	}
+}
+
 type unflushableWriter struct {
 	w http.ResponseWriter
 }

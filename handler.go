@@ -71,8 +71,8 @@ func NewUnaryHandler[Req, Res any](
 		if err != nil {
 			return err
 		}
-		mergeHeaders(conn.ResponseHeader(), response.Header())
-		mergeHeaders(conn.ResponseTrailer(), response.Trailer())
+		mergeNonProtocolHeaders(conn.ResponseHeader(), response.Header())
+		mergeNonProtocolHeaders(conn.ResponseTrailer(), response.Trailer())
 		return conn.Send(response.Any())
 	}
 
