@@ -2969,7 +2969,7 @@ func (d *deflateReader) Reset(reader io.Reader) error {
 	if resetter, ok := d.r.(flate.Resetter); ok {
 		return resetter.Reset(reader, nil)
 	}
-	return fmt.Errorf("flate reader should implement flate.Resetter")
+	return errors.New("flate reader should implement flate.Resetter")
 }
 
 var _ connect.Decompressor = (*deflateReader)(nil)

@@ -11,6 +11,7 @@ export PATH := $(BIN):$(PATH)
 export GOBIN := $(abspath $(BIN))
 COPYRIGHT_YEARS := 2021-2024
 LICENSE_IGNORE := --ignore /testdata/
+BUF_VERSION := 1.32.2
 
 .PHONY: help
 help: ## Describe useful make targets
@@ -100,15 +101,15 @@ $(BIN)/protoc-gen-connect-go:
 
 $(BIN)/buf: Makefile
 	@mkdir -p $(@D)
-	go install github.com/bufbuild/buf/cmd/buf@v1.32.0
+	go install github.com/bufbuild/buf/cmd/buf@v${BUF_VERSION}
 
 $(BIN)/license-header: Makefile
 	@mkdir -p $(@D)
-	go install github.com/bufbuild/buf/private/pkg/licenseheader/cmd/license-header@v1.32.0
+	go install github.com/bufbuild/buf/private/pkg/licenseheader/cmd/license-header@v${BUF_VERSION}
 
 $(BIN)/golangci-lint: Makefile
 	@mkdir -p $(@D)
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.2
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.59.1
 
 $(BIN)/protoc-gen-go: Makefile go.mod
 	@mkdir -p $(@D)

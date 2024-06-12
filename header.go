@@ -20,6 +20,7 @@ import (
 )
 
 var (
+	//nolint:gochecknoglobals
 	protocolHeaders = map[string]struct{}{
 		// HTTP headers.
 		headerContentType:     {},

@@ -95,8 +95,8 @@ func verifyHeaders(t *testing.T, headers http.Header) {
 	assert.Equal(t, headers, http.Header{})
 
 	// Verify set/del don't panic
-	headers.Set("a", "b")
-	headers.Del("a")
+	headers.Set("A", "b")
+	headers.Del("A")
 }
 
 type nopStreamingClientConn struct {
