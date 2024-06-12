@@ -16,7 +16,6 @@ package connect
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 )
 
@@ -53,7 +52,7 @@ func NewUnaryHandler[Req, Res any](
 		if res == nil && err == nil {
 			// This is going to panic during serialization. Debugging is much easier
 			// if we panic here instead, so we can include the procedure name.
-			panic(fmt.Sprintf("%s returned nil *connect.Response and nil error", procedure)) //nolint: forbidigo
+			panic(procedure + " returned nil *connect.Response and nil error") //nolint: forbidigo
 		}
 		return res, err
 	})
@@ -107,7 +106,7 @@ func NewClientStreamHandler[Req, Res any](
 			if res == nil {
 				// This is going to panic during serialization. Debugging is much easier
 				// if we panic here instead, so we can include the procedure name.
-				panic(fmt.Sprintf("%s returned nil *connect.Response and nil error", procedure)) //nolint: forbidigo
+				panic(procedure + " returned nil *connect.Response and nil error") //nolint: forbidigo
 			}
 			mergeHeaders(conn.ResponseHeader(), res.header)
 			mergeHeaders(conn.ResponseTrailer(), res.trailer)

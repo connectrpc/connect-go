@@ -17,7 +17,6 @@ package connect
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -131,7 +130,7 @@ func (d *duplexHTTPCall) sendUnary(payload messagePayload) (int64, error) {
 	// Unary messages are sent as a single HTTP request. We don't need to use a
 	// pipe for the request body and we don't need to send headers separately.
 	if !d.requestSent.CompareAndSwap(false, true) {
-		return 0, fmt.Errorf("request already sent")
+		return 0, errors.New("request already sent")
 	}
 	payloadLength := int64(payload.Len())
 	if payloadLength > 0 {
@@ -141,7 +140,7 @@ func (d *duplexHTTPCall) sendUnary(payload messagePayload) (int64, error) {
 		d.request.ContentLength = payloadLength
 		d.request.GetBody = func() (io.ReadCloser, error) {
 			if !payloadBody.Rewind() {
-				return nil, fmt.Errorf("payload cannot be retried")
+				return nil, errors.New("payload cannot be retried")
 			}
 			return payloadBody, nil
 		}
