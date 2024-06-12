@@ -39,8 +39,8 @@ func TestErrorNilUnderlying(t *testing.T) {
 	err.AddDetail(detail)
 	assert.Equal(t, len(err.Details()), 1)
 	assert.Equal(t, err.Details()[0].Type(), "google.protobuf.Empty")
-	err.Meta().Set("foo", "bar")
-	assert.Equal(t, err.Meta().Get("foo"), "bar")
+	err.Meta().Set("Foo", "bar")
+	assert.Equal(t, err.Meta().Get("Foo"), "bar")
 	assert.Equal(t, CodeOf(err), CodeUnknown)
 }
 
@@ -51,9 +51,9 @@ func TestErrorFormatting(t *testing.T) {
 		NewError(CodeUnavailable, errors.New("")).Error(),
 		CodeUnavailable.String(),
 	)
-	got := NewError(CodeUnavailable, errors.New("foo")).Error()
+	got := NewError(CodeUnavailable, errors.New("Foo")).Error()
 	assert.True(t, strings.Contains(got, CodeUnavailable.String()))
-	assert.True(t, strings.Contains(got, "foo"))
+	assert.True(t, strings.Contains(got, "Foo"))
 }
 
 func TestErrorCode(t *testing.T) {

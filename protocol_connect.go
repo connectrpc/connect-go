@@ -1018,7 +1018,8 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 	if !isTooBig {
 		url := m.buildGetURL(data, false /* compressed */)
 		if m.getURLMaxBytes <= 0 || len(url.String()) < m.getURLMaxBytes {
-			return m.writeWithGet(url)
+			m.writeWithGet(url)
+			return nil
 		}
 		if m.compressionPool == nil {
 			if m.getUseFallback {
@@ -1044,7 +1045,8 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 	}
 	url := m.buildGetURL(compressed.Bytes(), true /* compressed */)
 	if m.getURLMaxBytes <= 0 || len(url.String()) < m.getURLMaxBytes {
-		return m.writeWithGet(url)
+		m.writeWithGet(url)
+		return nil
 	}
 	if m.getUseFallback {
 		setHeaderCanonical(m.header, connectUnaryHeaderCompression, m.compressionName)
@@ -1071,14 +1073,13 @@ func (m *connectUnaryRequestMarshaler) buildGetURL(data []byte, compressed bool)
 	return &url
 }
 
-func (m *connectUnaryRequestMarshaler) writeWithGet(url *url.URL) *Error {
+func (m *connectUnaryRequestMarshaler) writeWithGet(url *url.URL) {
 	delHeaderCanonical(m.header, connectHeaderProtocolVersion)
 	delHeaderCanonical(m.header, headerContentType)
 	delHeaderCanonical(m.header, headerContentEncoding)
 	delHeaderCanonical(m.header, headerContentLength)
 	m.duplexCall.SetMethod(http.MethodGet)
 	*m.duplexCall.URL() = *url
-	return nil
 }
 
 type connectUnaryUnmarshaler struct {
