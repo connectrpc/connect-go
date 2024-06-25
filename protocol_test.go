@@ -15,6 +15,7 @@
 package connect
 
 import (
+	"net/url"
 	"testing"
 
 	"connectrpc.com/connect/internal/assert"
@@ -62,4 +63,36 @@ func BenchmarkCanonicalizeContentType(b *testing.B) {
 		}
 		b.ReportAllocs()
 	})
+}
+
+func TestProcedureFromURL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{name: "simple", url: "http://localhost:8080/foo", want: "/foo"},
+		{name: "service", url: "http://localhost:8080/service/bar", want: "/service/bar"},
+		{name: "trailing", url: "http://localhost:8080/service/bar/", want: "/service/bar"},
+		{name: "subroute", url: "http://localhost:8080/api/service/bar/", want: "/service/bar"},
+		{name: "subrouteTrailing", url: "http://localhost:8080/api/service/bar/", want: "/service/bar"},
+		{
+			name: "real",
+			url:  "http://localhost:8080/connect.ping.v1.PingService/Ping",
+			want: "/connect.ping.v1.PingService/Ping",
+		},
+	}
+	for _, testcase := range tests {
+		testcase := testcase
+		t.Run(testcase.name, func(t *testing.T) {
+			t.Parallel()
+			url, err := url.Parse(testcase.url)
+			if !assert.Nil(t, err) {
+				return
+			}
+			t.Log(url.String())
+			assert.Equal(t, InferProcedureFromURL(url), testcase.want)
+		})
+	}
 }

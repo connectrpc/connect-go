@@ -61,34 +61,7 @@ func NewErrorWriter(opts ...HandlerOption) *ErrorWriter {
 }
 
 func (w *ErrorWriter) classifyRequest(request *http.Request) protocolType {
-	ctype := canonicalizeContentType(getHeaderCanonical(request.Header, headerContentType))
-	isPost := request.Method == http.MethodPost
-	isGet := request.Method == http.MethodGet
-	switch {
-	case isPost && (ctype == grpcContentTypeDefault || strings.HasPrefix(ctype, grpcContentTypePrefix)):
-		return grpcProtocol
-	case isPost && (ctype == grpcWebContentTypeDefault || strings.HasPrefix(ctype, grpcWebContentTypePrefix)):
-		return grpcWebProtocol
-	case isPost && strings.HasPrefix(ctype, connectStreamingContentTypePrefix):
-		// Streaming ignores the requireConnectProtocolHeader option as the
-		// Content-Type is enough to determine the protocol.
-		if err := connectCheckProtocolVersion(request, false /* required */); err != nil {
-			return unknownProtocol
-		}
-		return connectStreamProtocol
-	case isPost && strings.HasPrefix(ctype, connectUnaryContentTypePrefix):
-		if err := connectCheckProtocolVersion(request, w.requireConnectProtocolHeader); err != nil {
-			return unknownProtocol
-		}
-		return connectUnaryProtocol
-	case isGet:
-		if err := connectCheckProtocolVersion(request, w.requireConnectProtocolHeader); err != nil {
-			return unknownProtocol
-		}
-		return connectUnaryProtocol
-	default:
-		return unknownProtocol
-	}
+	return classifyRequest(request, w.requireConnectProtocolHeader)
 }
 
 // IsSupported checks whether a request is using one of the ErrorWriter's
@@ -176,4 +149,35 @@ func (w *ErrorWriter) writeGRPCWeb(response http.ResponseWriter, err error) erro
 	grpcErrorToTrailer(response.Header(), w.protobuf, err)
 	response.WriteHeader(http.StatusOK)
 	return nil
+}
+
+func classifyRequest(request *http.Request, requireConnectProtocolHeader bool) protocolType {
+	ctype := canonicalizeContentType(getHeaderCanonical(request.Header, headerContentType))
+	isPost := request.Method == http.MethodPost
+	isGet := request.Method == http.MethodGet
+	switch {
+	case isPost && (ctype == grpcContentTypeDefault || strings.HasPrefix(ctype, grpcContentTypePrefix)):
+		return grpcProtocol
+	case isPost && (ctype == grpcWebContentTypeDefault || strings.HasPrefix(ctype, grpcWebContentTypePrefix)):
+		return grpcWebProtocol
+	case isPost && strings.HasPrefix(ctype, connectStreamingContentTypePrefix):
+		// Streaming ignores the requireConnectProtocolHeader option as the
+		// Content-Type is enough to determine the protocol.
+		if err := connectCheckProtocolVersion(request, false /* required */); err != nil {
+			return unknownProtocol
+		}
+		return connectStreamProtocol
+	case isPost && strings.HasPrefix(ctype, connectUnaryContentTypePrefix):
+		if err := connectCheckProtocolVersion(request, requireConnectProtocolHeader); err != nil {
+			return unknownProtocol
+		}
+		return connectUnaryProtocol
+	case isGet:
+		if err := connectCheckProtocolVersion(request, requireConnectProtocolHeader); err != nil {
+			return unknownProtocol
+		}
+		return connectUnaryProtocol
+	default:
+		return unknownProtocol
+	}
 }
