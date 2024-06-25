@@ -1,3 +1,9 @@
+name: fossa
+# Prevent writing to the repository using the CI token.
+# Ref: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#permissions
+permissions:
+  pull-requests: read
+on: [pull_request, push]
 jobs:
   fossa-scan:
     runs-on: ubuntu-latest
