@@ -1,0 +1,8 @@
+jobs:
+  fossa-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: fossas/fossa-action@v1
+        with:
+          api-key: ${{secrets.CONNECT_FOSSA_API_KEY}}
