@@ -4,7 +4,8 @@ Connect
 [![Build](https://github.com/connectrpc/connect-go/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/connectrpc/connect-go/actions/workflows/ci.yaml)
 [![Report Card](https://goreportcard.com/badge/connectrpc.com/connect)](https://goreportcard.com/report/connectrpc.com/connect)
 [![GoDoc](https://pkg.go.dev/badge/connectrpc.com/connect.svg)](https://pkg.go.dev/connectrpc.com/connect)
-[![Slack](https://img.shields.io/badge/slack-buf-%23e01563)][slack]
+[![Slack](https://img.shields.io/badge/slack-buf-%23e01563)][![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fconnectrpc%2Fconnect-go.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fconnectrpc%2Fconnect-go?ref=badge_shield)
+[slack]
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/8972/badge)](https://www.bestpractices.dev/projects/8972)
 
 Connect is a slim library for building browser and gRPC-compatible HTTP APIs.
@@ -184,3 +185,7 @@ Offered under the [Apache 2 license][license].
 [protobuf]: https://developers.google.com/protocol-buffers
 [protocol]: https://connectrpc.com/docs/protocol
 [slack]: https://buf.build/links/slack
+
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fconnectrpc%2Fconnect-go.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fconnectrpc%2Fconnect-go?ref=badge_large)
