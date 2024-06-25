@@ -11,7 +11,7 @@ export PATH := $(BIN):$(PATH)
 export GOBIN := $(abspath $(BIN))
 COPYRIGHT_YEARS := 2021-2024
 LICENSE_IGNORE := --ignore /testdata/
-BUF_VERSION := 1.32.2
+BUF_VERSION := 1.34.0
 
 .PHONY: help
 help: ## Describe useful make targets
@@ -78,6 +78,7 @@ lintfix: $(BIN)/golangci-lint $(BIN)/buf ## Automatically fix some lint errors
 
 .PHONY: generate
 generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
+	go mod tidy
 	rm -rf internal/gen
 	PATH="$(abspath $(BIN))" buf generate
 	license-header \
