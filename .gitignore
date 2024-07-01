@@ -3,3 +3,5 @@
 *.svg
 cover.out
 connect.test
+
+dist/
