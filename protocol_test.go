@@ -92,7 +92,8 @@ func TestProcedureFromURL(t *testing.T) {
 				return
 			}
 			t.Log(url.String())
-			assert.Equal(t, InferProcedureFromURL(url), testcase.want)
+			got, _ := ProcedureFromURL(url)
+			assert.Equal(t, got, testcase.want)
 		})
 	}
 }

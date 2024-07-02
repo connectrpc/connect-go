@@ -48,43 +48,43 @@ const (
 
 var errNoTimeout = errors.New("no timeout")
 
-// InferProtocolFromRequest returns the inferred protocol name for parsing an
+// ProtocolFromRequest returns the inferred protocol name for parsing an
 // HTTP request. It inspects the request's method and headers to determine the
 // protocol. If the request doesn't match any known protocol, an empty string
 // is returned.
-func InferProtocolFromRequest(request *http.Request) string {
+func ProtocolFromRequest(request *http.Request) (string, bool) {
 	switch classifyRequest(request, false) {
 	case connectUnaryProtocol, connectStreamProtocol:
-		return ProtocolConnect
+		return ProtocolConnect, true
 	case grpcProtocol:
-		return ProtocolGRPC
+		return ProtocolGRPC, true
 	case grpcWebProtocol:
-		return ProtocolGRPCWeb
+		return ProtocolGRPCWeb, true
 	case unknownProtocol:
-		return ""
+		return "", false
 	default:
-		return ""
+		return "", false
 	}
 }
 
-// InferProcedureFromURL returns the inferred procedure name from a URL. It's
+// ProcedureFromURL returns the inferred procedure name from a URL. It's
 // returned in the form "/service/method" if a valid suffix is found. If the
 // path doesn't contain a service and method, the entire path is returned.
-func InferProcedureFromURL(url *url.URL) string {
+func ProcedureFromURL(url *url.URL) (string, bool) {
 	path := strings.TrimSuffix(url.Path, "/")
 	ultimate := strings.LastIndex(path, "/")
 	if ultimate < 0 {
-		return url.Path
+		return url.Path, false
 	}
 	penultimate := strings.LastIndex(path[:ultimate], "/")
 	if penultimate < 0 {
-		return url.Path
+		return url.Path, false
 	}
 	procedure := path[penultimate:]
 	if len(procedure) < 4 { // two slashes + service + method
-		return url.Path
+		return url.Path, false
 	}
-	return procedure
+	return procedure, true
 }
 
 // A Protocol defines the HTTP semantics to use when sending and receiving
