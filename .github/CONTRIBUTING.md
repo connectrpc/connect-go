@@ -11,6 +11,9 @@ respect!
 
 Note that for a contribution to be accepted, you must sign off on all commits
 in order to affirm that they comply with the [Developer Certificate of Origin][dco].
+Make sure to configure `git` with the same name and E-Mail as your GitHub account,
+and run `git commit` with the `-s` flag to sign. If necessary, a bot will remind
+you to sign your commits when you open your pull request, and provide helpful tips.
 
 ## Setup
 
