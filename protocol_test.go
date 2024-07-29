@@ -68,19 +68,23 @@ func BenchmarkCanonicalizeContentType(b *testing.B) {
 func TestProcedureFromURL(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		url  string
-		want string
+		name  string
+		url   string
+		want  string
+		valid bool
 	}{
 		{name: "simple", url: "http://localhost:8080/foo", want: "/foo"},
-		{name: "service", url: "http://localhost:8080/service/bar", want: "/service/bar"},
-		{name: "trailing", url: "http://localhost:8080/service/bar/", want: "/service/bar"},
-		{name: "subroute", url: "http://localhost:8080/api/service/bar/", want: "/service/bar"},
-		{name: "subrouteTrailing", url: "http://localhost:8080/api/service/bar/", want: "/service/bar"},
+		{name: "service", url: "http://localhost:8080/service/bar", want: "/service/bar", valid: true},
+		{name: "trailing", url: "http://localhost:8080/service/bar/", want: "/service/bar", valid: true},
+		{name: "subroute", url: "http://localhost:8080/api/service/bar/", want: "/service/bar", valid: true},
+		{name: "subrouteTrailing", url: "http://localhost:8080/api/service/bar/", want: "/service/bar", valid: true},
+		{name: "missingService", url: "http://localhost:8080//foo", want: "//foo"},
+		{name: "missingMethod", url: "http://localhost:8080/foo//", want: "/foo//"},
 		{
-			name: "real",
-			url:  "http://localhost:8080/connect.ping.v1.PingService/Ping",
-			want: "/connect.ping.v1.PingService/Ping",
+			name:  "real",
+			url:   "http://localhost:8080/connect.ping.v1.PingService/Ping",
+			want:  "/connect.ping.v1.PingService/Ping",
+			valid: true,
 		},
 	}
 	for _, testcase := range tests {
