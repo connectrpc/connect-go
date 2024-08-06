@@ -86,7 +86,7 @@ func ProcedureFromURL(url *url.URL) (string, bool) {
 	if ultimate == len(path)-1 || penultimate == ultimate-1 {
 		return url.Path, false
 	}
-	return procedure, false
+	return procedure, true
 }
 
 // A Protocol defines the HTTP semantics to use when sending and receiving
