@@ -33,7 +33,8 @@ jobs:
         # conflicting guidance, run only on the most recent supported version.
         # For the same reason, only check generated code on the most recent
         # supported version.
-        if: matrix.go-version == '1.23.x'
+        # TODO: use 1.23 once all linters support that latest Go release.
+        if: matrix.go-version == '1.22.x'
         run: make checkgenerate && make lint
   conformance:
     runs-on: ubuntu-latest
