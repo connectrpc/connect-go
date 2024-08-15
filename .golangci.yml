@@ -1,5 +1,3 @@
-run:
-  skip-dirs-use-default: false
 linters-settings:
   errcheck:
     check-type-assertions: true
@@ -34,34 +32,27 @@ linters:
   enable-all: true
   disable:
     - cyclop            # covered by gocyclo
-    - deadcode          # abandoned
     - depguard          # unnecessary for small libraries
-    - exhaustivestruct  # replaced by exhaustruct
+    - execinquery       # deprecated since golangci v1.58
     - funlen            # rely on code review to limit function length
     - gocognit          # dubious "cognitive overhead" quantification
     - gofumpt           # prefer standard gofmt
     - goimports         # rely on gci instead
-    - golint            # deprecated by Go team
     - gomnd             # some unnamed constants are okay
-    - ifshort           # deprecated by author
     - inamedparam       # convention is not followed
-    - interfacer        # deprecated by author
     - ireturn           # "accept interfaces, return structs" isn't ironclad
     - lll               # don't want hard limits for line length
     - maintidx          # covered by gocyclo
-    - maligned          # readability trumps efficient struct packing
     - mnd               # status codes are clearer than constants
     - nlreturn          # generous whitespace violates house style
     - nonamedreturns    # named returns are fine; it's *bare* returns that are bad
-    - nosnakecase       # deprecated in https://github.com/golangci/golangci-lint/pull/3065
     - protogetter       # too many false positives
-    - scopelint         # deprecated by author
-    - structcheck       # abandoned
     - testpackage       # internal tests are fine
-    - varcheck          # abandoned
     - wrapcheck         # don't _always_ need to wrap errors
     - wsl               # generous whitespace violates house style
 issues:
+  exclude-dirs-use-default: false
+
   exclude:
     # Don't ban use of fmt.Errorf to create new errors, but the remaining
     # checks from err113 are useful.
