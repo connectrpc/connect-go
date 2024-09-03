@@ -237,8 +237,8 @@ func WithCodec(codec Codec) Option {
 // The default minimum is zero. Setting a minimum compression threshold may
 // improve overall performance, because the CPU cost of compressing very small
 // messages usually isn't worth the small reduction in network I/O.
-func WithCompressMinBytes(min int) Option {
-	return &compressMinBytesOption{Min: min}
+func WithCompressMinBytes(minBytes int) Option {
+	return &compressMinBytesOption{Min: minBytes}
 }
 
 // WithReadMaxBytes limits the performance impact of pathologically large
@@ -254,8 +254,8 @@ func WithCompressMinBytes(min int) Option {
 // HTTP request stream (rather than the per-message size). Connect handles
 // [http.MaxBytesError] specially, so clients still receive errors with the
 // appropriate error code and informative messages.
-func WithReadMaxBytes(max int) Option {
-	return &readMaxBytesOption{Max: max}
+func WithReadMaxBytes(maxBytes int) Option {
+	return &readMaxBytesOption{Max: maxBytes}
 }
 
 // WithSendMaxBytes prevents sending messages too large for the client/handler
@@ -266,8 +266,8 @@ func WithReadMaxBytes(max int) Option {
 //
 // Setting WithSendMaxBytes to zero allows any message size. Both clients and
 // handlers default to allowing any message size.
-func WithSendMaxBytes(max int) Option {
-	return &sendMaxBytesOption{Max: max}
+func WithSendMaxBytes(maxBytes int) Option {
+	return &sendMaxBytesOption{Max: maxBytes}
 }
 
 // WithIdempotency declares the idempotency of the procedure. This can determine
