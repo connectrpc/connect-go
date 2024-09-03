@@ -127,9 +127,9 @@ func TestProtocolFromRequest(t *testing.T) {
 		params: url.Values{"message": []string{"{}"}},
 		valid:  false,
 	}, {
-		name:        "connectGetContentType",
+		name:        "connectPutContentType",
 		contentType: "application/connect+json",
-		method:      http.MethodGet,
+		method:      http.MethodPut,
 		valid:       false,
 	}, {
 		name:   "nakedGet",
