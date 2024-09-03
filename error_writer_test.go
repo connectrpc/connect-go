@@ -17,6 +17,7 @@ package connect
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"connectrpc.com/connect/internal/assert"
@@ -37,9 +38,11 @@ func TestErrorWriter(t *testing.T) {
 		t.Run("UnaryGET", func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
 			assert.False(t, writer.IsSupported(req))
-			query := req.URL.Query()
-			query.Set(connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue)
-			req.URL.RawQuery = query.Encode()
+			req.URL.RawQuery = url.Values{
+				connectUnaryConnectQueryParameter:  []string{connectUnaryConnectQueryValue},
+				connectUnaryEncodingQueryParameter: []string{"json"},
+				connectUnaryMessageQueryParameter:  []string{"{}"},
+			}.Encode()
 			assert.True(t, writer.IsSupported(req))
 		})
 		t.Run("Stream", func(t *testing.T) {
@@ -60,6 +63,10 @@ func TestErrorWriter(t *testing.T) {
 		})
 		t.Run("ConnectUnaryGET", func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+			req.URL.RawQuery = url.Values{
+				connectUnaryEncodingQueryParameter: []string{"json"},
+				connectUnaryMessageQueryParameter:  []string{"{}"},
+			}.Encode()
 			assert.True(t, writer.IsSupported(req))
 		})
 		t.Run("ConnectStream", func(t *testing.T) {

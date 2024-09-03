@@ -176,6 +176,11 @@ func classifyRequest(request *http.Request, requireConnectProtocolHeader bool) p
 		if err := connectCheckProtocolVersion(request, requireConnectProtocolHeader); err != nil {
 			return unknownProtocol
 		}
+		// Check for Connect required parameters.
+		params := request.URL.Query()
+		if !params.Has("message") || !params.Has("encoding") {
+			return unknownProtocol
+		}
 		return connectUnaryProtocol
 	default:
 		return unknownProtocol

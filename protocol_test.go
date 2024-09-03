@@ -73,6 +73,7 @@ func TestProtocolFromRequest(t *testing.T) {
 		name        string
 		contentType string
 		method      string
+		params      url.Values
 		want        string
 		valid       bool
 	}{{
@@ -100,23 +101,40 @@ func TestProtocolFromRequest(t *testing.T) {
 		want:        ProtocolGRPC,
 		valid:       true,
 	}, {
-		name:        "connectGet",
-		contentType: "application/connec+json",
-		method:      http.MethodGet,
-		want:        ProtocolConnect,
-		valid:       true,
+		name:   "connectGet",
+		method: http.MethodGet,
+		params: url.Values{"message": []string{"{}"}, "encoding": []string{"json"}},
+		want:   ProtocolConnect,
+		valid:  true,
 	}, {
-		name:        "grpcWebGet",
-		contentType: "application/grpc-web",
-		method:      http.MethodGet,
-		want:        ProtocolConnect,
-		valid:       true,
+		name:   "connectGetProto",
+		method: http.MethodGet,
+		params: url.Values{"message": []string{""}, "encoding": []string{"proto"}},
+		want:   ProtocolConnect,
+		valid:  true,
 	}, {
-		name:        "grpcGet",
-		contentType: "application/grpc+json",
+		name:   "connectGetMissingParams",
+		method: http.MethodGet,
+		valid:  false,
+	}, {
+		name:   "connectGetMissingParam-Message",
+		method: http.MethodGet,
+		params: url.Values{"encoding": []string{"json"}},
+		valid:  false,
+	}, {
+		name:   "connectGetMissingParam-Encoding",
+		method: http.MethodGet,
+		params: url.Values{"message": []string{"{}"}},
+		valid:  false,
+	}, {
+		name:        "connectGetContentType",
+		contentType: "application/connect+json",
 		method:      http.MethodGet,
-		want:        ProtocolConnect,
-		valid:       true,
+		valid:       false,
+	}, {
+		name:   "nakedGet",
+		method: http.MethodGet,
+		valid:  false,
 	}, {
 		name:        "unknown",
 		contentType: "text/html",
@@ -130,6 +148,9 @@ func TestProtocolFromRequest(t *testing.T) {
 			req := httptest.NewRequest(testcase.method, "http://localhost:8080/service/Method", nil)
 			if testcase.contentType != "" {
 				req.Header.Set("Content-Type", testcase.contentType)
+			}
+			if testcase.params != nil {
+				req.URL.RawQuery = testcase.params.Encode()
 			}
 			req.Method = testcase.method
 			got, valid := ProtocolFromRequest(req)
