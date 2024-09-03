@@ -178,7 +178,7 @@ func classifyRequest(request *http.Request, requireConnectProtocolHeader bool) p
 		}
 		// Check for Connect required parameters.
 		params := request.URL.Query()
-		if !params.Has("message") || !params.Has("encoding") {
+		if !params.Has(connectUnaryMessageQueryParameter) || !params.Has(connectUnaryEncodingQueryParameter) {
 			return unknownProtocol
 		}
 		return connectUnaryProtocol
