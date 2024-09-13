@@ -168,6 +168,8 @@ func (d *duplexHTTPCall) CloseWrite() error {
 	// response to read from.
 	if d.requestSent.CompareAndSwap(false, true) {
 		go d.makeRequest()
+		// We never setup a request body, so it's effectively already closed.
+		// So nothing else to do.
 		return nil
 	}
 	// The user calls CloseWrite to indicate that they're done sending data. It's
