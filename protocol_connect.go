@@ -1408,7 +1408,7 @@ func connectValidateStreamResponseContentType(requestCodecName string, streamTyp
 			CodeUnknown,
 			"invalid content-type: %q; expecting %q",
 			responseContentType,
-			connectUnaryContentTypePrefix+requestCodecName,
+			connectStreamingContentTypePrefix+requestCodecName,
 		)
 	}
 	responseCodecName := connectCodecFromContentType(
