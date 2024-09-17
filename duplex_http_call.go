@@ -306,11 +306,7 @@ func (d *duplexHTTPCall) makeRequest() {
 	// pipe. Write's check for io.ErrClosedPipe and will convert this to io.EOF.
 	response, err := d.httpClient.Do(d.request) //nolint:bodyclose
 	if err != nil {
-		if errors.Is(err, io.EOF) {
-			// We use io.EOF as a sentinel in many places and don't want this
-			// transport error to be confused for those other situations.
-			err = io.ErrUnexpectedEOF
-		}
+		err = wrapIfEOF(err)
 		err = wrapIfContextError(err)
 		err = wrapIfLikelyH2CNotConfiguredError(d.request, err)
 		err = wrapIfLikelyWithGRPCNotUsedError(err)

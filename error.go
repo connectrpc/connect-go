@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -256,6 +257,22 @@ func (e *Error) detailsAsAny() []*anypb.Any {
 	return anys
 }
 
+type unexpectedEOFError struct {
+	err error
+}
+
+func (e *unexpectedEOFError) Error() string {
+	return e.err.Error()
+}
+
+func (e *unexpectedEOFError) Is(err error) bool {
+	// Return true only if err is the same value as e or if err
+	// is io.ErrUnexpectedEOF. Importantly, this returns false if
+	// the given err is io.EOF.
+	unexpectedEOF, ok := err.(*unexpectedEOFError)
+	return errors.Is(err, io.ErrUnexpectedEOF) || ok && e == unexpectedEOF
+}
+
 // IsNotModifiedError checks whether the supplied error indicates that the
 // requested resource hasn't changed. It only returns true if the server used
 // [NewNotModifiedError] in response to a Connect-protocol RPC made with an
@@ -290,6 +307,19 @@ func wrapIfUncoded(err error) error {
 		return maybeCodedErr
 	}
 	return NewError(CodeUnknown, maybeCodedErr)
+}
+
+// wrapIfEOF is used for abnormal EOF conditions, like EOF before response
+// headers were received. When this happens, we want errors.Is(err, io.EOF) to
+// return false (since we have *many* tests for io.EOF, which otherwise
+// indicates a normal end of stream). Instead, the error will return true with
+// errors.Is(err, io.ErrUnexpectedEOF), to make it more clear that the EOF is
+// an abnormal end of the operation.
+func wrapIfEOF(err error) error {
+	if errors.Is(err, io.EOF) {
+		return &unexpectedEOFError{err}
+	}
+	return err
 }
 
 // wrapIfContextError applies CodeCanceled or CodeDeadlineExceeded to Go's

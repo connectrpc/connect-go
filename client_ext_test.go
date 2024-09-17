@@ -270,8 +270,7 @@ func TestConnectionDropped(t *testing.T) {
 					}
 					err = svrStream.Err()
 				}
-				assert.NotNil(t, err)
-				if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
+				if assert.NotNil(t, err) && !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
 					t.Logf("err = %v\n%#v", err, err)
 				}
 			})
