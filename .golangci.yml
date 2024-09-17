@@ -19,8 +19,6 @@ linters-settings:
   importas:
     no-unaliased: true
     alias:
-      - pkg: connectrpc.com/connect
-        alias: connect
       - pkg: connectrpc.com/connect/internal/gen/connect/ping/v1
         alias: pingv1
   varnamelen:
