@@ -89,12 +89,17 @@ func (s StreamType) String() string {
 //
 // StreamingHandlerConn implementations do not need to be safe for concurrent use.
 type StreamingHandlerConn interface {
+	// Spec and Peer must be safe to call concurrently with all other methods.
 	Spec() Spec
 	Peer() Peer
 
+	// Receive, and RequestHeader may race with each other, but must be
+	// safe to call concurrently with all other methods.
 	Receive(any) error
 	RequestHeader() http.Header
 
+	// Send, ResponseHeader, and ResponseTrailer may race with each other,
+	// but must be safe to call concurrently with all other methods.
 	Send(any) error
 	ResponseHeader() http.Header
 	ResponseTrailer() http.Header
