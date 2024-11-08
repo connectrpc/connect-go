@@ -210,10 +210,10 @@ func TestServer(t *testing.T) {
 			assert.Nil(t, stream.Close())
 		})
 	}
-	testCumSum := func(t *testing.T, client pingv1connect.PingServiceClient, bidiSupported bool) { //nolint:thelper
+	testCumSum := func(t *testing.T, client pingv1connect.PingServiceClient, fullDuplex bool) { //nolint:thelper
 		t.Run("cumsum", func(t *testing.T) {
-			if !bidiSupported {
-				t.Skip("transport doesn't support bidi streaming")
+			if !fullDuplex {
+				t.Skip("transport doesn't support full-duplex streaming")
 			}
 			send := []int64{3, 5, 1}
 			expect := []int64{3, 8, 9}
@@ -248,8 +248,8 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, stream.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
 		})
 		t.Run("cumsum_error", func(t *testing.T) {
-			if !bidiSupported {
-				t.Skip("transport doesn't support bidi streaming")
+			if !fullDuplex {
+				t.Skip("transport doesn't support full-duplex streaming")
 			}
 			stream := client.CumSum(context.Background())
 			if err := stream.Send(&pingv1.CumSumRequest{Number: 42}); err != nil {
@@ -263,8 +263,8 @@ func TestServer(t *testing.T) {
 			assert.True(t, connect.IsWireError(err))
 		})
 		t.Run("cumsum_empty_stream", func(t *testing.T) {
-			if !bidiSupported {
-				t.Skip("transport doesn't support bidi streaming")
+			if !fullDuplex {
+				t.Skip("transport doesn't support full-duplex streaming")
 			}
 			stream := client.CumSum(context.Background())
 			stream.RequestHeader().Set(clientHeader, headerValue)
@@ -278,8 +278,8 @@ func TestServer(t *testing.T) {
 			assert.Nil(t, stream.CloseResponse()) // clean-up the stream
 		})
 		t.Run("cumsum_cancel_after_first_response", func(t *testing.T) {
-			if !bidiSupported {
-				t.Skip("transport doesn't support bidi streaming")
+			if !fullDuplex {
+				t.Skip("transport doesn't support full-duplex streaming")
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			stream := client.CumSum(ctx)
@@ -301,8 +301,8 @@ func TestServer(t *testing.T) {
 			assert.Nil(t, stream.CloseResponse())
 		})
 		t.Run("cumsum_cancel_before_send", func(t *testing.T) {
-			if !bidiSupported {
-				t.Skip("transport doesn't support bidi streaming")
+			if !fullDuplex {
+				t.Skip("transport doesn't support full-duplex streaming")
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			stream := client.CumSum(ctx)
@@ -317,9 +317,11 @@ func TestServer(t *testing.T) {
 			assert.Nil(t, stream.CloseRequest())
 			assert.Nil(t, stream.CloseResponse())
 		})
-		t.Run("cumsum_unsupported", func(t *testing.T) {
-			if bidiSupported {
-				t.Skip("transport supports bidi streaming")
+		t.Run("cumsum_half_duplex", func(t *testing.T) {
+			// This test is for HTTP1, which doesn't support full-duplex streaming.
+			// We expect the stream to error after the first response.
+			if fullDuplex {
+				t.Skip("transport supports full-duplex streaming")
 			}
 			stream := client.CumSum(context.Background())
 			stream.RequestHeader().Set(clientHeader, headerValue)
@@ -387,14 +389,14 @@ func TestServer(t *testing.T) {
 			assertIsHTTPMiddlewareError(t, stream.Err())
 		})
 	}
-	testMatrix := func(t *testing.T, client *http.Client, url string, bidi bool) { //nolint:thelper
+	testMatrix := func(t *testing.T, client *http.Client, url string, fullDuplex bool) { //nolint:thelper
 		run := func(t *testing.T, opts ...connect.ClientOption) {
 			t.Helper()
 			client := pingv1connect.NewPingServiceClient(client, url, opts...)
 			testPing(t, client)
 			testSum(t, client)
 			testCountUp(t, client)
-			testCumSum(t, client, bidi)
+			testCumSum(t, client, fullDuplex)
 			testErrors(t, client)
 		}
 		t.Run("connect", func(t *testing.T) {
@@ -500,13 +502,13 @@ func TestServer(t *testing.T) {
 		t.Parallel()
 		server := memhttptest.NewServer(t, mux)
 		client := &http.Client{Transport: server.TransportHTTP1()}
-		testMatrix(t, client, server.URL(), false /* bidi */)
+		testMatrix(t, client, server.URL(), false /* full-duplex */)
 	})
 	t.Run("http2", func(t *testing.T) {
 		t.Parallel()
 		server := memhttptest.NewServer(t, mux)
 		client := server.Client()
-		testMatrix(t, client, server.URL(), true /* bidi */)
+		testMatrix(t, client, server.URL(), true /* full-duplex */)
 	})
 }
 
