@@ -210,17 +210,16 @@ func TestServer(t *testing.T) {
 			assert.Nil(t, stream.Close())
 		})
 	}
-	testCumSum := func(t *testing.T, client pingv1connect.PingServiceClient, expectSuccess bool) { //nolint:thelper
+	testCumSum := func(t *testing.T, client pingv1connect.PingServiceClient, bidiSupported bool) { //nolint:thelper
 		t.Run("cumsum", func(t *testing.T) {
+			if !bidiSupported {
+				t.Skip("transport doesn't support bidi streaming")
+			}
 			send := []int64{3, 5, 1}
 			expect := []int64{3, 8, 9}
 			var got []int64
 			stream := client.CumSum(context.Background())
 			stream.RequestHeader().Set(clientHeader, headerValue)
-			if !expectSuccess { // server doesn't support HTTP/2
-				failNoHTTP2(t, stream)
-				return
-			}
 			var wg sync.WaitGroup
 			wg.Add(2)
 			go func() {
@@ -249,11 +248,10 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, stream.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
 		})
 		t.Run("cumsum_error", func(t *testing.T) {
-			stream := client.CumSum(context.Background())
-			if !expectSuccess { // server doesn't support HTTP/2
-				failNoHTTP2(t, stream)
-				return
+			if !bidiSupported {
+				t.Skip("transport doesn't support bidi streaming")
 			}
+			stream := client.CumSum(context.Background())
 			if err := stream.Send(&pingv1.CumSumRequest{Number: 42}); err != nil {
 				assert.ErrorIs(t, err, io.EOF)
 				assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
@@ -265,12 +263,11 @@ func TestServer(t *testing.T) {
 			assert.True(t, connect.IsWireError(err))
 		})
 		t.Run("cumsum_empty_stream", func(t *testing.T) {
+			if !bidiSupported {
+				t.Skip("transport doesn't support bidi streaming")
+			}
 			stream := client.CumSum(context.Background())
 			stream.RequestHeader().Set(clientHeader, headerValue)
-			if !expectSuccess { // server doesn't support HTTP/2
-				failNoHTTP2(t, stream)
-				return
-			}
 			// Deliberately closing with calling Send to test the behavior of Receive.
 			// This test case is based on the grpc interop tests.
 			assert.Nil(t, stream.CloseRequest())
@@ -281,14 +278,12 @@ func TestServer(t *testing.T) {
 			assert.Nil(t, stream.CloseResponse()) // clean-up the stream
 		})
 		t.Run("cumsum_cancel_after_first_response", func(t *testing.T) {
+			if !bidiSupported {
+				t.Skip("transport doesn't support bidi streaming")
+			}
 			ctx, cancel := context.WithCancel(context.Background())
 			stream := client.CumSum(ctx)
 			stream.RequestHeader().Set(clientHeader, headerValue)
-			if !expectSuccess { // server doesn't support HTTP/2
-				failNoHTTP2(t, stream)
-				cancel()
-				return
-			}
 			var got []int64
 			expect := []int64{42}
 			if err := stream.Send(&pingv1.CumSumRequest{Number: 42}); err != nil {
@@ -306,13 +301,11 @@ func TestServer(t *testing.T) {
 			assert.Nil(t, stream.CloseResponse())
 		})
 		t.Run("cumsum_cancel_before_send", func(t *testing.T) {
+			if !bidiSupported {
+				t.Skip("transport doesn't support bidi streaming")
+			}
 			ctx, cancel := context.WithCancel(context.Background())
 			stream := client.CumSum(ctx)
-			if !expectSuccess { // server doesn't support HTTP/2
-				failNoHTTP2(t, stream)
-				cancel()
-				return
-			}
 			stream.RequestHeader().Set(clientHeader, headerValue)
 			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 8}))
 			cancel()
@@ -321,6 +314,27 @@ func TestServer(t *testing.T) {
 			err := stream.Send(&pingv1.CumSumRequest{Number: 19})
 			assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled, assert.Sprintf("%v", err))
 			assert.False(t, connect.IsWireError(err))
+			assert.Nil(t, stream.CloseRequest())
+			assert.Nil(t, stream.CloseResponse())
+		})
+		t.Run("cumsum_unsupported", func(t *testing.T) {
+			if bidiSupported {
+				t.Skip("transport supports bidi streaming")
+			}
+			stream := client.CumSum(context.Background())
+			stream.RequestHeader().Set(clientHeader, headerValue)
+			err := stream.Send(&pingv1.CumSumRequest{Number: 1})
+			assert.Nil(t, err)
+
+			response, err := stream.Receive()
+			assert.Nil(t, err)
+			assert.NotNil(t, response)
+			assert.Equal(t, response.GetSum(), 1)
+
+			// Stream must now error as HTTP1 doesn't support full-duplex.
+			err = stream.Send(&pingv1.CumSumRequest{Number: 2})
+			assert.ErrorIs(t, err, io.EOF)
+
 			assert.Nil(t, stream.CloseRequest())
 			assert.Nil(t, stream.CloseResponse())
 		})
@@ -944,35 +958,6 @@ func TestUnavailableIfHostInvalid(t *testing.T) {
 	)
 	assert.NotNil(t, err)
 	assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
-}
-
-func TestBidiRequiresHTTP2(t *testing.T) {
-	t.Parallel()
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/connect+proto")
-		_, err := io.WriteString(w, "hello world")
-		assert.Nil(t, err)
-	})
-	server := memhttptest.NewServer(t, handler)
-	client := pingv1connect.NewPingServiceClient(
-		&http.Client{Transport: server.TransportHTTP1()},
-		server.URL(),
-	)
-	stream := client.CumSum(context.Background())
-	// Stream creates an async request, can error on Send or Receive.
-	if err := stream.Send(&pingv1.CumSumRequest{}); err != nil {
-		assert.ErrorIs(t, err, io.EOF)
-	}
-	assert.Nil(t, stream.CloseRequest())
-	_, err := stream.Receive()
-	assert.NotNil(t, err)
-	var connectErr *connect.Error
-	assert.True(t, errors.As(err, &connectErr))
-	assert.Equal(t, connectErr.Code(), connect.CodeUnimplemented)
-	assert.True(
-		t,
-		strings.HasSuffix(connectErr.Message(), ": bidi streams require at least HTTP/2"),
-	)
 }
 
 func TestCompressMinBytesClient(t *testing.T) {
@@ -2180,15 +2165,21 @@ func TestBidiOverHTTP1(t *testing.T) {
 		&http.Client{Transport: server.TransportHTTP1()},
 		server.URL(),
 	)
+	// Create a BIDI stream, after receiving a response the stream should be
+	// closed as HTTP1 doesn't support full-duplex.
 	stream := client.CumSum(context.Background())
-	// Stream creates an async request, can error on Send or Receive.
-	if err := stream.Send(&pingv1.CumSumRequest{Number: 2}); err != nil {
-		assert.ErrorIs(t, err, io.EOF)
-	}
-	_, err := stream.Receive()
-	assert.NotNil(t, err)
-	assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
-	assert.Equal(t, err.Error(), "unknown: HTTP status 505 HTTP Version Not Supported")
+	err := stream.Send(&pingv1.CumSumRequest{Number: 1})
+	assert.Nil(t, err)
+
+	response, err := stream.Receive()
+	assert.Nil(t, err)
+	assert.NotNil(t, response)
+	assert.Equal(t, response.GetSum(), 1)
+
+	// Stream must now error as HTTP1 doesn't support full-duplex.
+	err = stream.Send(&pingv1.CumSumRequest{Number: 2})
+	assert.ErrorIs(t, err, io.EOF)
+
 	assert.Nil(t, stream.CloseRequest())
 	assert.Nil(t, stream.CloseResponse())
 }
@@ -2769,23 +2760,6 @@ func (p *pluggablePingServer) CumSum(
 	stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse],
 ) error {
 	return p.cumSum(ctx, stream)
-}
-
-func failNoHTTP2(tb testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]) {
-	tb.Helper()
-	if err := stream.Send(&pingv1.CumSumRequest{}); err != nil {
-		assert.ErrorIs(tb, err, io.EOF)
-		assert.Equal(tb, connect.CodeOf(err), connect.CodeUnknown)
-	}
-	assert.Nil(tb, stream.CloseRequest())
-	_, err := stream.Receive()
-	assert.NotNil(tb, err) // should be 505
-	assert.True(
-		tb,
-		strings.Contains(err.Error(), "HTTP status 505"),
-		assert.Sprintf("expected 505, got %v", err),
-	)
-	assert.Nil(tb, stream.CloseResponse())
 }
 
 func expectClientHeader(check bool, req connect.AnyRequest) error {
