@@ -95,7 +95,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		response, err := receiveUnaryResponse[Res](conn, config.Initializer)
 		if err != nil {
 			_ = conn.CloseResponse()
-			return nil, err
+			return response, err
 		}
 		return response, conn.CloseResponse()
 	})
