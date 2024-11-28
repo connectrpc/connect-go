@@ -53,7 +53,7 @@ func TestClientErrorHandling(t *testing.T) {
 
 // errorHidingInterceptor is a simple interceptor that hides errors based on
 // some criteria (in this case, if the error is a CodeCanceled error). It is
-// use to reproduce an issue with error handling in the client, where the
+// used to reproduce an issue with error handling in the client, where the
 // type information is lost between unaryFunc and client.callUnary.
 type errorHidingInterceptor struct{}
 

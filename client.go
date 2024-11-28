@@ -95,7 +95,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		response, err := receiveUnaryResponse[Res](conn, config.Initializer)
 		if err != nil {
 			_ = conn.CloseResponse()
-			return response, err
+			return nil, err
 		}
 		return response, conn.CloseResponse()
 	})
@@ -110,7 +110,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		request.peer = client.protocolClient.Peer()
 		protocolClient.WriteRequestHeader(StreamTypeUnary, request.Header())
 		response, err := unaryFunc(ctx, request)
-		if err != nil {
+		if err != nil || response == nil {
 			return nil, err
 		}
 		typed, ok := response.(*Response[Res])
