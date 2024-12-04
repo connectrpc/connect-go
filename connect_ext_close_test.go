@@ -60,7 +60,7 @@ func testClientStream_CancelContext(t *testing.T, enableHTTP2 bool) {
 	closed := make(chan struct{})
 	go func() {
 		t.Log("will close stream")
-		t.Log("stream closed:", stream.Close())
+		t.Log("stream closed:", stream.Close()) // usually something like "read tcp 127.0.0.1:XXX->127.0.0.1:XXX: use of closed network connection"
 		close(closed)
 	}()
 
@@ -83,5 +83,7 @@ func testClientStream_CancelContext(t *testing.T, enableHTTP2 bool) {
 	// The following line takes 5 seconds and outputs:
 	// httptest.Server blocked in Close after 5 seconds, waiting for connections:
 	//  *tls.Conn 0x0000 127.0.0.1:**** in state active
+	startClosing := time.Now()
 	s.Close()
+	assert.True(t, time.Since(startClosing) < time.Second, assert.Sprintf("server.Close took too long: %s", time.Since(startClosing)))
 }
