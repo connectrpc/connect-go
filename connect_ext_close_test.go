@@ -78,4 +78,10 @@ func testClientStream_CancelContext(t *testing.T, enableHTTP2 bool) {
 	case <-time.After(time.Second):
 		t.Error("stream was not done receiving within 1s")
 	}
+
+	// The connection appears to not be properly closed:
+	// The following line takes 5 seconds and outputs:
+	// httptest.Server blocked in Close after 5 seconds, waiting for connections:
+	//  *tls.Conn 0x0000 127.0.0.1:**** in state active
+	s.Close()
 }
