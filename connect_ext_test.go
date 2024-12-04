@@ -2813,6 +2813,7 @@ type pingServer struct {
 
 	checkMetadata       bool
 	includeErrorDetails bool
+	delayCountUp        time.Duration
 }
 
 func (p pingServer) Ping(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
@@ -2913,6 +2914,7 @@ func (p pingServer) CountUp(
 		if err := stream.Send(&pingv1.CountUpResponse{Number: i}); err != nil {
 			return err
 		}
+		time.Sleep(p.delayCountUp)
 	}
 	return nil
 }
