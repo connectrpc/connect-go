@@ -239,13 +239,7 @@ func (d *duplexHTTPCall) CloseRead() error {
 	if d.response == nil {
 		return nil
 	}
-	_, err := discard(d.response.Body)
-	closeErr := d.response.Body.Close()
-	if err == nil ||
-		errors.Is(err, context.Canceled) ||
-		errors.Is(err, context.DeadlineExceeded) {
-		err = closeErr
-	}
+	err := d.response.Body.Close()
 	err = wrapIfContextDone(d.ctx, err)
 	return wrapIfRSTError(err)
 }
