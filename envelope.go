@@ -228,9 +228,13 @@ type envelopeReader struct {
 	compressionPool *compressionPool
 	bufferPool      *bufferPool
 	readMaxBytes    int
+	isEOF           bool
 }
 
 func (r *envelopeReader) Unmarshal(message any) *Error {
+	if r.isEOF {
+		return NewError(CodeInternal, io.EOF)
+	}
 	buffer := r.bufferPool.Get()
 	var dontRelease *bytes.Buffer
 	defer func() {
@@ -240,25 +244,20 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 	}()
 
 	env := &envelope{Data: buffer}
-	err := r.Read(env)
-	switch {
-	case err == nil && env.IsSet(flagEnvelopeCompressed) && r.compressionPool == nil:
+	if err := r.Read(env); err != nil {
+		// Mark the reader as EOF so that subsequent reads return EOF.
+		r.isEOF = true
+		return err
+	}
+	if env.IsSet(flagEnvelopeCompressed) && r.compressionPool == nil {
 		return errorf(
 			CodeInternal,
 			"protocol error: sent compressed message without compression support",
 		)
-	case err == nil &&
-		(env.Flags == 0 || env.Flags == flagEnvelopeCompressed) &&
-		env.Data.Len() == 0:
+	} else if (env.Flags == 0 || env.Flags == flagEnvelopeCompressed) && env.Data.Len() == 0 {
 		// This is a standard message (because none of the top 7 bits are set) and
 		// there's no data, so the zero value of the message is correct.
 		return nil
-	case err != nil && errors.Is(err, io.EOF):
-		// The stream has ended. Propagate the EOF to the caller.
-		return err
-	case err != nil:
-		// Something's wrong.
-		return err
 	}
 
 	data := env.Data
@@ -317,7 +316,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 			// The stream ended cleanly. That's expected, but we need to propagate an EOF
 			// to the user so that they know that the stream has ended. We shouldn't
 			// add any alarming text about protocol errors, though.
-			return NewError(CodeUnknown, err)
+			return NewError(CodeInternal, err)
 		}
 		err = wrapIfMaxBytesError(err, "read 5 byte message prefix")
 		err = wrapIfContextDone(r.ctx, err)
@@ -332,12 +331,8 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 	}
 	size := int64(binary.BigEndian.Uint32(prefixes[1:5]))
 	if r.readMaxBytes > 0 && size > int64(r.readMaxBytes) {
-		n, err := io.CopyN(io.Discard, r.reader, size)
-		r.bytesRead += n
-		if err != nil && !errors.Is(err, io.EOF) {
-			return errorf(CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %w", r.readMaxBytes, err)
-		}
-		return errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", size, r.readMaxBytes)
+		// Resource is exhausted, fail fast without reading more data from the stream.
+		return errorf(CodeResourceExhausted, "received message size %d is larger than configured max %d", size, r.readMaxBytes)
 	}
 	// We've read the prefix, so we know how many bytes to expect.
 	// CopyN will return an error if it doesn't read the requested
