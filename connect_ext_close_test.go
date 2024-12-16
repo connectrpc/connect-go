@@ -13,6 +13,7 @@ import (
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
 
+// See https://github.com/connectrpc/connect-go/pull/801 for further context
 func TestClientStream_CancelContext(t *testing.T) {
 	t.Run("HTTP2 disabled", func(t *testing.T) {
 		t.Parallel()
@@ -81,10 +82,7 @@ func testClientStream_CancelContext(t *testing.T, enableHTTP2 bool) {
 		t.Error("stream was not done receiving within 1s")
 	}
 
-	// The connection appears to not be properly closed with http2_enabled:
-	// The following line takes 10 seconds and outputs:
-	// httptest.Server blocked in Close after 5 seconds, waiting for connections:
-	//  *tls.Conn 0x0000 127.0.0.1:**** in state active
+	// ensure the connection gets closed quickly
 	startClosing := time.Now()
 	s.Close()
 	assert.True(t, time.Since(startClosing) < time.Second, assert.Sprintf("server.Close took too long: %s", time.Since(startClosing)))
