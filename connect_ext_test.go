@@ -2914,7 +2914,11 @@ func (p pingServer) CountUp(
 		if err := stream.Send(&pingv1.CountUpResponse{Number: i}); err != nil {
 			return err
 		}
-		time.Sleep(p.delayCountUp)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(p.delayCountUp):
+		}
 	}
 	return nil
 }
