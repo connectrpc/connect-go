@@ -15,9 +15,11 @@ import (
 
 func TestClientStream_CancelContext(t *testing.T) {
 	t.Run("HTTP2 disabled", func(t *testing.T) {
+		t.Parallel()
 		testClientStream_CancelContext(t, false)
 	})
 	t.Run("HTTP2 enabled", func(t *testing.T) {
+		t.Parallel()
 		testClientStream_CancelContext(t, true)
 	})
 }
@@ -59,8 +61,8 @@ func testClientStream_CancelContext(t *testing.T, enableHTTP2 bool) {
 
 	closed := make(chan struct{})
 	go func() {
-		t.Log("will close stream")
-		t.Log("stream closed:", stream.Close()) // usually something like "read tcp 127.0.0.1:XXX->127.0.0.1:XXX: use of closed network connection"
+		// close stream
+		assert.Nil(t, stream.Close())
 		close(closed)
 	}()
 
@@ -79,8 +81,8 @@ func testClientStream_CancelContext(t *testing.T, enableHTTP2 bool) {
 		t.Error("stream was not done receiving within 1s")
 	}
 
-	// The connection appears to not be properly closed:
-	// The following line takes 5 seconds and outputs:
+	// The connection appears to not be properly closed with http2_enabled:
+	// The following line takes 10 seconds and outputs:
 	// httptest.Server blocked in Close after 5 seconds, waiting for connections:
 	//  *tls.Conn 0x0000 127.0.0.1:**** in state active
 	startClosing := time.Now()
