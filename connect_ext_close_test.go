@@ -1,3 +1,17 @@
+// Copyright 2021-2024 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package connect_test
 
 import (
@@ -73,7 +87,7 @@ func testClientStream_CancelContext(t *testing.T, enableHTTP2 bool) {
 	select {
 	case <-closed:
 	case <-time.After(time.Second):
-		t.Error("stream was not closed within 1s")
+		t.Error("stream was not closed within 1s of context cancellation")
 	}
 	select {
 	case _, ok := <-msg:
@@ -82,7 +96,7 @@ func testClientStream_CancelContext(t *testing.T, enableHTTP2 bool) {
 		t.Error("stream was not done receiving within 1s")
 	}
 
-	// ensure the connection gets closed quickly
+	// ensure the server does not hang for too long when closing
 	startClosing := time.Now()
 	s.Close()
 	assert.True(t, time.Since(startClosing) < time.Second, assert.Sprintf("server.Close took too long: %s", time.Since(startClosing)))
