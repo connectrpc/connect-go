@@ -11,3 +11,4 @@ plugins:
   - local: protoc-gen-connect-go
     out: internal/gen
     opt: paths=source_relative
+clean: true

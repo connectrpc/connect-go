@@ -42,6 +42,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"os"
 	"path"
@@ -89,14 +90,18 @@ func main() {
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(1)
 	}
-	protogen.Options{}.Run(
+	var flagSet flag.FlagSet
+	samePackage := flagSet.Bool("same_package", false, "Generate files into the same Go package as the .pb.go base files.")
+	protogen.Options{
+		ParamFunc: flagSet.Set,
+	}.Run(
 		func(plugin *protogen.Plugin) error {
 			plugin.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL) | uint64(pluginpb.CodeGeneratorResponse_FEATURE_SUPPORTS_EDITIONS)
 			plugin.SupportedEditionsMinimum = descriptorpb.Edition_EDITION_PROTO2
 			plugin.SupportedEditionsMaximum = descriptorpb.Edition_EDITION_2023
 			for _, file := range plugin.Files {
 				if file.Generate {
-					generate(plugin, file)
+					generate(plugin, file, *samePackage)
 				}
 			}
 			return nil
@@ -104,24 +109,28 @@ func main() {
 	)
 }
 
-func generate(plugin *protogen.Plugin, file *protogen.File) {
+func generate(plugin *protogen.Plugin, file *protogen.File, samePackage bool) {
 	if len(file.Services) == 0 {
 		return
 	}
-	file.GoPackageName += generatedPackageSuffix
 
-	generatedFilenamePrefixToSlash := filepath.ToSlash(file.GeneratedFilenamePrefix)
-	file.GeneratedFilenamePrefix = path.Join(
-		path.Dir(generatedFilenamePrefixToSlash),
-		string(file.GoPackageName),
-		path.Base(generatedFilenamePrefixToSlash),
-	)
-	generatedFile := plugin.NewGeneratedFile(
-		file.GeneratedFilenamePrefix+generatedFilenameExtension,
-		protogen.GoImportPath(path.Join(
+	goImportPath := file.GoImportPath
+	if !samePackage {
+		file.GoPackageName += generatedPackageSuffix
+		generatedFilenamePrefixToSlash := filepath.ToSlash(file.GeneratedFilenamePrefix)
+		file.GeneratedFilenamePrefix = path.Join(
+			path.Dir(generatedFilenamePrefixToSlash),
+			string(file.GoPackageName),
+			path.Base(generatedFilenamePrefixToSlash),
+		)
+		goImportPath = protogen.GoImportPath(path.Join(
 			string(file.GoImportPath),
 			string(file.GoPackageName),
-		)),
+		))
+	}
+	generatedFile := plugin.NewGeneratedFile(
+		file.GeneratedFilenamePrefix+generatedFilenameExtension,
+		goImportPath,
 	)
 	generatedFile.Import(file.GoImportPath)
 	generatePreamble(generatedFile, file)
