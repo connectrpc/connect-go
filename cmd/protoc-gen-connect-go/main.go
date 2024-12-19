@@ -132,7 +132,9 @@ func generate(plugin *protogen.Plugin, file *protogen.File, samePackage bool) {
 		file.GeneratedFilenamePrefix+generatedFilenameExtension,
 		goImportPath,
 	)
-	generatedFile.Import(file.GoImportPath)
+	if !samePackage {
+		generatedFile.Import(file.GoImportPath)
+	}
 	generatePreamble(generatedFile, file)
 	generateServiceNameConstants(generatedFile, file.Services)
 	generateServiceNameVariables(generatedFile, file)
