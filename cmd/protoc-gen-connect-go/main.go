@@ -137,9 +137,8 @@ func generate(plugin *protogen.Plugin, file *protogen.File, samePackage bool) {
 	}
 	generatePreamble(generatedFile, file)
 	generateServiceNameConstants(generatedFile, file.Services)
-	generateServiceNameVariables(generatedFile, file)
 	for _, service := range file.Services {
-		generateService(generatedFile, service)
+		generateService(generatedFile, file, service)
 	}
 }
 
@@ -224,29 +223,27 @@ func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protoge
 	g.P()
 }
 
-func generateServiceNameVariables(g *protogen.GeneratedFile, file *protogen.File) {
-	wrapComments(g, "These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.")
-	g.P("var (")
-	for _, service := range file.Services {
-		serviceDescName := unexport(fmt.Sprintf("%sServiceDescriptor", service.Desc.Name()))
-		g.P(serviceDescName, ` = `,
-			g.QualifiedGoIdent(file.GoDescriptorIdent),
-			`.Services().ByName("`, service.Desc.Name(), `")`)
-		for _, method := range service.Methods {
-			g.P(procedureVarMethodDescriptor(method), ` = `,
-				serviceDescName,
-				`.Methods().ByName("`, method.Desc.Name(), `")`)
-		}
+func generateServiceNameVariables(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service) {
+	if len(service.Methods) == 0 {
+		return
 	}
-	g.P(")")
+	serviceMethodsName := unexport(fmt.Sprintf("%sMethods", service.Desc.Name()))
+	g.P(serviceMethodsName, ` := `,
+		g.QualifiedGoIdent(file.GoDescriptorIdent),
+		`.Services().ByName("`, service.Desc.Name(), `").Methods()`)
+	for _, method := range service.Methods {
+		g.P(procedureVarMethodDescriptor(method), ` := `,
+			serviceMethodsName,
+			`.ByName("`, method.Desc.Name(), `")`)
+	}
 }
 
-func generateService(g *protogen.GeneratedFile, service *protogen.Service) {
+func generateService(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service) {
 	names := newNames(service)
 	generateClientInterface(g, service, names)
-	generateClientImplementation(g, service, names)
+	generateClientImplementation(g, file, service, names)
 	generateServerInterface(g, service, names)
-	generateServerConstructor(g, service, names)
+	generateServerConstructor(g, file, service, names)
 	generateUnimplementedServerImplementation(g, service, names)
 }
 
@@ -271,7 +268,7 @@ func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Servic
 	g.P()
 }
 
-func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateClientImplementation(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, names names) {
 	clientOption := connectPackage.Ident("ClientOption")
 
 	// Client constructor.
@@ -292,6 +289,7 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 	if len(service.Methods) > 0 {
 		g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
 	}
+	generateServiceNameVariables(g, file, service)
 	g.P("return &", names.ClientImpl, "{")
 	for _, method := range service.Methods {
 		g.P(unexport(method.GoName), ": ",
@@ -407,7 +405,7 @@ func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Servic
 	g.P()
 }
 
-func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, names names) {
 	wrapComments(g, names.ServerConstructor, " builds an HTTP handler from the service implementation.",
 		" It returns the path on which to mount the handler and the handler itself.")
 	g.P("//")
@@ -420,6 +418,7 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 	handlerOption := connectPackage.Ident("HandlerOption")
 	g.P("func ", names.ServerConstructor, "(svc ", names.Server, ", opts ...", handlerOption,
 		") (string, ", httpPackage.Ident("Handler"), ") {")
+	generateServiceNameVariables(g, file, service)
 	for _, method := range service.Methods {
 		isStreamingServer := method.Desc.IsStreamingServer()
 		isStreamingClient := method.Desc.IsStreamingClient()
