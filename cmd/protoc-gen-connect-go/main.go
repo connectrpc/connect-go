@@ -65,7 +65,8 @@ const (
 	connectPackage = protogen.GoImportPath("connectrpc.com/connect")
 
 	generatedFilenameExtension = ".connect.go"
-	generatedPackageSuffix     = "connect"
+	defaultPackageSuffix       = "connect"
+	packageSuffixFlagName      = "package_suffix"
 
 	usage = "See https://connectrpc.com/docs/go/getting-started to learn how to use this plugin.\n\nFlags:\n  -h, --help\tPrint this help and exit.\n      --version\tPrint the version and exit."
 
@@ -91,7 +92,11 @@ func main() {
 		os.Exit(1)
 	}
 	var flagSet flag.FlagSet
-	samePackage := flagSet.Bool("same_package", false, "Generate files into the same Go package as the .pb.go base files.")
+	packageSuffix := flagSet.String(
+		packageSuffixFlagName,
+		defaultPackageSuffix,
+		"Generate files into a sub-package of the package containing the base .pb.go files using the given suffix. An empty suffix denotes to generate into the same package as the base pb.go files.",
+	)
 	protogen.Options{
 		ParamFunc: flagSet.Set,
 	}.Run(
@@ -101,7 +106,7 @@ func main() {
 			plugin.SupportedEditionsMaximum = descriptorpb.Edition_EDITION_2023
 			for _, file := range plugin.Files {
 				if file.Generate {
-					generate(plugin, file, *samePackage)
+					generate(plugin, file, *packageSuffix)
 				}
 			}
 			return nil
@@ -109,14 +114,14 @@ func main() {
 	)
 }
 
-func generate(plugin *protogen.Plugin, file *protogen.File, samePackage bool) {
+func generate(plugin *protogen.Plugin, file *protogen.File, packageSuffix string) {
 	if len(file.Services) == 0 {
 		return
 	}
 
 	goImportPath := file.GoImportPath
-	if !samePackage {
-		file.GoPackageName += generatedPackageSuffix
+	if packageSuffix != "" {
+		file.GoPackageName += protogen.GoPackageName(packageSuffix)
 		generatedFilenamePrefixToSlash := filepath.ToSlash(file.GeneratedFilenamePrefix)
 		file.GeneratedFilenamePrefix = path.Join(
 			path.Dir(generatedFilenamePrefixToSlash),
@@ -132,7 +137,7 @@ func generate(plugin *protogen.Plugin, file *protogen.File, samePackage bool) {
 		file.GeneratedFilenamePrefix+generatedFilenameExtension,
 		goImportPath,
 	)
-	if !samePackage {
+	if packageSuffix != "" {
 		generatedFile.Import(file.GoImportPath)
 	}
 	generatePreamble(generatedFile, file)
