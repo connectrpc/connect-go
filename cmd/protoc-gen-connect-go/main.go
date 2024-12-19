@@ -223,7 +223,7 @@ func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protoge
 	g.P()
 }
 
-func generateServiceNameVariables(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service) {
+func generateServiceMethodsVar(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service) {
 	if len(service.Methods) == 0 {
 		return
 	}
@@ -231,11 +231,6 @@ func generateServiceNameVariables(g *protogen.GeneratedFile, file *protogen.File
 	g.P(serviceMethodsName, ` := `,
 		g.QualifiedGoIdent(file.GoDescriptorIdent),
 		`.Services().ByName("`, service.Desc.Name(), `").Methods()`)
-	for _, method := range service.Methods {
-		g.P(procedureVarMethodDescriptor(method), ` := `,
-			serviceMethodsName,
-			`.ByName("`, method.Desc.Name(), `")`)
-	}
 }
 
 func generateService(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service) {
@@ -289,7 +284,7 @@ func generateClientImplementation(g *protogen.GeneratedFile, file *protogen.File
 	if len(service.Methods) > 0 {
 		g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
 	}
-	generateServiceNameVariables(g, file, service)
+	generateServiceMethodsVar(g, file, service)
 	g.P("return &", names.ClientImpl, "{")
 	for _, method := range service.Methods {
 		g.P(unexport(method.GoName), ": ",
@@ -418,7 +413,7 @@ func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, s
 	handlerOption := connectPackage.Ident("HandlerOption")
 	g.P("func ", names.ServerConstructor, "(svc ", names.Server, ", opts ...", handlerOption,
 		") (string, ", httpPackage.Ident("Handler"), ") {")
-	generateServiceNameVariables(g, file, service)
+	generateServiceMethodsVar(g, file, service)
 	for _, method := range service.Methods {
 		isStreamingServer := method.Desc.IsStreamingServer()
 		isStreamingClient := method.Desc.IsStreamingClient()
@@ -532,7 +527,8 @@ func procedureHandlerName(m *protogen.Method) string {
 }
 
 func procedureVarMethodDescriptor(m *protogen.Method) string {
-	return unexport(fmt.Sprintf("%s%sMethodDescriptor", m.Parent.GoName, m.GoName))
+	serviceMethodsName := unexport(fmt.Sprintf("%sMethods", m.Parent.GoName))
+	return serviceMethodsName + `.ByName("` + string(m.Desc.Name()) + `")`
 }
 
 func isDeprecatedService(service *protogen.Service) bool {

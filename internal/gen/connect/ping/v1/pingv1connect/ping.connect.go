@@ -88,41 +88,36 @@ type PingServiceClient interface {
 func NewPingServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) PingServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
 	pingServiceMethods := v1.File_connect_ping_v1_ping_proto.Services().ByName("PingService").Methods()
-	pingServicePingMethodDescriptor := pingServiceMethods.ByName("Ping")
-	pingServiceFailMethodDescriptor := pingServiceMethods.ByName("Fail")
-	pingServiceSumMethodDescriptor := pingServiceMethods.ByName("Sum")
-	pingServiceCountUpMethodDescriptor := pingServiceMethods.ByName("CountUp")
-	pingServiceCumSumMethodDescriptor := pingServiceMethods.ByName("CumSum")
 	return &pingServiceClient{
 		ping: connect.NewClient[v1.PingRequest, v1.PingResponse](
 			httpClient,
 			baseURL+PingServicePingProcedure,
-			connect.WithSchema(pingServicePingMethodDescriptor),
+			connect.WithSchema(pingServiceMethods.ByName("Ping")),
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		fail: connect.NewClient[v1.FailRequest, v1.FailResponse](
 			httpClient,
 			baseURL+PingServiceFailProcedure,
-			connect.WithSchema(pingServiceFailMethodDescriptor),
+			connect.WithSchema(pingServiceMethods.ByName("Fail")),
 			connect.WithClientOptions(opts...),
 		),
 		sum: connect.NewClient[v1.SumRequest, v1.SumResponse](
 			httpClient,
 			baseURL+PingServiceSumProcedure,
-			connect.WithSchema(pingServiceSumMethodDescriptor),
+			connect.WithSchema(pingServiceMethods.ByName("Sum")),
 			connect.WithClientOptions(opts...),
 		),
 		countUp: connect.NewClient[v1.CountUpRequest, v1.CountUpResponse](
 			httpClient,
 			baseURL+PingServiceCountUpProcedure,
-			connect.WithSchema(pingServiceCountUpMethodDescriptor),
+			connect.WithSchema(pingServiceMethods.ByName("CountUp")),
 			connect.WithClientOptions(opts...),
 		),
 		cumSum: connect.NewClient[v1.CumSumRequest, v1.CumSumResponse](
 			httpClient,
 			baseURL+PingServiceCumSumProcedure,
-			connect.WithSchema(pingServiceCumSumMethodDescriptor),
+			connect.WithSchema(pingServiceMethods.ByName("CumSum")),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -183,40 +178,35 @@ type PingServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	pingServiceMethods := v1.File_connect_ping_v1_ping_proto.Services().ByName("PingService").Methods()
-	pingServicePingMethodDescriptor := pingServiceMethods.ByName("Ping")
-	pingServiceFailMethodDescriptor := pingServiceMethods.ByName("Fail")
-	pingServiceSumMethodDescriptor := pingServiceMethods.ByName("Sum")
-	pingServiceCountUpMethodDescriptor := pingServiceMethods.ByName("CountUp")
-	pingServiceCumSumMethodDescriptor := pingServiceMethods.ByName("CumSum")
 	pingServicePingHandler := connect.NewUnaryHandler(
 		PingServicePingProcedure,
 		svc.Ping,
-		connect.WithSchema(pingServicePingMethodDescriptor),
+		connect.WithSchema(pingServiceMethods.ByName("Ping")),
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	pingServiceFailHandler := connect.NewUnaryHandler(
 		PingServiceFailProcedure,
 		svc.Fail,
-		connect.WithSchema(pingServiceFailMethodDescriptor),
+		connect.WithSchema(pingServiceMethods.ByName("Fail")),
 		connect.WithHandlerOptions(opts...),
 	)
 	pingServiceSumHandler := connect.NewClientStreamHandler(
 		PingServiceSumProcedure,
 		svc.Sum,
-		connect.WithSchema(pingServiceSumMethodDescriptor),
+		connect.WithSchema(pingServiceMethods.ByName("Sum")),
 		connect.WithHandlerOptions(opts...),
 	)
 	pingServiceCountUpHandler := connect.NewServerStreamHandler(
 		PingServiceCountUpProcedure,
 		svc.CountUp,
-		connect.WithSchema(pingServiceCountUpMethodDescriptor),
+		connect.WithSchema(pingServiceMethods.ByName("CountUp")),
 		connect.WithHandlerOptions(opts...),
 	)
 	pingServiceCumSumHandler := connect.NewBidiStreamHandler(
 		PingServiceCumSumProcedure,
 		svc.CumSum,
-		connect.WithSchema(pingServiceCumSumMethodDescriptor),
+		connect.WithSchema(pingServiceMethods.ByName("CumSum")),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/connect.ping.v1.PingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

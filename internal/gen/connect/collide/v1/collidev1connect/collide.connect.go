@@ -66,12 +66,11 @@ type CollideServiceClient interface {
 func NewCollideServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) CollideServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
 	collideServiceMethods := v1.File_connect_collide_v1_collide_proto.Services().ByName("CollideService").Methods()
-	collideServiceImportMethodDescriptor := collideServiceMethods.ByName("Import")
 	return &collideServiceClient{
 		_import: connect.NewClient[v1.ImportRequest, v1.ImportResponse](
 			httpClient,
 			baseURL+CollideServiceImportProcedure,
-			connect.WithSchema(collideServiceImportMethodDescriptor),
+			connect.WithSchema(collideServiceMethods.ByName("Import")),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -99,11 +98,10 @@ type CollideServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewCollideServiceHandler(svc CollideServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	collideServiceMethods := v1.File_connect_collide_v1_collide_proto.Services().ByName("CollideService").Methods()
-	collideServiceImportMethodDescriptor := collideServiceMethods.ByName("Import")
 	collideServiceImportHandler := connect.NewUnaryHandler(
 		CollideServiceImportProcedure,
 		svc.Import,
-		connect.WithSchema(collideServiceImportMethodDescriptor),
+		connect.WithSchema(collideServiceMethods.ByName("Import")),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/connect.collide.v1.CollideService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
