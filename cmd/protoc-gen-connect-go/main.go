@@ -42,6 +42,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"os"
 	"path"
@@ -89,14 +90,18 @@ func main() {
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(1)
 	}
-	protogen.Options{}.Run(
+	var flagSet flag.FlagSet
+	samePackage := flagSet.Bool("same_package", false, "Generate files into the same Go package as the .pb.go base files.")
+	protogen.Options{
+		ParamFunc: flagSet.Set,
+	}.Run(
 		func(plugin *protogen.Plugin) error {
 			plugin.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL) | uint64(pluginpb.CodeGeneratorResponse_FEATURE_SUPPORTS_EDITIONS)
 			plugin.SupportedEditionsMinimum = descriptorpb.Edition_EDITION_PROTO2
 			plugin.SupportedEditionsMaximum = descriptorpb.Edition_EDITION_2023
 			for _, file := range plugin.Files {
 				if file.Generate {
-					generate(plugin, file)
+					generate(plugin, file, *samePackage)
 				}
 			}
 			return nil
@@ -104,31 +109,36 @@ func main() {
 	)
 }
 
-func generate(plugin *protogen.Plugin, file *protogen.File) {
+func generate(plugin *protogen.Plugin, file *protogen.File, samePackage bool) {
 	if len(file.Services) == 0 {
 		return
 	}
-	file.GoPackageName += generatedPackageSuffix
 
-	generatedFilenamePrefixToSlash := filepath.ToSlash(file.GeneratedFilenamePrefix)
-	file.GeneratedFilenamePrefix = path.Join(
-		path.Dir(generatedFilenamePrefixToSlash),
-		string(file.GoPackageName),
-		path.Base(generatedFilenamePrefixToSlash),
-	)
-	generatedFile := plugin.NewGeneratedFile(
-		file.GeneratedFilenamePrefix+generatedFilenameExtension,
-		protogen.GoImportPath(path.Join(
+	goImportPath := file.GoImportPath
+	if !samePackage {
+		file.GoPackageName += generatedPackageSuffix
+		generatedFilenamePrefixToSlash := filepath.ToSlash(file.GeneratedFilenamePrefix)
+		file.GeneratedFilenamePrefix = path.Join(
+			path.Dir(generatedFilenamePrefixToSlash),
+			string(file.GoPackageName),
+			path.Base(generatedFilenamePrefixToSlash),
+		)
+		goImportPath = protogen.GoImportPath(path.Join(
 			string(file.GoImportPath),
 			string(file.GoPackageName),
-		)),
+		))
+	}
+	generatedFile := plugin.NewGeneratedFile(
+		file.GeneratedFilenamePrefix+generatedFilenameExtension,
+		goImportPath,
 	)
-	generatedFile.Import(file.GoImportPath)
+	if !samePackage {
+		generatedFile.Import(file.GoImportPath)
+	}
 	generatePreamble(generatedFile, file)
 	generateServiceNameConstants(generatedFile, file.Services)
-	generateServiceNameVariables(generatedFile, file)
 	for _, service := range file.Services {
-		generateService(generatedFile, service)
+		generateService(generatedFile, file, service)
 	}
 }
 
@@ -213,29 +223,22 @@ func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protoge
 	g.P()
 }
 
-func generateServiceNameVariables(g *protogen.GeneratedFile, file *protogen.File) {
-	wrapComments(g, "These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.")
-	g.P("var (")
-	for _, service := range file.Services {
-		serviceDescName := unexport(fmt.Sprintf("%sServiceDescriptor", service.Desc.Name()))
-		g.P(serviceDescName, ` = `,
-			g.QualifiedGoIdent(file.GoDescriptorIdent),
-			`.Services().ByName("`, service.Desc.Name(), `")`)
-		for _, method := range service.Methods {
-			g.P(procedureVarMethodDescriptor(method), ` = `,
-				serviceDescName,
-				`.Methods().ByName("`, method.Desc.Name(), `")`)
-		}
+func generateServiceMethodsVar(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service) {
+	if len(service.Methods) == 0 {
+		return
 	}
-	g.P(")")
+	serviceMethodsName := unexport(fmt.Sprintf("%sMethods", service.Desc.Name()))
+	g.P(serviceMethodsName, ` := `,
+		g.QualifiedGoIdent(file.GoDescriptorIdent),
+		`.Services().ByName("`, service.Desc.Name(), `").Methods()`)
 }
 
-func generateService(g *protogen.GeneratedFile, service *protogen.Service) {
+func generateService(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service) {
 	names := newNames(service)
 	generateClientInterface(g, service, names)
-	generateClientImplementation(g, service, names)
+	generateClientImplementation(g, file, service, names)
 	generateServerInterface(g, service, names)
-	generateServerConstructor(g, service, names)
+	generateServerConstructor(g, file, service, names)
 	generateUnimplementedServerImplementation(g, service, names)
 }
 
@@ -260,7 +263,7 @@ func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Servic
 	g.P()
 }
 
-func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateClientImplementation(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, names names) {
 	clientOption := connectPackage.Ident("ClientOption")
 
 	// Client constructor.
@@ -281,6 +284,7 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 	if len(service.Methods) > 0 {
 		g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
 	}
+	generateServiceMethodsVar(g, file, service)
 	g.P("return &", names.ClientImpl, "{")
 	for _, method := range service.Methods {
 		g.P(unexport(method.GoName), ": ",
@@ -396,7 +400,7 @@ func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Servic
 	g.P()
 }
 
-func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, names names) {
 	wrapComments(g, names.ServerConstructor, " builds an HTTP handler from the service implementation.",
 		" It returns the path on which to mount the handler and the handler itself.")
 	g.P("//")
@@ -409,6 +413,7 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 	handlerOption := connectPackage.Ident("HandlerOption")
 	g.P("func ", names.ServerConstructor, "(svc ", names.Server, ", opts ...", handlerOption,
 		") (string, ", httpPackage.Ident("Handler"), ") {")
+	generateServiceMethodsVar(g, file, service)
 	for _, method := range service.Methods {
 		isStreamingServer := method.Desc.IsStreamingServer()
 		isStreamingClient := method.Desc.IsStreamingClient()
@@ -522,7 +527,8 @@ func procedureHandlerName(m *protogen.Method) string {
 }
 
 func procedureVarMethodDescriptor(m *protogen.Method) string {
-	return unexport(fmt.Sprintf("%s%sMethodDescriptor", m.Parent.GoName, m.GoName))
+	serviceMethodsName := unexport(fmt.Sprintf("%sMethods", m.Parent.GoName))
+	return serviceMethodsName + `.ByName("` + string(m.Desc.Name()) + `")`
 }
 
 func isDeprecatedService(service *protogen.Service) bool {
