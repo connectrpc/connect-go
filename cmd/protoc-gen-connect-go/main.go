@@ -44,6 +44,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"go/token"
 	"os"
 	"path"
 	"path/filepath"
@@ -121,6 +122,10 @@ func generate(plugin *protogen.Plugin, file *protogen.File, packageSuffix string
 
 	goImportPath := file.GoImportPath
 	if packageSuffix != "" {
+		if !token.IsIdentifier(packageSuffix) {
+			plugin.Error(fmt.Errorf("package_suffix %q is not a valid Go identifier", packageSuffix))
+			return
+		}
 		file.GoPackageName += protogen.GoPackageName(packageSuffix)
 		generatedFilenamePrefixToSlash := filepath.ToSlash(file.GeneratedFilenamePrefix)
 		file.GeneratedFilenamePrefix = path.Join(
