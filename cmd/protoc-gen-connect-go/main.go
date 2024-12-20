@@ -23,11 +23,11 @@
 //
 // With [buf], your buf.gen.yaml will look like this:
 //
-//	version: v1
+//	version: v2
 //	plugins:
-//	  - name: go
+//	  - local: protoc-gen-go
 //	    out: gen
-//	  - name: connect-go
+//	  - local: protoc-gen-connect-go
 //	    out: gen
 //
 // This generates service definitions for the Protobuf types and services
@@ -35,7 +35,29 @@
 // invocations above will write output to:
 //
 //	gen/path/to/file.pb.go
-//	gen/path/to/connectfoov1/file.connect.go
+//	gen/path/to/foov1connect/file.connect.go
+//
+// The generated code is configurable with the same parameters as the protoc-gen-go
+// plugin, with the following additional parameters:
+//
+//   - package_suffix: To generate into a sub-package of the package containing the
+//     base .pb.go files using the given suffix. An empty suffix denotes to
+//     generate into the same package as the base pb.go files. Default is "connect".
+//
+// For example, to generate into the same package as the base .pb.go files:
+//
+//	version: v2
+//	plugins:
+//	  - local: protoc-gen-go
+//	    out: gen
+//	  - local: protoc-gen-connect-go
+//	    out: gen
+//	    opts: package_suffix
+//
+// This will generate output to:
+//
+//	gen/path/to/file.pb.go
+//	gen/path/to/file.connect.go
 //
 // [buf]: https://buf.build
 package main
