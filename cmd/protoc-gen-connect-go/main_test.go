@@ -69,11 +69,12 @@ func TestGenerate(t *testing.T) {
 		assert.Equal(t, file.GetName(), "connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect/ping.connect.go")
 		assert.NotZero(t, file.GetContent())
 	})
-	t.Run("ping.proto:same_package=true", func(t *testing.T) {
+	// Make sure empty package_suffix works alone.
+	t.Run("ping.proto:package_suffix=", func(t *testing.T) {
 		t.Parallel()
 		req := &pluginpb.CodeGeneratorRequest{
 			FileToGenerate:        []string{"connect/ping/v1/ping.proto"},
-			Parameter:             ptr("same_package=true"),
+			Parameter:             ptr("package_suffix="),
 			ProtoFile:             []*descriptorpb.FileDescriptorProto{pingFileDesc},
 			SourceFileDescriptors: []*descriptorpb.FileDescriptorProto{pingFileDesc},
 			CompilerVersion:       compilerVersion,
@@ -84,6 +85,41 @@ func TestGenerate(t *testing.T) {
 		assert.Equal(t, len(rsp.File), 1)
 		file := rsp.File[0]
 		assert.Equal(t, file.GetName(), "connectrpc.com/connect/internal/gen/connect/ping/v1/ping.connect.go")
+		assert.NotZero(t, file.GetContent())
+	})
+	// Make sure empty package_suffix works with another option.
+	t.Run("ping.proto:package_suffix=,paths=source_relative", func(t *testing.T) {
+		t.Parallel()
+		req := &pluginpb.CodeGeneratorRequest{
+			FileToGenerate:        []string{"connect/ping/v1/ping.proto"},
+			Parameter:             ptr("package_suffix="),
+			ProtoFile:             []*descriptorpb.FileDescriptorProto{pingFileDesc},
+			SourceFileDescriptors: []*descriptorpb.FileDescriptorProto{pingFileDesc},
+			CompilerVersion:       compilerVersion,
+		}
+		rsp := testGenerate(t, req)
+		assert.Nil(t, rsp.Error)
+
+		assert.Equal(t, len(rsp.File), 1)
+		file := rsp.File[0]
+		assert.Equal(t, file.GetName(), "connectrpc.com/connect/internal/gen/connect/ping/v1/ping.connect.go")
+		assert.NotZero(t, file.GetContent())
+	})
+	t.Run("ping.proto:package_suffix=baz", func(t *testing.T) {
+		t.Parallel()
+		req := &pluginpb.CodeGeneratorRequest{
+			FileToGenerate:        []string{"connect/ping/v1/ping.proto"},
+			Parameter:             ptr("package_suffix=baz"),
+			ProtoFile:             []*descriptorpb.FileDescriptorProto{pingFileDesc},
+			SourceFileDescriptors: []*descriptorpb.FileDescriptorProto{pingFileDesc},
+			CompilerVersion:       compilerVersion,
+		}
+		rsp := testGenerate(t, req)
+		assert.Nil(t, rsp.Error)
+
+		assert.Equal(t, len(rsp.File), 1)
+		file := rsp.File[0]
+		assert.Equal(t, file.GetName(), "connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1baz/ping.connect.go")
 		assert.NotZero(t, file.GetContent())
 	})
 }
