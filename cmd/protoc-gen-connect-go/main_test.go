@@ -16,8 +16,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"runtime"
@@ -34,9 +37,9 @@ import (
 	"google.golang.org/protobuf/types/pluginpb"
 
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/defaultpackage"
-	_ "connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/defaultpackage/defaultpackageconnect"
+	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/defaultpackage/defaultpackageconnect"
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/diffpackage"
-	_ "connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/diffpackage/diffpackagediff"
+	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/diffpackage/diffpackagediff"
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/noservice"
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/samepackage"
 )
@@ -175,6 +178,44 @@ func TestGenerate(t *testing.T) {
 	})
 }
 
+func TestClientHandler(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	t.Run("defaultpackage.proto", func(t *testing.T) {
+		t.Parallel()
+		svc := testDefaultPackageService{}
+		mux := http.NewServeMux()
+		mux.Handle(defaultpackageconnect.NewTestServiceHandler(svc))
+		server := httptest.NewServer(mux)
+		client := defaultpackageconnect.NewTestServiceClient(server.Client(), server.URL)
+		rsp, err := client.Method(ctx, connect.NewRequest(&defaultpackage.Request{}))
+		assert.Nil(t, err)
+		assert.NotNil(t, rsp)
+	})
+	t.Run("diffpackage.proto", func(t *testing.T) {
+		t.Parallel()
+		svc := testDiffPackageService{}
+		mux := http.NewServeMux()
+		mux.Handle(diffpackagediff.NewTestServiceHandler(svc))
+		server := httptest.NewServer(mux)
+		client := diffpackagediff.NewTestServiceClient(server.Client(), server.URL)
+		rsp, err := client.Method(ctx, connect.NewRequest(&diffpackage.Request{}))
+		assert.Nil(t, err)
+		assert.NotNil(t, rsp)
+	})
+	t.Run("samepackage.proto", func(t *testing.T) {
+		t.Parallel()
+		svc := testSamePackageService{}
+		mux := http.NewServeMux()
+		mux.Handle(samepackage.NewTestServiceHandler(svc))
+		server := httptest.NewServer(mux)
+		client := samepackage.NewTestServiceClient(server.Client(), server.URL)
+		rsp, err := client.Method(ctx, connect.NewRequest(&samepackage.Request{}))
+		assert.Nil(t, err)
+		assert.NotNil(t, rsp)
+	})
+}
+
 func testCmpToTestdata(t *testing.T, content, path string) {
 	t.Helper()
 	b, err := testdata.ReadFile(path)
@@ -226,4 +267,28 @@ func testRunProtocGenGo(t *testing.T, stdin io.Reader, args ...string) (stdout, 
 
 func ptr[T any](v T) *T {
 	return &v
+}
+
+type testDefaultPackageService struct {
+	defaultpackageconnect.UnimplementedTestServiceHandler
+}
+
+func (testDefaultPackageService) Method(context.Context, *connect.Request[defaultpackage.Request]) (*connect.Response[defaultpackage.Response], error) {
+	return connect.NewResponse(&defaultpackage.Response{}), nil
+}
+
+type testDiffPackageService struct {
+	diffpackagediff.UnimplementedTestServiceHandler
+}
+
+func (testDiffPackageService) Method(context.Context, *connect.Request[diffpackage.Request]) (*connect.Response[diffpackage.Response], error) {
+	return connect.NewResponse(&diffpackage.Response{}), nil
+}
+
+type testSamePackageService struct {
+	samepackage.UnimplementedTestServiceHandler
+}
+
+func (testSamePackageService) Method(context.Context, *connect.Request[samepackage.Request]) (*connect.Response[samepackage.Response], error) {
+	return connect.NewResponse(&samepackage.Response{}), nil
 }
