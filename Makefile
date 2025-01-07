@@ -11,7 +11,7 @@ export PATH := $(BIN):$(PATH)
 export GOBIN := $(abspath $(BIN))
 COPYRIGHT_YEARS := 2021-2024
 LICENSE_IGNORE := --ignore /testdata/
-BUF_VERSION := 1.34.0
+BUF_VERSION := 1.47.2
 
 .PHONY: help
 help: ## Describe useful make targets
@@ -81,6 +81,7 @@ generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/li
 	go mod tidy
 	rm -rf internal/gen
 	PATH="$(abspath $(BIN))" buf generate
+	( cd cmd/protoc-gen-connect-go; ./generate.sh )
 	license-header \
 		--license-type apache \
 		--copyright-holder "The Connect Authors" \
