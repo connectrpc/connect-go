@@ -259,7 +259,7 @@ func generateServiceMethodsVar(g *protogen.GeneratedFile, file *protogen.File, s
 	if len(service.Methods) == 0 {
 		return
 	}
-	serviceMethodsName := unexport(fmt.Sprintf("%sMethods", service.Desc.Name()))
+	serviceMethodsName := serviceVarMethodsName(service)
 	g.P(serviceMethodsName, ` := `,
 		g.QualifiedGoIdent(file.GoDescriptorIdent),
 		`.Services().ByName("`, service.Desc.Name(), `").Methods()`)
@@ -558,8 +558,12 @@ func procedureHandlerName(m *protogen.Method) string {
 	return fmt.Sprintf("%s%sHandler", unexport(m.Parent.GoName), m.GoName)
 }
 
+func serviceVarMethodsName(m *protogen.Service) string {
+	return unexport(fmt.Sprintf("%sMethods", m.GoName))
+}
+
 func procedureVarMethodDescriptor(m *protogen.Method) string {
-	serviceMethodsName := unexport(fmt.Sprintf("%sMethods", m.Parent.GoName))
+	serviceMethodsName := serviceVarMethodsName(m.Parent)
 	return serviceMethodsName + `.ByName("` + string(m.Desc.Name()) + `")`
 }
 
