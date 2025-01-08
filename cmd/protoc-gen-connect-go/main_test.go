@@ -42,6 +42,7 @@ import (
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/diffpackage/diffpackagediff"
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/noservice"
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/samepackage"
+	_ "connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/v1beta1service"
 )
 
 //go:embed testdata
