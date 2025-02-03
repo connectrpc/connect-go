@@ -18,9 +18,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"testing"
 
-	connect "connectrpc.com/connect"
+	"connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
@@ -34,9 +35,21 @@ type panicPingServer struct {
 }
 
 func (s *panicPingServer) Ping(
-	context.Context,
-	*connect.Request[pingv1.PingRequest],
+	_ context.Context,
+	_ *connect.Request[pingv1.PingRequest],
 ) (*connect.Response[pingv1.PingResponse], error) {
+	panic(s.panicWith) //nolint:forbidigo
+}
+
+func (s *panicPingServer) Sum(
+	_ context.Context,
+	stream *connect.ClientStream[pingv1.SumRequest],
+) (*connect.Response[pingv1.SumResponse], error) {
+	if !stream.Receive() {
+		if err := stream.Err(); err != nil {
+			return nil, err
+		}
+	}
 	panic(s.panicWith) //nolint:forbidigo
 }
 
@@ -46,6 +59,20 @@ func (s *panicPingServer) CountUp(
 	stream *connect.ServerStream[pingv1.CountUpResponse],
 ) error {
 	if err := stream.Send(&pingv1.CountUpResponse{}); err != nil {
+		return err
+	}
+	panic(s.panicWith) //nolint:forbidigo
+}
+
+func (s *panicPingServer) CumSum(
+	_ context.Context,
+	stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse],
+) error {
+	req, err := stream.Receive()
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(&pingv1.CumSumResponse{Sum: req.Number}); err != nil {
 		return err
 	}
 	panic(s.panicWith) //nolint:forbidigo
@@ -69,7 +96,7 @@ func TestWithRecover(t *testing.T) {
 	}
 	drainStream := func(stream *connect.ServerStreamForClient[pingv1.CountUpResponse]) error {
 		t.Helper()
-		defer stream.Close()
+		defer assertNoError(t, stream.Close)
 		assert.True(t, stream.Receive())  // expect one response msg
 		assert.False(t, stream.Receive()) // expect panic before second response msg
 		return stream.Err()
@@ -102,4 +129,110 @@ func TestWithRecover(t *testing.T) {
 	stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
 	assert.Nil(t, err)
 	assertNotHandled(drainStream(stream))
+}
+
+//nolint:tparallel // we can't run sub-tests in parallel due to server's statefulness
+func TestRecoverInterceptor(t *testing.T) {
+	t.Parallel()
+	var check atomic.Value
+	handle := func(ctx context.Context, req connect.AnyRequest, panicVal any) error {
+		fn, ok := check.Load().(func(context.Context, connect.AnyRequest, any))
+		if ok {
+			fn(ctx, req, panicVal)
+		}
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("panic: %v", panicVal))
+	}
+	assertHandled := func(err error) {
+		t.Helper()
+		assert.NotNil(t, err)
+		assert.Equal(t, connect.CodeOf(err), connect.CodeFailedPrecondition)
+	}
+	drainServerStream := func(stream *connect.ServerStreamForClient[pingv1.CountUpResponse]) error {
+		t.Helper()
+		defer assertNoError(t, stream.Close)
+		assert.True(t, stream.Receive())  // expect one response msg
+		assert.False(t, stream.Receive()) // expect panic before second response msg
+		return stream.Err()
+	}
+	drainBidiStream := func(stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+		t.Helper()
+		assertNoError(t, stream.CloseRequest)
+		defer assertNoError(t, stream.CloseResponse)
+		resp, err := stream.Receive()
+		// expect one response msg
+		assert.NotNil(t, resp)
+		assert.Nil(t, err)
+		// expect panic before second response msg
+		resp, err = stream.Receive()
+		assert.Nil(t, resp)
+		return err
+	}
+	pinger := &panicPingServer{}
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pinger,
+		connect.WithInterceptors(connect.RecoverInterceptor(handle))))
+	server := memhttptest.NewServer(t, mux)
+	client := pingv1connect.NewPingServiceClient(
+		server.Client(),
+		server.URL(),
+	)
+
+	// Unary and server-stream RPCs return the request message from req.Any()
+	check.Store(func(ctx context.Context, req connect.AnyRequest, panicVal any) {
+		assert.NotNil(t, req.Any())
+	})
+
+	t.Run("unary", func(t *testing.T) { //nolint:paralleltest
+		for _, panicWith := range []any{42, nil, http.ErrAbortHandler} {
+			pinger.panicWith = panicWith
+
+			_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
+			assertHandled(err)
+		}
+	})
+
+	t.Run("server-stream", func(t *testing.T) { //nolint:paralleltest
+		for _, panicWith := range []any{42, nil, http.ErrAbortHandler} {
+			pinger.panicWith = panicWith
+
+			stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
+			assert.Nil(t, err)
+			assertHandled(drainServerStream(stream))
+		}
+	})
+
+	// But client-stream and bidi-stream RPCs return nil from req.Any()
+	check.Store(func(ctx context.Context, req connect.AnyRequest, panicVal any) {
+		assert.Nil(t, req.Any())
+	})
+
+	t.Run("client-stream", func(t *testing.T) { //nolint:paralleltest
+		for _, panicWith := range []any{42, nil, http.ErrAbortHandler} {
+			pinger.panicWith = panicWith
+
+			stream := client.Sum(context.Background())
+			err := stream.Send(&pingv1.SumRequest{Number: 123})
+			assert.Nil(t, err)
+			resp, err := stream.CloseAndReceive()
+			assert.Nil(t, resp)
+			assertHandled(err)
+		}
+	})
+
+	t.Run("bidi-stream", func(t *testing.T) { //nolint:paralleltest
+		for _, panicWith := range []any{42, nil, http.ErrAbortHandler} {
+			pinger.panicWith = panicWith
+
+			stream := client.CumSum(context.Background())
+			err := stream.Send(&pingv1.CumSumRequest{Number: 123})
+			assert.Nil(t, err)
+			assertHandled(drainBidiStream(stream))
+		}
+	})
+}
+
+func assertNoError(t *testing.T, fn func() error) {
+	t.Helper()
+	err := fn()
+	assert.Nil(t, err)
 }
