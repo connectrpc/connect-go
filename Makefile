@@ -79,6 +79,7 @@ lintfix: $(BIN)/golangci-lint $(BIN)/buf ## Automatically fix some lint errors
 .PHONY: generate
 generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
 	go mod tidy
+	cd internal/conformance && go mod tidy
 	rm -rf internal/gen
 	PATH="$(abspath $(BIN))" buf generate
 	( cd cmd/protoc-gen-connect-go; ./generate.sh )
