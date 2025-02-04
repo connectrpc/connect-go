@@ -166,16 +166,25 @@ func NewRequest[T any](message *T) *Request[T] {
 // Any returns the concrete request message as an empty interface, so that
 // *Request implements the [AnyRequest] interface.
 func (r *Request[_]) Any() any {
+	if r == nil {
+		return nil
+	}
 	return r.Msg
 }
 
 // Spec returns a description of this RPC.
 func (r *Request[_]) Spec() Spec {
+	if r == nil {
+		return Spec{}
+	}
 	return r.spec
 }
 
 // Peer describes the other party for this RPC.
 func (r *Request[_]) Peer() Peer {
+	if r == nil {
+		return Peer{}
+	}
 	return r.peer
 }
 
@@ -183,6 +192,9 @@ func (r *Request[_]) Peer() Peer {
 // "Connect-" and "Grpc-" are reserved for use by the Connect and gRPC
 // protocols: applications may read them but shouldn't write them.
 func (r *Request[_]) Header() http.Header {
+	if r == nil {
+		return nil
+	}
 	if r.header == nil {
 		r.header = make(http.Header)
 	}
@@ -200,6 +212,9 @@ func (r *Request[_]) Header() http.Header {
 // if the request was never actually sent to the server (and thus no
 // determination ever made about the HTTP method).
 func (r *Request[_]) HTTPMethod() string {
+	if r == nil {
+		return ""
+	}
 	return r.method
 }
 
@@ -255,6 +270,9 @@ func NewResponse[T any](message *T) *Response[T] {
 // Any returns the concrete response message as an empty interface, so that
 // *Response implements the [AnyResponse] interface.
 func (r *Response[_]) Any() any {
+	if r == nil {
+		return nil
+	}
 	return r.Msg
 }
 
@@ -262,6 +280,9 @@ func (r *Response[_]) Any() any {
 // "Connect-" and "Grpc-" are reserved for use by the Connect and gRPC
 // protocols: applications may read them but shouldn't write them.
 func (r *Response[_]) Header() http.Header {
+	if r == nil {
+		return nil
+	}
 	if r.header == nil {
 		r.header = make(http.Header)
 	}
@@ -276,6 +297,10 @@ func (r *Response[_]) Header() http.Header {
 // Connect and gRPC protocols: applications may read them but shouldn't write
 // them.
 func (r *Response[_]) Trailer() http.Header {
+	if r == nil {
+		return nil
+	}
+
 	if r.trailer == nil {
 		r.trailer = make(http.Header)
 	}
