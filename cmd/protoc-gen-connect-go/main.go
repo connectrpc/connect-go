@@ -52,7 +52,7 @@
 //	    out: gen
 //	  - local: protoc-gen-connect-go
 //	    out: gen
-//	    opts: package_suffix
+//	    opt: package_suffix
 //
 // This will generate output to:
 //
