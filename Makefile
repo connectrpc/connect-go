@@ -82,7 +82,7 @@ generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/li
 	cd internal/conformance && go mod tidy
 	rm -rf internal/gen
 	PATH="$(abspath $(BIN))" buf generate
-	( cd cmd/protoc-gen-connect-go; ./generate.sh )
+	( cd cmd/protoc-gen-connect-go; PATH="$(abspath $(BIN)):$$PATH" ./generate.sh )
 	license-header \
 		--license-type apache \
 		--copyright-holder "The Connect Authors" \
