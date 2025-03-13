@@ -48,7 +48,7 @@ func TestServerTransport(t *testing.T) {
 		t.Run(fmt.Sprintf("%T", transport), func(t *testing.T) {
 			t.Parallel()
 			var wg sync.WaitGroup
-			for i := 0; i < concurrency; i++ {
+			for range concurrency {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()

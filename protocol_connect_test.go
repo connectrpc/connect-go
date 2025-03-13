@@ -55,7 +55,6 @@ func TestConnectErrorDetailMarshaling(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -259,7 +258,6 @@ func TestConnectValidateUnaryResponseContentType(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		testCase := testCase
 		httpMethod := http.MethodPost
 		if testCase.get {
 			httpMethod = http.MethodGet
@@ -346,7 +344,6 @@ func TestConnectValidateStreamResponseContentType(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		testCase := testCase
 		testCaseName := fmt.Sprintf("%s->%s", testCase.codecName, testCase.responseContentType)
 		t.Run(testCaseName, func(t *testing.T) {
 			t.Parallel()
