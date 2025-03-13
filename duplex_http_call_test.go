@@ -102,7 +102,7 @@ func TestHTTPCallGetBody(t *testing.T) {
 	}
 	for i, gotGetBody := 0, false; !gotGetBody; i++ {
 		errs := make([]chan error, numWorkers)
-		for range numWorkers {
+		for i := range numWorkers {
 			errs[i] = make(chan error, 1)
 			workChan <- work{size: 512, errs: errs[i]}
 		}

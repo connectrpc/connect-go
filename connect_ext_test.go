@@ -125,7 +125,7 @@ func TestServer(t *testing.T) {
 			stream := client.Sum(context.Background())
 			stream.RequestHeader().Set(clientHeader, headerValue)
 			for i := range upTo {
-				err := stream.Send(&pingv1.SumRequest{Number: int64(i)})
+				err := stream.Send(&pingv1.SumRequest{Number: int64(i + 1)})
 				assert.Nil(t, err, assert.Sprintf("send %d", i))
 			}
 			response, err := stream.CloseAndReceive()
@@ -158,7 +158,7 @@ func TestServer(t *testing.T) {
 			got := make([]int64, 0, upTo)
 			expect := make([]int64, 0, upTo)
 			for i := range upTo {
-				expect = append(expect, int64(i))
+				expect = append(expect, int64(i+1))
 			}
 			request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
 			request.Header().Set(clientHeader, headerValue)
@@ -2911,7 +2911,7 @@ func (p pingServer) CountUp(
 	stream.ResponseHeader().Set(handlerHeader, headerValue)
 	stream.ResponseTrailer().Set(handlerTrailer, trailerValue)
 	for i := range request.Msg.GetNumber() {
-		if err := stream.Send(&pingv1.CountUpResponse{Number: i}); err != nil {
+		if err := stream.Send(&pingv1.CountUpResponse{Number: i + 1}); err != nil {
 			return err
 		}
 	}
