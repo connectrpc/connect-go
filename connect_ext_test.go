@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"math/rand"
+	rand "math/rand/v2"
 	"net"
 	"net/http"
 	"runtime"
@@ -515,7 +515,7 @@ func TestConcurrentStreams(t *testing.T) {
 			sum := client.CumSum(context.Background())
 			start.Wait()
 			for range 100 {
-				num := rand.Int63n(1000) //nolint: gosec
+				num := rand.Int64N(1000) //nolint:gosec // No need for cryptographically secure random numbers.
 				total += num
 				if err := sum.Send(&pingv1.CumSumRequest{Number: num}); err != nil {
 					t.Errorf("failed to send request: %v", err)
