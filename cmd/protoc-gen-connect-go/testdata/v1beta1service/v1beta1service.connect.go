@@ -105,7 +105,7 @@ func NewExampleV1BetaHandler(svc ExampleV1BetaHandler, opts ...connect.HandlerOp
 		connect.WithSchema(exampleV1BetaMethods.ByName("Method")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/example.ExampleV1beta/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/example.ExampleV1beta/{method}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ExampleV1BetaMethodProcedure:
 			exampleV1BetaMethodHandler.ServeHTTP(w, r)

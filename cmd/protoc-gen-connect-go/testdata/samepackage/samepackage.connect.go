@@ -103,7 +103,7 @@ func NewTestServiceHandler(svc TestServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(testServiceMethods.ByName("Method")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/connect.test.same_package.TestService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/connect.test.same_package.TestService/{method}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case TestServiceMethodProcedure:
 			testServiceMethodHandler.ServeHTTP(w, r)
