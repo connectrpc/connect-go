@@ -2032,7 +2032,7 @@ func TestGRPCErrorMetadataIsTrailersOnly(t *testing.T) {
 	// Manually construct a gRPC prefix. Data is uncompressed, so the first byte
 	// is 0. Set the last 4 bytes to the message length.
 	var prefix [5]byte
-	binary.BigEndian.PutUint32(prefix[1:5], uint32(len(protoBytes))) //nolint:gosec // Safe for this test.
+	binary.BigEndian.PutUint32(prefix[1:5], uint32(len(protoBytes)))
 	body := append(prefix[:], protoBytes...)
 	// Manually send off a gRPC request.
 	req, err := http.NewRequestWithContext(
@@ -2253,7 +2253,7 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 
 	head := [5]byte{}
 	payload := []byte(`{"number": 42}`)
-	binary.BigEndian.PutUint32(head[1:], uint32(len(payload))) //nolint:gosec // Safe for this test.
+	binary.BigEndian.PutUint32(head[1:], uint32(len(payload)))
 	testcases := []struct {
 		name       string
 		handler    http.HandlerFunc
@@ -2329,7 +2329,7 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			assert.Nil(t, err)
 			endStream := "grpc-message: foo\r\n"
 			var length [4]byte
-			binary.BigEndian.PutUint32(length[:], uint32(len(endStream))) //nolint:gosec // Safe for this test.
+			binary.BigEndian.PutUint32(length[:], uint32(len(endStream)))
 			_, err = responseWriter.Write(length[:])
 			assert.Nil(t, err)
 			_, err = responseWriter.Write([]byte(endStream))
@@ -2446,7 +2446,7 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			assert.Nil(t, trailer.Write(&buf))
 			var head [5]byte
 			head[0] = 1 << 7
-			binary.BigEndian.PutUint32(head[1:], uint32(buf.Len())) //nolint:gosec // Safe for this test.
+			binary.BigEndian.PutUint32(head[1:], uint32(buf.Len()))
 			_, err = responseWriter.Write(head[:])
 			assert.Nil(t, err)
 			_, err = responseWriter.Write(buf.Bytes())
@@ -2845,7 +2845,7 @@ func (p pingServer) Fail(ctx context.Context, request *connect.Request[pingv1.Fa
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer protocol"))
 	}
 	err := connect.NewError(
-		connect.Code(request.Msg.GetCode()), //nolint:gosec // No information loss.
+		connect.Code(request.Msg.GetCode()),
 		errors.New(errorMessage),
 	)
 	err.Meta().Set(handlerHeader, headerValue)

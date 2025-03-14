@@ -124,3 +124,7 @@ issues:
     # Allow Code pointer receiver for UnmarshalText method
     - linters: [recvcheck]
       path: code.go
+    # Avoid false positives for int overflow in tests
+    - linters: [gosec]
+      text: "^G115: integer overflow conversion"
+      path: ".*_test.go"
