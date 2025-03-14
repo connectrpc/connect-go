@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"math/rand"
+	rand "math/rand/v2"
 	"net"
 	"net/http"
 	"runtime"
@@ -124,8 +124,8 @@ func TestServer(t *testing.T) {
 			)
 			stream := client.Sum(context.Background())
 			stream.RequestHeader().Set(clientHeader, headerValue)
-			for i := int64(1); i <= upTo; i++ {
-				err := stream.Send(&pingv1.SumRequest{Number: i})
+			for i := range upTo {
+				err := stream.Send(&pingv1.SumRequest{Number: int64(i + 1)})
 				assert.Nil(t, err, assert.Sprintf("send %d", i))
 			}
 			response, err := stream.CloseAndReceive()
@@ -157,8 +157,8 @@ func TestServer(t *testing.T) {
 			const upTo = 5
 			got := make([]int64, 0, upTo)
 			expect := make([]int64, 0, upTo)
-			for i := 1; i <= upTo; i++ {
-				expect = append(expect, int64(i))
+			for i := range upTo {
+				expect = append(expect, int64(i+1))
 			}
 			request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
 			request.Header().Set(clientHeader, headerValue)
@@ -506,7 +506,7 @@ func TestConcurrentStreams(t *testing.T) {
 	server := memhttptest.NewServer(t, mux)
 	var done, start sync.WaitGroup
 	start.Add(1)
-	for i := 0; i < runtime.GOMAXPROCS(0)*8; i++ {
+	for range runtime.GOMAXPROCS(0) * 8 {
 		done.Add(1)
 		go func() {
 			defer done.Done()
@@ -514,8 +514,8 @@ func TestConcurrentStreams(t *testing.T) {
 			var total int64
 			sum := client.CumSum(context.Background())
 			start.Wait()
-			for i := 0; i < 100; i++ {
-				num := rand.Int63n(1000) //nolint: gosec
+			for range 100 {
+				num := rand.Int64N(1000) //nolint:gosec // No need for cryptographically secure random numbers.
 				total += num
 				if err := sum.Send(&pingv1.CumSumRequest{Number: num}); err != nil {
 					t.Errorf("failed to send request: %v", err)
@@ -2003,7 +2003,6 @@ func TestUnflushableResponseWriter(t *testing.T) {
 		{"grpcweb", []connect.ClientOption{connect.WithGRPCWeb()}},
 	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			pingclient := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), tt.options...)
@@ -2465,7 +2464,6 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 		testcaseMux[t.Name()+"/"+testcase.name] = testcase.handler
 	}
 	for _, testcase := range testcases {
-		testcase := testcase
 		t.Run(testcase.name, func(t *testing.T) {
 			t.Parallel()
 			client := pingv1connect.NewPingServiceClient(
@@ -2846,7 +2844,10 @@ func (p pingServer) Fail(ctx context.Context, request *connect.Request[pingv1.Fa
 	if request.Peer().Protocol == "" {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer protocol"))
 	}
-	err := connect.NewError(connect.Code(request.Msg.GetCode()), errors.New(errorMessage))
+	err := connect.NewError(
+		connect.Code(request.Msg.GetCode()),
+		errors.New(errorMessage),
+	)
 	err.Meta().Set(handlerHeader, headerValue)
 	err.Meta().Set(handlerTrailer, trailerValue)
 	if p.includeErrorDetails {
@@ -2909,8 +2910,8 @@ func (p pingServer) CountUp(
 	}
 	stream.ResponseHeader().Set(handlerHeader, headerValue)
 	stream.ResponseTrailer().Set(handlerTrailer, trailerValue)
-	for i := int64(1); i <= request.Msg.GetNumber(); i++ {
-		if err := stream.Send(&pingv1.CountUpResponse{Number: i}); err != nil {
+	for i := range request.Msg.GetNumber() {
+		if err := stream.Send(&pingv1.CountUpResponse{Number: i + 1}); err != nil {
 			return err
 		}
 	}

@@ -1,6 +1,6 @@
 module connectrpc.com/connect
 
-go 1.21
+go 1.22
 
 retract (
 	v1.10.0 // module cache poisoned, use v1.10.1

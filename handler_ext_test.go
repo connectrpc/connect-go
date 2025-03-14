@@ -257,7 +257,7 @@ func TestHandlerMaliciousPrefix(t *testing.T) {
 	)
 	var wg sync.WaitGroup
 	start := make(chan struct{})
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		body := make([]byte, 16)
 		// Envelope prefix indicates a large payload which we're not actually
 		// sending.
