@@ -9,7 +9,7 @@ MAKEFLAGS += --no-print-directory
 BIN := .tmp/bin
 export PATH := $(BIN):$(PATH)
 export GOBIN := $(abspath $(BIN))
-COPYRIGHT_YEARS := 2021-2024
+COPYRIGHT_YEARS := 2021-2025
 LICENSE_IGNORE := --ignore /testdata/
 BUF_VERSION := 1.50.1
 
