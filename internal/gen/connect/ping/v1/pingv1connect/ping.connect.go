@@ -209,7 +209,7 @@ func NewPingServiceHandler(svc PingServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(pingServiceMethods.ByName("CumSum")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/connect.ping.v1.PingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/connect.ping.v1.PingService/{method}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case PingServicePingProcedure:
 			pingServicePingHandler.ServeHTTP(w, r)

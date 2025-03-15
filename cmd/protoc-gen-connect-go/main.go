@@ -473,7 +473,7 @@ func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, s
 		g.P(connectPackage.Ident("WithHandlerOptions"), "(opts...),")
 		g.P(")")
 	}
-	g.P(`return "/`, service.Desc.FullName(), `/", `, httpPackage.Ident("HandlerFunc"), `(func(w `, httpPackage.Ident("ResponseWriter"), `, r *`, httpPackage.Ident("Request"), `){`)
+	g.P(`return "/`, service.Desc.FullName(), `/{method}", `, httpPackage.Ident("HandlerFunc"), `(func(w `, httpPackage.Ident("ResponseWriter"), `, r *`, httpPackage.Ident("Request"), `){`)
 	g.P("switch r.URL.Path {")
 	for _, method := range service.Methods {
 		g.P("case ", procedureConstName(method), ":")

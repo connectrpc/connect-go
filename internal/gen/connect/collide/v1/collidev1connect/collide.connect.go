@@ -104,7 +104,7 @@ func NewCollideServiceHandler(svc CollideServiceHandler, opts ...connect.Handler
 		connect.WithSchema(collideServiceMethods.ByName("Import")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/connect.collide.v1.CollideService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/connect.collide.v1.CollideService/{method}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case CollideServiceImportProcedure:
 			collideServiceImportHandler.ServeHTTP(w, r)
