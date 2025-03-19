@@ -1,8 +1,6 @@
 module connectrpc.com/connect/internal/conformance
 
-go 1.22
-
-toolchain go1.23.5
+go 1.23.0
 
 require connectrpc.com/conformance v1.0.4
 
