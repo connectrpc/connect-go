@@ -40,7 +40,7 @@ jobs:
         if: matrix.go-version.name == 'latest'
         run: make checkgenerate && make lint
   conformance:
-    name: ci (go:${{ matrix.go-version.name }})
+    name: conformance (go:${{ matrix.go-version.name }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
