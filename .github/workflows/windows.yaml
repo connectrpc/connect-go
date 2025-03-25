@@ -12,7 +12,7 @@ permissions:
   contents: read
 jobs:
   ci:
-    name: ci (go:${{ matrix.go-version.name }})
+    name: windows (go:${{ matrix.go-version.name }})
     runs-on: windows-latest
     strategy:
       matrix:
