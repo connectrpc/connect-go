@@ -28,14 +28,6 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	"connectrpc.com/connect/internal/assert"
-	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"github.com/google/go-cmp/cmp"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protodesc"
-	"google.golang.org/protobuf/types/descriptorpb"
-	"google.golang.org/protobuf/types/pluginpb"
-
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/defaultpackage"
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/defaultpackage/defaultpackageconnect"
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/diffpackage"
@@ -43,6 +35,13 @@ import (
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/noservice"
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/samepackage"
 	_ "connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/v1beta1service"
+	"connectrpc.com/connect/internal/assert"
+	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
+	"github.com/google/go-cmp/cmp"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/pluginpb"
 )
 
 //go:embed testdata
