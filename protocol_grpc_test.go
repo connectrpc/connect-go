@@ -197,7 +197,7 @@ func TestGRPCWebTrailerMarshalling(t *testing.T) {
 	assert.Equal(t, marshalled, "grpc-message: Foo\r\ngrpc-status: 0\r\nuser-provided: bar\r\n")
 }
 func BenchmarkGRPCPercentEncoding(b *testing.B) {
-	input := "Hello, 世界"
+	input := "Hello, 世界" //nolint:gosmopolitan
 	want := "Hello, %E4%B8%96%E7%95%8C"
 	b.ReportAllocs()
 	for range b.N {
@@ -210,7 +210,7 @@ func BenchmarkGRPCPercentEncoding(b *testing.B) {
 
 func BenchmarkGRPCPercentDecoding(b *testing.B) {
 	input := "Hello, %E4%B8%96%E7%95%8C"
-	want := "Hello, 世界"
+	want := "Hello, 世界" //nolint:gosmopolitan
 	b.ReportAllocs()
 	for range b.N {
 		got, _ := grpcPercentDecode(input)
