@@ -154,7 +154,8 @@ linters:
         text: '^G115: integer overflow conversion'
       # Don't ban use of fmt.Errorf to create new errors, but the remaining
       # checks from err113 are useful.
-      - path: (.+)\.go$
+      - linters:
+          - err113
         text: 'do not define dynamic errors, use wrapped static errors instead: .*'
 formatters:
   enable:
