@@ -19,33 +19,31 @@ import (
 	"net/http"
 )
 
-var (
-	//nolint:gochecknoglobals
-	protocolHeaders = map[string]struct{}{
-		// HTTP headers.
-		headerContentType:     {},
-		headerContentLength:   {},
-		headerContentEncoding: {},
-		headerHost:            {},
-		headerUserAgent:       {},
-		headerTrailer:         {},
-		headerDate:            {},
-		// Connect headers.
-		connectUnaryHeaderAcceptCompression:     {},
-		connectUnaryTrailerPrefix:               {},
-		connectStreamingHeaderCompression:       {},
-		connectStreamingHeaderAcceptCompression: {},
-		connectHeaderTimeout:                    {},
-		connectHeaderProtocolVersion:            {},
-		// gRPC headers.
-		grpcHeaderCompression:       {},
-		grpcHeaderAcceptCompression: {},
-		grpcHeaderTimeout:           {},
-		grpcHeaderStatus:            {},
-		grpcHeaderMessage:           {},
-		grpcHeaderDetails:           {},
-	}
-)
+//nolint:gochecknoglobals
+var protocolHeaders = map[string]struct{}{
+	// HTTP headers.
+	headerContentType:     {},
+	headerContentLength:   {},
+	headerContentEncoding: {},
+	headerHost:            {},
+	headerUserAgent:       {},
+	headerTrailer:         {},
+	headerDate:            {},
+	// Connect headers.
+	connectUnaryHeaderAcceptCompression:     {},
+	connectUnaryTrailerPrefix:               {},
+	connectStreamingHeaderCompression:       {},
+	connectStreamingHeaderAcceptCompression: {},
+	connectHeaderTimeout:                    {},
+	connectHeaderProtocolVersion:            {},
+	// gRPC headers.
+	grpcHeaderCompression:       {},
+	grpcHeaderAcceptCompression: {},
+	grpcHeaderTimeout:           {},
+	grpcHeaderStatus:            {},
+	grpcHeaderMessage:           {},
+	grpcHeaderDetails:           {},
+}
 
 // EncodeBinaryHeader base64-encodes the data. It always emits unpadded values.
 //

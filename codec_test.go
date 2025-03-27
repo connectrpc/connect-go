@@ -27,8 +27,8 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-func convertMapToInterface(stringMap map[string]string) map[string]interface{} {
-	interfaceMap := make(map[string]interface{})
+func convertMapToInterface(stringMap map[string]string) map[string]any {
+	interfaceMap := make(map[string]any)
 	for key, value := range stringMap {
 		interfaceMap[key] = value
 	}
