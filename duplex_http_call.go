@@ -363,12 +363,15 @@ var _ messagePayload = nopPayload{}
 func (nopPayload) Read([]byte) (int, error) {
 	return 0, io.EOF
 }
+
 func (nopPayload) WriteTo(io.Writer) (int64, error) {
 	return 0, nil
 }
+
 func (nopPayload) Seek(int64, int) (int64, error) {
 	return 0, nil
 }
+
 func (nopPayload) Len() int {
 	return 0
 }

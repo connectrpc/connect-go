@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	rand "math/rand/v2"
 	"net"
@@ -2100,9 +2101,7 @@ func TestConnectProtocolHeaderRequired(t *testing.T) {
 		)
 		assert.Nil(t, err)
 		req.Header.Set("Content-Type", "application/json")
-		for k, v := range tcase.headers {
-			req.Header[k] = v
-		}
+		maps.Copy(req.Header, tcase.headers)
 		response, err := server.Client().Do(req)
 		assert.Nil(t, err)
 		assert.Nil(t, response.Body.Close())

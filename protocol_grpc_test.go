@@ -196,6 +196,7 @@ func TestGRPCWebTrailerMarshalling(t *testing.T) {
 	marshalled := responseWriter.Body.String()
 	assert.Equal(t, marshalled, "grpc-message: Foo\r\ngrpc-status: 0\r\nuser-provided: bar\r\n")
 }
+
 func BenchmarkGRPCPercentEncoding(b *testing.B) {
 	input := "Hello, 世界"
 	want := "Hello, %E4%B8%96%E7%95%8C"

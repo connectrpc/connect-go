@@ -21,9 +21,7 @@ import (
 	"sync"
 )
 
-var (
-	errListenerClosed = errors.New("listener closed")
-)
+var errListenerClosed = errors.New("listener closed")
 
 // memoryListener is a net.Listener that listens on an in memory network.
 type memoryListener struct {
