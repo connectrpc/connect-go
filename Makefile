@@ -112,10 +112,9 @@ $(BIN)/license-header: Makefile
 
 $(BIN)/golangci-lint: Makefile
 	@mkdir -p $(@D)
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.7
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.0.2
 
 $(BIN)/protoc-gen-go: Makefile go.mod
 	@mkdir -p $(@D)
 	@# The version of protoc-gen-go is determined by the version in go.mod
 	go install google.golang.org/protobuf/cmd/protoc-gen-go
-
