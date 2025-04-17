@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -729,7 +729,7 @@ func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {
 			retErr.details = append(retErr.details, &ErrorDetail{pbAny: d})
 		}
 		// Prefer the Protobuf-encoded data to the headers (grpc-go does this too).
-		retErr.code = Code(status.GetCode())
+		retErr.code = Code(status.GetCode()) //nolint:gosec // No information loss
 		retErr.err = errors.New(status.GetMessage())
 	}
 
@@ -873,7 +873,7 @@ func grpcStatusFromError(err error) *statusv1.Status {
 		Message: err.Error(),
 	}
 	if connectErr, ok := asError(err); ok {
-		status.Code = int32(connectErr.Code())
+		status.Code = int32(connectErr.Code()) //nolint:gosec // No information loss
 		status.Message = connectErr.Message()
 		status.Details = connectErr.detailsAsAny()
 	}
@@ -894,7 +894,7 @@ func grpcStatusFromError(err error) *statusv1.Status {
 //	https://datatracker.ietf.org/doc/html/rfc3986#section-2.1
 func grpcPercentEncode(msg string) string {
 	var hexCount int
-	for i := 0; i < len(msg); i++ {
+	for i := range len(msg) {
 		if grpcShouldEscape(msg[i]) {
 			hexCount++
 		}
@@ -905,7 +905,7 @@ func grpcPercentEncode(msg string) string {
 	// We need to escape some characters, so we'll need to allocate a new string.
 	var out strings.Builder
 	out.Grow(len(msg) + 2*hexCount)
-	for i := 0; i < len(msg); i++ {
+	for i := range len(msg) {
 		switch char := msg[i]; {
 		case grpcShouldEscape(char):
 			out.WriteByte('%')

@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,8 @@ import (
 func TestEnvelope(t *testing.T) {
 	t.Parallel()
 	payload := []byte(`{"number": 42}`)
-	head := makeEnvelopePrefix(0, len(payload))
+	head, err := makeEnvelopePrefix(0, len(payload))
+	assert.Nil(t, err)
 	buf := &bytes.Buffer{}
 	buf.Write(head[:])
 	buf.Write(payload)

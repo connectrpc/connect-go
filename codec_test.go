@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,8 +27,8 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-func convertMapToInterface(stringMap map[string]string) map[string]interface{} {
-	interfaceMap := make(map[string]interface{})
+func convertMapToInterface(stringMap map[string]string) map[string]any {
+	interfaceMap := make(map[string]any)
 	for key, value := range stringMap {
 		interfaceMap[key] = value
 	}
@@ -100,7 +100,7 @@ func TestStableCodec(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				roundtripProto := &structpb.Struct{}
 				err = codec.Unmarshal(want, roundtripProto)
 				if err != nil {

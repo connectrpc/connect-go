@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -196,11 +196,12 @@ func TestGRPCWebTrailerMarshalling(t *testing.T) {
 	marshalled := responseWriter.Body.String()
 	assert.Equal(t, marshalled, "grpc-message: Foo\r\ngrpc-status: 0\r\nuser-provided: bar\r\n")
 }
+
 func BenchmarkGRPCPercentEncoding(b *testing.B) {
 	input := "Hello, 世界"
 	want := "Hello, %E4%B8%96%E7%95%8C"
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		got := grpcPercentEncode(input)
 		if got != want {
 			b.Fatalf("grpcPercentEncode(%q) = %s, want %s", input, got, want)
@@ -212,7 +213,7 @@ func BenchmarkGRPCPercentDecoding(b *testing.B) {
 	input := "Hello, %E4%B8%96%E7%95%8C"
 	want := "Hello, 世界"
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		got, _ := grpcPercentDecode(input)
 		if got != want {
 			b.Fatalf("grpcPercentDecode(%q) = %s, want %s", input, got, want)
@@ -224,7 +225,7 @@ func BenchmarkGRPCTimeoutEncoding(b *testing.B) {
 	input := time.Second * 45
 	want := "45000000u"
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		got := grpcEncodeTimeout(input)
 		if got != want {
 			b.Fatalf("grpcEncodeTimeout(%q) = %s, want %s", input, got, want)
@@ -365,7 +366,6 @@ func TestGRPCValidateResponseContentType(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		testCase := testCase
 		protocol := ProtocolGRPC
 		if testCase.web {
 			protocol = ProtocolGRPCWeb

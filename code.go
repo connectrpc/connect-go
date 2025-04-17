@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -207,8 +207,8 @@ func (c *Code) UnmarshalText(data []byte) error {
 	// UnmarshalText.
 	if strings.HasPrefix(dataStr, "code_") {
 		dataStr = strings.TrimPrefix(dataStr, "code_")
-		code, err := strconv.ParseInt(dataStr, 10 /* base */, 64 /* bitsize */)
-		if err == nil && (code < int64(minCode) || code > int64(maxCode)) {
+		code, err := strconv.ParseUint(dataStr, 10 /* base */, 32 /* bitsize */)
+		if err == nil && (code < uint64(minCode) || code > uint64(maxCode)) {
 			*c = Code(code)
 			return nil
 		}

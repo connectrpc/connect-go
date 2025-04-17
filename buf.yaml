@@ -3,7 +3,7 @@ modules:
   - path: internal/proto
 lint:
   use:
-    - DEFAULT
+    - STANDARD
   ignore:
     - internal/proto/connectext/grpc/health/v1/health.proto
     - internal/proto/connectext/grpc/reflection/v1alpha/reflection.proto

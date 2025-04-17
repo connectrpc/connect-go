@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -363,12 +363,15 @@ var _ messagePayload = nopPayload{}
 func (nopPayload) Read([]byte) (int, error) {
 	return 0, io.EOF
 }
+
 func (nopPayload) WriteTo(io.Writer) (int64, error) {
 	return 0, nil
 }
+
 func (nopPayload) Seek(int64, int) (int64, error) {
 	return 0, nil
 }
+
 func (nopPayload) Len() int {
 	return 0
 }

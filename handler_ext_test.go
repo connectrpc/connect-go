@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -257,7 +257,7 @@ func TestHandlerMaliciousPrefix(t *testing.T) {
 	)
 	var wg sync.WaitGroup
 	start := make(chan struct{})
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		body := make([]byte, 16)
 		// Envelope prefix indicates a large payload which we're not actually
 		// sending.

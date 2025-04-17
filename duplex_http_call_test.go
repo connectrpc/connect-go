@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -92,7 +92,7 @@ func TestHTTPCallGetBody(t *testing.T) {
 	workChan := make(chan work)
 	wg := sync.WaitGroup{}
 	wg.Add(numWorkers)
-	for i := 0; i < numWorkers; i++ {
+	for range numWorkers {
 		go func() {
 			for work := range workChan {
 				work.errs <- caller(work.size)
@@ -102,7 +102,7 @@ func TestHTTPCallGetBody(t *testing.T) {
 	}
 	for i, gotGetBody := 0, false; !gotGetBody; i++ {
 		errs := make([]chan error, numWorkers)
-		for i := 0; i < numWorkers; i++ {
+		for i := range numWorkers {
 			errs[i] = make(chan error, 1)
 			workChan <- work{size: 512, errs: errs[i]}
 		}

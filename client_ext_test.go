@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -578,7 +578,7 @@ func TestClientDeadlineHandling(t *testing.T) {
 				case 1:
 					procedure = pingv1connect.PingServiceSumProcedure
 					stream := client.Sum(ctx)
-					for i := 0; i < 3; i++ {
+					for range 3 {
 						errs.sendErr = stream.Send(addUnrecognizedBytes(&pingv1.SumRequest{Number: 1}, extraField))
 						if errs.sendErr != nil {
 							break
@@ -598,7 +598,7 @@ func TestClientDeadlineHandling(t *testing.T) {
 				case 3:
 					procedure = pingv1connect.PingServiceCumSumProcedure
 					stream := client.CumSum(ctx)
-					for i := 0; i < 3; i++ {
+					for range 3 {
 						errs.sendErr = stream.Send(addUnrecognizedBytes(&pingv1.CumSumRequest{Number: 1}, extraField))
 						_, errs.recvErr = stream.Receive()
 						if errs.recvErr != nil {
@@ -627,8 +627,7 @@ func testClientDeadlineBruteForceLoop(
 	var rpcCount atomic.Int64
 
 	var wg sync.WaitGroup
-	for goroutine := 0; goroutine < parallelism; goroutine++ {
-		goroutine := goroutine
+	for goroutine := range parallelism {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -640,7 +639,7 @@ func testClientDeadlineBruteForceLoop(
 			const maxTimeout = 2 * time.Millisecond
 			for {
 				for timeout := minTimeout; timeout <= maxTimeout; timeout += 10 * time.Microsecond {
-					for i := 0; i < iterationsPerDeadline; i++ {
+					for range iterationsPerDeadline {
 						if testContext.Err() != nil {
 							return
 						}
@@ -716,7 +715,8 @@ type notModifiedPingServer struct {
 
 func (s *notModifiedPingServer) Ping(
 	_ context.Context,
-	req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	req *connect.Request[pingv1.PingRequest],
+) (*connect.Response[pingv1.PingResponse], error) {
 	if req.HTTPMethod() == http.MethodGet && req.Header().Get("If-None-Match") == s.etag {
 		return nil, connect.NewNotModifiedError(http.Header{"Etag": []string{s.etag}})
 	}

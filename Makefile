@@ -9,9 +9,9 @@ MAKEFLAGS += --no-print-directory
 BIN := .tmp/bin
 export PATH := $(BIN):$(PATH)
 export GOBIN := $(abspath $(BIN))
-COPYRIGHT_YEARS := 2021-2024
+COPYRIGHT_YEARS := 2021-2025
 LICENSE_IGNORE := --ignore /testdata/
-BUF_VERSION := 1.47.2
+BUF_VERSION := 1.50.1
 
 .PHONY: help
 help: ## Describe useful make targets
@@ -82,7 +82,7 @@ generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/li
 	cd internal/conformance && go mod tidy
 	rm -rf internal/gen
 	PATH="$(abspath $(BIN))" buf generate
-	( cd cmd/protoc-gen-connect-go; ./generate.sh )
+	( cd cmd/protoc-gen-connect-go; PATH="$(abspath $(BIN)):$$PATH" ./generate.sh )
 	license-header \
 		--license-type apache \
 		--copyright-holder "The Connect Authors" \
@@ -112,7 +112,7 @@ $(BIN)/license-header: Makefile
 
 $(BIN)/golangci-lint: Makefile
 	@mkdir -p $(@D)
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.60.0
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.7
 
 $(BIN)/protoc-gen-go: Makefile go.mod
 	@mkdir -p $(@D)

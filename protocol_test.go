@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,6 @@ func TestCanonicalizeContentType(t *testing.T) {
 		{name: "no parameters should be normalized", arg: "APPLICATION/json;  ", want: "application/json"},
 	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, canonicalizeContentType(tt.arg), tt.want)
@@ -43,21 +42,21 @@ func TestCanonicalizeContentType(t *testing.T) {
 
 func BenchmarkCanonicalizeContentType(b *testing.B) {
 	b.Run("simple", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = canonicalizeContentType("application/json")
 		}
 		b.ReportAllocs()
 	})
 
 	b.Run("with charset", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = canonicalizeContentType("application/json; charset=utf-8")
 		}
 		b.ReportAllocs()
 	})
 
 	b.Run("with other param", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = canonicalizeContentType("application/json; foo=utf-8")
 		}
 		b.ReportAllocs()

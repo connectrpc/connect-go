@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ func TestServerTransport(t *testing.T) {
 		t.Run(fmt.Sprintf("%T", transport), func(t *testing.T) {
 			t.Parallel()
 			var wg sync.WaitGroup
-			for i := 0; i < concurrency; i++ {
+			for range concurrency {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
