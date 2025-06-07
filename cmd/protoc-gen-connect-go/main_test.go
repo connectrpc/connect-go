@@ -36,16 +36,16 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/pluginpb"
 
-	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/defaultpackage"
-	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/defaultpackage/defaultpackageconnect"
-	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/diffpackage"
-	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/diffpackage/diffpackagediff"
-	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/noservice"
-	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/samepackage"
-	_ "connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/v1beta1service"
+	defaultpackage "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/defaultpackage/gen"
+	defaultpackageconnect "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/defaultpackage/gen/genconnect"
+	diffpackage "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/diffpackage/gen"
+	diffpackagediff "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/diffpackage/gen/gendiff"
+	noservice "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/noservice/gen"
+	samepackage "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/samepackage/gen"
+	_ "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/v1beta1service/gen"
 )
 
-//go:embed testdata
+//go:embed internal/testdata
 var testdata embed.FS
 
 func TestVersion(t *testing.T) {
@@ -105,9 +105,9 @@ func TestGenerate(t *testing.T) {
 
 		assert.Equal(t, len(rsp.File), 1)
 		file := rsp.File[0]
-		assert.Equal(t, file.GetName(), "connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/defaultpackage/defaultpackageconnect/defaultpackage.connect.go")
+		assert.Equal(t, file.GetName(), "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/defaultpackage/gen/genconnect/defaultpackage.connect.go")
 		assert.NotZero(t, file.GetContent())
-		testCmpToTestdata(t, file.GetContent(), "testdata/defaultpackage/defaultpackageconnect/defaultpackage.connect.go")
+		testCmpToTestdata(t, file.GetContent(), "internal/testdata/defaultpackage/gen/genconnect/defaultpackage.connect.go")
 	})
 	// Check generated code into a the same package.
 	t.Run("samepackage.proto", func(t *testing.T) {
@@ -125,9 +125,9 @@ func TestGenerate(t *testing.T) {
 
 		assert.Equal(t, len(rsp.File), 1)
 		file := rsp.File[0]
-		assert.Equal(t, file.GetName(), "connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/samepackage/samepackage.connect.go")
+		assert.Equal(t, file.GetName(), "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/samepackage/gen/samepackage.connect.go")
 		assert.NotZero(t, file.GetContent())
-		testCmpToTestdata(t, file.GetContent(), "testdata/samepackage/samepackage.connect.go")
+		testCmpToTestdata(t, file.GetContent(), "internal/testdata/samepackage/gen/samepackage.connect.go")
 	})
 	// Check generated code into a different subpackage.
 	t.Run("diffpackage.proto", func(t *testing.T) {
@@ -145,9 +145,9 @@ func TestGenerate(t *testing.T) {
 
 		assert.Equal(t, len(rsp.File), 1)
 		file := rsp.File[0]
-		assert.Equal(t, file.GetName(), "connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/diffpackage/diffpackagediff/diffpackage.connect.go")
+		assert.Equal(t, file.GetName(), "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/diffpackage/gen/gendiff/diffpackage.connect.go")
 		assert.NotZero(t, file.GetContent())
-		testCmpToTestdata(t, file.GetContent(), "testdata/diffpackage/diffpackagediff/diffpackage.connect.go")
+		testCmpToTestdata(t, file.GetContent(), "internal/testdata/diffpackage/gen/gendiff/diffpackage.connect.go")
 	})
 	// Validate package_suffix option.
 	t.Run("ping.proto:invalid_package_suffix", func(t *testing.T) {
