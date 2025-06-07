@@ -19,6 +19,9 @@ import (
 	"net/http"
 )
 
+type responseHeaderAddressContextKey struct{}
+type responseTrailerAddressContextKey struct{}
+
 func HeaderFromIncomingContext(ctx context.Context) (http.Header, bool) {
 	panic("TODO")
 }
@@ -38,13 +41,31 @@ func WithOutgoingHeader(ctx context.Context, header http.Header) context.Context
 // WithGetResponseHeader returns a new context to be given to a client when making a request
 // that will result in the header pointer being set to the response header.
 func WithGetResponseHeader(ctx context.Context, header *http.Header) context.Context {
-	panic("TODO")
+	return context.WithValue(ctx, responseHeaderAddressContextKey{}, header)
 }
 
 // WithGetResponseTrailer returns a new context to be given to a client when making a request
 // that will result in the trailer pointer being set to the response trailer.
 func WithGetResponseTrailer(ctx context.Context, trailer *http.Header) context.Context {
-	panic("TODO")
+	return context.WithValue(ctx, responseTrailerAddressContextKey{}, trailer)
+}
+
+// SetResponseHeader sets the response header within a simple handler implementation.
+func SetResponseHeader(ctx context.Context, header http.Header) {
+	responseHeaderAddress, ok := ctx.Value(responseHeaderAddressContextKey{}).(*http.Header)
+	if !ok {
+		return
+	}
+	*responseHeaderAddress = header
+}
+
+// SetResponseTrailer sets the response trailer within a simple handler implementation.
+func SetResponseTrailer(ctx context.Context, trailer http.Header) {
+	responseTrailerAddress, ok := ctx.Value(responseTrailerAddressContextKey{}).(*http.Header)
+	if !ok {
+		return
+	}
+	*responseTrailerAddress = trailer
 }
 
 func requestFromContext[T any](ctx context.Context, message *T) *Request[T] {
