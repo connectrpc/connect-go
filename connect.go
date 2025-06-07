@@ -211,6 +211,11 @@ func (r *Request[_]) setRequestMethod(method string) {
 	r.method = method
 }
 
+// setHeader sets the request header to the given value.
+func (r *Request[_]) setHeader(header http.Header) {
+	r.header = header
+}
+
 // AnyRequest is the common method set of every [Request], regardless of type
 // parameter. It's used in unary interceptors.
 //
@@ -280,6 +285,16 @@ func (r *Response[_]) Trailer() http.Header {
 		r.trailer = make(http.Header)
 	}
 	return r.trailer
+}
+
+// setHeader sets the response header.
+func (r *Response[_]) setHeader(header http.Header) {
+	r.header = header
+}
+
+// setTrailer sets the response trailer.
+func (r *Response[_]) setTrailer(trailer http.Header) {
+	r.trailer = trailer
 }
 
 // internalOnly implements AnyResponse.

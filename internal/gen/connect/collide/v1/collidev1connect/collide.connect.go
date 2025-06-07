@@ -53,7 +53,7 @@ const (
 
 // CollideServiceClient is a client for the connect.collide.v1.CollideService service.
 type CollideServiceClient interface {
-	Import(context.Context, *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error)
+	Import(context.Context, *v1.ImportRequest) (*v1.ImportResponse, error)
 }
 
 // NewCollideServiceClient constructs a client for the connect.collide.v1.CollideService service. By
@@ -82,13 +82,13 @@ type collideServiceClient struct {
 }
 
 // Import calls connect.collide.v1.CollideService.Import.
-func (c *collideServiceClient) Import(ctx context.Context, req *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error) {
-	return c._import.CallUnary(ctx, req)
+func (c *collideServiceClient) Import(ctx context.Context, req *v1.ImportRequest) (*v1.ImportResponse, error) {
+	return c._import.CallUnarySimple(ctx, req)
 }
 
 // CollideServiceHandler is an implementation of the connect.collide.v1.CollideService service.
 type CollideServiceHandler interface {
-	Import(context.Context, *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error)
+	Import(context.Context, *v1.ImportRequest) (*v1.ImportResponse, error)
 }
 
 // NewCollideServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -98,7 +98,7 @@ type CollideServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewCollideServiceHandler(svc CollideServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	collideServiceMethods := v1.File_connect_collide_v1_collide_proto.Services().ByName("CollideService").Methods()
-	collideServiceImportHandler := connect.NewUnaryHandler(
+	collideServiceImportHandler := connect.NewUnaryHandlerSimple(
 		CollideServiceImportProcedure,
 		svc.Import,
 		connect.WithSchema(collideServiceMethods.ByName("Import")),
@@ -117,6 +117,6 @@ func NewCollideServiceHandler(svc CollideServiceHandler, opts ...connect.Handler
 // UnimplementedCollideServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedCollideServiceHandler struct{}
 
-func (UnimplementedCollideServiceHandler) Import(context.Context, *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error) {
+func (UnimplementedCollideServiceHandler) Import(context.Context, *v1.ImportRequest) (*v1.ImportResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.collide.v1.CollideService.Import is not implemented"))
 }

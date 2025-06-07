@@ -85,6 +85,40 @@ func NewUnaryHandler[Req, Res any](
 	}
 }
 
+// NewUnaryHandlerSimple constructs a [Handler] for a request-response procedure.
+func NewUnaryHandlerSimple[Req, Res any](
+	procedure string,
+	unary func(context.Context, *Req) (*Res, error),
+	options ...HandlerOption,
+) *Handler {
+	return NewUnaryHandler(
+		procedure,
+		func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
+			var responseHeader http.Header
+			var responseTrailer http.Header
+			ctx = WithIncomingHeader(
+				WithGetResponseHeader(
+					WithGetResponseTrailer(
+						ctx,
+						&responseTrailer,
+					),
+					&responseHeader,
+				),
+				request.Header(),
+			)
+			responseMsg, err := unary(ctx, request.Msg)
+			if responseMsg != nil {
+				response := NewResponse(responseMsg)
+				response.setHeader(responseHeader)
+				response.setTrailer(responseHeader)
+				return response, err
+			}
+			return nil, err
+		},
+		options...,
+	)
+}
+
 // NewClientStreamHandler constructs a [Handler] for a client streaming procedure.
 func NewClientStreamHandler[Req, Res any](
 	procedure string,
@@ -131,6 +165,25 @@ func NewServerStreamHandler[Req, Res any](
 			}
 			return implementation(ctx, req, &ServerStream[Res]{conn: conn})
 		},
+	)
+}
+
+// NewServerStreamHandlerSimple constructs a [Handler] for a server streaming procedure.
+func NewServerStreamHandlerSimple[Req, Res any](
+	procedure string,
+	implementation func(context.Context, *Req, *ServerStream[Res]) error,
+	options ...HandlerOption,
+) *Handler {
+	return NewServerStreamHandler(
+		procedure,
+		func(ctx context.Context, request *Request[Req], serverStream *ServerStream[Res]) error {
+			ctx = WithIncomingHeader(
+				ctx,
+				request.Header(),
+			)
+			return implementation(ctx, request.Msg, serverStream)
+		},
+		options...,
 	)
 }
 
