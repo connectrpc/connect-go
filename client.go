@@ -130,6 +130,15 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 	return c.callUnary(ctx, request)
 }
 
+// CallUnarySimple calls a request-response procedure.
+func (c *Client[Req, Res]) CallUnarySimple(ctx context.Context, requestMsg *Req) (*Res, error) {
+	response, err := c.CallUnary(ctx, requestFromContext(ctx, requestMsg))
+	if response != nil {
+		return response.Msg, err
+	}
+	return nil, err
+}
+
 // CallClientStream calls a client streaming procedure.
 func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamForClient[Req, Res] {
 	if c.err != nil {
@@ -167,6 +176,11 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 		conn:        conn,
 		initializer: c.config.Initializer,
 	}, nil
+}
+
+// CallServerStreamSimple calls a server streaming procedure.
+func (c *Client[Req, Res]) CallServerStreamSimple(ctx context.Context, requestMsg *Req) (*ServerStreamForClient[Res], error) {
+	return c.CallServerStream(ctx, requestFromContext(ctx, requestMsg))
 }
 
 // CallBidiStream calls a bidirectional streaming procedure.
