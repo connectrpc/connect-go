@@ -20,9 +20,8 @@ import (
 	"net/http"
 	"os"
 
-	connect "connectrpc.com/connect"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
 )
 
 func Example_client() {
@@ -40,16 +39,14 @@ func Example_client() {
 	)
 	response, err := client.Ping(
 		context.Background(),
-		connect.NewRequest(&pingv1.PingRequest{Number: 42}),
+		&pingv1.PingRequest{Number: 42},
 	)
 	if err != nil {
 		logger.Println("error:", err)
 		return
 	}
-	logger.Println("response content-type:", response.Header().Get("Content-Type"))
-	logger.Println("response message:", response.Msg)
+	logger.Println("response:", response)
 
 	// Output:
-	// response content-type: application/proto
-	// response message: number:42
+	// response: number:42
 }

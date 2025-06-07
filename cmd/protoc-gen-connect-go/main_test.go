@@ -42,6 +42,7 @@ import (
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/diffpackage/diffpackagediff"
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/noservice"
 	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/samepackage"
+	"connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/simple"
 	_ "connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/v1beta1service"
 )
 
@@ -176,6 +177,27 @@ func TestGenerate(t *testing.T) {
 		rsp := testGenerate(t, req)
 		assert.Nil(t, rsp.Error)
 		assert.Equal(t, len(rsp.File), 0)
+	})
+	t.Run("simple.proto", func(t *testing.T) {
+		t.Parallel()
+		simpleFileDesc := protodesc.ToFileDescriptorProto(simple.File_simple_proto)
+		for _, parameter := range []string{"simple", "simple=true"} {
+			req := &pluginpb.CodeGeneratorRequest{
+				FileToGenerate:        []string{"simple.proto"},
+				Parameter:             ptr(parameter),
+				ProtoFile:             []*descriptorpb.FileDescriptorProto{simpleFileDesc},
+				SourceFileDescriptors: []*descriptorpb.FileDescriptorProto{simpleFileDesc},
+				CompilerVersion:       compilerVersion,
+			}
+			rsp := testGenerate(t, req)
+			assert.Nil(t, rsp.Error)
+
+			assert.Equal(t, len(rsp.File), 1)
+			file := rsp.File[0]
+			assert.Equal(t, file.GetName(), "connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/simple/simpleconnect/simple.connect.go")
+			assert.NotZero(t, file.GetContent())
+			testCmpToTestdata(t, file.GetContent(), "testdata/simple/simpleconnect/simple.connect.go")
+		}
 	})
 }
 

@@ -30,7 +30,7 @@ import (
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
