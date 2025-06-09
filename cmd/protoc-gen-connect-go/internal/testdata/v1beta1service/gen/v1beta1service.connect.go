@@ -18,7 +18,7 @@
 //
 // Source: v1beta1service.proto
 
-package v1beta1service
+package gen
 
 import (
 	connect "connectrpc.com/connect"
