@@ -1088,8 +1088,8 @@ type connectUnaryUnmarshaler struct {
 	codec           Codec
 	compressionPool *compressionPool
 	bufferPool      *bufferPool
-	alreadyRead     bool
 	readMaxBytes    int
+	isEOF           bool
 }
 
 func (u *connectUnaryUnmarshaler) Unmarshal(message any) *Error {
@@ -1097,10 +1097,10 @@ func (u *connectUnaryUnmarshaler) Unmarshal(message any) *Error {
 }
 
 func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]byte, any) error) *Error {
-	if u.alreadyRead {
+	if u.isEOF {
 		return NewError(CodeInternal, io.EOF)
 	}
-	u.alreadyRead = true
+	u.isEOF = true
 	data := u.bufferPool.Get()
 	defer u.bufferPool.Put(data)
 	reader := u.reader
@@ -1118,12 +1118,8 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 		return errorf(CodeUnknown, "read message: %w", err)
 	}
 	if u.readMaxBytes > 0 && bytesRead > int64(u.readMaxBytes) {
-		// Attempt to read to end in order to allow connection re-use
-		discardedBytes, err := io.Copy(io.Discard, u.reader)
-		if err != nil {
-			return errorf(CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %w", u.readMaxBytes, err)
-		}
-		return errorf(CodeResourceExhausted, "message size %d is larger than configured max %d", bytesRead+discardedBytes, u.readMaxBytes)
+		// Resource is exhausted, fail fast without reading more data from the stream.
+		return errorf(CodeResourceExhausted, "message size is larger than configured max %d", u.readMaxBytes)
 	}
 	if data.Len() > 0 && u.compressionPool != nil {
 		decompressed := u.bufferPool.Get()
