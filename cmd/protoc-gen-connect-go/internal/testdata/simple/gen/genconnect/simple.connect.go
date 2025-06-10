@@ -16,11 +16,11 @@
 //
 // Source: simple.proto
 
-package simpleconnect
+package genconnect
 
 import (
 	connect "connectrpc.com/connect"
-	simple "connectrpc.com/connect/cmd/protoc-gen-connect-go/testdata/simple"
+	gen "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/simple/gen"
 	context "context"
 	errors "errors"
 	http "net/http"
@@ -62,10 +62,10 @@ const (
 
 // TestServiceClient is a client for the connect.test.simple.TestService service.
 type TestServiceClient interface {
-	Method(context.Context, *simple.Request) (*simple.Response, error)
-	MethodClientStream(context.Context) *connect.ClientStreamForClient[simple.Request, simple.Response]
-	MethodServerStream(context.Context, *simple.Request) (*connect.ServerStreamForClient[simple.Response], error)
-	MethodBidiStream(context.Context, *simple.Request) (*connect.ServerStreamForClient[simple.Response], error)
+	Method(context.Context, *gen.Request) (*gen.Response, error)
+	MethodClientStream(context.Context) *connect.ClientStreamForClient[gen.Request, gen.Response]
+	MethodServerStream(context.Context, *gen.Request) (*connect.ServerStreamForClient[gen.Response], error)
+	MethodBidiStream(context.Context, *gen.Request) (*connect.ServerStreamForClient[gen.Response], error)
 }
 
 // NewTestServiceClient constructs a client for the connect.test.simple.TestService service. By
@@ -77,27 +77,27 @@ type TestServiceClient interface {
 // http://api.acme.com or https://acme.com/grpc).
 func NewTestServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) TestServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
-	testServiceMethods := simple.File_simple_proto.Services().ByName("TestService").Methods()
+	testServiceMethods := gen.File_simple_proto.Services().ByName("TestService").Methods()
 	return &testServiceClient{
-		method: connect.NewClient[simple.Request, simple.Response](
+		method: connect.NewClient[gen.Request, gen.Response](
 			httpClient,
 			baseURL+TestServiceMethodProcedure,
 			connect.WithSchema(testServiceMethods.ByName("Method")),
 			connect.WithClientOptions(opts...),
 		),
-		methodClientStream: connect.NewClient[simple.Request, simple.Response](
+		methodClientStream: connect.NewClient[gen.Request, gen.Response](
 			httpClient,
 			baseURL+TestServiceMethodClientStreamProcedure,
 			connect.WithSchema(testServiceMethods.ByName("MethodClientStream")),
 			connect.WithClientOptions(opts...),
 		),
-		methodServerStream: connect.NewClient[simple.Request, simple.Response](
+		methodServerStream: connect.NewClient[gen.Request, gen.Response](
 			httpClient,
 			baseURL+TestServiceMethodServerStreamProcedure,
 			connect.WithSchema(testServiceMethods.ByName("MethodServerStream")),
 			connect.WithClientOptions(opts...),
 		),
-		methodBidiStream: connect.NewClient[simple.Request, simple.Response](
+		methodBidiStream: connect.NewClient[gen.Request, gen.Response](
 			httpClient,
 			baseURL+TestServiceMethodBidiStreamProcedure,
 			connect.WithSchema(testServiceMethods.ByName("MethodBidiStream")),
@@ -108,38 +108,38 @@ func NewTestServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 
 // testServiceClient implements TestServiceClient.
 type testServiceClient struct {
-	method             *connect.Client[simple.Request, simple.Response]
-	methodClientStream *connect.Client[simple.Request, simple.Response]
-	methodServerStream *connect.Client[simple.Request, simple.Response]
-	methodBidiStream   *connect.Client[simple.Request, simple.Response]
+	method             *connect.Client[gen.Request, gen.Response]
+	methodClientStream *connect.Client[gen.Request, gen.Response]
+	methodServerStream *connect.Client[gen.Request, gen.Response]
+	methodBidiStream   *connect.Client[gen.Request, gen.Response]
 }
 
 // Method calls connect.test.simple.TestService.Method.
-func (c *testServiceClient) Method(ctx context.Context, req *simple.Request) (*simple.Response, error) {
+func (c *testServiceClient) Method(ctx context.Context, req *gen.Request) (*gen.Response, error) {
 	return c.method.CallUnarySimple(ctx, req)
 }
 
 // MethodClientStream calls connect.test.simple.TestService.MethodClientStream.
-func (c *testServiceClient) MethodClientStream(ctx context.Context) *connect.ClientStreamForClient[simple.Request, simple.Response] {
+func (c *testServiceClient) MethodClientStream(ctx context.Context) *connect.ClientStreamForClient[gen.Request, gen.Response] {
 	return c.methodClientStream.CallClientStream(ctx)
 }
 
 // MethodServerStream calls connect.test.simple.TestService.MethodServerStream.
-func (c *testServiceClient) MethodServerStream(ctx context.Context, req *simple.Request) (*connect.ServerStreamForClient[simple.Response], error) {
+func (c *testServiceClient) MethodServerStream(ctx context.Context, req *gen.Request) (*connect.ServerStreamForClient[gen.Response], error) {
 	return c.methodServerStream.CallServerStreamSimple(ctx, req)
 }
 
 // MethodBidiStream calls connect.test.simple.TestService.MethodBidiStream.
-func (c *testServiceClient) MethodBidiStream(ctx context.Context, req *simple.Request) (*connect.ServerStreamForClient[simple.Response], error) {
+func (c *testServiceClient) MethodBidiStream(ctx context.Context, req *gen.Request) (*connect.ServerStreamForClient[gen.Response], error) {
 	return c.methodBidiStream.CallServerStreamSimple(ctx, req)
 }
 
 // TestServiceHandler is an implementation of the connect.test.simple.TestService service.
 type TestServiceHandler interface {
-	Method(context.Context, *simple.Request) (*simple.Response, error)
-	MethodClientStream(context.Context, *connect.ClientStream[simple.Request]) (*connect.Response[simple.Response], error)
-	MethodServerStream(context.Context, *simple.Request, *connect.ServerStream[simple.Response]) error
-	MethodBidiStream(context.Context, *simple.Request, *connect.ServerStream[simple.Response]) error
+	Method(context.Context, *gen.Request) (*gen.Response, error)
+	MethodClientStream(context.Context, *connect.ClientStream[gen.Request]) (*connect.Response[gen.Response], error)
+	MethodServerStream(context.Context, *gen.Request, *connect.ServerStream[gen.Response]) error
+	MethodBidiStream(context.Context, *gen.Request, *connect.ServerStream[gen.Response]) error
 }
 
 // NewTestServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -148,7 +148,7 @@ type TestServiceHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewTestServiceHandler(svc TestServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	testServiceMethods := simple.File_simple_proto.Services().ByName("TestService").Methods()
+	testServiceMethods := gen.File_simple_proto.Services().ByName("TestService").Methods()
 	testServiceMethodHandler := connect.NewUnaryHandlerSimple(
 		TestServiceMethodProcedure,
 		svc.Method,
@@ -192,18 +192,18 @@ func NewTestServiceHandler(svc TestServiceHandler, opts ...connect.HandlerOption
 // UnimplementedTestServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedTestServiceHandler struct{}
 
-func (UnimplementedTestServiceHandler) Method(context.Context, *simple.Request) (*simple.Response, error) {
+func (UnimplementedTestServiceHandler) Method(context.Context, *gen.Request) (*gen.Response, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.test.simple.TestService.Method is not implemented"))
 }
 
-func (UnimplementedTestServiceHandler) MethodClientStream(context.Context, *connect.ClientStream[simple.Request]) (*connect.Response[simple.Response], error) {
+func (UnimplementedTestServiceHandler) MethodClientStream(context.Context, *connect.ClientStream[gen.Request]) (*connect.Response[gen.Response], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.test.simple.TestService.MethodClientStream is not implemented"))
 }
 
-func (UnimplementedTestServiceHandler) MethodServerStream(context.Context, *simple.Request, *connect.ServerStream[simple.Response]) error {
+func (UnimplementedTestServiceHandler) MethodServerStream(context.Context, *gen.Request, *connect.ServerStream[gen.Response]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("connect.test.simple.TestService.MethodServerStream is not implemented"))
 }
 
-func (UnimplementedTestServiceHandler) MethodBidiStream(context.Context, *simple.Request, *connect.ServerStream[simple.Response]) error {
+func (UnimplementedTestServiceHandler) MethodBidiStream(context.Context, *gen.Request, *connect.ServerStream[gen.Response]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("connect.test.simple.TestService.MethodBidiStream is not implemented"))
 }

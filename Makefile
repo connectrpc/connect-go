@@ -7,7 +7,7 @@ MAKEFLAGS += --warn-undefined-variables
 MAKEFLAGS += --no-builtin-rules
 MAKEFLAGS += --no-print-directory
 BIN := .tmp/bin
-export PATH := $(BIN):$(PATH)
+export PATH := $(abspath $(BIN)):$(PATH)
 export GOBIN := $(abspath $(BIN))
 COPYRIGHT_YEARS := 2021-2025
 LICENSE_IGNORE := --ignore /testdata/
@@ -79,10 +79,10 @@ lintfix: $(BIN)/golangci-lint $(BIN)/buf ## Automatically fix some lint errors
 .PHONY: generate
 generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
 	go mod tidy
-	cd internal/conformance && go mod tidy
-	rm -rf internal/gen
-	PATH="$(abspath $(BIN))" buf generate
-	( cd cmd/protoc-gen-connect-go; PATH="$(abspath $(BIN)):$$PATH" ./generate.sh )
+	cd ./internal/conformance && go mod tidy
+	buf generate
+	cd ./cmd/protoc-gen-connect-go/internal && \
+		find ./testdata -maxdepth 1 -type d \( ! -name testdata \) | xargs -n 1 -I % bash -c "cd '%' && buf generate"
 	license-header \
 		--license-type apache \
 		--copyright-holder "The Connect Authors" \
