@@ -85,6 +85,46 @@ func NewUnaryHandler[Req, Res any](
 	}
 }
 
+// NewUnaryHandlerSimple constructs a [Handler] for a request-response procedure using the
+// function signature associated with the "simple" generation option.
+//
+// This option eliminates the [Request] and [Response] wrappers, and instead uses the
+// context.Context to propagate information such as headers.
+func NewUnaryHandlerSimple[Req, Res any](
+	procedure string,
+	unary func(context.Context, *Req) (*Res, error),
+	options ...HandlerOption,
+) *Handler {
+	return NewUnaryHandler(
+		procedure,
+		func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
+			var responseHeader http.Header
+			var responseTrailer http.Header
+			// Add the request header to the context, and store the response header
+			// and trailer to propagate back to the caller.
+			ctx = WithIncomingHeader(
+				WithStoreResponseHeader(
+					WithStoreResponseTrailer(
+						ctx,
+						&responseTrailer,
+					),
+					&responseHeader,
+				),
+				request.Header(),
+			)
+			responseMsg, err := unary(ctx, request.Msg)
+			if responseMsg != nil {
+				response := NewResponse(responseMsg)
+				response.setHeader(responseHeader)
+				response.setTrailer(responseHeader)
+				return response, err
+			}
+			return nil, err
+		},
+		options...,
+	)
+}
+
 // NewClientStreamHandler constructs a [Handler] for a client streaming procedure.
 func NewClientStreamHandler[Req, Res any](
 	procedure string,
@@ -131,6 +171,30 @@ func NewServerStreamHandler[Req, Res any](
 			}
 			return implementation(ctx, req, &ServerStream[Res]{conn: conn})
 		},
+	)
+}
+
+// NewServerStreamHandlerSimple constructs a [Handler] a server streaming procedure using the function
+// signature associated with the "simple" generation option.
+//
+// This option eliminates the [Request] wrapper, and instead uses the context.Context to
+// propagate information such as headers.
+func NewServerStreamHandlerSimple[Req, Res any](
+	procedure string,
+	implementation func(context.Context, *Req, *ServerStream[Res]) error,
+	options ...HandlerOption,
+) *Handler {
+	return NewServerStreamHandler(
+		procedure,
+		func(ctx context.Context, request *Request[Req], serverStream *ServerStream[Res]) error {
+			// Add the request header to the context.
+			ctx = WithIncomingHeader(
+				ctx,
+				request.Header(),
+			)
+			return implementation(ctx, request.Msg, serverStream)
+		},
+		options...,
 	)
 }
 
