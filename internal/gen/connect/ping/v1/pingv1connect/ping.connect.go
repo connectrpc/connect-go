@@ -171,6 +171,45 @@ type PingServiceHandler interface {
 	CumSum(context.Context, *connect.BidiStream[v1.CumSumRequest, v1.CumSumResponse]) error
 }
 
+// PingServiceService provides access to the handlers for the connect.ping.v1.PingService service.
+type PingServiceService struct {
+	// Ping sends a ping to the server to determine if it's reachable.
+	PingFunc connect.HandlerFunc[v1.PingRequest, v1.PingResponse]
+	// Fail always fails.
+	FailFunc connect.HandlerFunc[v1.FailRequest, v1.FailResponse]
+	// Sum calculates the sum of the numbers sent on the stream.
+	SumFunc func(context.Context, *connect.ClientStream[v1.SumRequest]) (*connect.Response[v1.SumResponse], error)
+	// CountUp returns a stream of the numbers up to the given request.
+	CountUpFunc func(context.Context, *connect.Request[v1.CountUpRequest], *connect.ServerStream[v1.CountUpResponse]) error
+	// CumSum determines the cumulative sum of all the numbers sent on the stream.
+	CumSumFunc connect.BidiStreamFunc[v1.CumSumRequest, v1.CumSumResponse]
+}
+
+// Ping calls the PingFunc handler.
+func (s *PingServiceService) Ping(ctx context.Context, req *connect.Request[v1.PingRequest]) (*connect.Response[v1.PingResponse], error) {
+	return s.PingFunc(ctx, req)
+}
+
+// Fail calls the FailFunc handler.
+func (s *PingServiceService) Fail(ctx context.Context, req *connect.Request[v1.FailRequest]) (*connect.Response[v1.FailResponse], error) {
+	return s.FailFunc(ctx, req)
+}
+
+// Sum calls the SumFunc handler.
+func (s *PingServiceService) Sum(ctx context.Context, stream *connect.ClientStream[v1.SumRequest]) (*connect.Response[v1.SumResponse], error) {
+	return s.SumFunc(ctx, stream)
+}
+
+// CountUp calls the CountUpFunc handler.
+func (s *PingServiceService) CountUp(ctx context.Context, req *connect.Request[v1.CountUpRequest], stream *connect.ServerStream[v1.CountUpResponse]) error {
+	return s.CountUpFunc(ctx, req, stream)
+}
+
+// CumSum calls the CumSumFunc handler.
+func (s *PingServiceService) CumSum(ctx context.Context, stream *connect.BidiStream[v1.CumSumRequest, v1.CumSumResponse]) error {
+	return s.CumSumFunc(ctx, stream)
+}
+
 // NewPingServiceHandler builds an HTTP handler from the service implementation. It returns the path
 // on which to mount the handler and the handler itself.
 //

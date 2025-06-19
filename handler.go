@@ -19,6 +19,14 @@ import (
 	"net/http"
 )
 
+// HandlerFunc is a function that implements the Handler interface.
+// It is used to create a Handler from a function.
+type HandlerFunc[Req, Res any] func(context.Context, *Request[Req]) (*Response[Res], error)
+
+// BidiStreamFunc is a function that implements the BidiStream interface.
+// It is used to create a BidiStream from a function.
+type BidiStreamFunc[Req, Res any] func(context.Context, *BidiStream[Req, Res]) error
+
 // A Handler is the server-side implementation of a single RPC defined by a
 // service schema.
 //

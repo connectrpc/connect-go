@@ -59,6 +59,11 @@ type importServiceClient struct {
 type ImportServiceHandler interface {
 }
 
+// ImportServiceService provides access to the handlers for the connect.import.v1.ImportService
+// service.
+type ImportServiceService struct {
+}
+
 // NewImportServiceHandler builds an HTTP handler from the service implementation. It returns the
 // path on which to mount the handler and the handler itself.
 //

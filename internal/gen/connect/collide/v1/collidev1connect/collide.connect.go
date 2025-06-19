@@ -91,6 +91,17 @@ type CollideServiceHandler interface {
 	Import(context.Context, *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error)
 }
 
+// CollideServiceService provides access to the handlers for the connect.collide.v1.CollideService
+// service.
+type CollideServiceService struct {
+	ImportFunc connect.HandlerFunc[v1.ImportRequest, v1.ImportResponse]
+}
+
+// Import calls the ImportFunc handler.
+func (s *CollideServiceService) Import(ctx context.Context, req *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error) {
+	return s.ImportFunc(ctx, req)
+}
+
 // NewCollideServiceHandler builds an HTTP handler from the service implementation. It returns the
 // path on which to mount the handler and the handler itself.
 //

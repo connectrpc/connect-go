@@ -217,6 +217,120 @@ func TestClientHandler(t *testing.T) {
 	})
 }
 
+func TestServiceStruct(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	
+	t.Run("TestServiceService struct exists and works", func(t *testing.T) {
+		t.Parallel()
+		svc := testSamePackageService{}
+		
+		service := &samepackage.TestServiceService{
+			MethodFunc: svc.Method,
+		}
+		
+		assert.NotNil(t, service.MethodFunc)
+		
+		// Test that the service struct implements the handler interface
+		methodHandler := connect.NewUnaryHandler(
+			samepackage.TestServiceMethodProcedure,
+			service.Method, // Use the method, not the function field
+		)
+		
+		server := httptest.NewServer(methodHandler)
+		defer server.Close()
+		
+		client := samepackage.NewTestServiceClient(server.Client(), server.URL)
+		rsp, err := client.Method(ctx, connect.NewRequest(&samepackage.Request{}))
+		assert.Nil(t, err)
+		assert.NotNil(t, rsp)
+	})
+	
+	t.Run("TestServiceService can be used for custom routing", func(t *testing.T) {
+		t.Parallel()
+		svc := testSamePackageService{}
+		
+		service := &samepackage.TestServiceService{
+			MethodFunc: svc.Method,
+		}
+		
+		methodHandler := connect.NewUnaryHandler(
+			samepackage.TestServiceMethodProcedure,
+			service.Method,
+		)
+		
+		mux := http.NewServeMux()
+		mux.Handle(samepackage.TestServiceMethodProcedure, methodHandler)
+		
+		server := httptest.NewServer(mux)
+		defer server.Close()
+		
+		client := samepackage.NewTestServiceClient(server.Client(), server.URL)
+		rsp, err := client.Method(ctx, connect.NewRequest(&samepackage.Request{}))
+		assert.Nil(t, err)
+		assert.NotNil(t, rsp)
+	})
+	
+	t.Run("TestServiceService implements Handler interface (backwards compatible)", func(t *testing.T) {
+		t.Parallel()
+		svc := testSamePackageService{}
+		
+		service := &samepackage.TestServiceService{
+			MethodFunc: svc.Method,
+		}
+		
+		// The Service struct should implement the Handler interface
+		var handler samepackage.TestServiceHandler = service
+		assert.NotNil(t, handler)
+		
+		// Test that we can use the service directly as a handler
+		_, httpHandler := samepackage.NewTestServiceHandler(service)
+		server := httptest.NewServer(httpHandler)
+		defer server.Close()
+		
+		client := samepackage.NewTestServiceClient(server.Client(), server.URL)
+		rsp, err := client.Method(ctx, connect.NewRequest(&samepackage.Request{}))
+		assert.Nil(t, err)
+		assert.NotNil(t, rsp)
+	})
+}
+
+func TestServiceStructGeneration(t *testing.T) {
+	t.Parallel()
+	
+	t.Run("generated code contains Service struct", func(t *testing.T) {
+		t.Parallel()
+		samePackageFileDesc := protodesc.ToFileDescriptorProto(samepackage.File_samepackage_proto)
+		compilerVersion := &pluginpb.Version{
+			Major:  ptr(int32(0)),
+			Minor:  ptr(int32(0)),
+			Patch:  ptr(int32(1)),
+			Suffix: ptr("test"),
+		}
+		
+		req := &pluginpb.CodeGeneratorRequest{
+			FileToGenerate:        []string{"samepackage.proto"},
+			Parameter:             ptr("package_suffix"),
+			ProtoFile:             []*descriptorpb.FileDescriptorProto{samePackageFileDesc},
+			SourceFileDescriptors: []*descriptorpb.FileDescriptorProto{samePackageFileDesc},
+			CompilerVersion:       compilerVersion,
+		}
+		
+		rsp := testGenerate(t, req)
+		assert.Nil(t, rsp.Error)
+		assert.Equal(t, len(rsp.File), 1)
+		
+		file := rsp.File[0]
+		content := file.GetContent()
+		
+		assert.True(t, strings.Contains(content, "type TestServiceService struct"))
+		assert.True(t, strings.Contains(content, "MethodFunc connect.HandlerFunc[Request, Response]"))
+		assert.True(t, strings.Contains(content, "TestServiceService provides access to the handlers"))
+		assert.True(t, strings.Contains(content, "func (s *TestServiceService) Method(ctx context.Context, req *connect.Request[Request]) (*connect.Response[Response], error)"))
+		assert.True(t, strings.Contains(content, "return s.MethodFunc(ctx, req)"))
+	})
+}
+
 func testCmpToTestdata(t *testing.T, content, path string) {
 	t.Helper()
 	b, err := testdata.ReadFile(path)
