@@ -38,8 +38,9 @@ import (
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/generics/connect/import/v1/importv1connect"
-	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
+	pingv1connectsimple "connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/wrapped/connect/import/v1/importv1connect"
+	"connectrpc.com/connect/internal/gen/wrapped/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 	"google.golang.org/protobuf/proto"
@@ -2947,6 +2948,46 @@ func (p pingServer) CumSum(
 			return err
 		}
 	}
+}
+
+// func expectClientHeaderSimple(check bool, req connect.AnyRequest) error {
+// 	if !check {
+// 		return nil
+// 	}
+// 	return expectMetadata(req.Header(), "header", clientHeader, headerValue)
+// }
+
+type pingServerSimple struct {
+	pingv1connectsimple.UnimplementedPingServiceHandler
+
+	checkMetadata       bool
+	includeErrorDetails bool
+}
+
+func (p pingServerSimple) Ping(
+	ctx context.Context,
+	request *pingv1.PingRequest,
+) (*pingv1.PingResponse, error) {
+	callInfo, ok := connect.CallInfoFromContext(ctx)
+	if !ok {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
+	}
+	// if err := expectClientHeader(p.checkMetadata, request); err != nil {
+	// 	return nil, err
+	// }
+	if callInfo.Peer().Addr == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
+	}
+	if callInfo.Peer().Protocol == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer protocol"))
+	}
+	response := &pingv1.PingResponse{
+		Number: request.GetNumber(),
+		Text:   request.GetText(),
+	}
+	callInfo.ResponseHeader().Set(handlerHeader, headerValue)
+	callInfo.ResponseTrailer().Set(handlerTrailer, trailerValue)
+	return response, nil
 }
 
 type deflateReader struct {

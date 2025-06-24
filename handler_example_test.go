@@ -22,7 +22,7 @@ import (
 
 	connect "connectrpc.com/connect"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/wrapped/connect/ping/v1/pingv1connect"
 )
 
 // ExamplePingServer implements some trivial business logic. The Protobuf

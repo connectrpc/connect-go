@@ -17,11 +17,13 @@ package connect_test
 import (
 	"net/http"
 
-	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
+	pingv1connectsimple "connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/wrapped/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp"
 )
 
 var examplePingServer *memhttp.Server
+var examplePingServerSimple *memhttp.Server
 
 func init() {
 	// Generally, init functions are bad. However, we need to set up the server
@@ -34,4 +36,8 @@ func init() {
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
 	examplePingServer = memhttp.NewServer(mux)
+
+	muxSimple := http.NewServeMux()
+	muxSimple.Handle(pingv1connectsimple.NewPingServiceHandler(pingServerSimple{}))
+	examplePingServerSimple = memhttp.NewServer(muxSimple)
 }
