@@ -2960,8 +2960,8 @@ func (p pingServer) CumSum(
 type pingServerSimple struct {
 	pingv1connectsimple.UnimplementedPingServiceHandler
 
-	checkMetadata       bool
-	includeErrorDetails bool
+	// checkMetadata       bool
+	// includeErrorDetails bool
 }
 
 func (p pingServerSimple) Ping(

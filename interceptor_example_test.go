@@ -21,7 +21,7 @@ import (
 
 	connect "connectrpc.com/connect"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/wrapped/connect/ping/v1/pingv1connect"
 )
 
 func ExampleUnaryInterceptorFunc() {
@@ -46,7 +46,7 @@ func ExampleUnaryInterceptorFunc() {
 		examplePingServer.URL(),
 		connect.WithInterceptors(loggingInterceptor),
 	)
-	if _, err := client.Ping(context.Background(), &pingv1.PingRequest{Number: 42}); err != nil {
+	if _, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 42})); err != nil {
 		logger.Println("error:", err)
 		return
 	}
@@ -84,7 +84,7 @@ func ExampleWithInterceptors() {
 		examplePingServer.URL(),
 		connect.WithInterceptors(outer, inner),
 	)
-	if _, err := client.Ping(context.Background(), &pingv1.PingRequest{}); err != nil {
+	if _, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{})); err != nil {
 		logger.Println("error:", err)
 		return
 	}

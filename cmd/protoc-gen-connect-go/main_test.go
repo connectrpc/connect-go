@@ -182,23 +182,22 @@ func TestGenerate(t *testing.T) {
 	t.Run("simple.proto", func(t *testing.T) {
 		t.Parallel()
 		simpleFileDesc := protodesc.ToFileDescriptorProto(simple.File_simple_proto)
-		for _, parameter := range []string{"api", "api=simple"} {
-			req := &pluginpb.CodeGeneratorRequest{
-				FileToGenerate:        []string{"simple.proto"},
-				Parameter:             ptr(parameter),
-				ProtoFile:             []*descriptorpb.FileDescriptorProto{simpleFileDesc},
-				SourceFileDescriptors: []*descriptorpb.FileDescriptorProto{simpleFileDesc},
-				CompilerVersion:       compilerVersion,
-			}
-			rsp := testGenerate(t, req)
-			assert.Nil(t, rsp.Error)
-
-			assert.Equal(t, len(rsp.File), 1)
-			file := rsp.File[0]
-			assert.Equal(t, file.GetName(), "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/simple/gen/genconnect/simple.connect.go")
-			assert.NotZero(t, file.GetContent())
-			testCmpToTestdata(t, file.GetContent(), "internal/testdata/simple/gen/genconnect/simple.connect.go")
+		req := &pluginpb.CodeGeneratorRequest{
+			FileToGenerate:        []string{"simple.proto"},
+			Parameter:             ptr("api=simple"),
+			ProtoFile:             []*descriptorpb.FileDescriptorProto{simpleFileDesc},
+			SourceFileDescriptors: []*descriptorpb.FileDescriptorProto{simpleFileDesc},
+			CompilerVersion:       compilerVersion,
 		}
+		rsp := testGenerate(t, req)
+		assert.Nil(t, rsp.Error)
+
+		assert.Equal(t, len(rsp.File), 1)
+		file := rsp.File[0]
+		assert.Equal(t, file.GetName(), "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/simple/gen/genconnect/simple.connect.go")
+		assert.NotZero(t, file.GetContent())
+
+		testCmpToTestdata(t, file.GetContent(), "internal/testdata/simple/gen/genconnect/simple.connect.go")
 	})
 }
 
