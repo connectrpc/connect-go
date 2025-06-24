@@ -42,6 +42,7 @@ import (
 	diffpackagediff "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/diffpackage/gen/gendiff"
 	noservice "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/noservice/gen"
 	samepackage "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/samepackage/gen"
+
 	simple "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/simple/gen"
 	_ "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/v1beta1service/gen"
 )
@@ -181,7 +182,7 @@ func TestGenerate(t *testing.T) {
 	t.Run("simple.proto", func(t *testing.T) {
 		t.Parallel()
 		simpleFileDesc := protodesc.ToFileDescriptorProto(simple.File_simple_proto)
-		for _, parameter := range []string{"simple", "simple=true"} {
+		for _, parameter := range []string{"api", "api=simple"} {
 			req := &pluginpb.CodeGeneratorRequest{
 				FileToGenerate:        []string{"simple.proto"},
 				Parameter:             ptr(parameter),

@@ -9,11 +9,11 @@ plugins:
     out: internal/gen
     opt: paths=source_relative
   - local: protoc-gen-connect-go
-    out: internal/gen/generics
+    out: internal/gen/wrapped
     opt: paths=source_relative
   - local: protoc-gen-connect-go
     out: internal/gen/simple
     opt:
       - paths=source_relative
-      - simple
+      - api=simple
 clean: true

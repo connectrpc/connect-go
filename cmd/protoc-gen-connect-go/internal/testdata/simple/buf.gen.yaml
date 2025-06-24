@@ -12,5 +12,5 @@ plugins:
     out: gen
     opt:
       - paths=source_relative
-      - simple
+      - api=simple
 clean: true
