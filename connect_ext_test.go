@@ -2950,17 +2950,17 @@ func (p pingServer) CumSum(
 	}
 }
 
-// func expectClientHeaderSimple(check bool, req connect.AnyRequest) error {
-// 	if !check {
-// 		return nil
-// 	}
-// 	return expectMetadata(req.Header(), "header", clientHeader, headerValue)
-// }
+func expectClientHeaderInCallInfo(check bool, callInfo connect.CallInfo) error {
+	if !check {
+		return nil
+	}
+	return expectMetadata(callInfo.RequestHeader(), "header", clientHeader, headerValue)
+}
 
 type pingServerSimple struct {
 	pingv1connectsimple.UnimplementedPingServiceHandler
 
-	// checkMetadata       bool
+	checkMetadata bool
 	// includeErrorDetails bool
 }
 
@@ -2972,9 +2972,9 @@ func (p pingServerSimple) Ping(
 	if !ok {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
 	}
-	// if err := expectClientHeader(p.checkMetadata, request); err != nil {
-	// 	return nil, err
-	// }
+	if err := expectClientHeaderInCallInfo(p.checkMetadata, callInfo); err != nil {
+		return nil, err
+	}
 	if callInfo.Peer().Addr == "" {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
 	}

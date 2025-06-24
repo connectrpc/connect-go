@@ -81,7 +81,7 @@ func (p *ExamplePingServer) CumSum(ctx context.Context, stream *connect.BidiStre
 	}
 }
 
-func Example_handler() {
+func Example_handlers() {
 	// protoc-gen-connect-go generates constructors that return plain net/http
 	// Handlers, so they're compatible with most Go HTTP routers and middleware
 	// (for example, net/http's StripPrefix). Each handler automatically supports

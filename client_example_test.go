@@ -75,6 +75,7 @@ func Example_simple_client() {
 		return
 	}
 	ci, _ := connect.CallInfoFromContext(ctx)
+
 	logger.Println("response content-type:", ci.ResponseHeader().Get("Content-Type"))
 	logger.Println("response message:", response)
 

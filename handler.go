@@ -49,7 +49,6 @@ func NewUnaryHandler[Req, Res any](
 			return nil, errorf(CodeInternal, "unexpected handler request type %T", request)
 		}
 		res, err := unary(ctx, typed)
-
 		if res == nil && err == nil {
 			// This is going to panic during serialization. Debugging is much easier
 			// if we panic here instead, so we can include the procedure name.

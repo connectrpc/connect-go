@@ -137,11 +137,11 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 // This option eliminates the [Request] and [Response] wrappers, and instead uses the
 // context.Context to propagate information such as headers.
 func (c *Client[Req, Res]) CallUnarySimple(ctx context.Context, requestMsg *Req) (*Res, error) {
+	ci, _ := CallInfoFromContext(ctx)
 	response, err := c.CallUnary(ctx, requestFromContext(ctx, requestMsg))
 	if err != nil {
 		return nil, err
 	}
-	ci, _ := CallInfoFromContext(ctx)
 
 	maps.Copy(ci.ResponseHeader(), response.Header())
 	maps.Copy(ci.ResponseTrailer(), response.Trailer())
