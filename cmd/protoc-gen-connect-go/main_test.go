@@ -199,6 +199,41 @@ func TestGenerate(t *testing.T) {
 
 		testCmpToTestdata(t, file.GetContent(), "internal/testdata/simple/gen/genconnect/simple.connect.go")
 	})
+	t.Run("invalid api option", func(t *testing.T) {
+		t.Parallel()
+		simpleFileDesc := protodesc.ToFileDescriptorProto(simple.File_simple_proto)
+		req := &pluginpb.CodeGeneratorRequest{
+			FileToGenerate:        []string{"simple.proto"},
+			Parameter:             ptr("api=foo"),
+			ProtoFile:             []*descriptorpb.FileDescriptorProto{simpleFileDesc},
+			SourceFileDescriptors: []*descriptorpb.FileDescriptorProto{simpleFileDesc},
+			CompilerVersion:       compilerVersion,
+		}
+		rsp := testGenerate(t, req)
+		assert.NotNil(t, rsp.Error)
+		assert.Equal(t, *rsp.Error, `'simple' is the only valid value when specifying an api type`)
+	})
+	t.Run("empty api type defaults to wrapped", func(t *testing.T) {
+		t.Parallel()
+		req := &pluginpb.CodeGeneratorRequest{
+			FileToGenerate:        []string{"connect/ping/v1/ping.proto"},
+			Parameter:             ptr("api="),
+			ProtoFile:             []*descriptorpb.FileDescriptorProto{pingFileDesc},
+			SourceFileDescriptors: []*descriptorpb.FileDescriptorProto{pingFileDesc},
+			CompilerVersion:       compilerVersion,
+		}
+		rsp := testGenerate(t, req)
+		assert.Nil(t, rsp.Error)
+
+		assert.Equal(t, rsp.GetSupportedFeatures(), 3)
+		assert.Equal(t, rsp.GetMinimumEdition(), int32(descriptorpb.Edition_EDITION_PROTO2))
+		assert.Equal(t, rsp.GetMaximumEdition(), int32(descriptorpb.Edition_EDITION_2023))
+
+		assert.Equal(t, len(rsp.File), 1)
+		file := rsp.File[0]
+		assert.Equal(t, file.GetName(), "connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect/ping.connect.go")
+		assert.NotZero(t, file.GetContent())
+	})
 }
 
 func TestClientHandler(t *testing.T) {

@@ -2793,7 +2793,7 @@ func expectClientHeader(check bool, req connect.AnyRequest) error {
 	return expectMetadata(req.Header(), "header", clientHeader, headerValue)
 }
 
-func expectMetadata(meta http.Header, metaType, key, value string) error {
+func expectMetadata(meta http.Header, metaType, key, value string) error { //nolint:unparam
 	if got := meta.Get(key); got != value {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
 			"%s %q: got %q, expected %q",

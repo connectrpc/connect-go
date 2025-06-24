@@ -43,7 +43,6 @@
 //   - package_suffix: To generate into a sub-package of the package containing the
 //     base .pb.go files using the given suffix. An empty suffix denotes to
 //     generate into the same package as the base pb.go files. Default is "connect".
-//
 // For example, to generate into the same package as the base .pb.go files:
 //
 //	version: v2
@@ -59,11 +58,27 @@
 //	gen/path/to/file.pb.go
 //	gen/path/to/file.connect.go
 //
+//   - api: By default, generated code will wrap request and response types with a
+//     connect.Request and connect.Response type respectively. To generate and use
+//     just the raw request and response types, set this flag to 'simple'. Note that
+//     by doing so, metadata such as headers and trailers will be managed via context.Context.
+// For example:
+//
+//	version: v2
+//	plugins:
+//	  - local: protoc-gen-go
+//	    out: gen
+//	  - local: protoc-gen-connect-go
+//	    out: gen
+//	    opt: api=simple
+//
+//
 // [buf]: https://buf.build
 package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"go/token"
@@ -122,9 +137,8 @@ func main() {
 		"Generate files into a sub-package of the package containing the base .pb.go files using the given suffix. An empty suffix denotes to generate into the same package as the base pb.go files.",
 	)
 	apiType := flagSet.String(
-		apiFlagName,
-		"",
-		"Specify the type of API for generated types. Possible values are 'simple' or 'wrapped'. A value of 'wrapped' will result in wrapper connect.Request and connect.Response types, which wrap generated request and response types and contain functions for managing metadata. A value of 'simple' denotes to generate client and handler interfaces with simple function signatures and will be more familiar to users. This option eliminates the wrapper connect.Request and connect.Response types, instead having functions directly use generated RPC request and responses. Clients and handlers will instead use context.Context to propagate metadata such as headers. An empty string will use 'wrapped' by default.",
+		apiFlagName, "",
+		"Generate a simple API for request and response types. The only possible value when setting this option is 'simple', which denotes that client and handler interfaces with simple function signatures should be generated instead of wrapping request and response types in a connect.Request and connect.Response wrapper. Using this option will require using context to propagate metadata such as headers and trailers. Omitting this option will use wrapper types by default.",
 	)
 	protogen.Options{
 		ParamFunc: flagSet.Set,
@@ -149,6 +163,10 @@ func main() {
 
 func generate(plugin *protogen.Plugin, file *protogen.File, packageSuffix string, apiType string) {
 	if len(file.Services) == 0 {
+		return
+	}
+	if apiType != "" && !isSimpleAPI(apiType) {
+		plugin.Error(errors.New("'simple' is the only valid value when specifying an api type"))
 		return
 	}
 
