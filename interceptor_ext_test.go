@@ -28,7 +28,7 @@ import (
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 )
 
-func TestOnionOrderingEndToEndSnurt(t *testing.T) {
+func TestOnionOrderingEndToEnd(t *testing.T) {
 	t.Parallel()
 	// Helper function: returns a function that asserts that there's some value
 	// set for header "expect", and adds a value for header "add".
