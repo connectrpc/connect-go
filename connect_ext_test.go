@@ -2961,7 +2961,6 @@ type pingServerSimple struct {
 	pingv1connectsimple.UnimplementedPingServiceHandler
 
 	checkMetadata bool
-	// includeErrorDetails bool
 }
 
 func (p pingServerSimple) Ping(

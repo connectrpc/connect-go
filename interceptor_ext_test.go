@@ -28,7 +28,7 @@ import (
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 )
 
-func TestOnionOrderingEndToEnd(t *testing.T) {
+func TestOnionOrderingEndToEndSnurt(t *testing.T) {
 	t.Parallel()
 	// Helper function: returns a function that asserts that there's some value
 	// set for header "expect", and adds a value for header "add".
@@ -128,6 +128,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 		),
 	)
 	server := memhttptest.NewServer(t, mux)
+
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL(),
@@ -144,6 +145,8 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	assert.Equal(t, int32(1), handler1.Load())
 	assert.Equal(t, int32(1), handler2.Load())
 	assert.Equal(t, int32(1), handler3.Load())
+
+	assert.Nil(t, err)
 
 	responses, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
 	assert.Nil(t, err)
