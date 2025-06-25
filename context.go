@@ -35,7 +35,6 @@ type CallInfo interface {
 	// if the request was never actually sent to the server (and thus no
 	// determination ever made about the HTTP method).
 	HTTPMethod() string
-	SetHTTPMethod(s string)
 	// RequestHeader returns the HTTP headers for this request. Headers beginning with
 	// "Connect-" and "Grpc-" are reserved for use by the Connect and gRPC
 	// protocols: applications may read them but shouldn't write them.

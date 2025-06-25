@@ -43,6 +43,7 @@
 //   - package_suffix: To generate into a sub-package of the package containing the
 //     base .pb.go files using the given suffix. An empty suffix denotes to
 //     generate into the same package as the base pb.go files. Default is "connect".
+//
 // For example, to generate into the same package as the base .pb.go files:
 //
 //	version: v2
@@ -55,8 +56,8 @@
 //
 // This will generate output to:
 //
-//	gen/path/to/file.pb.go
-//	gen/path/to/file.connect.go
+//	 gen/path/to/file.pb.go
+//	 gen/path/to/file.connect.go
 //
 //   - api: By default, generated code will wrap request and response types with a
 //     connect.Request and connect.Response type respectively. To generate and use

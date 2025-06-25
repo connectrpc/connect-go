@@ -21,7 +21,6 @@ import (
 	"os"
 
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	pingv1connectsimple "connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
 	pingv1connect "connectrpc.com/connect/internal/gen/wrapped/connect/ping/v1/pingv1connect"
 )
 
@@ -50,36 +49,4 @@ func Example_client() {
 
 	// Output:
 	// response: number:42
-}
-
-func Example_simple_client() {
-	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
-	// To keep this example runnable, we'll use an HTTP server and client
-	// that communicate over in-memory pipes. The client is still a plain
-	// *http.Client!
-	var httpClient *http.Client = examplePingServerSimple.Client()
-
-	// By default, clients use the Connect protocol. Add connect.WithGRPC() or
-	// connect.WithGRPCWeb() to switch protocols.
-	client := pingv1connectsimple.NewPingServiceClient(
-		httpClient,
-		examplePingServer.URL(),
-	)
-	ctx, _ := connect.NewOutgoingContext(context.Background())
-	response, err := client.Ping(
-		ctx,
-		&pingv1.PingRequest{Number: 42},
-	)
-	if err != nil {
-		logger.Println("error:", err)
-		return
-	}
-	ci, _ := connect.CallInfoFromContext(ctx)
-
-	logger.Println("response content-type:", ci.ResponseHeader().Get("Content-Type"))
-	logger.Println("response message:", response)
-
-	// Output:
-	// response content-type: application/proto
-	// response message: number:42
 }

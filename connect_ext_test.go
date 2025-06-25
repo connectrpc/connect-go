@@ -2864,28 +2864,7 @@ func (p pingServer) Sum(
 	ctx context.Context,
 	stream *connect.ClientStream[pingv1.SumRequest],
 ) (*connect.Response[pingv1.SumResponse], error) {
-	if p.checkMetadata {
-		if err := expectMetadata(stream.RequestHeader(), "header", clientHeader, headerValue); err != nil {
-			return nil, err
-		}
-	}
-	if stream.Peer().Addr == "" {
-		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
-	}
-	if stream.Peer().Protocol == "" {
-		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer protocol"))
-	}
-	var sum int64
-	for stream.Receive() {
-		sum += stream.Msg().GetNumber()
-	}
-	if stream.Err() != nil {
-		return nil, stream.Err()
-	}
-	response := connect.NewResponse(&pingv1.SumResponse{Sum: sum})
-	response.Header().Set(handlerHeader, headerValue)
-	response.Trailer().Set(handlerTrailer, trailerValue)
-	return response, nil
+	return handleSum(stream, p.checkMetadata)
 }
 
 func (p pingServer) CountUp(
@@ -2922,32 +2901,7 @@ func (p pingServer) CumSum(
 	ctx context.Context,
 	stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse],
 ) error {
-	var sum int64
-	if p.checkMetadata {
-		if err := expectMetadata(stream.RequestHeader(), "header", clientHeader, headerValue); err != nil {
-			return err
-		}
-	}
-	if stream.Peer().Addr == "" {
-		return connect.NewError(connect.CodeInternal, errors.New("no peer address"))
-	}
-	if stream.Peer().Protocol == "" {
-		return connect.NewError(connect.CodeInternal, errors.New("no peer address"))
-	}
-	stream.ResponseHeader().Set(handlerHeader, headerValue)
-	stream.ResponseTrailer().Set(handlerTrailer, trailerValue)
-	for {
-		msg, err := stream.Receive()
-		if errors.Is(err, io.EOF) {
-			return nil
-		} else if err != nil {
-			return err
-		}
-		sum += msg.GetNumber()
-		if err := stream.Send(&pingv1.CumSumResponse{Sum: sum}); err != nil {
-			return err
-		}
-	}
+	return handleCumSum(stream, p.checkMetadata)
 }
 
 func expectClientHeaderInCallInfo(check bool, callInfo connect.CallInfo) error {
@@ -2987,6 +2941,77 @@ func (p pingServerSimple) Ping(
 	callInfo.ResponseHeader().Set(handlerHeader, headerValue)
 	callInfo.ResponseTrailer().Set(handlerTrailer, trailerValue)
 	return response, nil
+}
+
+func handleSum(
+	stream *connect.ClientStream[pingv1.SumRequest],
+	checkMetadata bool,
+) (*connect.Response[pingv1.SumResponse], error) {
+	if checkMetadata {
+		if err := expectMetadata(stream.RequestHeader(), "header", clientHeader, headerValue); err != nil {
+			return nil, err
+		}
+	}
+	if stream.Peer().Addr == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
+	}
+	if stream.Peer().Protocol == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer protocol"))
+	}
+	var sum int64
+	for stream.Receive() {
+		sum += stream.Msg().GetNumber()
+	}
+	if stream.Err() != nil {
+		return nil, stream.Err()
+	}
+	response := connect.NewResponse(&pingv1.SumResponse{Sum: sum})
+	response.Header().Set(handlerHeader, headerValue)
+	response.Trailer().Set(handlerTrailer, trailerValue)
+	return response, nil
+}
+
+func (p pingServerSimple) Sum(
+	ctx context.Context,
+	stream *connect.ClientStream[pingv1.SumRequest],
+) (*connect.Response[pingv1.SumResponse], error) {
+	return handleSum(stream, p.checkMetadata)
+}
+
+func handleCumSum(stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse], checkMetadata bool) error {
+	var sum int64
+	if checkMetadata {
+		if err := expectMetadata(stream.RequestHeader(), "header", clientHeader, headerValue); err != nil {
+			return err
+		}
+	}
+	if stream.Peer().Addr == "" {
+		return connect.NewError(connect.CodeInternal, errors.New("no peer address"))
+	}
+	if stream.Peer().Protocol == "" {
+		return connect.NewError(connect.CodeInternal, errors.New("no peer address"))
+	}
+	stream.ResponseHeader().Set(handlerHeader, headerValue)
+	stream.ResponseTrailer().Set(handlerTrailer, trailerValue)
+	for {
+		msg, err := stream.Receive()
+		if errors.Is(err, io.EOF) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		sum += msg.GetNumber()
+		if err := stream.Send(&pingv1.CumSumResponse{Sum: sum}); err != nil {
+			return err
+		}
+	}
+}
+
+func (p pingServerSimple) CumSum(
+	ctx context.Context,
+	stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse],
+) error {
+	return handleCumSum(stream, p.checkMetadata)
 }
 
 type deflateReader struct {

@@ -137,21 +137,25 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 // This option eliminates the [Request] and [Response] wrappers, and instead uses the
 // context.Context to propagate information such as headers.
 func (c *Client[Req, Res]) CallUnarySimple(ctx context.Context, requestMsg *Req) (*Res, error) {
+	ctx, ctxCallInfo := NewOutgoingContext(ctx)
 	req := requestFromContext(ctx, requestMsg)
+
 	response, err := c.CallUnary(ctx, req)
+
+	// Here we set anything that's set on the request after its made (peer, method, spec)
+	info, ok := ctxCallInfo.(*callInfo)
+	if ok {
+		info.peer = req.Peer()
+		info.spec = req.Spec()
+		info.method = req.HTTPMethod()
+	}
+
 	if err != nil {
 		return nil, err
 	}
-	// ci, _ := CallInfoFromContext(ctx)
-	ci, _ := ctx.Value(callInfoContextKey{}).(*callInfo)
 
-	// Here we set anything that's set on the request after its made (peer, method, spec)
-	// But we need to set these things in a way that others can't (like creating another struct or something)
-	ci.peer = req.Peer()
-	ci.spec = req.Spec()
-	ci.SetHTTPMethod(req.HTTPMethod())
-	maps.Copy(ci.ResponseHeader(), response.Header())
-	maps.Copy(ci.ResponseTrailer(), response.Trailer())
+	maps.Copy(info.ResponseHeader(), response.Header())
+	maps.Copy(info.ResponseTrailer(), response.Trailer())
 
 	return response.Msg, err
 }
