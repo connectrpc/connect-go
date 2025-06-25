@@ -9,7 +9,7 @@ plugins:
     out: internal/gen
     opt: paths=source_relative
   - local: protoc-gen-connect-go
-    out: internal/gen/wrapped
+    out: internal/gen
     opt: paths=source_relative
   - local: protoc-gen-connect-go
     out: internal/gen/simple

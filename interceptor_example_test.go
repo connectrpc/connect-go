@@ -57,39 +57,6 @@ func ExampleUnaryInterceptorFunc() {
 	// response: number:42
 }
 
-// func ExampleUnaryInterceptorFuncSimple() {
-// 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
-// 	loggingInterceptor := connect.UnaryInterceptorFunc(
-// 		func(next connect.UnaryFunc) connect.UnaryFunc {
-// 			return connect.UnaryFunc(func(ctx context.Context, request connect.AnyRequest) (connect.AnyResponse, error) {
-// 				logger.Println("calling:", request.Spec().Procedure)
-// 				logger.Println("request:", request.Any())
-// 				response, err := next(ctx, request)
-// 				if err != nil {
-// 					logger.Println("error:", err)
-// 				} else {
-// 					logger.Println("response:", response.Any())
-// 				}
-// 				return response, err
-// 			})
-// 		},
-// 	)
-// 	client := pingv1connectsimple.NewPingServiceClient(
-// 		examplePingServerSimple.Client(),
-// 		examplePingServerSimple.URL(),
-// 		connect.WithInterceptors(loggingInterceptor),
-// 	)
-// 	if _, err := client.Ping(context.Background(), &pingv1.PingRequest{Number: 42}); err != nil {
-// 		logger.Println("error:", err)
-// 		return
-// 	}
-
-// 	// Output:
-// 	// calling: /connect.ping.v1.PingService/Ping
-// 	// request: number:42
-// 	// response: number:42
-// }
-
 func ExampleWithInterceptors() {
 	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
 	outer := connect.UnaryInterceptorFunc(

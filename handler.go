@@ -98,15 +98,16 @@ func NewUnaryHandlerSimple[Req, Res any](
 	return NewUnaryHandler(
 		procedure,
 		func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
-			call := &callInfo{
-				requestHeader:   request.Header(),
-				peer:            request.Peer(),
-				method:          request.HTTPMethod(),
-				responseHeader:  make(http.Header),
-				responseTrailer: make(http.Header),
+			ctx, ci := NewOutgoingContext(ctx)
+			call, ok := ci.(*callInfo)
+			if ok {
+				call.peer = request.Peer()
+				call.spec = request.Spec()
+				call.method = request.HTTPMethod()
+				call.requestHeader = request.Header()
+				call.responseHeader = make(http.Header)
+				call.responseTrailer = make(http.Header)
 			}
-
-			ctx = WithCallInfo(ctx, call)
 
 			responseMsg, err := unary(ctx, request.Msg)
 

@@ -115,10 +115,6 @@ func NewOutgoingContext(ctx context.Context) (context.Context, CallInfo) {
 	return ctx, info
 }
 
-func WithCallInfo(ctx context.Context, callInfo CallInfo) context.Context {
-	return context.WithValue(ctx, callInfoContextKey{}, callInfo)
-}
-
 func CallInfoFromContext(ctx context.Context) (CallInfo, bool) {
 	value, ok := ctx.Value(callInfoContextKey{}).(CallInfo)
 	return value, ok
