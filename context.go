@@ -102,6 +102,16 @@ func (c *callInfo) internalOnly() {}
 
 type callInfoContextKey struct{}
 
+// Create a new request context for use from a client. When the returned
+// context is passed to RPCs, the returned call info can be used to set
+// request metadata before the RPC is invoked and to inspect response
+// metadata after the RPC completes.
+//
+// The returned context may be re-used across RPCs as long as they are
+// not concurrent. Results of all CallInfo methods other than
+// RequestHeader() are undefined if the context is used with concurrent RPCs.
+// If the given context is already associated with an outgoing CallInfo, then
+// ctx and the existing CallInfo are returned.
 func NewOutgoingContext(ctx context.Context) (context.Context, CallInfo) {
 	info, ok := ctx.Value(callInfoContextKey{}).(CallInfo)
 	if !ok {
@@ -111,13 +121,14 @@ func NewOutgoingContext(ctx context.Context) (context.Context, CallInfo) {
 	return ctx, info
 }
 
+// CallInfoFromContext returns the CallInfo for the given context, if there is one.
 func CallInfoFromContext(ctx context.Context) (CallInfo, bool) {
 	value, ok := ctx.Value(callInfoContextKey{}).(CallInfo)
 	return value, ok
 }
 
 func requestFromContext[T any](ctx context.Context, message *T) *Request[T] {
-	request := NewRequest[T](message)
+	request := NewRequest(message)
 	callInfo, ok := CallInfoFromContext(ctx)
 	if ok {
 		request.setHeader(callInfo.RequestHeader())
