@@ -21,7 +21,7 @@ import (
 	"os"
 
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	pingv1connect "connectrpc.com/connect/internal/gen/wrapped/connect/ping/v1/pingv1connect"
+	pingv1connect "connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
 
 func Example_client() {
