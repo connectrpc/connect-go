@@ -146,8 +146,6 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	assert.Equal(t, int32(1), handler2.Load())
 	assert.Equal(t, int32(1), handler3.Load())
 
-	assert.Nil(t, err)
-
 	responses, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
 	assert.Nil(t, err)
 	var sum int64

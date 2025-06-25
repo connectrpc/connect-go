@@ -35,6 +35,7 @@ type CallInfo interface {
 	// if the request was never actually sent to the server (and thus no
 	// determination ever made about the HTTP method).
 	HTTPMethod() string
+	SetHTTPMethod(s string)
 	// RequestHeader returns the HTTP headers for this request. Headers beginning with
 	// "Connect-" and "Grpc-" are reserved for use by the Connect and gRPC
 	// protocols: applications may read them but shouldn't write them.
@@ -97,6 +98,10 @@ func (c *callInfo) HTTPMethod() string {
 	return c.method
 }
 
+func (c *callInfo) SetHTTPMethod(method string) {
+	c.method = method
+}
+
 // internalOnly implements CallInfo.
 func (c *callInfo) internalOnly() {}
 
@@ -106,8 +111,9 @@ func NewOutgoingContext(ctx context.Context) (context.Context, CallInfo) {
 	info, ok := ctx.Value(callInfoContextKey{}).(CallInfo)
 	if !ok {
 		info = &callInfo{}
+		return context.WithValue(ctx, callInfoContextKey{}, info), info
 	}
-	return context.WithValue(ctx, callInfoContextKey{}, info), info
+	return ctx, info
 }
 
 func WithCallInfo(ctx context.Context, callInfo CallInfo) context.Context {
