@@ -128,7 +128,6 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 		),
 	)
 	server := memhttptest.NewServer(t, mux)
-
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL(),

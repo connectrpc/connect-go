@@ -97,10 +97,6 @@ func (c *callInfo) HTTPMethod() string {
 	return c.method
 }
 
-func (c *callInfo) SetHTTPMethod(method string) {
-	c.method = method
-}
-
 // internalOnly implements CallInfo.
 func (c *callInfo) internalOnly() {}
 

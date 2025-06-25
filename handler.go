@@ -105,8 +105,6 @@ func NewUnaryHandlerSimple[Req, Res any](
 				call.spec = request.Spec()
 				call.method = request.HTTPMethod()
 				call.requestHeader = request.Header()
-				call.responseHeader = make(http.Header)
-				call.responseTrailer = make(http.Header)
 			}
 
 			responseMsg, err := unary(ctx, request.Msg)
