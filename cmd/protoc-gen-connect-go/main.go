@@ -56,13 +56,14 @@
 //
 // This will generate output to:
 //
-//	 gen/path/to/file.pb.go
-//	 gen/path/to/file.connect.go
+// gen/path/to/file.pb.go
+// gen/path/to/file.connect.go
 //
 //   - api: By default, generated code will wrap request and response types with a
 //     connect.Request and connect.Response type respectively. To generate and use
 //     just the raw request and response types, set this flag to 'simple'. Note that
 //     by doing so, metadata such as headers and trailers will be managed via context.Context.
+//
 // For example:
 //
 //	version: v2
@@ -72,7 +73,6 @@
 //	  - local: protoc-gen-connect-go
 //	    out: gen
 //	    opt: api=simple
-//
 //
 // [buf]: https://buf.build
 package main
