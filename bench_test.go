@@ -82,7 +82,7 @@ func BenchmarkConnect(b *testing.B) {
 				b.RunParallel(func(pb *testing.PB) {
 					for pb.Next() {
 						if _, err := client.Ping(
-							ctx, &pingv1.PingRequest{Text: twoMiB},
+							ctx, connect.NewRequest(&pingv1.PingRequest{Text: twoMiB}),
 						); err != nil {
 							b.Error(err)
 						}
@@ -94,11 +94,11 @@ func BenchmarkConnect(b *testing.B) {
 				b.RunParallel(func(pb *testing.PB) {
 					for pb.Next() {
 						response, err := client.Ping(
-							ctx, &pingv1.PingRequest{Number: 42},
+							ctx, connect.NewRequest(&pingv1.PingRequest{Number: 42}),
 						)
 						if err != nil {
 							b.Error(err)
-						} else if num := response.GetNumber(); num != 42 {
+						} else if num := response.Msg.GetNumber(); num != 42 {
 							b.Errorf("expected 42, got %d", num)
 						}
 					}
@@ -134,7 +134,7 @@ func BenchmarkConnect(b *testing.B) {
 						const (
 							upTo = 1
 						)
-						request := &pingv1.CountUpRequest{Number: upTo}
+						request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
 						stream, err := client.CountUp(ctx, request)
 						if err != nil {
 							b.Error(err)

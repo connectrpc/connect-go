@@ -146,10 +146,6 @@ func main() {
 	}.Run(
 		func(plugin *protogen.Plugin) error {
 			plugin.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL) | uint64(pluginpb.CodeGeneratorResponse_FEATURE_SUPPORTS_EDITIONS)
-			simple, err := getSimpleBool(*simpleString)
-			if err != nil {
-				return err
-			}
 			plugin.SupportedEditionsMinimum = descriptorpb.Edition_EDITION_PROTO2
 			plugin.SupportedEditionsMaximum = descriptorpb.Edition_EDITION_2023
 			for _, file := range plugin.Files {
@@ -751,18 +747,5 @@ func newNames(service *protogen.Service) names {
 		Server:              fmt.Sprintf("%sHandler", base),
 		ServerConstructor:   fmt.Sprintf("New%sHandler", base),
 		UnimplementedServer: fmt.Sprintf("Unimplemented%sHandler", base),
-	}
-}
-
-// "simple" is a bool, but we want to support just setting "simple" without needing to set "simple=true"
-// We do this via making the flag a string, and then parsing manually here.
-func getSimpleBool(simpleString string) (bool, error) {
-	switch simpleString {
-	case "", "true":
-		return true, nil
-	case "false":
-		return false, nil
-	default:
-		return false, fmt.Errorf(`unknown value for option "simple" (must be one of "", "true", "false"): %q`, simpleString)
 	}
 }
