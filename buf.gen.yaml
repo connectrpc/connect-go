@@ -12,7 +12,7 @@ plugins:
     out: internal/gen/generics
     opt: paths=source_relative
   - local: protoc-gen-connect-go
-    out: internal/gen/simple
+    out: internal/gen
     opt:
       - paths=source_relative
       - simple

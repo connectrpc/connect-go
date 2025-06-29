@@ -53,7 +53,7 @@ on [connectrpc.com][docs] (especially the [Getting Started] guide for Go), the
 
 Curious what all this looks like in practice? From a [Protobuf
 schema](internal/proto/connect/ping/v1/ping.proto), we generate [a small RPC
-package](internal/gen/simple/connect/ping/v1/pingv1connect/ping.connect.go). Using that
+package](internal/gen/connect/ping/v1/pingv1connect/ping.connect.go). Using that
 package, we can build a server:
 
 ```go
@@ -66,7 +66,7 @@ import (
 
   "connectrpc.com/connect"
   pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-  "connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
+  "connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
   "golang.org/x/net/http2"
   "golang.org/x/net/http2/h2c"
 )
@@ -109,7 +109,7 @@ import (
 
   "connectrpc.com/connect"
   pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-  "connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
+  "connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
 
 func main() {
