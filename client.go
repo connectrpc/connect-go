@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -136,11 +137,27 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 // This option eliminates the [Request] and [Response] wrappers, and instead uses the
 // context.Context to propagate information such as headers.
 func (c *Client[Req, Res]) CallUnarySimple(ctx context.Context, requestMsg *Req) (*Res, error) {
-	response, err := c.CallUnary(ctx, requestFromContext(ctx, requestMsg))
-	if response != nil {
-		return response.Msg, err
+	ctx, ctxCallInfo := NewOutgoingContext(ctx)
+	req := requestFromContext(ctx, requestMsg)
+
+	response, err := c.CallUnary(ctx, req)
+
+	// Here we set anything that's set on the request after its made (peer, method, spec)
+	info, ok := ctxCallInfo.(*callInfo)
+	if ok {
+		info.peer = req.Peer()
+		info.spec = req.Spec()
+		info.method = req.HTTPMethod()
 	}
-	return nil, err
+
+	if err != nil {
+		return nil, err
+	}
+
+	maps.Copy(info.ResponseHeader(), response.Header())
+	maps.Copy(info.ResponseTrailer(), response.Trailer())
+
+	return response.Msg, err
 }
 
 // CallClientStream calls a client streaming procedure.
@@ -188,7 +205,34 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 // This option eliminates the [Request] wrapper, and instead uses the context.Context to
 // propagate information such as headers.
 func (c *Client[Req, Res]) CallServerStreamSimple(ctx context.Context, requestMsg *Req) (*ServerStreamForClient[Res], error) {
-	return c.CallServerStream(ctx, requestFromContext(ctx, requestMsg))
+	if c.err != nil {
+		return nil, c.err
+	}
+	ctx, ctxCallInfo := NewOutgoingContext(ctx)
+	// Note we don't need to check ok here because it should always be in context
+	// because of the above call to NewOutgoingContext
+	info, _ := ctxCallInfo.(*callInfo)
+	conn := c.newConn(ctx, StreamTypeServer, func(r *http.Request) {
+		info.method = r.Method
+	})
+	info.peer = conn.Peer()
+	info.spec = conn.Spec()
+	mergeHeaders(conn.RequestHeader(), info.requestHeader)
+	// Send always returns an io.EOF unless the error is from the client-side.
+	// We want the user to continue to call Receive in those cases to get the
+	// full error from the server-side.
+	if err := conn.Send(requestMsg); err != nil && !errors.Is(err, io.EOF) {
+		_ = conn.CloseRequest()
+		_ = conn.CloseResponse()
+		return nil, err
+	}
+	if err := conn.CloseRequest(); err != nil {
+		return nil, err
+	}
+	return &ServerStreamForClient[Res]{
+		conn:        conn,
+		initializer: c.config.Initializer,
+	}, nil
 }
 
 // CallBidiStream calls a bidirectional streaming procedure.

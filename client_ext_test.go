@@ -34,7 +34,9 @@ import (
 	"connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
+	pingv1connectgenerics "connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/memhttp"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
@@ -45,12 +47,12 @@ import (
 
 func TestNewClient_InitFailure(t *testing.T) {
 	t.Parallel()
-	client := pingv1connect.NewPingServiceClient(
-		http.DefaultClient,
-		"http://127.0.0.1:8080",
+
+	baseURL := "http://127.0.0.1:8080"
+	opts := []connect.ClientOption{
 		// This triggers an error during initialization, so each call will short circuit returning an error.
 		connect.WithSendCompression("invalid"),
-	)
+	}
 	validateExpectedError := func(t *testing.T, err error) {
 		t.Helper()
 		assert.NotNil(t, err)
@@ -58,87 +60,147 @@ func TestNewClient_InitFailure(t *testing.T) {
 		assert.True(t, errors.As(err, &connectErr))
 		assert.Equal(t, connectErr.Message(), `unknown compression "invalid"`)
 	}
-
-	t.Run("unary", func(t *testing.T) {
+	t.Run("generics_api", func(t *testing.T) {
 		t.Parallel()
-		_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
-		validateExpectedError(t, err)
+		client := pingv1connectgenerics.NewPingServiceClient(
+			http.DefaultClient,
+			baseURL,
+			opts...,
+		)
+		t.Run("unary", func(t *testing.T) {
+			t.Parallel()
+			_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
+			validateExpectedError(t, err)
+		})
+		t.Run("server_stream", func(t *testing.T) {
+			t.Parallel()
+			_, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 3}))
+			validateExpectedError(t, err)
+		})
+		t.Run("client_stream", func(t *testing.T) {
+			t.Parallel()
+			clientStream := client.Sum(context.Background())
+			err := clientStream.Send(&pingv1.SumRequest{})
+			validateExpectedError(t, err)
+		})
+		t.Run("bidi", func(t *testing.T) {
+			t.Parallel()
+			bidiStream := client.CumSum(context.Background())
+			err := bidiStream.Send(&pingv1.CumSumRequest{})
+			validateExpectedError(t, err)
+		})
 	})
 
-	t.Run("bidi", func(t *testing.T) {
+	t.Run("simple_api", func(t *testing.T) {
 		t.Parallel()
-		bidiStream := client.CumSum(context.Background())
-		err := bidiStream.Send(&pingv1.CumSumRequest{})
-		validateExpectedError(t, err)
-	})
+		client := pingv1connect.NewPingServiceClient(
+			http.DefaultClient,
+			baseURL,
+			opts...,
+		)
+		t.Run("unary", func(t *testing.T) {
+			t.Parallel()
+			_, err := client.Ping(context.Background(), &pingv1.PingRequest{})
+			validateExpectedError(t, err)
+		})
 
-	t.Run("client_stream", func(t *testing.T) {
-		t.Parallel()
-		clientStream := client.Sum(context.Background())
-		err := clientStream.Send(&pingv1.SumRequest{})
-		validateExpectedError(t, err)
-	})
-
-	t.Run("server_stream", func(t *testing.T) {
-		t.Parallel()
-		_, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 3}))
-		validateExpectedError(t, err)
+		t.Run("server_stream", func(t *testing.T) {
+			t.Parallel()
+			_, err := client.CountUp(context.Background(), &pingv1.CountUpRequest{Number: 3})
+			validateExpectedError(t, err)
+		})
 	})
 }
 
 func TestClientPeer(t *testing.T) {
 	t.Parallel()
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
-	server := memhttptest.NewServer(t, mux)
 
 	run := func(t *testing.T, unaryHTTPMethod string, opts ...connect.ClientOption) {
 		t.Helper()
-		client := pingv1connect.NewPingServiceClient(
-			server.Client(),
-			server.URL(),
-			connect.WithClientOptions(opts...),
-			connect.WithInterceptors(&assertPeerInterceptor{t}),
-		)
 		ctx := context.Background()
-		t.Run("unary", func(t *testing.T) {
-			unaryReq := connect.NewRequest[pingv1.PingRequest](nil)
-			_, err := client.Ping(ctx, unaryReq)
-			assert.Nil(t, err)
-			assert.Equal(t, unaryHTTPMethod, unaryReq.HTTPMethod())
-			text := strings.Repeat(".", 256)
-			r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
-			assert.Nil(t, err)
-			assert.Equal(t, r.Msg.GetText(), text)
-		})
-		t.Run("client_stream", func(t *testing.T) {
-			clientStream := client.Sum(ctx)
-			t.Cleanup(func() {
-				_, closeErr := clientStream.CloseAndReceive()
-				assert.Nil(t, closeErr)
+		t.Run("generics_api", func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServerGenerics{}))
+			server := memhttptest.NewServer(t, mux)
+
+			client := pingv1connectgenerics.NewPingServiceClient(
+				server.Client(),
+				server.URL(),
+				connect.WithClientOptions(opts...),
+				connect.WithInterceptors(&assertPeerInterceptor{t}),
+			)
+			t.Run("unary", func(t *testing.T) {
+				unaryReq := connect.NewRequest[pingv1.PingRequest](nil)
+				_, err := client.Ping(ctx, unaryReq)
+				assert.Nil(t, err)
+				assert.Equal(t, unaryHTTPMethod, unaryReq.HTTPMethod())
+				assert.Equal(t, unaryReq.Spec().Procedure, pingv1connect.PingServicePingProcedure)
+				assert.Equal(t, unaryReq.Peer().Addr, httptest.DefaultRemoteAddr)
+				text := strings.Repeat(".", 256)
+				r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
+				assert.Nil(t, err)
+				assert.Equal(t, r.Msg.GetText(), text)
 			})
-			assert.NotZero(t, clientStream.Peer().Addr)
-			assert.NotZero(t, clientStream.Peer().Protocol)
-			err := clientStream.Send(&pingv1.SumRequest{})
-			assert.Nil(t, err)
-		})
-		t.Run("server_stream", func(t *testing.T) {
-			serverStream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{}))
-			t.Cleanup(func() {
-				assert.Nil(t, serverStream.Close())
+			t.Run("client_stream", func(t *testing.T) {
+				clientStream := client.Sum(ctx)
+				t.Cleanup(func() {
+					_, closeErr := clientStream.CloseAndReceive()
+					assert.Nil(t, closeErr)
+				})
+				assert.NotZero(t, clientStream.Peer().Addr)
+				assert.NotZero(t, clientStream.Peer().Protocol)
+				err := clientStream.Send(&pingv1.SumRequest{})
+				assert.Nil(t, err)
 			})
-			assert.Nil(t, err)
-		})
-		t.Run("bidi_stream", func(t *testing.T) {
-			bidiStream := client.CumSum(ctx)
-			t.Cleanup(func() {
-				assert.Nil(t, bidiStream.CloseRequest())
-				assert.Nil(t, bidiStream.CloseResponse())
+			t.Run("server_stream", func(t *testing.T) {
+				serverStream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{}))
+				t.Cleanup(func() {
+					assert.Nil(t, serverStream.Close())
+				})
+				assert.Nil(t, err)
 			})
-			assert.NotZero(t, bidiStream.Peer().Addr)
-			assert.NotZero(t, bidiStream.Peer().Protocol)
-			err := bidiStream.Send(&pingv1.CumSumRequest{})
-			assert.Nil(t, err)
+			t.Run("bidi_stream", func(t *testing.T) {
+				bidiStream := client.CumSum(ctx)
+				t.Cleanup(func() {
+					assert.Nil(t, bidiStream.CloseRequest())
+					assert.Nil(t, bidiStream.CloseResponse())
+				})
+				assert.NotZero(t, bidiStream.Peer().Addr)
+				assert.NotZero(t, bidiStream.Peer().Protocol)
+				err := bidiStream.Send(&pingv1.CumSumRequest{})
+				assert.Nil(t, err)
+			})
+		})
+		t.Run("simple_api", func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+			server := memhttptest.NewServer(t, mux)
+
+			client := pingv1connect.NewPingServiceClient(
+				server.Client(),
+				server.URL(),
+				connect.WithClientOptions(opts...),
+				connect.WithInterceptors(&assertPeerInterceptor{t}),
+			)
+			t.Run("unary", func(t *testing.T) {
+				ctx, callInfo := connect.NewOutgoingContext(ctx)
+				_, err := client.Ping(ctx, &pingv1.PingRequest{})
+				assert.Nil(t, err)
+				assert.Equal(t, callInfo.HTTPMethod(), unaryHTTPMethod)
+				assert.Equal(t, callInfo.Spec().Procedure, pingv1connect.PingServicePingProcedure)
+				assert.Equal(t, callInfo.Peer().Addr, httptest.DefaultRemoteAddr)
+				text := strings.Repeat(".", 256)
+				r, err := client.Ping(ctx, &pingv1.PingRequest{Text: text})
+				assert.Nil(t, err)
+				assert.Equal(t, r.GetText(), text)
+			})
+			t.Run("server_stream", func(t *testing.T) {
+				serverStream, err := client.CountUp(ctx, &pingv1.CountUpRequest{})
+				t.Cleanup(func() {
+					assert.Nil(t, serverStream.Close())
+				})
+				assert.Nil(t, err)
+			})
 		})
 	}
 
@@ -171,65 +233,137 @@ func TestGetNotModified(t *testing.T) {
 	// part of the RPC protocol.
 	expectVary := []string{"Accept-Encoding"}
 
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(&notModifiedPingServer{etag: etag}))
-	server := memhttptest.NewServer(t, mux)
-	client := pingv1connect.NewPingServiceClient(
-		server.Client(),
-		server.URL(),
-		connect.WithHTTPGet(),
-	)
-	ctx := context.Background()
-	// unconditional request
-	unaryReq := connect.NewRequest(&pingv1.PingRequest{})
-	res, err := client.Ping(ctx, unaryReq)
-	assert.Nil(t, err)
-	assert.Equal(t, res.Header().Get("Etag"), etag)
-	assert.Equal(t, res.Header().Values("Vary"), expectVary)
-	assert.Equal(t, http.MethodGet, unaryReq.HTTPMethod())
+	validateExpectedError := func(t *testing.T, err error) {
+		t.Helper()
+		assert.NotNil(t, err)
+		assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+		assert.True(t, connect.IsNotModifiedError(err))
+		var connectErr *connect.Error
+		assert.True(t, errors.As(err, &connectErr))
+		assert.Equal(t, connectErr.Meta().Get("Etag"), etag)
+		assert.Equal(t, connectErr.Meta().Values("Vary"), expectVary)
+	}
 
-	unaryReq = connect.NewRequest(&pingv1.PingRequest{})
-	unaryReq.Header().Set("If-None-Match", etag)
-	_, err = client.Ping(ctx, unaryReq)
-	assert.NotNil(t, err)
-	assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
-	assert.True(t, connect.IsNotModifiedError(err))
-	var connectErr *connect.Error
-	assert.True(t, errors.As(err, &connectErr))
-	assert.Equal(t, connectErr.Meta().Get("Etag"), etag)
-	assert.Equal(t, connectErr.Meta().Values("Vary"), expectVary)
-	assert.Equal(t, http.MethodGet, unaryReq.HTTPMethod())
+	t.Run("generics_api", func(t *testing.T) {
+		t.Parallel()
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connectgenerics.NewPingServiceHandler(&notModifiedPingServerGenerics{etag: etag}))
+		server := memhttptest.NewServer(t, mux)
+		client := pingv1connectgenerics.NewPingServiceClient(
+			server.Client(),
+			server.URL(),
+			connect.WithHTTPGet(),
+		)
+
+		ctx := context.Background()
+		// unconditional request
+		unaryReq := connect.NewRequest(&pingv1.PingRequest{})
+		res, err := client.Ping(ctx, unaryReq)
+		assert.Nil(t, err)
+		assert.Equal(t, res.Header().Get("Etag"), etag)
+		assert.Equal(t, res.Header().Values("Vary"), expectVary)
+		assert.Equal(t, unaryReq.Spec().Procedure, pingv1connect.PingServicePingProcedure)
+		assert.Equal(t, http.MethodGet, unaryReq.HTTPMethod())
+
+		unaryReq = connect.NewRequest(&pingv1.PingRequest{})
+		unaryReq.Header().Set("If-None-Match", etag)
+
+		_, err = client.Ping(ctx, unaryReq)
+		validateExpectedError(t, err)
+		assert.Equal(t, http.MethodGet, unaryReq.HTTPMethod())
+		assert.Equal(t, unaryReq.Spec().Procedure, pingv1connect.PingServicePingProcedure)
+	})
+
+	t.Run("simple_api", func(t *testing.T) {
+		t.Parallel()
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connect.NewPingServiceHandler(&notModifiedPingServer{etag: etag}))
+		server := memhttptest.NewServer(t, mux)
+		client := pingv1connect.NewPingServiceClient(
+			server.Client(),
+			server.URL(),
+			connect.WithHTTPGet(),
+		)
+
+		ctx, callInfo := connect.NewOutgoingContext(context.Background())
+		// unconditional request
+		_, err := client.Ping(ctx, &pingv1.PingRequest{})
+		assert.Nil(t, err)
+		assert.Equal(t, callInfo.ResponseHeader().Get("Etag"), etag)
+		assert.Equal(t, callInfo.ResponseHeader().Values("Vary"), expectVary)
+		assert.Equal(t, callInfo.HTTPMethod(), http.MethodGet)
+		assert.Equal(t, callInfo.Spec().Procedure, pingv1connect.PingServicePingProcedure)
+
+		ctx, callInfo = connect.NewOutgoingContext(context.Background())
+		callInfo.RequestHeader().Set("If-None-Match", etag)
+
+		_, err = client.Ping(ctx, &pingv1.PingRequest{})
+		validateExpectedError(t, err)
+		assert.Equal(t, callInfo.HTTPMethod(), http.MethodGet)
+		assert.Equal(t, callInfo.Spec().Procedure, pingv1connect.PingServicePingProcedure)
+	})
 }
 
 func TestGetNoContentHeaders(t *testing.T) {
 	t.Parallel()
 
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(&pingServer{}))
-	server := memhttptest.NewServer(t, http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
-		if len(req.Header.Values("content-type")) > 0 ||
-			len(req.Header.Values("content-encoding")) > 0 ||
-			len(req.Header.Values("content-length")) > 0 {
-			http.Error(respWriter, "GET request should not include content headers", http.StatusBadRequest)
-		}
-		mux.ServeHTTP(respWriter, req)
-	}))
-	client := pingv1connect.NewPingServiceClient(
-		server.Client(),
-		server.URL(),
-		connect.WithHTTPGet(),
-	)
-	ctx := context.Background()
+	newServer := func(mux *http.ServeMux) *memhttp.Server {
+		return memhttptest.NewServer(t, http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
+			if len(req.Header.Values("content-type")) > 0 ||
+				len(req.Header.Values("content-encoding")) > 0 ||
+				len(req.Header.Values("content-length")) > 0 {
+				http.Error(respWriter, "GET request should not include content headers", http.StatusBadRequest)
+			}
+			mux.ServeHTTP(respWriter, req)
+		}))
+	}
 
-	unaryReq := connect.NewRequest(&pingv1.PingRequest{})
-	_, err := client.Ping(ctx, unaryReq)
-	assert.Nil(t, err)
-	assert.Equal(t, http.MethodGet, unaryReq.HTTPMethod())
+	t.Run("generics_api", func(t *testing.T) {
+		t.Parallel()
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connectgenerics.NewPingServiceHandler(&pingServerGenerics{}))
+		server := newServer(mux)
+		client := pingv1connectgenerics.NewPingServiceClient(
+			server.Client(),
+			server.URL(),
+			connect.WithHTTPGet(),
+		)
+		ctx := context.Background()
+
+		unaryReq := connect.NewRequest(&pingv1.PingRequest{})
+		_, err := client.Ping(ctx, unaryReq)
+		assert.Nil(t, err)
+		assert.Equal(t, http.MethodGet, unaryReq.HTTPMethod())
+		assert.Equal(t, unaryReq.Spec().Procedure, pingv1connect.PingServicePingProcedure)
+	})
+
+	t.Run("simple_api", func(t *testing.T) {
+		t.Parallel()
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connect.NewPingServiceHandler(&pingServer{}))
+		server := newServer(mux)
+		client := pingv1connect.NewPingServiceClient(
+			server.Client(),
+			server.URL(),
+			connect.WithHTTPGet(),
+		)
+		ctx, callInfo := connect.NewOutgoingContext(context.Background())
+
+		_, err := client.Ping(ctx, &pingv1.PingRequest{})
+		assert.Nil(t, err)
+		assert.Equal(t, callInfo.HTTPMethod(), http.MethodGet)
+		assert.Equal(t, callInfo.Spec().Procedure, pingv1connect.PingServicePingProcedure)
+	})
 }
 
 func TestConnectionDropped(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
+
+	httpClient := httpClientFunc(func(_ *http.Request) (*http.Response, error) {
+		return nil, io.EOF
+	})
+
 	for _, protocol := range []string{connect.ProtocolConnect, connect.ProtocolGRPC, connect.ProtocolGRPCWeb} {
 		var opts []connect.ClientOption
 		switch protocol {
@@ -240,40 +374,73 @@ func TestConnectionDropped(t *testing.T) {
 		}
 		t.Run(protocol, func(t *testing.T) {
 			t.Parallel()
-			httpClient := httpClientFunc(func(_ *http.Request) (*http.Response, error) {
-				return nil, io.EOF
-			})
-			client := pingv1connect.NewPingServiceClient(
-				httpClient,
-				"http://1.2.3.4",
-				opts...,
-			)
-			t.Run("unary", func(t *testing.T) {
+			t.Run("generics_api", func(t *testing.T) {
 				t.Parallel()
-				req := connect.NewRequest[pingv1.PingRequest](nil)
-				_, err := client.Ping(ctx, req)
-				assert.NotNil(t, err)
-				if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
-					t.Logf("err = %v\n%#v", err, err)
-				}
-			})
-			t.Run("stream", func(t *testing.T) {
-				t.Parallel()
-				req := connect.NewRequest[pingv1.CountUpRequest](nil)
-				svrStream, err := client.CountUp(ctx, req)
-				if err == nil {
-					t.Cleanup(func() {
-						assert.Nil(t, svrStream.Close())
-					})
-					if !assert.False(t, svrStream.Receive()) {
-						return
+				client := pingv1connectgenerics.NewPingServiceClient(
+					httpClient,
+					"http://"+httptest.DefaultRemoteAddr,
+					opts...,
+				)
+				t.Run("unary", func(t *testing.T) {
+					t.Parallel()
+					req := connect.NewRequest[pingv1.PingRequest](nil)
+					_, err := client.Ping(ctx, req)
+					assert.NotNil(t, err)
+					if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
+						t.Logf("err = %v\n%#v", err, err)
 					}
-					err = svrStream.Err()
-				}
-				assert.NotNil(t, err)
-				if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
-					t.Logf("err = %v\n%#v", err, err)
-				}
+				})
+				t.Run("server_stream", func(t *testing.T) {
+					t.Parallel()
+					req := connect.NewRequest[pingv1.CountUpRequest](nil)
+					svrStream, err := client.CountUp(ctx, req)
+					if err == nil {
+						t.Cleanup(func() {
+							assert.Nil(t, svrStream.Close())
+						})
+						if !assert.False(t, svrStream.Receive()) {
+							return
+						}
+						err = svrStream.Err()
+					}
+					assert.NotNil(t, err)
+					if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
+						t.Logf("err = %v\n%#v", err, err)
+					}
+				})
+			})
+			t.Run("simple_api", func(t *testing.T) {
+				client := pingv1connect.NewPingServiceClient(
+					httpClient,
+					"http://"+httptest.DefaultRemoteAddr,
+					opts...,
+				)
+
+				t.Run("unary", func(t *testing.T) {
+					t.Parallel()
+					_, err := client.Ping(ctx, &pingv1.PingRequest{})
+					assert.NotNil(t, err)
+					if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
+						t.Logf("err = %v\n%#v", err, err)
+					}
+				})
+				t.Run("server_stream", func(t *testing.T) {
+					t.Parallel()
+					svrStream, err := client.CountUp(ctx, &pingv1.CountUpRequest{})
+					if err == nil {
+						t.Cleanup(func() {
+							assert.Nil(t, svrStream.Close())
+						})
+						if !assert.False(t, svrStream.Receive()) {
+							return
+						}
+						err = svrStream.Err()
+					}
+					assert.NotNil(t, err)
+					if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
+						t.Logf("err = %v\n%#v", err, err)
+					}
+				})
 			})
 		})
 	}
@@ -281,46 +448,82 @@ func TestConnectionDropped(t *testing.T) {
 
 func TestSpecSchema(t *testing.T) {
 	t.Parallel()
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(
-		pingServer{},
+
+	handlerOpts := []connect.HandlerOption{
 		connect.WithInterceptors(&assertSchemaInterceptor{t}),
-	))
-	server := memhttptest.NewServer(t, mux)
-	ctx := context.Background()
-	client := pingv1connect.NewPingServiceClient(
-		server.Client(),
-		server.URL(),
+	}
+	clientOpts := []connect.ClientOption{
 		connect.WithInterceptors(&assertSchemaInterceptor{t}),
-	)
-	t.Run("unary", func(t *testing.T) {
+	}
+
+	t.Run("generics_api", func(t *testing.T) {
 		t.Parallel()
-		unaryReq := connect.NewRequest[pingv1.PingRequest](nil)
-		_, err := client.Ping(ctx, unaryReq)
-		assert.NotNil(t, unaryReq.Spec().Schema)
-		assert.Nil(t, err)
-		text := strings.Repeat(".", 256)
-		r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
-		assert.Nil(t, err)
-		assert.Equal(t, r.Msg.GetText(), text)
-	})
-	t.Run("bidi_stream", func(t *testing.T) {
-		t.Parallel()
-		bidiStream := client.CumSum(ctx)
-		t.Cleanup(func() {
-			assert.Nil(t, bidiStream.CloseRequest())
-			assert.Nil(t, bidiStream.CloseResponse())
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connectgenerics.NewPingServiceHandler(
+			pingServerGenerics{},
+			handlerOpts...,
+		))
+		server := memhttptest.NewServer(t, mux)
+		ctx := context.Background()
+		client := pingv1connectgenerics.NewPingServiceClient(
+			server.Client(),
+			server.URL(),
+			clientOpts...,
+		)
+		t.Run("unary", func(t *testing.T) {
+			t.Parallel()
+			unaryReq := connect.NewRequest[pingv1.PingRequest](nil)
+			_, err := client.Ping(ctx, unaryReq)
+			assert.NotNil(t, unaryReq.Spec().Schema)
+			assert.Nil(t, err)
+			text := strings.Repeat(".", 256)
+			r, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: text}))
+			assert.Nil(t, err)
+			assert.Equal(t, r.Msg.GetText(), text)
 		})
-		assert.NotZero(t, bidiStream.Spec().Schema)
-		err := bidiStream.Send(&pingv1.CumSumRequest{})
-		assert.Nil(t, err)
+		t.Run("bidi_stream", func(t *testing.T) {
+			t.Parallel()
+			bidiStream := client.CumSum(ctx)
+			t.Cleanup(func() {
+				assert.Nil(t, bidiStream.CloseRequest())
+				assert.Nil(t, bidiStream.CloseResponse())
+			})
+			assert.NotZero(t, bidiStream.Spec().Schema)
+			err := bidiStream.Send(&pingv1.CumSumRequest{})
+			assert.Nil(t, err)
+		})
+	})
+	t.Run("simple_api", func(t *testing.T) {
+		t.Parallel()
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connect.NewPingServiceHandler(
+			pingServer{},
+			handlerOpts...,
+		))
+		server := memhttptest.NewServer(t, mux)
+		client := pingv1connect.NewPingServiceClient(
+			server.Client(),
+			server.URL(),
+			clientOpts...,
+		)
+		t.Run("unary", func(t *testing.T) {
+			t.Parallel()
+			ctx, callInfo := connect.NewOutgoingContext(context.Background())
+			_, err := client.Ping(ctx, &pingv1.PingRequest{})
+			assert.NotNil(t, callInfo.Spec().Schema)
+			assert.Nil(t, err)
+			text := strings.Repeat(".", 256)
+			r, err := client.Ping(ctx, &pingv1.PingRequest{Text: text})
+			assert.Nil(t, err)
+			assert.Equal(t, r.GetText(), text)
+		})
 	})
 }
 
 func TestDynamicClient(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServerGenerics{}))
 	server := memhttptest.NewServer(t, mux)
 	ctx := context.Background()
 	initializer := func(spec connect.Spec, msg any) error {
@@ -339,278 +542,378 @@ func TestDynamicClient(t *testing.T) {
 		}
 		return nil
 	}
-	t.Run("unary", func(t *testing.T) {
-		t.Parallel()
-		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Ping")
+	findMethodDesc := func(t *testing.T, fullName protoreflect.FullName) protoreflect.MethodDescriptor {
+		t.Helper()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName(fullName)
 		assert.Nil(t, err)
 		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
 		assert.True(t, ok)
-		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
+		return methodDesc
+	}
+	createClient := func(procedure string, methodDesc protoreflect.MethodDescriptor) *connect.Client[dynamicpb.Message, dynamicpb.Message] {
+		return connect.NewClient[dynamicpb.Message, dynamicpb.Message](
 			server.Client(),
-			server.URL()+"/connect.ping.v1.PingService/Ping",
+			server.URL()+procedure,
 			connect.WithSchema(methodDesc),
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithResponseInitializer(initializer),
 		)
-		msg := dynamicpb.NewMessage(methodDesc.Input())
-		msg.Set(
-			methodDesc.Input().Fields().ByName("number"),
-			protoreflect.ValueOfInt64(42),
-		)
-		res, err := client.CallUnary(ctx, connect.NewRequest(msg))
-		assert.Nil(t, err)
-		got := res.Msg.Get(methodDesc.Output().Fields().ByName("number")).Int()
-		assert.Equal(t, got, 42)
-	})
-	t.Run("clientStream", func(t *testing.T) {
+	}
+	t.Run("generics_api", func(t *testing.T) {
 		t.Parallel()
-		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Sum")
-		assert.Nil(t, err)
-		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
-		assert.True(t, ok)
-		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
-			server.Client(),
-			server.URL()+"/connect.ping.v1.PingService/Sum",
-			connect.WithSchema(methodDesc),
-			connect.WithResponseInitializer(initializer),
-		)
-		stream := client.CallClientStream(ctx)
-		msg := dynamicpb.NewMessage(methodDesc.Input())
-		msg.Set(
-			methodDesc.Input().Fields().ByName("number"),
-			protoreflect.ValueOfInt64(42),
-		)
-		assert.Nil(t, stream.Send(msg))
-		assert.Nil(t, stream.Send(msg))
-		rsp, err := stream.CloseAndReceive()
-		if !assert.Nil(t, err) {
-			return
-		}
-		got := rsp.Msg.Get(methodDesc.Output().Fields().ByName("sum")).Int()
-		assert.Equal(t, got, 42*2)
-	})
-	t.Run("serverStream", func(t *testing.T) {
-		t.Parallel()
-		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.CountUp")
-		assert.Nil(t, err)
-		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
-		assert.True(t, ok)
-		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
-			server.Client(),
-			server.URL()+"/connect.ping.v1.PingService/CountUp",
-			connect.WithSchema(methodDesc),
-			connect.WithResponseInitializer(initializer),
-		)
-		msg := dynamicpb.NewMessage(methodDesc.Input())
-		msg.Set(
-			methodDesc.Input().Fields().ByName("number"),
-			protoreflect.ValueOfInt64(2),
-		)
-		req := connect.NewRequest(msg)
-		stream, err := client.CallServerStream(ctx, req)
-		if !assert.Nil(t, err) {
-			return
-		}
-		for i := 1; stream.Receive(); i++ {
-			out := stream.Msg()
+		t.Run("unary", func(t *testing.T) {
+			t.Parallel()
+			methodDesc := findMethodDesc(t, pingv1connectgenerics.PingServiceName+".Ping")
+			client := createClient(pingv1connectgenerics.PingServicePingProcedure, methodDesc)
+			msg := dynamicpb.NewMessage(methodDesc.Input())
+			msg.Set(
+				methodDesc.Input().Fields().ByName("number"),
+				protoreflect.ValueOfInt64(42),
+			)
+			res, err := client.CallUnary(ctx, connect.NewRequest(msg))
+			assert.Nil(t, err)
+			got := res.Msg.Get(methodDesc.Output().Fields().ByName("number")).Int()
+			assert.Equal(t, got, 42)
+		})
+		t.Run("client_stream", func(t *testing.T) {
+			t.Parallel()
+			methodDesc := findMethodDesc(t, pingv1connect.PingServiceName+".Sum")
+			client := createClient(pingv1connect.PingServiceSumProcedure, methodDesc)
+			stream := client.CallClientStream(ctx)
+			msg := dynamicpb.NewMessage(methodDesc.Input())
+			msg.Set(
+				methodDesc.Input().Fields().ByName("number"),
+				protoreflect.ValueOfInt64(42),
+			)
+			assert.Nil(t, stream.Send(msg))
+			assert.Nil(t, stream.Send(msg))
+			rsp, err := stream.CloseAndReceive()
+			if !assert.Nil(t, err) {
+				return
+			}
+			got := rsp.Msg.Get(methodDesc.Output().Fields().ByName("sum")).Int()
+			assert.Equal(t, got, 42*2)
+		})
+		t.Run("server_stream", func(t *testing.T) {
+			t.Parallel()
+			methodDesc := findMethodDesc(t, pingv1connect.PingServiceName+".CountUp")
+			client := createClient(pingv1connect.PingServiceCountUpProcedure, methodDesc)
+			msg := dynamicpb.NewMessage(methodDesc.Input())
+			msg.Set(
+				methodDesc.Input().Fields().ByName("number"),
+				protoreflect.ValueOfInt64(2),
+			)
+			req := connect.NewRequest(msg)
+			stream, err := client.CallServerStream(ctx, req)
+			if !assert.Nil(t, err) {
+				return
+			}
+			for i := 1; stream.Receive(); i++ {
+				out := stream.Msg()
+				got := out.Get(methodDesc.Output().Fields().ByName("number")).Int()
+				assert.Equal(t, got, int64(i))
+			}
+			assert.Nil(t, stream.Close())
+		})
+		t.Run("bidi", func(t *testing.T) {
+			t.Parallel()
+			methodDesc := findMethodDesc(t, pingv1connectgenerics.PingServiceName+".CumSum")
+			client := createClient(pingv1connectgenerics.PingServiceCumSumProcedure, methodDesc)
+			stream := client.CallBidiStream(ctx)
+			msg := dynamicpb.NewMessage(methodDesc.Input())
+			msg.Set(
+				methodDesc.Input().Fields().ByName("number"),
+				protoreflect.ValueOfInt64(42),
+			)
+			assert.Nil(t, stream.Send(msg))
+			assert.Nil(t, stream.CloseRequest())
+			out, err := stream.Receive()
+			if assert.Nil(t, err) {
+				return
+			}
 			got := out.Get(methodDesc.Output().Fields().ByName("number")).Int()
-			assert.Equal(t, got, int64(i))
-		}
-		assert.Nil(t, stream.Close())
+			assert.Equal(t, got, 42)
+		})
+		t.Run("option", func(t *testing.T) {
+			t.Parallel()
+			desc, err := protoregistry.GlobalFiles.FindDescriptorByName(pingv1connect.PingServiceName + ".Ping")
+			assert.Nil(t, err)
+			methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+			assert.True(t, ok)
+			optionCalled := false
+			client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
+				server.Client(),
+				server.URL()+pingv1connect.PingServicePingProcedure,
+				connect.WithSchema(methodDesc),
+				connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+				connect.WithResponseInitializer(
+					func(spec connect.Spec, msg any) error {
+						assert.NotNil(t, spec)
+						assert.NotNil(t, msg)
+						dynamic, ok := msg.(*dynamicpb.Message)
+						if !assert.True(t, ok) {
+							return fmt.Errorf("unexpected message type: %T", msg)
+						}
+						*dynamic = *dynamicpb.NewMessage(methodDesc.Output())
+						optionCalled = true
+						return nil
+					},
+				),
+			)
+			msg := dynamicpb.NewMessage(methodDesc.Input())
+			msg.Set(
+				methodDesc.Input().Fields().ByName("number"),
+				protoreflect.ValueOfInt64(42),
+			)
+			res, err := client.CallUnary(ctx, connect.NewRequest(msg))
+			assert.Nil(t, err)
+			got := res.Msg.Get(methodDesc.Output().Fields().ByName("number")).Int()
+			assert.Equal(t, got, 42)
+			assert.True(t, optionCalled)
+		})
 	})
-	t.Run("bidi", func(t *testing.T) {
+	t.Run("simple_api", func(t *testing.T) {
 		t.Parallel()
-		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.CumSum")
-		assert.Nil(t, err)
-		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
-		assert.True(t, ok)
-		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
-			server.Client(),
-			server.URL()+"/connect.ping.v1.PingService/CumSum",
-			connect.WithSchema(methodDesc),
-			connect.WithResponseInitializer(initializer),
-		)
-		stream := client.CallBidiStream(ctx)
-		msg := dynamicpb.NewMessage(methodDesc.Input())
-		msg.Set(
-			methodDesc.Input().Fields().ByName("number"),
-			protoreflect.ValueOfInt64(42),
-		)
-		assert.Nil(t, stream.Send(msg))
-		assert.Nil(t, stream.CloseRequest())
-		out, err := stream.Receive()
-		if assert.Nil(t, err) {
-			return
-		}
-		got := out.Get(methodDesc.Output().Fields().ByName("number")).Int()
-		assert.Equal(t, got, 42)
-	})
-	t.Run("option", func(t *testing.T) {
-		t.Parallel()
-		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Ping")
-		assert.Nil(t, err)
-		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
-		assert.True(t, ok)
-		optionCalled := false
-		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
-			server.Client(),
-			server.URL()+"/connect.ping.v1.PingService/Ping",
-			connect.WithSchema(methodDesc),
-			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
-			connect.WithResponseInitializer(
-				func(spec connect.Spec, msg any) error {
-					assert.NotNil(t, spec)
-					assert.NotNil(t, msg)
-					dynamic, ok := msg.(*dynamicpb.Message)
-					if !assert.True(t, ok) {
-						return fmt.Errorf("unexpected message type: %T", msg)
-					}
-					*dynamic = *dynamicpb.NewMessage(methodDesc.Output())
-					optionCalled = true
-					return nil
-				},
-			),
-		)
-		msg := dynamicpb.NewMessage(methodDesc.Input())
-		msg.Set(
-			methodDesc.Input().Fields().ByName("number"),
-			protoreflect.ValueOfInt64(42),
-		)
-		res, err := client.CallUnary(ctx, connect.NewRequest(msg))
-		assert.Nil(t, err)
-		got := res.Msg.Get(methodDesc.Output().Fields().ByName("number")).Int()
-		assert.Equal(t, got, 42)
-		assert.True(t, optionCalled)
+		t.Run("unary", func(t *testing.T) {
+			t.Parallel()
+			methodDesc := findMethodDesc(t, pingv1connect.PingServiceName+".Ping")
+			client := createClient(pingv1connect.PingServicePingProcedure, methodDesc)
+			msg := dynamicpb.NewMessage(methodDesc.Input())
+			msg.Set(
+				methodDesc.Input().Fields().ByName("number"),
+				protoreflect.ValueOfInt64(42),
+			)
+			res, err := client.CallUnarySimple(ctx, msg)
+			assert.Nil(t, err)
+			got := res.Get(methodDesc.Output().Fields().ByName("number")).Int()
+			assert.Equal(t, got, 42)
+		})
+		t.Run("server_stream", func(t *testing.T) {
+			t.Parallel()
+			methodDesc := findMethodDesc(t, pingv1connect.PingServiceName+".CountUp")
+			client := createClient(pingv1connect.PingServiceCountUpProcedure, methodDesc)
+			msg := dynamicpb.NewMessage(methodDesc.Input())
+			msg.Set(
+				methodDesc.Input().Fields().ByName("number"),
+				protoreflect.ValueOfInt64(2),
+			)
+			stream, err := client.CallServerStreamSimple(ctx, msg)
+			if !assert.Nil(t, err) {
+				return
+			}
+			for i := 1; stream.Receive(); i++ {
+				out := stream.Msg()
+				got := out.Get(methodDesc.Output().Fields().ByName("number")).Int()
+				assert.Equal(t, got, int64(i))
+			}
+			assert.Nil(t, stream.Close())
+		})
+		t.Run("option", func(t *testing.T) {
+			t.Parallel()
+			desc, err := protoregistry.GlobalFiles.FindDescriptorByName(pingv1connect.PingServiceName + ".Ping")
+			assert.Nil(t, err)
+			methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+			assert.True(t, ok)
+			optionCalled := false
+			client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
+				server.Client(),
+				server.URL()+pingv1connect.PingServicePingProcedure,
+				connect.WithSchema(methodDesc),
+				connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+				connect.WithResponseInitializer(
+					func(spec connect.Spec, msg any) error {
+						assert.NotNil(t, spec)
+						assert.NotNil(t, msg)
+						dynamic, ok := msg.(*dynamicpb.Message)
+						if !assert.True(t, ok) {
+							return fmt.Errorf("unexpected message type: %T", msg)
+						}
+						*dynamic = *dynamicpb.NewMessage(methodDesc.Output())
+						optionCalled = true
+						return nil
+					},
+				),
+			)
+			msg := dynamicpb.NewMessage(methodDesc.Input())
+			msg.Set(
+				methodDesc.Input().Fields().ByName("number"),
+				protoreflect.ValueOfInt64(42),
+			)
+			res, err := client.CallUnarySimple(ctx, msg)
+			assert.Nil(t, err)
+			got := res.Get(methodDesc.Output().Fields().ByName("number")).Int()
+			assert.Equal(t, got, 42)
+			assert.True(t, optionCalled)
+		})
 	})
 }
 
 func TestClientDeadlineHandling(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping slow test")
-	}
-
 	// Note that these tests are not able to reproduce issues with the race
 	// detector enabled. That's partly why the makefile only runs "slow"
 	// tests with the race detector disabled.
-
-	_, handler := pingv1connect.NewPingServiceHandler(pingServer{})
-	svr := httptest.NewUnstartedServer(http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
-		if req.Context().Err() != nil {
-			return
-		}
-		handler.ServeHTTP(respWriter, req)
-	}))
-	svr.Config.ErrorLog = log.New(io.Discard, "", 0) //nolint:forbidigo
-	svr.EnableHTTP2 = true
-	svr.StartTLS()
-	t.Cleanup(svr.Close)
+	if testing.Short() {
+		t.Skip("skipping slow test")
+	}
 
 	// This case creates a new connection for each RPC to verify that timeouts during dialing
 	// won't cause issues. This is historically easier to reproduce, so it uses a smaller
 	// duration, no concurrency, and fewer iterations. This is important because if we used
 	// a new connection for each RPC in the bigger test scenario below, we'd encounter other
 	// issues related to overwhelming the loopback interface and exhausting ephemeral ports.
-	t.Run("dial", func(t *testing.T) {
+	t.Run("generics_api", func(t *testing.T) {
 		t.Parallel()
-		transport, ok := svr.Client().Transport.(*http.Transport)
-		if !assert.True(t, ok) {
-			t.FailNow()
-		}
-		testClientDeadlineBruteForceLoop(t,
-			5*time.Second, 5, 1,
-			func(ctx context.Context) (string, rpcErrors) {
-				httpClient := &http.Client{
-					Transport: transport.Clone(),
-				}
-				client := pingv1connect.NewPingServiceClient(httpClient, svr.URL)
-				_, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: "foo"}))
-				// Close all connections and make sure to give a little time for the OS to
-				// release socket resources to prevent resource exhaustion (such as running
-				// out of ephemeral ports).
-				httpClient.CloseIdleConnections()
-				time.Sleep(time.Millisecond / 2)
-				return pingv1connect.PingServicePingProcedure, rpcErrors{recvErr: err}
-			},
-		)
+		_, handler := pingv1connectgenerics.NewPingServiceHandler(pingServerGenerics{})
+		svr := httptest.NewUnstartedServer(http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
+			if req.Context().Err() != nil {
+				return
+			}
+			handler.ServeHTTP(respWriter, req)
+		}))
+		svr.Config.ErrorLog = log.New(io.Discard, "", 0) //nolint:forbidigo
+		svr.EnableHTTP2 = true
+		svr.StartTLS()
+		t.Cleanup(svr.Close)
+
+		t.Run("dial", func(t *testing.T) {
+			t.Parallel()
+			transport, ok := svr.Client().Transport.(*http.Transport)
+			if !assert.True(t, ok) {
+				t.FailNow()
+			}
+			testClientDeadlineBruteForceLoop(t,
+				5*time.Second, 5, 1,
+				func(ctx context.Context) (string, rpcErrors) {
+					httpClient := &http.Client{
+						Transport: transport.Clone(),
+					}
+					client := pingv1connectgenerics.NewPingServiceClient(httpClient, svr.URL)
+					_, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: "foo"}))
+					// Close all connections and make sure to give a little time for the OS to
+					// release socket resources to prevent resource exhaustion (such as running
+					// out of ephemeral ports).
+					httpClient.CloseIdleConnections()
+					time.Sleep(time.Millisecond / 2)
+					return pingv1connect.PingServicePingProcedure, rpcErrors{recvErr: err}
+				},
+			)
+		})
+		// This case creates significantly more load than the above one, but uses a normal
+		// client so pools and re-uses connections. It also uses all stream types to send
+		// messages, to make sure that all stream implementations handle deadlines correctly.
+		// The I/O errors related to deadlines are historically harder to reproduce, so it
+		// throws a lot more effort into reproducing, particularly a longer duration for
+		// which it will run. It also uses larger messages (by packing requests with
+		// unrecognized fields) and compression, to make it more likely to encounter the
+		// deadline in the middle of read and write operations.
+		t.Run("read-write", func(t *testing.T) {
+			t.Parallel()
+
+			var extraField []byte
+			extraField = protowire.AppendTag(extraField, 999, protowire.BytesType)
+			extraData := make([]byte, 16*1024)
+			// use good random data so it's not very compressible
+			if _, err := rand.Read(extraData); err != nil {
+				t.Fatalf("failed to generate extra payload: %v", err)
+				return
+			}
+			extraField = protowire.AppendBytes(extraField, extraData)
+
+			clientConnect := pingv1connectgenerics.NewPingServiceClient(svr.Client(), svr.URL, connect.WithSendGzip())
+			clientGRPC := pingv1connectgenerics.NewPingServiceClient(svr.Client(), svr.URL, connect.WithSendGzip(), connect.WithGRPCWeb())
+			var count atomic.Int32
+			testClientDeadlineBruteForceLoop(t,
+				20*time.Second, 200, runtime.GOMAXPROCS(0),
+				func(ctx context.Context) (string, rpcErrors) {
+					var procedure string
+					var errs rpcErrors
+					rpcNum := count.Add(1)
+					var client pingv1connectgenerics.PingServiceClient
+					if rpcNum&4 == 0 {
+						client = clientConnect
+					} else {
+						client = clientGRPC
+					}
+					switch rpcNum & 3 {
+					case 0:
+						procedure = pingv1connectgenerics.PingServicePingProcedure
+						_, errs.recvErr = client.Ping(ctx, connect.NewRequest(addUnrecognizedBytes(&pingv1.PingRequest{Text: "foo"}, extraField)))
+					case 1:
+						procedure = pingv1connectgenerics.PingServiceSumProcedure
+						stream := client.Sum(ctx)
+						for range 3 {
+							errs.sendErr = stream.Send(addUnrecognizedBytes(&pingv1.SumRequest{Number: 1}, extraField))
+							if errs.sendErr != nil {
+								break
+							}
+						}
+						_, errs.recvErr = stream.CloseAndReceive()
+					case 2:
+						procedure = pingv1connectgenerics.PingServiceCountUpProcedure
+						var stream *connect.ServerStreamForClient[pingv1.CountUpResponse]
+						stream, errs.recvErr = client.CountUp(ctx, connect.NewRequest(addUnrecognizedBytes(&pingv1.CountUpRequest{Number: 3}, extraField)))
+						if errs.recvErr == nil {
+							for stream.Receive() {
+							}
+							errs.recvErr = stream.Err()
+							errs.closeRecvErr = stream.Close()
+						}
+					case 3:
+						procedure = pingv1connectgenerics.PingServiceCumSumProcedure
+						stream := client.CumSum(ctx)
+						for range 3 {
+							errs.sendErr = stream.Send(addUnrecognizedBytes(&pingv1.CumSumRequest{Number: 1}, extraField))
+							_, errs.recvErr = stream.Receive()
+							if errs.recvErr != nil {
+								break
+							}
+						}
+						errs.closeSendErr = stream.CloseRequest()
+						errs.closeRecvErr = stream.CloseResponse()
+					}
+					return procedure, errs
+				},
+			)
+		})
 	})
 
-	// This case creates significantly more load than the above one, but uses a normal
-	// client so pools and re-uses connections. It also uses all stream types to send
-	// messages, to make sure that all stream implementations handle deadlines correctly.
-	// The I/O errors related to deadlines are historically harder to reproduce, so it
-	// throws a lot more effort into reproducing, particularly a longer duration for
-	// which it will run. It also uses larger messages (by packing requests with
-	// unrecognized fields) and compression, to make it more likely to encounter the
-	// deadline in the middle of read and write operations.
-	t.Run("read-write", func(t *testing.T) {
+	t.Run("simple_api", func(t *testing.T) {
 		t.Parallel()
-
-		var extraField []byte
-		extraField = protowire.AppendTag(extraField, 999, protowire.BytesType)
-		extraData := make([]byte, 16*1024)
-		// use good random data so it's not very compressible
-		if _, err := rand.Read(extraData); err != nil {
-			t.Fatalf("failed to generate extra payload: %v", err)
-			return
-		}
-		extraField = protowire.AppendBytes(extraField, extraData)
-
-		clientConnect := pingv1connect.NewPingServiceClient(svr.Client(), svr.URL, connect.WithSendGzip())
-		clientGRPC := pingv1connect.NewPingServiceClient(svr.Client(), svr.URL, connect.WithSendGzip(), connect.WithGRPCWeb())
-		var count atomic.Int32
-		testClientDeadlineBruteForceLoop(t,
-			20*time.Second, 200, runtime.GOMAXPROCS(0),
-			func(ctx context.Context) (string, rpcErrors) {
-				var procedure string
-				var errs rpcErrors
-				rpcNum := count.Add(1)
-				var client pingv1connect.PingServiceClient
-				if rpcNum&4 == 0 {
-					client = clientConnect
-				} else {
-					client = clientGRPC
-				}
-				switch rpcNum & 3 {
-				case 0:
-					procedure = pingv1connect.PingServicePingProcedure
-					_, errs.recvErr = client.Ping(ctx, connect.NewRequest(addUnrecognizedBytes(&pingv1.PingRequest{Text: "foo"}, extraField)))
-				case 1:
-					procedure = pingv1connect.PingServiceSumProcedure
-					stream := client.Sum(ctx)
-					for range 3 {
-						errs.sendErr = stream.Send(addUnrecognizedBytes(&pingv1.SumRequest{Number: 1}, extraField))
-						if errs.sendErr != nil {
-							break
-						}
+		_, handler := pingv1connect.NewPingServiceHandler(pingServer{})
+		svr := httptest.NewUnstartedServer(http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
+			if req.Context().Err() != nil {
+				return
+			}
+			handler.ServeHTTP(respWriter, req)
+		}))
+		svr.Config.ErrorLog = log.New(io.Discard, "", 0) //nolint:forbidigo
+		svr.EnableHTTP2 = true
+		svr.StartTLS()
+		t.Cleanup(svr.Close)
+		t.Run("dial", func(t *testing.T) {
+			t.Parallel()
+			transport, ok := svr.Client().Transport.(*http.Transport)
+			if !assert.True(t, ok) {
+				t.FailNow()
+			}
+			testClientDeadlineBruteForceLoop(t,
+				5*time.Second, 5, 1,
+				func(ctx context.Context) (string, rpcErrors) {
+					httpClient := &http.Client{
+						Transport: transport.Clone(),
 					}
-					_, errs.recvErr = stream.CloseAndReceive()
-				case 2:
-					procedure = pingv1connect.PingServiceCountUpProcedure
-					var stream *connect.ServerStreamForClient[pingv1.CountUpResponse]
-					stream, errs.recvErr = client.CountUp(ctx, connect.NewRequest(addUnrecognizedBytes(&pingv1.CountUpRequest{Number: 3}, extraField)))
-					if errs.recvErr == nil {
-						for stream.Receive() {
-						}
-						errs.recvErr = stream.Err()
-						errs.closeRecvErr = stream.Close()
-					}
-				case 3:
-					procedure = pingv1connect.PingServiceCumSumProcedure
-					stream := client.CumSum(ctx)
-					for range 3 {
-						errs.sendErr = stream.Send(addUnrecognizedBytes(&pingv1.CumSumRequest{Number: 1}, extraField))
-						_, errs.recvErr = stream.Receive()
-						if errs.recvErr != nil {
-							break
-						}
-					}
-					errs.closeSendErr = stream.CloseRequest()
-					errs.closeRecvErr = stream.CloseResponse()
-				}
-				return procedure, errs
-			},
-		)
+					client := pingv1connect.NewPingServiceClient(httpClient, svr.URL)
+					_, err := client.Ping(ctx, &pingv1.PingRequest{Text: "foo"})
+					// Close all connections and make sure to give a little time for the OS to
+					// release socket resources to prevent resource exhaustion (such as running
+					// out of ephemeral ports).
+					httpClient.CloseIdleConnections()
+					time.Sleep(time.Millisecond / 2)
+					return pingv1connect.PingServicePingProcedure, rpcErrors{recvErr: err}
+				},
+			)
+		})
 	})
 }
 
@@ -707,13 +1010,13 @@ func testClientDeadlineBruteForceLoop(
 	t.Logf("Issued %d RPCs.", rpcCount.Load())
 }
 
-type notModifiedPingServer struct {
-	pingv1connect.UnimplementedPingServiceHandler
+type notModifiedPingServerGenerics struct {
+	pingv1connectgenerics.UnimplementedPingServiceHandler
 
 	etag string
 }
 
-func (s *notModifiedPingServer) Ping(
+func (s *notModifiedPingServerGenerics) Ping(
 	_ context.Context,
 	req *connect.Request[pingv1.PingRequest],
 ) (*connect.Response[pingv1.PingResponse], error) {
@@ -723,6 +1026,24 @@ func (s *notModifiedPingServer) Ping(
 	resp := connect.NewResponse(&pingv1.PingResponse{})
 	resp.Header().Set("Etag", s.etag)
 	return resp, nil
+}
+
+type notModifiedPingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+
+	etag string
+}
+
+func (s *notModifiedPingServer) Ping(
+	ctx context.Context,
+	req *pingv1.PingRequest,
+) (*pingv1.PingResponse, error) {
+	callInfo, _ := connect.CallInfoFromContext(ctx)
+	if callInfo.HTTPMethod() == http.MethodGet && callInfo.RequestHeader().Get("If-None-Match") == s.etag {
+		return nil, connect.NewNotModifiedError(http.Header{"Etag": []string{s.etag}})
+	}
+	callInfo.ResponseHeader().Set("Etag", s.etag)
+	return &pingv1.PingResponse{}, nil
 }
 
 type assertPeerInterceptor struct {

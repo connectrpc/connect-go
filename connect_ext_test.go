@@ -38,8 +38,9 @@ import (
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/generics/connect/import/v1/importv1connect"
-	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
+	pingv1connectgenerics "connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/simple/connect/import/v1/importv1connect"
+	"connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 	"google.golang.org/protobuf/proto"
@@ -63,61 +64,123 @@ const (
 
 func TestServer(t *testing.T) {
 	t.Parallel()
-	testPing := func(t *testing.T, client pingv1connect.PingServiceClient) { //nolint:thelper
-		t.Run("ping", func(t *testing.T) {
-			num := int64(42)
-			request := connect.NewRequest(&pingv1.PingRequest{Number: num})
-			request.Header().Set(clientHeader, headerValue)
-			expect := &pingv1.PingResponse{Number: num}
-			response, err := client.Ping(context.Background(), request)
-			assert.Nil(t, err)
-			assert.Equal(t, response.Msg, expect)
-			assert.Equal(t, response.Header().Values(handlerHeader), []string{headerValue})
-			assert.Equal(t, response.Trailer().Values(handlerTrailer), []string{trailerValue})
+	testPing := func(t *testing.T, httpClient *http.Client, url string, opts ...connect.ClientOption) { //nolint:thelper
+		client := pingv1connectgenerics.NewPingServiceClient(httpClient, url, opts...)
+		clientSimple := pingv1connect.NewPingServiceClient(httpClient, url, opts...)
+
+		t.Run("generics_api", func(t *testing.T) {
+			t.Run("ping", func(t *testing.T) {
+				num := int64(42)
+				request := connect.NewRequest(&pingv1.PingRequest{Number: num})
+				request.Header().Set(clientHeader, headerValue)
+				expect := &pingv1.PingResponse{Number: num}
+				response, err := client.Ping(context.Background(), request)
+				assert.Nil(t, err)
+				assert.Equal(t, response.Msg, expect)
+				assert.Equal(t, response.Header().Values(handlerHeader), []string{headerValue})
+				assert.Equal(t, response.Trailer().Values(handlerTrailer), []string{trailerValue})
+			})
+			t.Run("zero_ping", func(t *testing.T) {
+				request := connect.NewRequest(&pingv1.PingRequest{})
+				request.Header().Set(clientHeader, headerValue)
+				response, err := client.Ping(context.Background(), request)
+				assert.Nil(t, err)
+				var expect pingv1.PingResponse
+				assert.Equal(t, response.Msg, &expect)
+				assert.Equal(t, response.Header().Values(handlerHeader), []string{headerValue})
+				assert.Equal(t, response.Trailer().Values(handlerTrailer), []string{trailerValue})
+			})
+			t.Run("large_ping", func(t *testing.T) {
+				// Using a large payload splits the request and response over multiple
+				// packets, ensuring that we're managing HTTP readers and writers
+				// correctly.
+				if testing.Short() {
+					t.Skipf("skipping %s test in short mode", t.Name())
+				}
+				hellos := strings.Repeat("hello", 1024*1024) // ~5mb
+				request := connect.NewRequest(&pingv1.PingRequest{Text: hellos})
+				request.Header().Set(clientHeader, headerValue)
+				response, err := client.Ping(context.Background(), request)
+				assert.Nil(t, err)
+				assert.Equal(t, response.Msg.GetText(), hellos)
+				assert.Equal(t, response.Header().Values(handlerHeader), []string{headerValue})
+				assert.Equal(t, response.Trailer().Values(handlerTrailer), []string{trailerValue})
+			})
+			t.Run("ping_error", func(t *testing.T) {
+				_, err := client.Ping(
+					context.Background(),
+					connect.NewRequest(&pingv1.PingRequest{}),
+				)
+				assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
+			})
+			t.Run("ping_timeout", func(t *testing.T) {
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+				defer cancel()
+				request := connect.NewRequest(&pingv1.PingRequest{})
+				request.Header().Set(clientHeader, headerValue)
+				_, err := client.Ping(ctx, request)
+				assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded)
+			})
 		})
-		t.Run("zero_ping", func(t *testing.T) {
-			request := connect.NewRequest(&pingv1.PingRequest{})
-			request.Header().Set(clientHeader, headerValue)
-			response, err := client.Ping(context.Background(), request)
-			assert.Nil(t, err)
-			var expect pingv1.PingResponse
-			assert.Equal(t, response.Msg, &expect)
-			assert.Equal(t, response.Header().Values(handlerHeader), []string{headerValue})
-			assert.Equal(t, response.Trailer().Values(handlerTrailer), []string{trailerValue})
-		})
-		t.Run("large_ping", func(t *testing.T) {
-			// Using a large payload splits the request and response over multiple
-			// packets, ensuring that we're managing HTTP readers and writers
-			// correctly.
-			if testing.Short() {
-				t.Skipf("skipping %s test in short mode", t.Name())
-			}
-			hellos := strings.Repeat("hello", 1024*1024) // ~5mb
-			request := connect.NewRequest(&pingv1.PingRequest{Text: hellos})
-			request.Header().Set(clientHeader, headerValue)
-			response, err := client.Ping(context.Background(), request)
-			assert.Nil(t, err)
-			assert.Equal(t, response.Msg.GetText(), hellos)
-			assert.Equal(t, response.Header().Values(handlerHeader), []string{headerValue})
-			assert.Equal(t, response.Trailer().Values(handlerTrailer), []string{trailerValue})
-		})
-		t.Run("ping_error", func(t *testing.T) {
-			_, err := client.Ping(
-				context.Background(),
-				connect.NewRequest(&pingv1.PingRequest{}),
-			)
-			assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
-		})
-		t.Run("ping_timeout", func(t *testing.T) {
-			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-			defer cancel()
-			request := connect.NewRequest(&pingv1.PingRequest{})
-			request.Header().Set(clientHeader, headerValue)
-			_, err := client.Ping(ctx, request)
-			assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded)
+		t.Run("simple_api", func(t *testing.T) {
+			t.Parallel()
+			t.Run("ping", func(t *testing.T) {
+				num := int64(42)
+				ctx, callInfo := connect.NewOutgoingContext(context.Background())
+				callInfo.RequestHeader().Set(clientHeader, headerValue)
+				expect := &pingv1.PingResponse{Number: num}
+				response, err := clientSimple.Ping(ctx, &pingv1.PingRequest{Number: num})
+				assert.Nil(t, err)
+				assert.Equal(t, response, expect)
+				assert.Equal(t, callInfo.ResponseHeader().Values(handlerHeader), []string{headerValue})
+				assert.Equal(t, callInfo.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
+			})
+			t.Run("zero_ping", func(t *testing.T) {
+				ctx, callInfo := connect.NewOutgoingContext(context.Background())
+				callInfo.RequestHeader().Set(clientHeader, headerValue)
+				response, err := clientSimple.Ping(ctx, &pingv1.PingRequest{})
+				assert.Nil(t, err)
+				var expect pingv1.PingResponse
+				assert.Equal(t, response, &expect)
+				assert.Equal(t, callInfo.ResponseHeader().Values(handlerHeader), []string{headerValue})
+				assert.Equal(t, callInfo.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
+			})
+			t.Run("large_ping", func(t *testing.T) {
+				// Using a large payload splits the request and response over multiple
+				// packets, ensuring that we're managing HTTP readers and writers
+				// correctly.
+				if testing.Short() {
+					t.Skipf("skipping %s test in short mode", t.Name())
+				}
+				hellos := strings.Repeat("hello", 1024*1024) // ~5mb
+				ctx, callInfo := connect.NewOutgoingContext(context.Background())
+				callInfo.RequestHeader().Set(clientHeader, headerValue)
+				response, err := clientSimple.Ping(ctx, &pingv1.PingRequest{Text: hellos})
+				assert.Nil(t, err)
+				assert.Equal(t, response.GetText(), hellos)
+				assert.Equal(t, callInfo.ResponseHeader().Values(handlerHeader), []string{headerValue})
+				assert.Equal(t, callInfo.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
+			})
+			t.Run("ping_error", func(t *testing.T) {
+				_, err := clientSimple.Ping(
+					context.Background(),
+					&pingv1.PingRequest{},
+				)
+				assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
+			})
+			t.Run("ping_timeout", func(t *testing.T) {
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+				defer cancel()
+				ctx, callInfo := connect.NewOutgoingContext(ctx)
+				callInfo.RequestHeader().Set(clientHeader, headerValue)
+				_, err := clientSimple.Ping(ctx, &pingv1.PingRequest{})
+				assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded)
+			})
 		})
 	}
-	testSum := func(t *testing.T, client pingv1connect.PingServiceClient) { //nolint:thelper
+	testSum := func(t *testing.T, httpClient *http.Client, url string, opts ...connect.ClientOption) { //nolint:thelper
+		client := pingv1connectgenerics.NewPingServiceClient(httpClient, url, opts...)
+
 		t.Run("sum", func(t *testing.T) {
 			const (
 				upTo   = 10
@@ -153,65 +216,128 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, got.Header().Values(handlerHeader), []string{headerValue})
 		})
 	}
-	testCountUp := func(t *testing.T, client pingv1connect.PingServiceClient) { //nolint:thelper
-		t.Run("count_up", func(t *testing.T) {
-			const upTo = 5
-			got := make([]int64, 0, upTo)
-			expect := make([]int64, 0, upTo)
-			for i := range upTo {
-				expect = append(expect, int64(i+1))
-			}
-			request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
-			request.Header().Set(clientHeader, headerValue)
-			stream, err := client.CountUp(context.Background(), request)
-			assert.Nil(t, err)
-			for stream.Receive() {
-				got = append(got, stream.Msg().GetNumber())
-			}
-			assert.Nil(t, stream.Err())
-			assert.Nil(t, stream.Close())
-			assert.Equal(t, got, expect)
+	testCountUp := func(t *testing.T, httpClient *http.Client, url string, opts ...connect.ClientOption) { //nolint:thelper
+		t.Run("generics_api", func(t *testing.T) {
+			client := pingv1connectgenerics.NewPingServiceClient(httpClient, url, opts...)
+			t.Run("count_up", func(t *testing.T) {
+				const upTo = 5
+				got := make([]int64, 0, upTo)
+				expect := make([]int64, 0, upTo)
+				for i := range upTo {
+					expect = append(expect, int64(i+1))
+				}
+				request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
+				request.Header().Set(clientHeader, headerValue)
+				stream, err := client.CountUp(context.Background(), request)
+				assert.Nil(t, err)
+				for stream.Receive() {
+					got = append(got, stream.Msg().GetNumber())
+				}
+				assert.Nil(t, stream.Err())
+				assert.Nil(t, stream.Close())
+				assert.Equal(t, got, expect)
+			})
+			t.Run("count_up_error", func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				t.Cleanup(cancel)
+				stream, err := client.CountUp(
+					ctx,
+					connect.NewRequest(&pingv1.CountUpRequest{Number: 1}),
+				)
+				assert.Nil(t, err)
+				for stream.Receive() {
+					t.Fatalf("expected error, shouldn't receive any messages")
+				}
+				assert.Equal(
+					t,
+					connect.CodeOf(stream.Err()),
+					connect.CodeInvalidArgument,
+				)
+				assert.Nil(t, stream.Close())
+			})
+			t.Run("count_up_timeout", func(t *testing.T) {
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+				t.Cleanup(cancel)
+				_, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 1}))
+				assert.NotNil(t, err)
+				assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded)
+			})
+			t.Run("count_up_cancel_after_first_response", func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				request := connect.NewRequest(&pingv1.CountUpRequest{Number: 5})
+				request.Header().Set(clientHeader, headerValue)
+				stream, err := client.CountUp(ctx, request)
+				assert.Nil(t, err)
+				assert.True(t, stream.Receive())
+				cancel()
+				assert.False(t, stream.Receive())
+				assert.NotNil(t, stream.Err())
+				assert.Equal(t, connect.CodeOf(stream.Err()), connect.CodeCanceled)
+				assert.Nil(t, stream.Close())
+			})
 		})
-		t.Run("count_up_error", func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			t.Cleanup(cancel)
-			stream, err := client.CountUp(
-				ctx,
-				connect.NewRequest(&pingv1.CountUpRequest{Number: 1}),
-			)
-			assert.Nil(t, err)
-			for stream.Receive() {
-				t.Fatalf("expected error, shouldn't receive any messages")
-			}
-			assert.Equal(
-				t,
-				connect.CodeOf(stream.Err()),
-				connect.CodeInvalidArgument,
-			)
-			assert.Nil(t, stream.Close())
-		})
-		t.Run("count_up_timeout", func(t *testing.T) {
-			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-			t.Cleanup(cancel)
-			_, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 1}))
-			assert.NotNil(t, err)
-			assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded)
-		})
-		t.Run("count_up_cancel_after_first_response", func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			request := connect.NewRequest(&pingv1.CountUpRequest{Number: 5})
-			request.Header().Set(clientHeader, headerValue)
-			stream, err := client.CountUp(ctx, request)
-			assert.Nil(t, err)
-			assert.True(t, stream.Receive())
-			cancel()
-			assert.False(t, stream.Receive())
-			assert.NotNil(t, stream.Err())
-			assert.Equal(t, connect.CodeOf(stream.Err()), connect.CodeCanceled)
-			assert.Nil(t, stream.Close())
+		t.Run("simple_api", func(t *testing.T) {
+			client := pingv1connect.NewPingServiceClient(httpClient, url, opts...)
+			t.Run("count_up", func(t *testing.T) {
+				const upTo = 5
+				got := make([]int64, 0, upTo)
+				expect := make([]int64, 0, upTo)
+				for i := range upTo {
+					expect = append(expect, int64(i+1))
+				}
+				ctx, callInfo := connect.NewOutgoingContext(context.Background())
+				callInfo.RequestHeader().Set(clientHeader, headerValue)
+				stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: upTo})
+				assert.Nil(t, err)
+				for stream.Receive() {
+					got = append(got, stream.Msg().GetNumber())
+				}
+				assert.Nil(t, stream.Err())
+				assert.Nil(t, stream.Close())
+				assert.Equal(t, got, expect)
+			})
+			t.Run("count_up_error", func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				t.Cleanup(cancel)
+				stream, err := client.CountUp(
+					ctx,
+					&pingv1.CountUpRequest{Number: 1},
+				)
+				assert.Nil(t, err)
+				for stream.Receive() {
+					t.Fatalf("expected error, shouldn't receive any messages")
+				}
+				assert.Equal(
+					t,
+					connect.CodeOf(stream.Err()),
+					connect.CodeInvalidArgument,
+				)
+				assert.Nil(t, stream.Close())
+			})
+			t.Run("count_up_timeout", func(t *testing.T) {
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+				t.Cleanup(cancel)
+				_, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 1})
+				assert.NotNil(t, err)
+				assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded)
+			})
+			t.Run("count_up_cancel_after_first_response", func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				ctx, callInfo := connect.NewOutgoingContext(ctx)
+				callInfo.RequestHeader().Set(clientHeader, headerValue)
+				stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 5})
+				assert.Nil(t, err)
+				assert.True(t, stream.Receive())
+				cancel()
+				assert.False(t, stream.Receive())
+				assert.NotNil(t, stream.Err())
+				assert.Equal(t, connect.CodeOf(stream.Err()), connect.CodeCanceled)
+				assert.Nil(t, stream.Close())
+			})
 		})
 	}
-	testCumSum := func(t *testing.T, client pingv1connect.PingServiceClient, expectSuccess bool) { //nolint:thelper
+	testCumSum := func(t *testing.T, httpClient *http.Client, url string, expectSuccess bool, opts ...connect.ClientOption) { //nolint:thelper
+		client := pingv1connectgenerics.NewPingServiceClient(httpClient, url, opts...)
 		t.Run("cumsum", func(t *testing.T) {
 			send := []int64{3, 5, 1}
 			expect := []int64{3, 8, 9}
@@ -326,7 +452,7 @@ func TestServer(t *testing.T) {
 			assert.Nil(t, stream.CloseResponse())
 		})
 	}
-	testErrors := func(t *testing.T, client pingv1connect.PingServiceClient) { //nolint:thelper
+	testErrors := func(t *testing.T, httpClient *http.Client, url string, opts ...connect.ClientOption) { //nolint:thelper
 		assertIsHTTPMiddlewareError := func(tb testing.TB, err error) {
 			tb.Helper()
 			assert.NotNil(tb, err)
@@ -340,49 +466,86 @@ func TestServer(t *testing.T) {
 			}
 			assert.Equal(tb, len(connectErr.Details()), len(expect.Details()))
 		}
-		t.Run("errors", func(t *testing.T) {
-			request := connect.NewRequest(&pingv1.FailRequest{
-				Code: int32(connect.CodeResourceExhausted),
-			})
-			request.Header().Set(clientHeader, headerValue)
+		t.Run("generics_api", func(t *testing.T) {
+			client := pingv1connectgenerics.NewPingServiceClient(httpClient, url, opts...)
+			t.Run("errors", func(t *testing.T) {
+				request := connect.NewRequest(&pingv1.FailRequest{
+					Code: int32(connect.CodeResourceExhausted),
+				})
+				request.Header().Set(clientHeader, headerValue)
 
-			response, err := client.Fail(context.Background(), request)
-			assert.Nil(t, response)
-			assert.NotNil(t, err)
-			var connectErr *connect.Error
-			ok := errors.As(err, &connectErr)
-			assert.True(t, ok, assert.Sprintf("conversion to *connect.Error"))
-			assert.True(t, connect.IsWireError(err))
-			assert.Equal(t, connectErr.Code(), connect.CodeResourceExhausted)
-			assert.Equal(t, connectErr.Error(), "resource_exhausted: "+errorMessage)
-			assert.Zero(t, connectErr.Details())
-			assert.Equal(t, connectErr.Meta().Values(handlerHeader), []string{headerValue})
-			assert.Equal(t, connectErr.Meta().Values(handlerTrailer), []string{trailerValue})
+				response, err := client.Fail(context.Background(), request)
+				assert.Nil(t, response)
+				assert.NotNil(t, err)
+				var connectErr *connect.Error
+				ok := errors.As(err, &connectErr)
+				assert.True(t, ok, assert.Sprintf("conversion to *connect.Error"))
+				assert.True(t, connect.IsWireError(err))
+				assert.Equal(t, connectErr.Code(), connect.CodeResourceExhausted)
+				assert.Equal(t, connectErr.Error(), "resource_exhausted: "+errorMessage)
+				assert.Zero(t, connectErr.Details())
+				assert.Equal(t, connectErr.Meta().Values(handlerHeader), []string{headerValue})
+				assert.Equal(t, connectErr.Meta().Values(handlerTrailer), []string{trailerValue})
+			})
+			t.Run("middleware_errors_unary", func(t *testing.T) {
+				request := connect.NewRequest(&pingv1.PingRequest{})
+				request.Header().Set(clientMiddlewareErrorHeader, headerValue)
+				_, err := client.Ping(context.Background(), request)
+				assertIsHTTPMiddlewareError(t, err)
+			})
+			t.Run("middleware_errors_streaming", func(t *testing.T) {
+				request := connect.NewRequest(&pingv1.CountUpRequest{Number: 10})
+				request.Header().Set(clientMiddlewareErrorHeader, headerValue)
+				stream, err := client.CountUp(context.Background(), request)
+				assert.Nil(t, err)
+				assert.False(t, stream.Receive())
+				assertIsHTTPMiddlewareError(t, stream.Err())
+			})
 		})
-		t.Run("middleware_errors_unary", func(t *testing.T) {
-			request := connect.NewRequest(&pingv1.PingRequest{})
-			request.Header().Set(clientMiddlewareErrorHeader, headerValue)
-			_, err := client.Ping(context.Background(), request)
-			assertIsHTTPMiddlewareError(t, err)
-		})
-		t.Run("middleware_errors_streaming", func(t *testing.T) {
-			request := connect.NewRequest(&pingv1.CountUpRequest{Number: 10})
-			request.Header().Set(clientMiddlewareErrorHeader, headerValue)
-			stream, err := client.CountUp(context.Background(), request)
-			assert.Nil(t, err)
-			assert.False(t, stream.Receive())
-			assertIsHTTPMiddlewareError(t, stream.Err())
+		t.Run("simple_api", func(t *testing.T) {
+			client := pingv1connect.NewPingServiceClient(httpClient, url, opts...)
+			t.Run("errors", func(t *testing.T) {
+				ctx, callInfo := connect.NewOutgoingContext(context.Background())
+				callInfo.RequestHeader().Set(clientHeader, headerValue)
+				response, err := client.Fail(ctx, &pingv1.FailRequest{
+					Code: int32(connect.CodeResourceExhausted),
+				})
+				assert.Nil(t, response)
+				assert.NotNil(t, err)
+				var connectErr *connect.Error
+				ok := errors.As(err, &connectErr)
+				assert.True(t, ok, assert.Sprintf("conversion to *connect.Error"))
+				assert.True(t, connect.IsWireError(err))
+				assert.Equal(t, connectErr.Code(), connect.CodeResourceExhausted)
+				assert.Equal(t, connectErr.Error(), "resource_exhausted: "+errorMessage)
+				assert.Zero(t, connectErr.Details())
+				assert.Equal(t, connectErr.Meta().Values(handlerHeader), []string{headerValue})
+				assert.Equal(t, connectErr.Meta().Values(handlerTrailer), []string{trailerValue})
+			})
+			t.Run("middleware_errors_unary", func(t *testing.T) {
+				ctx, callInfo := connect.NewOutgoingContext(context.Background())
+				callInfo.RequestHeader().Set(clientMiddlewareErrorHeader, headerValue)
+				_, err := client.Ping(ctx, &pingv1.PingRequest{})
+				assertIsHTTPMiddlewareError(t, err)
+			})
+			t.Run("middleware_errors_streaming_simple", func(t *testing.T) {
+				ctx, callInfo := connect.NewOutgoingContext(context.Background())
+				callInfo.RequestHeader().Set(clientMiddlewareErrorHeader, headerValue)
+				stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 10})
+				assert.Nil(t, err)
+				assert.False(t, stream.Receive())
+				assertIsHTTPMiddlewareError(t, stream.Err())
+			})
 		})
 	}
-	testMatrix := func(t *testing.T, client *http.Client, url string, bidi bool) { //nolint:thelper
+	testMatrix := func(t *testing.T, httpClient *http.Client, url string, bidi bool) { //nolint:thelper
 		run := func(t *testing.T, opts ...connect.ClientOption) {
 			t.Helper()
-			client := pingv1connect.NewPingServiceClient(client, url, opts...)
-			testPing(t, client)
-			testSum(t, client)
-			testCountUp(t, client)
-			testCumSum(t, client, bidi)
-			testErrors(t, client)
+			testPing(t, httpClient, url, opts...)
+			testSum(t, httpClient, url, opts...)
+			testCountUp(t, httpClient, url, opts...)
+			testCumSum(t, httpClient, url, bidi, opts...)
+			testErrors(t, httpClient, url, opts...)
 		}
 		t.Run("connect", func(t *testing.T) {
 			t.Run("proto", func(t *testing.T) {
@@ -442,8 +605,8 @@ func TestServer(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	pingRoute, pingHandler := pingv1connect.NewPingServiceHandler(
-		pingServer{checkMetadata: true},
+	pingRoute, pingHandler := pingv1connectgenerics.NewPingServiceHandler(
+		pingServerGenerics{checkMetadata: true},
 	)
 	errorWriter := connect.NewErrorWriter()
 	// Add net/http middleware to the ping service to evaluate HTTP state.
@@ -464,15 +627,15 @@ func TestServer(t *testing.T) {
 		}
 		// Check Content-Length is set correctly.
 		switch request.URL.Path {
-		case pingv1connect.PingServicePingProcedure,
-			pingv1connect.PingServiceFailProcedure,
-			pingv1connect.PingServiceCountUpProcedure:
+		case pingv1connectgenerics.PingServicePingProcedure,
+			pingv1connectgenerics.PingServiceFailProcedure,
+			pingv1connectgenerics.PingServiceCountUpProcedure:
 			// Unary requests set Content-Length to the length of the request body.
 			if request.ContentLength < 0 {
 				t.Errorf("%s: expected Content-Length >= 0, got %d", request.URL.Path, request.ContentLength)
 			}
-		case pingv1connect.PingServiceSumProcedure,
-			pingv1connect.PingServiceCumSumProcedure:
+		case pingv1connectgenerics.PingServiceSumProcedure,
+			pingv1connectgenerics.PingServiceCumSumProcedure:
 			// Streaming requests set Content-Length to -1 or 0 on empty requests.
 			if request.ContentLength > 0 {
 				t.Errorf("%s: expected Content-Length -1 or 0, got %d", request.URL.Path, request.ContentLength)
@@ -503,7 +666,7 @@ func TestConcurrentStreams(t *testing.T) {
 	}
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServerGenerics{}))
 	server := memhttptest.NewServer(t, mux)
 	var done, start sync.WaitGroup
 	start.Add(1)
@@ -511,7 +674,7 @@ func TestConcurrentStreams(t *testing.T) {
 		done.Add(1)
 		go func() {
 			defer done.Done()
-			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+			client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL())
 			var total int64
 			sum := client.CumSum(context.Background())
 			start.Wait()
@@ -566,7 +729,7 @@ func TestErrorHeaderPropagation(t *testing.T) {
 		err.Meta()["x-test-case"] = []string{testname}
 		return err
 	}
-	pingServer := &pluggablePingServer{
+	pingServer := &pluggablePingServerGenerics{
 		ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
 			return nil, newError(request.Header().Get("X-Test"), request.Header().Get("X-Test-Is-Wire") == "true")
 		},
@@ -575,7 +738,7 @@ func TestErrorHeaderPropagation(t *testing.T) {
 		},
 	}
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServer))
 	server := memhttptest.NewServer(t, mux)
 
 	assertError := func(t *testing.T, err error, allowCustomHeaders bool) {
@@ -612,42 +775,32 @@ func TestErrorHeaderPropagation(t *testing.T) {
 			assert.Equal(t, meta.Values("X-Test"), []string(nil))
 		}
 	}
-	testServices := func(t *testing.T, client pingv1connect.PingServiceClient) {
+	testServices := func(t *testing.T, opts ...connect.ClientOption) {
 		t.Helper()
-		t.Run("unary", func(t *testing.T) {
-			request := connect.NewRequest(&pingv1.PingRequest{})
-			request.Header().Set("X-Test", t.Name())
-			_, err := client.Ping(context.Background(), request)
-			if !assert.NotNil(t, err) {
-				return
-			}
-			assertError(t, err, true /* allowCustomHeaders */)
-			t.Run("wire", func(t *testing.T) {
+		t.Run("generics_api", func(t *testing.T) {
+			client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), opts...)
+			t.Run("unary", func(t *testing.T) {
 				request := connect.NewRequest(&pingv1.PingRequest{})
 				request.Header().Set("X-Test", t.Name())
-				request.Header().Set("X-Test-Is-Wire", "true")
 				_, err := client.Ping(context.Background(), request)
 				if !assert.NotNil(t, err) {
 					return
 				}
-				assertError(t, err, false /* allowCustomHeaders */)
+				assertError(t, err, true /* allowCustomHeaders */)
+				t.Run("wire", func(t *testing.T) {
+					request := connect.NewRequest(&pingv1.PingRequest{})
+					request.Header().Set("X-Test", t.Name())
+					request.Header().Set("X-Test-Is-Wire", "true")
+					_, err := client.Ping(context.Background(), request)
+					if !assert.NotNil(t, err) {
+						return
+					}
+					assertError(t, err, false /* allowCustomHeaders */)
+				})
 			})
-		})
-		t.Run("bidi", func(t *testing.T) {
-			stream := client.CumSum(context.Background())
-			stream.RequestHeader().Set("X-Test", t.Name())
-			if err := stream.Send(nil); err != nil {
-				t.Fatal(err)
-			}
-			_, err := stream.Receive()
-			if !assert.NotNil(t, err) {
-				return
-			}
-			assertError(t, err, true /* allowCustomHeaders */)
-			t.Run("wire", func(t *testing.T) {
+			t.Run("bidi", func(t *testing.T) {
 				stream := client.CumSum(context.Background())
 				stream.RequestHeader().Set("X-Test", t.Name())
-				stream.RequestHeader().Set("X-Test-Is-Wire", "true")
 				if err := stream.Send(nil); err != nil {
 					t.Fatal(err)
 				}
@@ -655,23 +808,55 @@ func TestErrorHeaderPropagation(t *testing.T) {
 				if !assert.NotNil(t, err) {
 					return
 				}
+				assertError(t, err, true /* allowCustomHeaders */)
+				t.Run("wire", func(t *testing.T) {
+					stream := client.CumSum(context.Background())
+					stream.RequestHeader().Set("X-Test", t.Name())
+					stream.RequestHeader().Set("X-Test-Is-Wire", "true")
+					if err := stream.Send(nil); err != nil {
+						t.Fatal(err)
+					}
+					_, err := stream.Receive()
+					if !assert.NotNil(t, err) {
+						return
+					}
+				})
+			})
+		})
+		t.Run("simple_api", func(t *testing.T) {
+			clientSimple := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), opts...)
+			t.Run("unary", func(t *testing.T) {
+				ctx, callInfo := connect.NewOutgoingContext(context.Background())
+				callInfo.RequestHeader().Set("X-Test", t.Name())
+				_, err := clientSimple.Ping(ctx, &pingv1.PingRequest{})
+				if !assert.NotNil(t, err) {
+					return
+				}
+				assertError(t, err, true /* allowCustomHeaders */)
+				t.Run("wire", func(t *testing.T) {
+					ctx, callInfo := connect.NewOutgoingContext(context.Background())
+					callInfo.RequestHeader().Set("X-Test", t.Name())
+					callInfo.RequestHeader().Set("X-Test-Is-Wire", "true")
+					_, err := clientSimple.Ping(ctx, &pingv1.PingRequest{})
+					if !assert.NotNil(t, err) {
+						return
+					}
+					assertError(t, err, false /* allowCustomHeaders */)
+				})
 			})
 		})
 	}
 	t.Run("connect", func(t *testing.T) {
 		t.Parallel()
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
-		testServices(t, client)
+		testServices(t)
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
-		testServices(t, client)
+		testServices(t, connect.WithGRPC())
 	})
 	t.Run("grpc-web", func(t *testing.T) {
 		t.Parallel()
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
-		testServices(t, client)
+		testServices(t, connect.WithGRPCWeb())
 	})
 }
 
@@ -683,24 +868,49 @@ func TestHeaderBasic(t *testing.T) {
 		hval = "client value"
 	)
 
-	pingServer := &pluggablePingServer{
-		ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
-			assert.Equal(t, request.Header().Get(key), cval)
-			response := connect.NewResponse(&pingv1.PingResponse{})
-			response.Header().Set(key, hval)
-			return response, nil
-		},
-	}
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
-	server := memhttptest.NewServer(t, mux)
+	t.Run("generics_api", func(t *testing.T) {
+		t.Parallel()
+		pingServer := &pluggablePingServerGenerics{
+			ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+				assert.Equal(t, request.Header().Get(key), cval)
+				response := connect.NewResponse(&pingv1.PingResponse{})
+				response.Header().Set(key, hval)
+				return response, nil
+			},
+		}
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServer))
+		server := memhttptest.NewServer(t, mux)
 
-	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
-	request := connect.NewRequest(&pingv1.PingRequest{})
-	request.Header().Set(key, cval)
-	response, err := client.Ping(context.Background(), request)
-	assert.Nil(t, err)
-	assert.Equal(t, response.Header().Get(key), hval)
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL())
+		request := connect.NewRequest(&pingv1.PingRequest{})
+		request.Header().Set(key, cval)
+		response, err := client.Ping(context.Background(), request)
+		assert.Nil(t, err)
+		assert.Equal(t, response.Header().Get(key), hval)
+	})
+	t.Run("simple_api", func(t *testing.T) {
+		t.Parallel()
+		pingServer := &pluggablePingServer{
+			ping: func(ctx context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+				callInfo, ok := connect.CallInfoFromContext(ctx)
+				assert.True(t, ok)
+				assert.Equal(t, callInfo.RequestHeader().Get(key), cval)
+				callInfo.ResponseHeader().Set(key, hval)
+				return &pingv1.PingResponse{}, nil
+			},
+		}
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+		server := memhttptest.NewServer(t, mux)
+
+		ctx, callInfo := connect.NewOutgoingContext(context.Background())
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		callInfo.RequestHeader().Set(key, cval)
+		_, err := client.Ping(ctx, &pingv1.PingRequest{})
+		assert.Nil(t, err)
+		assert.Equal(t, callInfo.ResponseHeader().Get(key), hval)
+	})
 }
 
 func TestHeaderHost(t *testing.T) {
@@ -710,83 +920,157 @@ func TestHeaderHost(t *testing.T) {
 		cval = "buf.build"
 	)
 
-	pingServer := &pluggablePingServer{
-		ping: func(_ context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
-			assert.Equal(t, request.Header().Get(key), cval)
-			response := connect.NewResponse(&pingv1.PingResponse{})
-			return response, nil
-		},
-	}
+	t.Run("generics_api", func(t *testing.T) {
+		pingServer := &pluggablePingServerGenerics{
+			ping: func(_ context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+				assert.Equal(t, request.Header().Get(key), cval)
+				response := connect.NewResponse(&pingv1.PingResponse{})
+				return response, nil
+			},
+		}
 
-	newHTTP2Server := func(t *testing.T) *memhttp.Server {
-		t.Helper()
-		mux := http.NewServeMux()
-		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
-		server := memhttptest.NewServer(t, mux)
-		return server
-	}
+		newHTTP2Server := func(t *testing.T) *memhttp.Server {
+			t.Helper()
+			mux := http.NewServeMux()
+			mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServer))
+			server := memhttptest.NewServer(t, mux)
+			return server
+		}
 
-	callWithHost := func(t *testing.T, client pingv1connect.PingServiceClient) {
-		t.Helper()
+		callWithHost := func(t *testing.T, client pingv1connectgenerics.PingServiceClient) {
+			t.Helper()
 
-		request := connect.NewRequest(&pingv1.PingRequest{})
-		request.Header().Set(key, cval)
-		response, err := client.Ping(context.Background(), request)
-		assert.Nil(t, err)
-		assert.Equal(t, response.Header().Get(key), "")
-	}
+			request := connect.NewRequest(&pingv1.PingRequest{})
+			request.Header().Set(key, cval)
+			response, err := client.Ping(context.Background(), request)
+			assert.Nil(t, err)
+			assert.Equal(t, response.Header().Get(key), "")
+		}
+		t.Run("connect", func(t *testing.T) {
+			t.Parallel()
+			server := newHTTP2Server(t)
+			client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL())
+			callWithHost(t, client)
+		})
 
-	t.Run("connect", func(t *testing.T) {
-		t.Parallel()
-		server := newHTTP2Server(t)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
-		callWithHost(t, client)
+		t.Run("grpc", func(t *testing.T) {
+			t.Parallel()
+			server := newHTTP2Server(t)
+			client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
+			callWithHost(t, client)
+		})
+
+		t.Run("grpc-web", func(t *testing.T) {
+			t.Parallel()
+			server := newHTTP2Server(t)
+			client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
+			callWithHost(t, client)
+		})
 	})
-
-	t.Run("grpc", func(t *testing.T) {
+	t.Run("simple_api", func(t *testing.T) {
 		t.Parallel()
-		server := newHTTP2Server(t)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
-		callWithHost(t, client)
-	})
+		pingServer := &pluggablePingServer{
+			ping: func(ctx context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+				callInfo, ok := connect.CallInfoFromContext(ctx)
+				assert.True(t, ok)
+				assert.Equal(t, callInfo.RequestHeader().Get(key), cval)
+				return &pingv1.PingResponse{}, nil
+			},
+		}
 
-	t.Run("grpc-web", func(t *testing.T) {
-		t.Parallel()
-		server := newHTTP2Server(t)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
-		callWithHost(t, client)
+		newHTTP2Server := func(t *testing.T) *memhttp.Server {
+			t.Helper()
+			mux := http.NewServeMux()
+			mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+			server := memhttptest.NewServer(t, mux)
+			return server
+		}
+
+		callWithHost := func(t *testing.T, client pingv1connect.PingServiceClient) {
+			t.Helper()
+			ctx, callInfo := connect.NewOutgoingContext(context.Background())
+			callInfo.RequestHeader().Set(key, cval)
+			_, err := client.Ping(ctx, &pingv1.PingRequest{})
+			assert.Nil(t, err)
+			assert.Equal(t, callInfo.ResponseHeader().Get(key), "")
+		}
+		t.Run("connect", func(t *testing.T) {
+			t.Parallel()
+			server := newHTTP2Server(t)
+			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+			callWithHost(t, client)
+		})
+
+		t.Run("grpc", func(t *testing.T) {
+			t.Parallel()
+			server := newHTTP2Server(t)
+			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
+			callWithHost(t, client)
+		})
+
+		t.Run("grpc-web", func(t *testing.T) {
+			t.Parallel()
+			server := newHTTP2Server(t)
+			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
+			callWithHost(t, client)
+		})
 	})
 }
 
 func TestTimeoutParsing(t *testing.T) {
 	t.Parallel()
 	const timeout = 10 * time.Minute
-	pingServer := &pluggablePingServer{
-		ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
-			deadline, ok := ctx.Deadline()
-			assert.True(t, ok)
-			remaining := time.Until(deadline)
-			assert.True(t, remaining > 0)
-			assert.True(t, remaining <= timeout)
-			return connect.NewResponse(&pingv1.PingResponse{}), nil
-		},
-	}
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
-	server := memhttptest.NewServer(t, mux)
+	t.Run("generics_api", func(t *testing.T) {
+		t.Parallel()
+		pingServer := &pluggablePingServerGenerics{
+			ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+				deadline, ok := ctx.Deadline()
+				assert.True(t, ok)
+				remaining := time.Until(deadline)
+				assert.True(t, remaining > 0)
+				assert.True(t, remaining <= timeout)
+				return connect.NewResponse(&pingv1.PingResponse{}), nil
+			},
+		}
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServer))
+		server := memhttptest.NewServer(t, mux)
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
-	_, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
-	assert.Nil(t, err)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL())
+		_, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
+		assert.Nil(t, err)
+	})
+	t.Run("simple_api", func(t *testing.T) {
+		t.Parallel()
+		pingServer := &pluggablePingServer{
+			ping: func(ctx context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+				deadline, ok := ctx.Deadline()
+				assert.True(t, ok)
+				remaining := time.Until(deadline)
+				assert.True(t, remaining > 0)
+				assert.True(t, remaining <= timeout)
+				return &pingv1.PingResponse{}, nil
+			},
+		}
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+		server := memhttptest.NewServer(t, mux)
+
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		_, err := client.Ping(ctx, &pingv1.PingRequest{})
+		assert.Nil(t, err)
+	})
 }
 
 func TestFailCodec(t *testing.T) {
 	t.Parallel()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
 	server := memhttptest.NewServer(t, handler)
-	client := pingv1connect.NewPingServiceClient(
+	client := pingv1connectgenerics.NewPingServiceClient(
 		server.Client(),
 		server.URL(),
 		connect.WithCodec(failCodec{}),
@@ -803,7 +1087,7 @@ func TestContextError(t *testing.T) {
 	t.Parallel()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
 	server := memhttptest.NewServer(t, handler)
-	client := pingv1connect.NewPingServiceClient(
+	client := pingv1connectgenerics.NewPingServiceClient(
 		server.Client(),
 		server.URL(),
 	)
@@ -821,22 +1105,8 @@ func TestContextError(t *testing.T) {
 func TestGRPCMarshalStatusError(t *testing.T) {
 	t.Parallel()
 
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(
-		pingServer{
-			// Include error details in the response, so that the Status protobuf will be marshaled.
-			includeErrorDetails: true,
-		},
-		// We're using a codec that will fail to marshal the Status protobuf, which means the returned error will be ignored
-		connect.WithCodec(failCodec{}),
-	))
-	server := memhttptest.NewServer(t, mux)
-
-	assertInternalError := func(tb testing.TB, opts ...connect.ClientOption) {
+	assertError := func(tb testing.TB, err error) {
 		tb.Helper()
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), opts...)
-		request := connect.NewRequest(&pingv1.FailRequest{Code: int32(connect.CodeResourceExhausted)})
-		_, err := client.Fail(context.Background(), request)
 		tb.Log(err)
 		assert.NotNil(t, err, assert.Sprintf("expected an error"))
 		var connectErr *connect.Error
@@ -850,10 +1120,58 @@ func TestGRPCMarshalStatusError(t *testing.T) {
 		)
 	}
 
-	// Only applies to gRPC protocols, where we're marshaling the Status protobuf
-	// message to binary.
-	assertInternalError(t, connect.WithGRPC())
-	assertInternalError(t, connect.WithGRPCWeb())
+	t.Run("generics_api", func(t *testing.T) {
+		t.Parallel()
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connectgenerics.NewPingServiceHandler(
+			pingServerGenerics{
+				// Include error details in the response, so that the Status protobuf will be marshaled.
+				includeErrorDetails: true,
+			},
+			// We're using a codec that will fail to marshal the Status protobuf, which means the returned error will be ignored
+			connect.WithCodec(failCodec{}),
+		))
+		server := memhttptest.NewServer(t, mux)
+
+		assertInternalError := func(tb testing.TB, opts ...connect.ClientOption) {
+			tb.Helper()
+			client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), opts...)
+			request := connect.NewRequest(&pingv1.FailRequest{Code: int32(connect.CodeResourceExhausted)})
+			_, err := client.Fail(context.Background(), request)
+			assertError(tb, err)
+		}
+
+		// Only applies to gRPC protocols, where we're marshaling the Status protobuf
+		// message to binary.
+		assertInternalError(t, connect.WithGRPC())
+		assertInternalError(t, connect.WithGRPCWeb())
+	})
+	t.Run("simple_api", func(t *testing.T) {
+		t.Parallel()
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connect.NewPingServiceHandler(
+			pingServer{
+				// Include error details in the response, so that the Status protobuf will be marshaled.
+				includeErrorDetails: true,
+			},
+			// We're using a codec that will fail to marshal the Status protobuf, which means the returned error will be ignored
+			connect.WithCodec(failCodec{}),
+		))
+		server := memhttptest.NewServer(t, mux)
+
+		assertInternalError := func(tb testing.TB, opts ...connect.ClientOption) {
+			tb.Helper()
+			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), opts...)
+			request := &pingv1.FailRequest{Code: int32(connect.CodeResourceExhausted)}
+			_, err := client.Fail(context.Background(), request)
+			assertError(tb, err)
+		}
+
+		// Only applies to gRPC protocols, where we're marshaling the Status protobuf
+		// message to binary.
+		assertInternalError(t, connect.WithGRPC())
+		assertInternalError(t, connect.WithGRPCWeb())
+	})
 }
 
 func TestGRPCMissingTrailersError(t *testing.T) {
@@ -865,13 +1183,6 @@ func TestGRPCMissingTrailersError(t *testing.T) {
 			handler.ServeHTTP(&trimTrailerWriter{w: w}, r)
 		})
 	}
-
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(
-		pingServer{checkMetadata: true},
-	))
-	server := memhttptest.NewServer(t, trimTrailers(mux))
-	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
 
 	assertErrorNoTrailers := func(t *testing.T, err error) {
 		t.Helper()
@@ -893,58 +1204,105 @@ func TestGRPCMissingTrailersError(t *testing.T) {
 		}
 	}
 
-	t.Run("ping", func(t *testing.T) {
-		t.Parallel()
-		request := connect.NewRequest(&pingv1.PingRequest{Number: 1, Text: "foobar"})
-		_, err := client.Ping(context.Background(), request)
-		assertErrorNoTrailers(t, err)
+	t.Run("generics_api", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connectgenerics.NewPingServiceHandler(
+			pingServerGenerics{checkMetadata: true},
+		))
+		server := memhttptest.NewServer(t, trimTrailers(mux))
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
+		t.Run("unary", func(t *testing.T) {
+			t.Parallel()
+			request := connect.NewRequest(&pingv1.PingRequest{Number: 1, Text: "foobar"})
+			_, err := client.Ping(context.Background(), request)
+			assertErrorNoTrailers(t, err)
+		})
+		t.Run("client_stream", func(t *testing.T) {
+			t.Parallel()
+			stream := client.Sum(context.Background())
+			err := stream.Send(&pingv1.SumRequest{Number: 1})
+			assertNilOrEOF(t, err)
+			_, err = stream.CloseAndReceive()
+			assertErrorNoTrailers(t, err)
+		})
+		t.Run("server_stream", func(t *testing.T) {
+			t.Parallel()
+			stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
+			assert.Nil(t, err)
+			assert.False(t, stream.Receive())
+			assertErrorNoTrailers(t, stream.Err())
+		})
+		t.Run("bidi", func(t *testing.T) {
+			t.Parallel()
+			stream := client.CumSum(context.Background())
+			assertNilOrEOF(t, stream.Send(&pingv1.CumSumRequest{Number: 10}))
+			_, err := stream.Receive()
+			assertErrorNoTrailers(t, err)
+			assert.Nil(t, stream.CloseResponse())
+		})
+		t.Run("bidi_empty_stream", func(t *testing.T) {
+			t.Parallel()
+			stream := client.CumSum(context.Background())
+			assert.Nil(t, stream.CloseRequest())
+			response, err := stream.Receive()
+			assert.Nil(t, response)
+			assertErrorNoTrailers(t, err)
+			assert.Nil(t, stream.CloseResponse())
+		})
 	})
-	t.Run("sum", func(t *testing.T) {
+
+	t.Run("simple_api", func(t *testing.T) {
 		t.Parallel()
-		stream := client.Sum(context.Background())
-		err := stream.Send(&pingv1.SumRequest{Number: 1})
-		assertNilOrEOF(t, err)
-		_, err = stream.CloseAndReceive()
-		assertErrorNoTrailers(t, err)
-	})
-	t.Run("count_up", func(t *testing.T) {
-		t.Parallel()
-		stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
-		assert.Nil(t, err)
-		assert.False(t, stream.Receive())
-		assertErrorNoTrailers(t, stream.Err())
-	})
-	t.Run("cumsum", func(t *testing.T) {
-		t.Parallel()
-		stream := client.CumSum(context.Background())
-		assertNilOrEOF(t, stream.Send(&pingv1.CumSumRequest{Number: 10}))
-		_, err := stream.Receive()
-		assertErrorNoTrailers(t, err)
-		assert.Nil(t, stream.CloseResponse())
-	})
-	t.Run("cumsum_empty_stream", func(t *testing.T) {
-		t.Parallel()
-		stream := client.CumSum(context.Background())
-		assert.Nil(t, stream.CloseRequest())
-		response, err := stream.Receive()
-		assert.Nil(t, response)
-		assertErrorNoTrailers(t, err)
-		assert.Nil(t, stream.CloseResponse())
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connect.NewPingServiceHandler(
+			pingServer{checkMetadata: true},
+		))
+		server := memhttptest.NewServer(t, trimTrailers(mux))
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
+		t.Run("unary", func(t *testing.T) {
+			t.Parallel()
+			request := &pingv1.PingRequest{Number: 1, Text: "foobar"}
+			_, err := client.Ping(context.Background(), request)
+			assertErrorNoTrailers(t, err)
+		})
+		t.Run("server_stream", func(t *testing.T) {
+			t.Parallel()
+			stream, err := client.CountUp(context.Background(), &pingv1.CountUpRequest{Number: 10})
+			assert.Nil(t, err)
+			assert.False(t, stream.Receive())
+			assertErrorNoTrailers(t, stream.Err())
+		})
 	})
 }
 
 func TestUnavailableIfHostInvalid(t *testing.T) {
 	t.Parallel()
-	client := pingv1connect.NewPingServiceClient(
-		http.DefaultClient,
-		"https://api.invalid/",
-	)
-	_, err := client.Ping(
-		context.Background(),
-		connect.NewRequest(&pingv1.PingRequest{}),
-	)
-	assert.NotNil(t, err)
-	assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
+	t.Run("generics_api", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connectgenerics.NewPingServiceClient(
+			http.DefaultClient,
+			"https://api.invalid/",
+		)
+		_, err := client.Ping(
+			context.Background(),
+			connect.NewRequest(&pingv1.PingRequest{}),
+		)
+		assert.NotNil(t, err)
+		assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
+	})
+	t.Run("simple_api", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connect.NewPingServiceClient(
+			http.DefaultClient,
+			"https://api.invalid/",
+		)
+		_, err := client.Ping(
+			context.Background(),
+			&pingv1.PingRequest{},
+		)
+		assert.NotNil(t, err)
+		assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
+	})
 }
 
 func TestBidiRequiresHTTP2(t *testing.T) {
@@ -955,7 +1313,7 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 		assert.Nil(t, err)
 	})
 	server := memhttptest.NewServer(t, handler)
-	client := pingv1connect.NewPingServiceClient(
+	client := pingv1connectgenerics.NewPingServiceClient(
 		&http.Client{Transport: server.TransportHTTP1()},
 		server.URL(),
 	)
@@ -978,38 +1336,76 @@ func TestBidiRequiresHTTP2(t *testing.T) {
 
 func TestCompressMinBytesClient(t *testing.T) {
 	t.Parallel()
-	assertContentType := func(tb testing.TB, text, expect string) {
-		tb.Helper()
-		mux := http.NewServeMux()
-		mux.Handle("/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-			writer.Header().Set("Content-Type", "application/proto")
-			assert.Equal(tb, request.Header.Get("Content-Encoding"), expect)
-		}))
-		server := memhttptest.NewServer(t, mux)
-		_, err := pingv1connect.NewPingServiceClient(
-			server.Client(),
-			server.URL(),
-			connect.WithSendGzip(),
-			connect.WithCompressMinBytes(8),
-		).Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Text: text}))
-		assert.Nil(tb, err)
-	}
-	t.Run("request_uncompressed", func(t *testing.T) {
+	t.Run("generics_api", func(t *testing.T) {
 		t.Parallel()
-		assertContentType(t, "ping", "")
-	})
-	t.Run("request_compressed", func(t *testing.T) {
-		t.Parallel()
-		assertContentType(t, "pingping", "gzip")
-	})
+		assertContentType := func(tb testing.TB, text, expect string) {
+			tb.Helper()
+			mux := http.NewServeMux()
+			mux.Handle("/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				writer.Header().Set("Content-Type", "application/proto")
+				assert.Equal(tb, request.Header.Get("Content-Encoding"), expect)
+			}))
+			server := memhttptest.NewServer(t, mux)
+			_, err := pingv1connectgenerics.NewPingServiceClient(
+				server.Client(),
+				server.URL(),
+				connect.WithSendGzip(),
+				connect.WithCompressMinBytes(8),
+			).Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Text: text}))
+			assert.Nil(tb, err)
+		}
+		t.Run("request_uncompressed", func(t *testing.T) {
+			t.Parallel()
+			assertContentType(t, "ping", "")
+		})
+		t.Run("request_compressed", func(t *testing.T) {
+			t.Parallel()
+			assertContentType(t, "pingping", "gzip")
+		})
 
-	t.Run("request_uncompressed", func(t *testing.T) {
-		t.Parallel()
-		assertContentType(t, "ping", "")
+		t.Run("request_uncompressed", func(t *testing.T) {
+			t.Parallel()
+			assertContentType(t, "ping", "")
+		})
+		t.Run("request_compressed", func(t *testing.T) {
+			t.Parallel()
+			assertContentType(t, strings.Repeat("ping", 2), "gzip")
+		})
 	})
-	t.Run("request_compressed", func(t *testing.T) {
-		t.Parallel()
-		assertContentType(t, strings.Repeat("ping", 2), "gzip")
+	t.Run("simple_api", func(t *testing.T) {
+		assertContentType := func(tb testing.TB, text, expect string) {
+			tb.Helper()
+			mux := http.NewServeMux()
+			mux.Handle("/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				writer.Header().Set("Content-Type", "application/proto")
+				assert.Equal(tb, request.Header.Get("Content-Encoding"), expect)
+			}))
+			server := memhttptest.NewServer(t, mux)
+			_, err := pingv1connect.NewPingServiceClient(
+				server.Client(),
+				server.URL(),
+				connect.WithSendGzip(),
+				connect.WithCompressMinBytes(8),
+			).Ping(context.Background(), &pingv1.PingRequest{Text: text})
+			assert.Nil(tb, err)
+		}
+		t.Run("request_uncompressed", func(t *testing.T) {
+			t.Parallel()
+			assertContentType(t, "ping", "")
+		})
+		t.Run("request_compressed", func(t *testing.T) {
+			t.Parallel()
+			assertContentType(t, "pingping", "gzip")
+		})
+
+		t.Run("request_uncompressed", func(t *testing.T) {
+			t.Parallel()
+			assertContentType(t, "ping", "")
+		})
+		t.Run("request_compressed", func(t *testing.T) {
+			t.Parallel()
+			assertContentType(t, strings.Repeat("ping", 2), "gzip")
+		})
 	})
 }
 
@@ -1070,12 +1466,12 @@ func TestCustomCompression(t *testing.T) {
 		}
 		return w
 	}
-	mux.Handle(pingv1connect.NewPingServiceHandler(
-		pingServer{},
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(
+		pingServerGenerics{},
 		connect.WithCompression(compressionName, decompressor, compressor),
 	))
 	server := memhttptest.NewServer(t, mux)
-	client := pingv1connect.NewPingServiceClient(server.Client(),
+	client := pingv1connectgenerics.NewPingServiceClient(server.Client(),
 		server.URL(),
 		connect.WithAcceptCompression(compressionName, decompressor, compressor),
 		connect.WithSendCompression(compressionName),
@@ -1092,9 +1488,9 @@ func TestClientWithoutGzipSupport(t *testing.T) {
 	// asymmetric compression.
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServerGenerics{}))
 	server := memhttptest.NewServer(t, mux)
-	client := pingv1connect.NewPingServiceClient(server.Client(),
+	client := pingv1connectgenerics.NewPingServiceClient(server.Client(),
 		server.URL(),
 		connect.WithAcceptCompression("gzip", nil, nil),
 		connect.WithSendGzip(),
@@ -1109,14 +1505,14 @@ func TestClientWithoutGzipSupport(t *testing.T) {
 func TestInvalidHeaderTimeout(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServerGenerics{}))
 	server := memhttptest.NewServer(t, mux)
 	getPingResponseWithTimeout := func(t *testing.T, timeout string) *http.Response {
 		t.Helper()
 		request, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodPost,
-			server.URL()+pingv1connect.PingServicePingProcedure,
+			server.URL()+pingv1connectgenerics.PingServicePingProcedure,
 			strings.NewReader("{}"),
 		)
 		assert.Nil(t, err)
@@ -1142,9 +1538,9 @@ func TestInvalidHeaderTimeout(t *testing.T) {
 func TestInterceptorReturnsWrongType(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServerGenerics{}))
 	server := memhttptest.NewServer(t, mux)
-	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithInterceptors(connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
+	client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithInterceptors(connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, request connect.AnyRequest) (connect.AnyResponse, error) {
 			if _, err := next(ctx, request); err != nil {
 				return nil, err
@@ -1166,17 +1562,17 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	readMaxBytes := 1024
-	mux.Handle(pingv1connect.NewPingServiceHandler(
-		pingServer{},
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(
+		pingServerGenerics{},
 		connect.WithConditionalHandlerOptions(func(spec connect.Spec) []connect.HandlerOption {
 			var options []connect.HandlerOption
-			if spec.Procedure == pingv1connect.PingServicePingProcedure {
+			if spec.Procedure == pingv1connectgenerics.PingServicePingProcedure {
 				options = append(options, connect.WithReadMaxBytes(readMaxBytes))
 			}
 			return options
 		}),
 	))
-	readMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, compressed bool) {
+	readMaxBytesMatrix := func(t *testing.T, client pingv1connectgenerics.PingServiceClient, compressed bool) {
 		t.Helper()
 		t.Run("equal_read_max", func(t *testing.T) {
 			t.Parallel()
@@ -1227,37 +1623,37 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 	t.Run("connect", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL())
 		readMaxBytesMatrix(t, client, false)
 	})
 	t.Run("connect_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendGzip())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendGzip())
 		readMaxBytesMatrix(t, client, true)
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
 		readMaxBytesMatrix(t, client, false)
 	})
 	t.Run("grpc_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC(), connect.WithSendGzip())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC(), connect.WithSendGzip())
 		readMaxBytesMatrix(t, client, true)
 	})
 	t.Run("grpcweb", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
 		readMaxBytesMatrix(t, client, false)
 	})
 	t.Run("grpcweb_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb(), connect.WithSendGzip())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb(), connect.WithSendGzip())
 		readMaxBytesMatrix(t, client, true)
 	})
 }
@@ -1268,9 +1664,9 @@ func TestHandlerWithHTTPMaxBytes(t *testing.T) {
 	t.Parallel()
 	const readMaxBytes = 128
 	mux := http.NewServeMux()
-	pingRoute, pingHandler := pingv1connect.NewPingServiceHandler(pingServer{})
+	pingRoute, pingHandler := pingv1connectgenerics.NewPingServiceHandler(pingServerGenerics{})
 	mux.Handle(pingRoute, http.MaxBytesHandler(pingHandler, readMaxBytes))
-	run := func(t *testing.T, client pingv1connect.PingServiceClient, compressed bool) {
+	run := func(t *testing.T, client pingv1connectgenerics.PingServiceClient, compressed bool) {
 		t.Helper()
 		t.Run("below_read_max", func(t *testing.T) {
 			t.Parallel()
@@ -1308,37 +1704,37 @@ func TestHandlerWithHTTPMaxBytes(t *testing.T) {
 	t.Run("connect", func(t *testing.T) {
 		t.Parallel()
 		server := memhttptest.NewServer(t, mux)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL())
 		run(t, client, false)
 	})
 	t.Run("connect_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := memhttptest.NewServer(t, mux)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendGzip())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendGzip())
 		run(t, client, true)
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()
 		server := memhttptest.NewServer(t, mux)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
 		run(t, client, false)
 	})
 	t.Run("grpc_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := memhttptest.NewServer(t, mux)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC(), connect.WithSendGzip())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC(), connect.WithSendGzip())
 		run(t, client, true)
 	})
 	t.Run("grpcweb", func(t *testing.T) {
 		t.Parallel()
 		server := memhttptest.NewServer(t, mux)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
 		run(t, client, false)
 	})
 	t.Run("grpcweb_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := memhttptest.NewServer(t, mux)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb(), connect.WithSendGzip())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb(), connect.WithSendGzip())
 		run(t, client, true)
 	})
 }
@@ -1354,14 +1750,14 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 		} else {
 			compressionOption = connect.WithCompressMinBytes(math.MaxInt)
 		}
-		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}, compressionOption))
+		mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServerGenerics{}, compressionOption))
 		server := memhttptest.NewServer(t, mux)
 		return server
 	}
 	serverUncompressed := createServer(t, false)
 	serverCompressed := createServer(t, true)
 	readMaxBytes := 1024
-	readMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, compressed bool) {
+	readMaxBytesMatrix := func(t *testing.T, client pingv1connectgenerics.PingServiceClient, compressed bool) {
 		t.Helper()
 		t.Run("equal_read_max", func(t *testing.T) {
 			t.Parallel()
@@ -1403,32 +1799,32 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 	}
 	t.Run("connect", func(t *testing.T) {
 		t.Parallel()
-		client := pingv1connect.NewPingServiceClient(serverUncompressed.Client(), serverUncompressed.URL(), connect.WithReadMaxBytes(readMaxBytes))
+		client := pingv1connectgenerics.NewPingServiceClient(serverUncompressed.Client(), serverUncompressed.URL(), connect.WithReadMaxBytes(readMaxBytes))
 		readMaxBytesMatrix(t, client, false)
 	})
 	t.Run("connect_gzip", func(t *testing.T) {
 		t.Parallel()
-		client := pingv1connect.NewPingServiceClient(serverCompressed.Client(), serverCompressed.URL(), connect.WithReadMaxBytes(readMaxBytes))
+		client := pingv1connectgenerics.NewPingServiceClient(serverCompressed.Client(), serverCompressed.URL(), connect.WithReadMaxBytes(readMaxBytes))
 		readMaxBytesMatrix(t, client, true)
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()
-		client := pingv1connect.NewPingServiceClient(serverUncompressed.Client(), serverUncompressed.URL(), connect.WithReadMaxBytes(readMaxBytes), connect.WithGRPC())
+		client := pingv1connectgenerics.NewPingServiceClient(serverUncompressed.Client(), serverUncompressed.URL(), connect.WithReadMaxBytes(readMaxBytes), connect.WithGRPC())
 		readMaxBytesMatrix(t, client, false)
 	})
 	t.Run("grpc_gzip", func(t *testing.T) {
 		t.Parallel()
-		client := pingv1connect.NewPingServiceClient(serverCompressed.Client(), serverCompressed.URL(), connect.WithReadMaxBytes(readMaxBytes), connect.WithGRPC())
+		client := pingv1connectgenerics.NewPingServiceClient(serverCompressed.Client(), serverCompressed.URL(), connect.WithReadMaxBytes(readMaxBytes), connect.WithGRPC())
 		readMaxBytesMatrix(t, client, true)
 	})
 	t.Run("grpcweb", func(t *testing.T) {
 		t.Parallel()
-		client := pingv1connect.NewPingServiceClient(serverUncompressed.Client(), serverUncompressed.URL(), connect.WithReadMaxBytes(readMaxBytes), connect.WithGRPCWeb())
+		client := pingv1connectgenerics.NewPingServiceClient(serverUncompressed.Client(), serverUncompressed.URL(), connect.WithReadMaxBytes(readMaxBytes), connect.WithGRPCWeb())
 		readMaxBytesMatrix(t, client, false)
 	})
 	t.Run("grpcweb_gzip", func(t *testing.T) {
 		t.Parallel()
-		client := pingv1connect.NewPingServiceClient(serverCompressed.Client(), serverCompressed.URL(), connect.WithReadMaxBytes(readMaxBytes), connect.WithGRPCWeb())
+		client := pingv1connectgenerics.NewPingServiceClient(serverCompressed.Client(), serverCompressed.URL(), connect.WithReadMaxBytes(readMaxBytes), connect.WithGRPCWeb())
 		readMaxBytesMatrix(t, client, true)
 	})
 }
@@ -1436,7 +1832,7 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 func TestHandlerWithSendMaxBytes(t *testing.T) {
 	t.Parallel()
 	sendMaxBytes := 1024
-	sendMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, compressed bool) {
+	sendMaxBytesMatrix := func(t *testing.T, client pingv1connectgenerics.PingServiceClient, compressed bool) {
 		t.Helper()
 		t.Run("equal_send_max", func(t *testing.T) {
 			t.Parallel()
@@ -1496,8 +1892,8 @@ func TestHandlerWithSendMaxBytes(t *testing.T) {
 		} else {
 			options = append(options, connect.WithCompressMinBytes(math.MaxInt))
 		}
-		mux.Handle(pingv1connect.NewPingServiceHandler(
-			pingServer{},
+		mux.Handle(pingv1connectgenerics.NewPingServiceHandler(
+			pingServerGenerics{},
 			options...,
 		))
 		server := memhttptest.NewServer(t, mux)
@@ -1506,37 +1902,37 @@ func TestHandlerWithSendMaxBytes(t *testing.T) {
 	t.Run("connect", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t, false, sendMaxBytes)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL())
 		sendMaxBytesMatrix(t, client, false)
 	})
 	t.Run("connect_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t, true, sendMaxBytes)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL())
 		sendMaxBytesMatrix(t, client, true)
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t, false, sendMaxBytes)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
 		sendMaxBytesMatrix(t, client, false)
 	})
 	t.Run("grpc_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t, true, sendMaxBytes)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
 		sendMaxBytesMatrix(t, client, true)
 	})
 	t.Run("grpcweb", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t, false, sendMaxBytes)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
 		sendMaxBytesMatrix(t, client, false)
 	})
 	t.Run("grpcweb_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t, true, sendMaxBytes)
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
 		sendMaxBytesMatrix(t, client, true)
 	})
 }
@@ -1544,9 +1940,9 @@ func TestHandlerWithSendMaxBytes(t *testing.T) {
 func TestClientWithSendMaxBytes(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServerGenerics{}))
 	server := memhttptest.NewServer(t, mux)
-	sendMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, sendMaxBytes int, compressed bool) {
+	sendMaxBytesMatrix := func(t *testing.T, client pingv1connectgenerics.PingServiceClient, sendMaxBytes int, compressed bool) {
 		t.Helper()
 		t.Run("equal_send_max", func(t *testing.T) {
 			t.Parallel()
@@ -1597,37 +1993,37 @@ func TestClientWithSendMaxBytes(t *testing.T) {
 	t.Run("connect", func(t *testing.T) {
 		t.Parallel()
 		sendMaxBytes := 1024
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendMaxBytes(sendMaxBytes))
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendMaxBytes(sendMaxBytes))
 		sendMaxBytesMatrix(t, client, sendMaxBytes, false)
 	})
 	t.Run("connect_gzip", func(t *testing.T) {
 		t.Parallel()
 		sendMaxBytes := 1024
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendMaxBytes(sendMaxBytes), connect.WithSendGzip())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendMaxBytes(sendMaxBytes), connect.WithSendGzip())
 		sendMaxBytesMatrix(t, client, sendMaxBytes, true)
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()
 		sendMaxBytes := 1024
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendMaxBytes(sendMaxBytes), connect.WithGRPC())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendMaxBytes(sendMaxBytes), connect.WithGRPC())
 		sendMaxBytesMatrix(t, client, sendMaxBytes, false)
 	})
 	t.Run("grpc_gzip", func(t *testing.T) {
 		t.Parallel()
 		sendMaxBytes := 1024
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendMaxBytes(sendMaxBytes), connect.WithGRPC(), connect.WithSendGzip())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendMaxBytes(sendMaxBytes), connect.WithGRPC(), connect.WithSendGzip())
 		sendMaxBytesMatrix(t, client, sendMaxBytes, true)
 	})
 	t.Run("grpcweb", func(t *testing.T) {
 		t.Parallel()
 		sendMaxBytes := 1024
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendMaxBytes(sendMaxBytes), connect.WithGRPCWeb())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendMaxBytes(sendMaxBytes), connect.WithGRPCWeb())
 		sendMaxBytesMatrix(t, client, sendMaxBytes, false)
 	})
 	t.Run("grpcweb_gzip", func(t *testing.T) {
 		t.Parallel()
 		sendMaxBytes := 1024
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendMaxBytes(sendMaxBytes), connect.WithGRPCWeb(), connect.WithSendGzip())
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithSendMaxBytes(sendMaxBytes), connect.WithGRPCWeb(), connect.WithSendGzip())
 		sendMaxBytesMatrix(t, client, sendMaxBytes, true)
 	})
 }
@@ -1637,16 +2033,16 @@ func TestBidiStreamServerSendsFirstMessage(t *testing.T) {
 	run := func(t *testing.T, opts ...connect.ClientOption) {
 		t.Helper()
 		headersSent := make(chan struct{})
-		pingServer := &pluggablePingServer{
+		pingServer := &pluggablePingServerGenerics{
 			cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
 				close(headersSent)
 				return nil
 			},
 		}
 		mux := http.NewServeMux()
-		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+		mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServer))
 		server := memhttptest.NewServer(t, mux)
-		client := pingv1connect.NewPingServiceClient(
+		client := pingv1connectgenerics.NewPingServiceClient(
 			server.Client(),
 			server.URL(),
 			connect.WithClientOptions(opts...),
@@ -1680,164 +2076,248 @@ func TestBidiStreamServerSendsFirstMessage(t *testing.T) {
 
 func TestStreamForServer(t *testing.T) {
 	t.Parallel()
-	newPingClient := func(t *testing.T, pingServer pingv1connect.PingServiceHandler) pingv1connect.PingServiceClient {
-		t.Helper()
-		mux := http.NewServeMux()
-		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
-		server := memhttptest.NewServer(t, mux)
-		client := pingv1connect.NewPingServiceClient(
-			server.Client(),
-			server.URL(),
-		)
-		return client
-	}
-	t.Run("not-proto-message", func(t *testing.T) {
+	t.Run("generics_api", func(t *testing.T) {
 		t.Parallel()
-		client := newPingClient(t, &pluggablePingServer{
-			cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
-				return stream.Conn().Send("foobar")
-			},
+		newPingClient := func(t *testing.T, pingServer pingv1connectgenerics.PingServiceHandler) pingv1connectgenerics.PingServiceClient {
+			t.Helper()
+			mux := http.NewServeMux()
+			mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServer))
+			server := memhttptest.NewServer(t, mux)
+			client := pingv1connectgenerics.NewPingServiceClient(
+				server.Client(),
+				server.URL(),
+			)
+			return client
+		}
+		t.Run("bidi_not_proto_message", func(t *testing.T) {
+			t.Parallel()
+			client := newPingClient(t, &pluggablePingServerGenerics{
+				cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+					return stream.Conn().Send("foobar")
+				},
+			})
+			stream := client.CumSum(context.Background())
+			assert.Nil(t, stream.Send(nil))
+			_, err := stream.Receive()
+			assert.NotNil(t, err)
+			assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
+			assert.Nil(t, stream.CloseRequest())
 		})
-		stream := client.CumSum(context.Background())
-		assert.Nil(t, stream.Send(nil))
-		_, err := stream.Receive()
-		assert.NotNil(t, err)
-		assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
-		assert.Nil(t, stream.CloseRequest())
+		t.Run("bidi_nil_message", func(t *testing.T) {
+			t.Parallel()
+			client := newPingClient(t, &pluggablePingServerGenerics{
+				cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+					return stream.Send(nil)
+				},
+			})
+			stream := client.CumSum(context.Background())
+			assert.Nil(t, stream.Send(nil))
+			_, err := stream.Receive()
+			assert.NotNil(t, err)
+			assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+			assert.Nil(t, stream.CloseRequest())
+		})
+		t.Run("bidi_get_spec", func(t *testing.T) {
+			t.Parallel()
+			client := newPingClient(t, &pluggablePingServerGenerics{
+				cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+					assert.Equal(t, stream.Spec().StreamType, connect.StreamTypeBidi)
+					assert.Equal(t, stream.Spec().Procedure, pingv1connectgenerics.PingServiceCumSumProcedure)
+					assert.False(t, stream.Spec().IsClient)
+					return nil
+				},
+			})
+			stream := client.CumSum(context.Background())
+			assert.Nil(t, stream.Send(nil))
+			assert.Nil(t, stream.CloseRequest())
+		})
+		t.Run("server_stream", func(t *testing.T) {
+			t.Parallel()
+			client := newPingClient(t, &pluggablePingServerGenerics{
+				countUp: func(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+					assert.Equal(t, stream.Conn().Spec().StreamType, connect.StreamTypeServer)
+					assert.Equal(t, stream.Conn().Spec().Procedure, pingv1connectgenerics.PingServiceCountUpProcedure)
+					assert.False(t, stream.Conn().Spec().IsClient)
+					assert.Nil(t, stream.Send(&pingv1.CountUpResponse{Number: 1}))
+					return nil
+				},
+			})
+			stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
+			assert.Nil(t, err)
+			assert.NotNil(t, stream)
+			assert.Nil(t, stream.Close())
+		})
+		t.Run("server_stream_send", func(t *testing.T) {
+			t.Parallel()
+			client := newPingClient(t, &pluggablePingServerGenerics{
+				countUp: func(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+					assert.Nil(t, stream.Send(&pingv1.CountUpResponse{Number: 1}))
+					return nil
+				},
+			})
+			stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
+			assert.Nil(t, err)
+			assert.True(t, stream.Receive())
+			msg := stream.Msg()
+			assert.NotNil(t, msg)
+			assert.Equal(t, msg.GetNumber(), 1)
+			assert.Nil(t, stream.Close())
+		})
+		t.Run("server_stream_send_nil", func(t *testing.T) {
+			t.Parallel()
+			client := newPingClient(t, &pluggablePingServerGenerics{
+				countUp: func(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+					stream.ResponseHeader().Set("foo", "bar")
+					stream.ResponseTrailer().Set("bas", "blah")
+					assert.Nil(t, stream.Send(nil))
+					return nil
+				},
+			})
+			stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
+			assert.Nil(t, err)
+			assert.False(t, stream.Receive())
+			headers := stream.ResponseHeader()
+			assert.NotNil(t, headers)
+			assert.Equal(t, headers.Get("foo"), "bar")
+			trailers := stream.ResponseTrailer()
+			assert.NotNil(t, trailers)
+			assert.Equal(t, trailers.Get("bas"), "blah")
+			assert.Nil(t, stream.Close())
+		})
+		t.Run("client-stream", func(t *testing.T) {
+			t.Parallel()
+			client := newPingClient(t, &pluggablePingServerGenerics{
+				sum: func(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+					assert.Equal(t, stream.Spec().StreamType, connect.StreamTypeClient)
+					assert.Equal(t, stream.Spec().Procedure, pingv1connectgenerics.PingServiceSumProcedure)
+					assert.False(t, stream.Spec().IsClient)
+					assert.True(t, stream.Receive())
+					msg := stream.Msg()
+					assert.NotNil(t, msg)
+					assert.Equal(t, msg.GetNumber(), 1)
+					return connect.NewResponse(&pingv1.SumResponse{Sum: 1}), nil
+				},
+			})
+			stream := client.Sum(context.Background())
+			assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
+			res, err := stream.CloseAndReceive()
+			assert.Nil(t, err)
+			assert.NotNil(t, res)
+			assert.Equal(t, res.Msg.GetSum(), 1)
+		})
+		t.Run("client-stream-conn", func(t *testing.T) {
+			t.Parallel()
+			client := newPingClient(t, &pluggablePingServerGenerics{
+				sum: func(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+					assert.True(t, stream.Receive())
+					assert.NotNil(t, stream.Conn().Send("not-proto"))
+					return connect.NewResponse(&pingv1.SumResponse{}), nil
+				},
+			})
+			stream := client.Sum(context.Background())
+			assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
+			res, err := stream.CloseAndReceive()
+			assert.Nil(t, err)
+			assert.NotNil(t, res)
+		})
+		t.Run("client-stream-send-msg", func(t *testing.T) {
+			t.Parallel()
+			client := newPingClient(t, &pluggablePingServerGenerics{
+				sum: func(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+					assert.True(t, stream.Receive())
+					// We end up sending two response messages, but only one is expected.
+					assert.Nil(t, stream.Conn().Send(&pingv1.SumResponse{Sum: 2}))
+					return connect.NewResponse(&pingv1.SumResponse{}), nil
+				},
+			})
+			stream := client.Sum(context.Background())
+			assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
+			res, err := stream.CloseAndReceive()
+			assert.NotNil(t, err)
+			assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
+			assert.Nil(t, res)
+		})
 	})
-	t.Run("nil-message", func(t *testing.T) {
+	t.Run("simple_api", func(t *testing.T) {
 		t.Parallel()
-		client := newPingClient(t, &pluggablePingServer{
-			cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
-				return stream.Send(nil)
-			},
+		newPingClient := func(t *testing.T, pingServer pingv1connect.PingServiceHandler) pingv1connect.PingServiceClient {
+			t.Helper()
+			mux := http.NewServeMux()
+			mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+			server := memhttptest.NewServer(t, mux)
+			client := pingv1connect.NewPingServiceClient(
+				server.Client(),
+				server.URL(),
+			)
+			return client
+		}
+		t.Run("server_stream", func(t *testing.T) {
+			t.Parallel()
+			client := newPingClient(t, &pluggablePingServer{
+				countUp: func(ctx context.Context, req *pingv1.CountUpRequest, stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+					callInfo, ok := connect.CallInfoFromContext(ctx)
+					assert.True(t, ok)
+					assert.Equal(t, callInfo.Spec().StreamType, connect.StreamTypeServer)
+					assert.Equal(t, callInfo.Spec().Procedure, pingv1connectgenerics.PingServiceCountUpProcedure)
+					assert.False(t, callInfo.Spec().IsClient)
+
+					// assert.Equal(t, stream.Conn().Spec().StreamType, connect.StreamTypeServer)
+					// assert.Equal(t, stream.Conn().Spec().Procedure, pingv1connectgenerics.PingServiceCountUpProcedure)
+					// assert.False(t, stream.Conn().Spec().IsClient)
+					assert.Nil(t, stream.Send(&pingv1.CountUpResponse{Number: 1}))
+					return nil
+				},
+			})
+			stream, err := client.CountUp(context.Background(), &pingv1.CountUpRequest{})
+			assert.Nil(t, err)
+			assert.NotNil(t, stream)
+			assert.Nil(t, stream.Close())
 		})
-		stream := client.CumSum(context.Background())
-		assert.Nil(t, stream.Send(nil))
-		_, err := stream.Receive()
-		assert.NotNil(t, err)
-		assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
-		assert.Nil(t, stream.CloseRequest())
-	})
-	t.Run("get-spec", func(t *testing.T) {
-		t.Parallel()
-		client := newPingClient(t, &pluggablePingServer{
-			cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
-				assert.Equal(t, stream.Spec().StreamType, connect.StreamTypeBidi)
-				assert.Equal(t, stream.Spec().Procedure, pingv1connect.PingServiceCumSumProcedure)
-				assert.False(t, stream.Spec().IsClient)
-				return nil
-			},
+		t.Run("server_stream_send", func(t *testing.T) {
+			t.Parallel()
+			client := newPingClient(t, &pluggablePingServer{
+				countUp: func(ctx context.Context, req *pingv1.CountUpRequest, stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+					assert.Nil(t, stream.Send(&pingv1.CountUpResponse{Number: 1}))
+					return nil
+				},
+			})
+			stream, err := client.CountUp(context.Background(), &pingv1.CountUpRequest{})
+			assert.Nil(t, err)
+			assert.True(t, stream.Receive())
+			msg := stream.Msg()
+			assert.NotNil(t, msg)
+			assert.Equal(t, msg.GetNumber(), 1)
+			assert.Nil(t, stream.Close())
 		})
-		stream := client.CumSum(context.Background())
-		assert.Nil(t, stream.Send(nil))
-		assert.Nil(t, stream.CloseRequest())
-	})
-	t.Run("server-stream", func(t *testing.T) {
-		t.Parallel()
-		client := newPingClient(t, &pluggablePingServer{
-			countUp: func(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
-				assert.Equal(t, stream.Conn().Spec().StreamType, connect.StreamTypeServer)
-				assert.Equal(t, stream.Conn().Spec().Procedure, pingv1connect.PingServiceCountUpProcedure)
-				assert.False(t, stream.Conn().Spec().IsClient)
-				assert.Nil(t, stream.Send(&pingv1.CountUpResponse{Number: 1}))
-				return nil
-			},
+		t.Run("server_stream_send_nil", func(t *testing.T) {
+			t.Parallel()
+			client := newPingClient(t, &pluggablePingServer{
+				countUp: func(ctx context.Context, req *pingv1.CountUpRequest, stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+					callInfo, ok := connect.CallInfoFromContext(ctx)
+					assert.True(t, ok)
+					callInfo.ResponseHeader().Set("foo", "bar")
+					// callInfo.ResponseTrailer().Set("bas", "blah")
+
+					stream.ResponseHeader().Set("foo", "bar")
+					stream.ResponseTrailer().Set("bas", "blah")
+					assert.Nil(t, stream.Send(nil))
+					return nil
+				},
+			})
+			ctx, _ := connect.NewOutgoingContext(context.Background())
+			stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{})
+			assert.Nil(t, err)
+			assert.False(t, stream.Receive())
+			// headers := callInfo.ResponseHeader()
+			headers := stream.ResponseHeader()
+			assert.NotNil(t, headers)
+			assert.Equal(t, headers.Get("foo"), "bar")
+			trailers := stream.ResponseTrailer()
+			// trailers := callInfo.ResponseTrailer()
+			assert.NotNil(t, trailers)
+			assert.Equal(t, trailers.Get("bas"), "blah")
+			assert.Nil(t, stream.Close())
 		})
-		stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
-		assert.Nil(t, err)
-		assert.NotNil(t, stream)
-		assert.Nil(t, stream.Close())
-	})
-	t.Run("server-stream-send", func(t *testing.T) {
-		t.Parallel()
-		client := newPingClient(t, &pluggablePingServer{
-			countUp: func(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
-				assert.Nil(t, stream.Send(&pingv1.CountUpResponse{Number: 1}))
-				return nil
-			},
-		})
-		stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
-		assert.Nil(t, err)
-		assert.True(t, stream.Receive())
-		msg := stream.Msg()
-		assert.NotNil(t, msg)
-		assert.Equal(t, msg.GetNumber(), 1)
-		assert.Nil(t, stream.Close())
-	})
-	t.Run("server-stream-send-nil", func(t *testing.T) {
-		t.Parallel()
-		client := newPingClient(t, &pluggablePingServer{
-			countUp: func(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
-				stream.ResponseHeader().Set("foo", "bar")
-				stream.ResponseTrailer().Set("bas", "blah")
-				assert.Nil(t, stream.Send(nil))
-				return nil
-			},
-		})
-		stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
-		assert.Nil(t, err)
-		assert.False(t, stream.Receive())
-		headers := stream.ResponseHeader()
-		assert.NotNil(t, headers)
-		assert.Equal(t, headers.Get("foo"), "bar")
-		trailers := stream.ResponseTrailer()
-		assert.NotNil(t, trailers)
-		assert.Equal(t, trailers.Get("bas"), "blah")
-		assert.Nil(t, stream.Close())
-	})
-	t.Run("client-stream", func(t *testing.T) {
-		t.Parallel()
-		client := newPingClient(t, &pluggablePingServer{
-			sum: func(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
-				assert.Equal(t, stream.Spec().StreamType, connect.StreamTypeClient)
-				assert.Equal(t, stream.Spec().Procedure, pingv1connect.PingServiceSumProcedure)
-				assert.False(t, stream.Spec().IsClient)
-				assert.True(t, stream.Receive())
-				msg := stream.Msg()
-				assert.NotNil(t, msg)
-				assert.Equal(t, msg.GetNumber(), 1)
-				return connect.NewResponse(&pingv1.SumResponse{Sum: 1}), nil
-			},
-		})
-		stream := client.Sum(context.Background())
-		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
-		res, err := stream.CloseAndReceive()
-		assert.Nil(t, err)
-		assert.NotNil(t, res)
-		assert.Equal(t, res.Msg.GetSum(), 1)
-	})
-	t.Run("client-stream-conn", func(t *testing.T) {
-		t.Parallel()
-		client := newPingClient(t, &pluggablePingServer{
-			sum: func(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
-				assert.True(t, stream.Receive())
-				assert.NotNil(t, stream.Conn().Send("not-proto"))
-				return connect.NewResponse(&pingv1.SumResponse{}), nil
-			},
-		})
-		stream := client.Sum(context.Background())
-		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
-		res, err := stream.CloseAndReceive()
-		assert.Nil(t, err)
-		assert.NotNil(t, res)
-	})
-	t.Run("client-stream-send-msg", func(t *testing.T) {
-		t.Parallel()
-		client := newPingClient(t, &pluggablePingServer{
-			sum: func(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
-				assert.True(t, stream.Receive())
-				// We end up sending two response messages, but only one is expected.
-				assert.Nil(t, stream.Conn().Send(&pingv1.SumResponse{Sum: 2}))
-				return connect.NewResponse(&pingv1.SumResponse{}), nil
-			},
-		})
-		stream := client.Sum(context.Background())
-		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
-		res, err := stream.CloseAndReceive()
-		assert.NotNil(t, err)
-		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
-		assert.Nil(t, res)
 	})
 }
 
@@ -1846,17 +2326,17 @@ func TestConnectHTTPErrorCodes(t *testing.T) {
 	checkHTTPStatus := func(t *testing.T, connectCode connect.Code, wantHttpStatus int) {
 		t.Helper()
 		mux := http.NewServeMux()
-		pluggableServer := &pluggablePingServer{
+		pluggableServer := &pluggablePingServerGenerics{
 			ping: func(_ context.Context, _ *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
 				return nil, connect.NewError(connectCode, errors.New("error"))
 			},
 		}
-		mux.Handle(pingv1connect.NewPingServiceHandler(pluggableServer))
+		mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pluggableServer))
 		server := memhttptest.NewServer(t, mux)
 		req, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodPost,
-			server.URL()+pingv1connect.PingServicePingProcedure,
+			server.URL()+pingv1connectgenerics.PingServicePingProcedure,
 			strings.NewReader("{}"),
 		)
 		assert.Nil(t, err)
@@ -1865,7 +2345,7 @@ func TestConnectHTTPErrorCodes(t *testing.T) {
 		assert.Nil(t, err)
 		defer resp.Body.Close()
 		assert.Equal(t, wantHttpStatus, resp.StatusCode)
-		connectClient := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		connectClient := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL())
 		connectResp, err := connectClient.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
 		assert.NotNil(t, err)
 		assert.Nil(t, connectResp)
@@ -1951,13 +2431,13 @@ func TestFailCompression(t *testing.T) {
 	compressor := func() connect.Compressor { return failCompressor{} }
 	decompressor := func() connect.Decompressor { return failDecompressor{} }
 	mux.Handle(
-		pingv1connect.NewPingServiceHandler(
-			pingServer{},
+		pingv1connectgenerics.NewPingServiceHandler(
+			pingServerGenerics{},
 			connect.WithCompression(compressorName, decompressor, compressor),
 		),
 	)
 	server := memhttptest.NewServer(t, mux)
-	pingclient := pingv1connect.NewPingServiceClient(
+	pingclient := pingv1connectgenerics.NewPingServiceClient(
 		server.Client(),
 		server.URL(),
 		connect.WithAcceptCompression(compressorName, decompressor, compressor),
@@ -1988,7 +2468,7 @@ func TestUnflushableResponseWriter(t *testing.T) {
 		)
 	}
 	mux := http.NewServeMux()
-	path, handler := pingv1connect.NewPingServiceHandler(pingServer{})
+	path, handler := pingv1connectgenerics.NewPingServiceHandler(pingServerGenerics{})
 	wrapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handler.ServeHTTP(&unflushableWriter{w}, r)
 	})
@@ -2006,7 +2486,7 @@ func TestUnflushableResponseWriter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			pingclient := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), tt.options...)
+			pingclient := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), tt.options...)
 			stream, err := pingclient.CountUp(
 				context.Background(),
 				connect.NewRequest(&pingv1.CountUpRequest{Number: 5}),
@@ -2025,7 +2505,7 @@ func TestUnflushableResponseWriter(t *testing.T) {
 func TestGRPCErrorMetadataIsTrailersOnly(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServerGenerics{}))
 	server := memhttptest.NewServer(t, mux)
 
 	protoBytes, err := proto.Marshal(&pingv1.FailRequest{Code: int32(connect.CodeInternal)})
@@ -2039,7 +2519,7 @@ func TestGRPCErrorMetadataIsTrailersOnly(t *testing.T) {
 	req, err := http.NewRequestWithContext(
 		context.Background(),
 		http.MethodPost,
-		server.URL()+pingv1connect.PingServiceFailProcedure,
+		server.URL()+pingv1connectgenerics.PingServiceFailProcedure,
 		bytes.NewReader(body),
 	)
 	assert.Nil(t, err)
@@ -2062,10 +2542,10 @@ func TestGRPCErrorMetadataIsTrailersOnly(t *testing.T) {
 func TestConnectProtocolHeaderSentByDefault(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}, connect.WithRequireConnectProtocolHeader()))
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServerGenerics{}, connect.WithRequireConnectProtocolHeader()))
 	server := memhttptest.NewServer(t, mux)
 
-	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+	client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL())
 	_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
 	assert.Nil(t, err)
 
@@ -2080,8 +2560,8 @@ func TestConnectProtocolHeaderSentByDefault(t *testing.T) {
 func TestConnectProtocolHeaderRequired(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(
-		pingServer{},
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(
+		pingServerGenerics{},
 		connect.WithRequireConnectProtocolHeader(),
 	))
 	server := memhttptest.NewServer(t, mux)
@@ -2096,7 +2576,7 @@ func TestConnectProtocolHeaderRequired(t *testing.T) {
 		req, err := http.NewRequestWithContext(
 			context.Background(),
 			http.MethodPost,
-			server.URL()+pingv1connect.PingServicePingProcedure,
+			server.URL()+pingv1connectgenerics.PingServicePingProcedure,
 			strings.NewReader("{}"),
 		)
 		assert.Nil(t, err)
@@ -2114,7 +2594,7 @@ func TestAllowCustomUserAgent(t *testing.T) {
 
 	const customAgent = "custom"
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(&pluggablePingServer{
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(&pluggablePingServerGenerics{
 		ping: func(_ context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
 			agent := req.Header().Get("User-Agent")
 			assert.Equal(t, agent, customAgent)
@@ -2133,7 +2613,7 @@ func TestAllowCustomUserAgent(t *testing.T) {
 		{"grpcweb", []connect.ClientOption{connect.WithGRPCWeb()}},
 	}
 	for _, testCase := range tests {
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), testCase.opts...)
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), testCase.opts...)
 		req := connect.NewRequest(&pingv1.PingRequest{Number: 42})
 		req.Header().Set("User-Agent", customAgent)
 		_, err := client.Ping(context.Background(), req)
@@ -2145,7 +2625,7 @@ func TestWebXUserAgent(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(&pluggablePingServer{
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(&pluggablePingServerGenerics{
 		ping: func(_ context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
 			agent := req.Header().Get("User-Agent")
 			assert.NotZero(t, agent)
@@ -2159,7 +2639,7 @@ func TestWebXUserAgent(t *testing.T) {
 	}))
 	server := memhttptest.NewServer(t, mux)
 
-	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
+	client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
 	req := connect.NewRequest(&pingv1.PingRequest{Number: 42})
 	_, err := client.Ping(context.Background(), req)
 	assert.Nil(t, err)
@@ -2168,13 +2648,13 @@ func TestWebXUserAgent(t *testing.T) {
 func TestBidiOverHTTP1(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServerGenerics{}))
 	server := memhttptest.NewServer(t, mux)
 
 	// Clients expecting a full-duplex connection that end up with a simplex
 	// HTTP/1.1 connection shouldn't hang. Instead, the server should close the
 	// TCP connection.
-	client := pingv1connect.NewPingServiceClient(
+	client := pingv1connectgenerics.NewPingServiceClient(
 		&http.Client{Transport: server.TransportHTTP1()},
 		server.URL(),
 	)
@@ -2210,7 +2690,7 @@ func TestHandlerReturnsNilResponse(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(&pluggablePingServer{
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(&pluggablePingServerGenerics{
 		ping: func(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
 			return nil, nil //nolint: nilnil
 		},
@@ -2219,7 +2699,7 @@ func TestHandlerReturnsNilResponse(t *testing.T) {
 		},
 	}, connect.WithRecover(recoverPanic)))
 	server := memhttptest.NewServer(t, mux)
-	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+	client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL())
 
 	_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
 	assert.NotNil(t, err)
@@ -2465,7 +2945,7 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 	for _, testcase := range testcases {
 		t.Run(testcase.name, func(t *testing.T) {
 			t.Parallel()
-			client := pingv1connect.NewPingServiceClient(
+			client := pingv1connectgenerics.NewPingServiceClient(
 				server.Client(),
 				server.URL(),
 				testcase.options...,
@@ -2526,7 +3006,7 @@ func TestClientDisconnect(t *testing.T) {
 				gotRequest        = make(chan struct{})
 				gotResponse       = make(chan struct{})
 			)
-			pingServer := &pluggablePingServer{
+			pingServer := &pluggablePingServerGenerics{
 				sum: func(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
 					close(gotRequest)
 					for stream.Receive() {
@@ -2539,12 +3019,12 @@ func TestClientDisconnect(t *testing.T) {
 				},
 			}
 			mux := http.NewServeMux()
-			mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+			mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServer))
 			server := memhttptest.NewServer(t, mux)
 			var clientConn net.Conn
 			transport := captureTransport(server, &clientConn, gotRequest)
 			serverClient := &http.Client{Transport: transport}
-			client := pingv1connect.NewPingServiceClient(serverClient, server.URL())
+			client := pingv1connectgenerics.NewPingServiceClient(serverClient, server.URL())
 			stream := client.Sum(context.Background())
 			// Send header.
 			assert.Nil(t, stream.Send(nil))
@@ -2568,7 +3048,7 @@ func TestClientDisconnect(t *testing.T) {
 				gotRequest        = make(chan struct{})
 				gotResponse       = make(chan struct{})
 			)
-			pingServer := &pluggablePingServer{
+			pingServer := &pluggablePingServerGenerics{
 				countUp: func(ctx context.Context, _ *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
 					close(gotRequest)
 					var err error
@@ -2582,12 +3062,12 @@ func TestClientDisconnect(t *testing.T) {
 				},
 			}
 			mux := http.NewServeMux()
-			mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+			mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServer))
 			server := memhttptest.NewServer(t, mux)
 			var clientConn net.Conn
 			transport := captureTransport(server, &clientConn, gotRequest)
 			serverClient := &http.Client{Transport: transport}
-			client := pingv1connect.NewPingServiceClient(serverClient, server.URL())
+			client := pingv1connectgenerics.NewPingServiceClient(serverClient, server.URL())
 			stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
 			if !assert.Nil(t, err) {
 				return
@@ -2652,9 +3132,9 @@ func TestSetProtocolHeaders(t *testing.T) {
 		testcase := tt
 		t.Run(testcase.name, func(t *testing.T) {
 			t.Parallel()
-			pingServer := &pingServer{}
+			pingServer := &pingServerGenerics{}
 			mux := http.NewServeMux()
-			mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
+			mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServer))
 			server := memhttptest.NewServer(t, mux)
 
 			clientOpts := []connect.ClientOption{}
@@ -2662,22 +3142,22 @@ func TestSetProtocolHeaders(t *testing.T) {
 				// Use a different protocol to test the override.
 				clientOpts = append(clientOpts, connect.WithGRPC())
 			}
-			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), clientOpts...)
+			client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), clientOpts...)
 
-			pingProxyServer := &pluggablePingServer{
+			pingProxyServer := &pluggablePingServerGenerics{
 				ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
 					return client.Ping(ctx, request)
 				},
 			}
 			proxyMux := http.NewServeMux()
-			proxyMux.Handle(pingv1connect.NewPingServiceHandler(pingProxyServer))
+			proxyMux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingProxyServer))
 			proxyServer := memhttptest.NewServer(t, proxyMux)
 
 			proxyClientOpts := []connect.ClientOption{}
 			if testcase.clientOption != nil {
 				proxyClientOpts = append(proxyClientOpts, testcase.clientOption)
 			}
-			proxyClient := pingv1connect.NewPingServiceClient(proxyServer.Client(), proxyServer.URL(), proxyClientOpts...)
+			proxyClient := pingv1connectgenerics.NewPingServiceClient(proxyServer.Client(), proxyServer.URL(), proxyClientOpts...)
 
 			request := connect.NewRequest(&pingv1.PingRequest{Number: 42})
 			request.Header().Set("X-Test", t.Name())
@@ -2733,16 +3213,16 @@ func (c failCodec) Unmarshal(data []byte, message any) error {
 type pluggablePingServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
 
-	ping    func(context.Context, *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error)
+	ping    func(context.Context, *pingv1.PingRequest) (*pingv1.PingResponse, error)
 	sum     func(context.Context, *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error)
-	countUp func(context.Context, *connect.Request[pingv1.CountUpRequest], *connect.ServerStream[pingv1.CountUpResponse]) error
+	countUp func(context.Context, *pingv1.CountUpRequest, *connect.ServerStream[pingv1.CountUpResponse]) error
 	cumSum  func(context.Context, *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error
 }
 
 func (p *pluggablePingServer) Ping(
 	ctx context.Context,
-	request *connect.Request[pingv1.PingRequest],
-) (*connect.Response[pingv1.PingResponse], error) {
+	request *pingv1.PingRequest,
+) (*pingv1.PingResponse, error) {
 	return p.ping(ctx, request)
 }
 
@@ -2755,13 +3235,51 @@ func (p *pluggablePingServer) Sum(
 
 func (p *pluggablePingServer) CountUp(
 	ctx context.Context,
-	req *connect.Request[pingv1.CountUpRequest],
+	req *pingv1.CountUpRequest,
 	stream *connect.ServerStream[pingv1.CountUpResponse],
 ) error {
 	return p.countUp(ctx, req, stream)
 }
 
 func (p *pluggablePingServer) CumSum(
+	ctx context.Context,
+	stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse],
+) error {
+	return p.cumSum(ctx, stream)
+}
+
+type pluggablePingServerGenerics struct {
+	pingv1connectgenerics.UnimplementedPingServiceHandler
+
+	ping    func(context.Context, *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error)
+	sum     func(context.Context, *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error)
+	countUp func(context.Context, *connect.Request[pingv1.CountUpRequest], *connect.ServerStream[pingv1.CountUpResponse]) error
+	cumSum  func(context.Context, *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error
+}
+
+func (p *pluggablePingServerGenerics) Ping(
+	ctx context.Context,
+	request *connect.Request[pingv1.PingRequest],
+) (*connect.Response[pingv1.PingResponse], error) {
+	return p.ping(ctx, request)
+}
+
+func (p *pluggablePingServerGenerics) Sum(
+	ctx context.Context,
+	stream *connect.ClientStream[pingv1.SumRequest],
+) (*connect.Response[pingv1.SumResponse], error) {
+	return p.sum(ctx, stream)
+}
+
+func (p *pluggablePingServerGenerics) CountUp(
+	ctx context.Context,
+	req *connect.Request[pingv1.CountUpRequest],
+	stream *connect.ServerStream[pingv1.CountUpResponse],
+) error {
+	return p.countUp(ctx, req, stream)
+}
+
+func (p *pluggablePingServerGenerics) CumSum(
 	ctx context.Context,
 	stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse],
 ) error {
@@ -2792,7 +3310,7 @@ func expectClientHeader(check bool, req connect.AnyRequest) error {
 	return expectMetadata(req.Header(), "header", clientHeader, headerValue)
 }
 
-func expectMetadata(meta http.Header, metaType, key, value string) error {
+func expectMetadata(meta http.Header, metaType, key, value string) error { //nolint:unparam
 	if got := meta.Get(key); got != value {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
 			"%s %q: got %q, expected %q",
@@ -2805,14 +3323,14 @@ func expectMetadata(meta http.Header, metaType, key, value string) error {
 	return nil
 }
 
-type pingServer struct {
-	pingv1connect.UnimplementedPingServiceHandler
+type pingServerGenerics struct {
+	pingv1connectgenerics.UnimplementedPingServiceHandler
 
 	checkMetadata       bool
 	includeErrorDetails bool
 }
 
-func (p pingServer) Ping(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+func (p pingServerGenerics) Ping(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
 	if err := expectClientHeader(p.checkMetadata, request); err != nil {
 		return nil, err
 	}
@@ -2833,7 +3351,7 @@ func (p pingServer) Ping(ctx context.Context, request *connect.Request[pingv1.Pi
 	return response, nil
 }
 
-func (p pingServer) Fail(ctx context.Context, request *connect.Request[pingv1.FailRequest]) (*connect.Response[pingv1.FailResponse], error) {
+func (p pingServerGenerics) Fail(ctx context.Context, request *connect.Request[pingv1.FailRequest]) (*connect.Response[pingv1.FailResponse], error) {
 	if err := expectClientHeader(p.checkMetadata, request); err != nil {
 		return nil, err
 	}
@@ -2859,7 +3377,7 @@ func (p pingServer) Fail(ctx context.Context, request *connect.Request[pingv1.Fa
 	return nil, err
 }
 
-func (p pingServer) Sum(
+func (p pingServerGenerics) Sum(
 	ctx context.Context,
 	stream *connect.ClientStream[pingv1.SumRequest],
 ) (*connect.Response[pingv1.SumResponse], error) {
@@ -2887,7 +3405,7 @@ func (p pingServer) Sum(
 	return response, nil
 }
 
-func (p pingServer) CountUp(
+func (p pingServerGenerics) CountUp(
 	ctx context.Context,
 	request *connect.Request[pingv1.CountUpRequest],
 	stream *connect.ServerStream[pingv1.CountUpResponse],
@@ -2917,7 +3435,7 @@ func (p pingServer) CountUp(
 	return nil
 }
 
-func (p pingServer) CumSum(
+func (p pingServerGenerics) CumSum(
 	ctx context.Context,
 	stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse],
 ) error {
@@ -2947,6 +3465,110 @@ func (p pingServer) CumSum(
 			return err
 		}
 	}
+}
+
+func expectClientHeaderInCallInfo(check bool, callInfo connect.CallInfo) error {
+	if !check {
+		return nil
+	}
+	return expectMetadata(callInfo.RequestHeader(), "header", clientHeader, headerValue)
+}
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+
+	checkMetadata       bool
+	includeErrorDetails bool
+}
+
+func (p pingServer) Ping(
+	ctx context.Context,
+	request *pingv1.PingRequest,
+) (*pingv1.PingResponse, error) {
+	callInfo, ok := connect.CallInfoFromContext(ctx)
+	if !ok {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
+	}
+	if err := expectClientHeaderInCallInfo(p.checkMetadata, callInfo); err != nil {
+		return nil, err
+	}
+	if callInfo.Peer().Addr == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
+	}
+	if callInfo.Peer().Protocol == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer protocol"))
+	}
+	response := &pingv1.PingResponse{
+		Number: request.GetNumber(),
+		Text:   request.GetText(),
+	}
+	callInfo.ResponseHeader().Set(handlerHeader, headerValue)
+	callInfo.ResponseTrailer().Set(handlerTrailer, trailerValue)
+	return response, nil
+}
+
+func (p pingServer) CountUp(
+	ctx context.Context,
+	request *pingv1.CountUpRequest,
+	stream *connect.ServerStream[pingv1.CountUpResponse],
+) error {
+	callInfo, ok := connect.CallInfoFromContext(ctx)
+	if !ok {
+		return connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
+	}
+	if err := expectClientHeaderInCallInfo(p.checkMetadata, callInfo); err != nil {
+		return err
+	}
+	if callInfo.Peer().Addr == "" {
+		return connect.NewError(connect.CodeInternal, errors.New("no peer address"))
+	}
+	if callInfo.Peer().Protocol == "" {
+		return connect.NewError(connect.CodeInternal, errors.New("no peer protocol"))
+	}
+	if request.GetNumber() <= 0 {
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
+			"number must be positive: got %v",
+			request.GetNumber(),
+		))
+	}
+	callInfo.ResponseHeader().Set(handlerHeader, headerValue)
+	callInfo.ResponseTrailer().Set(handlerTrailer, trailerValue)
+	for i := range request.GetNumber() {
+		if err := stream.Send(&pingv1.CountUpResponse{Number: i + 1}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p pingServer) Fail(ctx context.Context, request *pingv1.FailRequest) (*pingv1.FailResponse, error) {
+	callInfo, ok := connect.CallInfoFromContext(ctx)
+	if !ok {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
+	}
+	if err := expectClientHeaderInCallInfo(p.checkMetadata, callInfo); err != nil {
+		return nil, err
+	}
+	if callInfo.Peer().Addr == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
+	}
+	if callInfo.Peer().Protocol == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer protocol"))
+	}
+	err := connect.NewError(
+		connect.Code(request.GetCode()),
+		errors.New(errorMessage),
+	)
+	err.Meta().Set(handlerHeader, headerValue)
+	err.Meta().Set(handlerTrailer, trailerValue)
+	if p.includeErrorDetails {
+		detail, derr := connect.NewErrorDetail(&pingv1.FailRequest{Code: request.GetCode()})
+		if derr != nil {
+			return nil, derr
+		}
+		err.AddDetail(detail)
+	}
+	return nil, err
 }
 
 type deflateReader struct {

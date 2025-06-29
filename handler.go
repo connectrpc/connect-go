@@ -16,6 +16,7 @@ package connect
 
 import (
 	"context"
+	"maps"
 	"net/http"
 )
 
@@ -98,25 +99,23 @@ func NewUnaryHandlerSimple[Req, Res any](
 	return NewUnaryHandler(
 		procedure,
 		func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
-			var responseHeader http.Header
-			var responseTrailer http.Header
 			// Add the request header to the context, and store the response header
 			// and trailer to propagate back to the caller.
-			ctx = WithIncomingHeader(
-				WithStoreResponseHeader(
-					WithStoreResponseTrailer(
-						ctx,
-						&responseTrailer,
-					),
-					&responseHeader,
-				),
-				request.Header(),
-			)
+			ctx, ci := NewOutgoingContext(ctx)
+			call, ok := ci.(*callInfo)
+			if ok {
+				call.peer = request.Peer()
+				call.spec = request.Spec()
+				call.method = request.HTTPMethod()
+				call.requestHeader = request.Header()
+			}
+
 			responseMsg, err := unary(ctx, request.Msg)
+
 			if responseMsg != nil {
 				response := NewResponse(responseMsg)
-				response.setHeader(responseHeader)
-				response.setTrailer(responseHeader)
+				response.setHeader(call.ResponseHeader())
+				response.setTrailer(call.ResponseTrailer())
 				return response, err
 			}
 			return nil, err
@@ -187,11 +186,13 @@ func NewServerStreamHandlerSimple[Req, Res any](
 	return NewServerStreamHandler(
 		procedure,
 		func(ctx context.Context, request *Request[Req], serverStream *ServerStream[Res]) error {
-			// Add the request header to the context.
-			ctx = WithIncomingHeader(
-				ctx,
-				request.Header(),
-			)
+			ctx, ci := NewOutgoingContext(ctx)
+			callInfo, _ := ci.(*callInfo)
+			callInfo.peer = request.Peer()
+			callInfo.spec = request.Spec()
+			callInfo.method = request.HTTPMethod()
+			maps.Copy(callInfo.RequestHeader(), request.Header())
+
 			return implementation(ctx, request.Msg, serverStream)
 		},
 		options...,

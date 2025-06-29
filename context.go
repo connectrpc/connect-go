@@ -19,68 +19,119 @@ import (
 	"net/http"
 )
 
-type requestIncomingHeaderContextKey struct{}
-type requestOutgoingHeaderContextKey struct{}
-type responseHeaderAddressContextKey struct{}
-type responseTrailerAddressContextKey struct{}
+type CallInfo interface {
+	// Spec returns a description of this call.
+	Spec() Spec
+	// Peer describes the other party for this call.
+	Peer() Peer
+	// HTTPMethod returns the HTTP method for this request. This is nearly always
+	// POST, but side-effect-free unary RPCs could be made via a GET.
+	//
+	// On a newly created request, via NewRequest, this will return the empty
+	// string until the actual request is actually sent and the HTTP method
+	// determined. This means that client interceptor functions will see the
+	// empty string until *after* they delegate to the handler they wrapped. It
+	// is even possible for this to return the empty string after such delegation,
+	// if the request was never actually sent to the server (and thus no
+	// determination ever made about the HTTP method).
+	HTTPMethod() string
+	// RequestHeader returns the HTTP headers for this request. Headers beginning with
+	// "Connect-" and "Grpc-" are reserved for use by the Connect and gRPC
+	// protocols: applications may read them but shouldn't write them.
+	RequestHeader() http.Header
+	// ResponseHeader returns the HTTP headers for this response. Headers beginning with
+	// "Connect-" and "Grpc-" are reserved for use by the Connect and gRPC
+	// protocols: applications may read them but shouldn't write them.
+	ResponseHeader() http.Header
+	// ResponseTrailer returns the trailers for this response. Depending on the underlying
+	// RPC protocol, trailers may be sent as HTTP trailers or a protocol-specific
+	// block of in-body metadata.
+	//
+	// Trailers beginning with "Connect-" and "Grpc-" are reserved for use by the
+	// Connect and gRPC protocols: applications may read them but shouldn't write
+	// them.
+	ResponseTrailer() http.Header
 
-// HeaderFromIncomingContext gets the header from a request sent to a handler.
-func HeaderFromIncomingContext(ctx context.Context) (http.Header, bool) {
-	value, ok := ctx.Value(requestIncomingHeaderContextKey{}).(http.Header)
-	return value, ok
+	internalOnly()
 }
 
-// HeaderFromOutgoingContext gets the header from a request sent by a client.
-func HeaderFromOutgoingContext(ctx context.Context) (http.Header, bool) {
-	value, ok := ctx.Value(requestOutgoingHeaderContextKey{}).(http.Header)
-	return value, ok
+type callInfo struct {
+	spec            Spec
+	peer            Peer
+	method          string
+	requestHeader   http.Header
+	responseHeader  http.Header
+	responseTrailer http.Header
 }
 
-// WithIncomingHeader adds the header to the context from a request sent to a handler.
-func WithIncomingHeader(ctx context.Context, header http.Header) context.Context {
-	return context.WithValue(ctx, requestIncomingHeaderContextKey{}, header)
+func (c *callInfo) Spec() Spec {
+	return c.spec
 }
 
-// WithOutgoingHeader adds the header to the context from a request sent by a client.
-func WithOutgoingHeader(ctx context.Context, header http.Header) context.Context {
-	return context.WithValue(ctx, requestOutgoingHeaderContextKey{}, header)
+func (c *callInfo) Peer() Peer {
+	return c.peer
 }
 
-// WithStoreResponseHeader returns a new context to be given to a client when making a request
-// that will result in the header pointer being set to the response header.
-func WithStoreResponseHeader(ctx context.Context, header *http.Header) context.Context {
-	return context.WithValue(ctx, responseHeaderAddressContextKey{}, header)
-}
-
-// WithStoreResponseTrailer returns a new context to be given to a client when making a request
-// that will result in the trailer pointer being set to the response trailer.
-func WithStoreResponseTrailer(ctx context.Context, trailer *http.Header) context.Context {
-	return context.WithValue(ctx, responseTrailerAddressContextKey{}, trailer)
-}
-
-// SetResponseHeader sets the response header within a simple handler implementation.
-func SetResponseHeader(ctx context.Context, header http.Header) {
-	responseHeaderAddress, ok := ctx.Value(responseHeaderAddressContextKey{}).(*http.Header)
-	if !ok {
-		return
+func (c *callInfo) RequestHeader() http.Header {
+	if c.requestHeader == nil {
+		c.requestHeader = make(http.Header)
 	}
-	*responseHeaderAddress = header
+	return c.requestHeader
 }
 
-// SetResponseTrailer sets the response trailer within a simple handler implementation.
-func SetResponseTrailer(ctx context.Context, trailer http.Header) {
-	responseTrailerAddress, ok := ctx.Value(responseTrailerAddressContextKey{}).(*http.Header)
-	if !ok {
-		return
+func (c *callInfo) ResponseHeader() http.Header {
+	if c.responseHeader == nil {
+		c.responseHeader = make(http.Header)
 	}
-	*responseTrailerAddress = trailer
+	return c.responseHeader
+}
+
+func (c *callInfo) ResponseTrailer() http.Header {
+	if c.responseTrailer == nil {
+		c.responseTrailer = make(http.Header)
+	}
+	return c.responseTrailer
+}
+
+func (c *callInfo) HTTPMethod() string {
+	return c.method
+}
+
+// internalOnly implements CallInfo.
+func (c *callInfo) internalOnly() {}
+
+type callInfoContextKey struct{}
+
+// Create a new request context for use from a client. When the returned
+// context is passed to RPCs, the returned call info can be used to set
+// request metadata before the RPC is invoked and to inspect response
+// metadata after the RPC completes.
+//
+// The returned context may be re-used across RPCs as long as they are
+// not concurrent. Results of all CallInfo methods other than
+// RequestHeader() are undefined if the context is used with concurrent RPCs.
+// If the given context is already associated with an outgoing CallInfo, then
+// ctx and the existing CallInfo are returned.
+func NewOutgoingContext(ctx context.Context) (context.Context, CallInfo) {
+	info, ok := ctx.Value(callInfoContextKey{}).(CallInfo)
+	if !ok {
+		info = &callInfo{}
+		return context.WithValue(ctx, callInfoContextKey{}, info), info
+	}
+	return ctx, info
+}
+
+// CallInfoFromContext returns the CallInfo for the given context, if there is one.
+func CallInfoFromContext(ctx context.Context) (CallInfo, bool) {
+	value, ok := ctx.Value(callInfoContextKey{}).(CallInfo)
+	return value, ok
 }
 
 func requestFromContext[T any](ctx context.Context, message *T) *Request[T] {
-	request := NewRequest[T](message)
-	header, ok := HeaderFromOutgoingContext(ctx)
+	request := NewRequest(message)
+	callInfo, ok := CallInfoFromContext(ctx)
 	if ok {
-		request.setHeader(header)
+		request.setHeader(callInfo.RequestHeader())
 	}
 	return request
 }

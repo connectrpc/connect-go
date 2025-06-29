@@ -28,7 +28,7 @@ import (
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
 )
 
 func BenchmarkConnect(b *testing.B) {

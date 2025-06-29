@@ -22,38 +22,73 @@ import (
 
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
+	"connectrpc.com/connect/internal/memhttp"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 )
 
 func TestClientUnaryGetFallback(t *testing.T) {
 	t.Parallel()
-	mux := http.NewServeMux()
-	mux.Handle("/connect.ping.v1.PingService/Ping", NewUnaryHandler(
-		"/connect.ping.v1.PingService/Ping",
-		func(ctx context.Context, r *Request[pingv1.PingRequest]) (*Response[pingv1.PingResponse], error) {
-			return NewResponse(&pingv1.PingResponse{
-				Number: r.Msg.GetNumber(),
-				Text:   r.Msg.GetText(),
-			}), nil
-		},
-		WithIdempotency(IdempotencyNoSideEffects),
-	))
-	server := memhttptest.NewServer(t, mux)
+	// Importing pingv1connect to get the procedure name results in cyclic dependencies in this file
+	pingProcedure := "/connect.ping.v1.PingService/Ping"
 
-	client := NewClient[pingv1.PingRequest, pingv1.PingResponse](
-		server.Client(),
-		server.URL()+"/connect.ping.v1.PingService/Ping",
-		WithHTTPGet(),
-		WithHTTPGetMaxURLSize(1, true),
-		WithSendGzip(),
-	)
-	ctx := context.Background()
+	newClient := func(server *memhttp.Server) *Client[pingv1.PingRequest, pingv1.PingResponse] {
+		return NewClient[pingv1.PingRequest, pingv1.PingResponse](
+			server.Client(),
+			server.URL()+pingProcedure,
+			WithHTTPGet(),
+			WithHTTPGetMaxURLSize(1, true),
+			WithSendGzip(),
+		)
+	}
 
-	_, err := client.CallUnary(ctx, NewRequest[pingv1.PingRequest](nil))
-	assert.Nil(t, err)
+	t.Run("generics_api", func(t *testing.T) {
+		t.Parallel()
+		mux := http.NewServeMux()
+		mux.Handle(pingProcedure, NewUnaryHandler(
+			pingProcedure,
+			func(ctx context.Context, r *Request[pingv1.PingRequest]) (*Response[pingv1.PingResponse], error) {
+				return NewResponse(&pingv1.PingResponse{
+					Number: r.Msg.GetNumber(),
+					Text:   r.Msg.GetText(),
+				}), nil
+			},
+			WithIdempotency(IdempotencyNoSideEffects),
+		))
+		server := memhttptest.NewServer(t, mux)
+		client := newClient(server)
+		ctx := context.Background()
 
-	text := strings.Repeat(".", 256)
-	r, err := client.CallUnary(ctx, NewRequest(&pingv1.PingRequest{Text: text}))
-	assert.Nil(t, err)
-	assert.Equal(t, r.Msg.GetText(), text)
+		_, err := client.CallUnary(ctx, NewRequest[pingv1.PingRequest](nil))
+		assert.Nil(t, err)
+
+		text := strings.Repeat(".", 256)
+		r, err := client.CallUnary(ctx, NewRequest(&pingv1.PingRequest{Text: text}))
+		assert.Nil(t, err)
+		assert.Equal(t, r.Msg.GetText(), text)
+	})
+	t.Run("simple_api", func(t *testing.T) {
+		t.Parallel()
+		mux := http.NewServeMux()
+		mux.Handle(pingProcedure, NewUnaryHandlerSimple(
+			pingProcedure,
+			func(ctx context.Context, r *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+				return &pingv1.PingResponse{
+					Number: r.GetNumber(),
+					Text:   r.GetText(),
+				}, nil
+			},
+			WithIdempotency(IdempotencyNoSideEffects),
+		))
+		server := memhttptest.NewServer(t, mux)
+		client := newClient(server)
+		ctx := context.Background()
+
+		_, err := client.CallUnarySimple(ctx, &pingv1.PingRequest{})
+		assert.Nil(t, err)
+
+		text := strings.Repeat(".", 256)
+		r, err := client.CallUnarySimple(ctx, &pingv1.PingRequest{Text: text})
+		assert.Nil(t, err)
+		assert.Equal(t, r.GetText(), text)
+	})
 }
