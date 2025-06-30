@@ -392,8 +392,6 @@ func receiveUnaryResponse[T any](conn StreamingClientConn, initializer maybeInit
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("Header %+v", conn.ResponseHeader())
-	fmt.Printf("trailer %+v", conn.ResponseTrailer())
 	return &Response[T]{
 		Msg:     msg,
 		header:  conn.ResponseHeader(),
