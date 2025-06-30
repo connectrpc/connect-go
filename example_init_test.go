@@ -32,6 +32,6 @@ func init() {
 	// deadlock, see:
 	// (https://github.com/golang/go/issues/48394)
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServerSimple{}))
 	examplePingServer = memhttp.NewServer(mux)
 }

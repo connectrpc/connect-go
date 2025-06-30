@@ -89,7 +89,7 @@ func TestNewClient_InitFailure(t *testing.T) {
 func TestClientPeer(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServerGenerics{}))
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
 	server := memhttptest.NewServer(t, mux)
 
 	run := func(t *testing.T, unaryHTTPMethod string, opts ...connect.ClientOption) {
@@ -205,7 +205,7 @@ func TestGetNoContentHeaders(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(&pingServerGenerics{}))
+	mux.Handle(pingv1connect.NewPingServiceHandler(&pingServer{}))
 	server := memhttptest.NewServer(t, http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
 		if len(req.Header.Values("content-type")) > 0 ||
 			len(req.Header.Values("content-encoding")) > 0 ||
@@ -283,7 +283,7 @@ func TestSpecSchema(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(
-		pingServerGenerics{},
+		pingServer{},
 		connect.WithInterceptors(&assertSchemaInterceptor{t}),
 	))
 	server := memhttptest.NewServer(t, mux)
@@ -320,7 +320,7 @@ func TestSpecSchema(t *testing.T) {
 func TestDynamicClient(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServerGenerics{}))
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
 	server := memhttptest.NewServer(t, mux)
 	ctx := context.Background()
 	initializer := func(spec connect.Spec, msg any) error {
@@ -494,7 +494,7 @@ func TestClientDeadlineHandling(t *testing.T) {
 	// detector enabled. That's partly why the makefile only runs "slow"
 	// tests with the race detector disabled.
 
-	_, handler := pingv1connect.NewPingServiceHandler(pingServerGenerics{})
+	_, handler := pingv1connect.NewPingServiceHandler(pingServer{})
 	svr := httptest.NewUnstartedServer(http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
 		if req.Context().Err() != nil {
 			return

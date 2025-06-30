@@ -123,7 +123,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(
 		pingv1connect.NewPingServiceHandler(
-			pingServerGenerics{},
+			pingServer{},
 			handlerOnion,
 		),
 	)
@@ -171,7 +171,7 @@ func TestEmptyUnaryInterceptorFunc(t *testing.T) {
 			return next(ctx, request)
 		}
 	})
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServerGenerics{}, connect.WithInterceptors(interceptor)))
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}, connect.WithInterceptors(interceptor)))
 	server := memhttptest.NewServer(t, mux)
 	connectClient := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithInterceptors(interceptor))
 	_, err := connectClient.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
@@ -197,7 +197,7 @@ func TestInterceptorFuncAccessingHTTPMethod(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(
 		pingv1connect.NewPingServiceHandler(
-			pingServerGenerics{},
+			pingServer{},
 			connect.WithInterceptors(handlerChecker),
 		),
 	)
