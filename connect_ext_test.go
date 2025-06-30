@@ -166,22 +166,6 @@ func TestCallInfo(t *testing.T) {
 			assert.Nil(t, stream.Close())
 			assert.Equal(t, stream.ResponseHeader().Values(handlerHeader), []string{headerValue})
 			assert.Equal(t, stream.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
-			// num := int64(42)
-			// ctx, callInfo := connect.NewOutgoingContext(context.Background())
-			// callInfo.RequestHeader().Set(clientHeader, headerValue)
-			// expect := &pingv1.PingResponse{Number: num}
-
-			// response, err := client.Ping(ctx, &pingv1.PingRequest{Number: num})
-			// assert.Equal(t, response, expect)
-			// assert.Nil(t, err)
-
-			// // Assert call info values are correctly populated
-			// assert.Equal(t, callInfo.Spec().StreamType, connect.StreamTypeUnary)
-			// assert.Equal(t, callInfo.Spec().Procedure, pingv1connect.PingServicePingProcedure)
-			// assert.True(t, callInfo.Spec().IsClient)
-			// assert.Equal(t, callInfo.Peer().Addr, httptest.DefaultRemoteAddr)
-			// assert.Equal(t, callInfo.ResponseHeader().Values(handlerHeader), []string{headerValue})
-			// assert.Equal(t, callInfo.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
 		})
 	})
 }
@@ -3135,8 +3119,8 @@ func (p pingServer) CountUp(
 			request.GetNumber(),
 		))
 	}
-	callInfo.ResponseHeader().Set(handlerHeader, headerValue)
-	callInfo.ResponseTrailer().Set(handlerTrailer, trailerValue)
+	stream.Conn().ResponseHeader().Set(handlerHeader, headerValue)
+	stream.Conn().ResponseTrailer().Set(handlerTrailer, trailerValue)
 	for i := range request.GetNumber() {
 		if err := stream.Send(&pingv1.CountUpResponse{Number: i + 1}); err != nil {
 			return err

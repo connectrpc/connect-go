@@ -81,6 +81,7 @@ func NewUnaryHandler[Req, Res any](
 		if err != nil {
 			return err
 		}
+
 		// Add response headers/trailers into the conn
 		mergeNonProtocolHeaders(conn.ResponseHeader(), response.Header())
 		mergeNonProtocolHeaders(conn.ResponseTrailer(), response.Trailer())

@@ -189,7 +189,7 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 
 	info.peer = conn.Peer()
 	info.spec = conn.Spec()
-	mergeHeaders(conn.RequestHeader(), info.requestHeader)
+	mergeHeaders(info.RequestHeader(), request.header)
 	// Send always returns an io.EOF unless the error is from the client-side.
 	// We want the user to continue to call Receive in those cases to get the
 	// full error from the server-side.
