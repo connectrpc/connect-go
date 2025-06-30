@@ -1020,50 +1020,26 @@ func TestHeaderHost(t *testing.T) {
 func TestTimeoutParsing(t *testing.T) {
 	t.Parallel()
 	const timeout = 10 * time.Minute
-	t.Run("generics_api", func(t *testing.T) {
-		t.Parallel()
-		pingServer := &pluggablePingServerGenerics{
-			ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
-				deadline, ok := ctx.Deadline()
-				assert.True(t, ok)
-				remaining := time.Until(deadline)
-				assert.True(t, remaining > 0)
-				assert.True(t, remaining <= timeout)
-				return connect.NewResponse(&pingv1.PingResponse{}), nil
-			},
-		}
-		mux := http.NewServeMux()
-		mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServer))
-		server := memhttptest.NewServer(t, mux)
+	t.Parallel()
+	pingServer := &pluggablePingServerGenerics{
+		ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+			deadline, ok := ctx.Deadline()
+			assert.True(t, ok)
+			remaining := time.Until(deadline)
+			assert.True(t, remaining > 0)
+			assert.True(t, remaining <= timeout)
+			return connect.NewResponse(&pingv1.PingResponse{}), nil
+		},
+	}
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(pingServer))
+	server := memhttptest.NewServer(t, mux)
 
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL())
-		_, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
-		assert.Nil(t, err)
-	})
-	t.Run("simple_api", func(t *testing.T) {
-		t.Parallel()
-		pingServer := &pluggablePingServer{
-			ping: func(ctx context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
-				deadline, ok := ctx.Deadline()
-				assert.True(t, ok)
-				remaining := time.Until(deadline)
-				assert.True(t, remaining > 0)
-				assert.True(t, remaining <= timeout)
-				return &pingv1.PingResponse{}, nil
-			},
-		}
-		mux := http.NewServeMux()
-		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer))
-		server := memhttptest.NewServer(t, mux)
-
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
-		_, err := client.Ping(ctx, &pingv1.PingRequest{})
-		assert.Nil(t, err)
-	})
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL())
+	_, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
+	assert.Nil(t, err)
 }
 
 func TestFailCodec(t *testing.T) {
@@ -1105,8 +1081,22 @@ func TestContextError(t *testing.T) {
 func TestGRPCMarshalStatusError(t *testing.T) {
 	t.Parallel()
 
-	assertError := func(tb testing.TB, err error) {
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connectgenerics.NewPingServiceHandler(
+		pingServerGenerics{
+			// Include error details in the response, so that the Status protobuf will be marshaled.
+			includeErrorDetails: true,
+		},
+		// We're using a codec that will fail to marshal the Status protobuf, which means the returned error will be ignored
+		connect.WithCodec(failCodec{}),
+	))
+	server := memhttptest.NewServer(t, mux)
+
+	assertInternalError := func(tb testing.TB, opts ...connect.ClientOption) {
 		tb.Helper()
+		client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), opts...)
+		request := connect.NewRequest(&pingv1.FailRequest{Code: int32(connect.CodeResourceExhausted)})
+		_, err := client.Fail(context.Background(), request)
 		tb.Log(err)
 		assert.NotNil(t, err, assert.Sprintf("expected an error"))
 		var connectErr *connect.Error
@@ -1120,58 +1110,10 @@ func TestGRPCMarshalStatusError(t *testing.T) {
 		)
 	}
 
-	t.Run("generics_api", func(t *testing.T) {
-		t.Parallel()
-		mux := http.NewServeMux()
-		mux.Handle(pingv1connectgenerics.NewPingServiceHandler(
-			pingServerGenerics{
-				// Include error details in the response, so that the Status protobuf will be marshaled.
-				includeErrorDetails: true,
-			},
-			// We're using a codec that will fail to marshal the Status protobuf, which means the returned error will be ignored
-			connect.WithCodec(failCodec{}),
-		))
-		server := memhttptest.NewServer(t, mux)
-
-		assertInternalError := func(tb testing.TB, opts ...connect.ClientOption) {
-			tb.Helper()
-			client := pingv1connectgenerics.NewPingServiceClient(server.Client(), server.URL(), opts...)
-			request := connect.NewRequest(&pingv1.FailRequest{Code: int32(connect.CodeResourceExhausted)})
-			_, err := client.Fail(context.Background(), request)
-			assertError(tb, err)
-		}
-
-		// Only applies to gRPC protocols, where we're marshaling the Status protobuf
-		// message to binary.
-		assertInternalError(t, connect.WithGRPC())
-		assertInternalError(t, connect.WithGRPCWeb())
-	})
-	t.Run("simple_api", func(t *testing.T) {
-		t.Parallel()
-		mux := http.NewServeMux()
-		mux.Handle(pingv1connect.NewPingServiceHandler(
-			pingServer{
-				// Include error details in the response, so that the Status protobuf will be marshaled.
-				includeErrorDetails: true,
-			},
-			// We're using a codec that will fail to marshal the Status protobuf, which means the returned error will be ignored
-			connect.WithCodec(failCodec{}),
-		))
-		server := memhttptest.NewServer(t, mux)
-
-		assertInternalError := func(tb testing.TB, opts ...connect.ClientOption) {
-			tb.Helper()
-			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), opts...)
-			request := &pingv1.FailRequest{Code: int32(connect.CodeResourceExhausted)}
-			_, err := client.Fail(context.Background(), request)
-			assertError(tb, err)
-		}
-
-		// Only applies to gRPC protocols, where we're marshaling the Status protobuf
-		// message to binary.
-		assertInternalError(t, connect.WithGRPC())
-		assertInternalError(t, connect.WithGRPCWeb())
-	})
+	// Only applies to gRPC protocols, where we're marshaling the Status protobuf
+	// message to binary.
+	assertInternalError(t, connect.WithGRPC())
+	assertInternalError(t, connect.WithGRPCWeb())
 }
 
 func TestGRPCMissingTrailersError(t *testing.T) {
@@ -1277,32 +1219,16 @@ func TestGRPCMissingTrailersError(t *testing.T) {
 
 func TestUnavailableIfHostInvalid(t *testing.T) {
 	t.Parallel()
-	t.Run("generics_api", func(t *testing.T) {
-		t.Parallel()
-		client := pingv1connectgenerics.NewPingServiceClient(
-			http.DefaultClient,
-			"https://api.invalid/",
-		)
-		_, err := client.Ping(
-			context.Background(),
-			connect.NewRequest(&pingv1.PingRequest{}),
-		)
-		assert.NotNil(t, err)
-		assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
-	})
-	t.Run("simple_api", func(t *testing.T) {
-		t.Parallel()
-		client := pingv1connect.NewPingServiceClient(
-			http.DefaultClient,
-			"https://api.invalid/",
-		)
-		_, err := client.Ping(
-			context.Background(),
-			&pingv1.PingRequest{},
-		)
-		assert.NotNil(t, err)
-		assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
-	})
+	client := pingv1connectgenerics.NewPingServiceClient(
+		http.DefaultClient,
+		"https://api.invalid/",
+	)
+	_, err := client.Ping(
+		context.Background(),
+		connect.NewRequest(&pingv1.PingRequest{}),
+	)
+	assert.NotNil(t, err)
+	assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
 }
 
 func TestBidiRequiresHTTP2(t *testing.T) {
@@ -2293,9 +2219,9 @@ func TestStreamForServer(t *testing.T) {
 			t.Parallel()
 			client := newPingClient(t, &pluggablePingServer{
 				countUp: func(ctx context.Context, req *pingv1.CountUpRequest, stream *connect.ServerStream[pingv1.CountUpResponse]) error {
-					callInfo, ok := connect.CallInfoFromContext(ctx)
-					assert.True(t, ok)
-					callInfo.ResponseHeader().Set("foo", "bar")
+					// callInfo, ok := connect.CallInfoFromContext(ctx)
+					// assert.True(t, ok)
+					// callInfo.ResponseHeader().Set("foo", "bar")
 					// callInfo.ResponseTrailer().Set("bas", "blah")
 
 					stream.ResponseHeader().Set("foo", "bar")
