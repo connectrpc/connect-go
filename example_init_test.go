@@ -17,7 +17,7 @@ package connect_test
 import (
 	"net/http"
 
-	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp"
 )
 
