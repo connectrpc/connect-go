@@ -16,6 +16,7 @@ package connect_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync/atomic"
@@ -349,50 +350,87 @@ type callInfoChecker struct {
 	count  atomic.Int32
 }
 
+func (h *callInfoChecker) validateCallInfo(callInfo connect.CallInfo, req connect.AnyRequest, prerequest bool) error {
+	// method should be blank until after we make request
+	if prerequest { //nolint:nestif
+		if callInfo.HTTPMethod() != "" {
+			return fmt.Errorf("expected blank HTTP method in outgoing context but instead got %q", callInfo.HTTPMethod())
+		}
+		if req.HTTPMethod() != "" {
+			return fmt.Errorf("expected blank HTTP method in request but instead got %q", req.HTTPMethod())
+		}
+	} else {
+		// server interceptors see method from the start
+		// NB: In theory, the method could also be GET, not just POST. But for the
+		// configuration under test, it will always be POST.
+		if callInfo.HTTPMethod() != http.MethodPost {
+			return fmt.Errorf("expected HTTP method %s in outgoing context but instead got %q", http.MethodPost, callInfo.HTTPMethod())
+		}
+		if req.HTTPMethod() != http.MethodPost {
+			return fmt.Errorf("expected HTTP method %s in request but instead got %q", http.MethodPost, req.HTTPMethod())
+		}
+	}
+	if callInfo.Peer().Addr == "" {
+		return errors.New("no peer set on call info")
+	}
+	if callInfo.Spec().Procedure != pingv1connect.PingServicePingProcedure {
+		return fmt.Errorf("expected spec procedure %s but got %s", pingv1connect.PingServicePingProcedure, callInfo.Spec().Procedure)
+	}
+	return nil
+}
+
+func (h *callInfoChecker) getCallInfo(ctx context.Context) (connect.CallInfo, error) {
+	var callInfo connect.CallInfo
+	if h.client {
+		info, ok := connect.CallInfoFromOutgoingContext(ctx)
+		if !ok {
+			return nil, errors.New("no call info found in outgoing context")
+		}
+		callInfo = info
+	} else {
+		info, ok := connect.CallInfoFromIncomingContext(ctx)
+		if !ok {
+			return nil, errors.New("no call info found in incoming context")
+		}
+		callInfo = info
+	}
+	return callInfo, nil
+}
+
 func (h *callInfoChecker) WrapUnary(unaryFunc connect.UnaryFunc) connect.UnaryFunc {
 	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 		h.count.Add(1)
+
+		callInfo, err := h.getCallInfo(ctx)
+		if err != nil {
+			return nil, err
+		}
+
 		if h.client {
-			outgoingCallInfo, ok := connect.CallInfoFromOutgoingContext(ctx)
-			if !ok {
-				return nil, fmt.Errorf("no call info found in outgoing context")
-			}
-			// should be blank until after we make request
-			if outgoingCallInfo.HTTPMethod() != "" {
-				return nil, fmt.Errorf("expected blank HTTP method in outgoing context but instead got %q", outgoingCallInfo.HTTPMethod())
-			}
-			if req.HTTPMethod() != "" {
-				return nil, fmt.Errorf("expected blank HTTP method in request but instead got %q", req.HTTPMethod())
+			if err := h.validateCallInfo(callInfo, req, true); err != nil {
+				return nil, err
 			}
 		} else {
-			incomingCallInfo, ok := connect.CallInfoFromIncomingContext(ctx)
-			if !ok {
-				return nil, fmt.Errorf("no call info found in incoming context")
-			}
-			// server interceptors see method from the start
-			// NB: In theory, the method could also be GET, not just POST. But for the
-			// configuration under test, it will always be POST.
-			if incomingCallInfo.HTTPMethod() != http.MethodPost {
-				return nil, fmt.Errorf("expected HTTP method %s in incoming context but instead got %q", http.MethodPost, incomingCallInfo.HTTPMethod())
-			}
-			if req.HTTPMethod() != http.MethodPost {
-				return nil, fmt.Errorf("expected HTTP method %s in request but instead got %q", http.MethodPost, req.HTTPMethod())
+			if err := h.validateCallInfo(callInfo, req, false); err != nil {
+				return nil, err
 			}
 		}
+
 		resp, err := unaryFunc(ctx, req)
-		// NB: In theory, the method could also be GET, not just POST. But for the
-		// configuration under test, it will always be POST.
-		if req.HTTPMethod() != http.MethodPost {
-			return nil, fmt.Errorf("expected HTTP method %s but instead got %q", http.MethodPost, req.HTTPMethod())
+		if err != nil {
+			return nil, err
 		}
+
 		// Method should now be set on the outgoing context
-		// callInfo, ok := connect.CallInfoFromOutgoingContext(ctx)
-		// if !ok {
-		// 	return nil, fmt.Errorf("no call info found in outgoing context after request")
-		// }
-		// if callInfo.HTTPMethod() != http.MethodPost {
-		// 	return nil, fmt.Errorf("expected HTTP method %s but instead got %q", http.MethodPost, callInfo.HTTPMethod())
-		// }
+		callInfo, err = h.getCallInfo(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := h.validateCallInfo(callInfo, req, false); err != nil {
+			return nil, err
+		}
+
 		return resp, err
 	}
 }

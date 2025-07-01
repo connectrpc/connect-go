@@ -77,10 +77,10 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 	unarySpec := config.newSpec(StreamTypeUnary)
 	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
 		ctx, callInfo := newOutgoingContext(ctx)
-		fmt.Printf("unary func call info: %+v\n\n", callInfo)
 		conn := client.protocolClient.NewConn(ctx, unarySpec, request.Header())
 		conn.onRequestSend(func(r *http.Request) {
 			request.setRequestMethod(r.Method)
+			callInfo.method = r.Method
 		})
 		// Send always returns an io.EOF unless the error is from the client-side.
 		// We want the user to continue to call Receive in those cases to get the
@@ -117,8 +117,6 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		callInfo.peer = request.Peer()
 		callInfo.spec = request.Spec()
 
-		fmt.Printf("call unary call info: %+v\n\n", callInfo)
-
 		response, err := unaryFunc(ctx, request)
 		if err != nil {
 			return nil, err
@@ -126,6 +124,9 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		typed, ok := response.(*Response[Res])
 		if !ok {
 			return nil, errorf(CodeInternal, "unexpected client response type %T", response)
+		}
+		callInfo.responseSource = &wrapper[Res]{
+			response: typed,
 		}
 		return typed, nil
 	}
@@ -155,11 +156,6 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 	resp, err := c.callUnary(ctx, request)
 	if err != nil {
 		return nil, err
-	}
-
-	callInfo.method = request.HTTPMethod()
-	callInfo.responseSource = &wrapper[Res]{
-		response: resp,
 	}
 
 	return resp, nil
