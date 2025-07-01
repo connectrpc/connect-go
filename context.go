@@ -20,21 +20,6 @@ import (
 )
 
 type CallInfo interface {
-	StreamCallInfo
-	// HTTPMethod returns the HTTP method for this request. This is nearly always
-	// POST, but side-effect-free unary RPCs could be made via a GET.
-	//
-	// On a newly created request, via NewRequest, this will return the empty
-	// string until the actual request is actually sent and the HTTP method
-	// determined. This means that client interceptor functions will see the
-	// empty string until *after* they delegate to the handler they wrapped. It
-	// is even possible for this to return the empty string after such delegation,
-	// if the request was never actually sent to the server (and thus no
-	// determination ever made about the HTTP method).
-	HTTPMethod() string
-}
-
-type StreamCallInfo interface {
 	// Spec returns a description of this call.
 	Spec() Spec
 	// Peer describes the other party for this call.
@@ -57,6 +42,17 @@ type StreamCallInfo interface {
 	ResponseTrailer() http.Header
 
 	internalOnly()
+	// HTTPMethod returns the HTTP method for this request. This is nearly always
+	// POST, but side-effect-free unary RPCs could be made via a GET.
+	//
+	// On a newly created request, via NewRequest, this will return the empty
+	// string until the actual request is actually sent and the HTTP method
+	// determined. This means that client interceptor functions will see the
+	// empty string until *after* they delegate to the handler they wrapped. It
+	// is even possible for this to return the empty string after such delegation,
+	// if the request was never actually sent to the server (and thus no
+	// determination ever made about the HTTP method).
+	HTTPMethod() string
 }
 
 type callInfo struct {
