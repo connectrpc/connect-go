@@ -80,13 +80,13 @@ func NewUnaryHandler[Req, Res any](
 			return err
 		}
 
+		// Add response headers/trailers into the context callinfo
+		mergeNonProtocolHeaders(conn.ResponseHeader(), info.ResponseHeader())
+		mergeNonProtocolHeaders(conn.ResponseTrailer(), info.ResponseTrailer())
+
 		// Add response headers/trailers into the conn
 		mergeNonProtocolHeaders(conn.ResponseHeader(), response.Header())
 		mergeNonProtocolHeaders(conn.ResponseTrailer(), response.Trailer())
-
-		// Add response headers/trailers into the context callinfo also
-		mergeNonProtocolHeaders(info.ResponseHeader(), response.Header())
-		mergeNonProtocolHeaders(info.ResponseTrailer(), response.Trailer())
 
 		return conn.Send(response.Any())
 	}
@@ -118,13 +118,7 @@ func NewUnaryHandlerSimple[Req, Res any](
 			if err != nil {
 				return nil, err
 			}
-			response := NewResponse(responseMsg)
-			callInfo, ok := CallInfoFromIncomingContext(ctx)
-			if ok {
-				response.setHeader(callInfo.ResponseHeader())
-				response.setTrailer(callInfo.ResponseTrailer())
-			}
-			return response, err
+			return NewResponse(responseMsg), nil
 		},
 		options...,
 	)
@@ -174,10 +168,9 @@ func NewServerStreamHandler[Req, Res any](
 			if err != nil {
 				return err
 			}
-			info := &streamCallInfo{
+			ctx = newIncomingContext(ctx, &streamCallInfo{
 				conn: conn,
-			}
-			ctx = newIncomingContext(ctx, info)
+			})
 			return implementation(ctx, req, &ServerStream[Res]{conn: conn})
 		},
 	)

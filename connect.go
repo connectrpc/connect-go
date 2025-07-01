@@ -287,16 +287,6 @@ func (r *Response[_]) Trailer() http.Header {
 	return r.trailer
 }
 
-// setHeader sets the response header.
-func (r *Response[_]) setHeader(header http.Header) {
-	r.header = header
-}
-
-// setTrailer sets the response trailer.
-func (r *Response[_]) setTrailer(trailer http.Header) {
-	r.trailer = trailer
-}
-
 // internalOnly implements AnyResponse.
 func (r *Response[_]) internalOnly() {}
 
