@@ -104,6 +104,7 @@ func (c *callInfo) HTTPMethod() string {
 // internalOnly implements CallInfo.
 func (c *callInfo) internalOnly() {}
 
+// streamCallInfo is a CallInfo implementation used for streaming RPCs.
 type streamCallInfo struct {
 	conn StreamingHandlerConn
 }
@@ -125,7 +126,7 @@ func (c *streamCallInfo) ResponseHeader() http.Header {
 }
 
 func (c *streamCallInfo) ResponseTrailer() http.Header {
-	return c.conn.ResponseHeader()
+	return c.conn.ResponseTrailer()
 }
 
 func (c *streamCallInfo) HTTPMethod() string {
