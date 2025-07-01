@@ -88,9 +88,13 @@ func NewUnaryHandler[Req, Res any](
 			mergeNonProtocolHeaders(conn.ResponseTrailer(), info.responseTrailer)
 		}
 
-		// Add response headers/trailers from the response into the conn
-		mergeNonProtocolHeaders(conn.ResponseHeader(), response.Header())
-		mergeNonProtocolHeaders(conn.ResponseTrailer(), response.Trailer())
+		// Add response headers/trailers from the response into the conn if they exist
+		if len(response.Header()) != 0 {
+			mergeNonProtocolHeaders(conn.ResponseHeader(), response.Header())
+		}
+		if len(response.Trailer()) != 0 {
+			mergeNonProtocolHeaders(conn.ResponseTrailer(), response.Trailer())
+		}
 
 		return conn.Send(response.Any())
 	}
