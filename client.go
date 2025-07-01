@@ -152,7 +152,11 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 	return resp, nil
 }
 
-// CallUnary calls a request-response procedure.
+// CallUnarySimple calls a request-response procedure using the function signature
+// associated with the "simple" generation option.
+//
+// This option eliminates the [Request] and [Response] wrappers, and instead uses the
+// context.Context to propagate information such as headers.
 func (c *Client[Req, Res]) CallUnarySimple(ctx context.Context, request *Req) (*Res, error) {
 	response, err := c.CallUnary(ctx, requestFromOutgoingContext(ctx, request))
 	if response != nil {
