@@ -151,12 +151,7 @@ type incomingCallInfoContextKey struct{}
 // If the given context is already associated with an outgoing CallInfo, then
 // ctx and the existing CallInfo are returned.
 func NewOutgoingContext(ctx context.Context) (context.Context, CallInfo) {
-	info, ok := ctx.Value(outgoingCallInfoContextKey{}).(CallInfo)
-	if !ok {
-		info = &callInfo{}
-		return context.WithValue(ctx, outgoingCallInfoContextKey{}, info), info
-	}
-	return ctx, info
+	return newOutgoingContext(ctx)
 }
 
 func newOutgoingContext(ctx context.Context) (context.Context, *callInfo) {
