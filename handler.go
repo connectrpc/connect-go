@@ -68,7 +68,7 @@ func NewUnaryHandler[Req, Res any](
 		}
 		// Add the request header to the context, and store the response header
 		// and trailer to propagate back to the caller.
-		info := &callInfo{
+		info := &handlerCallInfo{
 			peer:          request.Peer(),
 			spec:          request.Spec(),
 			method:        request.HTTPMethod(),
@@ -80,11 +80,15 @@ func NewUnaryHandler[Req, Res any](
 			return err
 		}
 
-		// Add response headers/trailers into the context callinfo
-		mergeNonProtocolHeaders(conn.ResponseHeader(), info.ResponseHeader())
-		mergeNonProtocolHeaders(conn.ResponseTrailer(), info.ResponseTrailer())
+		// Add response headers/trailers from the context callinfo into the conn if they exist
+		if info.responseHeader != nil {
+			mergeNonProtocolHeaders(conn.ResponseHeader(), info.responseHeader)
+		}
+		if info.responseTrailer != nil {
+			mergeNonProtocolHeaders(conn.ResponseTrailer(), info.responseTrailer)
+		}
 
-		// Add response headers/trailers into the conn
+		// Add response headers/trailers from the response into the conn
 		mergeNonProtocolHeaders(conn.ResponseHeader(), response.Header())
 		mergeNonProtocolHeaders(conn.ResponseTrailer(), response.Trailer())
 

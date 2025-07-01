@@ -19,6 +19,10 @@ import (
 	"net/http"
 )
 
+// CallInfo represents information relevant to an RPC call.
+// Values returned by these methods are not thread-safe. Users should expect
+// data races if they create an outgoing CallInfo in context and then pass that
+// CallInfo to another goroutine and try to call methods on it concurrent with the RPC.
 type CallInfo interface {
 	// Spec returns a description of this call.
 	Spec() Spec
@@ -31,6 +35,9 @@ type CallInfo interface {
 	// ResponseHeader returns the HTTP headers for this response. Headers beginning with
 	// "Connect-" and "Grpc-" are reserved for use by the Connect and gRPC
 	// protocols: applications may read them but shouldn't write them.
+	// On the client side, this method returns nil before
+	// the call is actually made. After the call is made, for streaming operations,
+	// this method will block for the server to actually return response headers.
 	ResponseHeader() http.Header
 	// ResponseTrailer returns the trailers for this response. Depending on the underlying
 	// RPC protocol, trailers may be sent as HTTP trailers or a protocol-specific
@@ -39,9 +46,11 @@ type CallInfo interface {
 	// Trailers beginning with "Connect-" and "Grpc-" are reserved for use by the
 	// Connect and gRPC protocols: applications may read them but shouldn't write
 	// them.
+	//
+	// On the client side, this method returns nil before
+	// the call is actually made. After the call is made, for streaming operations,
+	// this method will block for the server to actually return response trailers.
 	ResponseTrailer() http.Header
-
-	internalOnly()
 	// HTTPMethod returns the HTTP method for this request. This is nearly always
 	// POST, but side-effect-free unary RPCs could be made via a GET.
 	//
@@ -53,9 +62,12 @@ type CallInfo interface {
 	// if the request was never actually sent to the server (and thus no
 	// determination ever made about the HTTP method).
 	HTTPMethod() string
+
+	internalOnly()
 }
 
-type callInfo struct {
+// handlerCallInfo is a CallInfo implementation used for handlers.
+type handlerCallInfo struct {
 	spec            Spec
 	peer            Peer
 	method          string
@@ -64,41 +76,41 @@ type callInfo struct {
 	responseTrailer http.Header
 }
 
-func (c *callInfo) Spec() Spec {
+func (c *handlerCallInfo) Spec() Spec {
 	return c.spec
 }
 
-func (c *callInfo) Peer() Peer {
+func (c *handlerCallInfo) Peer() Peer {
 	return c.peer
 }
 
-func (c *callInfo) RequestHeader() http.Header {
+func (c *handlerCallInfo) RequestHeader() http.Header {
 	if c.requestHeader == nil {
 		c.requestHeader = make(http.Header)
 	}
 	return c.requestHeader
 }
 
-func (c *callInfo) ResponseHeader() http.Header {
+func (c *handlerCallInfo) ResponseHeader() http.Header {
 	if c.responseHeader == nil {
 		c.responseHeader = make(http.Header)
 	}
 	return c.responseHeader
 }
 
-func (c *callInfo) ResponseTrailer() http.Header {
+func (c *handlerCallInfo) ResponseTrailer() http.Header {
 	if c.responseTrailer == nil {
 		c.responseTrailer = make(http.Header)
 	}
 	return c.responseTrailer
 }
 
-func (c *callInfo) HTTPMethod() string {
+func (c *handlerCallInfo) HTTPMethod() string {
 	return c.method
 }
 
 // internalOnly implements CallInfo.
-func (c *callInfo) internalOnly() {}
+func (c *handlerCallInfo) internalOnly() {}
 
 // streamCallInfo is a CallInfo implementation used for streaming RPCs.
 type streamCallInfo struct {
@@ -133,6 +145,56 @@ func (c *streamCallInfo) HTTPMethod() string {
 // internalOnly implements CallInfo.
 func (c *streamCallInfo) internalOnly() {}
 
+type responseSource interface {
+	ResponseHeader() http.Header
+	ResponseTrailer() http.Header
+}
+
+// clientCallInfo is a CallInfo implementation used for clients.
+type clientCallInfo struct {
+	responseSource
+	spec          Spec
+	peer          Peer
+	method        string
+	requestHeader http.Header
+}
+
+func (c *clientCallInfo) Spec() Spec {
+	return c.spec
+}
+
+func (c *clientCallInfo) Peer() Peer {
+	return c.peer
+}
+
+func (c *clientCallInfo) RequestHeader() http.Header {
+	if c.requestHeader == nil {
+		c.requestHeader = make(http.Header)
+	}
+	return c.requestHeader
+}
+
+func (c *clientCallInfo) ResponseHeader() http.Header {
+	if c.responseSource == nil {
+		return nil
+	}
+	return c.responseSource.ResponseHeader()
+}
+
+func (c *clientCallInfo) ResponseTrailer() http.Header {
+	if c.responseSource == nil {
+		return nil
+	}
+	return c.responseSource.ResponseTrailer()
+}
+
+func (c *clientCallInfo) HTTPMethod() string {
+	return c.method
+}
+
+// internalOnly implements CallInfo.
+func (c *clientCallInfo) internalOnly() {}
+
 type outgoingCallInfoContextKey struct{}
 type incomingCallInfoContextKey struct{}
 
@@ -150,10 +212,10 @@ func NewOutgoingContext(ctx context.Context) (context.Context, CallInfo) {
 	return newOutgoingContext(ctx)
 }
 
-func newOutgoingContext(ctx context.Context) (context.Context, *callInfo) {
-	info, ok := ctx.Value(outgoingCallInfoContextKey{}).(*callInfo)
+func newOutgoingContext(ctx context.Context) (context.Context, *clientCallInfo) {
+	info, ok := ctx.Value(outgoingCallInfoContextKey{}).(*clientCallInfo)
 	if !ok {
-		info = &callInfo{}
+		info = &clientCallInfo{}
 		return context.WithValue(ctx, outgoingCallInfoContextKey{}, info), info
 	}
 	return ctx, info
