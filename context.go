@@ -150,6 +150,19 @@ type responseSource interface {
 	ResponseTrailer() http.Header
 }
 
+// responseWrapper wraps a Response object so that it can implement the responseSource interface.
+type responseWrapper[Res any] struct {
+	response *Response[Res]
+}
+
+func (w *responseWrapper[Res]) ResponseHeader() http.Header {
+	return w.response.Header()
+}
+
+func (w *responseWrapper[Res]) ResponseTrailer() http.Header {
+	return w.response.Trailer()
+}
+
 // clientCallInfo is a CallInfo implementation used for clients.
 type clientCallInfo struct {
 	responseSource
