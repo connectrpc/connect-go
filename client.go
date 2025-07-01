@@ -139,9 +139,6 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 	if c.err != nil {
 		return nil, c.err
 	}
-	ctx, callInfo := newOutgoingContext(ctx)
-	callInfo.requestHeader = request.Header()
-
 	resp, err := c.callUnary(ctx, request)
 	if err != nil {
 		return nil, err
