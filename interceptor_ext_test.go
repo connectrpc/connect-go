@@ -354,7 +354,7 @@ func (h *callInfoChecker) validateCallInfo(callInfo connect.CallInfo, req connec
 	// method should be blank until after we make request
 	if !expectMethod { //nolint:nestif
 		if callInfo.HTTPMethod() != "" {
-			return fmt.Errorf("expected blank HTTP method in outgoing context but instead got %q", callInfo.HTTPMethod())
+			return fmt.Errorf("expected blank HTTP method in context but instead got %q", callInfo.HTTPMethod())
 		}
 		if req.HTTPMethod() != "" {
 			return fmt.Errorf("expected blank HTTP method in request but instead got %q", req.HTTPMethod())
@@ -364,7 +364,7 @@ func (h *callInfoChecker) validateCallInfo(callInfo connect.CallInfo, req connec
 		// NB: In theory, the method could also be GET, not just POST. But for the
 		// configuration under test, it will always be POST.
 		if callInfo.HTTPMethod() != http.MethodPost {
-			return fmt.Errorf("expected HTTP method %s in outgoing context but instead got %q", http.MethodPost, callInfo.HTTPMethod())
+			return fmt.Errorf("expected HTTP method %s in context but instead got %q", http.MethodPost, callInfo.HTTPMethod())
 		}
 		if req.HTTPMethod() != http.MethodPost {
 			return fmt.Errorf("expected HTTP method %s in request but instead got %q", http.MethodPost, req.HTTPMethod())
@@ -373,8 +373,14 @@ func (h *callInfoChecker) validateCallInfo(callInfo connect.CallInfo, req connec
 	if callInfo.Peer().Addr == "" {
 		return errors.New("no peer set on call info")
 	}
+	if req.Peer().Addr == "" {
+		return errors.New("no peer set on request")
+	}
 	if callInfo.Spec().Procedure != pingv1connect.PingServicePingProcedure {
-		return fmt.Errorf("expected spec procedure %s but got %s", pingv1connect.PingServicePingProcedure, callInfo.Spec().Procedure)
+		return fmt.Errorf("expected spec procedure %s in context but got %s", pingv1connect.PingServicePingProcedure, callInfo.Spec().Procedure)
+	}
+	if req.Spec().Procedure != pingv1connect.PingServicePingProcedure {
+		return fmt.Errorf("expected spec procedure %s on request but got %s", pingv1connect.PingServicePingProcedure, callInfo.Spec().Procedure)
 	}
 	return nil
 }
