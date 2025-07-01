@@ -171,19 +171,19 @@ func newIncomingContext(ctx context.Context, info CallInfo) context.Context {
 	return context.WithValue(ctx, incomingCallInfoContextKey{}, info)
 }
 
-// CallInfoFromOutgoingContext returns the CallInfo for the given context, if there is one.
+// CallInfoFromOutgoingContext returns the CallInfo for the given outgoing context, if there is one.
 func CallInfoFromOutgoingContext(ctx context.Context) (CallInfo, bool) {
 	value, ok := ctx.Value(outgoingCallInfoContextKey{}).(CallInfo)
 	return value, ok
 }
 
-// CallInfoFromIncomingContext returns the CallInfo for the given context, if there is one.
+// CallInfoFromIncomingContext returns the CallInfo for the given incoming context, if there is one.
 func CallInfoFromIncomingContext(ctx context.Context) (CallInfo, bool) {
 	value, ok := ctx.Value(incomingCallInfoContextKey{}).(CallInfo)
 	return value, ok
 }
 
-func requestFromContext[T any](ctx context.Context, message *T) *Request[T] {
+func requestFromOutgoingContext[T any](ctx context.Context, message *T) *Request[T] {
 	request := NewRequest(message)
 	callInfo, ok := CallInfoFromOutgoingContext(ctx)
 	if ok {

@@ -82,8 +82,6 @@ func TestCallInfo(t *testing.T) {
 			response, err := client.Ping(ctx, &pingv1.PingRequest{Number: num})
 			assert.Equal(t, response, expect)
 			assert.Nil(t, err)
-
-			// Assert call info values are correctly populated
 			assert.Equal(t, callInfo.Spec().StreamType, connect.StreamTypeUnary)
 			assert.Equal(t, callInfo.Spec().Procedure, pingv1connect.PingServicePingProcedure)
 			assert.True(t, callInfo.Spec().IsClient)
@@ -104,8 +102,6 @@ func TestCallInfo(t *testing.T) {
 			assert.NotNil(t, msg)
 			assert.Equal(t, msg.GetNumber(), 1)
 			assert.Nil(t, stream.Close())
-
-			// Assert call info values are correctly populated
 			assert.Equal(t, callInfo.Spec().StreamType, connect.StreamTypeServer)
 			assert.Equal(t, callInfo.Spec().Procedure, pingv1connect.PingServiceCountUpProcedure)
 			assert.True(t, callInfo.Spec().IsClient)
@@ -132,24 +128,18 @@ func TestCallInfo(t *testing.T) {
 			response, err := client.Ping(ctx, request)
 			assert.Nil(t, err)
 			assert.Equal(t, response.Msg, expect)
-
 			assert.Equal(t, request.Spec().StreamType, connect.StreamTypeUnary)
 			assert.Equal(t, request.Spec().Procedure, pingv1connect.PingServicePingProcedure)
 			assert.True(t, request.Spec().IsClient)
 			assert.Equal(t, request.Peer().Addr, httptest.DefaultRemoteAddr)
-
-			// Verify that spec and peer on the callInfo are the same as the request wrapper
 			assert.Equal(t, callInfo.Spec().StreamType, request.Spec().StreamType)
 			assert.Equal(t, callInfo.Spec().Procedure, request.Spec().Procedure)
 			assert.True(t, callInfo.Spec().IsClient)
 			assert.Equal(t, callInfo.Peer().Addr, request.Peer().Addr)
-
-			// Verify that the response headers and trailers are the same on callInfo and the response
 			assert.Equal(t, response.Header().Values(handlerHeader), []string{headerValue})
 			assert.Equal(t, response.Trailer().Values(handlerTrailer), []string{trailerValue})
 			assert.Equal(t, callInfo.ResponseHeader().Values(handlerHeader), []string{headerValue})
 			assert.Equal(t, callInfo.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
-
 		})
 		t.Run("server_stream", func(t *testing.T) {
 			req := connect.NewRequest(&pingv1.CountUpRequest{
@@ -166,10 +156,7 @@ func TestCallInfo(t *testing.T) {
 			assert.Equal(t, msg.GetNumber(), 1)
 			assert.Nil(t, stream.Close())
 			assert.Equal(t, stream.ResponseHeader().Values(handlerHeader), []string{headerValue})
-			// assert.Equal(t, stream.ResponseHeader().Values(handlerTrailer), []string{trailerValue})
-			// assert.Equal(t, stream.ResponseHeader().Values(handlerTrailer), []string{trailerValue})
 			assert.Equal(t, callInfo.ResponseHeader().Values(handlerHeader), []string{headerValue})
-			// assert.Equal(t, callInfo.ResponseHeader().Values(handlerTrailer), []string{trailerValue})
 		})
 	})
 }
@@ -3104,7 +3091,6 @@ func (p pingServerSimple) CountUp(
 	request *pingv1.CountUpRequest,
 	stream *connect.ServerStream[pingv1.CountUpResponse],
 ) error {
-	fmt.Println("Count Up server")
 	callInfo, ok := connect.CallInfoFromIncomingContext(ctx)
 	if !ok {
 		return connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
