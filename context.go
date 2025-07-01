@@ -112,7 +112,7 @@ func (c *handlerCallInfo) HTTPMethod() string {
 // internalOnly implements CallInfo.
 func (c *handlerCallInfo) internalOnly() {}
 
-// streamCallInfo is a CallInfo implementation used for streaming RPCs.
+// streamCallInfo is a CallInfo implementation used for streaming RPC handlers.
 type streamCallInfo struct {
 	conn StreamingHandlerConn
 }
@@ -144,24 +144,6 @@ func (c *streamCallInfo) HTTPMethod() string {
 
 // internalOnly implements CallInfo.
 func (c *streamCallInfo) internalOnly() {}
-
-type responseSource interface {
-	ResponseHeader() http.Header
-	ResponseTrailer() http.Header
-}
-
-// responseWrapper wraps a Response object so that it can implement the responseSource interface.
-type responseWrapper[Res any] struct {
-	response *Response[Res]
-}
-
-func (w *responseWrapper[Res]) ResponseHeader() http.Header {
-	return w.response.Header()
-}
-
-func (w *responseWrapper[Res]) ResponseTrailer() http.Header {
-	return w.response.Trailer()
-}
 
 // clientCallInfo is a CallInfo implementation used for clients.
 type clientCallInfo struct {
@@ -211,7 +193,26 @@ func (c *clientCallInfo) internalOnly() {}
 type outgoingCallInfoContextKey struct{}
 type incomingCallInfoContextKey struct{}
 
-// Create a new request context for use from a client. When the returned
+// responseSource indicates a type that manage response headers and trailers.
+type responseSource interface {
+	ResponseHeader() http.Header
+	ResponseTrailer() http.Header
+}
+
+// responseWrapper wraps a Response object so that it can implement the responseSource interface.
+type responseWrapper[Res any] struct {
+	response *Response[Res]
+}
+
+func (w *responseWrapper[Res]) ResponseHeader() http.Header {
+	return w.response.Header()
+}
+
+func (w *responseWrapper[Res]) ResponseTrailer() http.Header {
+	return w.response.Trailer()
+}
+
+// Create a new outgoing context for use from a client. When the returned
 // context is passed to RPCs, the returned call info can be used to set
 // request metadata before the RPC is invoked and to inspect response
 // metadata after the RPC completes.
@@ -223,19 +224,6 @@ type incomingCallInfoContextKey struct{}
 // ctx and the existing CallInfo are returned.
 func NewOutgoingContext(ctx context.Context) (context.Context, CallInfo) {
 	return newOutgoingContext(ctx)
-}
-
-func newOutgoingContext(ctx context.Context) (context.Context, *clientCallInfo) {
-	info, ok := ctx.Value(outgoingCallInfoContextKey{}).(*clientCallInfo)
-	if !ok {
-		info = &clientCallInfo{}
-		return context.WithValue(ctx, outgoingCallInfoContextKey{}, info), info
-	}
-	return ctx, info
-}
-
-func newIncomingContext(ctx context.Context, info CallInfo) context.Context {
-	return context.WithValue(ctx, incomingCallInfoContextKey{}, info)
 }
 
 // CallInfoFromOutgoingContext returns the CallInfo for the given outgoing context, if there is one.
@@ -250,6 +238,22 @@ func CallInfoFromIncomingContext(ctx context.Context) (CallInfo, bool) {
 	return value, ok
 }
 
+// Creates a new outgoing context or returns the existing one in context.
+func newOutgoingContext(ctx context.Context) (context.Context, *clientCallInfo) {
+	info, ok := ctx.Value(outgoingCallInfoContextKey{}).(*clientCallInfo)
+	if !ok {
+		info = &clientCallInfo{}
+		return context.WithValue(ctx, outgoingCallInfoContextKey{}, info), info
+	}
+	return ctx, info
+}
+
+// newOutgoingContext creates a new incoming context.
+func newIncomingContext(ctx context.Context, info CallInfo) context.Context {
+	return context.WithValue(ctx, incomingCallInfoContextKey{}, info)
+}
+
+// requestFromOutgoingContext creates a new Request using the given context and message.
 func requestFromOutgoingContext[T any](ctx context.Context, message *T) *Request[T] {
 	request := NewRequest(message)
 	callInfo, ok := CallInfoFromOutgoingContext(ctx)
