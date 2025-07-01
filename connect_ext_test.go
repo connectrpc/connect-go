@@ -107,7 +107,6 @@ func TestCallInfo(t *testing.T) {
 			assert.True(t, callInfo.Spec().IsClient)
 			assert.Equal(t, callInfo.Peer().Addr, httptest.DefaultRemoteAddr)
 			assert.Equal(t, callInfo.ResponseHeader().Values(handlerHeader), []string{headerValue})
-			// assert.Equal(t, callInfo.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
 		})
 	})
 	t.Run("generics_api", func(t *testing.T) {
@@ -157,8 +156,6 @@ func TestCallInfo(t *testing.T) {
 			assert.Nil(t, stream.Close())
 			assert.Equal(t, stream.ResponseHeader().Values(handlerHeader), []string{headerValue})
 			assert.Equal(t, callInfo.ResponseHeader().Values(handlerHeader), []string{headerValue})
-			// assert.Equal(t, stream.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
-			// assert.Equal(t, callInfo.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
 		})
 	})
 }
