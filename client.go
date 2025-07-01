@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -128,23 +127,26 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 	if c.err != nil {
 		return nil, c.err
 	}
-	ctx, ci := NewOutgoingContext(ctx)
-	call, ok := ci.(*callInfo)
-	if ok {
-		call.requestHeader = request.Header()
-	}
+	ctx, callInfo := newOutgoingContext(ctx)
+	callInfo.requestHeader = request.Header()
 
 	resp, err := c.callUnary(ctx, request)
 	if err != nil {
 		return nil, err
 	}
 
-	if ok {
-		call.peer = request.Peer()
-		call.spec = request.Spec()
-		call.method = request.HTTPMethod()
-		maps.Copy(call.ResponseHeader(), resp.Header())
-		maps.Copy(call.ResponseTrailer(), resp.Trailer())
+	callInfo.peer = request.Peer()
+	callInfo.spec = request.Spec()
+	callInfo.method = request.HTTPMethod()
+	if callInfo.responseHeader == nil {
+		callInfo.responseHeader = resp.Header()
+	} else {
+		mergeHeaders(callInfo.ResponseHeader(), resp.Header())
+	}
+	if callInfo.responseTrailer == nil {
+		callInfo.responseTrailer = resp.Trailer()
+	} else {
+		mergeHeaders(callInfo.ResponseTrailer(), resp.Trailer())
 	}
 
 	return resp, nil
@@ -175,21 +177,21 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 	if c.err != nil {
 		return nil, c.err
 	}
-	ctx, ctxCallInfo := NewOutgoingContext(ctx)
-	// Note we don't need to check ok here because it should always be in context
-	// because of the above call to NewOutgoingContext
-	info, _ := ctxCallInfo.(*callInfo)
 	conn := c.newConn(ctx, StreamTypeServer, func(r *http.Request) {
 		request.method = r.Method
-		info.method = r.Method
 	})
 	request.spec = conn.Spec()
 	request.peer = conn.Peer()
 	mergeHeaders(conn.RequestHeader(), request.header)
 
+	ctx, ctxCallInfo := NewOutgoingContext(ctx)
+	// Note we don't need to check ok here because it should always be in context
+	// because of the above call to NewOutgoingContext
+	info, _ := ctxCallInfo.(*callInfo)
 	info.peer = conn.Peer()
 	info.spec = conn.Spec()
 	mergeHeaders(info.RequestHeader(), request.header)
+
 	// Send always returns an io.EOF unless the error is from the client-side.
 	// We want the user to continue to call Receive in those cases to get the
 	// full error from the server-side.
@@ -198,15 +200,23 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 		_ = conn.CloseResponse()
 		return nil, err
 	}
+	info.responseHeader = conn.ResponseHeader()
+	info.responseTrailer = conn.ResponseTrailer()
 	if err := conn.CloseRequest(); err != nil {
 		return nil, err
 	}
+
 	return &ServerStreamForClient[Res]{
 		conn:        conn,
 		initializer: c.config.Initializer,
 	}, nil
 }
 
+// CallServerStreamSimple calls a server streaming procedure using the function signature
+// associated with the "simple" generation option.
+//
+// This option eliminates the [Request] wrapper, and instead uses the context.Context to
+// propagate information such as headers.
 func (c *Client[Req, Res]) CallServerStreamSimple(ctx context.Context, requestMsg *Req) (*ServerStreamForClient[Res], error) {
 	return c.CallServerStream(ctx, requestFromContext(ctx, requestMsg))
 }

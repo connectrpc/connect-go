@@ -16,7 +16,6 @@ package connect
 
 import (
 	"context"
-	"maps"
 	"net/http"
 )
 
@@ -69,14 +68,13 @@ func NewUnaryHandler[Req, Res any](
 		}
 		// Add the request header to the context, and store the response header
 		// and trailer to propagate back to the caller.
-		ctx, ci := NewOutgoingContext(ctx)
-		call, ok := ci.(*callInfo)
-		if ok {
-			call.peer = request.Peer()
-			call.spec = request.Spec()
-			call.method = request.HTTPMethod()
-			call.requestHeader = request.Header()
+		info := &callInfo{
+			peer:          request.Peer(),
+			spec:          request.Spec(),
+			method:        request.HTTPMethod(),
+			requestHeader: request.Header(),
 		}
+		ctx = newIncomingContext(ctx, info)
 		response, err := untyped(ctx, request)
 		if err != nil {
 			return err
@@ -87,8 +85,8 @@ func NewUnaryHandler[Req, Res any](
 		mergeNonProtocolHeaders(conn.ResponseTrailer(), response.Trailer())
 
 		// Add response headers/trailers into the context callinfo also
-		mergeNonProtocolHeaders(call.ResponseHeader(), response.Header())
-		mergeNonProtocolHeaders(call.ResponseTrailer(), response.Trailer())
+		mergeNonProtocolHeaders(info.ResponseHeader(), response.Header())
+		mergeNonProtocolHeaders(info.ResponseTrailer(), response.Trailer())
 
 		return conn.Send(response.Any())
 	}
@@ -121,7 +119,7 @@ func NewUnaryHandlerSimple[Req, Res any](
 				return nil, err
 			}
 			response := NewResponse(responseMsg)
-			callInfo, ok := CallInfoFromContext(ctx)
+			callInfo, ok := CallInfoFromIncomingContext(ctx)
 			if ok {
 				response.setHeader(callInfo.ResponseHeader())
 				response.setTrailer(callInfo.ResponseTrailer())
@@ -176,13 +174,10 @@ func NewServerStreamHandler[Req, Res any](
 			if err != nil {
 				return err
 			}
-			ctx, ci := NewOutgoingContext(ctx)
-			callInfo, _ := ci.(*callInfo)
-			callInfo.peer = req.Peer()
-			callInfo.spec = req.Spec()
-			callInfo.method = req.HTTPMethod()
-			maps.Copy(callInfo.RequestHeader(), req.Header())
-
+			info := &streamCallInfo{
+				conn: conn,
+			}
+			ctx = newIncomingContext(ctx, info)
 			return implementation(ctx, req, &ServerStream[Res]{conn: conn})
 		},
 	)
