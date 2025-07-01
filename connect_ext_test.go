@@ -2867,43 +2867,6 @@ func (p *pluggablePingServer) CumSum(
 	return p.cumSum(ctx, stream)
 }
 
-func failNoHTTP2(tb testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]) {
-	tb.Helper()
-	if err := stream.Send(&pingv1.CumSumRequest{}); err != nil {
-		assert.ErrorIs(tb, err, io.EOF)
-		assert.Equal(tb, connect.CodeOf(err), connect.CodeUnknown)
-	}
-	assert.Nil(tb, stream.CloseRequest())
-	_, err := stream.Receive()
-	assert.NotNil(tb, err) // should be 505
-	assert.True(
-		tb,
-		strings.Contains(err.Error(), "HTTP status 505"),
-		assert.Sprintf("expected 505, got %v", err),
-	)
-	assert.Nil(tb, stream.CloseResponse())
-}
-
-func expectClientHeader(check bool, req connect.AnyRequest) error {
-	if !check {
-		return nil
-	}
-	return expectMetadata(req.Header(), "header", clientHeader, headerValue)
-}
-
-func expectMetadata(meta http.Header, metaType, key, value string) error { //nolint:unparam
-	if got := meta.Get(key); got != value {
-		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
-			"%s %q: got %q, expected %q",
-			metaType,
-			key,
-			got,
-			value,
-		))
-	}
-	return nil
-}
-
 type pingServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
 
@@ -2912,8 +2875,10 @@ type pingServer struct {
 }
 
 func (p pingServer) Ping(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
-	if err := expectClientHeader(p.checkMetadata, request); err != nil {
-		return nil, err
+	if p.checkMetadata {
+		if err := expectMetadata(request.Header()); err != nil {
+			return nil, err
+		}
 	}
 	if request.Peer().Addr == "" {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
@@ -2933,8 +2898,10 @@ func (p pingServer) Ping(ctx context.Context, request *connect.Request[pingv1.Pi
 }
 
 func (p pingServer) Fail(ctx context.Context, request *connect.Request[pingv1.FailRequest]) (*connect.Response[pingv1.FailResponse], error) {
-	if err := expectClientHeader(p.checkMetadata, request); err != nil {
-		return nil, err
+	if p.checkMetadata {
+		if err := expectMetadata(request.Header()); err != nil {
+			return nil, err
+		}
 	}
 	if request.Peer().Addr == "" {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
@@ -2963,7 +2930,7 @@ func (p pingServer) Sum(
 	stream *connect.ClientStream[pingv1.SumRequest],
 ) (*connect.Response[pingv1.SumResponse], error) {
 	if p.checkMetadata {
-		if err := expectMetadata(stream.RequestHeader(), "header", clientHeader, headerValue); err != nil {
+		if err := expectMetadata(stream.RequestHeader()); err != nil {
 			return nil, err
 		}
 	}
@@ -2991,8 +2958,10 @@ func (p pingServer) CountUp(
 	request *connect.Request[pingv1.CountUpRequest],
 	stream *connect.ServerStream[pingv1.CountUpResponse],
 ) error {
-	if err := expectClientHeader(p.checkMetadata, request); err != nil {
-		return err
+	if p.checkMetadata {
+		if err := expectMetadata(request.Header()); err != nil {
+			return err
+		}
 	}
 	if request.Peer().Addr == "" {
 		return connect.NewError(connect.CodeInternal, errors.New("no peer address"))
@@ -3022,7 +2991,7 @@ func (p pingServer) CumSum(
 ) error {
 	var sum int64
 	if p.checkMetadata {
-		if err := expectMetadata(stream.RequestHeader(), "header", clientHeader, headerValue); err != nil {
+		if err := expectMetadata(stream.RequestHeader()); err != nil {
 			return err
 		}
 	}
@@ -3048,13 +3017,6 @@ func (p pingServer) CumSum(
 	}
 }
 
-func expectClientHeaderInCallInfo(check bool, callInfo connect.CallInfo) error {
-	if !check {
-		return nil
-	}
-	return expectMetadata(callInfo.RequestHeader(), "header", clientHeader, headerValue)
-}
-
 type pingServerSimple struct {
 	pingv1connectsimple.UnimplementedPingServiceHandler
 
@@ -3067,8 +3029,10 @@ func (p pingServerSimple) Ping(ctx context.Context, request *pingv1.PingRequest)
 	if !ok {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
 	}
-	if err := expectClientHeaderInCallInfo(p.checkMetadata, callInfo); err != nil {
-		return nil, err
+	if p.checkMetadata {
+		if err := expectMetadata(callInfo.RequestHeader()); err != nil {
+			return nil, err
+		}
 	}
 	if callInfo.Peer().Addr == "" {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
@@ -3094,8 +3058,10 @@ func (p pingServerSimple) CountUp(
 	if !ok {
 		return connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
 	}
-	if err := expectClientHeaderInCallInfo(p.checkMetadata, callInfo); err != nil {
-		return err
+	if p.checkMetadata {
+		if err := expectMetadata(callInfo.RequestHeader()); err != nil {
+			return err
+		}
 	}
 	if callInfo.Peer().Addr == "" {
 		return connect.NewError(connect.CodeInternal, errors.New("no peer address"))
@@ -3124,8 +3090,10 @@ func (p pingServerSimple) Fail(ctx context.Context, request *pingv1.FailRequest)
 	if !ok {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
 	}
-	if err := expectClientHeaderInCallInfo(p.checkMetadata, callInfo); err != nil {
-		return nil, err
+	if p.checkMetadata {
+		if err := expectMetadata(callInfo.RequestHeader()); err != nil {
+			return nil, err
+		}
 	}
 	if callInfo.Peer().Addr == "" {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no peer address"))
@@ -3235,3 +3203,33 @@ func (failCompressor) Close() error {
 }
 
 func (failCompressor) Reset(io.Writer) {}
+
+func failNoHTTP2(tb testing.TB, stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]) {
+	tb.Helper()
+	if err := stream.Send(&pingv1.CumSumRequest{}); err != nil {
+		assert.ErrorIs(tb, err, io.EOF)
+		assert.Equal(tb, connect.CodeOf(err), connect.CodeUnknown)
+	}
+	assert.Nil(tb, stream.CloseRequest())
+	_, err := stream.Receive()
+	assert.NotNil(tb, err) // should be 505
+	assert.True(
+		tb,
+		strings.Contains(err.Error(), "HTTP status 505"),
+		assert.Sprintf("expected 505, got %v", err),
+	)
+	assert.Nil(tb, stream.CloseResponse())
+}
+
+func expectMetadata(meta http.Header) error {
+	if got := meta.Get(clientHeader); got != headerValue {
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
+			"%s %q: got %q, expected %q",
+			"header",
+			clientHeader,
+			got,
+			headerValue,
+		))
+	}
+	return nil
+}

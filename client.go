@@ -126,6 +126,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		if !ok {
 			return nil, errorf(CodeInternal, "unexpected client response type %T", response)
 		}
+		// Wrap the response and set it into the context callinfo
 		callInfo.responseSource = &responseWrapper[Res]{
 			response: typed,
 		}
@@ -139,12 +140,7 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 	if c.err != nil {
 		return nil, c.err
 	}
-	resp, err := c.callUnary(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
+	return c.callUnary(ctx, request)
 }
 
 // CallUnarySimple calls a request-response procedure using the function signature
