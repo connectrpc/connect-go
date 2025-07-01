@@ -190,7 +190,7 @@ func TestEmptyUnaryInterceptorFunc(t *testing.T) {
 	assert.Nil(t, countUpStream.Close())
 }
 
-func TestInterceptorFuncAccessingHTTPMethod(t *testing.T) {
+func TestInterceptorFuncAccessingCallInfo(t *testing.T) {
 	t.Parallel()
 	clientChecker := &callInfoChecker{client: true}
 	handlerChecker := &callInfoChecker{}
@@ -350,9 +350,9 @@ type callInfoChecker struct {
 	count  atomic.Int32
 }
 
-func (h *callInfoChecker) validateCallInfo(callInfo connect.CallInfo, req connect.AnyRequest, prerequest bool) error {
+func (h *callInfoChecker) validateCallInfo(callInfo connect.CallInfo, req connect.AnyRequest, expectMethod bool) error {
 	// method should be blank until after we make request
-	if prerequest { //nolint:nestif
+	if !expectMethod { //nolint:nestif
 		if callInfo.HTTPMethod() != "" {
 			return fmt.Errorf("expected blank HTTP method in outgoing context but instead got %q", callInfo.HTTPMethod())
 		}
@@ -407,11 +407,11 @@ func (h *callInfoChecker) WrapUnary(unaryFunc connect.UnaryFunc) connect.UnaryFu
 		}
 
 		if h.client {
-			if err := h.validateCallInfo(callInfo, req, true); err != nil {
+			if err := h.validateCallInfo(callInfo, req, false); err != nil {
 				return nil, err
 			}
 		} else {
-			if err := h.validateCallInfo(callInfo, req, false); err != nil {
+			if err := h.validateCallInfo(callInfo, req, true); err != nil {
 				return nil, err
 			}
 		}
@@ -427,7 +427,7 @@ func (h *callInfoChecker) WrapUnary(unaryFunc connect.UnaryFunc) connect.UnaryFu
 			return nil, err
 		}
 
-		if err := h.validateCallInfo(callInfo, req, false); err != nil {
+		if err := h.validateCallInfo(callInfo, req, true); err != nil {
 			return nil, err
 		}
 
