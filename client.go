@@ -116,6 +116,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		ctx, callInfo := newOutgoingContext(ctx)
 		callInfo.peer = request.Peer()
 		callInfo.spec = request.Spec()
+		callInfo.requestHeader = request.Header()
 
 		response, err := unaryFunc(ctx, request)
 		if err != nil {
