@@ -20,10 +20,7 @@ import (
 )
 
 type CallInfo interface {
-	// Spec returns a description of this call.
-	Spec() Spec
-	// Peer describes the other party for this call.
-	Peer() Peer
+	StreamCallInfo
 	// HTTPMethod returns the HTTP method for this request. This is nearly always
 	// POST, but side-effect-free unary RPCs could be made via a GET.
 	//
@@ -35,6 +32,13 @@ type CallInfo interface {
 	// if the request was never actually sent to the server (and thus no
 	// determination ever made about the HTTP method).
 	HTTPMethod() string
+}
+
+type StreamCallInfo interface {
+	// Spec returns a description of this call.
+	Spec() Spec
+	// Peer describes the other party for this call.
+	Peer() Peer
 	// RequestHeader returns the HTTP headers for this request. Headers beginning with
 	// "Connect-" and "Grpc-" are reserved for use by the Connect and gRPC
 	// protocols: applications may read them but shouldn't write them.
@@ -100,7 +104,40 @@ func (c *callInfo) HTTPMethod() string {
 // internalOnly implements CallInfo.
 func (c *callInfo) internalOnly() {}
 
-type callInfoContextKey struct{}
+type streamCallInfo struct {
+	conn StreamingHandlerConn
+}
+
+func (c *streamCallInfo) Spec() Spec {
+	return c.conn.Spec()
+}
+
+func (c *streamCallInfo) Peer() Peer {
+	return c.conn.Peer()
+}
+
+func (c *streamCallInfo) RequestHeader() http.Header {
+	return c.conn.RequestHeader()
+}
+
+func (c *streamCallInfo) ResponseHeader() http.Header {
+	return c.conn.ResponseHeader()
+}
+
+func (c *streamCallInfo) ResponseTrailer() http.Header {
+	return c.conn.ResponseHeader()
+}
+
+func (c *streamCallInfo) HTTPMethod() string {
+	// All stream calls are POSTs
+	return http.MethodPost
+}
+
+// internalOnly implements CallInfo.
+func (c *streamCallInfo) internalOnly() {}
+
+type outgoingCallInfoContextKey struct{}
+type incomingCallInfoContextKey struct{}
 
 // Create a new request context for use from a client. When the returned
 // context is passed to RPCs, the returned call info can be used to set
@@ -113,23 +150,42 @@ type callInfoContextKey struct{}
 // If the given context is already associated with an outgoing CallInfo, then
 // ctx and the existing CallInfo are returned.
 func NewOutgoingContext(ctx context.Context) (context.Context, CallInfo) {
-	info, ok := ctx.Value(callInfoContextKey{}).(CallInfo)
+	info, ok := ctx.Value(outgoingCallInfoContextKey{}).(CallInfo)
 	if !ok {
 		info = &callInfo{}
-		return context.WithValue(ctx, callInfoContextKey{}, info), info
+		return context.WithValue(ctx, outgoingCallInfoContextKey{}, info), info
 	}
 	return ctx, info
 }
 
-// CallInfoFromContext returns the CallInfo for the given context, if there is one.
-func CallInfoFromContext(ctx context.Context) (CallInfo, bool) {
-	value, ok := ctx.Value(callInfoContextKey{}).(CallInfo)
+func newOutgoingContext(ctx context.Context) (context.Context, *callInfo) {
+	info, ok := ctx.Value(outgoingCallInfoContextKey{}).(*callInfo)
+	if !ok {
+		info = &callInfo{}
+		return context.WithValue(ctx, outgoingCallInfoContextKey{}, info), info
+	}
+	return ctx, info
+}
+
+func newIncomingContext(ctx context.Context, info CallInfo) context.Context {
+	return context.WithValue(ctx, incomingCallInfoContextKey{}, info)
+}
+
+// CallInfoFromOutgoingContext returns the CallInfo for the given context, if there is one.
+func CallInfoFromOutgoingContext(ctx context.Context) (CallInfo, bool) {
+	value, ok := ctx.Value(outgoingCallInfoContextKey{}).(CallInfo)
+	return value, ok
+}
+
+// CallInfoFromIncomingContext returns the CallInfo for the given context, if there is one.
+func CallInfoFromIncomingContext(ctx context.Context) (CallInfo, bool) {
+	value, ok := ctx.Value(incomingCallInfoContextKey{}).(CallInfo)
 	return value, ok
 }
 
 func requestFromContext[T any](ctx context.Context, message *T) *Request[T] {
 	request := NewRequest(message)
-	callInfo, ok := CallInfoFromContext(ctx)
+	callInfo, ok := CallInfoFromOutgoingContext(ctx)
 	if ok {
 		request.setHeader(callInfo.RequestHeader())
 	}

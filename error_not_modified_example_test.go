@@ -42,9 +42,9 @@ func (*ExampleCachingPingServer) Ping(
 	resp := &pingv1.PingResponse{
 		Number: req.GetNumber(),
 	}
-	callInfo, ok := connect.CallInfoFromContext(ctx)
+	callInfo, ok := connect.CallInfoFromIncomingContext(ctx)
 	if !ok {
-		return nil, errors.New("not call info found in context")
+		return nil, errors.New("no call info found in context")
 	}
 
 	// Our hashing logic is simple: we use the number in the PingResponse.
