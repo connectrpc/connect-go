@@ -126,24 +126,12 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		if !ok {
 			return nil, errorf(CodeInternal, "unexpected client response type %T", response)
 		}
-		callInfo.responseSource = &wrapper[Res]{
+		callInfo.responseSource = &responseWrapper[Res]{
 			response: typed,
 		}
 		return typed, nil
 	}
 	return client
-}
-
-type wrapper[Res any] struct {
-	response *Response[Res]
-}
-
-func (w *wrapper[Res]) ResponseHeader() http.Header {
-	return w.response.Header()
-}
-
-func (w *wrapper[Res]) ResponseTrailer() http.Header {
-	return w.response.Trailer()
 }
 
 // CallUnary calls a request-response procedure.
