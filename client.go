@@ -76,6 +76,8 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 	// once at client creation.
 	unarySpec := config.newSpec(StreamTypeUnary)
 	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
+		ctx, callInfo := newOutgoingContext(ctx)
+		fmt.Printf("unary func call info: %+v\n\n", callInfo)
 		conn := client.protocolClient.NewConn(ctx, unarySpec, request.Header())
 		conn.onRequestSend(func(r *http.Request) {
 			request.setRequestMethod(r.Method)
@@ -109,6 +111,14 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		request.spec = unarySpec
 		request.peer = client.protocolClient.Peer()
 		protocolClient.WriteRequestHeader(StreamTypeUnary, request.Header())
+
+		// Also set them in the context so interceptors can inspect context for this information.
+		ctx, callInfo := newOutgoingContext(ctx)
+		callInfo.peer = request.Peer()
+		callInfo.spec = request.Spec()
+
+		fmt.Printf("call unary call info: %+v\n\n", callInfo)
+
 		response, err := unaryFunc(ctx, request)
 		if err != nil {
 			return nil, err
@@ -120,6 +130,18 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		return typed, nil
 	}
 	return client
+}
+
+type wrapper[Res any] struct {
+	response *Response[Res]
+}
+
+func (w *wrapper[Res]) ResponseHeader() http.Header {
+	return w.response.Header()
+}
+
+func (w *wrapper[Res]) ResponseTrailer() http.Header {
+	return w.response.Trailer()
 }
 
 // CallUnary calls a request-response procedure.
@@ -135,18 +157,9 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 		return nil, err
 	}
 
-	callInfo.peer = request.Peer()
-	callInfo.spec = request.Spec()
 	callInfo.method = request.HTTPMethod()
-	if callInfo.responseHeader == nil {
-		callInfo.responseHeader = resp.Header()
-	} else {
-		mergeHeaders(callInfo.ResponseHeader(), resp.Header())
-	}
-	if callInfo.responseTrailer == nil {
-		callInfo.responseTrailer = resp.Trailer()
-	} else {
-		mergeHeaders(callInfo.ResponseTrailer(), resp.Trailer())
+	callInfo.responseSource = &wrapper[Res]{
+		response: resp,
 	}
 
 	return resp, nil
@@ -187,6 +200,8 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 	_, callInfo := newOutgoingContext(ctx)
 	callInfo.peer = conn.Peer()
 	callInfo.spec = conn.Spec()
+	callInfo.responseSource = conn
+
 	request.peer = conn.Peer()
 	request.spec = conn.Spec()
 
@@ -203,9 +218,6 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 		_ = conn.CloseResponse()
 		return nil, err
 	}
-	callInfo.responseHeader = conn.ResponseHeader()
-	callInfo.responseTrailer = conn.ResponseTrailer()
-
 	if err := conn.CloseRequest(); err != nil {
 		return nil, err
 	}

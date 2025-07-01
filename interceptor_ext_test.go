@@ -191,8 +191,8 @@ func TestEmptyUnaryInterceptorFunc(t *testing.T) {
 
 func TestInterceptorFuncAccessingHTTPMethod(t *testing.T) {
 	t.Parallel()
-	clientChecker := &httpMethodChecker{client: true}
-	handlerChecker := &httpMethodChecker{}
+	clientChecker := &callInfoChecker{client: true}
+	handlerChecker := &callInfoChecker{}
 
 	mux := http.NewServeMux()
 	mux.Handle(
@@ -344,25 +344,39 @@ func (cc *headerInspectingClientConn) Receive(msg any) error {
 	return err
 }
 
-type httpMethodChecker struct {
+type callInfoChecker struct {
 	client bool
 	count  atomic.Int32
 }
 
-func (h *httpMethodChecker) WrapUnary(unaryFunc connect.UnaryFunc) connect.UnaryFunc {
+func (h *callInfoChecker) WrapUnary(unaryFunc connect.UnaryFunc) connect.UnaryFunc {
 	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 		h.count.Add(1)
 		if h.client {
+			outgoingCallInfo, ok := connect.CallInfoFromOutgoingContext(ctx)
+			if !ok {
+				return nil, fmt.Errorf("no call info found in outgoing context")
+			}
 			// should be blank until after we make request
+			if outgoingCallInfo.HTTPMethod() != "" {
+				return nil, fmt.Errorf("expected blank HTTP method in outgoing context but instead got %q", outgoingCallInfo.HTTPMethod())
+			}
 			if req.HTTPMethod() != "" {
-				return nil, fmt.Errorf("expected blank HTTP method but instead got %q", req.HTTPMethod())
+				return nil, fmt.Errorf("expected blank HTTP method in request but instead got %q", req.HTTPMethod())
 			}
 		} else {
+			incomingCallInfo, ok := connect.CallInfoFromIncomingContext(ctx)
+			if !ok {
+				return nil, fmt.Errorf("no call info found in incoming context")
+			}
 			// server interceptors see method from the start
 			// NB: In theory, the method could also be GET, not just POST. But for the
 			// configuration under test, it will always be POST.
+			if incomingCallInfo.HTTPMethod() != http.MethodPost {
+				return nil, fmt.Errorf("expected HTTP method %s in incoming context but instead got %q", http.MethodPost, incomingCallInfo.HTTPMethod())
+			}
 			if req.HTTPMethod() != http.MethodPost {
-				return nil, fmt.Errorf("expected HTTP method %s but instead got %q", http.MethodPost, req.HTTPMethod())
+				return nil, fmt.Errorf("expected HTTP method %s in request but instead got %q", http.MethodPost, req.HTTPMethod())
 			}
 		}
 		resp, err := unaryFunc(ctx, req)
@@ -371,11 +385,19 @@ func (h *httpMethodChecker) WrapUnary(unaryFunc connect.UnaryFunc) connect.Unary
 		if req.HTTPMethod() != http.MethodPost {
 			return nil, fmt.Errorf("expected HTTP method %s but instead got %q", http.MethodPost, req.HTTPMethod())
 		}
+		// Method should now be set on the outgoing context
+		// callInfo, ok := connect.CallInfoFromOutgoingContext(ctx)
+		// if !ok {
+		// 	return nil, fmt.Errorf("no call info found in outgoing context after request")
+		// }
+		// if callInfo.HTTPMethod() != http.MethodPost {
+		// 	return nil, fmt.Errorf("expected HTTP method %s but instead got %q", http.MethodPost, callInfo.HTTPMethod())
+		// }
 		return resp, err
 	}
 }
 
-func (h *httpMethodChecker) WrapStreamingClient(clientFunc connect.StreamingClientFunc) connect.StreamingClientFunc {
+func (h *callInfoChecker) WrapStreamingClient(clientFunc connect.StreamingClientFunc) connect.StreamingClientFunc {
 	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
 		// method not exposed to streaming interceptor, but that's okay because it's always POST for streams
 		h.count.Add(1)
@@ -383,7 +405,7 @@ func (h *httpMethodChecker) WrapStreamingClient(clientFunc connect.StreamingClie
 	}
 }
 
-func (h *httpMethodChecker) WrapStreamingHandler(handlerFunc connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+func (h *callInfoChecker) WrapStreamingHandler(handlerFunc connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
 		// method not exposed to streaming interceptor, but that's okay because it's always POST for streams
 		h.count.Add(1)
