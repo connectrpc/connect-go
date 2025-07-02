@@ -66,6 +66,32 @@ type CallInfo interface {
 	internalOnly()
 }
 
+// Create a new outgoing context for use from a client. When the returned
+// context is passed to RPCs, the returned call info can be used to set
+// request metadata before the RPC is invoked and to inspect response
+// metadata after the RPC completes.
+//
+// The returned context may be re-used across RPCs as long as they are
+// not concurrent. Results of all CallInfo methods other than
+// RequestHeader() are undefined if the context is used with concurrent RPCs.
+// If the given context is already associated with an outgoing CallInfo, then
+// ctx and the existing CallInfo are returned.
+func NewOutgoingContext(ctx context.Context) (context.Context, CallInfo) {
+	return newOutgoingContext(ctx)
+}
+
+// CallInfoFromOutgoingContext returns the CallInfo for the given outgoing context, if there is one.
+func CallInfoFromOutgoingContext(ctx context.Context) (CallInfo, bool) {
+	value, ok := ctx.Value(outgoingCallInfoContextKey{}).(CallInfo)
+	return value, ok
+}
+
+// CallInfoFromIncomingContext returns the CallInfo for the given incoming context, if there is one.
+func CallInfoFromIncomingContext(ctx context.Context) (CallInfo, bool) {
+	value, ok := ctx.Value(incomingCallInfoContextKey{}).(CallInfo)
+	return value, ok
+}
+
 // handlerCallInfo is a CallInfo implementation used for handlers.
 type handlerCallInfo struct {
 	spec            Spec
@@ -210,32 +236,6 @@ func (w *responseWrapper[Res]) ResponseHeader() http.Header {
 
 func (w *responseWrapper[Res]) ResponseTrailer() http.Header {
 	return w.response.Trailer()
-}
-
-// Create a new outgoing context for use from a client. When the returned
-// context is passed to RPCs, the returned call info can be used to set
-// request metadata before the RPC is invoked and to inspect response
-// metadata after the RPC completes.
-//
-// The returned context may be re-used across RPCs as long as they are
-// not concurrent. Results of all CallInfo methods other than
-// RequestHeader() are undefined if the context is used with concurrent RPCs.
-// If the given context is already associated with an outgoing CallInfo, then
-// ctx and the existing CallInfo are returned.
-func NewOutgoingContext(ctx context.Context) (context.Context, CallInfo) {
-	return newOutgoingContext(ctx)
-}
-
-// CallInfoFromOutgoingContext returns the CallInfo for the given outgoing context, if there is one.
-func CallInfoFromOutgoingContext(ctx context.Context) (CallInfo, bool) {
-	value, ok := ctx.Value(outgoingCallInfoContextKey{}).(CallInfo)
-	return value, ok
-}
-
-// CallInfoFromIncomingContext returns the CallInfo for the given incoming context, if there is one.
-func CallInfoFromIncomingContext(ctx context.Context) (CallInfo, bool) {
-	value, ok := ctx.Value(incomingCallInfoContextKey{}).(CallInfo)
-	return value, ok
 }
 
 // Creates a new outgoing context or returns the existing one in context.
