@@ -92,21 +92,32 @@ func TestCallInfo(t *testing.T) {
 		t.Run("server_stream", func(t *testing.T) {
 			ctx, callInfo := connect.NewOutgoingContext(context.Background())
 			callInfo.RequestHeader().Set(clientHeader, headerValue)
+
+			val := 3
 			stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{
-				Number: 1,
+				Number: int64(val),
 			})
 			assert.Nil(t, err)
-			assert.True(t, stream.Receive())
+			// Receive expected messages
+			for idx := range val {
+				expected := int64(idx + 1)
+				assert.True(t, stream.Receive())
+				assert.Nil(t, stream.Err())
+				msg := stream.Msg()
+				assert.NotNil(t, msg)
+				assert.Equal(t, msg.GetNumber(), expected)
+			}
+
+			// Stream should be done. Expect false on receive and close stream
+			assert.False(t, stream.Receive())
 			assert.Nil(t, stream.Err())
-			msg := stream.Msg()
-			assert.NotNil(t, msg)
-			assert.Equal(t, msg.GetNumber(), 1)
 			assert.Nil(t, stream.Close())
 			assert.Equal(t, callInfo.Spec().StreamType, connect.StreamTypeServer)
 			assert.Equal(t, callInfo.Spec().Procedure, pingv1connect.PingServiceCountUpProcedure)
 			assert.True(t, callInfo.Spec().IsClient)
 			assert.Equal(t, callInfo.Peer().Addr, httptest.DefaultRemoteAddr)
-			assert.Equal(t, callInfo.ResponseHeader().Values(handlerHeader), []string{headerValue})
+			assert.Equal(t, stream.ResponseHeader().Values(handlerHeader), []string{headerValue})
+			assert.Equal(t, stream.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
 		})
 	})
 	t.Run("generics_api", func(t *testing.T) {
@@ -141,21 +152,44 @@ func TestCallInfo(t *testing.T) {
 			assert.Equal(t, callInfo.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
 		})
 		t.Run("server_stream", func(t *testing.T) {
-			req := connect.NewRequest(&pingv1.CountUpRequest{
-				Number: 1,
-			})
-			req.Header().Set(clientHeader, headerValue)
 			ctx, callInfo := connect.NewOutgoingContext(context.Background())
+			callInfo.RequestHeader().Set(clientHeader, headerValue)
+
+			val := 3
+			req := connect.NewRequest(&pingv1.CountUpRequest{
+				Number: int64(val),
+			})
 			stream, err := client.CountUp(ctx, req)
 			assert.Nil(t, err)
-			assert.True(t, stream.Receive())
+			// Receive expected messages
+			for idx := range val {
+				expected := int64(idx + 1)
+				assert.True(t, stream.Receive())
+				assert.Nil(t, stream.Err())
+				msg := stream.Msg()
+				assert.NotNil(t, msg)
+				assert.Equal(t, msg.GetNumber(), expected)
+			}
+
+			// Stream should be done. Expect false on receive and close stream
+			assert.False(t, stream.Receive())
 			assert.Nil(t, stream.Err())
-			msg := stream.Msg()
-			assert.NotNil(t, msg)
-			assert.Equal(t, msg.GetNumber(), 1)
 			assert.Nil(t, stream.Close())
+			// Assert values on request and stream
+			assert.Equal(t, req.Spec().StreamType, connect.StreamTypeServer)
+			assert.Equal(t, req.Spec().Procedure, pingv1connect.PingServiceCountUpProcedure)
+			assert.True(t, req.Spec().IsClient)
+			assert.Equal(t, req.Peer().Addr, httptest.DefaultRemoteAddr)
 			assert.Equal(t, stream.ResponseHeader().Values(handlerHeader), []string{headerValue})
+			assert.Equal(t, stream.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
+
+			// Assert the same values are in the call info
+			assert.Equal(t, callInfo.Spec().StreamType, req.Spec().StreamType)
+			assert.Equal(t, callInfo.Spec().Procedure, req.Spec().Procedure)
+			assert.True(t, callInfo.Spec().IsClient)
+			assert.Equal(t, callInfo.Peer().Addr, req.Peer().Addr)
 			assert.Equal(t, callInfo.ResponseHeader().Values(handlerHeader), []string{headerValue})
+			assert.Equal(t, callInfo.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
 		})
 	})
 }
