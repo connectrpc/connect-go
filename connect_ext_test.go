@@ -75,7 +75,7 @@ func TestCallInfo(t *testing.T) {
 		client := pingv1connectsimple.NewPingServiceClient(server.Client(), server.URL())
 		t.Run("unary", func(t *testing.T) {
 			num := int64(42)
-			ctx, callInfo := connect.NewOutgoingContext(context.Background())
+			ctx, callInfo := connect.NewClientContext(context.Background())
 			callInfo.RequestHeader().Set(clientHeader, headerValue)
 			expect := &pingv1.PingResponse{Number: num}
 
@@ -90,7 +90,7 @@ func TestCallInfo(t *testing.T) {
 			assert.Equal(t, callInfo.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
 		})
 		t.Run("server_stream", func(t *testing.T) {
-			ctx, callInfo := connect.NewOutgoingContext(context.Background())
+			ctx, callInfo := connect.NewClientContext(context.Background())
 			callInfo.RequestHeader().Set(clientHeader, headerValue)
 
 			val := 3
@@ -134,7 +134,7 @@ func TestCallInfo(t *testing.T) {
 			request.Header().Set(clientHeader, headerValue)
 			expect := &pingv1.PingResponse{Number: num}
 
-			ctx, callInfo := connect.NewOutgoingContext(context.Background())
+			ctx, callInfo := connect.NewClientContext(context.Background())
 			response, err := client.Ping(ctx, request)
 			assert.Nil(t, err)
 			assert.Equal(t, response.Msg, expect)
@@ -152,7 +152,7 @@ func TestCallInfo(t *testing.T) {
 			assert.Equal(t, callInfo.ResponseTrailer().Values(handlerTrailer), []string{trailerValue})
 		})
 		t.Run("server_stream", func(t *testing.T) {
-			ctx, callInfo := connect.NewOutgoingContext(context.Background())
+			ctx, callInfo := connect.NewClientContext(context.Background())
 			callInfo.RequestHeader().Set(clientHeader, headerValue)
 
 			val := 3
@@ -3059,7 +3059,7 @@ type pingServerSimple struct {
 }
 
 func (p pingServerSimple) Ping(ctx context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
-	callInfo, ok := connect.CallInfoFromIncomingContext(ctx)
+	callInfo, ok := connect.CallInfoFromHandlerContext(ctx)
 	if !ok {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
 	}
@@ -3088,7 +3088,7 @@ func (p pingServerSimple) CountUp(
 	request *pingv1.CountUpRequest,
 	stream *connect.ServerStream[pingv1.CountUpResponse],
 ) error {
-	callInfo, ok := connect.CallInfoFromIncomingContext(ctx)
+	callInfo, ok := connect.CallInfoFromHandlerContext(ctx)
 	if !ok {
 		return connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
 	}
@@ -3120,7 +3120,7 @@ func (p pingServerSimple) CountUp(
 }
 
 func (p pingServerSimple) Fail(ctx context.Context, request *pingv1.FailRequest) (*pingv1.FailResponse, error) {
-	callInfo, ok := connect.CallInfoFromIncomingContext(ctx)
+	callInfo, ok := connect.CallInfoFromHandlerContext(ctx)
 	if !ok {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
 	}

@@ -74,7 +74,7 @@ func NewUnaryHandler[Req, Res any](
 			method:        request.HTTPMethod(),
 			requestHeader: request.Header(),
 		}
-		ctx = newIncomingContext(ctx, info)
+		ctx = newHandlerContext(ctx, info)
 		response, err := untyped(ctx, request)
 		if err != nil {
 			return err
@@ -176,7 +176,7 @@ func NewServerStreamHandler[Req, Res any](
 			if err != nil {
 				return err
 			}
-			ctx = newIncomingContext(ctx, &streamCallInfo{
+			ctx = newHandlerContext(ctx, &streamCallInfo{
 				conn: conn,
 			})
 			return implementation(ctx, req, &ServerStream[Res]{conn: conn})

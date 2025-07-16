@@ -48,7 +48,7 @@ func ExampleIsNotModifiedError() {
 		connect.WithHTTPGet(),
 	)
 	req := &pingv1.PingRequest{Number: 42}
-	ctx, callInfo := connect.NewOutgoingContext(context.Background())
+	ctx, callInfo := connect.NewClientContext(context.Background())
 	_, err := client.Ping(ctx, req)
 	if err != nil {
 		fmt.Println(err)

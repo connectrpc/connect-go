@@ -21,7 +21,7 @@ import (
 
 // CallInfo represents information relevant to an RPC call.
 // Values returned by these methods are not thread-safe. Users should expect
-// data races if they create an outgoing CallInfo in context and then pass that
+// data races if they create an outgoing client CallInfo in context and then pass that
 // CallInfo to another goroutine and try to call methods on it concurrent with the RPC.
 type CallInfo interface {
 	// Spec returns a description of this call.
@@ -66,29 +66,28 @@ type CallInfo interface {
 	internalOnly()
 }
 
-// Create a new outgoing context for use from a client. When the returned
-// context is passed to RPCs, the returned call info can be used to set
+// Create a new client (i.e. outgoing) context for use from a client. When the
+// returned context is passed to RPCs, the returned call info can be used to set
 // request metadata before the RPC is invoked and to inspect response
 // metadata after the RPC completes.
 //
 // The returned context may be re-used across RPCs as long as they are
 // not concurrent. Results of all CallInfo methods other than
 // RequestHeader() are undefined if the context is used with concurrent RPCs.
-// If the given context is already associated with an outgoing CallInfo, then
-// ctx and the existing CallInfo are returned.
-func NewOutgoingContext(ctx context.Context) (context.Context, CallInfo) {
-	return newOutgoingContext(ctx)
+func NewClientContext(ctx context.Context) (context.Context, CallInfo) {
+	info := &clientCallInfo{}
+	return context.WithValue(ctx, clientCallInfoContextKey{}, info), info
 }
 
-// CallInfoFromOutgoingContext returns the CallInfo for the given outgoing context, if there is one.
-func CallInfoFromOutgoingContext(ctx context.Context) (CallInfo, bool) {
-	value, ok := ctx.Value(outgoingCallInfoContextKey{}).(CallInfo)
+// CallInfoFromClientContext returns the CallInfo for the given client context, if there is one.
+func CallInfoFromClientContext(ctx context.Context) (CallInfo, bool) {
+	value, ok := ctx.Value(clientCallInfoContextKey{}).(CallInfo)
 	return value, ok
 }
 
-// CallInfoFromIncomingContext returns the CallInfo for the given incoming context, if there is one.
-func CallInfoFromIncomingContext(ctx context.Context) (CallInfo, bool) {
-	value, ok := ctx.Value(incomingCallInfoContextKey{}).(CallInfo)
+// CallInfoFromHandlerContext returns the CallInfo for the given handler (i.e. incoming) context, if there is one.
+func CallInfoFromHandlerContext(ctx context.Context) (CallInfo, bool) {
+	value, ok := ctx.Value(handlerCallInfoContextKey{}).(CallInfo)
 	return value, ok
 }
 
@@ -216,8 +215,8 @@ func (c *clientCallInfo) HTTPMethod() string {
 // internalOnly implements CallInfo.
 func (c *clientCallInfo) internalOnly() {}
 
-type outgoingCallInfoContextKey struct{}
-type incomingCallInfoContextKey struct{}
+type clientCallInfoContextKey struct{}
+type handlerCallInfoContextKey struct{}
 
 // responseSource indicates a type that manage response headers and trailers.
 type responseSource interface {
@@ -238,25 +237,21 @@ func (w *responseWrapper[Res]) ResponseTrailer() http.Header {
 	return w.response.Trailer()
 }
 
-// Creates a new outgoing context or returns the existing one in context.
-func newOutgoingContext(ctx context.Context) (context.Context, *clientCallInfo) {
-	info, ok := ctx.Value(outgoingCallInfoContextKey{}).(*clientCallInfo)
-	if !ok {
-		info = &clientCallInfo{}
-		return context.WithValue(ctx, outgoingCallInfoContextKey{}, info), info
-	}
-	return ctx, info
+// Gets a client (i.e. outgoing) call info from context.
+func getClientCallInfoFromContext(ctx context.Context) (*clientCallInfo, bool) {
+	info, ok := ctx.Value(clientCallInfoContextKey{}).(*clientCallInfo)
+	return info, ok
 }
 
-// newOutgoingContext creates a new incoming context.
-func newIncomingContext(ctx context.Context, info CallInfo) context.Context {
-	return context.WithValue(ctx, incomingCallInfoContextKey{}, info)
+// newHandlerContext creates a new handler (i.e. incoming) context.
+func newHandlerContext(ctx context.Context, info CallInfo) context.Context {
+	return context.WithValue(ctx, handlerCallInfoContextKey{}, info)
 }
 
-// requestFromOutgoingContext creates a new Request using the given context and message.
-func requestFromOutgoingContext[T any](ctx context.Context, message *T) *Request[T] {
+// requestFromClientContext creates a new Request using the given context and message.
+func requestFromClientContext[T any](ctx context.Context, message *T) *Request[T] {
 	request := NewRequest(message)
-	callInfo, ok := CallInfoFromOutgoingContext(ctx)
+	callInfo, ok := CallInfoFromClientContext(ctx)
 	if ok {
 		request.setHeader(callInfo.RequestHeader())
 	}
