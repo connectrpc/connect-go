@@ -76,11 +76,13 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 	// once at client creation.
 	unarySpec := config.newSpec(StreamTypeUnary)
 	unaryFunc := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
-		ctx, callInfo := newOutgoingContext(ctx)
 		conn := client.protocolClient.NewConn(ctx, unarySpec, request.Header())
 		conn.onRequestSend(func(r *http.Request) {
 			request.setRequestMethod(r.Method)
-			callInfo.method = r.Method
+			callInfo, ok := getClientCallInfoFromContext(ctx)
+			if ok {
+				callInfo.method = r.Method
+			}
 		})
 		// Send always returns an io.EOF unless the error is from the client-side.
 		// We want the user to continue to call Receive in those cases to get the
@@ -112,11 +114,13 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		request.peer = client.protocolClient.Peer()
 		protocolClient.WriteRequestHeader(StreamTypeUnary, request.Header())
 
-		// Also set them in the context so interceptors can inspect context for this information.
-		ctx, callInfo := newOutgoingContext(ctx)
-		callInfo.peer = request.Peer()
-		callInfo.spec = request.Spec()
-		callInfo.requestHeader = request.Header()
+		// Also set them in the context if there's a call info present
+		callInfo, callInfoOk := getClientCallInfoFromContext(ctx)
+		if callInfoOk {
+			callInfo.peer = request.Peer()
+			callInfo.spec = request.Spec()
+			callInfo.requestHeader = request.Header()
+		}
 
 		response, err := unaryFunc(ctx, request)
 		if err != nil {
@@ -126,9 +130,11 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		if !ok {
 			return nil, errorf(CodeInternal, "unexpected client response type %T", response)
 		}
-		// Wrap the response and set it into the context callinfo
-		callInfo.responseSource = &responseWrapper[Res]{
-			response: typed,
+		if callInfoOk {
+			// Wrap the response and set it into the context callinfo
+			callInfo.responseSource = &responseWrapper[Res]{
+				response: typed,
+			}
 		}
 		return typed, nil
 	}
@@ -149,7 +155,7 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 // This option eliminates the [Request] and [Response] wrappers, and instead uses the
 // context.Context to propagate information such as headers.
 func (c *Client[Req, Res]) CallUnarySimple(ctx context.Context, request *Req) (*Res, error) {
-	response, err := c.CallUnary(ctx, requestFromOutgoingContext(ctx, request))
+	response, err := c.CallUnary(ctx, requestFromClientContext(ctx, request))
 	if response != nil {
 		return response.Msg, err
 	}
@@ -175,17 +181,21 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 	conn := c.newConn(ctx, StreamTypeServer, func(r *http.Request) {
 		request.method = r.Method
 	})
-	_, callInfo := newOutgoingContext(ctx)
-	callInfo.peer = conn.Peer()
-	callInfo.spec = conn.Spec()
-	callInfo.responseSource = conn
-
 	request.peer = conn.Peer()
 	request.spec = conn.Spec()
 
-	// Merge any callInfo request headers first, then do the request.
-	// so that context headers show first in the list of headers
-	mergeHeaders(conn.RequestHeader(), callInfo.RequestHeader())
+	callInfo, ok := getClientCallInfoFromContext(ctx)
+	// Set values in the context if there's a call info present
+	if ok {
+		callInfo.peer = conn.Peer()
+		callInfo.spec = conn.Spec()
+		callInfo.responseSource = conn
+
+		// Merge any callInfo request headers first, then do the request.
+		// so that context headers show first in the list of headers
+		mergeHeaders(conn.RequestHeader(), callInfo.RequestHeader())
+	}
+
 	mergeHeaders(conn.RequestHeader(), request.header)
 
 	// Send always returns an io.EOF unless the error is from the client-side.
@@ -211,7 +221,7 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 // This option eliminates the [Request] wrapper, and instead uses the context.Context to
 // propagate information such as headers.
 func (c *Client[Req, Res]) CallServerStreamSimple(ctx context.Context, requestMsg *Req) (*ServerStreamForClient[Res], error) {
-	return c.CallServerStream(ctx, requestFromOutgoingContext(ctx, requestMsg))
+	return c.CallServerStream(ctx, requestFromClientContext(ctx, requestMsg))
 }
 
 // CallBidiStream calls a bidirectional streaming procedure.
