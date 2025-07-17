@@ -63,7 +63,7 @@ const (
 // TestServiceClient is a client for the connect.test.simple.TestService service.
 type TestServiceClient interface {
 	Method(context.Context, *gen.Request) (*gen.Response, error)
-	MethodClientStream(context.Context) *connect.ClientStreamForClient[gen.Request, gen.Response]
+	MethodClientStream(context.Context) (*connect.ClientStreamForClient[gen.Request, gen.Response], error)
 	MethodServerStream(context.Context, *gen.Request) (*connect.ServerStreamForClient[gen.Response], error)
 	MethodBidiStream(context.Context, *gen.Request) (*connect.ServerStreamForClient[gen.Response], error)
 }
@@ -120,7 +120,7 @@ func (c *testServiceClient) Method(ctx context.Context, req *gen.Request) (*gen.
 }
 
 // MethodClientStream calls connect.test.simple.TestService.MethodClientStream.
-func (c *testServiceClient) MethodClientStream(ctx context.Context) *connect.ClientStreamForClient[gen.Request, gen.Response] {
+func (c *testServiceClient) MethodClientStream(ctx context.Context) (*connect.ClientStreamForClient[gen.Request, gen.Response], error) {
 	return c.methodClientStream.CallClientStreamSimple(ctx)
 }
 

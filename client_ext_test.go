@@ -412,7 +412,8 @@ func TestDynamicClient(t *testing.T) {
 			connect.WithSchema(methodDesc),
 			connect.WithResponseInitializer(initializer),
 		)
-		stream := client.CallClientStreamSimple(ctx)
+		stream, err := client.CallClientStreamSimple(ctx)
+		assert.Nil(t, err)
 		select {
 		case <-connected:
 			break
@@ -509,7 +510,8 @@ func TestDynamicClient(t *testing.T) {
 			connect.WithSchema(methodDesc),
 			connect.WithResponseInitializer(initializer),
 		)
-		stream := client.CallBidiStreamSimple(ctx)
+		stream, err := client.CallBidiStreamSimple(ctx)
+		assert.Nil(t, err)
 		select {
 		case <-connected:
 			break

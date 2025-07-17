@@ -183,10 +183,15 @@ func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamFo
 }
 
 // CallClientStream calls a client streaming procedure in simple mode.
-func (c *Client[Req, Res]) CallClientStreamSimple(ctx context.Context) *ClientStreamForClient[Req, Res] {
+func (c *Client[Req, Res]) CallClientStreamSimple(ctx context.Context) (*ClientStreamForClient[Req, Res], error) {
 	stream := c.CallClientStream(ctx)
-	stream.Send(nil)
-	return stream
+	if stream.err != nil {
+		return nil, stream.err
+	}
+	if err := stream.Send(nil); err != nil {
+		return nil, err
+	}
+	return stream, nil
 }
 
 // CallServerStream calls a server streaming procedure.
@@ -259,10 +264,15 @@ func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForCli
 }
 
 // CallBidiStreamSimple calls a bidirectional streaming procedure in simple mode.
-func (c *Client[Req, Res]) CallBidiStreamSimple(ctx context.Context) *BidiStreamForClient[Req, Res] {
+func (c *Client[Req, Res]) CallBidiStreamSimple(ctx context.Context) (*BidiStreamForClient[Req, Res], error) {
 	stream := c.CallBidiStream(ctx)
-	stream.Send(nil)
-	return stream
+	if stream.err != nil {
+		return nil, stream.err
+	}
+	if err := stream.Send(nil); err != nil {
+		return nil, err
+	}
+	return stream, nil
 }
 
 func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType, onRequestSend func(r *http.Request)) StreamingClientConn {
