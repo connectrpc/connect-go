@@ -489,6 +489,47 @@ func TestDynamicClient(t *testing.T) {
 		got := out.Get(methodDesc.Output().Fields().ByName("number")).Int()
 		assert.Equal(t, got, 42)
 	})
+	t.Run("bidiSimple", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.CumSum")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		connected := make(chan struct{})
+		transport := &http2.Transport{
+			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+				close(connected)
+				return server.Transport().DialTLSContext(ctx, network, addr, cfg)
+			},
+			AllowHTTP: true,
+		}
+		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
+			&http.Client{Transport: transport},
+			server.URL()+"/connect.ping.v1.PingService/CumSum",
+			connect.WithSchema(methodDesc),
+			connect.WithResponseInitializer(initializer),
+		)
+		stream := client.CallBidiStreamSimple(ctx)
+		select {
+		case <-connected:
+			break
+		case <-time.After(time.Second):
+			t.Error("CallBidiStreamSimple did not eagerly send headers")
+		}
+		msg := dynamicpb.NewMessage(methodDesc.Input())
+		msg.Set(
+			methodDesc.Input().Fields().ByName("number"),
+			protoreflect.ValueOfInt64(42),
+		)
+		assert.Nil(t, stream.Send(msg))
+		assert.Nil(t, stream.CloseRequest())
+		out, err := stream.Receive()
+		if assert.Nil(t, err) {
+			return
+		}
+		got := out.Get(methodDesc.Output().Fields().ByName("number")).Int()
+		assert.Equal(t, got, 42)
+	})
 	t.Run("option", func(t *testing.T) {
 		t.Parallel()
 		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Ping")

@@ -258,6 +258,13 @@ func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForCli
 	}
 }
 
+// CallBidiStreamSimple calls a bidirectional streaming procedure in simple mode.
+func (c *Client[Req, Res]) CallBidiStreamSimple(ctx context.Context) *BidiStreamForClient[Req, Res] {
+	stream := c.CallBidiStream(ctx)
+	stream.Send(nil)
+	return stream
+}
+
 func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType, onRequestSend func(r *http.Request)) StreamingClientConn {
 	newConn := func(ctx context.Context, spec Spec) StreamingClientConn {
 		header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
