@@ -381,7 +381,11 @@ func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, na
 
 	switch {
 	case isStreamingClient && !isStreamingServer:
-		g.P("return c.", unexport(method.GoName), ".CallClientStream(ctx)")
+		if simple {
+			g.P("return c.", unexport(method.GoName), ".CallClientStreamSimple(ctx)")
+		} else {
+			g.P("return c.", unexport(method.GoName), ".CallClientStream(ctx)")
+		}
 	case !isStreamingClient && isStreamingServer:
 		if simple {
 			g.P("return c.", unexport(method.GoName), ".CallServerStreamSimple(ctx, req)")

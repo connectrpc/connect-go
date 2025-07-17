@@ -182,6 +182,13 @@ func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamFo
 	}
 }
 
+// CallClientStream calls a client streaming procedure in simple mode.
+func (c *Client[Req, Res]) CallClientStreamSimple(ctx context.Context) *ClientStreamForClient[Req, Res] {
+	stream := c.CallClientStream(ctx)
+	stream.Send(nil)
+	return stream
+}
+
 // CallServerStream calls a server streaming procedure.
 func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Request[Req]) (*ServerStreamForClient[Res], error) {
 	if c.err != nil {

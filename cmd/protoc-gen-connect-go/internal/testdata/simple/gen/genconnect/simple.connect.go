@@ -121,7 +121,7 @@ func (c *testServiceClient) Method(ctx context.Context, req *gen.Request) (*gen.
 
 // MethodClientStream calls connect.test.simple.TestService.MethodClientStream.
 func (c *testServiceClient) MethodClientStream(ctx context.Context) *connect.ClientStreamForClient[gen.Request, gen.Response] {
-	return c.methodClientStream.CallClientStream(ctx)
+	return c.methodClientStream.CallClientStreamSimple(ctx)
 }
 
 // MethodServerStream calls connect.test.simple.TestService.MethodServerStream.
