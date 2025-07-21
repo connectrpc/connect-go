@@ -78,7 +78,6 @@ func TestCallInfo(t *testing.T) {
 			ctx, callInfo := connect.NewClientContext(context.Background())
 			callInfo.RequestHeader().Set(clientHeader, headerValue)
 			expect := &pingv1.PingResponse{Number: num}
-
 			response, err := client.Ping(ctx, &pingv1.PingRequest{Number: num})
 			assert.Equal(t, response, expect)
 			assert.Nil(t, err)

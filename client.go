@@ -104,6 +104,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		return response, conn.CloseResponse()
 	})
 	if interceptor := config.Interceptor; interceptor != nil {
+		// interceptor here is the chain
 		unaryFunc = interceptor.WrapUnary(unaryFunc)
 	}
 	client.callUnary = func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
@@ -119,7 +120,19 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		if callInfoOk {
 			callInfo.peer = request.Peer()
 			callInfo.spec = request.Spec()
+			// A client could have set request headers in the call info OR the request wrapper
+			// So if a callInfo exists in context, merge any headers from there into the request wrapper
+			// so that all headers are sent in the request
+			mergeHeaders(request.Header(), callInfo.requestHeader)
+			// Then, set the full list of merged headers into the call info so users can query the context
+			// for this information
+			// TODO - Does this necessarily need done?
 			callInfo.requestHeader = request.Header()
+
+			// Copy the call info into a sentinel value. This is so we can compare
+			// the sentinel value against the call info in context. If they're different,
+			// we can stop the request. This protects against changing the context in interceptors.
+			ctx = context.WithValue(ctx, sentinelContextKey{}, callInfo)
 		}
 
 		response, err := unaryFunc(ctx, request)
@@ -178,15 +191,22 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 	if c.err != nil {
 		return nil, c.err
 	}
+	callInfo, callInfoOk := getClientCallInfoFromContext(ctx)
+	// Set values in the context if there's a call info present
+	if callInfoOk {
+		// Copy the call info into a sentinel value. This is so we can compare
+		// the sentinel value against the call info in context. If they're different,
+		// we can stop the request. This protects against changing the context in interceptors.
+		ctx = context.WithValue(ctx, sentinelContextKey{}, callInfo)
+	}
 	conn := c.newConn(ctx, StreamTypeServer, func(r *http.Request) {
 		request.method = r.Method
 	})
 	request.peer = conn.Peer()
 	request.spec = conn.Spec()
 
-	callInfo, ok := getClientCallInfoFromContext(ctx)
 	// Set values in the context if there's a call info present
-	if ok {
+	if callInfoOk {
 		callInfo.peer = conn.Peer()
 		callInfo.spec = conn.Spec()
 		callInfo.responseSource = conn
