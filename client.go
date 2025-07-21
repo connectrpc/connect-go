@@ -104,7 +104,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		return response, conn.CloseResponse()
 	})
 	if interceptor := config.Interceptor; interceptor != nil {
-		// interceptor here is the chain
+		// interceptor is the full chain of all interceptors provided
 		unaryFunc = interceptor.WrapUnary(unaryFunc)
 	}
 	client.callUnary = func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
@@ -124,10 +124,6 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 			// So if a callInfo exists in context, merge any headers from there into the request wrapper
 			// so that all headers are sent in the request
 			mergeHeaders(request.Header(), callInfo.requestHeader)
-			// Then, set the full list of merged headers into the call info so users can query the context
-			// for this information
-			// TODO - Does this necessarily need done?
-			callInfo.requestHeader = request.Header()
 
 			// Copy the call info into a sentinel value. This is so we can compare
 			// the sentinel value against the call info in context. If they're different,
@@ -168,7 +164,7 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 // This option eliminates the [Request] and [Response] wrappers, and instead uses the
 // context.Context to propagate information such as headers.
 func (c *Client[Req, Res]) CallUnarySimple(ctx context.Context, request *Req) (*Res, error) {
-	response, err := c.CallUnary(ctx, requestFromClientContext(ctx, request))
+	response, err := c.CallUnary(ctx, NewRequest(request))
 	if response != nil {
 		return response.Msg, err
 	}
@@ -241,7 +237,7 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 // This option eliminates the [Request] wrapper, and instead uses the context.Context to
 // propagate information such as headers.
 func (c *Client[Req, Res]) CallServerStreamSimple(ctx context.Context, requestMsg *Req) (*ServerStreamForClient[Res], error) {
-	return c.CallServerStream(ctx, requestFromClientContext(ctx, requestMsg))
+	return c.CallServerStream(ctx, NewRequest(requestMsg))
 }
 
 // CallBidiStream calls a bidirectional streaming procedure.

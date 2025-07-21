@@ -131,8 +131,6 @@ func streamingClientThunk(next StreamingClientFunc) StreamingClientFunc {
 }
 
 func checkSentinel(ctx context.Context) bool {
-	callInfo, _ := ctx.Value(clientCallInfoContextKey{}).(*clientCallInfo)
-	sentinel, _ := ctx.Value(sentinelContextKey{}).(*clientCallInfo)
 	// Only verify if there's a sentinel call info to compare it to
-	return callInfo == sentinel
+	return ctx.Value(clientCallInfoContextKey{}) == ctx.Value(sentinelContextKey{})
 }

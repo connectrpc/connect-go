@@ -242,13 +242,3 @@ func getClientCallInfoFromContext(ctx context.Context) (*clientCallInfo, bool) {
 func newHandlerContext(ctx context.Context, info CallInfo) context.Context {
 	return context.WithValue(ctx, handlerCallInfoContextKey{}, info)
 }
-
-// requestFromClientContext creates a new Request using the given context and message.
-func requestFromClientContext[T any](ctx context.Context, message *T) *Request[T] {
-	request := NewRequest(message)
-	callInfo, ok := getClientCallInfoFromContext(ctx)
-	if ok {
-		request.setHeader(callInfo.RequestHeader())
-	}
-	return request
-}
