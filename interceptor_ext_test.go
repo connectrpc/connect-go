@@ -25,8 +25,43 @@ import (
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/memhttp"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 )
+
+func TestSideQuestInInterceptor(t *testing.T) {
+	t.Parallel()
+	t.Run("unary", func(t *testing.T) {
+		t.Parallel()
+		t.Run("sidequest_succeeds", func(t *testing.T) {
+			t.Parallel()
+			createInterceptors := func(clientCounter1 *atomic.Int32, clientCounter2 *atomic.Int32, server *memhttp.Server) connect.Option {
+				return connect.WithInterceptors(
+					newSideQuestInterceptor(t, clientCounter1, server),
+					newSideQuestInterceptor(t, clientCounter2, server),
+				)
+			}
+			var clientCounter1, clientCounter2 atomic.Int32
+			mux := http.NewServeMux()
+			mux.Handle(
+				pingv1connect.NewPingServiceHandler(
+					pingServer{},
+				),
+			)
+			server := memhttptest.NewServer(t, mux)
+			client := pingv1connect.NewPingServiceClient(
+				server.Client(),
+				server.URL(),
+				createInterceptors(&clientCounter1, &clientCounter2, server),
+			)
+			_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
+
+			assert.Nil(t, err)
+			assert.Equal(t, int32(1), clientCounter1.Load())
+			assert.Equal(t, int32(1), clientCounter2.Load())
+		})
+	})
+}
 
 func TestNewClientContextFails(t *testing.T) {
 	// Verifies that calling NewClientContext in an interceptor fails when sending the new context downstream
@@ -35,13 +70,13 @@ func TestNewClientContextFails(t *testing.T) {
 		t.Parallel()
 		t.Run("first_interceptor", func(t *testing.T) {
 			t.Parallel()
-			createInterceptors := func(client1 *atomic.Int32, client2 *atomic.Int32) connect.Option {
+			createInterceptors := func(clientCounter1 *atomic.Int32, clientCounter2 *atomic.Int32) connect.Option {
 				return connect.WithInterceptors(
-					&contextInterceptor{client: true, count: client1, createNewContext: true},
-					&contextInterceptor{client: true, count: client2},
+					&contextInterceptor{client: true, count: clientCounter1, createNewContext: true},
+					&contextInterceptor{client: true, count: clientCounter2},
 				)
 			}
-			var client1, client2 atomic.Int32
+			var clientCounter1, clientCounter2 atomic.Int32
 			mux := http.NewServeMux()
 			mux.Handle(
 				pingv1connect.NewPingServiceHandler(
@@ -52,7 +87,7 @@ func TestNewClientContextFails(t *testing.T) {
 			client := pingv1connect.NewPingServiceClient(
 				server.Client(),
 				server.URL(),
-				createInterceptors(&client1, &client2),
+				createInterceptors(&clientCounter1, &clientCounter2),
 			)
 			_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
 
@@ -60,18 +95,18 @@ func TestNewClientContextFails(t *testing.T) {
 			assert.NotNil(t, err)
 			assert.Equal(t, err.Error(), "creating a new context in an interceptor is prohibited")
 			// And because we're creating it in the first interceptor, only the first interceptor fires
-			assert.Equal(t, int32(1), client1.Load())
-			assert.Equal(t, int32(0), client2.Load())
+			assert.Equal(t, int32(1), clientCounter1.Load())
+			assert.Equal(t, int32(0), clientCounter2.Load())
 		})
 		t.Run("subsequent_interceptor", func(t *testing.T) {
 			t.Parallel()
-			createInterceptors := func(client1 *atomic.Int32, client2 *atomic.Int32) connect.Option {
+			createInterceptors := func(clientCounter1 *atomic.Int32, clientCounter2 *atomic.Int32) connect.Option {
 				return connect.WithInterceptors(
-					&contextInterceptor{client: true, count: client1},
-					&contextInterceptor{client: true, count: client2, createNewContext: true},
+					&contextInterceptor{client: true, count: clientCounter1},
+					&contextInterceptor{client: true, count: clientCounter2, createNewContext: true},
 				)
 			}
-			var client1, client2 atomic.Int32
+			var clientCounter1, clientCounter2 atomic.Int32
 			mux := http.NewServeMux()
 			mux.Handle(
 				pingv1connect.NewPingServiceHandler(
@@ -82,7 +117,7 @@ func TestNewClientContextFails(t *testing.T) {
 			client := pingv1connect.NewPingServiceClient(
 				server.Client(),
 				server.URL(),
-				createInterceptors(&client1, &client2),
+				createInterceptors(&clientCounter1, &clientCounter2),
 			)
 			_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
 
@@ -90,21 +125,21 @@ func TestNewClientContextFails(t *testing.T) {
 			assert.NotNil(t, err)
 			assert.Equal(t, err.Error(), "creating a new context in an interceptor is prohibited")
 			// And because we're creating it in the second interceptor, they both fire
-			assert.Equal(t, int32(1), client1.Load())
-			assert.Equal(t, int32(1), client2.Load())
+			assert.Equal(t, int32(1), clientCounter1.Load())
+			assert.Equal(t, int32(1), clientCounter2.Load())
 		})
 	})
 	t.Run("server_streaming", func(t *testing.T) {
 		t.Parallel()
 		t.Run("first_interceptor", func(t *testing.T) {
 			t.Parallel()
-			createInterceptors := func(client1 *atomic.Int32, client2 *atomic.Int32) connect.Option {
+			createInterceptors := func(clientCounter1 *atomic.Int32, clientCounter2 *atomic.Int32) connect.Option {
 				return connect.WithInterceptors(
-					&contextInterceptor{client: true, count: client1, createNewContext: true},
-					&contextInterceptor{client: true, count: client2},
+					&contextInterceptor{client: true, count: clientCounter1, createNewContext: true},
+					&contextInterceptor{client: true, count: clientCounter2},
 				)
 			}
-			var client1, client2 atomic.Int32
+			var clientCounter1, clientCounter2 atomic.Int32
 			mux := http.NewServeMux()
 			mux.Handle(
 				pingv1connect.NewPingServiceHandler(
@@ -115,7 +150,7 @@ func TestNewClientContextFails(t *testing.T) {
 			client := pingv1connect.NewPingServiceClient(
 				server.Client(),
 				server.URL(),
-				createInterceptors(&client1, &client2),
+				createInterceptors(&clientCounter1, &clientCounter2),
 			)
 			responses, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
 
@@ -124,18 +159,18 @@ func TestNewClientContextFails(t *testing.T) {
 			assert.NotNil(t, err)
 			assert.Equal(t, err.Error(), "creating a new context in an interceptor is prohibited")
 			// And because we're creating it in the first interceptor, only the first interceptor fires
-			assert.Equal(t, int32(1), client1.Load())
-			assert.Equal(t, int32(0), client2.Load())
+			assert.Equal(t, int32(1), clientCounter1.Load())
+			assert.Equal(t, int32(0), clientCounter2.Load())
 		})
 		t.Run("subsequent_interceptor", func(t *testing.T) {
 			t.Parallel()
-			createInterceptors := func(client1 *atomic.Int32, client2 *atomic.Int32) connect.Option {
+			createInterceptors := func(clientCounter1 *atomic.Int32, clientCounter2 *atomic.Int32) connect.Option {
 				return connect.WithInterceptors(
-					&contextInterceptor{client: true, count: client1},
-					&contextInterceptor{client: true, count: client2, createNewContext: true},
+					&contextInterceptor{client: true, count: clientCounter1},
+					&contextInterceptor{client: true, count: clientCounter2, createNewContext: true},
 				)
 			}
-			var client1, client2 atomic.Int32
+			var clientCounter1, clientCounter2 atomic.Int32
 			mux := http.NewServeMux()
 			mux.Handle(
 				pingv1connect.NewPingServiceHandler(
@@ -146,7 +181,7 @@ func TestNewClientContextFails(t *testing.T) {
 			client := pingv1connect.NewPingServiceClient(
 				server.Client(),
 				server.URL(),
-				createInterceptors(&client1, &client2),
+				createInterceptors(&clientCounter1, &clientCounter2),
 			)
 			responses, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
 
@@ -155,8 +190,8 @@ func TestNewClientContextFails(t *testing.T) {
 			assert.NotNil(t, err)
 			assert.Equal(t, err.Error(), "creating a new context in an interceptor is prohibited")
 			// And because we're creating it in the second interceptor, all interceptors fire
-			assert.Equal(t, int32(1), client1.Load())
-			assert.Equal(t, int32(1), client2.Load())
+			assert.Equal(t, int32(1), clientCounter1.Load())
+			assert.Equal(t, int32(1), clientCounter2.Load())
 		})
 	})
 }
@@ -201,7 +236,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 		}
 	}
 
-	var client1, client2, client3, handler1, handler2, handler3 atomic.Int32
+	var clientCounter1, clientCounter2, clientCounter3, handlerCounter1, handlerCounter2, handlerCounter3 atomic.Int32
 
 	// The client and handler interceptor onions are the meat of the test. The
 	// order of interceptor execution must be the same for unary and streaming
@@ -216,7 +251,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	// intended order clear.
 	clientOnion := connect.WithInterceptors(
 		newHeaderInterceptor(
-			&client1,
+			&clientCounter1,
 			// 1 (start). request: should see protocol-related headers
 			func(_ connect.Spec, h http.Header) {
 				assert.NotZero(t, h.Get("Content-Type"))
@@ -225,29 +260,29 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 			assertAllPresent,
 		),
 		newHeaderInterceptor(
-			&client2,
+			&clientCounter2,
 			newInspector("", "one"),       // 2. request: add header "one"
 			newInspector("three", "four"), // 11. response: check "three", add "four"
 		),
 		newHeaderInterceptor(
-			&client3,
+			&clientCounter3,
 			newInspector("one", "two"),   // 3. request: check "one", add "two"
 			newInspector("two", "three"), // 10. response: check "two", add "three"
 		),
 	)
 	handlerOnion := connect.WithInterceptors(
 		newHeaderInterceptor(
-			&handler1,
+			&handlerCounter1,
 			newInspector("two", "three"), // 4. request: check "two", add "three"
 			newInspector("one", "two"),   // 9. response: check "one", add "two"
 		),
 		newHeaderInterceptor(
-			&handler2,
+			&handlerCounter2,
 			newInspector("three", "four"), // 5. request: check "three", add "four"
 			newInspector("", "one"),       // 8. response: add "one"
 		),
 		newHeaderInterceptor(
-			&handler3,
+			&handlerCounter3,
 			assertAllPresent, // 6. request: check "one"-"four"
 			nil,              // 7. response: no-op
 		),
@@ -271,12 +306,12 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	assert.Nil(t, err)
 
 	// make sure the interceptors were actually invoked
-	assert.Equal(t, int32(1), client1.Load())
-	assert.Equal(t, int32(1), client2.Load())
-	assert.Equal(t, int32(1), client3.Load())
-	assert.Equal(t, int32(1), handler1.Load())
-	assert.Equal(t, int32(1), handler2.Load())
-	assert.Equal(t, int32(1), handler3.Load())
+	assert.Equal(t, int32(1), clientCounter1.Load())
+	assert.Equal(t, int32(1), clientCounter2.Load())
+	assert.Equal(t, int32(1), clientCounter3.Load())
+	assert.Equal(t, int32(1), handlerCounter1.Load())
+	assert.Equal(t, int32(1), handlerCounter2.Load())
+	assert.Equal(t, int32(1), handlerCounter3.Load())
 
 	responses, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
 	assert.Nil(t, err)
@@ -288,12 +323,12 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	assert.Nil(t, responses.Close())
 
 	// make sure the interceptors were invoked again
-	assert.Equal(t, int32(2), client1.Load())
-	assert.Equal(t, int32(2), client2.Load())
-	assert.Equal(t, int32(2), client3.Load())
-	assert.Equal(t, int32(2), handler1.Load())
-	assert.Equal(t, int32(2), handler2.Load())
-	assert.Equal(t, int32(2), handler3.Load())
+	assert.Equal(t, int32(2), clientCounter1.Load())
+	assert.Equal(t, int32(2), clientCounter2.Load())
+	assert.Equal(t, int32(2), clientCounter3.Load())
+	assert.Equal(t, int32(2), handlerCounter1.Load())
+	assert.Equal(t, int32(2), handlerCounter2.Load())
+	assert.Equal(t, int32(2), handlerCounter3.Load())
 }
 
 func TestEmptyUnaryInterceptorFunc(t *testing.T) {
@@ -556,6 +591,63 @@ func (h *contextInterceptor) WrapStreamingClient(next connect.StreamingClientFun
 func (h *contextInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
 		h.count.Add(1)
+		return next(ctx, conn)
+	}
+}
+
+type sideQuestInterceptor struct {
+	count  *atomic.Int32
+	client pingv1connect.PingServiceClient
+	t      *testing.T
+}
+
+func newSideQuestInterceptor( //nolint:thelper
+	t *testing.T,
+	counter *atomic.Int32,
+	server *memhttp.Server,
+) *sideQuestInterceptor {
+	client := pingv1connect.NewPingServiceClient(
+		server.Client(),
+		server.URL(),
+	)
+	return &sideQuestInterceptor{t: t, client: client, count: counter}
+}
+
+func (h *sideQuestInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		h.count.Add(1)
+		num := int64(42)
+		// Create a new client context for the side quest Ping. This should succeed because we aren't
+		// sending this on through the interceptor chain and reusing this context
+		newCtx, _ := connect.NewClientContext(ctx)
+		resp, err := h.client.Ping(newCtx, connect.NewRequest(&pingv1.PingRequest{Number: num}))
+		assert.Nil(h.t, err)
+		assert.Equal(h.t, resp.Msg.Number, num)
+
+		return next(ctx, req)
+	}
+}
+
+func (h *sideQuestInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
+		h.count.Add(1)
+		// Create a new context for the side quest CountUp. This should succeed because we aren't
+		// sending this on through the interceptor chain and reusing this context
+		newCtx, _ := connect.NewClientContext(ctx)
+		responses, err := h.client.CountUp(newCtx, connect.NewRequest(&pingv1.CountUpRequest{Number: 3}))
+		assert.Nil(h.t, err)
+		var sum int64
+		for responses.Receive() {
+			sum += responses.Msg().GetNumber()
+		}
+		assert.Equal(h.t, sum, 6)
+		assert.Nil(h.t, responses.Close())
+		return next(ctx, spec)
+	}
+}
+
+func (h *sideQuestInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
 		return next(ctx, conn)
 	}
 }
