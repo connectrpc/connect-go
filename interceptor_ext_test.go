@@ -28,6 +28,139 @@ import (
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 )
 
+func TestNewClientContextFails(t *testing.T) {
+	// Verifies that calling NewClientContext in an interceptor fails when sending the new context downstream
+	t.Parallel()
+	t.Run("unary", func(t *testing.T) {
+		t.Parallel()
+		t.Run("first_interceptor", func(t *testing.T) {
+			t.Parallel()
+			createInterceptors := func(client1 *atomic.Int32, client2 *atomic.Int32) connect.Option {
+				return connect.WithInterceptors(
+					&contextInterceptor{client: true, count: client1, createNewContext: true},
+					&contextInterceptor{client: true, count: client2},
+				)
+			}
+			var client1, client2 atomic.Int32
+			mux := http.NewServeMux()
+			mux.Handle(
+				pingv1connect.NewPingServiceHandler(
+					pingServer{},
+				),
+			)
+			server := memhttptest.NewServer(t, mux)
+			client := pingv1connect.NewPingServiceClient(
+				server.Client(),
+				server.URL(),
+				createInterceptors(&client1, &client2),
+			)
+			_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
+
+			// Since we are creating a new client context, an error will be returned from the invocation
+			assert.NotNil(t, err)
+			assert.Equal(t, err.Error(), "creating a new context in an interceptor is prohibited")
+			// And because we're creating it in the first interceptor, only the first interceptor fires
+			assert.Equal(t, int32(1), client1.Load())
+			assert.Equal(t, int32(0), client2.Load())
+		})
+		t.Run("subsequent_interceptor", func(t *testing.T) {
+			t.Parallel()
+			createInterceptors := func(client1 *atomic.Int32, client2 *atomic.Int32) connect.Option {
+				return connect.WithInterceptors(
+					&contextInterceptor{client: true, count: client1},
+					&contextInterceptor{client: true, count: client2, createNewContext: true},
+				)
+			}
+			var client1, client2 atomic.Int32
+			mux := http.NewServeMux()
+			mux.Handle(
+				pingv1connect.NewPingServiceHandler(
+					pingServer{},
+				),
+			)
+			server := memhttptest.NewServer(t, mux)
+			client := pingv1connect.NewPingServiceClient(
+				server.Client(),
+				server.URL(),
+				createInterceptors(&client1, &client2),
+			)
+			_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
+
+			// Since we are creating a new client context, an error will be returned from the invocation
+			assert.NotNil(t, err)
+			assert.Equal(t, err.Error(), "creating a new context in an interceptor is prohibited")
+			// And because we're creating it in the second interceptor, they both fire
+			assert.Equal(t, int32(1), client1.Load())
+			assert.Equal(t, int32(1), client2.Load())
+		})
+	})
+	t.Run("server_streaming", func(t *testing.T) {
+		t.Parallel()
+		t.Run("first_interceptor", func(t *testing.T) {
+			t.Parallel()
+			createInterceptors := func(client1 *atomic.Int32, client2 *atomic.Int32) connect.Option {
+				return connect.WithInterceptors(
+					&contextInterceptor{client: true, count: client1, createNewContext: true},
+					&contextInterceptor{client: true, count: client2},
+				)
+			}
+			var client1, client2 atomic.Int32
+			mux := http.NewServeMux()
+			mux.Handle(
+				pingv1connect.NewPingServiceHandler(
+					pingServer{},
+				),
+			)
+			server := memhttptest.NewServer(t, mux)
+			client := pingv1connect.NewPingServiceClient(
+				server.Client(),
+				server.URL(),
+				createInterceptors(&client1, &client2),
+			)
+			responses, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
+
+			// Since we are creating a new client context, an error will be returned from the invocation
+			assert.Nil(t, responses)
+			assert.NotNil(t, err)
+			assert.Equal(t, err.Error(), "creating a new context in an interceptor is prohibited")
+			// And because we're creating it in the first interceptor, only the first interceptor fires
+			assert.Equal(t, int32(1), client1.Load())
+			assert.Equal(t, int32(0), client2.Load())
+		})
+		t.Run("subsequent_interceptor", func(t *testing.T) {
+			t.Parallel()
+			createInterceptors := func(client1 *atomic.Int32, client2 *atomic.Int32) connect.Option {
+				return connect.WithInterceptors(
+					&contextInterceptor{client: true, count: client1},
+					&contextInterceptor{client: true, count: client2, createNewContext: true},
+				)
+			}
+			var client1, client2 atomic.Int32
+			mux := http.NewServeMux()
+			mux.Handle(
+				pingv1connect.NewPingServiceHandler(
+					pingServer{},
+				),
+			)
+			server := memhttptest.NewServer(t, mux)
+			client := pingv1connect.NewPingServiceClient(
+				server.Client(),
+				server.URL(),
+				createInterceptors(&client1, &client2),
+			)
+			responses, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
+
+			// Since we are creating a new client context, an error will be returned from the invocation
+			assert.Nil(t, responses)
+			assert.NotNil(t, err)
+			assert.Equal(t, err.Error(), "creating a new context in an interceptor is prohibited")
+			// And because we're creating it in the second interceptor, all interceptors fire
+			assert.Equal(t, int32(1), client1.Load())
+			assert.Equal(t, int32(1), client2.Load())
+		})
+	})
+}
+
 func TestOnionOrderingEndToEnd(t *testing.T) {
 	t.Parallel()
 	// Helper function: returns a function that asserts that there's some value
@@ -349,7 +482,7 @@ type httpMethodChecker struct {
 	count  atomic.Int32
 }
 
-func (h *httpMethodChecker) WrapUnary(unaryFunc connect.UnaryFunc) connect.UnaryFunc {
+func (h *httpMethodChecker) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 		h.count.Add(1)
 		if h.client {
@@ -365,7 +498,7 @@ func (h *httpMethodChecker) WrapUnary(unaryFunc connect.UnaryFunc) connect.Unary
 				return nil, fmt.Errorf("expected HTTP method %s but instead got %q", http.MethodPost, req.HTTPMethod())
 			}
 		}
-		resp, err := unaryFunc(ctx, req)
+		resp, err := next(ctx, req)
 		// NB: In theory, the method could also be GET, not just POST. But for the
 		// configuration under test, it will always be POST.
 		if req.HTTPMethod() != http.MethodPost {
@@ -388,5 +521,41 @@ func (h *httpMethodChecker) WrapStreamingHandler(handlerFunc connect.StreamingHa
 		// method not exposed to streaming interceptor, but that's okay because it's always POST for streams
 		h.count.Add(1)
 		return handlerFunc(ctx, conn)
+	}
+}
+
+type contextInterceptor struct {
+	client bool
+	count  *atomic.Int32
+	// Whether the interceptor should attempt to create a new context (which will cause next() to return an error)
+	createNewContext bool
+}
+
+func (h *contextInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		h.count.Add(1)
+		if h.createNewContext {
+			// This will cause next to return an error
+			ctx, _ = connect.NewClientContext(ctx)
+		}
+		return next(ctx, req)
+	}
+}
+
+func (h *contextInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
+		h.count.Add(1)
+		if h.createNewContext {
+			// This will cause next to return an error
+			ctx, _ = connect.NewClientContext(ctx)
+		}
+		return next(ctx, spec)
+	}
+}
+
+func (h *contextInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
+		h.count.Add(1)
+		return next(ctx, conn)
 	}
 }

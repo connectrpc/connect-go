@@ -16,6 +16,13 @@ package connect
 
 import (
 	"context"
+	"errors"
+)
+
+var (
+	// errNewClientContextProhibited signals that a new client context was created
+	// in an interceptor, which is prohibited.
+	errNewClientContextProhibited = errors.New("creating a new context in an interceptor is prohibited")
 )
 
 // UnaryFunc is the generic signature of a unary RPC. Interceptors may wrap
@@ -36,9 +43,8 @@ type StreamingHandlerFunc func(context.Context, StreamingHandlerConn) error
 
 // An Interceptor adds logic to a generated handler or client, like the
 // decorators or middleware you may have seen in other libraries. Interceptors
-// may replace the context, mutate requests and responses, handle errors,
-// retry, recover from panics, emit logs and metrics, or do nearly anything
-// else.
+// may mutate requests and responses, handle errors, retry, recover from panics,
+// emit logs and metrics, or do nearly anything else.
 //
 // The returned functions must be safe to call concurrently.
 type Interceptor interface {
@@ -85,6 +91,7 @@ func newChain(interceptors []Interceptor) *chain {
 
 func (c *chain) WrapUnary(next UnaryFunc) UnaryFunc {
 	for _, interceptor := range c.interceptors {
+		next = unaryThunk(next)
 		next = interceptor.WrapUnary(next)
 	}
 	return next
@@ -92,6 +99,7 @@ func (c *chain) WrapUnary(next UnaryFunc) UnaryFunc {
 
 func (c *chain) WrapStreamingClient(next StreamingClientFunc) StreamingClientFunc {
 	for _, interceptor := range c.interceptors {
+		next = streamingClientThunk(next)
 		next = interceptor.WrapStreamingClient(next)
 	}
 	return next
@@ -102,4 +110,29 @@ func (c *chain) WrapStreamingHandler(next StreamingHandlerFunc) StreamingHandler
 		next = interceptor.WrapStreamingHandler(next)
 	}
 	return next
+}
+
+func unaryThunk(next UnaryFunc) UnaryFunc {
+	return func(ctx context.Context, req AnyRequest) (AnyResponse, error) {
+		if !checkSentinel(ctx) {
+			return nil, errNewClientContextProhibited
+		}
+		return next(ctx, req)
+	}
+}
+
+func streamingClientThunk(next StreamingClientFunc) StreamingClientFunc {
+	return func(ctx context.Context, spec Spec) StreamingClientConn {
+		if !checkSentinel(ctx) {
+			return &errStreamingClientConn{err: errNewClientContextProhibited}
+		}
+		return next(ctx, spec)
+	}
+}
+
+func checkSentinel(ctx context.Context) bool {
+	callInfo, _ := ctx.Value(clientCallInfoContextKey{}).(*clientCallInfo)
+	sentinel, _ := ctx.Value(sentinelContextKey{}).(*clientCallInfo)
+	// Only verify if there's a sentinel call info to compare it to
+	return callInfo == sentinel
 }

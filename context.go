@@ -79,12 +79,6 @@ func NewClientContext(ctx context.Context) (context.Context, CallInfo) {
 	return context.WithValue(ctx, clientCallInfoContextKey{}, info), info
 }
 
-// CallInfoFromClientContext returns the CallInfo for the given client context, if there is one.
-func CallInfoFromClientContext(ctx context.Context) (CallInfo, bool) {
-	value, ok := ctx.Value(clientCallInfoContextKey{}).(CallInfo)
-	return value, ok
-}
-
 // CallInfoFromHandlerContext returns the CallInfo for the given handler (i.e. incoming) context, if there is one.
 func CallInfoFromHandlerContext(ctx context.Context) (CallInfo, bool) {
 	value, ok := ctx.Value(handlerCallInfoContextKey{}).(CallInfo)
@@ -216,6 +210,7 @@ func (c *clientCallInfo) HTTPMethod() string {
 func (c *clientCallInfo) internalOnly() {}
 
 type clientCallInfoContextKey struct{}
+type sentinelContextKey struct{}
 type handlerCallInfoContextKey struct{}
 
 // responseSource indicates a type that manage response headers and trailers.
@@ -251,7 +246,7 @@ func newHandlerContext(ctx context.Context, info CallInfo) context.Context {
 // requestFromClientContext creates a new Request using the given context and message.
 func requestFromClientContext[T any](ctx context.Context, message *T) *Request[T] {
 	request := NewRequest(message)
-	callInfo, ok := CallInfoFromClientContext(ctx)
+	callInfo, ok := getClientCallInfoFromContext(ctx)
 	if ok {
 		request.setHeader(callInfo.RequestHeader())
 	}
