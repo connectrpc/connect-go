@@ -211,11 +211,6 @@ func (r *Request[_]) setRequestMethod(method string) {
 	r.method = method
 }
 
-// setHeader sets the request header to the given value.
-func (r *Request[_]) setHeader(header http.Header) {
-	r.header = header
-}
-
 // AnyRequest is the common method set of every [Request], regardless of type
 // parameter. It's used in unary interceptors.
 //
