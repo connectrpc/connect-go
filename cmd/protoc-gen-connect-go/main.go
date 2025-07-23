@@ -381,7 +381,11 @@ func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, na
 
 	switch {
 	case isStreamingClient && !isStreamingServer:
-		g.P("return c.", unexport(method.GoName), ".CallClientStream(ctx)")
+		if simple {
+			g.P("return c.", unexport(method.GoName), ".CallClientStreamSimple(ctx)")
+		} else {
+			g.P("return c.", unexport(method.GoName), ".CallClientStream(ctx)")
+		}
 	case !isStreamingClient && isStreamingServer:
 		if simple {
 			g.P("return c.", unexport(method.GoName), ".CallServerStream(ctx, ", connectPackage.Ident("NewRequest"), "(req))")
@@ -389,7 +393,11 @@ func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, na
 			g.P("return c.", unexport(method.GoName), ".CallServerStream(ctx, req)")
 		}
 	case isStreamingClient && isStreamingServer:
-		g.P("return c.", unexport(method.GoName), ".CallBidiStream(ctx)")
+		if simple {
+			g.P("return c.", unexport(method.GoName), ".CallBidiStreamSimple(ctx)")
+		} else {
+			g.P("return c.", unexport(method.GoName), ".CallBidiStream(ctx)")
+		}
 	default:
 		if simple {
 			g.P("response, err := c.", unexport(method.GoName), ".CallUnary(ctx, ", connectPackage.Ident("NewRequest"), "(req))")
@@ -413,12 +421,24 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named b
 	}
 	if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
 		// bidi streaming
+		if simple {
+			return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
+				"(*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClient")) +
+				"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
+				", error)"
+		}
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
 			"*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClient")) +
 			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
 	}
 	if method.Desc.IsStreamingClient() {
 		// client streaming
+		if simple {
+			return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
+				"(*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClient")) +
+				"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
+				", error)"
+		}
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
 			"*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClient")) +
 			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
@@ -484,7 +504,11 @@ func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, s
 		idempotency := methodIdempotency(method)
 		switch {
 		case isStreamingClient && !isStreamingServer:
-			g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewClientStreamHandler"), "(")
+			if simple {
+				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewClientStreamHandlerSimple"), "(")
+			} else {
+				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewClientStreamHandler"), "(")
+			}
 		case !isStreamingClient && isStreamingServer:
 			if simple {
 				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewServerStreamHandlerSimple"), "(")
@@ -568,6 +592,12 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 	}
 	if method.Desc.IsStreamingClient() {
 		// client streaming
+		if simple {
+			return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ", " +
+				streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStream")) +
+				"[" + g.QualifiedGoIdent(method.Input.GoIdent) + "]" +
+				") (*" + g.QualifiedGoIdent(method.Output.GoIdent) + " ,error)"
+		}
 		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ", " +
 			streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStream")) +
 			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + "]" +

@@ -63,7 +63,7 @@ const (
 // TestServiceClient is a client for the connect.test.simple.TestService service.
 type TestServiceClient interface {
 	Method(context.Context, *gen.Request) (*gen.Response, error)
-	MethodClientStream(context.Context) *connect.ClientStreamForClient[gen.Request, gen.Response]
+	MethodClientStream(context.Context) (*connect.ClientStreamForClient[gen.Request, gen.Response], error)
 	MethodServerStream(context.Context, *gen.Request) (*connect.ServerStreamForClient[gen.Response], error)
 	MethodBidiStream(context.Context, *gen.Request) (*connect.ServerStreamForClient[gen.Response], error)
 }
@@ -124,8 +124,8 @@ func (c *testServiceClient) Method(ctx context.Context, req *gen.Request) (*gen.
 }
 
 // MethodClientStream calls connect.test.simple.TestService.MethodClientStream.
-func (c *testServiceClient) MethodClientStream(ctx context.Context) *connect.ClientStreamForClient[gen.Request, gen.Response] {
-	return c.methodClientStream.CallClientStream(ctx)
+func (c *testServiceClient) MethodClientStream(ctx context.Context) (*connect.ClientStreamForClient[gen.Request, gen.Response], error) {
+	return c.methodClientStream.CallClientStreamSimple(ctx)
 }
 
 // MethodServerStream calls connect.test.simple.TestService.MethodServerStream.
@@ -141,7 +141,7 @@ func (c *testServiceClient) MethodBidiStream(ctx context.Context, req *gen.Reque
 // TestServiceHandler is an implementation of the connect.test.simple.TestService service.
 type TestServiceHandler interface {
 	Method(context.Context, *gen.Request) (*gen.Response, error)
-	MethodClientStream(context.Context, *connect.ClientStream[gen.Request]) (*connect.Response[gen.Response], error)
+	MethodClientStream(context.Context, *connect.ClientStream[gen.Request]) (*gen.Response, error)
 	MethodServerStream(context.Context, *gen.Request, *connect.ServerStream[gen.Response]) error
 	MethodBidiStream(context.Context, *gen.Request, *connect.ServerStream[gen.Response]) error
 }
@@ -159,7 +159,7 @@ func NewTestServiceHandler(svc TestServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(testServiceMethods.ByName("Method")),
 		connect.WithHandlerOptions(opts...),
 	)
-	testServiceMethodClientStreamHandler := connect.NewClientStreamHandler(
+	testServiceMethodClientStreamHandler := connect.NewClientStreamHandlerSimple(
 		TestServiceMethodClientStreamProcedure,
 		svc.MethodClientStream,
 		connect.WithSchema(testServiceMethods.ByName("MethodClientStream")),
@@ -200,7 +200,7 @@ func (UnimplementedTestServiceHandler) Method(context.Context, *gen.Request) (*g
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.test.simple.TestService.Method is not implemented"))
 }
 
-func (UnimplementedTestServiceHandler) MethodClientStream(context.Context, *connect.ClientStream[gen.Request]) (*connect.Response[gen.Response], error) {
+func (UnimplementedTestServiceHandler) MethodClientStream(context.Context, *connect.ClientStream[gen.Request]) (*gen.Response, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("connect.test.simple.TestService.MethodClientStream is not implemented"))
 }
 

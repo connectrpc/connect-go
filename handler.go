@@ -162,6 +162,29 @@ func NewClientStreamHandler[Req, Res any](
 	)
 }
 
+// NewClientStreamHandlerSimple constructs a [Handler] for a request-streaming procedure
+// using the function signature associated with the "simple" generation option.
+//
+// This option eliminates the [Response] wrapper, and instead uses the context.Context
+// to propagate information such as headers.
+func NewClientStreamHandlerSimple[Req, Res any](
+	procedure string,
+	implementation func(context.Context, *ClientStream[Req]) (*Res, error),
+	options ...HandlerOption,
+) *Handler {
+	return NewClientStreamHandler(
+		procedure,
+		func(ctx context.Context, stream *ClientStream[Req]) (*Response[Res], error) {
+			responseMsg, err := implementation(ctx, stream)
+			if err != nil {
+				return nil, err
+			}
+			return NewResponse(responseMsg), nil
+		},
+		options...,
+	)
+}
+
 // NewServerStreamHandler constructs a [Handler] for a server streaming procedure.
 func NewServerStreamHandler[Req, Res any](
 	procedure string,
