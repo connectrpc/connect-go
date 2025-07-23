@@ -114,8 +114,8 @@ func (c *chain) WrapStreamingHandler(next StreamingHandlerFunc) StreamingHandler
 
 func unaryThunk(next UnaryFunc) UnaryFunc {
 	return func(ctx context.Context, req AnyRequest) (AnyResponse, error) {
-		if !checkSentinel(ctx) {
-			return nil, errNewClientContextProhibited
+		if err := checkSentinel(ctx); err != nil {
+			return nil, err
 		}
 		return next(ctx, req)
 	}
@@ -123,14 +123,16 @@ func unaryThunk(next UnaryFunc) UnaryFunc {
 
 func streamingClientThunk(next StreamingClientFunc) StreamingClientFunc {
 	return func(ctx context.Context, spec Spec) StreamingClientConn {
-		if !checkSentinel(ctx) {
-			return &errStreamingClientConn{err: errNewClientContextProhibited}
+		if err := checkSentinel(ctx); err != nil {
+			return &errStreamingClientConn{err: err}
 		}
 		return next(ctx, spec)
 	}
 }
 
-func checkSentinel(ctx context.Context) bool {
-	// Only verify if there's a sentinel call info to compare it to
-	return ctx.Value(clientCallInfoContextKey{}) == ctx.Value(sentinelContextKey{})
+func checkSentinel(ctx context.Context) error {
+	if ctx.Value(clientCallInfoContextKey{}) != ctx.Value(sentinelContextKey{}) {
+		return errNewClientContextProhibited
+	}
+	return nil
 }

@@ -232,13 +232,13 @@ func (w *responseWrapper[Res]) ResponseTrailer() http.Header {
 	return w.response.Trailer()
 }
 
-// Gets a client (i.e. outgoing) call info from context.
-func getClientCallInfoFromContext(ctx context.Context) (*clientCallInfo, bool) {
+// clientCallInfoFromContext gets the call info from a client/outgoing context.
+func clientCallInfoFromContext(ctx context.Context) (*clientCallInfo, bool) {
 	info, ok := ctx.Value(clientCallInfoContextKey{}).(*clientCallInfo)
 	return info, ok
 }
 
-// newHandlerContext creates a new handler (i.e. incoming) context.
+// newHandlerContext creates a new handler/incoming context.
 func newHandlerContext(ctx context.Context, info CallInfo) context.Context {
 	return context.WithValue(ctx, handlerCallInfoContextKey{}, info)
 }

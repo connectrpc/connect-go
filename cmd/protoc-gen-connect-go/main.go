@@ -384,7 +384,7 @@ func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, na
 		g.P("return c.", unexport(method.GoName), ".CallClientStream(ctx)")
 	case !isStreamingClient && isStreamingServer:
 		if simple {
-			g.P("return c.", unexport(method.GoName), ".CallServerStreamSimple(ctx, req)")
+			g.P("return c.", unexport(method.GoName), ".CallServerStream(ctx, ", connectPackage.Ident("NewRequest"), "(req))")
 		} else {
 			g.P("return c.", unexport(method.GoName), ".CallServerStream(ctx, req)")
 		}
@@ -392,7 +392,11 @@ func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, na
 		g.P("return c.", unexport(method.GoName), ".CallBidiStream(ctx)")
 	default:
 		if simple {
-			g.P("return c.", unexport(method.GoName), ".CallUnarySimple(ctx, req)")
+			g.P("response, err := c.", unexport(method.GoName), ".CallUnary(ctx, ", connectPackage.Ident("NewRequest"), "(req))")
+			g.P("if response != nil {")
+			g.P("return response.Msg, err")
+			g.P("}")
+			g.P("return nil, err")
 		} else {
 			g.P("return c.", unexport(method.GoName), ".CallUnary(ctx, req)")
 		}
