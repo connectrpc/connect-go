@@ -134,12 +134,20 @@ type pingServiceClient struct {
 
 // Ping calls connect.ping.v1.PingService.Ping.
 func (c *pingServiceClient) Ping(ctx context.Context, req *v1.PingRequest) (*v1.PingResponse, error) {
-	return c.ping.CallUnarySimple(ctx, req)
+	response, err := c.ping.CallUnary(ctx, connect.NewRequest(req))
+	if response != nil {
+		return response.Msg, err
+	}
+	return nil, err
 }
 
 // Fail calls connect.ping.v1.PingService.Fail.
 func (c *pingServiceClient) Fail(ctx context.Context, req *v1.FailRequest) (*v1.FailResponse, error) {
-	return c.fail.CallUnarySimple(ctx, req)
+	response, err := c.fail.CallUnary(ctx, connect.NewRequest(req))
+	if response != nil {
+		return response.Msg, err
+	}
+	return nil, err
 }
 
 // Sum calls connect.ping.v1.PingService.Sum.
@@ -149,7 +157,7 @@ func (c *pingServiceClient) Sum(ctx context.Context) (*connect.ClientStreamForCl
 
 // CountUp calls connect.ping.v1.PingService.CountUp.
 func (c *pingServiceClient) CountUp(ctx context.Context, req *v1.CountUpRequest) (*connect.ServerStreamForClient[v1.CountUpResponse], error) {
-	return c.countUp.CallServerStreamSimple(ctx, req)
+	return c.countUp.CallServerStream(ctx, connect.NewRequest(req))
 }
 
 // CumSum calls connect.ping.v1.PingService.CumSum.

@@ -368,8 +368,8 @@ type hasHTTPMethod interface {
 	getHTTPMethod() string
 }
 
+// errStreamingClientConn is a sentinel error implementation of StreamingClientConn.
 type errStreamingClientConn struct {
-	StreamingClientConn
 	err error
 }
 

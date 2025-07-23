@@ -79,7 +79,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		conn := client.protocolClient.NewConn(ctx, unarySpec, request.Header())
 		conn.onRequestSend(func(r *http.Request) {
 			request.setRequestMethod(r.Method)
-			callInfo, ok := getClientCallInfoFromContext(ctx)
+			callInfo, ok := clientCallInfoFromContext(ctx)
 			if ok {
 				callInfo.method = r.Method
 			}
@@ -104,7 +104,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		return response, conn.CloseResponse()
 	})
 	if interceptor := config.Interceptor; interceptor != nil {
-		// interceptor here is the chain
+		// interceptor is the full chain of all interceptors provided
 		unaryFunc = interceptor.WrapUnary(unaryFunc)
 	}
 	client.callUnary = func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
@@ -116,7 +116,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		protocolClient.WriteRequestHeader(StreamTypeUnary, request.Header())
 
 		// Also set them in the context if there's a call info present
-		callInfo, callInfoOk := getClientCallInfoFromContext(ctx)
+		callInfo, callInfoOk := clientCallInfoFromContext(ctx)
 		if callInfoOk {
 			callInfo.peer = request.Peer()
 			callInfo.spec = request.Spec()
@@ -158,19 +158,6 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 	return c.callUnary(ctx, request)
 }
 
-// CallUnarySimple calls a request-response procedure using the function signature
-// associated with the "simple" generation option.
-//
-// This option eliminates the [Request] and [Response] wrappers, and instead uses the
-// context.Context to propagate information such as headers.
-func (c *Client[Req, Res]) CallUnarySimple(ctx context.Context, request *Req) (*Res, error) {
-	response, err := c.CallUnary(ctx, NewRequest(request))
-	if response != nil {
-		return response.Msg, err
-	}
-	return nil, err
-}
-
 // CallClientStream calls a client streaming procedure.
 func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamForClient[Req, Res] {
 	if c.err != nil {
@@ -199,7 +186,7 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 	if c.err != nil {
 		return nil, c.err
 	}
-	callInfo, callInfoOk := getClientCallInfoFromContext(ctx)
+	callInfo, callInfoOk := clientCallInfoFromContext(ctx)
 	// Set values in the context if there's a call info present
 	if callInfoOk {
 		// Copy the call info into a sentinel value. This is so we can compare
@@ -241,15 +228,6 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 		conn:        conn,
 		initializer: c.config.Initializer,
 	}, nil
-}
-
-// CallServerStreamSimple calls a server streaming procedure using the function signature
-// associated with the "simple" generation option.
-//
-// This option eliminates the [Request] wrapper, and instead uses the context.Context to
-// propagate information such as headers.
-func (c *Client[Req, Res]) CallServerStreamSimple(ctx context.Context, requestMsg *Req) (*ServerStreamForClient[Res], error) {
-	return c.CallServerStream(ctx, NewRequest(requestMsg))
 }
 
 // CallBidiStream calls a bidirectional streaming procedure.
