@@ -19,68 +19,226 @@ import (
 	"net/http"
 )
 
-type requestIncomingHeaderContextKey struct{}
-type requestOutgoingHeaderContextKey struct{}
-type responseHeaderAddressContextKey struct{}
-type responseTrailerAddressContextKey struct{}
+// CallInfo represents information relevant to an RPC call.
+// Values returned by these methods are not thread-safe. Users should expect
+// data races if they create an outgoing client CallInfo in context and then pass that
+// CallInfo to another goroutine and try to call methods on it concurrent with the RPC.
+type CallInfo interface {
+	// Spec returns a description of this call.
+	Spec() Spec
+	// Peer describes the other party for this call.
+	Peer() Peer
+	// RequestHeader returns the HTTP headers for this request. Headers beginning with
+	// "Connect-" and "Grpc-" are reserved for use by the Connect and gRPC
+	// protocols: applications may read them but shouldn't write them.
+	RequestHeader() http.Header
+	// ResponseHeader returns the HTTP headers for this response. Headers beginning with
+	// "Connect-" and "Grpc-" are reserved for use by the Connect and gRPC
+	// protocols: applications may read them but shouldn't write them.
+	// On the client side, this method returns nil before
+	// the call is actually made. After the call is made, for streaming operations,
+	// this method will block for the server to actually return response headers.
+	ResponseHeader() http.Header
+	// ResponseTrailer returns the trailers for this response. Depending on the underlying
+	// RPC protocol, trailers may be sent as HTTP trailers or a protocol-specific
+	// block of in-body metadata.
+	//
+	// Trailers beginning with "Connect-" and "Grpc-" are reserved for use by the
+	// Connect and gRPC protocols: applications may read them but shouldn't write
+	// them.
+	//
+	// On the client side, this method returns nil before
+	// the call is actually made. After the call is made, for streaming operations,
+	// this method will block for the server to actually return response trailers.
+	ResponseTrailer() http.Header
+	// HTTPMethod returns the HTTP method for this request. This is nearly always
+	// POST, but side-effect-free unary RPCs could be made via a GET.
+	//
+	// On a newly created request, via NewRequest, this will return the empty
+	// string until the actual request is actually sent and the HTTP method
+	// determined. This means that client interceptor functions will see the
+	// empty string until *after* they delegate to the handler they wrapped. It
+	// is even possible for this to return the empty string after such delegation,
+	// if the request was never actually sent to the server (and thus no
+	// determination ever made about the HTTP method).
+	HTTPMethod() string
 
-// HeaderFromIncomingContext gets the header from a request sent to a handler.
-func HeaderFromIncomingContext(ctx context.Context) (http.Header, bool) {
-	value, ok := ctx.Value(requestIncomingHeaderContextKey{}).(http.Header)
+	internalOnly()
+}
+
+// Create a new client (i.e. outgoing) context for use from a client. When the
+// returned context is passed to RPCs, the returned call info can be used to set
+// request metadata before the RPC is invoked and to inspect response
+// metadata after the RPC completes.
+//
+// The returned context may be re-used across RPCs as long as they are
+// not concurrent. Results of all CallInfo methods other than
+// RequestHeader() are undefined if the context is used with concurrent RPCs.
+func NewClientContext(ctx context.Context) (context.Context, CallInfo) {
+	info := &clientCallInfo{}
+	return context.WithValue(ctx, clientCallInfoContextKey{}, info), info
+}
+
+// CallInfoFromHandlerContext returns the CallInfo for the given handler (i.e. incoming) context, if there is one.
+func CallInfoFromHandlerContext(ctx context.Context) (CallInfo, bool) {
+	value, ok := ctx.Value(handlerCallInfoContextKey{}).(CallInfo)
 	return value, ok
 }
 
-// HeaderFromOutgoingContext gets the header from a request sent by a client.
-func HeaderFromOutgoingContext(ctx context.Context) (http.Header, bool) {
-	value, ok := ctx.Value(requestOutgoingHeaderContextKey{}).(http.Header)
-	return value, ok
+// handlerCallInfo is a CallInfo implementation used for handlers.
+type handlerCallInfo struct {
+	spec            Spec
+	peer            Peer
+	method          string
+	requestHeader   http.Header
+	responseHeader  http.Header
+	responseTrailer http.Header
 }
 
-// WithIncomingHeader adds the header to the context from a request sent to a handler.
-func WithIncomingHeader(ctx context.Context, header http.Header) context.Context {
-	return context.WithValue(ctx, requestIncomingHeaderContextKey{}, header)
+func (c *handlerCallInfo) Spec() Spec {
+	return c.spec
 }
 
-// WithOutgoingHeader adds the header to the context from a request sent by a client.
-func WithOutgoingHeader(ctx context.Context, header http.Header) context.Context {
-	return context.WithValue(ctx, requestOutgoingHeaderContextKey{}, header)
+func (c *handlerCallInfo) Peer() Peer {
+	return c.peer
 }
 
-// WithStoreResponseHeader returns a new context to be given to a client when making a request
-// that will result in the header pointer being set to the response header.
-func WithStoreResponseHeader(ctx context.Context, header *http.Header) context.Context {
-	return context.WithValue(ctx, responseHeaderAddressContextKey{}, header)
-}
-
-// WithStoreResponseTrailer returns a new context to be given to a client when making a request
-// that will result in the trailer pointer being set to the response trailer.
-func WithStoreResponseTrailer(ctx context.Context, trailer *http.Header) context.Context {
-	return context.WithValue(ctx, responseTrailerAddressContextKey{}, trailer)
-}
-
-// SetResponseHeader sets the response header within a simple handler implementation.
-func SetResponseHeader(ctx context.Context, header http.Header) {
-	responseHeaderAddress, ok := ctx.Value(responseHeaderAddressContextKey{}).(*http.Header)
-	if !ok {
-		return
+func (c *handlerCallInfo) RequestHeader() http.Header {
+	if c.requestHeader == nil {
+		c.requestHeader = make(http.Header)
 	}
-	*responseHeaderAddress = header
+	return c.requestHeader
 }
 
-// SetResponseTrailer sets the response trailer within a simple handler implementation.
-func SetResponseTrailer(ctx context.Context, trailer http.Header) {
-	responseTrailerAddress, ok := ctx.Value(responseTrailerAddressContextKey{}).(*http.Header)
-	if !ok {
-		return
+func (c *handlerCallInfo) ResponseHeader() http.Header {
+	if c.responseHeader == nil {
+		c.responseHeader = make(http.Header)
 	}
-	*responseTrailerAddress = trailer
+	return c.responseHeader
 }
 
-func requestFromContext[T any](ctx context.Context, message *T) *Request[T] {
-	request := NewRequest[T](message)
-	header, ok := HeaderFromOutgoingContext(ctx)
-	if ok {
-		request.setHeader(header)
+func (c *handlerCallInfo) ResponseTrailer() http.Header {
+	if c.responseTrailer == nil {
+		c.responseTrailer = make(http.Header)
 	}
-	return request
+	return c.responseTrailer
+}
+
+func (c *handlerCallInfo) HTTPMethod() string {
+	return c.method
+}
+
+// internalOnly implements CallInfo.
+func (c *handlerCallInfo) internalOnly() {}
+
+// streamCallInfo is a CallInfo implementation used for streaming RPC handlers.
+type streamCallInfo struct {
+	conn StreamingHandlerConn
+}
+
+func (c *streamCallInfo) Spec() Spec {
+	return c.conn.Spec()
+}
+
+func (c *streamCallInfo) Peer() Peer {
+	return c.conn.Peer()
+}
+
+func (c *streamCallInfo) RequestHeader() http.Header {
+	return c.conn.RequestHeader()
+}
+
+func (c *streamCallInfo) ResponseHeader() http.Header {
+	return c.conn.ResponseHeader()
+}
+
+func (c *streamCallInfo) ResponseTrailer() http.Header {
+	return c.conn.ResponseTrailer()
+}
+
+func (c *streamCallInfo) HTTPMethod() string {
+	// All stream calls are POSTs
+	return http.MethodPost
+}
+
+// internalOnly implements CallInfo.
+func (c *streamCallInfo) internalOnly() {}
+
+// clientCallInfo is a CallInfo implementation used for clients.
+type clientCallInfo struct {
+	responseSource
+	spec          Spec
+	peer          Peer
+	method        string
+	requestHeader http.Header
+}
+
+func (c *clientCallInfo) Spec() Spec {
+	return c.spec
+}
+
+func (c *clientCallInfo) Peer() Peer {
+	return c.peer
+}
+
+func (c *clientCallInfo) RequestHeader() http.Header {
+	if c.requestHeader == nil {
+		c.requestHeader = make(http.Header)
+	}
+	return c.requestHeader
+}
+
+func (c *clientCallInfo) ResponseHeader() http.Header {
+	if c.responseSource == nil {
+		return nil
+	}
+	return c.responseSource.ResponseHeader()
+}
+
+func (c *clientCallInfo) ResponseTrailer() http.Header {
+	if c.responseSource == nil {
+		return nil
+	}
+	return c.responseSource.ResponseTrailer()
+}
+
+func (c *clientCallInfo) HTTPMethod() string {
+	return c.method
+}
+
+// internalOnly implements CallInfo.
+func (c *clientCallInfo) internalOnly() {}
+
+type clientCallInfoContextKey struct{}
+type sentinelContextKey struct{}
+type handlerCallInfoContextKey struct{}
+
+// responseSource indicates a type that manage response headers and trailers.
+type responseSource interface {
+	ResponseHeader() http.Header
+	ResponseTrailer() http.Header
+}
+
+// responseWrapper wraps a Response object so that it can implement the responseSource interface.
+type responseWrapper[Res any] struct {
+	response *Response[Res]
+}
+
+func (w *responseWrapper[Res]) ResponseHeader() http.Header {
+	return w.response.Header()
+}
+
+func (w *responseWrapper[Res]) ResponseTrailer() http.Header {
+	return w.response.Trailer()
+}
+
+// clientCallInfoFromContext gets the call info from a client/outgoing context.
+func clientCallInfoFromContext(ctx context.Context) (*clientCallInfo, bool) {
+	info, ok := ctx.Value(clientCallInfoContextKey{}).(*clientCallInfo)
+	return info, ok
+}
+
+// newHandlerContext creates a new handler/incoming context.
+func newHandlerContext(ctx context.Context, info CallInfo) context.Context {
+	return context.WithValue(ctx, handlerCallInfoContextKey{}, info)
 }

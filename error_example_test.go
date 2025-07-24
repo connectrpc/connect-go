@@ -22,7 +22,7 @@ import (
 
 	connect "connectrpc.com/connect"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
 )
 
 func ExampleError_Message() {
@@ -47,14 +47,15 @@ func ExampleIsNotModifiedError() {
 		// Enable client-side support for HTTP GETs.
 		connect.WithHTTPGet(),
 	)
-	req := connect.NewRequest(&pingv1.PingRequest{Number: 42})
-	first, err := client.Ping(context.Background(), req)
+	req := &pingv1.PingRequest{Number: 42}
+	ctx, callInfo := connect.NewClientContext(context.Background())
+	_, err := client.Ping(ctx, req)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	// If the server set an Etag, we can use it to cache the response.
-	etag := first.Header().Get("Etag")
+	etag := callInfo.ResponseHeader().Get("Etag")
 	if etag == "" {
 		fmt.Println("no Etag in response headers")
 		return
@@ -62,7 +63,7 @@ func ExampleIsNotModifiedError() {
 	fmt.Println("cached response with Etag", etag)
 	// Now we'd like to make the same request again, but avoid re-fetching the
 	// response if possible.
-	req.Header().Set("If-None-Match", etag)
+	callInfo.RequestHeader().Set("If-None-Match", etag)
 	_, err = client.Ping(context.Background(), req)
 	if connect.IsNotModifiedError(err) {
 		fmt.Println("can reuse cached response")

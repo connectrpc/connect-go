@@ -79,6 +79,10 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		conn := client.protocolClient.NewConn(ctx, unarySpec, request.Header())
 		conn.onRequestSend(func(r *http.Request) {
 			request.setRequestMethod(r.Method)
+			callInfo, ok := clientCallInfoFromContext(ctx)
+			if ok {
+				callInfo.method = r.Method
+			}
 		})
 		// Send always returns an io.EOF unless the error is from the client-side.
 		// We want the user to continue to call Receive in those cases to get the
@@ -100,6 +104,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		return response, conn.CloseResponse()
 	})
 	if interceptor := config.Interceptor; interceptor != nil {
+		// interceptor is the full chain of all interceptors provided
 		unaryFunc = interceptor.WrapUnary(unaryFunc)
 	}
 	client.callUnary = func(ctx context.Context, request *Request[Req]) (*Response[Res], error) {
@@ -109,6 +114,23 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		request.spec = unarySpec
 		request.peer = client.protocolClient.Peer()
 		protocolClient.WriteRequestHeader(StreamTypeUnary, request.Header())
+
+		// Also set them in the context if there's a call info present
+		callInfo, callInfoOk := clientCallInfoFromContext(ctx)
+		if callInfoOk {
+			callInfo.peer = request.Peer()
+			callInfo.spec = request.Spec()
+			// A client could have set request headers in the call info OR the request wrapper
+			// So if a callInfo exists in context, merge any headers from there into the request wrapper
+			// so that all headers are sent in the request
+			mergeHeaders(request.Header(), callInfo.requestHeader)
+
+			// Copy the call info into a sentinel value. This is so we can compare
+			// the sentinel value against the call info in context. If they're different,
+			// we can stop the request. This protects against changing the context in interceptors.
+			ctx = context.WithValue(ctx, sentinelContextKey{}, callInfo)
+		}
+
 		response, err := unaryFunc(ctx, request)
 		if err != nil {
 			return nil, err
@@ -116,6 +138,12 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		typed, ok := response.(*Response[Res])
 		if !ok {
 			return nil, errorf(CodeInternal, "unexpected client response type %T", response)
+		}
+		if callInfoOk {
+			// Wrap the response and set it into the context callinfo
+			callInfo.responseSource = &responseWrapper[Res]{
+				response: typed,
+			}
 		}
 		return typed, nil
 	}
@@ -130,19 +158,6 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 	return c.callUnary(ctx, request)
 }
 
-// CallUnarySimple calls a request-response procedure using the function signature
-// associated with the "simple" generation option.
-//
-// This option eliminates the [Request] and [Response] wrappers, and instead uses the
-// context.Context to propagate information such as headers.
-func (c *Client[Req, Res]) CallUnarySimple(ctx context.Context, requestMsg *Req) (*Res, error) {
-	response, err := c.CallUnary(ctx, requestFromContext(ctx, requestMsg))
-	if response != nil {
-		return response.Msg, err
-	}
-	return nil, err
-}
-
 // CallClientStream calls a client streaming procedure.
 func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamForClient[Req, Res] {
 	if c.err != nil {
@@ -154,6 +169,22 @@ func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamFo
 	}
 }
 
+// CallClientStream calls a client streaming procedure in simple mode.
+func (c *Client[Req, Res]) CallClientStreamSimple(ctx context.Context) (*ClientStreamForClientSimple[Req, Res], error) {
+	if c.err != nil {
+		return &ClientStreamForClientSimple[Req, Res]{err: c.err}, c.err
+	}
+
+	stream := &ClientStreamForClientSimple[Req, Res]{
+		conn:        c.newConn(ctx, StreamTypeClient, nil),
+		initializer: c.config.Initializer,
+	}
+	if err := stream.Send(nil); err != nil {
+		return nil, err
+	}
+	return stream, nil
+}
+
 // CallServerStream calls a server streaming procedure.
 func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Request[Req]) (*ServerStreamForClient[Res], error) {
 	if c.err != nil {
@@ -162,9 +193,11 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 	conn := c.newConn(ctx, StreamTypeServer, func(r *http.Request) {
 		request.method = r.Method
 	})
-	request.spec = conn.Spec()
 	request.peer = conn.Peer()
+	request.spec = conn.Spec()
+
 	mergeHeaders(conn.RequestHeader(), request.header)
+
 	// Send always returns an io.EOF unless the error is from the client-side.
 	// We want the user to continue to call Receive in those cases to get the
 	// full error from the server-side.
@@ -182,15 +215,6 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 	}, nil
 }
 
-// CallServerStreamSimple calls a server streaming procedure using the function signature
-// associated with the "simple" generation option.
-//
-// This option eliminates the [Request] wrapper, and instead uses the context.Context to
-// propagate information such as headers.
-func (c *Client[Req, Res]) CallServerStreamSimple(ctx context.Context, requestMsg *Req) (*ServerStreamForClient[Res], error) {
-	return c.CallServerStream(ctx, requestFromContext(ctx, requestMsg))
-}
-
 // CallBidiStream calls a bidirectional streaming procedure.
 func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForClient[Req, Res] {
 	if c.err != nil {
@@ -202,7 +226,27 @@ func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForCli
 	}
 }
 
+// CallBidiStreamSimple calls a bidirectional streaming procedure in simple mode.
+func (c *Client[Req, Res]) CallBidiStreamSimple(ctx context.Context) (*BidiStreamForClient[Req, Res], error) {
+	stream := c.CallBidiStream(ctx)
+	if stream.err != nil {
+		return nil, stream.err
+	}
+	if err := stream.Send(nil); err != nil {
+		return nil, err
+	}
+	return stream, nil
+}
+
 func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType, onRequestSend func(r *http.Request)) StreamingClientConn {
+	callInfo, callInfoOk := clientCallInfoFromContext(ctx)
+	// Set values in the context if there's a call info present
+	if callInfoOk {
+		// Copy the call info into a sentinel value. This is so we can compare
+		// the sentinel value against the call info in context. If they're different,
+		// we can stop the request. This protects against changing the context in interceptors.
+		ctx = context.WithValue(ctx, sentinelContextKey{}, callInfo)
+	}
 	newConn := func(ctx context.Context, spec Spec) StreamingClientConn {
 		header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
 		c.protocolClient.WriteRequestHeader(streamType, header)
@@ -213,7 +257,20 @@ func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType, o
 	if interceptor := c.config.Interceptor; interceptor != nil {
 		newConn = interceptor.WrapStreamingClient(newConn)
 	}
-	return newConn(ctx, c.config.newSpec(streamType))
+	conn := newConn(ctx, c.config.newSpec(streamType))
+
+	// Set values in the context if there's a call info present
+	if callInfoOk {
+		callInfo.peer = conn.Peer()
+		callInfo.spec = conn.Spec()
+		callInfo.responseSource = conn
+
+		// Merge any callInfo request headers first, then do the request.
+		// so that context headers show first in the list of headers
+		mergeHeaders(conn.RequestHeader(), callInfo.RequestHeader())
+	}
+
+	return conn
 }
 
 type clientConfig struct {
