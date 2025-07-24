@@ -83,7 +83,11 @@ type collideServiceClient struct {
 
 // Import calls connect.collide.v1.CollideService.Import.
 func (c *collideServiceClient) Import(ctx context.Context, req *v1.ImportRequest) (*v1.ImportResponse, error) {
-	return c._import.CallUnarySimple(ctx, req)
+	response, err := c._import.CallUnary(ctx, connect.NewRequest(req))
+	if response != nil {
+		return response.Msg, err
+	}
+	return nil, err
 }
 
 // CollideServiceHandler is an implementation of the connect.collide.v1.CollideService service.

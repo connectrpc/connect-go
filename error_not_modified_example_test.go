@@ -16,12 +16,13 @@ package connect_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 
 	connect "connectrpc.com/connect"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
 )
 
 // ExampleCachingServer is an example of how servers can take advantage the
@@ -35,22 +36,27 @@ type ExampleCachingPingServer struct {
 // indicates this), so clients using the Connect protocol may call it with HTTP
 // GET requests. This implementation uses Etags to manage client-side caching.
 func (*ExampleCachingPingServer) Ping(
-	_ context.Context,
-	req *connect.Request[pingv1.PingRequest],
-) (*connect.Response[pingv1.PingResponse], error) {
-	resp := connect.NewResponse(&pingv1.PingResponse{
-		Number: req.Msg.GetNumber(),
-	})
+	ctx context.Context,
+	req *pingv1.PingRequest,
+) (*pingv1.PingResponse, error) {
+	resp := &pingv1.PingResponse{
+		Number: req.GetNumber(),
+	}
+	callInfo, ok := connect.CallInfoFromHandlerContext(ctx)
+	if !ok {
+		return nil, errors.New("no call info found in context")
+	}
+
 	// Our hashing logic is simple: we use the number in the PingResponse.
-	hash := strconv.FormatInt(resp.Msg.GetNumber(), 10)
+	hash := strconv.FormatInt(resp.GetNumber(), 10)
 	// If the request was an HTTP GET, we'll need to check if the client already
 	// has the response cached.
-	if req.HTTPMethod() == http.MethodGet && req.Header().Get("If-None-Match") == hash {
+	if callInfo.HTTPMethod() == http.MethodGet && callInfo.RequestHeader().Get("If-None-Match") == hash {
 		return nil, connect.NewNotModifiedError(http.Header{
 			"Etag": []string{hash},
 		})
 	}
-	resp.Header().Set("Etag", hash)
+	callInfo.ResponseHeader().Set("Etag", hash)
 	return resp, nil
 }
 

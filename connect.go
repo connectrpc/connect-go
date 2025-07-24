@@ -211,11 +211,6 @@ func (r *Request[_]) setRequestMethod(method string) {
 	r.method = method
 }
 
-// setHeader sets the request header to the given value.
-func (r *Request[_]) setHeader(header http.Header) {
-	r.header = header
-}
-
 // AnyRequest is the common method set of every [Request], regardless of type
 // parameter. It's used in unary interceptors.
 //
@@ -285,16 +280,6 @@ func (r *Response[_]) Trailer() http.Header {
 		r.trailer = make(http.Header)
 	}
 	return r.trailer
-}
-
-// setHeader sets the response header.
-func (r *Response[_]) setHeader(header http.Header) {
-	r.header = header
-}
-
-// setTrailer sets the response trailer.
-func (r *Response[_]) setTrailer(trailer http.Header) {
-	r.trailer = trailer
 }
 
 // internalOnly implements AnyResponse.
@@ -381,6 +366,47 @@ type receiveConn interface {
 // POST.
 type hasHTTPMethod interface {
 	getHTTPMethod() string
+}
+
+// errStreamingClientConn is a sentinel error implementation of StreamingClientConn.
+type errStreamingClientConn struct {
+	err error
+}
+
+func (c *errStreamingClientConn) Receive(msg any) error {
+	return c.err
+}
+
+func (c *errStreamingClientConn) Spec() Spec {
+	return Spec{}
+}
+
+func (c *errStreamingClientConn) Peer() Peer {
+	return Peer{}
+}
+
+func (c *errStreamingClientConn) Send(msg any) error {
+	return c.err
+}
+
+func (c *errStreamingClientConn) CloseRequest() error {
+	return c.err
+}
+
+func (c *errStreamingClientConn) CloseResponse() error {
+	return c.err
+}
+
+func (c *errStreamingClientConn) RequestHeader() http.Header {
+	return make(http.Header)
+}
+
+func (c *errStreamingClientConn) ResponseHeader() http.Header {
+	return make(http.Header)
+}
+
+func (c *errStreamingClientConn) ResponseTrailer() http.Header {
+	return make(http.Header)
 }
 
 // receiveUnaryResponse unmarshals a message from a StreamingClientConn, then

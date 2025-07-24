@@ -18,10 +18,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -36,6 +38,7 @@ import (
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
+	"golang.org/x/net/http2"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -389,6 +392,48 @@ func TestDynamicClient(t *testing.T) {
 		got := rsp.Msg.Get(methodDesc.Output().Fields().ByName("sum")).Int()
 		assert.Equal(t, got, 42*2)
 	})
+	t.Run("clientStreamSimple", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Sum")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		connected := make(chan struct{})
+		transport := &http2.Transport{
+			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+				close(connected)
+				return server.Transport().DialTLSContext(ctx, network, addr, cfg)
+			},
+			AllowHTTP: true,
+		}
+		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
+			&http.Client{Transport: transport},
+			server.URL()+"/connect.ping.v1.PingService/Sum",
+			connect.WithSchema(methodDesc),
+			connect.WithResponseInitializer(initializer),
+		)
+		stream, err := client.CallClientStreamSimple(ctx)
+		assert.Nil(t, err)
+		select {
+		case <-connected:
+			break
+		case <-time.After(time.Second):
+			t.Error("CallClientStreamSimple did not eagerly send headers")
+		}
+		msg := dynamicpb.NewMessage(methodDesc.Input())
+		msg.Set(
+			methodDesc.Input().Fields().ByName("number"),
+			protoreflect.ValueOfInt64(42),
+		)
+		assert.Nil(t, stream.Send(msg))
+		assert.Nil(t, stream.Send(msg))
+		rsp, err := stream.CloseAndReceive()
+		if !assert.Nil(t, err) {
+			return
+		}
+		got := rsp.Get(methodDesc.Output().Fields().ByName("sum")).Int()
+		assert.Equal(t, got, 42*2)
+	})
 	t.Run("serverStream", func(t *testing.T) {
 		t.Parallel()
 		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.CountUp")
@@ -431,6 +476,48 @@ func TestDynamicClient(t *testing.T) {
 			connect.WithResponseInitializer(initializer),
 		)
 		stream := client.CallBidiStream(ctx)
+		msg := dynamicpb.NewMessage(methodDesc.Input())
+		msg.Set(
+			methodDesc.Input().Fields().ByName("number"),
+			protoreflect.ValueOfInt64(42),
+		)
+		assert.Nil(t, stream.Send(msg))
+		assert.Nil(t, stream.CloseRequest())
+		out, err := stream.Receive()
+		if assert.Nil(t, err) {
+			return
+		}
+		got := out.Get(methodDesc.Output().Fields().ByName("number")).Int()
+		assert.Equal(t, got, 42)
+	})
+	t.Run("bidiSimple", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.CumSum")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		connected := make(chan struct{})
+		transport := &http2.Transport{
+			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+				close(connected)
+				return server.Transport().DialTLSContext(ctx, network, addr, cfg)
+			},
+			AllowHTTP: true,
+		}
+		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
+			&http.Client{Transport: transport},
+			server.URL()+"/connect.ping.v1.PingService/CumSum",
+			connect.WithSchema(methodDesc),
+			connect.WithResponseInitializer(initializer),
+		)
+		stream, err := client.CallBidiStreamSimple(ctx)
+		assert.Nil(t, err)
+		select {
+		case <-connected:
+			break
+		case <-time.After(time.Second):
+			t.Error("CallBidiStreamSimple did not eagerly send headers")
+		}
 		msg := dynamicpb.NewMessage(methodDesc.Input())
 		msg.Set(
 			methodDesc.Input().Fields().ByName("number"),
