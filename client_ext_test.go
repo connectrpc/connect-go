@@ -431,7 +431,7 @@ func TestDynamicClient(t *testing.T) {
 		if !assert.Nil(t, err) {
 			return
 		}
-		got := rsp.Msg.Get(methodDesc.Output().Fields().ByName("sum")).Int()
+		got := rsp.Get(methodDesc.Output().Fields().ByName("sum")).Int()
 		assert.Equal(t, got, 42*2)
 	})
 	t.Run("serverStream", func(t *testing.T) {

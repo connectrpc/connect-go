@@ -71,7 +71,7 @@ type PingServiceClient interface {
 	// Fail always fails.
 	Fail(context.Context, *v1.FailRequest) (*v1.FailResponse, error)
 	// Sum calculates the sum of the numbers sent on the stream.
-	Sum(context.Context) (*connect.ClientStreamForClient[v1.SumRequest, v1.SumResponse], error)
+	Sum(context.Context) (*connect.ClientStreamForClientSimple[v1.SumRequest, v1.SumResponse], error)
 	// CountUp returns a stream of the numbers up to the given request.
 	CountUp(context.Context, *v1.CountUpRequest) (*connect.ServerStreamForClient[v1.CountUpResponse], error)
 	// CumSum determines the cumulative sum of all the numbers sent on the stream.
@@ -151,7 +151,7 @@ func (c *pingServiceClient) Fail(ctx context.Context, req *v1.FailRequest) (*v1.
 }
 
 // Sum calls connect.ping.v1.PingService.Sum.
-func (c *pingServiceClient) Sum(ctx context.Context) (*connect.ClientStreamForClient[v1.SumRequest, v1.SumResponse], error) {
+func (c *pingServiceClient) Sum(ctx context.Context) (*connect.ClientStreamForClientSimple[v1.SumRequest, v1.SumResponse], error) {
 	return c.sum.CallClientStreamSimple(ctx)
 }
 

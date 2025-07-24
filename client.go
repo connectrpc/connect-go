@@ -170,10 +170,14 @@ func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamFo
 }
 
 // CallClientStream calls a client streaming procedure in simple mode.
-func (c *Client[Req, Res]) CallClientStreamSimple(ctx context.Context) (*ClientStreamForClient[Req, Res], error) {
-	stream := c.CallClientStream(ctx)
-	if stream.err != nil {
-		return nil, stream.err
+func (c *Client[Req, Res]) CallClientStreamSimple(ctx context.Context) (*ClientStreamForClientSimple[Req, Res], error) {
+	if c.err != nil {
+		return &ClientStreamForClientSimple[Req, Res]{err: c.err}, c.err
+	}
+
+	stream := &ClientStreamForClientSimple[Req, Res]{
+		conn:        c.newConn(ctx, StreamTypeClient, nil),
+		initializer: c.config.Initializer,
 	}
 	if err := stream.Send(nil); err != nil {
 		return nil, err
@@ -186,30 +190,11 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 	if c.err != nil {
 		return nil, c.err
 	}
-	callInfo, callInfoOk := clientCallInfoFromContext(ctx)
-	// Set values in the context if there's a call info present
-	if callInfoOk {
-		// Copy the call info into a sentinel value. This is so we can compare
-		// the sentinel value against the call info in context. If they're different,
-		// we can stop the request. This protects against changing the context in interceptors.
-		ctx = context.WithValue(ctx, sentinelContextKey{}, callInfo)
-	}
 	conn := c.newConn(ctx, StreamTypeServer, func(r *http.Request) {
 		request.method = r.Method
 	})
 	request.peer = conn.Peer()
 	request.spec = conn.Spec()
-
-	// Set values in the context if there's a call info present
-	if callInfoOk {
-		callInfo.peer = conn.Peer()
-		callInfo.spec = conn.Spec()
-		callInfo.responseSource = conn
-
-		// Merge any callInfo request headers first, then do the request.
-		// so that context headers show first in the list of headers
-		mergeHeaders(conn.RequestHeader(), callInfo.RequestHeader())
-	}
 
 	mergeHeaders(conn.RequestHeader(), request.header)
 
@@ -254,6 +239,14 @@ func (c *Client[Req, Res]) CallBidiStreamSimple(ctx context.Context) (*BidiStrea
 }
 
 func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType, onRequestSend func(r *http.Request)) StreamingClientConn {
+	callInfo, callInfoOk := clientCallInfoFromContext(ctx)
+	// Set values in the context if there's a call info present
+	if callInfoOk {
+		// Copy the call info into a sentinel value. This is so we can compare
+		// the sentinel value against the call info in context. If they're different,
+		// we can stop the request. This protects against changing the context in interceptors.
+		ctx = context.WithValue(ctx, sentinelContextKey{}, callInfo)
+	}
 	newConn := func(ctx context.Context, spec Spec) StreamingClientConn {
 		header := make(http.Header, 8) // arbitrary power of two, prevent immediate resizing
 		c.protocolClient.WriteRequestHeader(streamType, header)
@@ -264,7 +257,20 @@ func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType, o
 	if interceptor := c.config.Interceptor; interceptor != nil {
 		newConn = interceptor.WrapStreamingClient(newConn)
 	}
-	return newConn(ctx, c.config.newSpec(streamType))
+	conn := newConn(ctx, c.config.newSpec(streamType))
+
+	// Set values in the context if there's a call info present
+	if callInfoOk {
+		callInfo.peer = conn.Peer()
+		callInfo.spec = conn.Spec()
+		callInfo.responseSource = conn
+
+		// Merge any callInfo request headers first, then do the request.
+		// so that context headers show first in the list of headers
+		mergeHeaders(conn.RequestHeader(), callInfo.RequestHeader())
+	}
+
+	return conn
 }
 
 type clientConfig struct {

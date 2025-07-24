@@ -435,7 +435,7 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named b
 		// client streaming
 		if simple {
 			return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
-				"(*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClient")) +
+				"(*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClientSimple")) +
 				"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
 				", error)"
 		}

@@ -16,7 +16,9 @@ package connect_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -25,173 +27,471 @@ import (
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
+	pingv1connectsimple "connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 )
 
-func TestSideQuestInInterceptor(t *testing.T) {
+const expectedContextErrorMessage = "creating a new context in an interceptor is prohibited"
+
+func TestNewClientContextInInterceptor(t *testing.T) {
 	t.Parallel()
-	t.Run("unary", func(t *testing.T) {
+	t.Run("simple_api", func(t *testing.T) {
 		t.Parallel()
+		mux := http.NewServeMux()
+		mux.Handle(
+			pingv1connectsimple.NewPingServiceHandler(
+				pingServerSimple{},
+			),
+		)
+		server := memhttptest.NewServer(t, mux)
+		t.Run("first_interceptor", func(t *testing.T) {
+			// Because we're creating a new context in the first interceptor, only the first interceptor should fire
+			createClient := func(counter1 *atomic.Int32, counter2 *atomic.Int32) pingv1connectsimple.PingServiceClient {
+				opts := connect.WithInterceptors(
+					&contextInterceptor{client: true, count: counter1, createNewContext: true},
+					&contextInterceptor{client: true, count: counter2},
+				)
+				return pingv1connectsimple.NewPingServiceClient(
+					server.Client(),
+					server.URL(),
+					opts,
+				)
+			}
+			t.Run("unary", func(t *testing.T) {
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+				resp, err := client.Ping(context.Background(), &pingv1.PingRequest{Number: 10})
+
+				assert.Nil(t, resp)
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(0), clientCounter2.Load())
+			})
+			t.Run("server_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+				stream, err := client.CountUp(context.Background(), &pingv1.CountUpRequest{Number: 10})
+
+				assert.Nil(t, stream)
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(0), clientCounter2.Load())
+			})
+			t.Run("client_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+
+				// With client-streaming and the simple API, the initial call fails. This differs from
+				// the generics API which requires a call to stream.Send first to receive an error.
+				stream, err := client.Sum(context.Background())
+				assert.NotNil(t, err)
+				assert.Nil(t, stream)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(0), clientCounter2.Load())
+			})
+			t.Run("bidi_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+
+				// With bidi-streaming and the simple API, the initial call fails. This differs from
+				// the generics API which requires a call to stream.Send first to receive an error.
+				stream, err := client.CumSum(context.Background())
+				assert.NotNil(t, err)
+				assert.Nil(t, stream)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(0), clientCounter2.Load())
+			})
+		})
+		t.Run("subsequent_interceptor", func(t *testing.T) {
+			// Because we're creating a new context in the last interceptor, all interceptors should fire
+			createClient := func(counter1 *atomic.Int32, counter2 *atomic.Int32) pingv1connectsimple.PingServiceClient {
+				opts := connect.WithInterceptors(
+					&contextInterceptor{client: true, count: counter1},
+					&contextInterceptor{client: true, count: counter2, createNewContext: true},
+				)
+				return pingv1connectsimple.NewPingServiceClient(
+					server.Client(),
+					server.URL(),
+					opts,
+				)
+			}
+			t.Run("unary", func(t *testing.T) {
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+
+				resp, err := client.Ping(context.Background(), &pingv1.PingRequest{Number: 10})
+				assert.Nil(t, resp)
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
+			t.Run("server_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+
+				stream, err := client.CountUp(context.Background(), &pingv1.CountUpRequest{Number: 10})
+				assert.Nil(t, stream)
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
+			t.Run("client_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+
+				// With client-streaming and the simple API, the initial call fails. This differs from
+				// the generics API which requires a call to stream.Send first to receive an error.
+				stream, err := client.Sum(context.Background())
+				assert.NotNil(t, err)
+				assert.Nil(t, stream)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
+			t.Run("bidi_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+
+				// With bidi-streaming and the simple API, the initial call fails. This differs from
+				// the generics API which requires a call to stream.Send first to receive an error.
+				stream, err := client.CumSum(context.Background())
+				assert.NotNil(t, err)
+				assert.Nil(t, stream)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
+		})
 		t.Run("sidequest_succeeds", func(t *testing.T) {
+			// These tests create a new context but it is used to issue a separate/new request and not reused in the
+			// interceptor chain. So, all interceptors should fire and no errors should be returned.
 			t.Parallel()
-			createInterceptors := func(clientCounter1 *atomic.Int32, clientCounter2 *atomic.Int32, server *memhttp.Server) connect.Option {
-				return connect.WithInterceptors(
-					newSideQuestInterceptor(t, clientCounter1, server),
-					newSideQuestInterceptor(t, clientCounter2, server),
+			createClient := func(counter1 *atomic.Int32, counter2 *atomic.Int32) pingv1connectsimple.PingServiceClient {
+				opts := connect.WithInterceptors(
+					newSideQuestInterceptor(t, counter1, server),
+					newSideQuestInterceptor(t, counter2, server),
+				)
+				return pingv1connectsimple.NewPingServiceClient(
+					server.Client(),
+					server.URL(),
+					opts,
 				)
 			}
-			var clientCounter1, clientCounter2 atomic.Int32
-			mux := http.NewServeMux()
-			mux.Handle(
-				pingv1connect.NewPingServiceHandler(
-					pingServer{},
-				),
-			)
-			server := memhttptest.NewServer(t, mux)
-			client := pingv1connect.NewPingServiceClient(
-				server.Client(),
-				server.URL(),
-				createInterceptors(&clientCounter1, &clientCounter2, server),
-			)
-			_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
+			t.Run("unary", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
 
-			assert.Nil(t, err)
-			assert.Equal(t, int32(1), clientCounter1.Load())
-			assert.Equal(t, int32(1), clientCounter2.Load())
+				resp, err := client.Ping(context.Background(), &pingv1.PingRequest{Number: 10})
+				assert.NotNil(t, resp)
+				assert.Nil(t, err)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
+			t.Run("server_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+
+				stream, err := client.CountUp(context.Background(), &pingv1.CountUpRequest{Number: 10})
+				assert.NotNil(t, stream)
+				assert.Nil(t, err)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
+			t.Run("client_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+
+				stream, err := client.Sum(context.Background())
+				assert.NotNil(t, stream)
+				assert.Nil(t, err)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
+			t.Run("bidi_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+
+				stream, err := client.CumSum(context.Background())
+				assert.Nil(t, err)
+				assert.NotNil(t, stream)
+
+				assert.Nil(t, stream.CloseRequest())
+				assert.Nil(t, stream.CloseResponse())
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
 		})
 	})
-}
-
-func TestNewClientContextFails(t *testing.T) {
-	// Verifies that calling NewClientContext in an interceptor fails when sending the new context downstream
-	t.Parallel()
-	t.Run("unary", func(t *testing.T) {
+	t.Run("generics_api", func(t *testing.T) {
 		t.Parallel()
+		mux := http.NewServeMux()
+		mux.Handle(
+			pingv1connectsimple.NewPingServiceHandler(
+				pingServerSimple{},
+			),
+		)
+		server := memhttptest.NewServer(t, mux)
 		t.Run("first_interceptor", func(t *testing.T) {
-			t.Parallel()
-			createInterceptors := func(clientCounter1 *atomic.Int32, clientCounter2 *atomic.Int32) connect.Option {
-				return connect.WithInterceptors(
-					&contextInterceptor{client: true, count: clientCounter1, createNewContext: true},
-					&contextInterceptor{client: true, count: clientCounter2},
+			// Because we're creating a new context in the first interceptor, only the first interceptor should fire
+			createClient := func(counter1 *atomic.Int32, counter2 *atomic.Int32) pingv1connect.PingServiceClient {
+				opts := connect.WithInterceptors(
+					&contextInterceptor{client: true, count: counter1, createNewContext: true},
+					&contextInterceptor{client: true, count: counter2},
+				)
+				return pingv1connect.NewPingServiceClient(
+					server.Client(),
+					server.URL(),
+					opts,
 				)
 			}
-			var clientCounter1, clientCounter2 atomic.Int32
-			mux := http.NewServeMux()
-			mux.Handle(
-				pingv1connect.NewPingServiceHandler(
-					pingServer{},
-				),
-			)
-			server := memhttptest.NewServer(t, mux)
-			client := pingv1connect.NewPingServiceClient(
-				server.Client(),
-				server.URL(),
-				createInterceptors(&clientCounter1, &clientCounter2),
-			)
-			_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
+			t.Run("unary", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
 
-			// Since we are creating a new client context, an error will be returned from the invocation
-			assert.NotNil(t, err)
-			assert.Equal(t, err.Error(), "creating a new context in an interceptor is prohibited")
-			// And because we're creating it in the first interceptor, only the first interceptor fires
-			assert.Equal(t, int32(1), clientCounter1.Load())
-			assert.Equal(t, int32(0), clientCounter2.Load())
+				resp, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
+				assert.Nil(t, resp)
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(0), clientCounter2.Load())
+			})
+			t.Run("server_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+
+				stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
+				assert.Nil(t, stream)
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(0), clientCounter2.Load())
+			})
+			t.Run("client_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+				stream := client.Sum(context.Background())
+				assert.NotNil(t, stream)
+
+				// With client-streaming and the generics API, a call to stream.Send is required to receive an error.
+				err := stream.Send(&pingv1.SumRequest{Number: int64(1)})
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+
+				// We should receive the same error when we try to close the stream
+				resp, err := stream.CloseAndReceive()
+				assert.Nil(t, resp)
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(0), clientCounter2.Load())
+			})
+			//nolint:dupl // the test logic for bidi w/r/t generic and simple api looks the same, but it's subtly different
+			t.Run("bidi_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+				stream := client.CumSum(context.Background())
+				assert.NotNil(t, stream)
+
+				// With bidi-streaming and the generics API, a call to stream.Send is required to receive an error.
+				err := stream.Send(&pingv1.CumSumRequest{Number: 1})
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+
+				// We should receive the same error when we try to close the send and receive parts of the stream
+				err = stream.CloseRequest()
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+
+				err = stream.CloseResponse()
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(0), clientCounter2.Load())
+			})
 		})
+
 		t.Run("subsequent_interceptor", func(t *testing.T) {
-			t.Parallel()
-			createInterceptors := func(clientCounter1 *atomic.Int32, clientCounter2 *atomic.Int32) connect.Option {
-				return connect.WithInterceptors(
-					&contextInterceptor{client: true, count: clientCounter1},
-					&contextInterceptor{client: true, count: clientCounter2, createNewContext: true},
+			// Because we're creating a new context in the last interceptor, all interceptors should fire
+			createClient := func(counter1 *atomic.Int32, counter2 *atomic.Int32) pingv1connect.PingServiceClient {
+				opts := connect.WithInterceptors(
+					&contextInterceptor{client: true, count: counter1},
+					&contextInterceptor{client: true, count: counter2, createNewContext: true},
+				)
+				return pingv1connect.NewPingServiceClient(
+					server.Client(),
+					server.URL(),
+					opts,
 				)
 			}
-			var clientCounter1, clientCounter2 atomic.Int32
-			mux := http.NewServeMux()
-			mux.Handle(
-				pingv1connect.NewPingServiceHandler(
-					pingServer{},
-				),
-			)
-			server := memhttptest.NewServer(t, mux)
-			client := pingv1connect.NewPingServiceClient(
-				server.Client(),
-				server.URL(),
-				createInterceptors(&clientCounter1, &clientCounter2),
-			)
-			_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
+			t.Run("unary", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
 
-			// Since we are creating a new client context, an error will be returned from the invocation
-			assert.NotNil(t, err)
-			assert.Equal(t, err.Error(), "creating a new context in an interceptor is prohibited")
-			// And because we're creating it in the second interceptor, they both fire
-			assert.Equal(t, int32(1), clientCounter1.Load())
-			assert.Equal(t, int32(1), clientCounter2.Load())
+				resp, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
+				assert.Nil(t, resp)
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
+			t.Run("server_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+
+				stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
+				assert.Nil(t, stream)
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
+			t.Run("client_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+				stream := client.Sum(context.Background())
+				assert.NotNil(t, stream)
+
+				// With client-streaming and the generics API, a call to stream.Send is required to receive an error.
+				err := stream.Send(&pingv1.SumRequest{Number: int64(1)})
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+
+				// We should receive the same error when we try to close the stream
+				resp, err := stream.CloseAndReceive()
+				assert.Nil(t, resp)
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
+			//nolint:dupl // the test logic for bidi w/r/t generic and simple api looks the same, but it's subtly different
+			t.Run("bidi_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+				stream := client.CumSum(context.Background())
+				assert.NotNil(t, stream)
+
+				// With bidi-streaming and the generics API, a call to stream.Send is required to receive an error.
+				err := stream.Send(&pingv1.CumSumRequest{Number: 1})
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+
+				// We should receive the same error when we try to close the send and receive parts of the stream
+				err = stream.CloseRequest()
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+
+				err = stream.CloseResponse()
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), expectedContextErrorMessage)
+
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
 		})
-	})
-	t.Run("server_streaming", func(t *testing.T) {
-		t.Parallel()
-		t.Run("first_interceptor", func(t *testing.T) {
-			t.Parallel()
-			createInterceptors := func(clientCounter1 *atomic.Int32, clientCounter2 *atomic.Int32) connect.Option {
-				return connect.WithInterceptors(
-					&contextInterceptor{client: true, count: clientCounter1, createNewContext: true},
-					&contextInterceptor{client: true, count: clientCounter2},
+		t.Run("sidequest_succeeds", func(t *testing.T) {
+			// These tests create a new context but it is used to issue a separate/new request and not reused in the
+			// interceptor chain. So, all interceptors should fire and no errors should be returned.
+			createClient := func(counter1 *atomic.Int32, counter2 *atomic.Int32) pingv1connect.PingServiceClient {
+				opts := connect.WithInterceptors(
+					newSideQuestInterceptor(t, counter1, server),
+					newSideQuestInterceptor(t, counter2, server),
+				)
+				return pingv1connect.NewPingServiceClient(
+					server.Client(),
+					server.URL(),
+					opts,
 				)
 			}
-			var clientCounter1, clientCounter2 atomic.Int32
-			mux := http.NewServeMux()
-			mux.Handle(
-				pingv1connect.NewPingServiceHandler(
-					pingServer{},
-				),
-			)
-			server := memhttptest.NewServer(t, mux)
-			client := pingv1connect.NewPingServiceClient(
-				server.Client(),
-				server.URL(),
-				createInterceptors(&clientCounter1, &clientCounter2),
-			)
-			responses, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
+			t.Run("unary", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
 
-			// Since we are creating a new client context, an error will be returned from the invocation
-			assert.Nil(t, responses)
-			assert.NotNil(t, err)
-			assert.Equal(t, err.Error(), "creating a new context in an interceptor is prohibited")
-			// And because we're creating it in the first interceptor, only the first interceptor fires
-			assert.Equal(t, int32(1), clientCounter1.Load())
-			assert.Equal(t, int32(0), clientCounter2.Load())
-		})
-		t.Run("subsequent_interceptor", func(t *testing.T) {
-			t.Parallel()
-			createInterceptors := func(clientCounter1 *atomic.Int32, clientCounter2 *atomic.Int32) connect.Option {
-				return connect.WithInterceptors(
-					&contextInterceptor{client: true, count: clientCounter1},
-					&contextInterceptor{client: true, count: clientCounter2, createNewContext: true},
-				)
-			}
-			var clientCounter1, clientCounter2 atomic.Int32
-			mux := http.NewServeMux()
-			mux.Handle(
-				pingv1connect.NewPingServiceHandler(
-					pingServer{},
-				),
-			)
-			server := memhttptest.NewServer(t, mux)
-			client := pingv1connect.NewPingServiceClient(
-				server.Client(),
-				server.URL(),
-				createInterceptors(&clientCounter1, &clientCounter2),
-			)
-			responses, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
+				resp, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
+				assert.NotNil(t, resp)
+				assert.Nil(t, err)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
+			t.Run("server_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
 
-			// Since we are creating a new client context, an error will be returned from the invocation
-			assert.Nil(t, responses)
-			assert.NotNil(t, err)
-			assert.Equal(t, err.Error(), "creating a new context in an interceptor is prohibited")
-			// And because we're creating it in the second interceptor, all interceptors fire
-			assert.Equal(t, int32(1), clientCounter1.Load())
-			assert.Equal(t, int32(1), clientCounter2.Load())
+				stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
+				assert.NotNil(t, stream)
+				assert.Nil(t, err)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
+			t.Run("client_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+				stream := client.Sum(context.Background())
+				assert.NotNil(t, stream)
+
+				err := stream.Send(&pingv1.SumRequest{Number: int64(1)})
+				assert.Nil(t, err)
+				resp, err := stream.CloseAndReceive()
+				assert.NotNil(t, resp)
+				assert.Nil(t, err)
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
+			t.Run("bidi_stream", func(t *testing.T) {
+				t.Parallel()
+				var clientCounter1, clientCounter2 atomic.Int32
+				client := createClient(&clientCounter1, &clientCounter2)
+				stream := client.CumSum(context.Background())
+				assert.NotNil(t, stream)
+
+				// The initial send should succeed
+				err := stream.Send(&pingv1.CumSumRequest{Number: 1})
+				assert.Nil(t, err)
+
+				// We should be able to successfully close the send part of the stream
+				assert.Nil(t, stream.CloseRequest())
+
+				// All receives should succeed
+				for {
+					msg, err := stream.Receive()
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					assert.NotNil(t, msg)
+					assert.Nil(t, err)
+				}
+				// We should be able to successfully close the receive part of the stream
+				assert.Nil(t, stream.CloseResponse())
+				assert.Equal(t, int32(1), clientCounter1.Load())
+				assert.Equal(t, int32(1), clientCounter2.Load())
+			})
 		})
 	})
 }

@@ -124,7 +124,7 @@ func BenchmarkConnect(b *testing.B) {
 						response, err := stream.CloseAndReceive()
 						if err != nil {
 							b.Error(err)
-						} else if got := response.Msg.GetSum(); got != expect {
+						} else if got := response.GetSum(); got != expect {
 							b.Errorf("expected %d, got %d", expect, got)
 						}
 					}
