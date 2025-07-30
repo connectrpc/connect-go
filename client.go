@@ -159,6 +159,10 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 }
 
 // CallClientStream calls a client streaming procedure.
+//
+// Request headers can be sent via the [ClientStreamForClient.RequestHeader] method on the stream. Note that the
+// request headers are not sent automatically when this method is invoked and instead require an explicit call to
+// [ClientStreamForClient.Send].
 func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamForClient[Req, Res] {
 	if c.err != nil {
 		return &ClientStreamForClient[Req, Res]{err: c.err}
@@ -169,7 +173,14 @@ func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamFo
 	}
 }
 
-// CallClientStream calls a client streaming procedure in simple mode.
+// CallClientStreamSimple calls a client streaming procedure.
+//
+// Request headers should be set in a [CallInfo] object inside the context using [NewClientContext]. These headers are
+// transmitted when this method is called and do not require an explicit call to [ClientStreamForClientSimple.Send].
+//
+// In addition, when calling [ClientStreamForClientSimple.CloseAndReceive] on the returned stream, the returned response
+// is the response type defined for the stream and _not_ a Connect [Response] wrapper type. As a result, any response
+// headers and trailers should be read from the [CallInfo] object in context.
 func (c *Client[Req, Res]) CallClientStreamSimple(ctx context.Context) (*ClientStreamForClientSimple[Req, Res], error) {
 	if c.err != nil {
 		return &ClientStreamForClientSimple[Req, Res]{err: c.err}, c.err
@@ -216,6 +227,10 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 }
 
 // CallBidiStream calls a bidirectional streaming procedure.
+//
+// Request headers can be sent via the [BidiStreamForClient.RequestHeader] method. Note that the
+// request headers are not sent automatically when this method is invoked and instead require an explicit call to
+// [BidiStreamForClient.Send].
 func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForClient[Req, Res] {
 	if c.err != nil {
 		return &BidiStreamForClient[Req, Res]{err: c.err}
@@ -226,7 +241,12 @@ func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForCli
 	}
 }
 
-// CallBidiStreamSimple calls a bidirectional streaming procedure in simple mode.
+// CallBidiStreamSimple calls a bidirectional streaming procedure.
+//
+// Request headers should be set in a [CallInfo] object inside the context using [NewClientContext]. These headers
+// are transmitted when this method is called and do not require an explicit call to [BidiStreamForClient.Send].
+//
+// Likewise, response headers and trailers should be read from the [CallInfo] object in context.
 func (c *Client[Req, Res]) CallBidiStreamSimple(ctx context.Context) (*BidiStreamForClient[Req, Res], error) {
 	stream := c.CallBidiStream(ctx)
 	if stream.err != nil {
