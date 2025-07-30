@@ -423,7 +423,7 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named b
 		// bidi streaming
 		if simple {
 			return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
-				"(*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClient")) +
+				"(*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClientSimple")) +
 				"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
 				", error)"
 		}
