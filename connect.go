@@ -339,7 +339,7 @@ type Peer struct {
 	Query    url.Values // server-only
 }
 
-func newPeerFromURL(url *url.URL, protocol string) Peer {
+func newPeerForURL(url *url.URL, protocol string) Peer {
 	return Peer{
 		Addr:     url.Host,
 		Protocol: protocol,

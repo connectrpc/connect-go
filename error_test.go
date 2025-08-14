@@ -108,7 +108,7 @@ func TestErrorIs(t *testing.T) {
 	assert.True(t, errors.Is(connectErr, connectErr))
 }
 
-func TestTypeNameFromURL(t *testing.T) {
+func TestTypeNameForURL(t *testing.T) {
 	t.Parallel()
 	testCases := []struct {
 		name     string
@@ -144,7 +144,7 @@ func TestTypeNameFromURL(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, typeNameFromURL(testCase.url), testCase.typeName)
+			assert.Equal(t, typeNameForURL(testCase.url), testCase.typeName)
 		})
 	}
 }
