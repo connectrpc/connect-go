@@ -3191,7 +3191,7 @@ type pingServerSimple struct {
 }
 
 func (p pingServerSimple) Ping(ctx context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
-	callInfo, ok := connect.CallInfoFromHandlerContext(ctx)
+	callInfo, ok := connect.CallInfoForHandlerContext(ctx)
 	if !ok {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
 	}
@@ -3221,7 +3221,7 @@ func (p pingServerSimple) CountUp(
 	request *pingv1.CountUpRequest,
 	stream *connect.ServerStream[pingv1.CountUpResponse],
 ) error {
-	callInfo, ok := connect.CallInfoFromHandlerContext(ctx)
+	callInfo, ok := connect.CallInfoForHandlerContext(ctx)
 	if !ok {
 		return connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
 	}
@@ -3254,7 +3254,7 @@ func (p pingServerSimple) CountUp(
 }
 
 func (p pingServerSimple) Fail(ctx context.Context, request *pingv1.FailRequest) (*pingv1.FailResponse, error) {
-	callInfo, ok := connect.CallInfoFromHandlerContext(ctx)
+	callInfo, ok := connect.CallInfoForHandlerContext(ctx)
 	if !ok {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
 	}
@@ -3290,7 +3290,7 @@ func (p pingServerSimple) Sum(
 	ctx context.Context,
 	stream *connect.ClientStream[pingv1.SumRequest],
 ) (*pingv1.SumResponse, error) {
-	callInfo, ok := connect.CallInfoFromHandlerContext(ctx)
+	callInfo, ok := connect.CallInfoForHandlerContext(ctx)
 	if !ok {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no call info found in context"))
 	}
@@ -3849,7 +3849,7 @@ func validateRequestInfo(request requestInfo) error {
 
 // Compares the information in the call info in context with the given request information to verify they match.
 func compareContextAndRequest(ctx context.Context, request requestInfo, requestHeaders http.Header) error {
-	callInfo, ok := connect.CallInfoFromHandlerContext(ctx)
+	callInfo, ok := connect.CallInfoForHandlerContext(ctx)
 	if !ok {
 		return connect.NewError(connect.CodeInternal, errors.New("no call info in handler context"))
 	}
