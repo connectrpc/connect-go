@@ -75,7 +75,7 @@ type PingServiceClient interface {
 	// CountUp returns a stream of the numbers up to the given request.
 	CountUp(context.Context, *v1.CountUpRequest) (*connect.ServerStreamForClient[v1.CountUpResponse], error)
 	// CumSum determines the cumulative sum of all the numbers sent on the stream.
-	CumSum(context.Context) (*connect.BidiStreamForClient[v1.CumSumRequest, v1.CumSumResponse], error)
+	CumSum(context.Context) (*connect.BidiStreamForClientSimple[v1.CumSumRequest, v1.CumSumResponse], error)
 }
 
 // NewPingServiceClient constructs a client for the connect.ping.v1.PingService service. By default,
@@ -161,7 +161,7 @@ func (c *pingServiceClient) CountUp(ctx context.Context, req *v1.CountUpRequest)
 }
 
 // CumSum calls connect.ping.v1.PingService.CumSum.
-func (c *pingServiceClient) CumSum(ctx context.Context) (*connect.BidiStreamForClient[v1.CumSumRequest, v1.CumSumResponse], error) {
+func (c *pingServiceClient) CumSum(ctx context.Context) (*connect.BidiStreamForClientSimple[v1.CumSumRequest, v1.CumSumResponse], error) {
 	return c.cumSum.CallBidiStreamSimple(ctx)
 }
 

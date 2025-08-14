@@ -159,7 +159,7 @@ func TestCallInfo(t *testing.T) {
 			assert.Equal(t, response.GetSum(), expect)
 		})
 		t.Run("bidi_stream", func(t *testing.T) {
-			testBidiStreamSimple(t, client, true)
+			testBidiStreamSimple(t, client)
 		})
 		t.Run("bidi_stream_generics_server", func(t *testing.T) {
 			mux := http.NewServeMux()
@@ -168,7 +168,7 @@ func TestCallInfo(t *testing.T) {
 			))
 			server := memhttptest.NewServer(t, mux)
 			simpleClient := pingv1connectsimple.NewPingServiceClient(server.Client(), server.URL())
-			testBidiStreamSimple(t, simpleClient, true)
+			testBidiStreamSimple(t, simpleClient)
 		})
 		t.Run("bidi_stream_no_callinfo", func(t *testing.T) {
 			send := []int64{3, 5, 1}
@@ -3720,7 +3720,7 @@ func testClientStreamGenerics(t *testing.T, client pingv1connect.PingServiceClie
 	assertResponseHeadersAndTrailers(t, callInfo)
 }
 
-func testBidiStreamSimple(t *testing.T, client pingv1connectsimple.PingServiceClient, expectSuccess bool) { //nolint:thelper
+func testBidiStreamSimple(t *testing.T, client pingv1connectsimple.PingServiceClient) { //nolint:thelper
 	send := []int64{3, 5, 1}
 	expect := []int64{3, 8, 9}
 	var got []int64
@@ -3732,10 +3732,6 @@ func testBidiStreamSimple(t *testing.T, client pingv1connectsimple.PingServiceCl
 	assert.Nil(t, err)
 	assert.NotNil(t, stream)
 
-	if !expectSuccess { // server doesn't support HTTP/2
-		failNoHTTP2(t, stream)
-		return
-	}
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
