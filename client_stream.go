@@ -20,10 +20,78 @@ import (
 	"net/http"
 )
 
+// ClientStreamForClientSimple is the client's view of a client streaming RPC.
+//
+// It's returned from [Client.CallClientStreamSimple], but doesn't currently have an
+// exported constructor function.
+//
+// Usage of this stream requires that request headers be set in a [CallInfo] object in context via [NewClientContext].
+// In addition, the response returned by [ClientStreamForClientSimple.CloseAndReceive] is the response type defined for
+// the stream and _not_ a Connect [Response] wrapper type. As a result, response headers/trailers should be read from
+// the [CallInfo] object in context.
+type ClientStreamForClientSimple[Req, Res any] struct {
+	conn        StreamingClientConn
+	initializer maybeInitializer
+	// Error from client construction. If non-nil, return for all calls.
+	err error
+}
+
+// Spec returns the specification for the RPC.
+func (c *ClientStreamForClientSimple[_, _]) Spec() Spec {
+	return c.conn.Spec()
+}
+
+// Peer describes the server for the RPC.
+func (c *ClientStreamForClientSimple[_, _]) Peer() Peer {
+	return c.conn.Peer()
+}
+
+// Send a message to the server. The first call to Send also sends the request
+// headers.
+//
+// If the server returns an error, Send returns an error that wraps [io.EOF].
+// Clients should check for case using the standard library's [errors.Is] and
+// unmarshal the error using CloseAndReceive.
+func (c *ClientStreamForClientSimple[Req, Res]) Send(request *Req) error {
+	if c.err != nil {
+		return c.err
+	}
+	if request == nil {
+		return c.conn.Send(nil)
+	}
+	return c.conn.Send(request)
+}
+
+// CloseAndReceive closes the send side of the stream and waits for the
+// response.
+func (c *ClientStreamForClientSimple[Req, Res]) CloseAndReceive() (*Res, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	if err := c.conn.CloseRequest(); err != nil {
+		_ = c.conn.CloseResponse()
+		return nil, err
+	}
+	response, err := receiveUnaryResponse[Res](c.conn, c.initializer)
+	if err != nil {
+		_ = c.conn.CloseResponse()
+		return nil, err
+	}
+	return response.Msg, c.conn.CloseResponse()
+}
+
+// Conn exposes the underlying StreamingClientConn. This may be useful if
+// you'd prefer to wrap the connection in a different high-level API.
+func (c *ClientStreamForClientSimple[Req, Res]) Conn() (StreamingClientConn, error) {
+	return c.conn, c.err
+}
+
 // ClientStreamForClient is the client's view of a client streaming RPC.
 //
 // It's returned from [Client].CallClientStream, but doesn't currently have an
 // exported constructor function.
+//
+// When using this stream, request headers should be set via the [ClientStreamForClient.RequestHeader] method.
 type ClientStreamForClient[Req, Res any] struct {
 	conn        StreamingClientConn
 	initializer maybeInitializer
