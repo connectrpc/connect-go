@@ -79,7 +79,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		conn := client.protocolClient.NewConn(ctx, unarySpec, request.Header())
 		conn.onRequestSend(func(r *http.Request) {
 			request.setRequestMethod(r.Method)
-			callInfo, ok := clientCallInfoFromContext(ctx)
+			callInfo, ok := clientCallInfoForContext(ctx)
 			if ok {
 				callInfo.method = r.Method
 			}
@@ -116,7 +116,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		protocolClient.WriteRequestHeader(StreamTypeUnary, request.Header())
 
 		// Also set them in the context if there's a call info present
-		callInfo, callInfoOk := clientCallInfoFromContext(ctx)
+		callInfo, callInfoOk := clientCallInfoForContext(ctx)
 		if callInfoOk {
 			callInfo.peer = request.Peer()
 			callInfo.spec = request.Spec()
@@ -272,7 +272,7 @@ func (c *Client[Req, Res]) CallBidiStreamSimple(ctx context.Context) (*BidiStrea
 }
 
 func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType, onRequestSend func(r *http.Request)) StreamingClientConn {
-	callInfo, callInfoOk := clientCallInfoFromContext(ctx)
+	callInfo, callInfoOk := clientCallInfoForContext(ctx)
 	// Set values in the context if there's a call info present
 	if callInfoOk {
 		// Copy the call info into a sentinel value. This is so we can compare

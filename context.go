@@ -76,8 +76,8 @@ func NewClientContext(ctx context.Context) (context.Context, CallInfo) {
 	return context.WithValue(ctx, clientCallInfoContextKey{}, info), info
 }
 
-// CallInfoFromHandlerContext returns the CallInfo for the given handler (i.e. incoming) context, if there is one.
-func CallInfoFromHandlerContext(ctx context.Context) (CallInfo, bool) {
+// CallInfoForHandlerContext returns the CallInfo for the given handler (i.e. incoming) context, if there is one.
+func CallInfoForHandlerContext(ctx context.Context) (CallInfo, bool) {
 	value, ok := ctx.Value(handlerCallInfoContextKey{}).(CallInfo)
 	return value, ok
 }
@@ -229,8 +229,8 @@ func (w *responseWrapper[Res]) ResponseTrailer() http.Header {
 	return w.response.Trailer()
 }
 
-// clientCallInfoFromContext gets the call info from a client/outgoing context.
-func clientCallInfoFromContext(ctx context.Context) (*clientCallInfo, bool) {
+// clientCallInfoForContext gets the call info from a client/outgoing context.
+func clientCallInfoForContext(ctx context.Context) (*clientCallInfo, bool) {
 	info, ok := ctx.Value(clientCallInfoContextKey{}).(*clientCallInfo)
 	return info, ok
 }

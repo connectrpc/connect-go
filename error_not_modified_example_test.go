@@ -42,7 +42,7 @@ func (*ExampleCachingPingServer) Ping(
 	resp := &pingv1.PingResponse{
 		Number: req.GetNumber(),
 	}
-	callInfo, ok := connect.CallInfoFromHandlerContext(ctx)
+	callInfo, ok := connect.CallInfoForHandlerContext(ctx)
 	if !ok {
 		return nil, errors.New("no call info found in context")
 	}
