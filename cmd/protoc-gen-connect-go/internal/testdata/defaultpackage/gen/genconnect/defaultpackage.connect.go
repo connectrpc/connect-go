@@ -91,6 +91,17 @@ type TestServiceHandler interface {
 	Method(context.Context, *connect.Request[gen.Request]) (*connect.Response[gen.Response], error)
 }
 
+// TestServiceService provides access to the handlers for the
+// connect.test.default_package.TestService service.
+type TestServiceService struct {
+	MethodFunc connect.HandlerFunc[gen.Request, gen.Response]
+}
+
+// Method calls the MethodFunc handler.
+func (s *TestServiceService) Method(ctx context.Context, req *connect.Request[gen.Request]) (*connect.Response[gen.Response], error) {
+	return s.MethodFunc(ctx, req)
+}
+
 // NewTestServiceHandler builds an HTTP handler from the service implementation. It returns the path
 // on which to mount the handler and the handler itself.
 //

@@ -92,6 +92,16 @@ type ExampleV1BetaHandler interface {
 	Method(context.Context, *connect.Request[GetExample_Request]) (*connect.Response[Get1ExampleResponse], error)
 }
 
+// ExampleV1BetaService provides access to the handlers for the example.ExampleV1beta service.
+type ExampleV1BetaService struct {
+	MethodFunc connect.HandlerFunc[GetExample_Request, Get1ExampleResponse]
+}
+
+// Method calls the MethodFunc handler.
+func (s *ExampleV1BetaService) Method(ctx context.Context, req *connect.Request[GetExample_Request]) (*connect.Response[Get1ExampleResponse], error) {
+	return s.MethodFunc(ctx, req)
+}
+
 // NewExampleV1BetaHandler builds an HTTP handler from the service implementation. It returns the
 // path on which to mount the handler and the handler itself.
 //

@@ -270,6 +270,7 @@ func generateService(g *protogen.GeneratedFile, file *protogen.File, service *pr
 	generateClientInterface(g, service, names)
 	generateClientImplementation(g, file, service, names)
 	generateServerInterface(g, service, names)
+	generateServiceImplementation(g, file, service, names)
 	generateServerConstructor(g, file, service, names)
 	generateUnimplementedServerImplementation(g, service, names)
 }
@@ -430,6 +431,74 @@ func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Servic
 	}
 	g.P("}")
 	g.P()
+}
+
+func generateServiceImplementation(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, names names) {
+	// Service struct - make it public
+	wrapComments(g, names.Service, " provides access to the handlers for the ", service.Desc.FullName(), " service.")
+	if isDeprecatedService(service) {
+		g.P("//")
+		deprecated(g)
+	}
+	g.AnnotateSymbol(names.Service, protogen.Annotation{Location: service.Location})
+	g.P("type ", names.Service, " struct {")
+	for _, method := range service.Methods {
+		fieldName := method.GoName + "Func"
+		g.AnnotateSymbol(names.Service+"."+fieldName, protogen.Annotation{Location: method.Location})
+		leadingComments(
+			g,
+			method.Comments.Leading,
+			isDeprecatedMethod(method),
+		)
+		// Use connect function types where available, fall back to full signatures
+		if !method.Desc.IsStreamingClient() && !method.Desc.IsStreamingServer() {
+			// Unary method - use HandlerFunc
+			g.P(fieldName, " ", connectPackage.Ident("HandlerFunc"), "[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]")
+		} else if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
+			// Bidirectional streaming - use BidiStreamFunc
+			g.P(fieldName, " ", connectPackage.Ident("BidiStreamFunc"), "[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]")
+		} else {
+			// Client or server streaming - use full function signature (no dedicated func types available)
+			g.P(fieldName, " func", serverSignatureParams(g, method, false))
+		}
+	}
+	g.P("}")
+	g.P()
+	
+	// Generate methods that delegate to the handler functions to make the Service struct
+	// implement the Handler interface (backwards compatible)
+	for _, method := range service.Methods {
+		fieldName := method.GoName + "Func"
+		wrapComments(g, method.GoName, " calls the ", method.GoName, "Func handler.")
+		if isDeprecatedMethod(method) {
+			g.P("//")
+			deprecated(g)
+		}
+		// Use named parameters for the method signature
+		methodSig := method.GoName + serverSignatureParams(g, method, true /* named */)
+		g.P("func (s *", names.Service, ") ", methodSig, " {")
+		
+		// Handle different method types
+		isStreamingClient := method.Desc.IsStreamingClient()
+		isStreamingServer := method.Desc.IsStreamingServer()
+		
+		switch {
+		case isStreamingClient && isStreamingServer:
+			// Bidirectional streaming: (ctx, stream)
+			g.P("return s.", fieldName, "(ctx, stream)")
+		case isStreamingClient && !isStreamingServer:
+			// Client streaming: (ctx, stream)
+			g.P("return s.", fieldName, "(ctx, stream)")
+		case !isStreamingClient && isStreamingServer:
+			// Server streaming: (ctx, req, stream)
+			g.P("return s.", fieldName, "(ctx, req, stream)")
+		default:
+			// Unary: (ctx, req)
+			g.P("return s.", fieldName, "(ctx, req)")
+		}
+		g.P("}")
+		g.P()
+	}
 }
 
 func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, names names) {
@@ -667,6 +736,7 @@ type names struct {
 	Server              string
 	ServerConstructor   string
 	UnimplementedServer string
+	Service             string
 }
 
 func newNames(service *protogen.Service) names {
@@ -679,5 +749,6 @@ func newNames(service *protogen.Service) names {
 		Server:              fmt.Sprintf("%sHandler", base),
 		ServerConstructor:   fmt.Sprintf("New%sHandler", base),
 		UnimplementedServer: fmt.Sprintf("Unimplemented%sHandler", base),
+		Service:             fmt.Sprintf("%sService", base),
 	}
 }
