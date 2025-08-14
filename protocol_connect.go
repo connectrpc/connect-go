@@ -95,7 +95,7 @@ func (*protocolConnect) NewHandler(params *protocolHandlerParams) protocolHandle
 func (*protocolConnect) NewClient(params *protocolClientParams) (protocolClient, error) {
 	return &connectClient{
 		protocolClientParams: *params,
-		peer:                 newPeerFromURL(params.URL, ProtocolConnect),
+		peer:                 newPeerForURL(params.URL, ProtocolConnect),
 	}, nil
 }
 
@@ -137,7 +137,7 @@ func (h *connectHandler) CanHandlePayload(request *http.Request, contentType str
 	if request.Method == http.MethodGet {
 		query := request.URL.Query()
 		codecName := query.Get(connectUnaryEncodingQueryParameter)
-		contentType = connectContentTypeFromCodecName(
+		contentType = connectContentTypeForCodecName(
 			h.Spec.StreamType,
 			codecName,
 		)
@@ -191,14 +191,14 @@ func (h *connectHandler) NewConn(
 		msgReader := queryValueReader(msg, query.Get(connectUnaryBase64QueryParameter) == "1")
 		requestBody = io.NopCloser(msgReader)
 		codecName = query.Get(connectUnaryEncodingQueryParameter)
-		contentType = connectContentTypeFromCodecName(
+		contentType = connectContentTypeForCodecName(
 			h.Spec.StreamType,
 			codecName,
 		)
 	} else {
 		requestBody = request.Body
 		contentType = getHeaderCanonical(request.Header, headerContentType)
-		codecName = connectCodecFromContentType(
+		codecName = connectCodecForContentType(
 			h.Spec.StreamType,
 			contentType,
 		)
@@ -324,7 +324,7 @@ func (c *connectClient) WriteRequestHeader(streamType StreamType, header http.He
 	}
 	header[connectHeaderProtocolVersion] = []string{connectProtocolVersion}
 	header[headerContentType] = []string{
-		connectContentTypeFromCodecName(streamType, c.Codec.Name()),
+		connectContentTypeForCodecName(streamType, c.Codec.Name()),
 	}
 	acceptCompressionHeader := connectUnaryHeaderAcceptCompression
 	if streamType != StreamTypeUnary {
@@ -1107,7 +1107,7 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func([]by
 	if u.readMaxBytes > 0 && int64(u.readMaxBytes) < math.MaxInt64 {
 		reader = io.LimitReader(u.reader, int64(u.readMaxBytes)+1)
 	}
-	// ReadFrom ignores io.EOF, so any error here is real.
+	// ReadFor ignores io.EOF, so any error here is real.
 	bytesRead, err := data.ReadFrom(reader)
 	if err != nil {
 		err = wrapIfMaxBytesError(err, "read first %d bytes of message", bytesRead)
@@ -1152,7 +1152,7 @@ func (d *connectWireDetail) MarshalJSON() ([]byte, error) {
 		Value string          `json:"value"`
 		Debug json.RawMessage `json:"debug,omitempty"`
 	}{
-		Type:  typeNameFromURL(d.pbAny.GetTypeUrl()),
+		Type:  typeNameForURL(d.pbAny.GetTypeUrl()),
 		Value: base64.RawStdEncoding.EncodeToString(d.pbAny.GetValue()),
 	}
 	// Try to produce debug info, but expect failure when we don't have
@@ -1307,14 +1307,14 @@ func connectCodeToHTTP(code Code) int {
 	}
 }
 
-func connectCodecFromContentType(streamType StreamType, contentType string) string {
+func connectCodecForContentType(streamType StreamType, contentType string) string {
 	if streamType == StreamTypeUnary {
 		return strings.TrimPrefix(contentType, connectUnaryContentTypePrefix)
 	}
 	return strings.TrimPrefix(contentType, connectStreamingContentTypePrefix)
 }
 
-func connectContentTypeFromCodecName(streamType StreamType, name string) string {
+func connectContentTypeForCodecName(streamType StreamType, name string) string {
 	if streamType == StreamTypeUnary {
 		return connectUnaryContentTypePrefix + name
 	}
@@ -1378,7 +1378,7 @@ func connectValidateUnaryResponseContentType(
 			connectUnaryContentTypePrefix+requestCodecName,
 		)
 	}
-	responseCodecName := connectCodecFromContentType(
+	responseCodecName := connectCodecForContentType(
 		StreamTypeUnary,
 		responseContentType,
 	)
@@ -1411,7 +1411,7 @@ func connectValidateStreamResponseContentType(requestCodecName string, streamTyp
 			connectStreamingContentTypePrefix+requestCodecName,
 		)
 	}
-	responseCodecName := connectCodecFromContentType(
+	responseCodecName := connectCodecForContentType(
 		streamType,
 		responseContentType,
 	)
