@@ -146,7 +146,7 @@ func NewClientStreamHandler[Req, Res any](
 				conn:        conn,
 				initializer: config.Initializer,
 			}
-			ctx = newHandlerContext(ctx, &streamCallInfo{
+			ctx = newHandlerContext(ctx, &streamingHandlerCallInfo{
 				conn: conn,
 			})
 			res, err := implementation(ctx, stream)
@@ -202,7 +202,7 @@ func NewServerStreamHandler[Req, Res any](
 			if err != nil {
 				return err
 			}
-			ctx = newHandlerContext(ctx, &streamCallInfo{
+			ctx = newHandlerContext(ctx, &streamingHandlerCallInfo{
 				conn: conn,
 			})
 			return implementation(ctx, req, &ServerStream[Res]{conn: conn})
@@ -239,7 +239,7 @@ func NewBidiStreamHandler[Req, Res any](
 	return newStreamHandler(
 		config,
 		func(ctx context.Context, conn StreamingHandlerConn) error {
-			ctx = newHandlerContext(ctx, &streamCallInfo{
+			ctx = newHandlerContext(ctx, &streamingHandlerCallInfo{
 				conn: conn,
 			})
 			return implementation(

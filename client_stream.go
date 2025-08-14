@@ -20,11 +20,15 @@ import (
 	"net/http"
 )
 
-// ClientStreamForClientsimple is the client's view of a client streaming RPC.
-// for the simple API.
+// ClientStreamForClientSimple is the client's view of a client streaming RPC.
 //
-// It's returned from [Client].CallClientStreamSimple, but doesn't currently have an
+// It's returned from [Client.CallClientStreamSimple], but doesn't currently have an
 // exported constructor function.
+//
+// Usage of this stream requires that request headers be set in a [CallInfo] object in context via [NewClientContext].
+// In addition, the response returned by [ClientStreamForClientSimple.CloseAndReceive] is the response type defined for
+// the stream and _not_ a Connect [Response] wrapper type. As a result, response headers/trailers should be read from
+// the [CallInfo] object in context.
 type ClientStreamForClientSimple[Req, Res any] struct {
 	conn        StreamingClientConn
 	initializer maybeInitializer
@@ -86,6 +90,8 @@ func (c *ClientStreamForClientSimple[Req, Res]) Conn() (StreamingClientConn, err
 //
 // It's returned from [Client].CallClientStream, but doesn't currently have an
 // exported constructor function.
+//
+// When using this stream, request headers should be set via the [ClientStreamForClient.RequestHeader] method.
 type ClientStreamForClient[Req, Res any] struct {
 	conn        StreamingClientConn
 	initializer maybeInitializer
