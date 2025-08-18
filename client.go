@@ -183,12 +183,16 @@ func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamFo
 // headers and trailers should be read from the [CallInfo] object in context.
 func (c *Client[Req, Res]) CallClientStreamSimple(ctx context.Context) (*ClientStreamForClientSimple[Req, Res], error) {
 	if c.err != nil {
-		return &ClientStreamForClientSimple[Req, Res]{err: c.err}, c.err
+		return &ClientStreamForClientSimple[Req, Res]{
+			stream: &ClientStreamForClient[Req, Res]{err: c.err},
+		}, c.err
 	}
 
 	stream := &ClientStreamForClientSimple[Req, Res]{
-		conn:        c.newConn(ctx, StreamTypeClient, nil),
-		initializer: c.config.Initializer,
+		stream: &ClientStreamForClient[Req, Res]{
+			conn:        c.newConn(ctx, StreamTypeClient, nil),
+			initializer: c.config.Initializer,
+		},
 	}
 	if err := stream.Send(nil); err != nil {
 		return nil, err
@@ -247,11 +251,20 @@ func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForCli
 // are transmitted when this method is called and do not require an explicit call to [BidiStreamForClient.Send].
 //
 // Likewise, response headers and trailers should be read from the [CallInfo] object in context.
-func (c *Client[Req, Res]) CallBidiStreamSimple(ctx context.Context) (*BidiStreamForClient[Req, Res], error) {
-	stream := c.CallBidiStream(ctx)
-	if stream.err != nil {
-		return nil, stream.err
+func (c *Client[Req, Res]) CallBidiStreamSimple(ctx context.Context) (*BidiStreamForClientSimple[Req, Res], error) {
+	if c.err != nil {
+		return &BidiStreamForClientSimple[Req, Res]{
+			stream: &BidiStreamForClient[Req, Res]{err: c.err},
+		}, c.err
 	}
+
+	stream := &BidiStreamForClientSimple[Req, Res]{
+		stream: &BidiStreamForClient[Req, Res]{
+			conn:        c.newConn(ctx, StreamTypeBidi, nil),
+			initializer: c.config.Initializer,
+		},
+	}
+
 	if err := stream.Send(nil); err != nil {
 		return nil, err
 	}
