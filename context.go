@@ -206,8 +206,22 @@ func (c *clientCallInfo) HTTPMethod() string {
 // internalOnly implements CallInfo.
 func (c *clientCallInfo) internalOnly() {}
 
+// clientCallInfoContextKey is the key used to store client call info in context.
 type clientCallInfoContextKey struct{}
+
+// sentinelContextKey is the key used to store a copy of client call info in context
+// when a request is made.
+// Each interceptor in an interceptor chain compares the actual call info with the
+// sentinel call info. If the two values are different, the request will
+// return an error in the interceptor.
+// This protects against changing the call info in interceptors, which is prohibited
+// as it would allow users to modify call info mid-flight independent of the actual
+// request or response.
+// Users who wish to modify call info data such as headers and trailers should instead
+// use Connect [Request] and [Response] wrapper types.
 type sentinelContextKey struct{}
+
+// handlerCallInfoContextKey is the key used to store handler call info in context.
 type handlerCallInfoContextKey struct{}
 
 // responseSource indicates a type that manages response headers and trailers.

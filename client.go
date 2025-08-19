@@ -124,11 +124,6 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 			// So if a callInfo exists in context, merge any headers from there into the request wrapper
 			// so that all headers are sent in the request
 			mergeHeaders(request.Header(), callInfo.requestHeader)
-
-			// Copy the call info into a sentinel value. This is so we can compare
-			// the sentinel value against the call info in context. If they're different,
-			// we can stop the request. This protects against changing the context in interceptors.
-			ctx = context.WithValue(ctx, sentinelContextKey{}, callInfo)
 		}
 
 		response, err := unaryFunc(ctx, request)
