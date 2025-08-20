@@ -17,7 +17,7 @@ package connect_test
 import (
 	"net/http"
 
-	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp"
 )
 
@@ -32,6 +32,6 @@ func init() {
 	// deadlock, see:
 	// (https://github.com/golang/go/issues/48394)
 	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServerSimple{}))
 	examplePingServer = memhttp.NewServer(mux)
 }
