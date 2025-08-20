@@ -211,7 +211,7 @@ type clientCallInfoContextKey struct{}
 
 // sentinelContextKey is the key used to store a copy of client call info in context
 // when a request is made.
-// Each interceptor in an interceptor chain compares the actual call info with the
+// Each step in an interceptor chain compares the actual call info with the
 // sentinel call info. If the two values are different, the request will
 // return an error in the interceptor.
 // This protects against changing the call info in interceptors, which is prohibited
