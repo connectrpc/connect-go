@@ -326,18 +326,21 @@ func (d *duplexHTTPCall) makeRequest() {
 		_ = d.CloseWrite()
 		return
 	}
-	if (d.streamType&StreamTypeBidi) == StreamTypeBidi && response.ProtoMajor < 2 {
-		// If we somehow dialed an HTTP/1.x server, fail with an explicit message
-		// rather than returning a more cryptic error later on.
-		d.responseErr = errorf(
-			CodeUnimplemented,
-			"response from %v is HTTP/%d.%d: bidi streams require at least HTTP/2",
-			d.request.URL,
-			response.ProtoMajor,
-			response.ProtoMinor,
-		)
-		_ = d.CloseWrite()
+	if DisallowBidiStreamingHttp11 {
+		if (d.streamType&StreamTypeBidi) == StreamTypeBidi && response.ProtoMajor < 2 {
+			// If we somehow dialed an HTTP/1.x server, fail with an explicit message
+			// rather than returning a more cryptic error later on.
+			d.responseErr = errorf(
+				CodeUnimplemented,
+				"response from %v is HTTP/%d.%d: bidi streams require at least HTTP/2",
+				d.request.URL,
+				response.ProtoMajor,
+				response.ProtoMinor,
+			)
+			_ = d.CloseWrite()
+		}
 	}
+
 }
 
 // getNoBody is a GetBody function for http.NoBody.
