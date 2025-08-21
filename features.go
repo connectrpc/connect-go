@@ -1,5 +1,5 @@
 package connect
 
-var (
-	DisallowBidiStreamingHttp11 = true
-)
+type ExperimentalFeatures struct {
+	AllowBidiStreamOverHTTP11 bool
+}

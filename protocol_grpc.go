@@ -214,6 +214,7 @@ func (g *grpcHandler) NewConn(
 			},
 			web: g.web,
 		},
+		experimental: g.Experimental,
 	})
 	if failed != nil {
 		// Negotiation failed, so we can't establish a stream.
@@ -280,6 +281,7 @@ func (g *grpcClient) NewConn(
 		g.URL,
 		spec,
 		header,
+		g.Experimental,
 	)
 	conn := &grpcClientConn{
 		spec:             spec,
@@ -466,6 +468,8 @@ type grpcHandlerConn struct {
 	wroteToBody     bool
 	request         *http.Request
 	unmarshaler     grpcUnmarshaler
+
+	experimental ExperimentalFeatures
 }
 
 func (hc *grpcHandlerConn) Spec() Spec {
@@ -515,7 +519,7 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 		// a well-intentioned client may just not expect the server to be returning
 		// an error for a streaming RPC. Better to accept that we can't always reuse
 		// TCP connections.
-		if DisallowBidiStreamingHttp11 {
+		if !hc.experimental.AllowBidiStreamOverHTTP11 {
 			closeErr := hc.request.Body.Close()
 			if retErr == nil {
 				retErr = closeErr

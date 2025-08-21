@@ -2179,6 +2179,9 @@ func TestBidiOverHTTP1(t *testing.T) {
 	client := pingv1connect.NewPingServiceClient(
 		&http.Client{Transport: server.TransportHTTP1()},
 		server.URL(),
+		// connect.WithExperimental(connect.ExperimentalFeatures{
+		// 	AllowBidiStreamOverHTTP11: true,
+		// }),
 	)
 	stream := client.CumSum(context.Background())
 	// Stream creates an async request, can error on Send or Receive.
@@ -2186,9 +2189,10 @@ func TestBidiOverHTTP1(t *testing.T) {
 		assert.ErrorIs(t, err, io.EOF)
 	}
 	_, err := stream.Receive()
-	assert.NotNil(t, err)
 	assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+	assert.NotNil(t, err)
 	assert.Equal(t, err.Error(), "unknown: HTTP status 505 HTTP Version Not Supported")
+
 	assert.Nil(t, stream.CloseRequest())
 	assert.Nil(t, stream.CloseResponse())
 }
