@@ -54,6 +54,7 @@ func TestHTTPCallGetBody(t *testing.T) {
 			serverURL,
 			Spec{StreamType: StreamTypeUnary},
 			http.Header{},
+			ExperimentalFeatures{},
 		)
 		getBodyCalled := false
 		call.onRequestSend = func(*http.Request) {

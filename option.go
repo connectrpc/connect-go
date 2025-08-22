@@ -230,6 +230,10 @@ func WithCodec(codec Codec) Option {
 	return &codecOption{Codec: codec}
 }
 
+func WithExperimental(features ExperimentalFeatures) Option {
+	return &experimentalOption{features}
+}
+
 // WithCompressMinBytes sets a minimum size threshold for compression:
 // regardless of compressor configuration, messages smaller than the configured
 // minimum are sent uncompressed.
@@ -399,6 +403,18 @@ func (o *clientOptionsOption) applyToClient(config *clientConfig) {
 	for _, option := range o.options {
 		option.applyToClient(config)
 	}
+}
+
+type experimentalOption struct {
+	features ExperimentalFeatures
+}
+
+func (o *experimentalOption) applyToClient(config *clientConfig) {
+	config.Experimental = o.features
+}
+
+func (o *experimentalOption) applyToHandler(config *handlerConfig) {
+	config.Experimental = o.features
 }
 
 type codecOption struct {

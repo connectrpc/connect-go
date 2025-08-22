@@ -65,6 +65,8 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 			EnableGet:        config.EnableGet,
 			GetURLMaxBytes:   config.GetURLMaxBytes,
 			GetUseFallback:   config.GetUseFallback,
+
+			Experimental: config.Experimental,
 		},
 	)
 	if protocolErr != nil {
@@ -213,6 +215,8 @@ type clientConfig struct {
 	GetURLMaxBytes         int
 	GetUseFallback         bool
 	IdempotencyLevel       IdempotencyLevel
+
+	Experimental ExperimentalFeatures
 }
 
 func newClientConfig(rawURL string, options []ClientOption) (*clientConfig, *Error) {
@@ -227,6 +231,7 @@ func newClientConfig(rawURL string, options []ClientOption) (*clientConfig, *Err
 		Procedure:        protoPath,
 		CompressionPools: make(map[string]*compressionPool),
 		BufferPool:       newBufferPool(),
+		Experimental:     DefaultExperimentalFeatures,
 	}
 	withProtoBinaryCodec().applyToClient(&config)
 	withGzip().applyToClient(&config)
