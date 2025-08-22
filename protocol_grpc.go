@@ -519,7 +519,8 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 		// a well-intentioned client may just not expect the server to be returning
 		// an error for a streaming RPC. Better to accept that we can't always reuse
 		// TCP connections.
-		if !hc.experimental.AllowBidiStreamOverHTTP11 {
+
+		if !hc.experimental.AllowBidiStreamOverHTTP11 || hc.request.ProtoMajor > 1 {
 			closeErr := hc.request.Body.Close()
 			if retErr == nil {
 				retErr = closeErr

@@ -2214,6 +2214,44 @@ func TestBidiOverHTTP1(t *testing.T) {
 				assert.Nil(t, err)
 			},
 		},
+		{
+			name: "allow bidi stream over http1 grpc",
+			handlerOptions: []connect.HandlerOption{
+				connect.WithExperimental(connect.ExperimentalFeatures{
+					AllowBidiStreamOverHTTP11: true,
+				}),
+			},
+			clientOptions: []connect.ClientOption{
+				connect.WithExperimental(connect.ExperimentalFeatures{
+					AllowBidiStreamOverHTTP11: true,
+				}),
+				connect.WithGRPC(),
+			},
+			validate: func(t *testing.T, csr *pingv1.CumSumResponse, err error) {
+				assert.NotNil(t, csr)
+				assert.Equal(t, 2, csr.Sum)
+				assert.Nil(t, err)
+			},
+		},
+		{
+			name: "allow bidi stream over http1 grpc-web",
+			handlerOptions: []connect.HandlerOption{
+				connect.WithExperimental(connect.ExperimentalFeatures{
+					AllowBidiStreamOverHTTP11: true,
+				}),
+			},
+			clientOptions: []connect.ClientOption{
+				connect.WithExperimental(connect.ExperimentalFeatures{
+					AllowBidiStreamOverHTTP11: true,
+				}),
+				connect.WithGRPCWeb(),
+			},
+			validate: func(t *testing.T, csr *pingv1.CumSumResponse, err error) {
+				assert.NotNil(t, csr)
+				assert.Equal(t, 2, csr.Sum)
+				assert.Nil(t, err)
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mux := http.NewServeMux()
