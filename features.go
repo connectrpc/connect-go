@@ -5,5 +5,5 @@ type ExperimentalFeatures struct {
 }
 
 var DefaultExperimentalFeatures = ExperimentalFeatures{
-	AllowBidiStreamOverHTTP11: true,
+	AllowBidiStreamOverHTTP11: false,
 }
