@@ -231,6 +231,7 @@ func newClientConfig(rawURL string, options []ClientOption) (*clientConfig, *Err
 		Procedure:        protoPath,
 		CompressionPools: make(map[string]*compressionPool),
 		BufferPool:       newBufferPool(),
+		Experimental:     DefaultExperimentalFeatures,
 	}
 	withProtoBinaryCodec().applyToClient(&config)
 	withGzip().applyToClient(&config)

@@ -277,6 +277,7 @@ func newHandlerConfig(procedure string, streamType StreamType, options []Handler
 		Codecs:           make(map[string]Codec),
 		BufferPool:       newBufferPool(),
 		StreamType:       streamType,
+		Experimental:     DefaultExperimentalFeatures,
 	}
 	withProtoBinaryCodec().applyToHandler(&config)
 	withProtoJSONCodecs().applyToHandler(&config)

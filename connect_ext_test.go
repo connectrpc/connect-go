@@ -2179,9 +2179,17 @@ func TestBidiOverHTTP1(t *testing.T) {
 
 	for _, tc := range []testCase{
 		{
-			name:           "disallow bidi stream over http1",
-			handlerOptions: []connect.HandlerOption{},
-			clientOptions:  []connect.ClientOption{},
+			name: "disallow bidi stream over http1",
+			handlerOptions: []connect.HandlerOption{
+				connect.WithExperimental(connect.ExperimentalFeatures{
+					AllowBidiStreamOverHTTP11: false,
+				}),
+			},
+			clientOptions: []connect.ClientOption{
+				connect.WithExperimental(connect.ExperimentalFeatures{
+					AllowBidiStreamOverHTTP11: false,
+				}),
+			},
 			validate: func(t *testing.T, csr *pingv1.CumSumResponse, err error) {
 				assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
 				assert.NotNil(t, err)
