@@ -22,7 +22,7 @@ import (
 
 	connect "connectrpc.com/connect"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
 )
 
 // ExamplePingServer implements some trivial business logic. The Protobuf
@@ -34,18 +34,16 @@ type ExamplePingServer struct {
 // Ping implements pingv1connect.PingServiceHandler.
 func (*ExamplePingServer) Ping(
 	_ context.Context,
-	request *connect.Request[pingv1.PingRequest],
-) (*connect.Response[pingv1.PingResponse], error) {
-	return connect.NewResponse(
-		&pingv1.PingResponse{
-			Number: request.Msg.GetNumber(),
-			Text:   request.Msg.GetText(),
-		},
-	), nil
+	request *pingv1.PingRequest,
+) (*pingv1.PingResponse, error) {
+	return &pingv1.PingResponse{
+		Number: request.GetNumber(),
+		Text:   request.GetText(),
+	}, nil
 }
 
 // Sum implements pingv1connect.PingServiceHandler.
-func (p *ExamplePingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+func (p *ExamplePingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*pingv1.SumResponse, error) {
 	var sum int64
 	for stream.Receive() {
 		sum += stream.Msg().GetNumber()
@@ -53,12 +51,12 @@ func (p *ExamplePingServer) Sum(ctx context.Context, stream *connect.ClientStrea
 	if stream.Err() != nil {
 		return nil, stream.Err()
 	}
-	return connect.NewResponse(&pingv1.SumResponse{Sum: sum}), nil
+	return &pingv1.SumResponse{Sum: sum}, nil
 }
 
 // CountUp implements pingv1connect.PingServiceHandler.
-func (p *ExamplePingServer) CountUp(ctx context.Context, request *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
-	for number := int64(1); number <= request.Msg.GetNumber(); number++ {
+func (p *ExamplePingServer) CountUp(ctx context.Context, request *pingv1.CountUpRequest, stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+	for number := int64(1); number <= request.GetNumber(); number++ {
 		if err := stream.Send(&pingv1.CountUpResponse{Number: number}); err != nil {
 			return err
 		}

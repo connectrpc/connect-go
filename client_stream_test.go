@@ -24,7 +24,9 @@ import (
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 )
 
-func TestClientStreamForClient_NoPanics(t *testing.T) {
+const expectedStreamErrorMessage = "no stream initialized"
+
+func TestClientStreamForClient_InitErrNoPanics(t *testing.T) {
 	t.Parallel()
 	initErr := errors.New("client init failure")
 	clientStream := &ClientStreamForClient[pingv1.PingRequest, pingv1.PingResponse]{err: initErr}
@@ -38,7 +40,35 @@ func TestClientStreamForClient_NoPanics(t *testing.T) {
 	assert.Nil(t, conn)
 }
 
-func TestServerStreamForClient_NoPanics(t *testing.T) {
+func TestClientStreamForClientSimple_InitErrNoPanics(t *testing.T) {
+	t.Parallel()
+	initErr := errors.New("client init failure")
+	clientStream := &ClientStreamForClientSimple[pingv1.PingRequest, pingv1.PingResponse]{
+		stream: &ClientStreamForClient[pingv1.PingRequest, pingv1.PingResponse]{err: initErr},
+	}
+	assert.ErrorIs(t, clientStream.Send(&pingv1.PingRequest{}), initErr)
+	res, err := clientStream.CloseAndReceive()
+	assert.Nil(t, res)
+	assert.ErrorIs(t, err, initErr)
+	assert.NotNil(t, err)
+}
+
+func TestClientStreamForClientSimple_NilStreamNoPanics(t *testing.T) {
+	t.Parallel()
+	clientStream := &ClientStreamForClientSimple[pingv1.PingRequest, pingv1.PingResponse]{}
+	// Should not panic
+	clientStream.Peer()
+	clientStream.Spec()
+	err := clientStream.Send(&pingv1.PingRequest{})
+	assert.NotNil(t, err)
+	assert.Equal(t, err.Error(), expectedStreamErrorMessage)
+	res, err := clientStream.CloseAndReceive()
+	assert.Nil(t, res)
+	assert.NotNil(t, err)
+	assert.Equal(t, err.Error(), expectedStreamErrorMessage)
+}
+
+func TestServerStreamForClient_InitErrNoPanics(t *testing.T) {
 	t.Parallel()
 	initErr := errors.New("client init failure")
 	serverStream := &ServerStreamForClient[pingv1.PingResponse]{constructErr: initErr}
@@ -72,7 +102,7 @@ func TestServerStreamForClient(t *testing.T) {
 	assert.NotNil(t, conn)
 }
 
-func TestBidiStreamForClient_NoPanics(t *testing.T) {
+func TestBidiStreamForClient_InitErrNoPanics(t *testing.T) {
 	t.Parallel()
 	initErr := errors.New("client init failure")
 	bidiStream := &BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]{err: initErr}
@@ -88,6 +118,48 @@ func TestBidiStreamForClient_NoPanics(t *testing.T) {
 	conn, err := bidiStream.Conn()
 	assert.NotNil(t, err)
 	assert.Nil(t, conn)
+}
+
+func TestBidiStreamForClientSimple_InitErrNoPanics(t *testing.T) {
+	t.Parallel()
+	initErr := errors.New("client init failure")
+	bidiStream := &BidiStreamForClientSimple[pingv1.CumSumRequest, pingv1.CumSumResponse]{
+		stream: &BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]{err: initErr},
+	}
+	res, err := bidiStream.Receive()
+	assert.Nil(t, res)
+	assert.ErrorIs(t, err, initErr)
+	verifyHeaders(t, bidiStream.ResponseHeader())
+	verifyHeaders(t, bidiStream.ResponseTrailer())
+	assert.ErrorIs(t, bidiStream.Send(&pingv1.CumSumRequest{}), initErr)
+	assert.ErrorIs(t, bidiStream.CloseRequest(), initErr)
+	assert.ErrorIs(t, bidiStream.CloseResponse(), initErr)
+	assert.NotNil(t, err)
+}
+
+func TestBidiStreamForClientSimple_NilStreamNoPanics(t *testing.T) {
+	t.Parallel()
+	bidiStream := &BidiStreamForClientSimple[pingv1.PingRequest, pingv1.PingResponse]{}
+	// Should not panic
+	bidiStream.Peer()
+	bidiStream.Spec()
+	bidiStream.ResponseHeader()
+	bidiStream.ResponseTrailer()
+	err := bidiStream.Send(&pingv1.PingRequest{})
+	assert.NotNil(t, err)
+	assert.Equal(t, err.Error(), expectedStreamErrorMessage)
+	res, err := bidiStream.Receive()
+	assert.Nil(t, res)
+	assert.NotNil(t, err)
+	assert.Equal(t, err.Error(), expectedStreamErrorMessage)
+	err = bidiStream.CloseRequest()
+	assert.Nil(t, res)
+	assert.NotNil(t, err)
+	assert.Equal(t, err.Error(), expectedStreamErrorMessage)
+	err = bidiStream.CloseResponse()
+	assert.Nil(t, res)
+	assert.NotNil(t, err)
+	assert.Equal(t, err.Error(), expectedStreamErrorMessage)
 }
 
 func verifyHeaders(t *testing.T, headers http.Header) {

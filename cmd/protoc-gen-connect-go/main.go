@@ -90,6 +90,7 @@ const (
 	generatedFilenameExtension = ".connect.go"
 	defaultPackageSuffix       = "connect"
 	packageSuffixFlagName      = "package_suffix"
+	simpleFlagName             = "simple"
 
 	usage = "See https://connectrpc.com/docs/go/getting-started to learn how to use this plugin.\n\nFlags:\n  -h, --help\tPrint this help and exit.\n      --version\tPrint the version and exit."
 
@@ -120,16 +121,27 @@ func main() {
 		defaultPackageSuffix,
 		"Generate files into a sub-package of the package containing the base .pb.go files using the given suffix. An empty suffix denotes to generate into the same package as the base pb.go files.",
 	)
+	// "simple" is a bool, but we want to support just setting "simple" without needing to set "simple=true"
+	// We do this via making the flag a string, and then parsing manually in getSimpleBool.
+	simpleString := flagSet.String(
+		simpleFlagName,
+		"false",
+		"Generate client and handler interfaces with simple function signatures. This eliminates the wrapper connect.Request and connect.Response types, instead having functions directly use generated RPC request and responses. Clients and handlers will instead use context.Contexts to propagate information such as headers. Most users will be more familiar with these interfaces than the default.",
+	)
 	protogen.Options{
 		ParamFunc: flagSet.Set,
 	}.Run(
 		func(plugin *protogen.Plugin) error {
 			plugin.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL) | uint64(pluginpb.CodeGeneratorResponse_FEATURE_SUPPORTS_EDITIONS)
+			simple, err := getSimpleBool(*simpleString)
+			if err != nil {
+				return err
+			}
 			plugin.SupportedEditionsMinimum = descriptorpb.Edition_EDITION_PROTO2
 			plugin.SupportedEditionsMaximum = descriptorpb.Edition_EDITION_2023
 			for _, file := range plugin.Files {
 				if file.Generate {
-					generate(plugin, file, *packageSuffix)
+					generate(plugin, file, *packageSuffix, simple)
 				}
 			}
 			return nil
@@ -137,7 +149,7 @@ func main() {
 	)
 }
 
-func generate(plugin *protogen.Plugin, file *protogen.File, packageSuffix string) {
+func generate(plugin *protogen.Plugin, file *protogen.File, packageSuffix string, simple bool) {
 	if len(file.Services) == 0 {
 		return
 	}
@@ -170,7 +182,7 @@ func generate(plugin *protogen.Plugin, file *protogen.File, packageSuffix string
 	generatePreamble(generatedFile, file)
 	generateServiceNameConstants(generatedFile, file.Services)
 	for _, service := range file.Services {
-		generateService(generatedFile, file, service)
+		generateService(generatedFile, file, service, simple)
 	}
 }
 
@@ -265,16 +277,16 @@ func generateServiceMethodsVar(g *protogen.GeneratedFile, file *protogen.File, s
 		`.Services().ByName("`, service.Desc.Name(), `").Methods()`)
 }
 
-func generateService(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service) {
+func generateService(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, simple bool) {
 	names := newNames(service)
-	generateClientInterface(g, service, names)
-	generateClientImplementation(g, file, service, names)
-	generateServerInterface(g, service, names)
-	generateServerConstructor(g, file, service, names)
-	generateUnimplementedServerImplementation(g, service, names)
+	generateClientInterface(g, service, names, simple)
+	generateClientImplementation(g, file, service, names, simple)
+	generateServerInterface(g, service, names, simple)
+	generateServerConstructor(g, file, service, names, simple)
+	generateUnimplementedServerImplementation(g, service, names, simple)
 }
 
-func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Service, names names, simple bool) {
 	wrapComments(g, names.Client, " is a client for the ", service.Desc.FullName(), " service.")
 	if isDeprecatedService(service) {
 		g.P("//")
@@ -289,13 +301,13 @@ func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Servic
 			method.Comments.Leading,
 			isDeprecatedMethod(method),
 		)
-		g.P(clientSignature(g, method, false /* named */))
+		g.P(clientSignature(g, method, false /* named */, simple))
 	}
 	g.P("}")
 	g.P()
 }
 
-func generateClientImplementation(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, names names) {
+func generateClientImplementation(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, names names, simple bool) {
 	clientOption := connectPackage.Ident("ClientOption")
 
 	// Client constructor.
@@ -352,11 +364,11 @@ func generateClientImplementation(g *protogen.GeneratedFile, file *protogen.File
 	g.P("}")
 	g.P()
 	for _, method := range service.Methods {
-		generateClientMethod(g, method, names)
+		generateClientMethod(g, method, names, simple)
 	}
 }
 
-func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, names names) {
+func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, names names, simple bool) {
 	receiver := names.ClientImpl
 	isStreamingClient := method.Desc.IsStreamingClient()
 	isStreamingServer := method.Desc.IsStreamingServer()
@@ -365,23 +377,43 @@ func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, na
 		g.P("//")
 		deprecated(g)
 	}
-	g.P("func (c *", receiver, ") ", clientSignature(g, method, true /* named */), " {")
+	g.P("func (c *", receiver, ") ", clientSignature(g, method, true /* named */, simple), " {")
 
 	switch {
 	case isStreamingClient && !isStreamingServer:
-		g.P("return c.", unexport(method.GoName), ".CallClientStream(ctx)")
+		if simple {
+			g.P("return c.", unexport(method.GoName), ".CallClientStreamSimple(ctx)")
+		} else {
+			g.P("return c.", unexport(method.GoName), ".CallClientStream(ctx)")
+		}
 	case !isStreamingClient && isStreamingServer:
-		g.P("return c.", unexport(method.GoName), ".CallServerStream(ctx, req)")
+		if simple {
+			g.P("return c.", unexport(method.GoName), ".CallServerStream(ctx, ", connectPackage.Ident("NewRequest"), "(req))")
+		} else {
+			g.P("return c.", unexport(method.GoName), ".CallServerStream(ctx, req)")
+		}
 	case isStreamingClient && isStreamingServer:
-		g.P("return c.", unexport(method.GoName), ".CallBidiStream(ctx)")
+		if simple {
+			g.P("return c.", unexport(method.GoName), ".CallBidiStreamSimple(ctx)")
+		} else {
+			g.P("return c.", unexport(method.GoName), ".CallBidiStream(ctx)")
+		}
 	default:
-		g.P("return c.", unexport(method.GoName), ".CallUnary(ctx, req)")
+		if simple {
+			g.P("response, err := c.", unexport(method.GoName), ".CallUnary(ctx, ", connectPackage.Ident("NewRequest"), "(req))")
+			g.P("if response != nil {")
+			g.P("return response.Msg, err")
+			g.P("}")
+			g.P("return nil, err")
+		} else {
+			g.P("return c.", unexport(method.GoName), ".CallUnary(ctx, req)")
+		}
 	}
 	g.P("}")
 	g.P()
 }
 
-func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named bool) string {
+func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named bool, simple bool) string {
 	reqName := "req"
 	ctxName := "ctx"
 	if !named {
@@ -389,17 +421,37 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named b
 	}
 	if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
 		// bidi streaming
+		if simple {
+			return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
+				"(*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClientSimple")) +
+				"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
+				", error)"
+		}
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
 			"*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClient")) +
 			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
 	}
 	if method.Desc.IsStreamingClient() {
 		// client streaming
+		if simple {
+			return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
+				"(*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClientSimple")) +
+				"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
+				", error)"
+		}
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
 			"*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClient")) +
 			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
 	}
 	if method.Desc.IsStreamingServer() {
+		if simple {
+			return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
+				", " + reqName + " *" +
+				g.QualifiedGoIdent(method.Input.GoIdent) + ") " +
+				"(*" + g.QualifiedGoIdent(connectPackage.Ident("ServerStreamForClient")) +
+				"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
+				", error)"
+		}
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
 			", " + reqName + " *" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
 			g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
@@ -408,10 +460,10 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named b
 			", error)"
 	}
 	// unary; symmetric so we can re-use server templating
-	return method.GoName + serverSignatureParams(g, method, named)
+	return method.GoName + serverSignatureParams(g, method, named, simple)
 }
 
-func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Service, names names, simple bool) {
 	wrapComments(g, names.Server, " is an implementation of the ", service.Desc.FullName(), " service.")
 	if isDeprecatedService(service) {
 		g.P("//")
@@ -426,13 +478,13 @@ func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Servic
 			isDeprecatedMethod(method),
 		)
 		g.AnnotateSymbol(names.Server+"."+method.GoName, protogen.Annotation{Location: method.Location})
-		g.P(serverSignature(g, method))
+		g.P(serverSignature(g, method, simple))
 	}
 	g.P("}")
 	g.P()
 }
 
-func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, names names) {
+func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, names names, simple bool) {
 	wrapComments(g, names.ServerConstructor, " builds an HTTP handler from the service implementation.",
 		" It returns the path on which to mount the handler and the handler itself.")
 	g.P("//")
@@ -452,13 +504,25 @@ func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, s
 		idempotency := methodIdempotency(method)
 		switch {
 		case isStreamingClient && !isStreamingServer:
-			g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewClientStreamHandler"), "(")
+			if simple {
+				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewClientStreamHandlerSimple"), "(")
+			} else {
+				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewClientStreamHandler"), "(")
+			}
 		case !isStreamingClient && isStreamingServer:
-			g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewServerStreamHandler"), "(")
+			if simple {
+				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewServerStreamHandlerSimple"), "(")
+			} else {
+				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewServerStreamHandler"), "(")
+			}
 		case isStreamingClient && isStreamingServer:
 			g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewBidiStreamHandler"), "(")
 		default:
-			g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewUnaryHandler"), "(")
+			if simple {
+				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewUnaryHandlerSimple"), "(")
+			} else {
+				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewUnaryHandler"), "(")
+			}
 		}
 		g.P(procedureConstName(method), `,`)
 		g.P("svc.", method.GoName, ",")
@@ -487,12 +551,12 @@ func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, s
 	g.P()
 }
 
-func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names, simple bool) {
 	wrapComments(g, names.UnimplementedServer, " returns CodeUnimplemented from all methods.")
 	g.P("type ", names.UnimplementedServer, " struct {}")
 	g.P()
 	for _, method := range service.Methods {
-		g.P("func (", names.UnimplementedServer, ") ", serverSignature(g, method), "{")
+		g.P("func (", names.UnimplementedServer, ") ", serverSignature(g, method, simple), "{")
 		if method.Desc.IsStreamingServer() {
 			g.P("return ", connectPackage.Ident("NewError"), "(",
 				connectPackage.Ident("CodeUnimplemented"), ", ", errorsPackage.Ident("New"),
@@ -508,11 +572,11 @@ func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, servic
 	g.P()
 }
 
-func serverSignature(g *protogen.GeneratedFile, method *protogen.Method) string {
-	return method.GoName + serverSignatureParams(g, method, false /* named */)
+func serverSignature(g *protogen.GeneratedFile, method *protogen.Method, simple bool) string {
+	return method.GoName + serverSignatureParams(g, method, false /* named */, simple)
 }
 
-func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, named bool) string {
+func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, named bool, simple bool) string {
 	ctxName := "ctx "
 	reqName := "req "
 	streamName := "stream "
@@ -528,6 +592,12 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 	}
 	if method.Desc.IsStreamingClient() {
 		// client streaming
+		if simple {
+			return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ", " +
+				streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStream")) +
+				"[" + g.QualifiedGoIdent(method.Input.GoIdent) + "]" +
+				") (*" + g.QualifiedGoIdent(method.Output.GoIdent) + " ,error)"
+		}
 		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ", " +
 			streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStream")) +
 			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + "]" +
@@ -535,6 +605,14 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 	}
 	if method.Desc.IsStreamingServer() {
 		// server streaming
+		if simple {
+			return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
+				", " + reqName + " *" +
+				g.QualifiedGoIdent(method.Input.GoIdent) + ", " +
+				streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ServerStream")) +
+				"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
+				") error"
+		}
 		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
 			", " + reqName + "*" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
 			g.QualifiedGoIdent(method.Input.GoIdent) + "], " +
@@ -543,8 +621,15 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 			") error"
 	}
 	// unary
+	if simple {
+		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
+			", " + reqName + " *" +
+			g.QualifiedGoIdent(method.Input.GoIdent) + ") " +
+			"(*" +
+			g.QualifiedGoIdent(method.Output.GoIdent) + ", error)"
+	}
 	return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
-		", " + reqName + "*" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
+		", " + reqName + " *" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
 		g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
 		"(*" + g.QualifiedGoIdent(connectPackage.Ident("Response")) + "[" +
 		g.QualifiedGoIdent(method.Output.GoIdent) + "], error)"
@@ -679,5 +764,18 @@ func newNames(service *protogen.Service) names {
 		Server:              fmt.Sprintf("%sHandler", base),
 		ServerConstructor:   fmt.Sprintf("New%sHandler", base),
 		UnimplementedServer: fmt.Sprintf("Unimplemented%sHandler", base),
+	}
+}
+
+// "simple" is a bool, but we want to support just setting "simple" without needing to set "simple=true"
+// We do this via making the flag a string, and then parsing manually here.
+func getSimpleBool(simpleString string) (bool, error) {
+	switch simpleString {
+	case "", "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf(`unknown value for option "simple" (must be one of "", "true", "false"): %q`, simpleString)
 	}
 }

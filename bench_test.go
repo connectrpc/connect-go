@@ -28,7 +28,7 @@ import (
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
 )
 
 func BenchmarkConnect(b *testing.B) {
@@ -82,7 +82,7 @@ func BenchmarkConnect(b *testing.B) {
 				b.RunParallel(func(pb *testing.PB) {
 					for pb.Next() {
 						if _, err := client.Ping(
-							ctx, connect.NewRequest(&pingv1.PingRequest{Text: twoMiB}),
+							ctx, &pingv1.PingRequest{Text: twoMiB},
 						); err != nil {
 							b.Error(err)
 						}
@@ -94,11 +94,11 @@ func BenchmarkConnect(b *testing.B) {
 				b.RunParallel(func(pb *testing.PB) {
 					for pb.Next() {
 						response, err := client.Ping(
-							ctx, connect.NewRequest(&pingv1.PingRequest{Number: 42}),
+							ctx, &pingv1.PingRequest{Number: 42},
 						)
 						if err != nil {
 							b.Error(err)
-						} else if num := response.Msg.GetNumber(); num != 42 {
+						} else if num := response.GetNumber(); num != 42 {
 							b.Errorf("expected 42, got %d", num)
 						}
 					}
@@ -112,7 +112,10 @@ func BenchmarkConnect(b *testing.B) {
 							upTo   = 1
 							expect = 1
 						)
-						stream := client.Sum(ctx)
+						stream, err := client.Sum(ctx)
+						if err != nil {
+							b.Error(err)
+						}
 						for number := int64(1); number <= upTo; number++ {
 							if err := stream.Send(&pingv1.SumRequest{Number: number}); err != nil {
 								b.Error(err)
@@ -121,7 +124,7 @@ func BenchmarkConnect(b *testing.B) {
 						response, err := stream.CloseAndReceive()
 						if err != nil {
 							b.Error(err)
-						} else if got := response.Msg.GetSum(); got != expect {
+						} else if got := response.GetSum(); got != expect {
 							b.Errorf("expected %d, got %d", expect, got)
 						}
 					}
@@ -134,7 +137,7 @@ func BenchmarkConnect(b *testing.B) {
 						const (
 							upTo = 1
 						)
-						request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
+						request := &pingv1.CountUpRequest{Number: upTo}
 						stream, err := client.CountUp(ctx, request)
 						if err != nil {
 							b.Error(err)
@@ -159,7 +162,10 @@ func BenchmarkConnect(b *testing.B) {
 						const (
 							upTo = 1
 						)
-						stream := client.CumSum(ctx)
+						stream, err := client.CumSum(ctx)
+						if err != nil {
+							b.Error(err)
+						}
 						number := int64(1)
 						for ; number <= upTo; number++ {
 							if err := stream.Send(&pingv1.CumSumRequest{Number: number}); err != nil {

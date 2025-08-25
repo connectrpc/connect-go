@@ -30,7 +30,7 @@ import (
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -363,6 +363,47 @@ func TestDynamicHandler(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.Handle("/connect.ping.v1.PingService/Sum",
 			connect.NewClientStreamHandler(
+				"/connect.ping.v1.PingService/Sum",
+				dynamicSum,
+				connect.WithSchema(methodDesc),
+				connect.WithRequestInitializer(initializer),
+			),
+		)
+		server := memhttptest.NewServer(t, mux)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		stream := client.Sum(context.Background())
+		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 42}))
+		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 42}))
+		rsp, err := stream.CloseAndReceive()
+		if !assert.Nil(t, err) {
+			return
+		}
+		assert.Equal(t, rsp.Msg.Sum, 42*2)
+	})
+	t.Run("clientStreamSimple", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Sum")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		dynamicSum := func(_ context.Context, stream *connect.ClientStream[dynamicpb.Message]) (*dynamicpb.Message, error) {
+			var sum int64
+			for stream.Receive() {
+				got := stream.Msg().Get(
+					methodDesc.Input().Fields().ByName("number"),
+				).Int()
+				sum += got
+			}
+			msg := dynamicpb.NewMessage(methodDesc.Output())
+			msg.Set(
+				methodDesc.Output().Fields().ByName("sum"),
+				protoreflect.ValueOfInt64(sum),
+			)
+			return msg, nil
+		}
+		mux := http.NewServeMux()
+		mux.Handle("/connect.ping.v1.PingService/Sum",
+			connect.NewClientStreamHandlerSimple(
 				"/connect.ping.v1.PingService/Sum",
 				dynamicSum,
 				connect.WithSchema(methodDesc),
