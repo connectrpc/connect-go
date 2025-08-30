@@ -67,8 +67,6 @@ import (
   "connectrpc.com/connect"
   pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
   "connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
-  "golang.org/x/net/http2"
-  "golang.org/x/net/http2/h2c"
 )
 
 type PingServer struct {
@@ -96,12 +94,16 @@ func main() {
   // The generated constructors return a path and a plain net/http
   // handler.
   mux.Handle(pingv1connect.NewPingServiceHandler(&PingServer{}))
-  err := http.ListenAndServe(
-    "localhost:8080",
-    // For gRPC clients, it's convenient to support HTTP/2 without TLS. You can
-    // avoid x/net/http2 by using http.ListenAndServeTLS.
-    h2c.NewHandler(mux, &http2.Server{}),
-  )
+  p := new(http.Protocols)
+  p.SetHTTP1(true)
+  // For gRPC clients, it's convenient to support HTTP/2 without TLS.
+  p.SetUnencryptedHTTP2(true)
+  s := &http.Server{
+    Addr:      "localhost:8080",
+    Handler:   mux,
+    Protocols: p,
+  }
+  err := s.ListenAndServe()
   log.Fatalf("listen failed: %v", err)
 }
 ```

@@ -100,10 +100,14 @@ func Example_handler() {
 		"internal/testdata/server.key",
 		mux,
 	)
-	// To serve HTTP/2 requests without TLS (as many gRPC clients expect), import
-	// golang.org/x/net/http2/h2c and golang.org/x/net/http2 and change to:
-	// _ = http.ListenAndServe(
-	// 	"localhost:8080",
-	// 	h2c.NewHandler(mux, &http2.Server{}),
-	// )
+	// To serve HTTP/2 requests without TLS (as many gRPC clients expect), use
+	// Protocols.SetUnencryptedHTTP2 and change to:
+	// p := new(http.Protocols)
+	// p.SetHTTP1(true)
+	// p.SetUnencryptedHTTP2(true)
+	// s := &http.Server{
+	// 	Addr:    "localhost:8080",
+	// 	Handler: mux,
+	// }
+	// _ = s.ListenAndServe()
 }
