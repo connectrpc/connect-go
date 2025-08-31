@@ -106,8 +106,9 @@ func Example_handler() {
 	// p.SetHTTP1(true)
 	// p.SetUnencryptedHTTP2(true)
 	// s := &http.Server{
-	// 	Addr:    "localhost:8080",
-	// 	Handler: mux,
+	// 	Addr:      "localhost:8080",
+	// 	Handler:   mux,
+	// 	Protocols: p,
 	// }
 	// _ = s.ListenAndServe()
 }
