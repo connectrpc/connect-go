@@ -2443,28 +2443,118 @@ func TestWebXUserAgent(t *testing.T) {
 
 func TestBidiOverHTTP1(t *testing.T) {
 	t.Parallel()
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
-	server := memhttptest.NewServer(t, mux)
 
-	// Clients expecting a full-duplex connection that end up with a simplex
-	// HTTP/1.1 connection shouldn't hang. Instead, the server should close the
-	// TCP connection.
-	client := pingv1connect.NewPingServiceClient(
-		&http.Client{Transport: server.TransportHTTP1()},
-		server.URL(),
-	)
-	stream := client.CumSum(context.Background())
-	// Stream creates an async request, can error on Send or Receive.
-	if err := stream.Send(&pingv1.CumSumRequest{Number: 2}); err != nil {
-		assert.ErrorIs(t, err, io.EOF)
+	type testCase struct {
+		name           string
+		handlerOptions []connect.HandlerOption
+		clientOptions  []connect.ClientOption
+		validate       func(*testing.T, *pingv1.CumSumResponse, error)
 	}
-	_, err := stream.Receive()
-	assert.NotNil(t, err)
-	assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
-	assert.Equal(t, err.Error(), "unknown: HTTP status 505 HTTP Version Not Supported")
-	assert.Nil(t, stream.CloseRequest())
-	assert.Nil(t, stream.CloseResponse())
+
+	for _, tc := range []testCase{
+		{
+			name: "disallow bidi stream over http1",
+			handlerOptions: []connect.HandlerOption{
+				connect.WithExperimental(connect.ExperimentalFeatures{
+					AllowBidiStreamOverHTTP11: false,
+				}),
+			},
+			clientOptions: []connect.ClientOption{
+				connect.WithExperimental(connect.ExperimentalFeatures{
+					AllowBidiStreamOverHTTP11: false,
+				}),
+			},
+			validate: func(t *testing.T, csr *pingv1.CumSumResponse, err error) {
+				assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+				assert.NotNil(t, err)
+				assert.Equal(t, err.Error(), "unknown: HTTP status 505 HTTP Version Not Supported")
+			},
+		},
+		{
+			name: "allow bidi stream over http1",
+			handlerOptions: []connect.HandlerOption{
+				connect.WithExperimental(connect.ExperimentalFeatures{
+					AllowBidiStreamOverHTTP11: true,
+				}),
+			},
+			clientOptions: []connect.ClientOption{
+				connect.WithExperimental(connect.ExperimentalFeatures{
+					AllowBidiStreamOverHTTP11: true,
+				}),
+			},
+			validate: func(t *testing.T, csr *pingv1.CumSumResponse, err error) {
+				assert.NotNil(t, csr)
+				assert.Equal(t, 2, csr.Sum)
+				assert.Nil(t, err)
+			},
+		},
+		{
+			name: "allow bidi stream over http1 grpc",
+			handlerOptions: []connect.HandlerOption{
+				connect.WithExperimental(connect.ExperimentalFeatures{
+					AllowBidiStreamOverHTTP11: true,
+				}),
+			},
+			clientOptions: []connect.ClientOption{
+				connect.WithExperimental(connect.ExperimentalFeatures{
+					AllowBidiStreamOverHTTP11: true,
+				}),
+				connect.WithGRPC(),
+			},
+			validate: func(t *testing.T, csr *pingv1.CumSumResponse, err error) {
+				assert.NotNil(t, csr)
+				assert.Equal(t, 2, csr.Sum)
+				assert.Nil(t, err)
+			},
+		},
+		{
+			name: "allow bidi stream over http1 grpc-web",
+			handlerOptions: []connect.HandlerOption{
+				connect.WithExperimental(connect.ExperimentalFeatures{
+					AllowBidiStreamOverHTTP11: true,
+				}),
+			},
+			clientOptions: []connect.ClientOption{
+				connect.WithExperimental(connect.ExperimentalFeatures{
+					AllowBidiStreamOverHTTP11: true,
+				}),
+				connect.WithGRPCWeb(),
+			},
+			validate: func(t *testing.T, csr *pingv1.CumSumResponse, err error) {
+				assert.NotNil(t, csr)
+				assert.Equal(t, 2, csr.Sum)
+				assert.Nil(t, err)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.Handle(pingv1connect.NewPingServiceHandler(
+				pingServer{},
+				tc.handlerOptions...,
+			))
+			server := memhttptest.NewServer(t, mux)
+
+			// Clients expecting a full-duplex connection that end up with a simplex
+			// HTTP/1.1 connection shouldn't hang. Instead, the server should close the
+			// TCP connection.
+			client := pingv1connect.NewPingServiceClient(
+				&http.Client{Transport: server.TransportHTTP1()},
+				server.URL(),
+				tc.clientOptions...,
+			)
+			stream := client.CumSum(context.Background())
+			// Stream creates an async request, can error on Send or Receive.
+			if err := stream.Send(&pingv1.CumSumRequest{Number: 2}); err != nil {
+				assert.ErrorIs(t, err, io.EOF)
+			}
+			recvMsg, err := stream.Receive()
+			tc.validate(t, recvMsg, err)
+
+			assert.Nil(t, stream.CloseRequest())
+			assert.Nil(t, stream.CloseResponse())
+		})
+	}
 }
 
 func TestHandlerReturnsNilResponse(t *testing.T) {

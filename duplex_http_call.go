@@ -50,6 +50,8 @@ type duplexHTTPCall struct {
 	responseReady chan struct{}
 	response      *http.Response
 	responseErr   error
+
+	allowBidiStreamOverHTTP11 bool
 }
 
 func newDuplexHTTPCall(
@@ -58,6 +60,7 @@ func newDuplexHTTPCall(
 	url *url.URL,
 	spec Spec,
 	header http.Header,
+	features ExperimentalFeatures,
 ) *duplexHTTPCall {
 	// ensure we make a copy of the url before we pass along to the
 	// Request. This ensures if a transport out of our control wants
@@ -87,6 +90,8 @@ func newDuplexHTTPCall(
 		streamType:    spec.StreamType,
 		request:       request,
 		responseReady: make(chan struct{}),
+
+		allowBidiStreamOverHTTP11: features.AllowBidiStreamOverHTTP11,
 	}
 }
 
@@ -326,18 +331,21 @@ func (d *duplexHTTPCall) makeRequest() {
 		_ = d.CloseWrite()
 		return
 	}
-	if (d.streamType&StreamTypeBidi) == StreamTypeBidi && response.ProtoMajor < 2 {
-		// If we somehow dialed an HTTP/1.x server, fail with an explicit message
-		// rather than returning a more cryptic error later on.
-		d.responseErr = errorf(
-			CodeUnimplemented,
-			"response from %v is HTTP/%d.%d: bidi streams require at least HTTP/2",
-			d.request.URL,
-			response.ProtoMajor,
-			response.ProtoMinor,
-		)
-		_ = d.CloseWrite()
+	if !d.allowBidiStreamOverHTTP11 {
+		if (d.streamType&StreamTypeBidi) == StreamTypeBidi && response.ProtoMajor < 2 {
+			// If we somehow dialed an HTTP/1.x server, fail with an explicit message
+			// rather than returning a more cryptic error later on.
+			d.responseErr = errorf(
+				CodeUnimplemented,
+				"response from %v is HTTP/%d.%d: bidi streams require at least HTTP/2",
+				d.request.URL,
+				response.ProtoMajor,
+				response.ProtoMinor,
+			)
+			_ = d.CloseWrite()
+		}
 	}
+
 }
 
 // getNoBody is a GetBody function for http.NoBody.

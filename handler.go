@@ -31,6 +31,7 @@ type Handler struct {
 	protocolHandlers map[string][]protocolHandler // Method to protocol handlers
 	allowMethod      string                       // Allow header
 	acceptPost       string                       // Accept-Post header
+	experimental     ExperimentalFeatures
 }
 
 // NewUnaryHandler constructs a [Handler] for a request-response procedure.
@@ -106,6 +107,8 @@ func NewUnaryHandler[Req, Res any](
 		protocolHandlers: mappedMethodHandlers(protocolHandlers),
 		allowMethod:      sortedAllowMethodValue(protocolHandlers),
 		acceptPost:       sortedAcceptPostValue(protocolHandlers),
+
+		experimental: config.Experimental,
 	}
 }
 
@@ -261,12 +264,22 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	// okay if we can't re-use the connection.
 	isBidi := (h.spec.StreamType & StreamTypeBidi) == StreamTypeBidi
 	if isBidi && request.ProtoMajor < 2 {
+		// Check if we allow bidi stream over HTTP/1.1, enable full-duplex support
+		// and if fail, we fallback to the default behaviour.
+		if h.experimental.AllowBidiStreamOverHTTP11 {
+			responseController := http.NewResponseController(responseWriter)
+			if err := responseController.EnableFullDuplex(); err == nil {
+				goto Pass
+			}
+		}
+
 		// Clients coded to expect full-duplex connections may hang if they've
 		// mistakenly negotiated HTTP/1.1. To unblock them, we must close the
 		// underlying TCP connection.
 		responseWriter.Header().Set("Connection", "close")
 		responseWriter.WriteHeader(http.StatusHTTPVersionNotSupported)
 		return
+	Pass:
 	}
 
 	protocolHandlers := h.protocolHandlers[request.Method]
@@ -350,6 +363,8 @@ type handlerConfig struct {
 	ReadMaxBytes                 int
 	SendMaxBytes                 int
 	StreamType                   StreamType
+
+	Experimental ExperimentalFeatures
 }
 
 func newHandlerConfig(procedure string, streamType StreamType, options []HandlerOption) *handlerConfig {
@@ -360,6 +375,7 @@ func newHandlerConfig(procedure string, streamType StreamType, options []Handler
 		Codecs:           make(map[string]Codec),
 		BufferPool:       newBufferPool(),
 		StreamType:       streamType,
+		Experimental:     DefaultExperimentalFeatures,
 	}
 	withProtoBinaryCodec().applyToHandler(&config)
 	withProtoJSONCodecs().applyToHandler(&config)
@@ -402,6 +418,7 @@ func (c *handlerConfig) newProtocolHandlers() []protocolHandler {
 			SendMaxBytes:                 c.SendMaxBytes,
 			RequireConnectProtocolHeader: c.RequireConnectProtocolHeader,
 			IdempotencyLevel:             c.IdempotencyLevel,
+			Experimental:                 c.Experimental,
 		}))
 	}
 	return handlers
@@ -421,5 +438,7 @@ func newStreamHandler(
 		protocolHandlers: mappedMethodHandlers(protocolHandlers),
 		allowMethod:      sortedAllowMethodValue(protocolHandlers),
 		acceptPost:       sortedAcceptPostValue(protocolHandlers),
+
+		experimental: config.Experimental,
 	}
 }

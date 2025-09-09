@@ -83,6 +83,8 @@ type protocolHandlerParams struct {
 	SendMaxBytes                 int
 	RequireConnectProtocolHeader bool
 	IdempotencyLevel             IdempotencyLevel
+
+	Experimental ExperimentalFeatures
 }
 
 // Handler is the server side of a protocol. HTTP handlers typically support
@@ -132,6 +134,8 @@ type protocolClientParams struct {
 	// The gRPC family of protocols always needs access to a Protobuf codec to
 	// marshal and unmarshal errors.
 	Protobuf Codec
+
+	Experimental ExperimentalFeatures
 }
 
 // Client is the client side of a protocol. HTTP clients typically use a single
