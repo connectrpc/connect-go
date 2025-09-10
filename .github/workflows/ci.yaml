@@ -27,7 +27,7 @@ jobs:
         with:
           fetch-depth: 1
       - name: Install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version.version }}
       - name: Unit Test
@@ -55,7 +55,7 @@ jobs:
         with:
           fetch-depth: 1
       - name: Install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version.version }}
       - name: Run Conformance Tests
@@ -68,7 +68,7 @@ jobs:
         with:
           fetch-depth: 1
       - name: Install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           # only the latest
           go-version: 1.25.x
