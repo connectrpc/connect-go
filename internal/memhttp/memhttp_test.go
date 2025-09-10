@@ -53,7 +53,7 @@ func TestServerTransport(t *testing.T) {
 				go func() {
 					defer wg.Done()
 					req, err := http.NewRequestWithContext(
-						context.Background(),
+						t.Context(),
 						http.MethodGet,
 						server.URL(),
 						nil,
@@ -83,7 +83,7 @@ func TestRegisterOnShutdown(t *testing.T) {
 	server.RegisterOnShutdown(func() {
 		close(done)
 	})
-	assert.Nil(t, server.Shutdown(context.Background()))
+	assert.Nil(t, server.Shutdown(t.Context()))
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):

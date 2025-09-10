@@ -64,27 +64,27 @@ func TestNewClient_InitFailure(t *testing.T) {
 
 	t.Run("unary", func(t *testing.T) {
 		t.Parallel()
-		_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
+		_, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{}))
 		validateExpectedError(t, err)
 	})
 
 	t.Run("bidi", func(t *testing.T) {
 		t.Parallel()
-		bidiStream := client.CumSum(context.Background())
+		bidiStream := client.CumSum(t.Context())
 		err := bidiStream.Send(&pingv1.CumSumRequest{})
 		validateExpectedError(t, err)
 	})
 
 	t.Run("client_stream", func(t *testing.T) {
 		t.Parallel()
-		clientStream := client.Sum(context.Background())
+		clientStream := client.Sum(t.Context())
 		err := clientStream.Send(&pingv1.SumRequest{})
 		validateExpectedError(t, err)
 	})
 
 	t.Run("server_stream", func(t *testing.T) {
 		t.Parallel()
-		_, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 3}))
+		_, err := client.CountUp(t.Context(), connect.NewRequest(&pingv1.CountUpRequest{Number: 3}))
 		validateExpectedError(t, err)
 	})
 }
@@ -103,7 +103,7 @@ func TestClientPeer(t *testing.T) {
 			connect.WithClientOptions(opts...),
 			connect.WithInterceptors(&assertPeerInterceptor{t}),
 		)
-		ctx := context.Background()
+		ctx := t.Context()
 		t.Run("unary", func(t *testing.T) {
 			unaryReq := connect.NewRequest[pingv1.PingRequest](nil)
 			_, err := client.Ping(ctx, unaryReq)
@@ -182,7 +182,7 @@ func TestGetNotModified(t *testing.T) {
 		server.URL(),
 		connect.WithHTTPGet(),
 	)
-	ctx := context.Background()
+	ctx := t.Context()
 	// unconditional request
 	unaryReq := connect.NewRequest(&pingv1.PingRequest{})
 	res, err := client.Ping(ctx, unaryReq)
@@ -222,7 +222,7 @@ func TestGetNoContentHeaders(t *testing.T) {
 		server.URL(),
 		connect.WithHTTPGet(),
 	)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	unaryReq := connect.NewRequest(&pingv1.PingRequest{})
 	_, err := client.Ping(ctx, unaryReq)
@@ -232,7 +232,7 @@ func TestGetNoContentHeaders(t *testing.T) {
 
 func TestConnectionDropped(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	for _, protocol := range []string{connect.ProtocolConnect, connect.ProtocolGRPC, connect.ProtocolGRPCWeb} {
 		var opts []connect.ClientOption
 		switch protocol {
@@ -290,7 +290,7 @@ func TestSpecSchema(t *testing.T) {
 		connect.WithInterceptors(&assertSchemaInterceptor{t}),
 	))
 	server := memhttptest.NewServer(t, mux)
-	ctx := context.Background()
+	ctx := t.Context()
 	client := pingv1connect.NewPingServiceClient(
 		server.Client(),
 		server.URL(),
@@ -325,7 +325,7 @@ func TestDynamicClient(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
 	server := memhttptest.NewServer(t, mux)
-	ctx := context.Background()
+	ctx := t.Context()
 	initializer := func(spec connect.Spec, msg any) error {
 		dynamic, ok := msg.(*dynamicpb.Message)
 		if !ok {
@@ -709,7 +709,7 @@ func testClientDeadlineBruteForceLoop(
 	loopBody func(ctx context.Context) (string, rpcErrors),
 ) {
 	t.Helper()
-	testContext, testCancel := context.WithTimeout(context.Background(), duration)
+	testContext, testCancel := context.WithTimeout(t.Context(), duration)
 	defer testCancel()
 	var rpcCount atomic.Int64
 
@@ -730,7 +730,7 @@ func testClientDeadlineBruteForceLoop(
 						if testContext.Err() != nil {
 							return
 						}
-						ctx, cancel := context.WithTimeout(context.Background(), timeout)
+						ctx, cancel := context.WithTimeout(t.Context(), timeout)
 						// We are intentionally not inheriting from testContext, which signals when the
 						// test loop should stop and return but need not influence the RPC deadline.
 						proc, errs := loopBody(ctx) //nolint:contextcheck

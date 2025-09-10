@@ -203,7 +203,7 @@ func TestGenerate(t *testing.T) {
 
 func TestClientHandler(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	t.Run("defaultpackage.proto", func(t *testing.T) {
 		t.Parallel()
 		svc := testDefaultPackageService{}
