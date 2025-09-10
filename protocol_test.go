@@ -42,21 +42,21 @@ func TestCanonicalizeContentType(t *testing.T) {
 
 func BenchmarkCanonicalizeContentType(b *testing.B) {
 	b.Run("simple", func(b *testing.B) {
-		for range b.N {
+		for b.Loop() {
 			_ = canonicalizeContentType("application/json")
 		}
 		b.ReportAllocs()
 	})
 
 	b.Run("with charset", func(b *testing.B) {
-		for range b.N {
+		for b.Loop() {
 			_ = canonicalizeContentType("application/json; charset=utf-8")
 		}
 		b.ReportAllocs()
 	})
 
 	b.Run("with other param", func(b *testing.B) {
-		for range b.N {
+		for b.Loop() {
 			_ = canonicalizeContentType("application/json; foo=utf-8")
 		}
 		b.ReportAllocs()

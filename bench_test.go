@@ -17,7 +17,6 @@ package connect_test
 import (
 	"bytes"
 	"compress/gzip"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -76,7 +75,7 @@ func BenchmarkConnect(b *testing.B) {
 				connect.WithClientOptions(client.opts...),
 			)
 
-			ctx := context.Background()
+			ctx := b.Context()
 			b.Run("unary_big", func(b *testing.B) {
 				b.ReportAllocs()
 				b.RunParallel(func(pb *testing.PB) {
@@ -263,7 +262,7 @@ func unaryRESTIteration(b *testing.B, client *http.Client, url string, text stri
 	}
 	compressedRequestBody.Close()
 	request, err := http.NewRequestWithContext(
-		context.Background(),
+		b.Context(),
 		http.MethodPost,
 		url,
 		rawRequestBody,

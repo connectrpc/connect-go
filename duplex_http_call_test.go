@@ -16,7 +16,6 @@ package connect
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -49,7 +48,7 @@ func TestHTTPCallGetBody(t *testing.T) {
 	errGetBodyCalled := errors.New("getBodyCalled") // sentinel error
 	caller := func(size int) error {
 		call := newDuplexHTTPCall(
-			context.Background(),
+			t.Context(),
 			server.Client(),
 			serverURL,
 			Spec{StreamType: StreamTypeUnary},

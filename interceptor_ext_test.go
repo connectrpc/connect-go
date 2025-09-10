@@ -61,7 +61,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 			t.Run("unary", func(t *testing.T) {
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
-				resp, err := client.Ping(context.Background(), &pingv1.PingRequest{Number: 10})
+				resp, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 10})
 
 				assert.Nil(t, resp)
 				assert.NotNil(t, err)
@@ -74,7 +74,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				t.Parallel()
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
-				stream, err := client.CountUp(context.Background(), &pingv1.CountUpRequest{Number: 10})
+				stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 10})
 
 				assert.Nil(t, stream)
 				assert.NotNil(t, err)
@@ -90,7 +90,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 
 				// With client-streaming and the simple API, the initial call fails. This differs from
 				// the generics API which requires a call to stream.Send first to receive an error.
-				stream, err := client.Sum(context.Background())
+				stream, err := client.Sum(t.Context())
 				assert.NotNil(t, err)
 				assert.Nil(t, stream)
 				assert.Equal(t, int32(1), clientCounter1.Load())
@@ -103,7 +103,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 
 				// With bidi-streaming and the simple API, the initial call fails. This differs from
 				// the generics API which requires a call to stream.Send first to receive an error.
-				stream, err := client.CumSum(context.Background())
+				stream, err := client.CumSum(t.Context())
 				assert.NotNil(t, err)
 				assert.Nil(t, stream)
 				assert.Equal(t, int32(1), clientCounter1.Load())
@@ -127,7 +127,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
 
-				resp, err := client.Ping(context.Background(), &pingv1.PingRequest{Number: 10})
+				resp, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 10})
 				assert.Nil(t, resp)
 				assert.NotNil(t, err)
 				assert.Equal(t, err.Error(), expectedContextErrorMessage)
@@ -139,7 +139,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
 
-				stream, err := client.CountUp(context.Background(), &pingv1.CountUpRequest{Number: 10})
+				stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 10})
 				assert.Nil(t, stream)
 				assert.NotNil(t, err)
 				assert.Equal(t, err.Error(), expectedContextErrorMessage)
@@ -153,7 +153,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 
 				// With client-streaming and the simple API, the initial call fails. This differs from
 				// the generics API which requires a call to stream.Send first to receive an error.
-				stream, err := client.Sum(context.Background())
+				stream, err := client.Sum(t.Context())
 				assert.NotNil(t, err)
 				assert.Nil(t, stream)
 				assert.Equal(t, int32(1), clientCounter1.Load())
@@ -166,7 +166,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 
 				// With bidi-streaming and the simple API, the initial call fails. This differs from
 				// the generics API which requires a call to stream.Send first to receive an error.
-				stream, err := client.CumSum(context.Background())
+				stream, err := client.CumSum(t.Context())
 				assert.NotNil(t, err)
 				assert.Nil(t, stream)
 				assert.Equal(t, int32(1), clientCounter1.Load())
@@ -193,7 +193,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
 
-				resp, err := client.Ping(context.Background(), &pingv1.PingRequest{Number: 10})
+				resp, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 10})
 				assert.NotNil(t, resp)
 				assert.Nil(t, err)
 				assert.Equal(t, int32(1), clientCounter1.Load())
@@ -204,7 +204,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
 
-				stream, err := client.CountUp(context.Background(), &pingv1.CountUpRequest{Number: 10})
+				stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 10})
 				assert.NotNil(t, stream)
 				assert.Nil(t, err)
 				assert.Equal(t, int32(1), clientCounter1.Load())
@@ -215,7 +215,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
 
-				stream, err := client.Sum(context.Background())
+				stream, err := client.Sum(t.Context())
 				assert.NotNil(t, stream)
 				assert.Nil(t, err)
 				assert.Equal(t, int32(1), clientCounter1.Load())
@@ -226,7 +226,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
 
-				stream, err := client.CumSum(context.Background())
+				stream, err := client.CumSum(t.Context())
 				assert.Nil(t, err)
 				assert.NotNil(t, stream)
 
@@ -264,7 +264,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
 
-				resp, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
+				resp, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
 				assert.Nil(t, resp)
 				assert.NotNil(t, err)
 				assert.Equal(t, err.Error(), expectedContextErrorMessage)
@@ -276,7 +276,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
 
-				stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
+				stream, err := client.CountUp(t.Context(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
 				assert.Nil(t, stream)
 				assert.NotNil(t, err)
 				assert.Equal(t, err.Error(), expectedContextErrorMessage)
@@ -287,7 +287,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				t.Parallel()
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
-				stream := client.Sum(context.Background())
+				stream := client.Sum(t.Context())
 				assert.NotNil(t, stream)
 
 				// With client-streaming and the generics API, a call to stream.Send is required to receive an error.
@@ -308,7 +308,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				t.Parallel()
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
-				stream := client.CumSum(context.Background())
+				stream := client.CumSum(t.Context())
 				assert.NotNil(t, stream)
 
 				// With bidi-streaming and the generics API, a call to stream.Send is required to receive an error.
@@ -348,7 +348,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
 
-				resp, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
+				resp, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
 				assert.Nil(t, resp)
 				assert.NotNil(t, err)
 				assert.Equal(t, err.Error(), expectedContextErrorMessage)
@@ -360,7 +360,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
 
-				stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
+				stream, err := client.CountUp(t.Context(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
 				assert.Nil(t, stream)
 				assert.NotNil(t, err)
 				assert.Equal(t, err.Error(), expectedContextErrorMessage)
@@ -371,7 +371,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				t.Parallel()
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
-				stream := client.Sum(context.Background())
+				stream := client.Sum(t.Context())
 				assert.NotNil(t, stream)
 
 				// With client-streaming and the generics API, a call to stream.Send is required to receive an error.
@@ -392,7 +392,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				t.Parallel()
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
-				stream := client.CumSum(context.Background())
+				stream := client.CumSum(t.Context())
 				assert.NotNil(t, stream)
 
 				// With bidi-streaming and the generics API, a call to stream.Send is required to receive an error.
@@ -432,7 +432,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
 
-				resp, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
+				resp, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
 				assert.NotNil(t, resp)
 				assert.Nil(t, err)
 				assert.Equal(t, int32(1), clientCounter1.Load())
@@ -443,7 +443,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
 
-				stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
+				stream, err := client.CountUp(t.Context(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
 				assert.NotNil(t, stream)
 				assert.Nil(t, err)
 				assert.Equal(t, int32(1), clientCounter1.Load())
@@ -453,7 +453,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				t.Parallel()
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
-				stream := client.Sum(context.Background())
+				stream := client.Sum(t.Context())
 				assert.NotNil(t, stream)
 
 				err := stream.Send(&pingv1.SumRequest{Number: int64(1)})
@@ -468,7 +468,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				t.Parallel()
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
-				stream := client.CumSum(context.Background())
+				stream := client.CumSum(t.Context())
 				assert.NotNil(t, stream)
 
 				// The initial send should succeed
@@ -602,7 +602,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 		clientOnion,
 	)
 
-	_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
+	_, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{Number: 10}))
 	assert.Nil(t, err)
 
 	// make sure the interceptors were actually invoked
@@ -613,7 +613,7 @@ func TestOnionOrderingEndToEnd(t *testing.T) {
 	assert.Equal(t, int32(1), handlerCounter2.Load())
 	assert.Equal(t, int32(1), handlerCounter3.Load())
 
-	responses, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
+	responses, err := client.CountUp(t.Context(), connect.NewRequest(&pingv1.CountUpRequest{Number: 10}))
 	assert.Nil(t, err)
 	var sum int64
 	for responses.Receive() {
@@ -642,14 +642,14 @@ func TestEmptyUnaryInterceptorFunc(t *testing.T) {
 	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}, connect.WithInterceptors(interceptor)))
 	server := memhttptest.NewServer(t, mux)
 	connectClient := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithInterceptors(interceptor))
-	_, err := connectClient.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
+	_, err := connectClient.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{}))
 	assert.Nil(t, err)
-	sumStream := connectClient.Sum(context.Background())
+	sumStream := connectClient.Sum(t.Context())
 	assert.Nil(t, sumStream.Send(&pingv1.SumRequest{Number: 1}))
 	resp, err := sumStream.CloseAndReceive()
 	assert.Nil(t, err)
 	assert.NotNil(t, resp)
-	countUpStream, err := connectClient.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
+	countUpStream, err := connectClient.CountUp(t.Context(), connect.NewRequest(&pingv1.CountUpRequest{}))
 	assert.Nil(t, err)
 	for countUpStream.Receive() {
 		assert.NotNil(t, countUpStream.Msg())
@@ -678,7 +678,7 @@ func TestInterceptorFuncAccessingHTTPMethod(t *testing.T) {
 
 	pingReq := connect.NewRequest(&pingv1.PingRequest{Number: 10})
 	assert.Equal(t, "", pingReq.HTTPMethod())
-	_, err := client.Ping(context.Background(), pingReq)
+	_, err := client.Ping(t.Context(), pingReq)
 	assert.Nil(t, err)
 	assert.Equal(t, http.MethodPost, pingReq.HTTPMethod())
 
@@ -688,7 +688,7 @@ func TestInterceptorFuncAccessingHTTPMethod(t *testing.T) {
 
 	countUpReq := connect.NewRequest(&pingv1.CountUpRequest{Number: 10})
 	assert.Equal(t, "", countUpReq.HTTPMethod())
-	responses, err := client.CountUp(context.Background(), countUpReq)
+	responses, err := client.CountUp(t.Context(), countUpReq)
 	assert.Nil(t, err)
 	var sum int64
 	for responses.Receive() {
