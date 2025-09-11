@@ -16,15 +16,10 @@ package memhttp
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
-	"net"
 	"net/http"
 	"sync"
 	"time"
-
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
 // Server is a net/http server that uses in-memory pipes instead of TCP. By
@@ -49,12 +44,14 @@ func NewServer(handler http.Handler, opts ...Option) *Server {
 		opt.apply(&cfg)
 	}
 
-	h2s := &http2.Server{}
-	handler = h2c.NewHandler(handler, h2s)
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
 	listener := newMemoryListener("1.2.3.4") // httptest.DefaultRemoteAddr
 	server := &Server{
 		server: http.Server{
 			Handler:           handler,
+			Protocols:         protocols,
 			ReadHeaderTimeout: 5 * time.Second,
 		},
 		listener:       listener,
@@ -69,17 +66,18 @@ func NewServer(handler http.Handler, opts ...Option) *Server {
 	return server
 }
 
-// Transport returns a [http2.Transport] configured to use in-memory pipes
-// rather than TCP and speak both HTTP/1.1 and HTTP/2.
+// Transport returns a [http.Transport] configured to use in-memory pipes
+// rather than TCP and speak HTTP/2.
 //
 // Callers may reconfigure the returned transport without affecting other transports.
-func (s *Server) Transport() *http2.Transport {
-	return &http2.Transport{
-		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-			return s.listener.DialContext(ctx, network, addr)
-		},
-		AllowHTTP: true,
-	}
+func (s *Server) Transport() *http.Transport {
+	transport := s.TransportHTTP1()
+
+	p := new(http.Protocols)
+	p.SetUnencryptedHTTP2(true)
+	transport.Protocols = p
+
+	return transport
 }
 
 // TransportHTTP1 returns a [http.Transport] configured to use in-memory pipes

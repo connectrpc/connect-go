@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -38,14 +39,20 @@ func BenchmarkConnect(b *testing.B) {
 		),
 	)
 	server := httptest.NewUnstartedServer(mux)
-	server.EnableHTTP2 = true
-	server.StartTLS()
+	p := new(http.Protocols)
+	p.SetHTTP1(true)
+	p.SetUnencryptedHTTP2(true)
+	server.Config.Protocols = p
+	server.Start()
 	b.Cleanup(server.Close)
 
 	httpClient := server.Client()
 	httpTransport, ok := httpClient.Transport.(*http.Transport)
 	assert.True(b, ok)
 	httpTransport.DisableCompression = true
+	clientProtos := new(http.Protocols)
+	clientProtos.SetUnencryptedHTTP2(true)
+	httpTransport.Protocols = clientProtos
 
 	clients := []struct {
 		name string
@@ -201,7 +208,9 @@ func BenchmarkREST(b *testing.B) {
 		defer request.Body.Close()
 		defer func() {
 			_, err := io.Copy(io.Discard, request.Body)
-			assert.Nil(b, err)
+			if err != nil && !errors.Is(err, http.ErrBodyReadAfterClose) {
+				assert.Nil(b, err)
+			}
 		}()
 		writer.Header().Set("Content-Type", "application/json")
 		var body io.Reader = request.Body
@@ -237,16 +246,26 @@ func BenchmarkREST(b *testing.B) {
 	}
 
 	server := httptest.NewUnstartedServer(http.HandlerFunc(handler))
-	server.EnableHTTP2 = true
-	server.StartTLS()
+	p := new(http.Protocols)
+	p.SetHTTP1(true)
+	p.SetUnencryptedHTTP2(true)
+	server.Config.Protocols = p
+	server.Start()
 	b.Cleanup(server.Close)
 	twoMiB := strings.Repeat("a", 2*1024*1024)
 	b.ResetTimer()
 
+	clientProtos := new(http.Protocols)
+	clientProtos.SetUnencryptedHTTP2(true)
+	client := server.Client()
+	transport, ok := client.Transport.(*http.Transport)
+	assert.True(b, ok)
+	transport.Protocols = clientProtos
+
 	b.Run("unary", func(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				unaryRESTIteration(b, server.Client(), server.URL, twoMiB)
+				unaryRESTIteration(b, client, server.URL, twoMiB)
 			}
 		})
 	})

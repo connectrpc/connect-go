@@ -19,7 +19,6 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
-	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -2782,9 +2781,9 @@ func TestClientDisconnect(t *testing.T) {
 	}
 	http2RoundTripper := func(server *memhttp.Server, clientConn *net.Conn, onError chan struct{}) http.RoundTripper {
 		transport := server.Transport()
-		dialContext := transport.DialTLSContext
-		transport.DialTLSContext = func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-			conn, err := dialContext(ctx, network, addr, cfg)
+		dialContext := transport.DialContext
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			conn, err := dialContext(ctx, network, addr)
 			if err != nil {
 				close(onError)
 				return nil, err
