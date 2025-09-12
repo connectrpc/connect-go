@@ -138,7 +138,7 @@ func main() {
 				return err
 			}
 			plugin.SupportedEditionsMinimum = descriptorpb.Edition_EDITION_PROTO2
-			plugin.SupportedEditionsMaximum = descriptorpb.Edition_EDITION_2023
+			plugin.SupportedEditionsMaximum = descriptorpb.Edition_EDITION_2024
 			for _, file := range plugin.Files {
 				if file.Generate {
 					generate(plugin, file, *packageSuffix, simple)

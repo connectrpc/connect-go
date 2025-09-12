@@ -80,7 +80,7 @@ func TestGenerate(t *testing.T) {
 
 		assert.Equal(t, rsp.GetSupportedFeatures(), 3)
 		assert.Equal(t, rsp.GetMinimumEdition(), int32(descriptorpb.Edition_EDITION_PROTO2))
-		assert.Equal(t, rsp.GetMaximumEdition(), int32(descriptorpb.Edition_EDITION_2023))
+		assert.Equal(t, rsp.GetMaximumEdition(), int32(descriptorpb.Edition_EDITION_2024))
 
 		assert.Equal(t, len(rsp.File), 1)
 		file := rsp.File[0]
@@ -102,7 +102,7 @@ func TestGenerate(t *testing.T) {
 
 		assert.Equal(t, rsp.GetSupportedFeatures(), 3)
 		assert.Equal(t, rsp.GetMinimumEdition(), int32(descriptorpb.Edition_EDITION_PROTO2))
-		assert.Equal(t, rsp.GetMaximumEdition(), int32(descriptorpb.Edition_EDITION_2023))
+		assert.Equal(t, rsp.GetMaximumEdition(), int32(descriptorpb.Edition_EDITION_2024))
 
 		assert.Equal(t, len(rsp.File), 1)
 		file := rsp.File[0]
