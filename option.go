@@ -185,11 +185,11 @@ type Option interface {
 }
 
 // WithSchema provides a parsed representation of the schema for an RPC to a
-// client or handler. The supplied schema is exposed as [Spec.Schema]. This
+// client or handler. The supplied schema is exposed as [Spec].Schema. This
 // option is typically added by generated code.
 //
 // For services using protobuf schemas, the supplied schema should be a
-// [protoreflect.MethodDescriptor].
+// [google.golang.org/protobuf/reflect/protoreflect.MethodDescriptor].
 func WithSchema(schema any) Option {
 	return &schemaOption{Schema: schema}
 }
