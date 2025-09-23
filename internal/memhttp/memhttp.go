@@ -71,12 +71,12 @@ func NewServer(handler http.Handler, opts ...Option) *Server {
 //
 // Callers may reconfigure the returned transport without affecting other transports.
 func (s *Server) Transport() *http.Transport {
+	protocols := new(http.Protocols)
+	protocols.SetUnencryptedHTTP2(true)
+
 	transport := s.TransportHTTP1()
-
-	p := new(http.Protocols)
-	p.SetUnencryptedHTTP2(true)
-	transport.Protocols = p
-
+	transport.Protocols = protocols
+	transport.DisableKeepAlives = false
 	return transport
 }
 
