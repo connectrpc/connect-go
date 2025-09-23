@@ -1151,7 +1151,7 @@ func TestGRPCMissingTrailersError(t *testing.T) {
 		var connectErr *connect.Error
 		ok := errors.As(err, &connectErr)
 		assert.True(t, ok)
-		assert.Equal(t, connectErr.Code(), connect.CodeUnknown)
+		assert.Equal(t, connectErr.Code(), connect.CodeUnknown, assert.Sprintf("%s", err))
 		assert.True(
 			t,
 			strings.HasSuffix(connectErr.Message(), "protocol error: no Grpc-Status trailer: unexpected EOF"),
@@ -1190,7 +1190,8 @@ func TestGRPCMissingTrailersError(t *testing.T) {
 		t.Parallel()
 		stream := client.CumSum(t.Context())
 		assertNilOrEOF(t, stream.Send(&pingv1.CumSumRequest{Number: 10}))
-		_, err := stream.Receive()
+		response, err := stream.Receive()
+		assert.Nil(t, response)
 		assertErrorNoTrailers(t, err)
 		assert.Nil(t, stream.CloseResponse())
 	})
