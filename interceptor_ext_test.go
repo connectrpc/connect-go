@@ -209,6 +209,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				assert.Nil(t, err)
 				assert.Equal(t, int32(1), clientCounter1.Load())
 				assert.Equal(t, int32(1), clientCounter2.Load())
+				assert.Nil(t, stream.Close())
 			})
 			t.Run("client_stream", func(t *testing.T) {
 				t.Parallel()
@@ -220,6 +221,9 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				assert.Nil(t, err)
 				assert.Equal(t, int32(1), clientCounter1.Load())
 				assert.Equal(t, int32(1), clientCounter2.Load())
+				resp, err := stream.CloseAndReceive()
+				assert.Nil(t, err)
+				assert.NotNil(t, resp)
 			})
 			t.Run("bidi_stream", func(t *testing.T) {
 				t.Parallel()
@@ -448,6 +452,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				assert.Nil(t, err)
 				assert.Equal(t, int32(1), clientCounter1.Load())
 				assert.Equal(t, int32(1), clientCounter2.Load())
+				assert.Nil(t, stream.Close())
 			})
 			t.Run("client_stream", func(t *testing.T) {
 				t.Parallel()

@@ -40,16 +40,27 @@ func TestHTTPCallGetBody(t *testing.T) {
 	})
 	// Must use httptest for this test.
 	server := httptest.NewUnstartedServer(handler)
-	server.EnableHTTP2 = true
-	server.StartTLS()
+	svrProtos := new(http.Protocols)
+	svrProtos.SetHTTP1(true)
+	svrProtos.SetUnencryptedHTTP2(true)
+	server.Config.Protocols = svrProtos
+	server.Start()
 	t.Cleanup(server.Close)
+
+	clientProtos := new(http.Protocols)
+	clientProtos.SetUnencryptedHTTP2(true)
+	client := server.Client()
+	transport, ok := client.Transport.(*http.Transport)
+	assert.True(t, ok)
+	transport.Protocols = clientProtos
+
 	bufferPool := newBufferPool()
 	serverURL, _ := url.Parse(server.URL)
 	errGetBodyCalled := errors.New("getBodyCalled") // sentinel error
 	caller := func(size int) error {
 		call := newDuplexHTTPCall(
 			t.Context(),
-			server.Client(),
+			client,
 			serverURL,
 			Spec{StreamType: StreamTypeUnary},
 			http.Header{},
