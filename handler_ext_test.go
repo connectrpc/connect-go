@@ -30,7 +30,7 @@ import (
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -53,7 +53,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	t.Run("get_method_no_encoding", func(t *testing.T) {
 		t.Parallel()
 		request, err := http.NewRequestWithContext(
-			context.Background(),
+			t.Context(),
 			http.MethodGet,
 			server.URL()+pingProcedure,
 			strings.NewReader(""),
@@ -68,7 +68,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	t.Run("get_method_bad_encoding", func(t *testing.T) {
 		t.Parallel()
 		request, err := http.NewRequestWithContext(
-			context.Background(),
+			t.Context(),
 			http.MethodGet,
 			server.URL()+pingProcedure+`?encoding=unk&message={}`,
 			strings.NewReader(""),
@@ -84,7 +84,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		t.Parallel()
 		const queryStringSuffix = `?encoding=json&message={}`
 		request, err := http.NewRequestWithContext(
-			context.Background(),
+			t.Context(),
 			http.MethodGet,
 			server.URL()+pingProcedure+queryStringSuffix,
 			strings.NewReader("!"), // non-empty body
@@ -97,7 +97,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 
 		// Same thing, but this time w/ a content-length header
 		request, err = http.NewRequestWithContext(
-			context.Background(),
+			t.Context(),
 			http.MethodGet,
 			server.URL()+pingProcedure+queryStringSuffix,
 			strings.NewReader("!"), // non-empty body
@@ -113,7 +113,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	t.Run("idempotent_get_method", func(t *testing.T) {
 		t.Parallel()
 		request, err := http.NewRequestWithContext(
-			context.Background(),
+			t.Context(),
 			http.MethodGet,
 			server.URL()+pingProcedure+`?encoding=json&message={}`,
 			strings.NewReader(""),
@@ -128,7 +128,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	t.Run("prefixed_get_method", func(t *testing.T) {
 		t.Parallel()
 		request, err := http.NewRequestWithContext(
-			context.Background(),
+			t.Context(),
 			http.MethodGet,
 			server.URL()+"/prefixed"+pingProcedure+`?encoding=json&message={}`,
 			strings.NewReader(""),
@@ -143,7 +143,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	t.Run("method_not_allowed", func(t *testing.T) {
 		t.Parallel()
 		request, err := http.NewRequestWithContext(
-			context.Background(),
+			t.Context(),
 			http.MethodGet,
 			server.URL()+sumProcedure,
 			strings.NewReader(""),
@@ -159,7 +159,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	t.Run("unsupported_content_type", func(t *testing.T) {
 		t.Parallel()
 		request, err := http.NewRequestWithContext(
-			context.Background(),
+			t.Context(),
 			http.MethodPost,
 			server.URL()+pingProcedure,
 			strings.NewReader("{}"),
@@ -188,7 +188,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	t.Run("charset_in_content_type_header", func(t *testing.T) {
 		t.Parallel()
 		req, err := http.NewRequestWithContext(
-			context.Background(),
+			t.Context(),
 			http.MethodPost,
 			server.URL()+pingProcedure,
 			strings.NewReader("{}"),
@@ -204,7 +204,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	t.Run("unsupported_charset", func(t *testing.T) {
 		t.Parallel()
 		req, err := http.NewRequestWithContext(
-			context.Background(),
+			t.Context(),
 			http.MethodPost,
 			server.URL()+pingProcedure,
 			strings.NewReader("{}"),
@@ -220,7 +220,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	t.Run("unsupported_content_encoding", func(t *testing.T) {
 		t.Parallel()
 		req, err := http.NewRequestWithContext(
-			context.Background(),
+			t.Context(),
 			http.MethodPost,
 			server.URL()+pingProcedure,
 			strings.NewReader("{}"),
@@ -263,7 +263,7 @@ func TestHandlerMaliciousPrefix(t *testing.T) {
 		// sending.
 		binary.BigEndian.PutUint32(body[1:5], spuriousSize)
 		req, err := http.NewRequestWithContext(
-			context.Background(),
+			t.Context(),
 			http.MethodPost,
 			server.URL()+pingv1connect.PingServicePingProcedure,
 			bytes.NewReader(body),
@@ -330,7 +330,7 @@ func TestDynamicHandler(t *testing.T) {
 		)
 		server := memhttptest.NewServer(t, mux)
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
-		rsp, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{
+		rsp, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{
 			Number: 42,
 		}))
 		if !assert.Nil(t, err) {
@@ -371,7 +371,48 @@ func TestDynamicHandler(t *testing.T) {
 		)
 		server := memhttptest.NewServer(t, mux)
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
-		stream := client.Sum(context.Background())
+		stream := client.Sum(t.Context())
+		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 42}))
+		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 42}))
+		rsp, err := stream.CloseAndReceive()
+		if !assert.Nil(t, err) {
+			return
+		}
+		assert.Equal(t, rsp.Msg.Sum, 42*2)
+	})
+	t.Run("clientStreamSimple", func(t *testing.T) {
+		t.Parallel()
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName("connect.ping.v1.PingService.Sum")
+		assert.Nil(t, err)
+		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
+		assert.True(t, ok)
+		dynamicSum := func(_ context.Context, stream *connect.ClientStream[dynamicpb.Message]) (*dynamicpb.Message, error) {
+			var sum int64
+			for stream.Receive() {
+				got := stream.Msg().Get(
+					methodDesc.Input().Fields().ByName("number"),
+				).Int()
+				sum += got
+			}
+			msg := dynamicpb.NewMessage(methodDesc.Output())
+			msg.Set(
+				methodDesc.Output().Fields().ByName("sum"),
+				protoreflect.ValueOfInt64(sum),
+			)
+			return msg, nil
+		}
+		mux := http.NewServeMux()
+		mux.Handle("/connect.ping.v1.PingService/Sum",
+			connect.NewClientStreamHandlerSimple(
+				"/connect.ping.v1.PingService/Sum",
+				dynamicSum,
+				connect.WithSchema(methodDesc),
+				connect.WithRequestInitializer(initializer),
+			),
+		)
+		server := memhttptest.NewServer(t, mux)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		stream := client.Sum(t.Context())
 		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 42}))
 		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 42}))
 		rsp, err := stream.CloseAndReceive()
@@ -411,7 +452,7 @@ func TestDynamicHandler(t *testing.T) {
 		)
 		server := memhttptest.NewServer(t, mux)
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
-		stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{
+		stream, err := client.CountUp(t.Context(), connect.NewRequest(&pingv1.CountUpRequest{
 			Number: 2,
 		}))
 		if !assert.Nil(t, err) {
@@ -465,7 +506,7 @@ func TestDynamicHandler(t *testing.T) {
 		)
 		server := memhttptest.NewServer(t, mux)
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
-		stream := client.CumSum(context.Background())
+		stream := client.CumSum(t.Context())
 		assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
 		msg, err := stream.Receive()
 		if !assert.Nil(t, err) {
@@ -515,7 +556,7 @@ func TestDynamicHandler(t *testing.T) {
 		)
 		server := memhttptest.NewServer(t, mux)
 		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
-		rsp, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{
+		rsp, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{
 			Number: 42,
 		}))
 		if !assert.Nil(t, err) {

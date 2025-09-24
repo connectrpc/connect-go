@@ -339,7 +339,7 @@ type Peer struct {
 	Query    url.Values // server-only
 }
 
-func newPeerFromURL(url *url.URL, protocol string) Peer {
+func newPeerForURL(url *url.URL, protocol string) Peer {
 	return Peer{
 		Addr:     url.Host,
 		Protocol: protocol,
@@ -366,6 +366,47 @@ type receiveConn interface {
 // POST.
 type hasHTTPMethod interface {
 	getHTTPMethod() string
+}
+
+// errStreamingClientConn is a sentinel error implementation of StreamingClientConn.
+type errStreamingClientConn struct {
+	err error
+}
+
+func (c *errStreamingClientConn) Receive(msg any) error {
+	return c.err
+}
+
+func (c *errStreamingClientConn) Spec() Spec {
+	return Spec{}
+}
+
+func (c *errStreamingClientConn) Peer() Peer {
+	return Peer{}
+}
+
+func (c *errStreamingClientConn) Send(msg any) error {
+	return c.err
+}
+
+func (c *errStreamingClientConn) CloseRequest() error {
+	return c.err
+}
+
+func (c *errStreamingClientConn) CloseResponse() error {
+	return c.err
+}
+
+func (c *errStreamingClientConn) RequestHeader() http.Header {
+	return make(http.Header)
+}
+
+func (c *errStreamingClientConn) ResponseHeader() http.Header {
+	return make(http.Header)
+}
+
+func (c *errStreamingClientConn) ResponseTrailer() http.Header {
+	return make(http.Header)
 }
 
 // receiveUnaryResponse unmarshals a message from a StreamingClientConn, then

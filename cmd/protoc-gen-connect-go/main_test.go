@@ -42,6 +42,7 @@ import (
 	diffpackagediff "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/diffpackage/gen/gendiff"
 	noservice "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/noservice/gen"
 	samepackage "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/samepackage/gen"
+	simple "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/simple/gen"
 	_ "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/v1beta1service/gen"
 )
 
@@ -79,7 +80,7 @@ func TestGenerate(t *testing.T) {
 
 		assert.Equal(t, rsp.GetSupportedFeatures(), 3)
 		assert.Equal(t, rsp.GetMinimumEdition(), int32(descriptorpb.Edition_EDITION_PROTO2))
-		assert.Equal(t, rsp.GetMaximumEdition(), int32(descriptorpb.Edition_EDITION_2023))
+		assert.Equal(t, rsp.GetMaximumEdition(), int32(descriptorpb.Edition_EDITION_2024))
 
 		assert.Equal(t, len(rsp.File), 1)
 		file := rsp.File[0]
@@ -101,7 +102,7 @@ func TestGenerate(t *testing.T) {
 
 		assert.Equal(t, rsp.GetSupportedFeatures(), 3)
 		assert.Equal(t, rsp.GetMinimumEdition(), int32(descriptorpb.Edition_EDITION_PROTO2))
-		assert.Equal(t, rsp.GetMaximumEdition(), int32(descriptorpb.Edition_EDITION_2023))
+		assert.Equal(t, rsp.GetMaximumEdition(), int32(descriptorpb.Edition_EDITION_2024))
 
 		assert.Equal(t, len(rsp.File), 1)
 		file := rsp.File[0]
@@ -177,11 +178,32 @@ func TestGenerate(t *testing.T) {
 		assert.Nil(t, rsp.Error)
 		assert.Equal(t, len(rsp.File), 0)
 	})
+	t.Run("simple.proto", func(t *testing.T) {
+		t.Parallel()
+		simpleFileDesc := protodesc.ToFileDescriptorProto(simple.File_simple_proto)
+		for _, parameter := range []string{"simple", "simple=true"} {
+			req := &pluginpb.CodeGeneratorRequest{
+				FileToGenerate:        []string{"simple.proto"},
+				Parameter:             ptr(parameter),
+				ProtoFile:             []*descriptorpb.FileDescriptorProto{simpleFileDesc},
+				SourceFileDescriptors: []*descriptorpb.FileDescriptorProto{simpleFileDesc},
+				CompilerVersion:       compilerVersion,
+			}
+			rsp := testGenerate(t, req)
+			assert.Nil(t, rsp.Error)
+
+			assert.Equal(t, len(rsp.File), 1)
+			file := rsp.File[0]
+			assert.Equal(t, file.GetName(), "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/simple/gen/genconnect/simple.connect.go")
+			assert.NotZero(t, file.GetContent())
+			testCmpToTestdata(t, file.GetContent(), "internal/testdata/simple/gen/genconnect/simple.connect.go")
+		}
+	})
 }
 
 func TestClientHandler(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	t.Run("defaultpackage.proto", func(t *testing.T) {
 		t.Parallel()
 		svc := testDefaultPackageService{}

@@ -17,8 +17,8 @@ package connect_test
 import (
 	"bytes"
 	"compress/gzip"
-	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +28,7 @@ import (
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
 )
 
 func BenchmarkConnect(b *testing.B) {
@@ -39,14 +39,20 @@ func BenchmarkConnect(b *testing.B) {
 		),
 	)
 	server := httptest.NewUnstartedServer(mux)
-	server.EnableHTTP2 = true
-	server.StartTLS()
+	p := new(http.Protocols)
+	p.SetHTTP1(true)
+	p.SetUnencryptedHTTP2(true)
+	server.Config.Protocols = p
+	server.Start()
 	b.Cleanup(server.Close)
 
 	httpClient := server.Client()
 	httpTransport, ok := httpClient.Transport.(*http.Transport)
 	assert.True(b, ok)
 	httpTransport.DisableCompression = true
+	clientProtos := new(http.Protocols)
+	clientProtos.SetUnencryptedHTTP2(true)
+	httpTransport.Protocols = clientProtos
 
 	clients := []struct {
 		name string
@@ -76,13 +82,13 @@ func BenchmarkConnect(b *testing.B) {
 				connect.WithClientOptions(client.opts...),
 			)
 
-			ctx := context.Background()
+			ctx := b.Context()
 			b.Run("unary_big", func(b *testing.B) {
 				b.ReportAllocs()
 				b.RunParallel(func(pb *testing.PB) {
 					for pb.Next() {
 						if _, err := client.Ping(
-							ctx, connect.NewRequest(&pingv1.PingRequest{Text: twoMiB}),
+							ctx, &pingv1.PingRequest{Text: twoMiB},
 						); err != nil {
 							b.Error(err)
 						}
@@ -94,11 +100,11 @@ func BenchmarkConnect(b *testing.B) {
 				b.RunParallel(func(pb *testing.PB) {
 					for pb.Next() {
 						response, err := client.Ping(
-							ctx, connect.NewRequest(&pingv1.PingRequest{Number: 42}),
+							ctx, &pingv1.PingRequest{Number: 42},
 						)
 						if err != nil {
 							b.Error(err)
-						} else if num := response.Msg.GetNumber(); num != 42 {
+						} else if num := response.GetNumber(); num != 42 {
 							b.Errorf("expected 42, got %d", num)
 						}
 					}
@@ -112,7 +118,10 @@ func BenchmarkConnect(b *testing.B) {
 							upTo   = 1
 							expect = 1
 						)
-						stream := client.Sum(ctx)
+						stream, err := client.Sum(ctx)
+						if err != nil {
+							b.Error(err)
+						}
 						for number := int64(1); number <= upTo; number++ {
 							if err := stream.Send(&pingv1.SumRequest{Number: number}); err != nil {
 								b.Error(err)
@@ -121,7 +130,7 @@ func BenchmarkConnect(b *testing.B) {
 						response, err := stream.CloseAndReceive()
 						if err != nil {
 							b.Error(err)
-						} else if got := response.Msg.GetSum(); got != expect {
+						} else if got := response.GetSum(); got != expect {
 							b.Errorf("expected %d, got %d", expect, got)
 						}
 					}
@@ -134,7 +143,7 @@ func BenchmarkConnect(b *testing.B) {
 						const (
 							upTo = 1
 						)
-						request := connect.NewRequest(&pingv1.CountUpRequest{Number: upTo})
+						request := &pingv1.CountUpRequest{Number: upTo}
 						stream, err := client.CountUp(ctx, request)
 						if err != nil {
 							b.Error(err)
@@ -159,7 +168,10 @@ func BenchmarkConnect(b *testing.B) {
 						const (
 							upTo = 1
 						)
-						stream := client.CumSum(ctx)
+						stream, err := client.CumSum(ctx)
+						if err != nil {
+							b.Error(err)
+						}
 						number := int64(1)
 						for ; number <= upTo; number++ {
 							if err := stream.Send(&pingv1.CumSumRequest{Number: number}); err != nil {
@@ -196,7 +208,9 @@ func BenchmarkREST(b *testing.B) {
 		defer request.Body.Close()
 		defer func() {
 			_, err := io.Copy(io.Discard, request.Body)
-			assert.Nil(b, err)
+			if err != nil && !errors.Is(err, http.ErrBodyReadAfterClose) {
+				assert.Nil(b, err)
+			}
 		}()
 		writer.Header().Set("Content-Type", "application/json")
 		var body io.Reader = request.Body
@@ -232,16 +246,26 @@ func BenchmarkREST(b *testing.B) {
 	}
 
 	server := httptest.NewUnstartedServer(http.HandlerFunc(handler))
-	server.EnableHTTP2 = true
-	server.StartTLS()
+	p := new(http.Protocols)
+	p.SetHTTP1(true)
+	p.SetUnencryptedHTTP2(true)
+	server.Config.Protocols = p
+	server.Start()
 	b.Cleanup(server.Close)
 	twoMiB := strings.Repeat("a", 2*1024*1024)
 	b.ResetTimer()
 
+	clientProtos := new(http.Protocols)
+	clientProtos.SetUnencryptedHTTP2(true)
+	client := server.Client()
+	transport, ok := client.Transport.(*http.Transport)
+	assert.True(b, ok)
+	transport.Protocols = clientProtos
+
 	b.Run("unary", func(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				unaryRESTIteration(b, server.Client(), server.URL, twoMiB)
+				unaryRESTIteration(b, client, server.URL, twoMiB)
 			}
 		})
 	})
@@ -257,7 +281,7 @@ func unaryRESTIteration(b *testing.B, client *http.Client, url string, text stri
 	}
 	compressedRequestBody.Close()
 	request, err := http.NewRequestWithContext(
-		context.Background(),
+		b.Context(),
 		http.MethodPost,
 		url,
 		rawRequestBody,

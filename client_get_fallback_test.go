@@ -47,7 +47,7 @@ func TestClientUnaryGetFallback(t *testing.T) {
 		WithHTTPGetMaxURLSize(1, true),
 		WithSendGzip(),
 	)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := client.CallUnary(ctx, NewRequest[pingv1.PingRequest](nil))
 	assert.Nil(t, err)

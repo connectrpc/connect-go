@@ -18,16 +18,16 @@ jobs:
       matrix:
         go-version:
           - name: latest
-            version: 1.24.x
+            version: 1.25.x
           - name: previous
-            version: 1.23.x
+            version: 1.24.x
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
       - name: Install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version.version }}
       - name: Test

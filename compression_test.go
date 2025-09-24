@@ -15,7 +15,6 @@
 package connect
 
 import (
-	"context"
 	"net/http"
 	"testing"
 
@@ -49,7 +48,7 @@ func TestAcceptEncodingOrdering(t *testing.T) {
 		withFakeBrotli,
 		withGzip(),
 	)
-	_, _ = client.CallUnary(context.Background(), NewRequest(&emptypb.Empty{}))
+	_, _ = client.CallUnary(t.Context(), NewRequest(&emptypb.Empty{}))
 	assert.True(t, called)
 }
 

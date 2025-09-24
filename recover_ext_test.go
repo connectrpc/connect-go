@@ -23,7 +23,7 @@ import (
 	connect "connectrpc.com/connect"
 	"connectrpc.com/connect/internal/assert"
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-	"connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
 )
 
@@ -86,20 +86,20 @@ func TestWithRecover(t *testing.T) {
 	for _, panicWith := range []any{42, nil} {
 		pinger.panicWith = panicWith
 
-		_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
+		_, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{}))
 		assertHandled(err)
 
-		stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
+		stream, err := client.CountUp(t.Context(), connect.NewRequest(&pingv1.CountUpRequest{}))
 		assert.Nil(t, err)
 		assertHandled(drainStream(stream))
 	}
 
 	pinger.panicWith = http.ErrAbortHandler
 
-	_, err := client.Ping(context.Background(), connect.NewRequest(&pingv1.PingRequest{}))
+	_, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{}))
 	assertNotHandled(err)
 
-	stream, err := client.CountUp(context.Background(), connect.NewRequest(&pingv1.CountUpRequest{}))
+	stream, err := client.CountUp(t.Context(), connect.NewRequest(&pingv1.CountUpRequest{}))
 	assert.Nil(t, err)
 	assertNotHandled(drainStream(stream))
 }
