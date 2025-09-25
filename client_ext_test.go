@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -38,7 +37,6 @@ import (
 	pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/internal/gen/generics/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/internal/memhttp/memhttptest"
-	"golang.org/x/net/http2"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -399,12 +397,11 @@ func TestDynamicClient(t *testing.T) {
 		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
 		assert.True(t, ok)
 		connected := make(chan struct{})
-		transport := &http2.Transport{
-			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-				close(connected)
-				return server.Transport().DialTLSContext(ctx, network, addr, cfg)
-			},
-			AllowHTTP: true,
+		transport := server.Transport()
+		dialContext := transport.DialContext
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			close(connected)
+			return dialContext(ctx, network, addr)
 		}
 		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
 			&http.Client{Transport: transport},
@@ -497,12 +494,11 @@ func TestDynamicClient(t *testing.T) {
 		methodDesc, ok := desc.(protoreflect.MethodDescriptor)
 		assert.True(t, ok)
 		connected := make(chan struct{})
-		transport := &http2.Transport{
-			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-				close(connected)
-				return server.Transport().DialTLSContext(ctx, network, addr, cfg)
-			},
-			AllowHTTP: true,
+		transport := server.Transport()
+		dialContext := transport.DialContext
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			close(connected)
+			return dialContext(ctx, network, addr)
 		}
 		client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](
 			&http.Client{Transport: transport},
@@ -589,9 +585,19 @@ func TestClientDeadlineHandling(t *testing.T) {
 		handler.ServeHTTP(respWriter, req)
 	}))
 	svr.Config.ErrorLog = log.New(io.Discard, "", 0) //nolint:forbidigo
-	svr.EnableHTTP2 = true
-	svr.StartTLS()
+	p := new(http.Protocols)
+	p.SetHTTP1(true)
+	p.SetUnencryptedHTTP2(true)
+	svr.Config.Protocols = p
+	svr.Start()
 	t.Cleanup(svr.Close)
+
+	clientProtos := new(http.Protocols)
+	clientProtos.SetUnencryptedHTTP2(true)
+	client := svr.Client()
+	transport, ok := client.Transport.(*http.Transport)
+	assert.True(t, ok)
+	transport.Protocols = clientProtos
 
 	// This case creates a new connection for each RPC to verify that timeouts during dialing
 	// won't cause issues. This is historically easier to reproduce, so it uses a smaller
@@ -600,7 +606,7 @@ func TestClientDeadlineHandling(t *testing.T) {
 	// issues related to overwhelming the loopback interface and exhausting ephemeral ports.
 	t.Run("dial", func(t *testing.T) {
 		t.Parallel()
-		transport, ok := svr.Client().Transport.(*http.Transport)
+		transport, ok := client.Transport.(*http.Transport)
 		if !assert.True(t, ok) {
 			t.FailNow()
 		}
@@ -643,8 +649,8 @@ func TestClientDeadlineHandling(t *testing.T) {
 		}
 		extraField = protowire.AppendBytes(extraField, extraData)
 
-		clientConnect := pingv1connect.NewPingServiceClient(svr.Client(), svr.URL, connect.WithSendGzip())
-		clientGRPC := pingv1connect.NewPingServiceClient(svr.Client(), svr.URL, connect.WithSendGzip(), connect.WithGRPCWeb())
+		clientConnect := pingv1connect.NewPingServiceClient(client, svr.URL, connect.WithSendGzip())
+		clientGRPC := pingv1connect.NewPingServiceClient(client, svr.URL, connect.WithSendGzip(), connect.WithGRPCWeb())
 		var count atomic.Int32
 		testClientDeadlineBruteForceLoop(t,
 			20*time.Second, 200, runtime.GOMAXPROCS(0),
