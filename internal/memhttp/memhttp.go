@@ -33,6 +33,11 @@ type Server struct {
 
 	serverWG  sync.WaitGroup
 	serverErr error
+
+	// client is configured for use with the server.
+	// Its transport is automatically closed when Close is called.
+	client   *http.Client
+	clientMu sync.Mutex
 }
 
 // NewServer creates a new Server that uses the given handler. Configuration
@@ -94,12 +99,18 @@ func (s *Server) TransportHTTP1() *http.Transport {
 }
 
 // Client returns an [http.Client] configured to use in-memory pipes rather
-// than TCP and speak HTTP/2. It is configured to use the same
-// [http2.Transport] as [Transport].
+// than TCP and speak HTTP/2.
 //
-// Callers may reconfigure the returned client without affecting other clients.
+// Client is configured to use the same transport for the lifetime of the
+// server, and its idle connections are automatically closed when the
+// server is closed.
 func (s *Server) Client() *http.Client {
-	return &http.Client{Transport: s.Transport()}
+	s.clientMu.Lock()
+	defer s.clientMu.Unlock()
+	if s.client == nil {
+		s.client = &http.Client{Transport: s.Transport()}
+	}
+	return s.client
 }
 
 // URL returns the server's URL.
@@ -110,6 +121,11 @@ func (s *Server) URL() string {
 // Shutdown gracefully shuts down the server, without interrupting any active
 // connections. See [http.Server.Shutdown] for details.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.clientMu.Lock()
+	if s.client != nil {
+		s.client.CloseIdleConnections()
+	}
+	s.clientMu.Unlock()
 	if err := s.server.Shutdown(ctx); err != nil {
 		return err
 	}
@@ -128,6 +144,11 @@ func (s *Server) Cleanup() error {
 // Close closes the server's listener. It does not wait for connections to
 // finish.
 func (s *Server) Close() error {
+	s.clientMu.Lock()
+	if s.client != nil {
+		s.client.CloseIdleConnections()
+	}
+	s.clientMu.Unlock()
 	return s.server.Close()
 }
 
