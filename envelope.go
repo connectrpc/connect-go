@@ -375,11 +375,15 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 }
 
 func makeEnvelopePrefix(flags uint8, size int) ([5]byte, error) {
-	if size < 0 || uint64(size) > math.MaxUint32 {
+	if size < 0 {
+		return [5]byte{}, fmt.Errorf("connect.makeEnvelopePrefix: size %d out of bounds", size)
+	}
+	sizeUint64 := uint64(size)
+	if sizeUint64 > math.MaxUint32 {
 		return [5]byte{}, fmt.Errorf("connect.makeEnvelopePrefix: size %d out of bounds", size)
 	}
 	prefix := [5]byte{}
 	prefix[0] = flags
-	binary.BigEndian.PutUint32(prefix[1:5], uint32(size))
+	binary.BigEndian.PutUint32(prefix[1:5], uint32(sizeUint64))
 	return prefix, nil
 }
