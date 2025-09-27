@@ -54,7 +54,7 @@ on [connectrpc.com][docs] (especially the [Getting Started] guide for Go), the
 Curious what all this looks like in practice? From a [Protobuf
 schema](internal/proto/connect/ping/v1/ping.proto), we generate [a small RPC
 package](internal/gen/simple/connect/ping/v1/pingv1connect/ping.connect.go). Using that
-package, we can build a server:
+package, we can build a server. This example is available at [internal/example](internal/example):
 
 ```go
 package main
@@ -67,6 +67,7 @@ import (
   "connectrpc.com/connect"
   pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
   "connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
+  "connectrpc.com/validate"
 )
 
 type PingServer struct {
@@ -83,7 +84,13 @@ func main() {
   mux := http.NewServeMux()
   // The generated constructors return a path and a plain net/http
   // handler.
-  mux.Handle(pingv1connect.NewPingServiceHandler(&PingServer{}))
+  mux.Handle(
+    pingv1connect.NewPingServiceHandler(
+      &PingServer{},
+      // Validation via Protovalidate is almost always recommended
+      connect.WithInterceptors(validate.NewInterceptor()),
+    ),
+  )
   p := new(http.Protocols)
   p.SetHTTP1(true)
   // For gRPC clients, it's convenient to support HTTP/2 without TLS.
@@ -93,13 +100,14 @@ func main() {
     Handler:   mux,
     Protocols: p,
   }
-  err := s.ListenAndServe()
-  log.Fatalf("listen failed: %v", err)
+  if err := s.ListenAndServe(); err != nil {
+    log.Fatalf("listen failed: %v", err)
+  }
 }
 ```
 
 With that server running, you can make requests with any gRPC or Connect
-client. To write a client using Connect,
+client. To write a client using Connect:
 
 ```go
 package main
@@ -109,7 +117,6 @@ import (
   "log"
   "net/http"
 
-  "connectrpc.com/connect"
   pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
   "connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
 )
@@ -119,9 +126,7 @@ func main() {
     http.DefaultClient,
     "http://localhost:8080/",
   )
-  req := &pingv1.PingRequest{
-    Number: 42,
-  }
+  req := &pingv1.PingRequest{Number: 42}
   res, err := client.Ping(context.Background(), req)
   if err != nil {
     log.Fatalln(err)
@@ -136,9 +141,10 @@ configuring timeouts, connection pools, observability, and h2c.
 
 ## Ecosystem
 
-* [grpchealth]: gRPC-compatible health checks
-* [grpcreflect]: gRPC-compatible server reflection
-* [examples-go]: service powering demo.connectrpc.com, including bidi streaming
+* [grpchealth]: gRPC-compatible health checks for connect-go
+* [grpcreflect]: gRPC-compatible server reflection for connect-go
+* [validate]: [Protovalidate][protovalidate] interceptor for connect-go
+* [examples-go]: service powering [demo.connectrpc.com](https://demo.connectrpc.com), including bidi streaming
 * [connect-es]: Type-safe APIs with Protobuf and TypeScript
 * [Buf Studio]: web UI for ad-hoc RPCs
 * [conformance]: Connect, gRPC, and gRPC-Web interoperability tests
