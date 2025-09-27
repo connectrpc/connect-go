@@ -180,3 +180,5 @@ Offered under the [Apache 2 license][license].
 [protobuf]: https://developers.google.com/protocol-buffers
 [protocol]: https://connectrpc.com/docs/protocol
 [slack]: https://buf.build/links/slack
+[validate]: https://github.com/connectrpc/validate-go
+[protovalidate]: https://protovalidate.com
