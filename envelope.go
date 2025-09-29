@@ -375,6 +375,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 }
 
 func makeEnvelopePrefix(flags uint8, size int) ([5]byte, error) {
+	// Cast as 64-bit to ensure comparison works on all architectures.
 	size64 := int64(size)
 	if size64 < 0 || size64 > math.MaxUint32 {
 		return [5]byte{}, fmt.Errorf("connect.makeEnvelopePrefix: size %d out of bounds", size)
