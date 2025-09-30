@@ -38,15 +38,16 @@ type CallInfo interface {
 	ResponseHeader() http.Header
 	// ResponseTrailer returns the trailers for this response. Depending on the underlying
 	// RPC protocol, trailers may be sent as HTTP trailers or a protocol-specific
-	// block of in-body metadata.
+	// block of in-body metadata. Error metadata from Error.Meta() is accessible as
+	// trailers.
 	//
 	// Trailers beginning with "Connect-" and "Grpc-" are reserved for use by the
 	// Connect and gRPC protocols: applications may read them but shouldn't write
 	// them.
 	//
-	// On the client side, this method returns nil before
-	// the call is actually made. After the call is made, for streaming operations,
-	// this method will block for the server to actually return response trailers.
+	// On the client side, this method returns nil before the call is actually made.
+	// After the call is made, for streaming operations, this method will block
+	// for the server to actually return response trailers.
 	ResponseTrailer() http.Header
 	// HTTPMethod returns the HTTP method for this request. This is nearly always
 	// POST, but side-effect-free unary RPCs could be made via a GET.
@@ -243,6 +244,36 @@ func (w *responseWrapper[Res]) ResponseTrailer() http.Header {
 	return w.response.Trailer()
 }
 
+// errorResponseWrapper wraps an Error to a responseSource to propagate metadata.
+//
+// Error metadata is only exposed in trailers, not headers.
+type errorResponseWrapper struct {
+	base responseSource
+	err  *Error
+}
+
+func (w *errorResponseWrapper) ResponseHeader() http.Header {
+	if w.base != nil {
+		return w.base.ResponseHeader()
+	}
+	return make(http.Header)
+}
+
+func (w *errorResponseWrapper) ResponseTrailer() http.Header {
+	combined := make(http.Header)
+	if w.base != nil {
+		for k, v := range w.base.ResponseTrailer() {
+			combined[k] = v
+		}
+	}
+	if w.err != nil {
+		for k, v := range w.err.Meta() {
+			combined[k] = v
+		}
+	}
+	return combined
+}
+
 // clientCallInfoForContext gets the call info from a client/outgoing context.
 func clientCallInfoForContext(ctx context.Context) (*clientCallInfo, bool) {
 	info, ok := ctx.Value(clientCallInfoContextKey{}).(*clientCallInfo)
@@ -252,4 +283,25 @@ func clientCallInfoForContext(ctx context.Context) (*clientCallInfo, bool) {
 // newHandlerContext creates a new handler/incoming context.
 func newHandlerContext(ctx context.Context, info CallInfo) context.Context {
 	return context.WithValue(ctx, handlerCallInfoContextKey{}, info)
+}
+
+// callInfoAwareConn wraps a StreamingClientConn to automatically update
+// callInfo.responseSource when errors with metadata are encountered.
+type callInfoAwareConn struct {
+	StreamingClientConn
+	callInfo *clientCallInfo
+}
+
+func (c *callInfoAwareConn) Receive(msg any) error {
+	err := c.StreamingClientConn.Receive(msg)
+	if err != nil && c.callInfo != nil {
+		if connectErr, ok := asError(err); ok && len(connectErr.Meta()) > 0 {
+			// Wrap the current responseSource with the error metadata.
+			c.callInfo.responseSource = &errorResponseWrapper{
+				base: c.StreamingClientConn,
+				err:  connectErr,
+			}
+		}
+	}
+	return err
 }
