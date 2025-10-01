@@ -82,6 +82,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 			callInfo, ok := clientCallInfoForContext(ctx)
 			if ok {
 				callInfo.method = r.Method
+				callInfo.responseSource = conn
 			}
 		})
 		// Send always returns an io.EOF unless the error is from the client-side.
@@ -98,10 +99,6 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		}
 		response, err := receiveUnaryResponse[Res](conn, config.Initializer)
 		if err != nil {
-			// Before closing, capture the conn as responseSource for callInfo.
-			if callInfo, ok := clientCallInfoForContext(ctx); ok {
-				callInfo.responseSource = conn
-			}
 			_ = conn.CloseResponse()
 			return nil, err
 		}
@@ -137,26 +134,11 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 
 		response, err := unaryFunc(ctx, request)
 		if err != nil {
-			if callInfoOk {
-				if connectErr, ok := asError(err); ok && len(connectErr.Meta()) > 0 {
-					// Wrap the existing responseSource (conn) with error metadata.
-					callInfo.responseSource = &errorResponseWrapper{
-						base: callInfo.responseSource,
-						err:  connectErr,
-					}
-				}
-			}
 			return nil, err
 		}
 		typed, ok := response.(*Response[Res])
 		if !ok {
 			return nil, errorf(CodeInternal, "unexpected client response type %T", response)
-		}
-		if callInfoOk {
-			// Wrap the response and set it into the context callinfo
-			callInfo.responseSource = &responseWrapper[Res]{
-				response: typed,
-			}
 		}
 		return typed, nil
 	}
@@ -314,12 +296,6 @@ func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType, o
 		// Merge any callInfo request headers first, then do the request,
 		// so that context headers show first in the list of headers.
 		mergeHeaders(conn.RequestHeader(), callInfo.RequestHeader())
-
-		// Wrap the connection to automatically update responseSource if an error occurs.
-		conn = &callInfoAwareConn{
-			StreamingClientConn: conn,
-			callInfo:            callInfo,
-		}
 	}
 
 	return conn

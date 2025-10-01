@@ -231,45 +231,6 @@ type responseSource interface {
 	ResponseTrailer() http.Header
 }
 
-// responseWrapper wraps a Response object so that it can implement the responseSource interface.
-type responseWrapper[Res any] struct {
-	response *Response[Res]
-}
-
-func (w *responseWrapper[Res]) ResponseHeader() http.Header {
-	return w.response.Header()
-}
-
-func (w *responseWrapper[Res]) ResponseTrailer() http.Header {
-	return w.response.Trailer()
-}
-
-// errorResponseWrapper wraps an Error to a responseSource to propagate metadata.
-//
-// Error metadata is only exposed in trailers, not headers.
-type errorResponseWrapper struct {
-	base responseSource
-	err  *Error
-}
-
-func (w *errorResponseWrapper) ResponseHeader() http.Header {
-	if w.base != nil {
-		return w.base.ResponseHeader()
-	}
-	return make(http.Header)
-}
-
-func (w *errorResponseWrapper) ResponseTrailer() http.Header {
-	combined := make(http.Header)
-	if w.base != nil {
-		mergeHeaders(combined, w.base.ResponseTrailer())
-	}
-	if w.err != nil {
-		mergeNonProtocolHeaders(combined, w.err.Meta())
-	}
-	return combined
-}
-
 // clientCallInfoForContext gets the call info from a client/outgoing context.
 func clientCallInfoForContext(ctx context.Context) (*clientCallInfo, bool) {
 	info, ok := ctx.Value(clientCallInfoContextKey{}).(*clientCallInfo)
@@ -279,25 +240,4 @@ func clientCallInfoForContext(ctx context.Context) (*clientCallInfo, bool) {
 // newHandlerContext creates a new handler/incoming context.
 func newHandlerContext(ctx context.Context, info CallInfo) context.Context {
 	return context.WithValue(ctx, handlerCallInfoContextKey{}, info)
-}
-
-// callInfoAwareConn wraps a StreamingClientConn to automatically update
-// callInfo.responseSource when errors with metadata are encountered.
-type callInfoAwareConn struct {
-	StreamingClientConn
-	callInfo *clientCallInfo
-}
-
-func (c *callInfoAwareConn) Receive(msg any) error {
-	err := c.StreamingClientConn.Receive(msg)
-	if err != nil && c.callInfo != nil {
-		if connectErr, ok := asError(err); ok && len(connectErr.Meta()) > 0 {
-			// Wrap the current responseSource with the error metadata.
-			c.callInfo.responseSource = &errorResponseWrapper{
-				base: c.StreamingClientConn,
-				err:  connectErr,
-			}
-		}
-	}
-	return err
 }
