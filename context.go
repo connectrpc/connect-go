@@ -262,14 +262,10 @@ func (w *errorResponseWrapper) ResponseHeader() http.Header {
 func (w *errorResponseWrapper) ResponseTrailer() http.Header {
 	combined := make(http.Header)
 	if w.base != nil {
-		for k, v := range w.base.ResponseTrailer() {
-			combined[k] = v
-		}
+		mergeHeaders(combined, w.base.ResponseTrailer())
 	}
 	if w.err != nil {
-		for k, v := range w.err.Meta() {
-			combined[k] = v
-		}
+		mergeNonProtocolHeaders(combined, w.err.Meta())
 	}
 	return combined
 }
