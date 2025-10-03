@@ -3252,7 +3252,7 @@ func TestCallInfoHeadersOnError(t *testing.T) {
 			assert.Equal(t, len(bothSourcesValues), 2)
 			assert.True(t, compareValues(bothSourcesValues, []string{"from-callinfo-trailer", "from-error-meta"}))
 
-			testHeadersMatchErrorMetadata(t, err, callInfo)
+			testHeadersMatchErrorMetadata(t, stream.Err(), callInfo)
 		})
 		t.Run("bidi_stream_cumsum_success", func(t *testing.T) {
 			t.Parallel()
@@ -3322,7 +3322,7 @@ func TestCallInfoHeadersOnError(t *testing.T) {
 			assert.Equal(t, len(bothSourcesValues), 2)
 			assert.True(t, compareValues(bothSourcesValues, []string{"from-callinfo-trailer", "from-error-meta"}))
 
-			testHeadersMatchErrorMetadata(t, err, callInfo)
+			testHeadersMatchErrorMetadata(t, stream.Err(), callInfo)
 		})
 		t.Run("bidi_stream_cumsum_error_after_first_response", func(t *testing.T) {
 			t.Parallel()
