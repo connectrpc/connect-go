@@ -38,8 +38,7 @@ type CallInfo interface {
 	ResponseHeader() http.Header
 	// ResponseTrailer returns the trailers for this response. Depending on the underlying
 	// RPC protocol, trailers may be sent as HTTP trailers or a protocol-specific
-	// block of in-body metadata. Error metadata from Error.Meta() is accessible as
-	// trailers.
+	// block of in-body metadata.
 	//
 	// Trailers beginning with "Connect-" and "Grpc-" are reserved for use by the
 	// Connect and gRPC protocols: applications may read them but shouldn't write
