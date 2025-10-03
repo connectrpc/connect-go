@@ -3103,6 +3103,20 @@ func TestCallInfoHeadersOnError(t *testing.T) {
 		},
 	}
 
+	testHeadersMatchErrorMetadata := func(t *testing.T, err error, callInfo connect.CallInfo) {
+		t.Helper()
+		var connectErr *connect.Error
+		assert.True(t, errors.As(err, &connectErr))
+		expectedMeta := make(http.Header)
+		for key, vals := range callInfo.ResponseHeader() {
+			expectedMeta[key] = append(expectedMeta[key], vals...)
+		}
+		for key, vals := range callInfo.ResponseTrailer() {
+			expectedMeta[key] = append(expectedMeta[key], vals...)
+		}
+		assert.True(t, compareHeaders(connectErr.Meta(), expectedMeta))
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connectsimple.NewPingServiceHandler(handler))
 	server := memhttptest.NewServer(t, mux)
@@ -3198,16 +3212,7 @@ func TestCallInfoHeadersOnError(t *testing.T) {
 			assert.Equal(t, len(bothSourcesValues), 2)
 			assert.True(t, compareValues(bothSourcesValues, []string{"from-callinfo-trailer", "from-error-meta"}))
 
-			var connectErr *connect.Error
-			assert.True(t, errors.As(err, &connectErr))
-			expectedMeta := make(http.Header)
-			for key, vals := range callInfo.ResponseHeader() {
-				expectedMeta[key] = append(expectedMeta[key], vals...)
-			}
-			for key, vals := range callInfo.ResponseTrailer() {
-				expectedMeta[key] = append(expectedMeta[key], vals...)
-			}
-			assert.True(t, compareHeaders(connectErr.Meta(), expectedMeta))
+			testHeadersMatchErrorMetadata(t, err, callInfo)
 		})
 		t.Run("server_stream_countup_success", func(t *testing.T) {
 			t.Parallel()
@@ -3247,16 +3252,7 @@ func TestCallInfoHeadersOnError(t *testing.T) {
 			assert.Equal(t, len(bothSourcesValues), 2)
 			assert.True(t, compareValues(bothSourcesValues, []string{"from-callinfo-trailer", "from-error-meta"}))
 
-			var connectErr *connect.Error
-			assert.True(t, errors.As(stream.Err(), &connectErr))
-			expectedMeta := make(http.Header)
-			for key, vals := range callInfo.ResponseHeader() {
-				expectedMeta[key] = append(expectedMeta[key], vals...)
-			}
-			for key, vals := range callInfo.ResponseTrailer() {
-				expectedMeta[key] = append(expectedMeta[key], vals...)
-			}
-			assert.True(t, compareHeaders(connectErr.Meta(), expectedMeta))
+			testHeadersMatchErrorMetadata(t, err, callInfo)
 		})
 		t.Run("bidi_stream_cumsum_success", func(t *testing.T) {
 			t.Parallel()
@@ -3302,16 +3298,7 @@ func TestCallInfoHeadersOnError(t *testing.T) {
 			assert.Equal(t, len(bothSourcesValues), 2)
 			assert.True(t, compareValues(bothSourcesValues, []string{"from-callinfo-trailer", "from-error-meta"}))
 
-			var connectErr *connect.Error
-			assert.True(t, errors.As(err, &connectErr))
-			expectedMeta := make(http.Header)
-			for key, vals := range callInfo.ResponseHeader() {
-				expectedMeta[key] = append(expectedMeta[key], vals...)
-			}
-			for key, vals := range callInfo.ResponseTrailer() {
-				expectedMeta[key] = append(expectedMeta[key], vals...)
-			}
-			assert.True(t, compareHeaders(connectErr.Meta(), expectedMeta))
+			testHeadersMatchErrorMetadata(t, err, callInfo)
 		})
 		t.Run("server_stream_countup_error_after_first_response", func(t *testing.T) {
 			t.Parallel()
@@ -3335,16 +3322,7 @@ func TestCallInfoHeadersOnError(t *testing.T) {
 			assert.Equal(t, len(bothSourcesValues), 2)
 			assert.True(t, compareValues(bothSourcesValues, []string{"from-callinfo-trailer", "from-error-meta"}))
 
-			var connectErr *connect.Error
-			assert.True(t, errors.As(stream.Err(), &connectErr))
-			expectedMeta := make(http.Header)
-			for key, vals := range callInfo.ResponseHeader() {
-				expectedMeta[key] = append(expectedMeta[key], vals...)
-			}
-			for key, vals := range callInfo.ResponseTrailer() {
-				expectedMeta[key] = append(expectedMeta[key], vals...)
-			}
-			assert.True(t, compareHeaders(connectErr.Meta(), expectedMeta))
+			testHeadersMatchErrorMetadata(t, err, callInfo)
 		})
 		t.Run("bidi_stream_cumsum_error_after_first_response", func(t *testing.T) {
 			t.Parallel()
@@ -3369,16 +3347,7 @@ func TestCallInfoHeadersOnError(t *testing.T) {
 			assert.Equal(t, len(bothSourcesValues), 2)
 			assert.True(t, compareValues(bothSourcesValues, []string{"from-callinfo-trailer", "from-error-meta"}))
 
-			var connectErr *connect.Error
-			assert.True(t, errors.As(err, &connectErr))
-			expectedMeta := make(http.Header)
-			for key, vals := range callInfo.ResponseHeader() {
-				expectedMeta[key] = append(expectedMeta[key], vals...)
-			}
-			for key, vals := range callInfo.ResponseTrailer() {
-				expectedMeta[key] = append(expectedMeta[key], vals...)
-			}
-			assert.True(t, compareHeaders(connectErr.Meta(), expectedMeta))
+			testHeadersMatchErrorMetadata(t, err, callInfo)
 		})
 	}
 
