@@ -30,6 +30,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 // Version is the semantic version of the connect module.
@@ -319,6 +320,8 @@ type Spec struct {
 	Procedure        string // for example, "/acme.foo.v1.FooService/Bar"
 	IsClient         bool   // otherwise we're in a handler
 	IdempotencyLevel IdempotencyLevel
+	ReadTimeout      time.Duration
+	WriteTimeout     time.Duration
 }
 
 // Peer describes the other party to an RPC.

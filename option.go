@@ -19,6 +19,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"time"
 )
 
 // A ClientOption configures a [Client].
@@ -351,6 +352,14 @@ func WithInterceptors(interceptors ...Interceptor) Option {
 	return &interceptorsOption{interceptors}
 }
 
+func WithReadTimeout(value time.Duration) HandlerOption {
+	return &readTimeoutOption{value: value}
+}
+
+func WithWriteTimeout(value time.Duration) HandlerOption {
+	return &writeTimeoutOption{value: value}
+}
+
 // WithOptions composes multiple Options into one.
 func WithOptions(options ...Option) Option {
 	return &optionsOption{options}
@@ -644,4 +653,16 @@ func (o *conditionalHandlerOptions) applyToHandler(config *handlerConfig) {
 	for _, option := range o.conditional(spec) {
 		option.applyToHandler(config)
 	}
+}
+
+type readTimeoutOption struct{ value time.Duration }
+
+func (o *readTimeoutOption) applyToHandler(config *handlerConfig) {
+	config.ReadTimeout = o.value
+}
+
+type writeTimeoutOption struct{ value time.Duration }
+
+func (o *writeTimeoutOption) applyToHandler(config *handlerConfig) {
+	config.WriteTimeout = o.value
 }
