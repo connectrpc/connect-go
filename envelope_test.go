@@ -25,7 +25,7 @@ import (
 func TestEnvelope(t *testing.T) {
 	t.Parallel()
 	payload := []byte(`{"number": 42}`)
-	head, err := makeEnvelopePrefix(0, len(payload))
+	head, err := makeEnvelopePrefix(0, uint32(len(payload)))
 	assert.Nil(t, err)
 	buf := &bytes.Buffer{}
 	buf.Write(head[:])
