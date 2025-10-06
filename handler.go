@@ -259,7 +259,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	if h.spec.ReadTimeout != 0 {
 		rc := http.NewResponseController(responseWriter)
 		rc.SetReadDeadline(time.Now().Add(h.spec.ReadTimeout))
-		rc.SetWriteDeadline(time.Now().Add(h.spec.ReadTimeout))
+		rc.SetWriteDeadline(time.Now().Add(h.spec.WriteTimeout))
 	}
 
 	// We don't need to defer functions to close the request body or read to
