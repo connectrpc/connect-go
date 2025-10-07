@@ -82,6 +82,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 			callInfo, ok := clientCallInfoForContext(ctx)
 			if ok {
 				callInfo.method = r.Method
+				callInfo.responseSource = conn
 			}
 		})
 		// Send always returns an io.EOF unless the error is from the client-side.
@@ -138,12 +139,6 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		typed, ok := response.(*Response[Res])
 		if !ok {
 			return nil, errorf(CodeInternal, "unexpected client response type %T", response)
-		}
-		if callInfoOk {
-			// Wrap the response and set it into the context callinfo
-			callInfo.responseSource = &responseWrapper[Res]{
-				response: typed,
-			}
 		}
 		return typed, nil
 	}
@@ -298,8 +293,8 @@ func (c *Client[Req, Res]) newConn(ctx context.Context, streamType StreamType, o
 		callInfo.spec = conn.Spec()
 		callInfo.responseSource = conn
 
-		// Merge any callInfo request headers first, then do the request.
-		// so that context headers show first in the list of headers
+		// Merge any callInfo request headers first, then do the request,
+		// so that context headers show first in the list of headers.
 		mergeHeaders(conn.RequestHeader(), callInfo.RequestHeader())
 	}
 

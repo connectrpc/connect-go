@@ -76,16 +76,15 @@ func NewUnaryHandler[Req, Res any](
 		}
 		ctx = newHandlerContext(ctx, info)
 		response, err := untyped(ctx, request)
-		if err != nil {
-			return err
-		}
-
 		// Add response headers/trailers from the context callinfo into the conn if they exist
 		if info.responseHeader != nil {
 			mergeNonProtocolHeaders(conn.ResponseHeader(), info.responseHeader)
 		}
 		if info.responseTrailer != nil {
 			mergeNonProtocolHeaders(conn.ResponseTrailer(), info.responseTrailer)
+		}
+		if err != nil {
+			return err
 		}
 
 		// Add response headers/trailers from the response into the conn if they exist
@@ -95,7 +94,6 @@ func NewUnaryHandler[Req, Res any](
 		if len(response.Trailer()) != 0 {
 			mergeNonProtocolHeaders(conn.ResponseTrailer(), response.Trailer())
 		}
-
 		return conn.Send(response.Any())
 	}
 

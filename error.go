@@ -227,12 +227,6 @@ func (e *Error) AddDetail(d *ErrorDetail) {
 
 // Meta allows the error to carry additional information as key-value pairs.
 //
-// Metadata attached to errors returned by unary handlers is always sent as
-// HTTP headers, regardless of the protocol. Metadata attached to errors
-// returned by streaming handlers may be sent as HTTP headers, HTTP trailers,
-// or a block of in-body metadata, depending on the protocol in use and whether
-// or not the handler has already written messages to the stream.
-//
 // Protocol-specific headers and trailers may be removed to avoid breaking
 // protocol semantics. For example, Content-Length and Content-Type headers
 // won't be propagated. See the documentation for each protocol for more
