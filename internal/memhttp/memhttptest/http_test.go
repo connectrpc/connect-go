@@ -1,3 +1,5 @@
+//go:build go1.25
+
 // Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
