@@ -352,10 +352,30 @@ func WithInterceptors(interceptors ...Interceptor) Option {
 	return &interceptorsOption{interceptors}
 }
 
+// WithReadTimeout option specifies the maximum amount of time that a service 
+// handler is allowed to take when reading a message in a stream.
+// If the total time exceeds WithReadTimeout, then that particular stream is 
+// closed.
+// This enables the user to close only that particular stream instead of the 
+// entire connection.
+// This prevents malicious or slow clients from using up resources.
+// This option is passed to the handler config and then to the spec. 
+// Finally, ServeHTTP function of the handler reads the timeout values from 
+// the spec and enforces them using ResponseController.
 func WithReadTimeout(value time.Duration) HandlerOption {
 	return &readTimeoutOption{value: value}
 }
 
+// WithWriteTimeout option specifies the maximum amount of time that a service 
+// handler is allowed to take when writing a message to a stream.
+// If the total time exceeds WithReadTimeout, then that particular stream is 
+// closed.
+// This enables the user to close only that particular stream instead of the 
+// entire connection.
+// This prevents malicious or slow clients from using up resources.
+// This option is passed to the handler config and then to the spec. 
+// Finally, ServeHTTP function of the handler reads the timeout values from 
+// the spec and enforces them using ResponseController.
 func WithWriteTimeout(value time.Duration) HandlerOption {
 	return &writeTimeoutOption{value: value}
 }
