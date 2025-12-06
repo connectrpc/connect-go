@@ -2968,6 +2968,406 @@ func TestSetProtocolHeaders(t *testing.T) {
 	}
 }
 
+func TestCallInfoHeadersOnError(t *testing.T) {
+	t.Parallel()
+
+	handler := &pluggablePingServerSimple{
+		ping: func(ctx context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+			callInfo, ok := connect.CallInfoForHandlerContext(ctx)
+			if !ok {
+				return nil, connect.NewError(connect.CodeInternal, nil)
+			}
+			if request.GetNumber() < 0 {
+				callInfo.ResponseHeader().Set("x-custom-key", "ping-error")
+				callInfo.ResponseHeader().Set("x-header-only", "should-not-be-in-trailers")
+				callInfo.ResponseTrailer().Set("x-trailer-only", "should-not-be-in-headers")
+				callInfo.ResponseTrailer().Set("x-both-sources", "from-callinfo-trailer")
+				err := connect.NewError(connect.CodeInvalidArgument, nil)
+				err.Meta().Set("x-error-only", "from-error-only")
+				err.Meta().Set("x-both-sources", "from-error-meta")
+				return nil, err
+			}
+			callInfo.ResponseHeader().Set("x-custom-key", "ping-success")
+			callInfo.ResponseHeader().Set("x-success-header", "in-headers")
+			callInfo.ResponseTrailer().Set("x-success-trailer", "in-trailers")
+			return &pingv1.PingResponse{Number: request.GetNumber()}, nil
+		},
+		sum: func(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*pingv1.SumResponse, error) {
+			callInfo, ok := connect.CallInfoForHandlerContext(ctx)
+			if !ok {
+				return nil, connect.NewError(connect.CodeInternal, nil)
+			}
+			var sum int64
+			for stream.Receive() {
+				if stream.Msg().GetNumber() < 0 {
+					// Error case
+					callInfo.ResponseHeader().Set("x-custom-key", "sum-error")
+					callInfo.ResponseHeader().Set("x-header-only", "should-not-be-in-trailers")
+					callInfo.ResponseTrailer().Set("x-trailer-only", "should-not-be-in-headers")
+					callInfo.ResponseTrailer().Set("x-both-sources", "from-callinfo-trailer")
+					err := connect.NewError(connect.CodeInvalidArgument, nil)
+					err.Meta().Set("x-error-only", "from-error-only")
+					err.Meta().Set("x-both-sources", "from-error-meta")
+					return nil, err
+				}
+				sum += stream.Msg().GetNumber()
+			}
+			if stream.Err() != nil {
+				return nil, stream.Err()
+			}
+			callInfo.ResponseHeader().Set("x-custom-key", "sum-success")
+			callInfo.ResponseHeader().Set("x-success-header", "in-headers")
+			callInfo.ResponseTrailer().Set("x-success-trailer", "in-trailers")
+			return &pingv1.SumResponse{Sum: sum}, nil
+		},
+		countUp: func(ctx context.Context, request *pingv1.CountUpRequest, stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+			callInfo, ok := connect.CallInfoForHandlerContext(ctx)
+			if !ok {
+				return connect.NewError(connect.CodeInternal, nil)
+			}
+			if request.GetNumber() < 0 {
+				// Error before first response
+				callInfo.ResponseHeader().Set("x-custom-key", "countup-error")
+				callInfo.ResponseHeader().Set("x-header-only", "should-not-be-in-trailers")
+				callInfo.ResponseTrailer().Set("x-trailer-only", "should-not-be-in-headers")
+				callInfo.ResponseTrailer().Set("x-both-sources", "from-callinfo-trailer")
+				err := connect.NewError(connect.CodeInvalidArgument, nil)
+				err.Meta().Set("x-error-only", "from-error-only")
+				err.Meta().Set("x-both-sources", "from-error-meta")
+				return err
+			}
+			callInfo.ResponseHeader().Set("x-custom-key", "countup-success")
+			callInfo.ResponseHeader().Set("x-success-header", "in-headers")
+			callInfo.ResponseTrailer().Set("x-success-trailer", "in-trailers")
+			for number := int64(1); number <= request.GetNumber(); number++ {
+				// Simulate error after sending 2 responses (for testing trailers)
+				if number == 3 && request.GetNumber() == 5 {
+					callInfo.ResponseTrailer().Set("x-error-trailer", "error-after-streaming")
+					callInfo.ResponseTrailer().Set("x-trailer-only-after", "only-in-trailers")
+					callInfo.ResponseTrailer().Set("x-both-sources", "from-callinfo-trailer")
+					err := connect.NewError(connect.CodeInternal, nil)
+					err.Meta().Set("x-error-only", "from-error-only")
+					err.Meta().Set("x-both-sources", "from-error-meta")
+					return err
+				}
+				if err := stream.Send(&pingv1.CountUpResponse{Number: number}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+		cumSum: func(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+			callInfo, ok := connect.CallInfoForHandlerContext(ctx)
+			if !ok {
+				return connect.NewError(connect.CodeInternal, nil)
+			}
+			callInfo.ResponseHeader().Set("x-custom-key", "cumsum-success")
+			callInfo.ResponseHeader().Set("x-success-header", "in-headers")
+			callInfo.ResponseTrailer().Set("x-success-trailer", "in-trailers")
+			var sum int64
+			for {
+				req, err := stream.Receive()
+				if err != nil {
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					return err
+				}
+				if req.GetNumber() == -99 {
+					// Special case: error after successful exchanges (for testing trailers)
+					callInfo.ResponseHeader().Set("x-custom-key", "cumsum-error-streaming")
+					callInfo.ResponseHeader().Set("x-header-only", "should-not-be-in-trailers")
+					callInfo.ResponseTrailer().Set("x-trailer-only", "should-not-be-in-headers")
+					callInfo.ResponseTrailer().Set("x-both-sources", "from-callinfo-trailer")
+					err := connect.NewError(connect.CodeInternal, nil)
+					err.Meta().Set("x-error-only", "from-error-only")
+					err.Meta().Set("x-both-sources", "from-error-meta")
+					return err
+				}
+				if req.GetNumber() < 0 {
+					callInfo.ResponseHeader().Set("x-custom-key", "cumsum-error")
+					callInfo.ResponseHeader().Set("x-header-only", "should-not-be-in-trailers")
+					callInfo.ResponseTrailer().Set("x-trailer-only", "should-not-be-in-headers")
+					callInfo.ResponseTrailer().Set("x-both-sources", "from-callinfo-trailer")
+					err := connect.NewError(connect.CodeInvalidArgument, nil)
+					err.Meta().Set("x-error-only", "from-error-only")
+					err.Meta().Set("x-both-sources", "from-error-meta")
+					return err
+				}
+				sum += req.GetNumber()
+				if err := stream.Send(&pingv1.CumSumResponse{Sum: sum}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+
+	testHeadersMatchErrorMetadata := func(t *testing.T, err error, callInfo connect.CallInfo) {
+		t.Helper()
+		var connectErr *connect.Error
+		assert.True(t, errors.As(err, &connectErr))
+		expectedMeta := make(http.Header)
+		for key, vals := range callInfo.ResponseHeader() {
+			expectedMeta[key] = append(expectedMeta[key], vals...)
+		}
+		for key, vals := range callInfo.ResponseTrailer() {
+			expectedMeta[key] = append(expectedMeta[key], vals...)
+		}
+		assert.True(t, compareHeaders(connectErr.Meta(), expectedMeta))
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connectsimple.NewPingServiceHandler(handler))
+	server := memhttptest.NewServer(t, mux)
+
+	testCallInfoHeaders := func(t *testing.T, client pingv1connectsimple.PingServiceClient, protocol string) { //nolint:thelper
+		t.Run("unary_ping_success", func(t *testing.T) {
+			t.Parallel()
+			ctx, callInfo := connect.NewClientContext(t.Context())
+			response, err := client.Ping(ctx, &pingv1.PingRequest{Number: 1})
+			assert.Nil(t, err)
+			assert.NotNil(t, response)
+
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-custom-key"), []string{"ping-success"}))
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-success-header"), []string{"in-headers"}))
+			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-success-trailer"), []string{"in-trailers"}))
+			assert.Equal(t, len(callInfo.ResponseTrailer().Values("x-success-header")), 0)
+			assert.Equal(t, len(callInfo.ResponseHeader().Values("x-success-trailer")), 0)
+		})
+		t.Run("unary_ping_error", func(t *testing.T) {
+			t.Parallel()
+			ctx, callInfo := connect.NewClientContext(t.Context())
+			response, err := client.Ping(ctx, &pingv1.PingRequest{Number: -1})
+			assert.NotNil(t, err)
+			assert.Nil(t, response)
+
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-custom-key"), []string{"ping-error"}))
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-header-only"), []string{"should-not-be-in-trailers"}))
+			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-trailer-only"), []string{"should-not-be-in-headers"}))
+			assert.Equal(t, len(callInfo.ResponseHeader().Values("x-trailer-only")), 0)
+
+			var connectErr *connect.Error
+			assert.True(t, errors.As(err, &connectErr))
+			expectedMeta := make(http.Header)
+			for key, vals := range callInfo.ResponseHeader() {
+				expectedMeta[key] = append(expectedMeta[key], vals...)
+			}
+			for key, vals := range callInfo.ResponseTrailer() {
+				expectedMeta[key] = append(expectedMeta[key], vals...)
+			}
+			assert.True(t, compareHeaders(connectErr.Meta(), expectedMeta))
+
+			// Assert the protocol specific handling of error metadata is used.
+			switch protocol {
+			case connect.ProtocolConnect:
+				assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-error-only"), []string{"from-error-only"}))
+				assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-both-sources"), []string{"from-error-meta"}))
+				assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-both-sources"), []string{"from-callinfo-trailer"}))
+			case connect.ProtocolGRPC, connect.ProtocolGRPCWeb:
+				assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-error-only"), []string{"from-error-only"}))
+				bothSourcesValues := callInfo.ResponseTrailer().Values("x-both-sources")
+				assert.Equal(t, len(bothSourcesValues), 2)
+				assert.True(t, compareValues(bothSourcesValues, []string{"from-callinfo-trailer", "from-error-meta"}))
+			default:
+				t.Errorf("unknown protocol: %s", protocol)
+			}
+		})
+		t.Run("client_stream_sum_success", func(t *testing.T) {
+			t.Parallel()
+			ctx, callInfo := connect.NewClientContext(t.Context())
+			stream, err := client.Sum(ctx)
+			assert.Nil(t, err)
+
+			assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
+			assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 2}))
+			assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 3}))
+			response, err := stream.CloseAndReceive()
+			assert.Nil(t, err)
+			assert.NotNil(t, response)
+
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-custom-key"), []string{"sum-success"}))
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-success-header"), []string{"in-headers"}))
+			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-success-trailer"), []string{"in-trailers"}))
+			assert.Equal(t, len(callInfo.ResponseTrailer().Values("x-success-header")), 0)
+			assert.Equal(t, len(callInfo.ResponseHeader().Values("x-success-trailer")), 0)
+		})
+		t.Run("client_stream_sum_error", func(t *testing.T) {
+			t.Parallel()
+			ctx, callInfo := connect.NewClientContext(t.Context())
+			stream, err := client.Sum(ctx)
+			assert.Nil(t, err)
+
+			assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: -1}))
+			response, err := stream.CloseAndReceive()
+			assert.NotNil(t, err)
+			assert.Nil(t, response)
+
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-custom-key"), []string{"sum-error"}))
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-header-only"), []string{"should-not-be-in-trailers"}))
+			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-trailer-only"), []string{"should-not-be-in-headers"}))
+			assert.Equal(t, len(callInfo.ResponseHeader().Values("x-trailer-only")), 0)
+			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-error-only"), []string{"from-error-only"}))
+			bothSourcesValues := callInfo.ResponseTrailer().Values("x-both-sources")
+			assert.Equal(t, len(bothSourcesValues), 2)
+			assert.True(t, compareValues(bothSourcesValues, []string{"from-callinfo-trailer", "from-error-meta"}))
+
+			testHeadersMatchErrorMetadata(t, err, callInfo)
+		})
+		t.Run("server_stream_countup_success", func(t *testing.T) {
+			t.Parallel()
+			ctx, callInfo := connect.NewClientContext(t.Context())
+			stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 3})
+			assert.Nil(t, err)
+
+			count := 0
+			for stream.Receive() {
+				count++
+			}
+			assert.Nil(t, stream.Err())
+			assert.Equal(t, count, 3)
+
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-custom-key"), []string{"countup-success"}))
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-success-header"), []string{"in-headers"}))
+			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-success-trailer"), []string{"in-trailers"}))
+			assert.Equal(t, len(callInfo.ResponseTrailer().Values("x-success-header")), 0)
+			assert.Equal(t, len(callInfo.ResponseHeader().Values("x-success-trailer")), 0)
+		})
+		t.Run("server_stream_countup_error", func(t *testing.T) {
+			t.Parallel()
+			ctx, callInfo := connect.NewClientContext(t.Context())
+			stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: -1})
+			assert.Nil(t, err)
+
+			hasData := stream.Receive()
+			assert.False(t, hasData)
+			assert.NotNil(t, stream.Err())
+
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-custom-key"), []string{"countup-error"}))
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-header-only"), []string{"should-not-be-in-trailers"}))
+			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-trailer-only"), []string{"should-not-be-in-headers"}))
+			assert.Equal(t, len(callInfo.ResponseHeader().Values("x-trailer-only")), 0)
+			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-error-only"), []string{"from-error-only"}))
+			bothSourcesValues := callInfo.ResponseTrailer().Values("x-both-sources")
+			assert.Equal(t, len(bothSourcesValues), 2)
+			assert.True(t, compareValues(bothSourcesValues, []string{"from-callinfo-trailer", "from-error-meta"}))
+
+			testHeadersMatchErrorMetadata(t, stream.Err(), callInfo)
+		})
+		t.Run("bidi_stream_cumsum_success", func(t *testing.T) {
+			t.Parallel()
+			ctx, callInfo := connect.NewClientContext(t.Context())
+			stream, err := client.CumSum(ctx)
+			assert.Nil(t, err)
+
+			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+			msg1, err := stream.Receive()
+			assert.Nil(t, err)
+			assert.Equal(t, msg1.Sum, int64(1))
+			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 2}))
+			msg2, err := stream.Receive()
+			assert.Nil(t, err)
+			assert.Equal(t, msg2.Sum, int64(3))
+			assert.Nil(t, stream.CloseRequest())
+			_, err = stream.Receive()
+			assert.NotNil(t, err)
+			assert.Nil(t, stream.CloseResponse())
+
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-custom-key"), []string{"cumsum-success"}))
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-success-header"), []string{"in-headers"}))
+			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-success-trailer"), []string{"in-trailers"}))
+			assert.Equal(t, len(callInfo.ResponseTrailer().Values("x-success-header")), 0)
+			assert.Equal(t, len(callInfo.ResponseHeader().Values("x-success-trailer")), 0)
+		})
+		t.Run("bidi_stream_cumsum_error", func(t *testing.T) {
+			t.Parallel()
+			ctx, callInfo := connect.NewClientContext(t.Context())
+			stream, err := client.CumSum(ctx)
+			assert.Nil(t, err)
+
+			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: -1}))
+			_, err = stream.Receive()
+			assert.NotNil(t, err)
+
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-custom-key"), []string{"cumsum-error"}))
+			assert.True(t, compareValues(callInfo.ResponseHeader().Values("x-header-only"), []string{"should-not-be-in-trailers"}))
+			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-trailer-only"), []string{"should-not-be-in-headers"}))
+			assert.Equal(t, len(callInfo.ResponseHeader().Values("x-trailer-only")), 0)
+			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-error-only"), []string{"from-error-only"}))
+			bothSourcesValues := callInfo.ResponseTrailer().Values("x-both-sources")
+			assert.Equal(t, len(bothSourcesValues), 2)
+			assert.True(t, compareValues(bothSourcesValues, []string{"from-callinfo-trailer", "from-error-meta"}))
+
+			testHeadersMatchErrorMetadata(t, err, callInfo)
+		})
+		t.Run("server_stream_countup_error_after_first_response", func(t *testing.T) {
+			t.Parallel()
+			ctx, callInfo := connect.NewClientContext(t.Context())
+			stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 5})
+			assert.Nil(t, err)
+
+			hasData := stream.Receive()
+			assert.True(t, hasData)
+			assert.Equal(t, stream.Msg().Number, int64(1))
+			hasData = stream.Receive()
+			assert.True(t, hasData)
+			assert.Equal(t, stream.Msg().Number, int64(2))
+			hasData = stream.Receive()
+			assert.False(t, hasData)
+			assert.NotNil(t, stream.Err())
+
+			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-error-trailer"), []string{"error-after-streaming"}))
+			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-error-only"), []string{"from-error-only"}))
+			bothSourcesValues := callInfo.ResponseTrailer().Values("x-both-sources")
+			assert.Equal(t, len(bothSourcesValues), 2)
+			assert.True(t, compareValues(bothSourcesValues, []string{"from-callinfo-trailer", "from-error-meta"}))
+
+			testHeadersMatchErrorMetadata(t, stream.Err(), callInfo)
+		})
+		t.Run("bidi_stream_cumsum_error_after_first_response", func(t *testing.T) {
+			t.Parallel()
+			ctx, callInfo := connect.NewClientContext(t.Context())
+			stream, err := client.CumSum(ctx)
+			assert.Nil(t, err)
+
+			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+			msg1, err := stream.Receive()
+			assert.Nil(t, err)
+			assert.Equal(t, msg1.Sum, int64(1))
+			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 2}))
+			msg2, err := stream.Receive()
+			assert.Nil(t, err)
+			assert.Equal(t, msg2.Sum, int64(3))
+			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: -99}))
+			_, err = stream.Receive()
+			assert.NotNil(t, err)
+
+			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-error-only"), []string{"from-error-only"}))
+			bothSourcesValues := callInfo.ResponseTrailer().Values("x-both-sources")
+			assert.Equal(t, len(bothSourcesValues), 2)
+			assert.True(t, compareValues(bothSourcesValues, []string{"from-callinfo-trailer", "from-error-meta"}))
+
+			testHeadersMatchErrorMetadata(t, err, callInfo)
+		})
+	}
+
+	t.Run("connect", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connectsimple.NewPingServiceClient(server.Client(), server.URL())
+		testCallInfoHeaders(t, client, connect.ProtocolConnect)
+	})
+	t.Run("grpc", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connectsimple.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPC())
+		testCallInfoHeaders(t, client, connect.ProtocolGRPC)
+	})
+	t.Run("grpcweb", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connectsimple.NewPingServiceClient(server.Client(), server.URL(), connect.WithGRPCWeb())
+		testCallInfoHeaders(t, client, connect.ProtocolGRPCWeb)
+	})
+}
+
 type unflushableWriter struct {
 	w http.ResponseWriter
 }
@@ -3041,6 +3441,31 @@ func (p *pluggablePingServer) CumSum(
 	ctx context.Context,
 	stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse],
 ) error {
+	return p.cumSum(ctx, stream)
+}
+
+type pluggablePingServerSimple struct {
+	pingv1connectsimple.UnimplementedPingServiceHandler
+
+	ping    func(context.Context, *pingv1.PingRequest) (*pingv1.PingResponse, error)
+	sum     func(context.Context, *connect.ClientStream[pingv1.SumRequest]) (*pingv1.SumResponse, error)
+	countUp func(context.Context, *pingv1.CountUpRequest, *connect.ServerStream[pingv1.CountUpResponse]) error
+	cumSum  func(context.Context, *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error
+}
+
+func (p *pluggablePingServerSimple) Ping(ctx context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+	return p.ping(ctx, request)
+}
+
+func (p *pluggablePingServerSimple) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*pingv1.SumResponse, error) {
+	return p.sum(ctx, stream)
+}
+
+func (p *pluggablePingServerSimple) CountUp(ctx context.Context, req *pingv1.CountUpRequest, stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+	return p.countUp(ctx, req, stream)
+}
+
+func (p *pluggablePingServerSimple) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
 	return p.cumSum(ctx, stream)
 }
 

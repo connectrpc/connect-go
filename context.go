@@ -44,9 +44,9 @@ type CallInfo interface {
 	// Connect and gRPC protocols: applications may read them but shouldn't write
 	// them.
 	//
-	// On the client side, this method returns nil before
-	// the call is actually made. After the call is made, for streaming operations,
-	// this method will block for the server to actually return response trailers.
+	// On the client side, this method returns nil before the call is actually made.
+	// After the call is made, for streaming operations, this method will block
+	// for the server to actually return response trailers.
 	ResponseTrailer() http.Header
 	// HTTPMethod returns the HTTP method for this request. This is nearly always
 	// POST, but side-effect-free unary RPCs could be made via a GET.
@@ -228,19 +228,6 @@ type handlerCallInfoContextKey struct{}
 type responseSource interface {
 	ResponseHeader() http.Header
 	ResponseTrailer() http.Header
-}
-
-// responseWrapper wraps a Response object so that it can implement the responseSource interface.
-type responseWrapper[Res any] struct {
-	response *Response[Res]
-}
-
-func (w *responseWrapper[Res]) ResponseHeader() http.Header {
-	return w.response.Header()
-}
-
-func (w *responseWrapper[Res]) ResponseTrailer() http.Header {
-	return w.response.Trailer()
 }
 
 // clientCallInfoForContext gets the call info from a client/outgoing context.
