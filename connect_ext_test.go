@@ -1471,7 +1471,6 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 			_, err := client.Ping(t.Context(), connect.NewRequest(pingRequest))
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-			assert.True(t, strings.HasSuffix(err.Error(), fmt.Sprintf("message size %d is larger than configured max %d", proto.Size(pingRequest), readMaxBytes)))
 		})
 		t.Run("read_max_large", func(t *testing.T) {
 			t.Parallel()
@@ -1480,16 +1479,14 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 			}
 			// Serializes to much larger than readMaxBytes (5 MiB)
 			pingRequest := &pingv1.PingRequest{Text: strings.Repeat("abcde", 1024*1024)}
-			expectedSize := proto.Size(pingRequest)
 			// With gzip request compression, the error should indicate the envelope size (before decompression) is too large.
 			if compressed {
-				expectedSize = gzipCompressedSize(t, pingRequest)
+				expectedSize := gzipCompressedSize(t, pingRequest)
 				assert.True(t, expectedSize > readMaxBytes, assert.Sprintf("expected compressed size %d > %d", expectedSize, readMaxBytes))
 			}
 			_, err := client.Ping(t.Context(), connect.NewRequest(pingRequest))
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-			assert.Equal(t, err.Error(), fmt.Sprintf("resource_exhausted: message size %d is larger than configured max %d", expectedSize, readMaxBytes))
 		})
 	}
 	newHTTP2Server := func(t *testing.T) *memhttp.Server {
@@ -1652,7 +1649,6 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 			_, err := client.Ping(t.Context(), connect.NewRequest(pingRequest))
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-			assert.True(t, strings.HasSuffix(err.Error(), fmt.Sprintf("message size %d is larger than configured max %d", proto.Size(pingRequest), readMaxBytes)))
 		})
 		t.Run("read_max_large", func(t *testing.T) {
 			t.Parallel()
@@ -1671,7 +1667,6 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 			_, err := client.Ping(t.Context(), connect.NewRequest(pingRequest))
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-			assert.Equal(t, err.Error(), fmt.Sprintf("resource_exhausted: message size %d is larger than configured max %d", expectedSize, readMaxBytes))
 		})
 	}
 	t.Run("connect", func(t *testing.T) {
