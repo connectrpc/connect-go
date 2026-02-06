@@ -138,9 +138,9 @@ func WithHandlerOptions(options ...HandlerOption) HandlerOption {
 
 // WithRecover adds an interceptor that recovers from panics. The supplied
 // function receives the context, [Spec], request headers, and the recovered
-// value (which may be nil). It must return an error to send back to the
-// client. It may also log the panic, emit metrics, or execute other
-// error-handling logic. Handler functions must be safe to call concurrently.
+// value. It must return an error to send back to the client. It may also log
+// the panic, emit metrics, or execute other error-handling logic. Handler
+// functions must be safe to call concurrently.
 //
 // To preserve compatibility with [net/http]'s semantics, this interceptor
 // doesn't handle panics with [http.ErrAbortHandler].
@@ -150,8 +150,17 @@ func WithHandlerOptions(options ...HandlerOption) HandlerOption {
 // usually necessary to prevent crashes. Instead, it helps servers collect
 // RPC-specific data during panics and send a more detailed error to
 // clients.
+//
+// Deprecated: Use RecoverInterceptor to create an interceptor and
+// WithInterceptors to register it via HandlerOption.
 func WithRecover(handle func(context.Context, Spec, http.Header, any) error) HandlerOption {
-	return WithInterceptors(&recoverHandlerInterceptor{handle: handle})
+	return WithInterceptors(RecoverInterceptor(func(ctx context.Context, req AnyRequest, panicValue any) error {
+		//nolint:errorlint,goerr113 // net/http checks for ErrAbortHandler with ==, so we should too
+		if panicValue == http.ErrAbortHandler {
+			panic(panicValue) //nolint:forbidigo
+		}
+		return handle(ctx, req.Spec(), req.Header(), panicValue)
+	}))
 }
 
 // WithRequireConnectProtocolHeader configures the Handler to require requests
