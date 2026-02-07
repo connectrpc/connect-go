@@ -133,7 +133,7 @@ func NewClient[Req, Res any](httpClient HTTPClient, url string, options ...Clien
 		}
 
 		response, err := unaryFunc(ctx, request)
-		if err != nil {
+		if err != nil || response == nil {
 			return nil, err
 		}
 		typed, ok := response.(*Response[Res])
