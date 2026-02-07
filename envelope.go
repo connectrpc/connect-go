@@ -28,11 +28,17 @@ import (
 // same meaning in the gRPC-Web, gRPC-HTTP2, and Connect protocols.
 const flagEnvelopeCompressed = 0b00000001
 
-var errSpecialEnvelope = errorf(
-	CodeUnknown,
-	"final message has protocol-specific flags: %w",
-	// User code checks for end of stream with errors.Is(err, io.EOF).
-	io.EOF,
+var (
+	errSpecialEnvelope = errorf(
+		CodeUnknown,
+		"final message has protocol-specific flags: %w",
+		// User code checks for end of stream with errors.Is(err, io.EOF).
+		io.EOF,
+	)
+	// errExceedsSendMax is a sentinel wrapped by sendMaxBytes errors so
+	// that callers (e.g. MarshalEndStream) can detect the violation and
+	// fall back to a smaller frame.
+	errExceedsSendMax = errors.New("")
 )
 
 // envelope is a block of arbitrary bytes wrapped in gRPC and Connect's framing
@@ -160,7 +166,7 @@ func (w *envelopeWriter) Write(env *envelope) *Error {
 		w.compressionPool == nil ||
 		env.Data.Len() < w.compressMinBytes {
 		if w.sendMaxBytes > 0 && env.Data.Len() > w.sendMaxBytes {
-			return errorf(CodeResourceExhausted, "message size %d exceeds sendMaxBytes %d", env.Data.Len(), w.sendMaxBytes)
+			return errorf(CodeResourceExhausted, "message size %d exceeds sendMaxBytes %d%w", env.Data.Len(), w.sendMaxBytes, errExceedsSendMax)
 		}
 		return w.write(env)
 	}
@@ -170,12 +176,50 @@ func (w *envelopeWriter) Write(env *envelope) *Error {
 		return err
 	}
 	if w.sendMaxBytes > 0 && data.Len() > w.sendMaxBytes {
-		return errorf(CodeResourceExhausted, "compressed message size %d exceeds sendMaxBytes %d", data.Len(), w.sendMaxBytes)
+		return errorf(CodeResourceExhausted, "compressed message size %d exceeds sendMaxBytes %d%w", data.Len(), w.sendMaxBytes, errExceedsSendMax)
 	}
 	return w.write(&envelope{
 		Data:  data,
 		Flags: env.Flags | flagEnvelopeCompressed,
 	})
+}
+
+// writeControlFrame implements a fallback strategy for writing protocol
+// control frames (Connect EndStream, gRPC-Web trailers) that may exceed
+// sendMaxBytes. It calls marshal to produce the frame bytes and attempts to
+// write the frame. If the frame exceeds sendMaxBytes:
+//  1. Calls reduce (if non-nil) to strip non-essential data (e.g. error
+//     details), re-marshals, and retries.
+//  2. If still too large, sends the frame anyway — the limit is unreasonably
+//     low and delivering the error is more important.
+func (w *envelopeWriter) writeControlFrame(flags uint8, marshal func() ([]byte, *Error), reduce func()) *Error {
+	write := func() *Error {
+		data, err := marshal()
+		if err != nil {
+			return err
+		}
+		raw := bytes.NewBuffer(data)
+		defer w.bufferPool.Put(raw)
+		return w.Write(&envelope{Data: raw, Flags: flags})
+	}
+	if writeErr := write(); writeErr == nil || !errors.Is(writeErr, errExceedsSendMax) {
+		return writeErr
+	}
+	if reduce != nil {
+		reduce()
+		if writeErr := write(); writeErr == nil || !errors.Is(writeErr, errExceedsSendMax) {
+			return writeErr
+		}
+	}
+	// Even the (possibly reduced) frame exceeds sendMaxBytes. The limit is
+	// unreasonably low, so send it anyway.
+	data, err := marshal()
+	if err != nil {
+		return err
+	}
+	raw := bytes.NewBuffer(data)
+	defer w.bufferPool.Put(raw)
+	return w.write(&envelope{Data: raw, Flags: flags})
 }
 
 func (w *envelopeWriter) marshalAppend(message any, codec marshalAppender) *Error {

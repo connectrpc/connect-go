@@ -197,6 +197,49 @@ func TestGRPCWebTrailerMarshalling(t *testing.T) {
 	assert.Equal(t, marshalled, "grpc-message: Foo\r\ngrpc-status: 0\r\nuser-provided: bar\r\n")
 }
 
+func TestGRPCWebTrailerMarshallingSendMaxBytesControlFrame(t *testing.T) {
+	t.Parallel()
+	testCases := []struct {
+		name       string
+		compressed bool
+	}{
+		{
+			name: "uncompressed",
+		},
+		{
+			name:       "compressed",
+			compressed: true,
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			responseWriter := httptest.NewRecorder()
+			marshaler := grpcMarshaler{
+				envelopeWriter: envelopeWriter{
+					sender:       writeSender{writer: responseWriter},
+					bufferPool:   newBufferPool(),
+					sendMaxBytes: 1,
+				},
+			}
+			if testCase.compressed {
+				gzipOption, ok := withGzip().(*compressionOption)
+				assert.True(t, ok)
+				marshaler.compressMinBytes = 1
+				marshaler.compressionPool = gzipOption.CompressionPool
+			}
+			trailer := http.Header{}
+			trailer.Add("grpc-status", "13")
+			trailer.Add("grpc-message", strings.Repeat("x", 64))
+			err := marshaler.MarshalWebTrailers(trailer)
+			assert.Nil(t, err)
+			frame := responseWriter.Body.Bytes()
+			assert.True(t, len(frame) > 5, assert.Sprintf("expected trailer frame in response body"))
+			assert.True(t, frame[0]&grpcFlagEnvelopeTrailer == grpcFlagEnvelopeTrailer)
+		})
+	}
+}
+
 func BenchmarkGRPCPercentEncoding(b *testing.B) {
 	input := "Hello, 世界"
 	want := "Hello, %E4%B8%96%E7%95%8C"
