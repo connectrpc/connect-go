@@ -54,6 +54,10 @@ func (e *envelope) IsSet(flag uint8) bool {
 	return e.Flags&flag == flag
 }
 
+func (e *envelope) isControlFrame() bool {
+	return e.IsSet(connectFlagEnvelopeEndStream) || e.IsSet(grpcFlagEnvelopeTrailer)
+}
+
 // Read implements [io.Reader].
 func (e *envelope) Read(data []byte) (readN int, err error) {
 	if e.offset < 5 {
@@ -159,7 +163,7 @@ func (w *envelopeWriter) Write(env *envelope) *Error {
 	if env.IsSet(flagEnvelopeCompressed) ||
 		w.compressionPool == nil ||
 		env.Data.Len() < w.compressMinBytes {
-		if w.sendMaxBytes > 0 && env.Data.Len() > w.sendMaxBytes {
+		if w.sendMaxBytes > 0 && env.Data.Len() > w.sendMaxBytes && !env.isControlFrame() {
 			return errorf(CodeResourceExhausted, "message size %d exceeds sendMaxBytes %d", env.Data.Len(), w.sendMaxBytes)
 		}
 		return w.write(env)
@@ -169,7 +173,7 @@ func (w *envelopeWriter) Write(env *envelope) *Error {
 	if err := w.compressionPool.Compress(data, env.Data); err != nil {
 		return err
 	}
-	if w.sendMaxBytes > 0 && data.Len() > w.sendMaxBytes {
+	if w.sendMaxBytes > 0 && data.Len() > w.sendMaxBytes && !env.isControlFrame() {
 		return errorf(CodeResourceExhausted, "compressed message size %d exceeds sendMaxBytes %d", data.Len(), w.sendMaxBytes)
 	}
 	return w.write(&envelope{
