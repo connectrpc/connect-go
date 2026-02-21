@@ -74,7 +74,9 @@ import (
 	"unicode/utf8"
 
 	connect "connectrpc.com/connect"
+	optionsv1 "connectrpc.com/connect/cmd/protoc-gen-connect-go/gen/connectrpc/go/options/v1"
 	"google.golang.org/protobuf/compiler/protogen"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/pluginpb"
@@ -85,6 +87,7 @@ const (
 	errorsPackage  = protogen.GoImportPath("errors")
 	httpPackage    = protogen.GoImportPath("net/http")
 	stringsPackage = protogen.GoImportPath("strings")
+	timePackage    = protogen.GoImportPath("time")
 	connectPackage = protogen.GoImportPath("connectrpc.com/connect")
 
 	generatedFilenameExtension = ".connect.go"
@@ -502,6 +505,7 @@ func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, s
 		isStreamingServer := method.Desc.IsStreamingServer()
 		isStreamingClient := method.Desc.IsStreamingClient()
 		idempotency := methodIdempotency(method)
+		timeouts := methodTimeouts(method)
 		switch {
 		case isStreamingClient && !isStreamingServer:
 			if simple {
@@ -533,6 +537,10 @@ func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, s
 		case connect.IdempotencyIdempotent:
 			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyIdempotent"), "),")
 		case connect.IdempotencyUnknown:
+		}
+		if timeouts != nil {
+			g.P(connectPackage.Ident("WithReadTimeout"), "(", timePackage.Ident("Duration"), "(", timeouts.ReadMs, ")*", timePackage.Ident("Millisecond"), "),")
+			g.P(connectPackage.Ident("WithWriteTimeout"), "(", timePackage.Ident("Duration"), "(", timeouts.WriteMs, ")*", timePackage.Ident("Millisecond"), "),")
 		}
 		g.P(connectPackage.Ident("WithHandlerOptions"), "(opts...),")
 		g.P(")")
@@ -676,6 +684,22 @@ func methodIdempotency(method *protogen.Method) connect.IdempotencyLevel {
 		return connect.IdempotencyUnknown
 	}
 	return connect.IdempotencyUnknown
+}
+
+func methodTimeouts(method *protogen.Method) *optionsv1.MethodTimeouts {
+	methodOptions, ok := method.Desc.Options().(*descriptorpb.MethodOptions)
+	if !ok {
+		return nil
+	}
+	if !proto.HasExtension(methodOptions, optionsv1.E_Timeouts) {
+		return nil
+	}
+	ext := proto.GetExtension(methodOptions, optionsv1.E_Timeouts)
+	opts, ok := ext.(*optionsv1.MethodTimeouts)
+	if !ok {
+		return nil
+	}
+	return opts
 }
 
 // Raggedy comments in the generated code are driving me insane. This

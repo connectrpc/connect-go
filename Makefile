@@ -81,8 +81,8 @@ generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/li
 	go mod tidy
 	cd ./internal/conformance && go mod tidy
 	buf generate
-	cd ./cmd/protoc-gen-connect-go/internal && \
-		find ./testdata -maxdepth 1 -type d \( ! -name testdata \) | xargs -n 1 -I % bash -c "cd '%' && buf generate"
+	buf generate --template cmd/protoc-gen-connect-go/proto/buf.gen.yaml
+	find ./cmd/protoc-gen-connect-go/internal/testdata -maxdepth 1 -type d \( ! -name testdata \) | xargs -n 1 -I % bash -c "buf generate --template '%/buf.gen.yaml'"
 	license-header \
 		--license-type apache \
 		--copyright-holder "The Connect Authors" \

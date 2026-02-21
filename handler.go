@@ -17,6 +17,7 @@ package connect
 import (
 	"context"
 	"net/http"
+	"time"
 )
 
 // A Handler is the server-side implementation of a single RPC defined by a
@@ -253,6 +254,24 @@ func NewBidiStreamHandler[Req, Res any](
 
 // ServeHTTP implements [http.Handler].
 func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
+	rc := http.NewResponseController(responseWriter)
+	if h.spec.ReadTimeout != 0 {
+		if h.spec.ReadTimeout > 0 {
+			rc.SetReadDeadline(time.Now().Add(h.spec.ReadTimeout))
+		} else {
+			// Negative timeout means no deadline.
+			rc.SetReadDeadline(time.Time{})
+		}
+	}
+	if h.spec.WriteTimeout != 0 {
+		if h.spec.WriteTimeout > 0 {
+			rc.SetWriteDeadline(time.Now().Add(h.spec.WriteTimeout))
+		} else {
+			// Negative timeout means no deadline.
+			rc.SetWriteDeadline(time.Time{})
+		}
+	}
+
 	// We don't need to defer functions to close the request body or read to
 	// EOF: the stream we construct later on already does that, and we only
 	// return early when dealing with misbehaving clients. In those cases, it's
@@ -347,6 +366,8 @@ type handlerConfig struct {
 	BufferPool                   *bufferPool
 	ReadMaxBytes                 int
 	SendMaxBytes                 int
+	ReadTimeout                  time.Duration
+	WriteTimeout                 time.Duration
 	StreamType                   StreamType
 }
 
@@ -374,6 +395,8 @@ func (c *handlerConfig) newSpec() Spec {
 		Schema:           c.Schema,
 		StreamType:       c.StreamType,
 		IdempotencyLevel: c.IdempotencyLevel,
+		ReadTimeout:      c.ReadTimeout,
+		WriteTimeout:     c.WriteTimeout,
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"time"
 )
 
 // A ClientOption configures a [Client].
@@ -175,6 +176,14 @@ func WithRequireConnectProtocolHeader() HandlerOption {
 // slice is safe.
 func WithConditionalHandlerOptions(conditional func(spec Spec) []HandlerOption) HandlerOption {
 	return &conditionalHandlerOptions{conditional: conditional}
+}
+
+func WithReadTimeout(timeout time.Duration) HandlerOption {
+	return &readTimeoutOption{timeout}
+}
+
+func WithWriteTimeout(timeout time.Duration) HandlerOption {
+	return &writeTimeoutOption{timeout}
 }
 
 // Option implements both [ClientOption] and [HandlerOption], so it can be
@@ -644,4 +653,20 @@ func (o *conditionalHandlerOptions) applyToHandler(config *handlerConfig) {
 	for _, option := range o.conditional(spec) {
 		option.applyToHandler(config)
 	}
+}
+
+type readTimeoutOption struct {
+	timeout time.Duration
+}
+
+func (o *readTimeoutOption) applyToHandler(config *handlerConfig) {
+	config.ReadTimeout = o.timeout
+}
+
+type writeTimeoutOption struct {
+	timeout time.Duration
+}
+
+func (o *writeTimeoutOption) applyToHandler(config *handlerConfig) {
+	config.WriteTimeout = o.timeout
 }

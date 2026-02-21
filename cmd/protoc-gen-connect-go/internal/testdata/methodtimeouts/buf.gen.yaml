@@ -1,0 +1,21 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/methodtimeouts/gen
+plugins:
+  - local: protoc-gen-go
+    out: cmd/protoc-gen-connect-go/internal/testdata/methodtimeouts/gen
+    opt: paths=source_relative
+  - local: .tmp/bin/protoc-gen-connect-go
+    out: cmd/protoc-gen-connect-go/internal/testdata/methodtimeouts/gen
+    opt: paths=source_relative
+clean: true
+inputs:
+  # This input is necessary for buf to resolve the connectrpc/go/options/v1/annotations.proto
+  # import in methodtimeouts.proto. However, we can then exclude those proto files in
+  # cmd/protoc-gen-connect-go/proto/connectrpc from being generated using exclude_paths.
+  - directory: cmd/protoc-gen-connect-go
+    exclude_paths: 
+      - cmd/protoc-gen-connect-go/proto/connectrpc
