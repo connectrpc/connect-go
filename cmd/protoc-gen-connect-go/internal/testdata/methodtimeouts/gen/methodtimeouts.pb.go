@@ -21,7 +21,7 @@
 package gen
 
 import (
-	_ "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/methodtimeouts/gen/connectrpc/go/options/v1"
+	_ "connectrpc.com/connect/cmd/protoc-gen-connect-go/gen/connectrpc/go/options/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -122,8 +122,7 @@ const file_methodtimeouts_proto_rawDesc = "" +
 	"\x8a\xb5\x18\x06\b\xe8\a\x10\xd0\x0f\x12t\n" +
 	"\aMethod2\x12%.connect.test.method_timeouts.Request\x1a&.connect.test.method_timeouts.Response\"\x1a\x8a\xb5\x18\x16\b\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01\x12a\n" +
 	"\aMethod3\x12%.connect.test.method_timeouts.Request\x1a&.connect.test.method_timeouts.Response\"\a\x8a\xb5\x18\x03\b\xe8\a\x12a\n" +
-	"\aMethod4\x12%.connect.test.method_timeouts.Request\x1a&.connect.test.method_timeouts.Response\"\a\x8a\xb5\x18\x03\b\xe8\aB\x9c\x02\n" +
-	" com.connect.test.method_timeoutsB\x13MethodtimeoutsProtoP\x01ZUconnectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/methodtimeouts/gen\xa2\x02\x03CTM\xaa\x02\x1bConnect.Test.MethodTimeouts\xca\x02\x1bConnect\\Test\\MethodTimeouts\xe2\x02'Connect\\Test\\MethodTimeouts\\GPBMetadata\xea\x02\x1dConnect::Test::MethodTimeoutsb\x06proto3"
+	"\aMethod4\x12%.connect.test.method_timeouts.Request\x1a&.connect.test.method_timeouts.Response\"\a\x8a\xb5\x18\x03\b\xe8\aB[ZYconnectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/methodtimeouts/gen;genb\x06proto3"
 
 var (
 	file_methodtimeouts_proto_rawDescOnce sync.Once

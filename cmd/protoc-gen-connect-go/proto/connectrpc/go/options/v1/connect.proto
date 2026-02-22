@@ -16,6 +16,8 @@ syntax = "proto3";
 
 package connectrpc.go.options.v1;
 
+option go_package = "connectrpc.com/connect/cmd/protoc-gen-connect-go/gen/connectrpc/go/options/v1;optionsv1";
+
 message MethodTimeouts {
 	// Timeout in milliseconds to read the entire request 
 	// (including the body).

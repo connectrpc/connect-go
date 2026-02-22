@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -36,10 +37,12 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/pluginpb"
 
+	optionsv1 "connectrpc.com/connect/cmd/protoc-gen-connect-go/gen/connectrpc/go/options/v1"
 	defaultpackage "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/defaultpackage/gen"
 	defaultpackageconnect "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/defaultpackage/gen/genconnect"
 	diffpackage "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/diffpackage/gen"
 	diffpackagediff "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/diffpackage/gen/gendiff"
+	methodtimeouts "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/methodtimeouts/gen"
 	noservice "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/noservice/gen"
 	samepackage "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/samepackage/gen"
 	simple "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/simple/gen"
@@ -149,6 +152,32 @@ func TestGenerate(t *testing.T) {
 		assert.Equal(t, file.GetName(), "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/diffpackage/gen/gendiff/diffpackage.connect.go")
 		assert.NotZero(t, file.GetContent())
 		testCmpToTestdata(t, file.GetContent(), "internal/testdata/diffpackage/gen/gendiff/diffpackage.connect.go")
+	})
+	// Check generated code with method timeouts.
+	t.Run("methodtimeouts.proto", func(t *testing.T) {
+		t.Parallel()
+		fmt.Println(protodesc.ToFileDescriptorProto(optionsv1.File_connectrpc_go_options_v1_annotations_proto).GetName())
+		methodTimeoutsFileDesc := protodesc.ToFileDescriptorProto(methodtimeouts.File_methodtimeouts_proto)
+		req := &pluginpb.CodeGeneratorRequest{
+			FileToGenerate: []string{"methodtimeouts.proto"},
+			ProtoFile: []*descriptorpb.FileDescriptorProto{
+				// ProtoFile needs dependencies listed before the files that depend on them. 
+				protodesc.ToFileDescriptorProto(descriptorpb.File_google_protobuf_descriptor_proto),
+				protodesc.ToFileDescriptorProto(optionsv1.File_connectrpc_go_options_v1_connect_proto),
+				protodesc.ToFileDescriptorProto(optionsv1.File_connectrpc_go_options_v1_annotations_proto),
+				methodTimeoutsFileDesc,
+			},
+			SourceFileDescriptors: []*descriptorpb.FileDescriptorProto{methodTimeoutsFileDesc},
+			CompilerVersion:       compilerVersion,
+		}
+		rsp := testGenerate(t, req)
+		assert.Nil(t, rsp.Error)
+
+		assert.Equal(t, len(rsp.File), 1)
+		file := rsp.File[0]
+		assert.Equal(t, file.GetName(), "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/methodtimeouts/gen/genconnect/methodtimeouts.connect.go")
+		assert.NotZero(t, file.GetContent())
+		testCmpToTestdata(t, file.GetContent(), "internal/testdata/methodtimeouts/gen/genconnect/methodtimeouts.connect.go")
 	})
 	// Validate package_suffix option.
 	t.Run("ping.proto:invalid_package_suffix", func(t *testing.T) {

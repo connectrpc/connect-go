@@ -19,6 +19,8 @@ package connectrpc.go.options.v1;
 import "google/protobuf/descriptor.proto";
 import "connectrpc/go/options/v1/connect.proto";
 
+option go_package = "connectrpc.com/connect/cmd/protoc-gen-connect-go/gen/connectrpc/go/options/v1;optionsv1";
+
 extend google.protobuf.MethodOptions {
   // We should get a unique ID from protobuf-global-extension-registry@google.com
   // for ConnectRPC project, and use it as the field number here.

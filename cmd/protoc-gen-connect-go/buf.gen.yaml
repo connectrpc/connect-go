@@ -1,9 +1,4 @@
 version: v2
-managed:
-  enabled: true
-  override:
-    - file_option: go_package_prefix
-      value: connectrpc.com/connect/cmd/protoc-gen-connect-go
 plugins:
   - local: protoc-gen-go
     out: gen

@@ -255,21 +255,9 @@ func NewBidiStreamHandler[Req, Res any](
 // ServeHTTP implements [http.Handler].
 func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
 	responseController := http.NewResponseController(responseWriter)
-
-	readDeadline := getDeadline(h.spec.ReadTimeout)
-	if readDeadline != nil {
-		if err := responseController.SetReadDeadline(*readDeadline); err != nil {
-			responseWriter.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-	}
-
-	writeDeadline := getDeadline(h.spec.WriteTimeout)
-	if writeDeadline != nil {
-		if err := responseController.SetWriteDeadline(*writeDeadline); err != nil {
-			responseWriter.WriteHeader(http.StatusInternalServerError)
-			return
-		}
+	if err := applyDeadlines(h.spec.ReadTimeout, h.spec.WriteTimeout, responseController); err != nil {
+		responseWriter.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
 	// We don't need to defer functions to close the request body or read to
@@ -365,6 +353,30 @@ func getDeadline(timeout time.Duration) *time.Time {
 	}
 	t := time.Now().Add(timeout)
 	return &t
+}
+
+// deadlineSetter sets read/write deadlines. *http.ResponseController implements this.
+type deadlineSetter interface {
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
+}
+
+// applyDeadlines applies read and write timeouts to the setter (e.g. an http.ResponseController).
+// It returns an error if setting any deadline fails to be set.
+func applyDeadlines(readTimeout, writeTimeout time.Duration, setter deadlineSetter) error {
+	readDeadline := getDeadline(readTimeout)
+	if readDeadline != nil {
+		if err := setter.SetReadDeadline(*readDeadline); err != nil {
+			return err
+		}
+	}
+	writeDeadline := getDeadline(writeTimeout)
+	if writeDeadline != nil {
+		if err := setter.SetWriteDeadline(*writeDeadline); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type handlerConfig struct {

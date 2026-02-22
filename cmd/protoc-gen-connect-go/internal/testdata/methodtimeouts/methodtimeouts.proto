@@ -18,6 +18,8 @@ package connect.test.method_timeouts;
 
 import "connectrpc/go/options/v1/annotations.proto";
 
+option go_package = "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/methodtimeouts/gen;gen";
+
 message Request {}
 
 message Response {}

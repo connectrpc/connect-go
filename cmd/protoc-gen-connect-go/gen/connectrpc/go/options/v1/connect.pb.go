@@ -99,8 +99,7 @@ const file_connectrpc_go_options_v1_connect_proto_rawDesc = "" +
 	"&connectrpc/go/options/v1/connect.proto\x12\x18connectrpc.go.options.v1\"D\n" +
 	"\x0eMethodTimeouts\x12\x17\n" +
 	"\aread_ms\x18\x01 \x01(\x03R\x06readMs\x12\x19\n" +
-	"\bwrite_ms\x18\x02 \x01(\x03R\awriteMsB\x84\x02\n" +
-	"\x1ccom.connectrpc.go.options.v1B\fConnectProtoP\x01ZSconnectrpc.com/connect/cmd/protoc-gen-connect-go/connectrpc/go/options/v1;optionsv1\xa2\x02\x03CGO\xaa\x02\x18Connectrpc.Go.Options.V1\xca\x02\x18Connectrpc\\Go\\Options\\V1\xe2\x02$Connectrpc\\Go\\Options\\V1\\GPBMetadata\xea\x02\x1bConnectrpc::Go::Options::V1b\x06proto3"
+	"\bwrite_ms\x18\x02 \x01(\x03R\awriteMsBYZWconnectrpc.com/connect/cmd/protoc-gen-connect-go/gen/connectrpc/go/options/v1;optionsv1b\x06proto3"
 
 var (
 	file_connectrpc_go_options_v1_connect_proto_rawDescOnce sync.Once
