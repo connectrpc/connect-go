@@ -362,7 +362,7 @@ type deadlineSetter interface {
 }
 
 // applyDeadlines applies read and write timeouts to the setter (e.g. an http.ResponseController).
-// It returns an error if setting any deadline fails to be set.
+// It returns an error if setting any deadline fails.
 func applyDeadlines(readTimeout, writeTimeout time.Duration, setter deadlineSetter) error {
 	readDeadline := getDeadline(readTimeout)
 	if readDeadline != nil {
