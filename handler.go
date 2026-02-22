@@ -254,21 +254,21 @@ func NewBidiStreamHandler[Req, Res any](
 
 // ServeHTTP implements [http.Handler].
 func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
-	rc := http.NewResponseController(responseWriter)
-	if h.spec.ReadTimeout != 0 {
-		if h.spec.ReadTimeout > 0 {
-			rc.SetReadDeadline(time.Now().Add(h.spec.ReadTimeout))
-		} else {
-			// Negative timeout means no deadline.
-			rc.SetReadDeadline(time.Time{})
+	responseController := http.NewResponseController(responseWriter)
+
+	readDeadline := getDeadline(h.spec.ReadTimeout)
+	if readDeadline != nil {
+		if err := responseController.SetReadDeadline(*readDeadline); err != nil {
+			responseWriter.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 	}
-	if h.spec.WriteTimeout != 0 {
-		if h.spec.WriteTimeout > 0 {
-			rc.SetWriteDeadline(time.Now().Add(h.spec.WriteTimeout))
-		} else {
-			// Negative timeout means no deadline.
-			rc.SetWriteDeadline(time.Time{})
+
+	writeDeadline := getDeadline(h.spec.WriteTimeout)
+	if writeDeadline != nil {
+		if err := responseController.SetWriteDeadline(*writeDeadline); err != nil {
+			responseWriter.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 	}
 
@@ -350,6 +350,21 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 		return
 	}
 	_ = connCloser.Close(h.implementation(ctx, connCloser))
+}
+
+// getDeadline returns a pointer to a time.Time with the given timeout.
+// If the timeout is 0 (i.e. not set), nil is returned.
+// If the timeout is negative, the zero value is returned to indicate no deadline.
+// Otherwise, a time.Time with the given timeout is returned.
+func getDeadline(timeout time.Duration) *time.Time {
+	if timeout == 0 {
+		return nil
+	}
+	if timeout < 0 {
+		return &time.Time{}
+	}
+	t := time.Now().Add(timeout)
+	return &t
 }
 
 type handlerConfig struct {

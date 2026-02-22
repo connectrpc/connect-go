@@ -691,15 +691,17 @@ func methodTimeouts(method *protogen.Method) *optionsv1.MethodTimeouts {
 	if !ok {
 		return nil
 	}
+
 	if !proto.HasExtension(methodOptions, optionsv1.E_Timeouts) {
 		return nil
 	}
 	ext := proto.GetExtension(methodOptions, optionsv1.E_Timeouts)
-	opts, ok := ext.(*optionsv1.MethodTimeouts)
-	if !ok {
+
+	timeouts, timeoutsOk := ext.(*optionsv1.MethodTimeouts)
+	if !timeoutsOk {
 		return nil
 	}
-	return opts
+	return timeouts
 }
 
 // Raggedy comments in the generated code are driving me insane. This
