@@ -21,9 +21,9 @@ option go_package = "connectrpc.com/connect/cmd/protoc-gen-connect-go/gen/connec
 message MethodTimeouts {
 	// Timeout in milliseconds to read the entire request 
 	// (including the body).
-	// A value of -1 means no timeout.
+	// A negative value means no timeout.
 	int64 read_ms = 1;
 	// Timeout in milliseconds for writing the response.
-	// A value of -1 means no timeout.
+	// A negative value means no timeout.
 	int64 write_ms = 2;
 }

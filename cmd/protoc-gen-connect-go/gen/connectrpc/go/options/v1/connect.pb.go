@@ -39,10 +39,10 @@ type MethodTimeouts struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Timeout in milliseconds to read the entire request
 	// (including the body).
-	// A value of -1 means no timeout.
+	// A negative value means no timeout.
 	ReadMs int64 `protobuf:"varint,1,opt,name=read_ms,json=readMs,proto3" json:"read_ms,omitempty"`
 	// Timeout in milliseconds for writing the response.
-	// A value of -1 means no timeout.
+	// A negative value means no timeout.
 	WriteMs       int64 `protobuf:"varint,2,opt,name=write_ms,json=writeMs,proto3" json:"write_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
