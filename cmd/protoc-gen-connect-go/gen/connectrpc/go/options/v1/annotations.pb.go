@@ -60,8 +60,8 @@ var File_connectrpc_go_options_v1_annotations_proto protoreflect.FileDescriptor
 const file_connectrpc_go_options_v1_annotations_proto_rawDesc = "" +
 	"\n" +
 	"*connectrpc/go/options/v1/annotations.proto\x12\x18connectrpc.go.options.v1\x1a google/protobuf/descriptor.proto\x1a&connectrpc/go/options/v1/connect.proto:f\n" +
-	"\btimeouts\x12\x1e.google.protobuf.MethodOptions\x18ц\x03 \x01(\v2(.connectrpc.go.options.v1.MethodTimeoutsR\btimeoutsB\x8c\x02\n" +
-	"\x1ccom.connectrpc.go.options.v1B\x10AnnotationsProtoP\x01ZWconnectrpc.com/connect/cmd/protoc-gen-connect-go/gen/connectrpc/go/options/v1;optionsv1\xa2\x02\x03CGO\xaa\x02\x18Connectrpc.Go.Options.V1\xca\x02\x18Connectrpc\\Go\\Options\\V1\xe2\x02$Connectrpc\\Go\\Options\\V1\\GPBMetadata\xea\x02\x1bConnectrpc::Go::Options::V1b\x06proto3"
+	"\btimeouts\x12\x1e.google.protobuf.MethodOptions\x18ц\x03 \x01(\v2(.connectrpc.go.options.v1.MethodTimeoutsR\btimeoutsB\x88\x02\n" +
+	"\x1ccom.connectrpc.go.options.v1B\x10AnnotationsProtoP\x01ZSconnectrpc.com/connect/cmd/protoc-gen-connect-go/connectrpc/go/options/v1;optionsv1\xa2\x02\x03CGO\xaa\x02\x18Connectrpc.Go.Options.V1\xca\x02\x18Connectrpc\\Go\\Options\\V1\xe2\x02$Connectrpc\\Go\\Options\\V1\\GPBMetadata\xea\x02\x1bConnectrpc::Go::Options::V1b\x06proto3"
 
 var file_connectrpc_go_options_v1_annotations_proto_goTypes = []any{
 	(*descriptorpb.MethodOptions)(nil), // 0: google.protobuf.MethodOptions

@@ -76,13 +76,17 @@ lintfix: $(BIN)/golangci-lint $(BIN)/buf ## Automatically fix some lint errors
 	golangci-lint run --fix --modules-download-mode=readonly --timeout=3m0s
 	buf format -w
 
+.PHONY: generate-annotations
+generate-annotations: $(BIN)/buf $(BIN)/protoc-gen-go  ## Generate only the proto annotations (no protoc-gen-connect-go needed)
+	cd ./cmd/protoc-gen-connect-go && buf generate
+
 .PHONY: generate
-generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
+generate: generate-annotations $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
 	go mod tidy
 	cd ./internal/conformance && go mod tidy
 	buf generate
-	buf generate --template cmd/protoc-gen-connect-go/proto/buf.gen.yaml
-	find ./cmd/protoc-gen-connect-go/internal/testdata -maxdepth 1 -type d \( ! -name testdata \) | xargs -n 1 -I % bash -c "buf generate --template '%/buf.gen.yaml'"
+	cd ./cmd/protoc-gen-connect-go/internal && \
+		find ./testdata -maxdepth 1 -type d \( ! -name testdata \) | xargs -n 1 -I % bash -c "cd '%' && buf generate"
 	license-header \
 		--license-type apache \
 		--copyright-holder "The Connect Authors" \

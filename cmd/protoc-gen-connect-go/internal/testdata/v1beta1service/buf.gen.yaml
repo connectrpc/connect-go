@@ -6,13 +6,11 @@ managed:
       value: connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/v1beta1service/gen
 plugins:
   - local: protoc-gen-go
-    out: cmd/protoc-gen-connect-go/internal/testdata/v1beta1service/gen
+    out: gen
     opt: paths=source_relative
   - local: protoc-gen-connect-go
-    out: cmd/protoc-gen-connect-go/internal/testdata/v1beta1service/gen
+    out: gen
     opt:
       - paths=source_relative
       - package_suffix
 clean: true
-inputs:
-  - directory: cmd/protoc-gen-connect-go/internal/testdata/v1beta1service

@@ -1,8 +1,6 @@
 version: v2
 modules:
   - path: internal/proto
-  - path: cmd/protoc-gen-connect-go/proto
-  - path: cmd/protoc-gen-connect-go/internal/testdata/methodtimeouts
 lint:
   use:
     - STANDARD

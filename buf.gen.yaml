@@ -17,5 +17,3 @@ plugins:
       - paths=source_relative
       - simple
 clean: true
-inputs:
-  - directory: internal/proto
