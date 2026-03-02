@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ package connect
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -55,7 +54,6 @@ func TestConnectErrorDetailMarshaling(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -122,7 +120,7 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 
 	unmarshaler := connectStreamingUnmarshaler{
 		envelopeReader: envelopeReader{
-			ctx:        context.Background(),
+			ctx:        t.Context(),
 			reader:     &buffer,
 			bufferPool: bufferPool,
 		},
@@ -259,7 +257,6 @@ func TestConnectValidateUnaryResponseContentType(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		testCase := testCase
 		httpMethod := http.MethodPost
 		if testCase.get {
 			httpMethod = http.MethodGet
@@ -346,7 +343,6 @@ func TestConnectValidateStreamResponseContentType(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		testCase := testCase
 		testCaseName := fmt.Sprintf("%s->%s", testCase.codecName, testCase.responseContentType)
 		t.Run(testCaseName, func(t *testing.T) {
 			t.Parallel()

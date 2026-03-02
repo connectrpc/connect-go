@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,11 +23,11 @@
 //
 // With [buf], your buf.gen.yaml will look like this:
 //
-//	version: v1
+//	version: v2
 //	plugins:
-//	  - name: go
+//	  - local: protoc-gen-go
 //	    out: gen
-//	  - name: connect-go
+//	  - local: protoc-gen-connect-go
 //	    out: gen
 //
 // This generates service definitions for the Protobuf types and services
@@ -35,14 +35,38 @@
 // invocations above will write output to:
 //
 //	gen/path/to/file.pb.go
-//	gen/path/to/connectfoov1/file.connect.go
+//	gen/path/to/foov1connect/file.connect.go
+//
+// The generated code is configurable with the same parameters as the protoc-gen-go
+// plugin, with the following additional parameters:
+//
+//   - package_suffix: To generate into a sub-package of the package containing the
+//     base .pb.go files using the given suffix. An empty suffix denotes to
+//     generate into the same package as the base pb.go files. Default is "connect".
+//
+// For example, to generate into the same package as the base .pb.go files:
+//
+//	version: v2
+//	plugins:
+//	  - local: protoc-gen-go
+//	    out: gen
+//	  - local: protoc-gen-connect-go
+//	    out: gen
+//	    opt: package_suffix
+//
+// This will generate output to:
+//
+//	gen/path/to/file.pb.go
+//	gen/path/to/file.connect.go
 //
 // [buf]: https://buf.build
 package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
+	"go/token"
 	"os"
 	"path"
 	"path/filepath"
@@ -64,7 +88,9 @@ const (
 	connectPackage = protogen.GoImportPath("connectrpc.com/connect")
 
 	generatedFilenameExtension = ".connect.go"
-	generatedPackageSuffix     = "connect"
+	defaultPackageSuffix       = "connect"
+	packageSuffixFlagName      = "package_suffix"
+	simpleFlagName             = "simple"
 
 	usage = "See https://connectrpc.com/docs/go/getting-started to learn how to use this plugin.\n\nFlags:\n  -h, --help\tPrint this help and exit.\n      --version\tPrint the version and exit."
 
@@ -89,14 +115,33 @@ func main() {
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(1)
 	}
-	protogen.Options{}.Run(
+	var flagSet flag.FlagSet
+	packageSuffix := flagSet.String(
+		packageSuffixFlagName,
+		defaultPackageSuffix,
+		"Generate files into a sub-package of the package containing the base .pb.go files using the given suffix. An empty suffix denotes to generate into the same package as the base pb.go files.",
+	)
+	// "simple" is a bool, but we want to support just setting "simple" without needing to set "simple=true"
+	// We do this via making the flag a string, and then parsing manually in getSimpleBool.
+	simpleString := flagSet.String(
+		simpleFlagName,
+		"false",
+		"Generate client and handler interfaces with simple function signatures. This eliminates the wrapper connect.Request and connect.Response types, instead having functions directly use generated RPC request and responses. Clients and handlers will instead use context.Contexts to propagate information such as headers. Most users will be more familiar with these interfaces than the default.",
+	)
+	protogen.Options{
+		ParamFunc: flagSet.Set,
+	}.Run(
 		func(plugin *protogen.Plugin) error {
 			plugin.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL) | uint64(pluginpb.CodeGeneratorResponse_FEATURE_SUPPORTS_EDITIONS)
+			simple, err := getSimpleBool(*simpleString)
+			if err != nil {
+				return err
+			}
 			plugin.SupportedEditionsMinimum = descriptorpb.Edition_EDITION_PROTO2
-			plugin.SupportedEditionsMaximum = descriptorpb.Edition_EDITION_2023
+			plugin.SupportedEditionsMaximum = descriptorpb.Edition_EDITION_2024
 			for _, file := range plugin.Files {
 				if file.Generate {
-					generate(plugin, file)
+					generate(plugin, file, *packageSuffix, simple)
 				}
 			}
 			return nil
@@ -104,31 +149,40 @@ func main() {
 	)
 }
 
-func generate(plugin *protogen.Plugin, file *protogen.File) {
+func generate(plugin *protogen.Plugin, file *protogen.File, packageSuffix string, simple bool) {
 	if len(file.Services) == 0 {
 		return
 	}
-	file.GoPackageName += generatedPackageSuffix
 
-	generatedFilenamePrefixToSlash := filepath.ToSlash(file.GeneratedFilenamePrefix)
-	file.GeneratedFilenamePrefix = path.Join(
-		path.Dir(generatedFilenamePrefixToSlash),
-		string(file.GoPackageName),
-		path.Base(generatedFilenamePrefixToSlash),
-	)
-	generatedFile := plugin.NewGeneratedFile(
-		file.GeneratedFilenamePrefix+generatedFilenameExtension,
-		protogen.GoImportPath(path.Join(
+	goImportPath := file.GoImportPath
+	if packageSuffix != "" {
+		if !token.IsIdentifier(packageSuffix) {
+			plugin.Error(fmt.Errorf("package_suffix %q is not a valid Go identifier", packageSuffix))
+			return
+		}
+		file.GoPackageName += protogen.GoPackageName(packageSuffix)
+		generatedFilenamePrefixToSlash := filepath.ToSlash(file.GeneratedFilenamePrefix)
+		file.GeneratedFilenamePrefix = path.Join(
+			path.Dir(generatedFilenamePrefixToSlash),
+			string(file.GoPackageName),
+			path.Base(generatedFilenamePrefixToSlash),
+		)
+		goImportPath = protogen.GoImportPath(path.Join(
 			string(file.GoImportPath),
 			string(file.GoPackageName),
-		)),
+		))
+	}
+	generatedFile := plugin.NewGeneratedFile(
+		file.GeneratedFilenamePrefix+generatedFilenameExtension,
+		goImportPath,
 	)
-	generatedFile.Import(file.GoImportPath)
+	if packageSuffix != "" {
+		generatedFile.Import(file.GoImportPath)
+	}
 	generatePreamble(generatedFile, file)
 	generateServiceNameConstants(generatedFile, file.Services)
-	generateServiceNameVariables(generatedFile, file)
 	for _, service := range file.Services {
-		generateService(generatedFile, service)
+		generateService(generatedFile, file, service, simple)
 	}
 }
 
@@ -213,33 +267,26 @@ func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protoge
 	g.P()
 }
 
-func generateServiceNameVariables(g *protogen.GeneratedFile, file *protogen.File) {
-	wrapComments(g, "These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.")
-	g.P("var (")
-	for _, service := range file.Services {
-		serviceDescName := unexport(fmt.Sprintf("%sServiceDescriptor", service.Desc.Name()))
-		g.P(serviceDescName, ` = `,
-			g.QualifiedGoIdent(file.GoDescriptorIdent),
-			`.Services().ByName("`, service.Desc.Name(), `")`)
-		for _, method := range service.Methods {
-			g.P(procedureVarMethodDescriptor(method), ` = `,
-				serviceDescName,
-				`.Methods().ByName("`, method.Desc.Name(), `")`)
-		}
+func generateServiceMethodsVar(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service) {
+	if len(service.Methods) == 0 {
+		return
 	}
-	g.P(")")
+	serviceMethodsName := serviceVarMethodsName(service)
+	g.P(serviceMethodsName, ` := `,
+		g.QualifiedGoIdent(file.GoDescriptorIdent),
+		`.Services().ByName("`, service.Desc.Name(), `").Methods()`)
 }
 
-func generateService(g *protogen.GeneratedFile, service *protogen.Service) {
+func generateService(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, simple bool) {
 	names := newNames(service)
-	generateClientInterface(g, service, names)
-	generateClientImplementation(g, service, names)
-	generateServerInterface(g, service, names)
-	generateServerConstructor(g, service, names)
-	generateUnimplementedServerImplementation(g, service, names)
+	generateClientInterface(g, service, names, simple)
+	generateClientImplementation(g, file, service, names, simple)
+	generateServerInterface(g, service, names, simple)
+	generateServerConstructor(g, file, service, names, simple)
+	generateUnimplementedServerImplementation(g, service, names, simple)
 }
 
-func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Service, names names, simple bool) {
 	wrapComments(g, names.Client, " is a client for the ", service.Desc.FullName(), " service.")
 	if isDeprecatedService(service) {
 		g.P("//")
@@ -254,13 +301,13 @@ func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Servic
 			method.Comments.Leading,
 			isDeprecatedMethod(method),
 		)
-		g.P(clientSignature(g, method, false /* named */))
+		g.P(clientSignature(g, method, false /* named */, simple))
 	}
 	g.P("}")
 	g.P()
 }
 
-func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateClientImplementation(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, names names, simple bool) {
 	clientOption := connectPackage.Ident("ClientOption")
 
 	// Client constructor.
@@ -281,6 +328,7 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 	if len(service.Methods) > 0 {
 		g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
 	}
+	generateServiceMethodsVar(g, file, service)
 	g.P("return &", names.ClientImpl, "{")
 	for _, method := range service.Methods {
 		g.P(unexport(method.GoName), ": ",
@@ -316,11 +364,11 @@ func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.S
 	g.P("}")
 	g.P()
 	for _, method := range service.Methods {
-		generateClientMethod(g, method, names)
+		generateClientMethod(g, method, names, simple)
 	}
 }
 
-func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, names names) {
+func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, names names, simple bool) {
 	receiver := names.ClientImpl
 	isStreamingClient := method.Desc.IsStreamingClient()
 	isStreamingServer := method.Desc.IsStreamingServer()
@@ -329,23 +377,43 @@ func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, na
 		g.P("//")
 		deprecated(g)
 	}
-	g.P("func (c *", receiver, ") ", clientSignature(g, method, true /* named */), " {")
+	g.P("func (c *", receiver, ") ", clientSignature(g, method, true /* named */, simple), " {")
 
 	switch {
 	case isStreamingClient && !isStreamingServer:
-		g.P("return c.", unexport(method.GoName), ".CallClientStream(ctx)")
+		if simple {
+			g.P("return c.", unexport(method.GoName), ".CallClientStreamSimple(ctx)")
+		} else {
+			g.P("return c.", unexport(method.GoName), ".CallClientStream(ctx)")
+		}
 	case !isStreamingClient && isStreamingServer:
-		g.P("return c.", unexport(method.GoName), ".CallServerStream(ctx, req)")
+		if simple {
+			g.P("return c.", unexport(method.GoName), ".CallServerStream(ctx, ", connectPackage.Ident("NewRequest"), "(req))")
+		} else {
+			g.P("return c.", unexport(method.GoName), ".CallServerStream(ctx, req)")
+		}
 	case isStreamingClient && isStreamingServer:
-		g.P("return c.", unexport(method.GoName), ".CallBidiStream(ctx)")
+		if simple {
+			g.P("return c.", unexport(method.GoName), ".CallBidiStreamSimple(ctx)")
+		} else {
+			g.P("return c.", unexport(method.GoName), ".CallBidiStream(ctx)")
+		}
 	default:
-		g.P("return c.", unexport(method.GoName), ".CallUnary(ctx, req)")
+		if simple {
+			g.P("response, err := c.", unexport(method.GoName), ".CallUnary(ctx, ", connectPackage.Ident("NewRequest"), "(req))")
+			g.P("if response != nil {")
+			g.P("return response.Msg, err")
+			g.P("}")
+			g.P("return nil, err")
+		} else {
+			g.P("return c.", unexport(method.GoName), ".CallUnary(ctx, req)")
+		}
 	}
 	g.P("}")
 	g.P()
 }
 
-func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named bool) string {
+func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named bool, simple bool) string {
 	reqName := "req"
 	ctxName := "ctx"
 	if !named {
@@ -353,17 +421,37 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named b
 	}
 	if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
 		// bidi streaming
+		if simple {
+			return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
+				"(*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClientSimple")) +
+				"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
+				", error)"
+		}
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
 			"*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClient")) +
 			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
 	}
 	if method.Desc.IsStreamingClient() {
 		// client streaming
+		if simple {
+			return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
+				"(*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClientSimple")) +
+				"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
+				", error)"
+		}
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
 			"*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClient")) +
 			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
 	}
 	if method.Desc.IsStreamingServer() {
+		if simple {
+			return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
+				", " + reqName + " *" +
+				g.QualifiedGoIdent(method.Input.GoIdent) + ") " +
+				"(*" + g.QualifiedGoIdent(connectPackage.Ident("ServerStreamForClient")) +
+				"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
+				", error)"
+		}
 		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
 			", " + reqName + " *" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
 			g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
@@ -372,10 +460,10 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named b
 			", error)"
 	}
 	// unary; symmetric so we can re-use server templating
-	return method.GoName + serverSignatureParams(g, method, named)
+	return method.GoName + serverSignatureParams(g, method, named, simple)
 }
 
-func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Service, names names, simple bool) {
 	wrapComments(g, names.Server, " is an implementation of the ", service.Desc.FullName(), " service.")
 	if isDeprecatedService(service) {
 		g.P("//")
@@ -390,13 +478,13 @@ func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Servic
 			isDeprecatedMethod(method),
 		)
 		g.AnnotateSymbol(names.Server+"."+method.GoName, protogen.Annotation{Location: method.Location})
-		g.P(serverSignature(g, method))
+		g.P(serverSignature(g, method, simple))
 	}
 	g.P("}")
 	g.P()
 }
 
-func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, names names, simple bool) {
 	wrapComments(g, names.ServerConstructor, " builds an HTTP handler from the service implementation.",
 		" It returns the path on which to mount the handler and the handler itself.")
 	g.P("//")
@@ -409,19 +497,32 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 	handlerOption := connectPackage.Ident("HandlerOption")
 	g.P("func ", names.ServerConstructor, "(svc ", names.Server, ", opts ...", handlerOption,
 		") (string, ", httpPackage.Ident("Handler"), ") {")
+	generateServiceMethodsVar(g, file, service)
 	for _, method := range service.Methods {
 		isStreamingServer := method.Desc.IsStreamingServer()
 		isStreamingClient := method.Desc.IsStreamingClient()
 		idempotency := methodIdempotency(method)
 		switch {
 		case isStreamingClient && !isStreamingServer:
-			g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewClientStreamHandler"), "(")
+			if simple {
+				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewClientStreamHandlerSimple"), "(")
+			} else {
+				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewClientStreamHandler"), "(")
+			}
 		case !isStreamingClient && isStreamingServer:
-			g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewServerStreamHandler"), "(")
+			if simple {
+				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewServerStreamHandlerSimple"), "(")
+			} else {
+				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewServerStreamHandler"), "(")
+			}
 		case isStreamingClient && isStreamingServer:
 			g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewBidiStreamHandler"), "(")
 		default:
-			g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewUnaryHandler"), "(")
+			if simple {
+				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewUnaryHandlerSimple"), "(")
+			} else {
+				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewUnaryHandler"), "(")
+			}
 		}
 		g.P(procedureConstName(method), `,`)
 		g.P("svc.", method.GoName, ",")
@@ -450,12 +551,12 @@ func generateServerConstructor(g *protogen.GeneratedFile, service *protogen.Serv
 	g.P()
 }
 
-func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names) {
+func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names, simple bool) {
 	wrapComments(g, names.UnimplementedServer, " returns CodeUnimplemented from all methods.")
 	g.P("type ", names.UnimplementedServer, " struct {}")
 	g.P()
 	for _, method := range service.Methods {
-		g.P("func (", names.UnimplementedServer, ") ", serverSignature(g, method), "{")
+		g.P("func (", names.UnimplementedServer, ") ", serverSignature(g, method, simple), "{")
 		if method.Desc.IsStreamingServer() {
 			g.P("return ", connectPackage.Ident("NewError"), "(",
 				connectPackage.Ident("CodeUnimplemented"), ", ", errorsPackage.Ident("New"),
@@ -471,11 +572,11 @@ func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, servic
 	g.P()
 }
 
-func serverSignature(g *protogen.GeneratedFile, method *protogen.Method) string {
-	return method.GoName + serverSignatureParams(g, method, false /* named */)
+func serverSignature(g *protogen.GeneratedFile, method *protogen.Method, simple bool) string {
+	return method.GoName + serverSignatureParams(g, method, false /* named */, simple)
 }
 
-func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, named bool) string {
+func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, named bool, simple bool) string {
 	ctxName := "ctx "
 	reqName := "req "
 	streamName := "stream "
@@ -491,6 +592,12 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 	}
 	if method.Desc.IsStreamingClient() {
 		// client streaming
+		if simple {
+			return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ", " +
+				streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStream")) +
+				"[" + g.QualifiedGoIdent(method.Input.GoIdent) + "]" +
+				") (*" + g.QualifiedGoIdent(method.Output.GoIdent) + " ,error)"
+		}
 		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ", " +
 			streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStream")) +
 			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + "]" +
@@ -498,6 +605,14 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 	}
 	if method.Desc.IsStreamingServer() {
 		// server streaming
+		if simple {
+			return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
+				", " + reqName + " *" +
+				g.QualifiedGoIdent(method.Input.GoIdent) + ", " +
+				streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ServerStream")) +
+				"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
+				") error"
+		}
 		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
 			", " + reqName + "*" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
 			g.QualifiedGoIdent(method.Input.GoIdent) + "], " +
@@ -506,8 +621,15 @@ func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, n
 			") error"
 	}
 	// unary
+	if simple {
+		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
+			", " + reqName + " *" +
+			g.QualifiedGoIdent(method.Input.GoIdent) + ") " +
+			"(*" +
+			g.QualifiedGoIdent(method.Output.GoIdent) + ", error)"
+	}
 	return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
-		", " + reqName + "*" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
+		", " + reqName + " *" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
 		g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
 		"(*" + g.QualifiedGoIdent(connectPackage.Ident("Response")) + "[" +
 		g.QualifiedGoIdent(method.Output.GoIdent) + "], error)"
@@ -521,8 +643,13 @@ func procedureHandlerName(m *protogen.Method) string {
 	return fmt.Sprintf("%s%sHandler", unexport(m.Parent.GoName), m.GoName)
 }
 
+func serviceVarMethodsName(m *protogen.Service) string {
+	return unexport(fmt.Sprintf("%sMethods", m.GoName))
+}
+
 func procedureVarMethodDescriptor(m *protogen.Method) string {
-	return unexport(fmt.Sprintf("%s%sMethodDescriptor", m.Parent.GoName, m.GoName))
+	serviceMethodsName := serviceVarMethodsName(m.Parent)
+	return serviceMethodsName + `.ByName("` + string(m.Desc.Name()) + `")`
 }
 
 func isDeprecatedService(service *protogen.Service) bool {
@@ -637,5 +764,18 @@ func newNames(service *protogen.Service) names {
 		Server:              fmt.Sprintf("%sHandler", base),
 		ServerConstructor:   fmt.Sprintf("New%sHandler", base),
 		UnimplementedServer: fmt.Sprintf("Unimplemented%sHandler", base),
+	}
+}
+
+// "simple" is a bool, but we want to support just setting "simple" without needing to set "simple=true"
+// We do this via making the flag a string, and then parsing manually here.
+func getSimpleBool(simpleString string) (bool, error) {
+	switch simpleString {
+	case "", "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf(`unknown value for option "simple" (must be one of "", "true", "false"): %q`, simpleString)
 	}
 }

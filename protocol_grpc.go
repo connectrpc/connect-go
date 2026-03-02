@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -98,9 +98,9 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 
 // NewClient implements protocol, so it must return an interface.
 func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, error) {
-	peer := newPeerFromURL(params.URL, ProtocolGRPC)
+	peer := newPeerForURL(params.URL, ProtocolGRPC)
 	if g.web {
-		peer = newPeerFromURL(params.URL, ProtocolGRPCWeb)
+		peer = newPeerForURL(params.URL, ProtocolGRPCWeb)
 	}
 	return &grpcClient{
 		protocolClientParams: *params,
@@ -173,7 +173,7 @@ func (g *grpcHandler) NewConn(
 		header[grpcHeaderCompression] = []string{responseCompression}
 	}
 
-	codecName := grpcCodecFromContentType(g.web, getHeaderCanonical(request.Header, headerContentType))
+	codecName := grpcCodecForContentType(g.web, getHeaderCanonical(request.Header, headerContentType))
 	codec := g.Codecs.Get(codecName) // handler.go guarantees this is not nil
 	protocolName := ProtocolGRPC
 	if g.web {
@@ -247,7 +247,7 @@ func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {
 		// both.
 		header[headerXUserAgent] = []string{defaultGrpcUserAgent}
 	}
-	header[headerContentType] = []string{grpcContentTypeFromCodecName(g.web, g.Codec.Name())}
+	header[headerContentType] = []string{grpcContentTypeForCodecName(g.web, g.Codec.Name())}
 	// gRPC handles compression on a per-message basis, so we don't want to
 	// compress the whole stream. By default, http.Client will ask the server
 	// to gzip the stream if we don't set Accept-Encoding.
@@ -388,7 +388,7 @@ func (cc *grpcClientConn) Receive(msg any) error {
 		delHeaderCanonical(cc.responseTrailer, headerContentType)
 
 		// Try to read the status out of the headers.
-		serverErr := grpcErrorFromTrailer(cc.protobuf, cc.responseHeader)
+		serverErr := grpcErrorForTrailer(cc.protobuf, cc.responseHeader)
 		if serverErr == nil {
 			// Status says "OK". So return original error (io.EOF).
 			return err
@@ -398,7 +398,7 @@ func (cc *grpcClientConn) Receive(msg any) error {
 	}
 
 	// See if the server sent an explicit error in the HTTP or gRPC-Web trailers.
-	serverErr := grpcErrorFromTrailer(cc.protobuf, cc.responseTrailer)
+	serverErr := grpcErrorForTrailer(cc.protobuf, cc.responseTrailer)
 	if serverErr != nil && (errors.Is(err, io.EOF) || !errors.Is(serverErr, errTrailersWithoutGRPCStatus)) {
 		// We've either:
 		//   - Cleanly read until the end of the response body and *not* received
@@ -689,7 +689,7 @@ func grpcValidateResponse(
 // A nil error is only returned when a grpc-status key IS present, but it
 // indicates a code of zero (no error). If no grpc-status key is present, this
 // returns a non-nil *Error that wraps errTrailersWithoutGRPCStatus.
-func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {
+func grpcErrorForTrailer(protobuf Codec, trailer http.Header) *Error {
 	codeHeader := getHeaderCanonical(trailer, grpcHeaderStatus)
 	if codeHeader == "" {
 		// If there are no trailers at all, that's an internal error.
@@ -729,7 +729,7 @@ func grpcErrorFromTrailer(protobuf Codec, trailer http.Header) *Error {
 			retErr.details = append(retErr.details, &ErrorDetail{pbAny: d})
 		}
 		// Prefer the Protobuf-encoded data to the headers (grpc-go does this too).
-		retErr.code = Code(status.GetCode())
+		retErr.code = Code(status.GetCode()) //nolint:gosec // No information loss
 		retErr.err = errors.New(status.GetMessage())
 	}
 
@@ -812,7 +812,7 @@ func grpcTimeoutUnitLookup(unit byte) (time.Duration, error) {
 	}
 }
 
-func grpcCodecFromContentType(web bool, contentType string) string {
+func grpcCodecForContentType(web bool, contentType string) string {
 	if (!web && contentType == grpcContentTypeDefault) || (web && contentType == grpcWebContentTypeDefault) {
 		// implicitly protobuf
 		return codecNameProto
@@ -824,7 +824,7 @@ func grpcCodecFromContentType(web bool, contentType string) string {
 	return strings.TrimPrefix(contentType, prefix)
 }
 
-func grpcContentTypeFromCodecName(web bool, name string) string {
+func grpcContentTypeForCodecName(web bool, name string) string {
 	if web {
 		return grpcWebContentTypePrefix + name
 	}
@@ -847,7 +847,7 @@ func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) {
 		mergeNonProtocolHeaders(trailer, connectErr.meta)
 	}
 	var (
-		status  = grpcStatusFromError(err)
+		status  = grpcStatusForError(err)
 		code    = status.GetCode()
 		message = status.GetMessage()
 		bin     []byte
@@ -867,13 +867,13 @@ func grpcErrorToTrailer(trailer http.Header, protobuf Codec, err error) {
 	}
 }
 
-func grpcStatusFromError(err error) *statusv1.Status {
+func grpcStatusForError(err error) *statusv1.Status {
 	status := &statusv1.Status{
 		Code:    int32(CodeUnknown),
 		Message: err.Error(),
 	}
 	if connectErr, ok := asError(err); ok {
-		status.Code = int32(connectErr.Code())
+		status.Code = int32(connectErr.Code()) //nolint:gosec // No information loss
 		status.Message = connectErr.Message()
 		status.Details = connectErr.detailsAsAny()
 	}
@@ -894,7 +894,7 @@ func grpcStatusFromError(err error) *statusv1.Status {
 //	https://datatracker.ietf.org/doc/html/rfc3986#section-2.1
 func grpcPercentEncode(msg string) string {
 	var hexCount int
-	for i := 0; i < len(msg); i++ {
+	for i := range len(msg) {
 		if grpcShouldEscape(msg[i]) {
 			hexCount++
 		}
@@ -905,7 +905,7 @@ func grpcPercentEncode(msg string) string {
 	// We need to escape some characters, so we'll need to allocate a new string.
 	var out strings.Builder
 	out.Grow(len(msg) + 2*hexCount)
-	for i := 0; i < len(msg); i++ {
+	for i := range len(msg) {
 		switch char := msg[i]; {
 		case grpcShouldEscape(char):
 			out.WriteByte('%')

@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 package connect
 
 import (
-	"context"
 	"net/http"
 	"testing"
 
@@ -49,7 +48,7 @@ func TestAcceptEncodingOrdering(t *testing.T) {
 		withFakeBrotli,
 		withGzip(),
 	)
-	_, _ = client.CallUnary(context.Background(), NewRequest(&emptypb.Empty{}))
+	_, _ = client.CallUnary(t.Context(), NewRequest(&emptypb.Empty{}))
 	assert.True(t, called)
 }
 

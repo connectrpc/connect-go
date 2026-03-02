@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,15 +16,10 @@ package memhttp
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
-	"net"
 	"net/http"
 	"sync"
 	"time"
-
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
 // Server is a net/http server that uses in-memory pipes instead of TCP. By
@@ -38,6 +33,11 @@ type Server struct {
 
 	serverWG  sync.WaitGroup
 	serverErr error
+
+	// client is configured for use with the server.
+	// Its transport is automatically closed when Close is called.
+	client   *http.Client
+	clientMu sync.Mutex
 }
 
 // NewServer creates a new Server that uses the given handler. Configuration
@@ -49,12 +49,14 @@ func NewServer(handler http.Handler, opts ...Option) *Server {
 		opt.apply(&cfg)
 	}
 
-	h2s := &http2.Server{}
-	handler = h2c.NewHandler(handler, h2s)
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
 	listener := newMemoryListener("1.2.3.4") // httptest.DefaultRemoteAddr
 	server := &Server{
 		server: http.Server{
 			Handler:           handler,
+			Protocols:         protocols,
 			ReadHeaderTimeout: 5 * time.Second,
 		},
 		listener:       listener,
@@ -69,17 +71,18 @@ func NewServer(handler http.Handler, opts ...Option) *Server {
 	return server
 }
 
-// Transport returns a [http2.Transport] configured to use in-memory pipes
-// rather than TCP and speak both HTTP/1.1 and HTTP/2.
+// Transport returns a [http.Transport] configured to use in-memory pipes
+// rather than TCP and speak HTTP/2.
 //
 // Callers may reconfigure the returned transport without affecting other transports.
-func (s *Server) Transport() *http2.Transport {
-	return &http2.Transport{
-		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-			return s.listener.DialContext(ctx, network, addr)
-		},
-		AllowHTTP: true,
-	}
+func (s *Server) Transport() *http.Transport {
+	protocols := new(http.Protocols)
+	protocols.SetUnencryptedHTTP2(true)
+
+	transport := s.TransportHTTP1()
+	transport.Protocols = protocols
+	transport.DisableKeepAlives = false
+	return transport
 }
 
 // TransportHTTP1 returns a [http.Transport] configured to use in-memory pipes
@@ -96,12 +99,18 @@ func (s *Server) TransportHTTP1() *http.Transport {
 }
 
 // Client returns an [http.Client] configured to use in-memory pipes rather
-// than TCP and speak HTTP/2. It is configured to use the same
-// [http2.Transport] as [Transport].
+// than TCP and speak HTTP/2.
 //
-// Callers may reconfigure the returned client without affecting other clients.
+// Client is configured to use the same transport for the lifetime of the
+// server, and its idle connections are automatically closed when the
+// server is closed.
 func (s *Server) Client() *http.Client {
-	return &http.Client{Transport: s.Transport()}
+	s.clientMu.Lock()
+	defer s.clientMu.Unlock()
+	if s.client == nil {
+		s.client = &http.Client{Transport: s.Transport()}
+	}
+	return s.client
 }
 
 // URL returns the server's URL.
@@ -112,6 +121,11 @@ func (s *Server) URL() string {
 // Shutdown gracefully shuts down the server, without interrupting any active
 // connections. See [http.Server.Shutdown] for details.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.clientMu.Lock()
+	if s.client != nil {
+		s.client.CloseIdleConnections()
+	}
+	s.clientMu.Unlock()
 	if err := s.server.Shutdown(ctx); err != nil {
 		return err
 	}
@@ -130,6 +144,11 @@ func (s *Server) Cleanup() error {
 // Close closes the server's listener. It does not wait for connections to
 // finish.
 func (s *Server) Close() error {
+	s.clientMu.Lock()
+	if s.client != nil {
+		s.client.CloseIdleConnections()
+	}
+	s.clientMu.Unlock()
 	return s.server.Close()
 }
 

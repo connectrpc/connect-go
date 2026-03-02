@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -185,11 +185,11 @@ type Option interface {
 }
 
 // WithSchema provides a parsed representation of the schema for an RPC to a
-// client or handler. The supplied schema is exposed as [Spec.Schema]. This
+// client or handler. The supplied schema is exposed as [Spec].Schema. This
 // option is typically added by generated code.
 //
 // For services using protobuf schemas, the supplied schema should be a
-// [protoreflect.MethodDescriptor].
+// [google.golang.org/protobuf/reflect/protoreflect.MethodDescriptor].
 func WithSchema(schema any) Option {
 	return &schemaOption{Schema: schema}
 }

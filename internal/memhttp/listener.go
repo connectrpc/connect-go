@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +21,7 @@ import (
 	"sync"
 )
 
-var (
-	errListenerClosed = errors.New("listener closed")
-)
+var errListenerClosed = errors.New("listener closed")
 
 // memoryListener is a net.Listener that listens on an in memory network.
 type memoryListener struct {

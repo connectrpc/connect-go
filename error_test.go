@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -108,7 +108,7 @@ func TestErrorIs(t *testing.T) {
 	assert.True(t, errors.Is(connectErr, connectErr))
 }
 
-func TestTypeNameFromURL(t *testing.T) {
+func TestTypeNameForURL(t *testing.T) {
 	t.Parallel()
 	testCases := []struct {
 		name     string
@@ -142,10 +142,9 @@ func TestTypeNameFromURL(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, typeNameFromURL(testCase.url), testCase.typeName)
+			assert.Equal(t, typeNameForURL(testCase.url), testCase.typeName)
 		})
 	}
 }

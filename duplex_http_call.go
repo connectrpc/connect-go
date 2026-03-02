@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -229,7 +229,7 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 	n, err := d.response.Body.Read(data)
 	if err != nil && !errors.Is(err, io.EOF) {
 		err = wrapIfContextDone(d.ctx, err)
-		err = wrapIfRSTError(err)
+		err = wrapIfRSTError(d.ctx, err)
 	}
 	return n, err
 }
@@ -239,15 +239,9 @@ func (d *duplexHTTPCall) CloseRead() error {
 	if d.response == nil {
 		return nil
 	}
-	_, err := discard(d.response.Body)
-	closeErr := d.response.Body.Close()
-	if err == nil ||
-		errors.Is(err, context.Canceled) ||
-		errors.Is(err, context.DeadlineExceeded) {
-		err = closeErr
-	}
+	err := d.response.Body.Close()
 	err = wrapIfContextDone(d.ctx, err)
-	return wrapIfRSTError(err)
+	return wrapIfRSTError(d.ctx, err)
 }
 
 // ResponseStatusCode is the response's HTTP status code.
@@ -316,7 +310,7 @@ func (d *duplexHTTPCall) makeRequest() {
 		err = wrapIfContextError(err)
 		err = wrapIfLikelyH2CNotConfiguredError(d.request, err)
 		err = wrapIfLikelyWithGRPCNotUsedError(err)
-		err = wrapIfRSTError(err)
+		err = wrapIfRSTError(d.ctx, err)
 		if _, ok := asError(err); !ok {
 			err = NewError(CodeUnavailable, err)
 		}
@@ -369,12 +363,15 @@ var _ messagePayload = nopPayload{}
 func (nopPayload) Read([]byte) (int, error) {
 	return 0, io.EOF
 }
+
 func (nopPayload) WriteTo(io.Writer) (int64, error) {
 	return 0, nil
 }
+
 func (nopPayload) Seek(int64, int) (int64, error) {
 	return 0, nil
 }
+
 func (nopPayload) Len() int {
 	return 0
 }

@@ -1,4 +1,4 @@
-// Copyright 2021-2024 The Connect Authors
+// Copyright 2021-2025 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ package connect
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -41,16 +40,27 @@ func TestHTTPCallGetBody(t *testing.T) {
 	})
 	// Must use httptest for this test.
 	server := httptest.NewUnstartedServer(handler)
-	server.EnableHTTP2 = true
-	server.StartTLS()
+	svrProtos := new(http.Protocols)
+	svrProtos.SetHTTP1(true)
+	svrProtos.SetUnencryptedHTTP2(true)
+	server.Config.Protocols = svrProtos
+	server.Start()
 	t.Cleanup(server.Close)
+
+	clientProtos := new(http.Protocols)
+	clientProtos.SetUnencryptedHTTP2(true)
+	client := server.Client()
+	transport, ok := client.Transport.(*http.Transport)
+	assert.True(t, ok)
+	transport.Protocols = clientProtos
+
 	bufferPool := newBufferPool()
 	serverURL, _ := url.Parse(server.URL)
 	errGetBodyCalled := errors.New("getBodyCalled") // sentinel error
 	caller := func(size int) error {
 		call := newDuplexHTTPCall(
-			context.Background(),
-			server.Client(),
+			t.Context(),
+			client,
 			serverURL,
 			Spec{StreamType: StreamTypeUnary},
 			http.Header{},
@@ -92,7 +102,7 @@ func TestHTTPCallGetBody(t *testing.T) {
 	workChan := make(chan work)
 	wg := sync.WaitGroup{}
 	wg.Add(numWorkers)
-	for i := 0; i < numWorkers; i++ {
+	for range numWorkers {
 		go func() {
 			for work := range workChan {
 				work.errs <- caller(work.size)
@@ -102,7 +112,7 @@ func TestHTTPCallGetBody(t *testing.T) {
 	}
 	for i, gotGetBody := 0, false; !gotGetBody; i++ {
 		errs := make([]chan error, numWorkers)
-		for i := 0; i < numWorkers; i++ {
+		for i := range numWorkers {
 			errs[i] = make(chan error, 1)
 			workChan <- work{size: 512, errs: errs[i]}
 		}
