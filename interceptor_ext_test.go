@@ -708,6 +708,37 @@ func TestInterceptorFuncAccessingHTTPMethod(t *testing.T) {
 	assert.Equal(t, int32(2), handlerChecker.count.Load())
 }
 
+func TestHandlerErrorResponseNilInInterceptor(t *testing.T) {
+	t.Parallel()
+	handlerErr := connect.NewError(connect.CodeInternal, errors.New("handler error"))
+	var interceptorSawNilResponse bool
+	checkNilInterceptor := connect.UnaryInterceptorFunc(
+		func(next connect.UnaryFunc) connect.UnaryFunc {
+			return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+				res, err := next(ctx, req)
+				// res must be nil when err is non-nil; a typed nil stored in an
+				// interface would make this check incorrectly report non-nil.
+				interceptorSawNilResponse = res == nil
+				return res, err
+			}
+		},
+	)
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(
+		&pluggablePingServer{
+			ping: func(_ context.Context, _ *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+				return nil, handlerErr
+			},
+		},
+		connect.WithInterceptors(checkNilInterceptor),
+	))
+	server := memhttptest.NewServer(t, mux)
+	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+	_, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{}))
+	assert.NotNil(t, err)
+	assert.True(t, interceptorSawNilResponse)
+}
+
 // headerInterceptor makes it easier to write interceptors that inspect or
 // mutate HTTP headers. It applies the same logic to unary and streaming
 // procedures, wrapping the send or receive side of the stream as appropriate.
