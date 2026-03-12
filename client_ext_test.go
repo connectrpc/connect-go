@@ -799,6 +799,8 @@ func TestClientBidiOverHTTP1(t *testing.T) {
 			assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
 		}
 		_, err := stream.Receive()
+		assert.NotNil(t, err)
+		t.Log("cumsum_error", err)
 		assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
 		assert.True(t, connect.IsWireError(err))
 	})

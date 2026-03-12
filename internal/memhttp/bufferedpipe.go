@@ -31,7 +31,6 @@ type bufferedPipeConn struct {
 	mu       sync.Mutex
 	cond     sync.Cond
 	buf      []byte
-	closed   bool
 	writeErr error         // error from the writeLoop
 	done     chan struct{} // closed when background goroutine exits
 }
@@ -53,9 +52,6 @@ func (bpc *bufferedPipeConn) Write(data []byte) (int, error) {
 	if bpc.writeErr != nil {
 		return 0, bpc.writeErr
 	}
-	if bpc.closed {
-		return 0, io.ErrClosedPipe
-	}
 	bpc.buf = append(bpc.buf, data...)
 	bpc.cond.Signal()
 	return len(data), nil
@@ -63,7 +59,7 @@ func (bpc *bufferedPipeConn) Write(data []byte) (int, error) {
 
 func (bpc *bufferedPipeConn) Close() error {
 	bpc.mu.Lock()
-	bpc.closed = true
+	bpc.writeErr = io.ErrClosedPipe
 	bpc.cond.Signal()
 	bpc.mu.Unlock()
 	<-bpc.done // wait for write loop to drain and exit
@@ -74,7 +70,7 @@ func (bpc *bufferedPipeConn) SetWriteDeadline(deadline time.Time) error {
 	err := bpc.Conn.SetWriteDeadline(deadline)
 	if !deadline.IsZero() && !deadline.After(time.Now()) {
 		bpc.mu.Lock()
-		bpc.closed = true
+		bpc.writeErr = io.ErrClosedPipe
 		bpc.cond.Signal()
 		bpc.mu.Unlock()
 	}
@@ -93,14 +89,14 @@ func (bpc *bufferedPipeConn) writeLoop() {
 	var flushBuf []byte
 	for {
 		bpc.mu.Lock()
-		for len(bpc.buf) == 0 && !bpc.closed {
+		for len(bpc.buf) == 0 && bpc.writeErr == nil {
 			bpc.cond.Wait()
 		}
 
 		// Fast swap: active buffer becomes the flush buffer,
 		// and the flush buffer is reset to become the new active buffer.
 		bpc.buf, flushBuf = flushBuf[:0], bpc.buf
-		closed := bpc.closed
+		closing := bpc.writeErr != nil
 		bpc.mu.Unlock()
 
 		if len(flushBuf) > 0 {
@@ -109,13 +105,11 @@ func (bpc *bufferedPipeConn) writeLoop() {
 				if bpc.writeErr == nil {
 					bpc.writeErr = err
 				}
-				// Force close to stop writers if the underlying conn fails
-				bpc.closed = true
 				bpc.mu.Unlock()
 				return
 			}
 		}
-		if closed {
+		if closing {
 			return
 		}
 	}
