@@ -707,6 +707,103 @@ func TestClientDeadlineHandling(t *testing.T) {
 	})
 }
 
+// TestClientBidiOverHTTP1 tests bidi streaming over real TCP connections
+// (not in-memory pipes) to verify the behavior with real kernel socket buffers.
+// The server is a plain http.Server without TLS or HTTP/2 configuration, so
+// all connections are HTTP/1.1.
+func TestClientBidiOverHTTP1(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{checkMetadata: true}))
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Plain http.Server without Protocols or TLS: HTTP/1.1 only.
+	server := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go server.Serve(listener) //nolint:errcheck
+	t.Cleanup(func() { server.Close() })
+
+	addr := listener.Addr().String()
+	transport := &http.Transport{
+		ForceAttemptHTTP2: false,
+		DisableKeepAlives: true,
+	}
+	httpClient := &http.Client{Transport: transport}
+	client := pingv1connect.NewPingServiceClient(httpClient, "http://"+addr)
+
+	t.Run("full_duplex", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+
+		stream := client.CumSum(ctx)
+		for _, el := range expectedHeaderValues {
+			stream.RequestHeader().Add(clientHeader, el)
+		}
+		// Interleave send and receive -- true full-duplex.
+		send := []int64{3, 5, 1}
+		expect := []int64{3, 8, 9}
+		for i, num := range send {
+			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: num}))
+			resp, err := stream.Receive()
+			assert.Nil(t, err)
+			assert.NotNil(t, resp)
+			assert.Equal(t, resp.GetSum(), expect[i])
+		}
+		assert.Nil(t, stream.CloseRequest())
+		_, err := stream.Receive()
+		assert.ErrorIs(t, err, io.EOF)
+		assert.Nil(t, stream.CloseResponse())
+	})
+
+	t.Run("half_duplex", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+
+		stream := client.CumSum(ctx)
+		for _, el := range expectedHeaderValues {
+			stream.RequestHeader().Add(clientHeader, el)
+		}
+		// Send all, close request, then receive all.
+		assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 10}))
+		assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 20}))
+		assert.Nil(t, stream.CloseRequest())
+
+		resp1, err := stream.Receive()
+		assert.Nil(t, err)
+		assert.Equal(t, resp1.GetSum(), int64(10))
+
+		resp2, err := stream.Receive()
+		assert.Nil(t, err)
+		assert.Equal(t, resp2.GetSum(), int64(30))
+
+		_, err = stream.Receive()
+		assert.ErrorIs(t, err, io.EOF)
+		assert.Nil(t, stream.CloseResponse())
+	})
+
+	t.Run("cumsum_error", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+
+		stream := client.CumSum(ctx)
+		// Don't set required headers -- server should return InvalidArgument.
+		if err := stream.Send(&pingv1.CumSumRequest{Number: 42}); err != nil {
+			assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+		}
+		_, err := stream.Receive()
+		assert.Equal(t, connect.CodeOf(err), connect.CodeInvalidArgument)
+		assert.True(t, connect.IsWireError(err))
+	})
+}
+
 func testClientDeadlineBruteForceLoop(
 	t *testing.T,
 	duration time.Duration,

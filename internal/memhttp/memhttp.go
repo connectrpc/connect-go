@@ -91,8 +91,8 @@ func (s *Server) Transport() *http.Transport {
 // Callers may reconfigure the returned transport without affecting other transports.
 func (s *Server) TransportHTTP1() *http.Transport {
 	return &http.Transport{
-		DialContext: s.listener.DialContext,
-		// TODO(emcfarlane): DisableKeepAlives false can causes tests
+		DialContext: s.listener.DialContextBuffered,
+		// TODO(emcfarlane): DisableKeepAlives false causes tests
 		// to hang on shutdown.
 		DisableKeepAlives: true,
 	}

@@ -71,7 +71,26 @@ func (l *memoryListener) Addr() net.Addr {
 
 // DialContext is the type expected by http.Transport.DialContext.
 func (l *memoryListener) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return l.dialContext(ctx, false)
+}
+
+// DialContextBuffered is like DialContext but wraps both sides of the
+// connection with asynchronous write buffering. This mimics the kernel-level
+// write buffering of real TCP connections and prevents deadlocks in HTTP/1.x
+// when both sides write concurrently (e.g., the server's finishRequest
+// flushes the chunked response while the client is still writing the request
+// body). HTTP/2 connections should use DialContext instead, as the buffering
+// can delay write-failure propagation and interfere with disconnect detection.
+func (l *memoryListener) DialContextBuffered(ctx context.Context, network, addr string) (net.Conn, error) {
+	return l.dialContext(ctx, true)
+}
+
+func (l *memoryListener) dialContext(ctx context.Context, buffered bool) (net.Conn, error) {
 	server, client := net.Pipe()
+	if buffered {
+		server = newBufferedPipeConn(server)
+		client = newBufferedPipeConn(client)
+	}
 	select {
 	case <-ctx.Done():
 		return nil, &net.OpError{Op: "dial", Net: l.addr.Network(), Err: ctx.Err()}

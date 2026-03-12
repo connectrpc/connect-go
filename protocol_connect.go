@@ -834,6 +834,16 @@ func (hc *connectStreamingHandlerConn) Close(err error) error {
 	// a well-intentioned client may just not expect the server to be returning
 	// an error for a streaming RPC. Better to accept that we can't always reuse
 	// TCP connections.
+	//
+	// For bidirectional streams over HTTP/1.x, request.Body.Close() can
+	// block reading to the end of the current chunk even though the HTTP
+	// server skips its post-handler drain (Connection: close +
+	// EnableFullDuplex). Expire the read deadline so Close returns
+	// immediately.
+	if (hc.spec.StreamType&StreamTypeBidi) == StreamTypeBidi && hc.request.ProtoMajor < 2 {
+		rc := http.NewResponseController(hc.responseWriter)
+		_ = rc.SetReadDeadline(time.Now())
+	}
 	if err := hc.request.Body.Close(); err != nil {
 		if connectErr, ok := asError(err); ok {
 			return connectErr
