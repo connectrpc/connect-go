@@ -1,0 +1,56 @@
+// Copyright 2021-2025 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package connect.test.method_timeouts;
+
+import "connectrpc/go/options/v1/annotations.proto";
+
+option go_package = "connectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/methodtimeouts/gen;gen";
+
+message Request {}
+
+message Response {}
+
+service TestService {
+  rpc Method0(Request) returns (Response) {}
+
+  rpc Method1(Request) returns (Response) {
+    option (connectrpc.go.options.v1.timeouts) = {
+      read_ms: 1000
+      write_ms: 2000
+    };
+  }
+
+  rpc Method2(Request) returns (Response) {
+    option (connectrpc.go.options.v1.timeouts) = {
+      read_ms: -1
+      write_ms: -1
+    };
+  }
+
+  rpc Method3(Request) returns (Response) {
+    option (connectrpc.go.options.v1.timeouts) = {
+      read_ms: 1000
+    };
+  }
+
+  rpc Method4(Request) returns (Response) {
+    option (connectrpc.go.options.v1.timeouts) = {
+      read_ms: 1000
+      write_ms: 0
+    };
+  }
+}

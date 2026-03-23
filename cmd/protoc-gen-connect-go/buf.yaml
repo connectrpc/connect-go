@@ -1,0 +1,13 @@
+version: v2
+modules:
+  - path: proto
+  # this must be declared as a module in the same workspace as "proto",
+  # so it can import symbols from annotations.proto.
+  - path: internal/testdata/methodtimeouts
+lint:
+  use:
+    - STANDARD
+  disallow_comment_ignores: true
+breaking:
+  use:
+    - WIRE_JSON

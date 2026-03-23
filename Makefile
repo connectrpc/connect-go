@@ -76,8 +76,12 @@ lintfix: $(BIN)/golangci-lint $(BIN)/buf ## Automatically fix some lint errors
 	golangci-lint run --fix --modules-download-mode=readonly --timeout=3m0s
 	buf format -w
 
+.PHONY: generate-annotations
+generate-annotations: $(BIN)/buf $(BIN)/protoc-gen-go  ## Generate only the proto annotations (no protoc-gen-connect-go needed)
+	cd ./cmd/protoc-gen-connect-go && buf generate
+
 .PHONY: generate
-generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
+generate: generate-annotations $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
 	go mod tidy
 	cd ./internal/conformance && go mod tidy
 	buf generate

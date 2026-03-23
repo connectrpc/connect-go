@@ -17,6 +17,7 @@ package connect
 import (
 	"context"
 	"net/http"
+	"time"
 )
 
 // A Handler is the server-side implementation of a single RPC defined by a
@@ -257,6 +258,12 @@ func NewBidiStreamHandler[Req, Res any](
 
 // ServeHTTP implements [http.Handler].
 func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
+	responseController := http.NewResponseController(responseWriter)
+	if err := applyDeadlines(h.spec.ReadTimeout, h.spec.WriteTimeout, responseController); err != nil {
+		responseWriter.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
 	// We don't need to defer functions to close the request body or read to
 	// EOF: the stream we construct later on already does that, and we only
 	// return early when dealing with misbehaving clients. In those cases, it's
@@ -337,6 +344,45 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	_ = connCloser.Close(h.implementation(ctx, connCloser))
 }
 
+// getDeadline returns a pointer to a time.Time with the given timeout.
+// If the timeout is 0 (i.e. not set), nil is returned.
+// If the timeout is negative, the zero value is returned to indicate no deadline.
+// Otherwise, a time.Time with the given timeout is returned.
+func getDeadline(timeout time.Duration) *time.Time {
+	if timeout == 0 {
+		return nil
+	}
+	if timeout < 0 {
+		return &time.Time{}
+	}
+	t := time.Now().Add(timeout)
+	return &t
+}
+
+// deadlineSetter sets read/write deadlines. *http.ResponseController implements this.
+type deadlineSetter interface {
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
+}
+
+// applyDeadlines applies read and write timeouts to the setter (e.g. an http.ResponseController).
+// It returns an error if setting any deadline fails.
+func applyDeadlines(readTimeout, writeTimeout time.Duration, setter deadlineSetter) error {
+	readDeadline := getDeadline(readTimeout)
+	if readDeadline != nil {
+		if err := setter.SetReadDeadline(*readDeadline); err != nil {
+			return err
+		}
+	}
+	writeDeadline := getDeadline(writeTimeout)
+	if writeDeadline != nil {
+		if err := setter.SetWriteDeadline(*writeDeadline); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type handlerConfig struct {
 	CompressionPools             map[string]*compressionPool
 	CompressionNames             []string
@@ -351,6 +397,8 @@ type handlerConfig struct {
 	BufferPool                   *bufferPool
 	ReadMaxBytes                 int
 	SendMaxBytes                 int
+	ReadTimeout                  time.Duration
+	WriteTimeout                 time.Duration
 	StreamType                   StreamType
 }
 
@@ -378,6 +426,8 @@ func (c *handlerConfig) newSpec() Spec {
 		Schema:           c.Schema,
 		StreamType:       c.StreamType,
 		IdempotencyLevel: c.IdempotencyLevel,
+		ReadTimeout:      c.ReadTimeout,
+		WriteTimeout:     c.WriteTimeout,
 	}
 }
 

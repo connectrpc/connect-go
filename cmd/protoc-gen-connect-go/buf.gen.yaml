@@ -1,0 +1,13 @@
+version: v2
+plugins:
+  - local: protoc-gen-go
+    out: gen
+    opt: paths=source_relative
+# Currently, buf doesn't support per-module generation config, which
+# is required to run a different set of plugins/plugin options for
+# the testdata modules. As a workaround, we use `inputs` to restrict
+# the generation config in this file to only the "proto" module, and
+# have separate buf.gen.yaml files for the testdata modules.
+# See: https://github.com/bufbuild/buf/issues/3060
+inputs:
+  - directory: proto
