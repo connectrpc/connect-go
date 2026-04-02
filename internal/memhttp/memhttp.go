@@ -45,6 +45,7 @@ type Server struct {
 func NewServer(handler http.Handler, opts ...Option) *Server {
 	var cfg config
 	WithCleanupTimeout(5 * time.Second).apply(&cfg)
+	WithConnBufferSize(defaultConnBufferSize).apply(&cfg)
 	for _, opt := range opts {
 		opt.apply(&cfg)
 	}
@@ -52,7 +53,7 @@ func NewServer(handler http.Handler, opts ...Option) *Server {
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
-	listener := newMemoryListener("1.2.3.4") // httptest.DefaultRemoteAddr
+	listener := newMemoryListener("1.2.3.4", cfg.ConnBufferSize) // httptest.DefaultRemoteAddr
 	server := &Server{
 		server: http.Server{
 			Handler:           handler,
@@ -91,7 +92,7 @@ func (s *Server) Transport() *http.Transport {
 // Callers may reconfigure the returned transport without affecting other transports.
 func (s *Server) TransportHTTP1() *http.Transport {
 	return &http.Transport{
-		DialContext: s.listener.DialContextBuffered,
+		DialContext: s.listener.DialContext,
 		// TODO(emcfarlane): DisableKeepAlives false causes tests
 		// to hang on shutdown.
 		DisableKeepAlives: true,

@@ -21,11 +21,15 @@ import (
 	"sync"
 )
 
+// TODO(go.dev/issue/77362): Replace memoryListener and memoryConn with
+// testing/nettest.Listener and testing/nettest.Conn when available.
+
 var errListenerClosed = errors.New("listener closed")
 
 // memoryListener is a net.Listener that listens on an in memory network.
 type memoryListener struct {
-	addr memoryAddr
+	addr        memoryAddr
+	connBufSize int
 
 	conns  chan net.Conn
 	once   sync.Once
@@ -33,11 +37,12 @@ type memoryListener struct {
 }
 
 // newMemoryListener returns a new in-memory listener.
-func newMemoryListener(addr string) *memoryListener {
+func newMemoryListener(addr string, connBufSize int) *memoryListener {
 	return &memoryListener{
-		addr:   memoryAddr(addr),
-		conns:  make(chan net.Conn),
-		closed: make(chan struct{}),
+		addr:        memoryAddr(addr),
+		connBufSize: connBufSize,
+		conns:       make(chan net.Conn),
+		closed:      make(chan struct{}),
 	}
 }
 
@@ -70,27 +75,8 @@ func (l *memoryListener) Addr() net.Addr {
 }
 
 // DialContext is the type expected by http.Transport.DialContext.
-func (l *memoryListener) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	return l.dialContext(ctx, false)
-}
-
-// DialContextBuffered is like DialContext but wraps both sides of the
-// connection with asynchronous write buffering. This mimics the kernel-level
-// write buffering of real TCP connections and prevents deadlocks in HTTP/1.x
-// when both sides write concurrently (e.g., the server's finishRequest
-// flushes the chunked response while the client is still writing the request
-// body). HTTP/2 connections should use DialContext instead, as the buffering
-// can delay write-failure propagation and interfere with disconnect detection.
-func (l *memoryListener) DialContextBuffered(ctx context.Context, network, addr string) (net.Conn, error) {
-	return l.dialContext(ctx, true)
-}
-
-func (l *memoryListener) dialContext(ctx context.Context, buffered bool) (net.Conn, error) {
-	server, client := net.Pipe()
-	if buffered {
-		server = newBufferedPipeConn(server)
-		client = newBufferedPipeConn(client)
-	}
+func (l *memoryListener) DialContext(ctx context.Context, _, _ string) (net.Conn, error) {
+	server, client := newMemoryConnPair(l.addr, l.connBufSize)
 	select {
 	case <-ctx.Done():
 		return nil, &net.OpError{Op: "dial", Net: l.addr.Network(), Err: ctx.Err()}
