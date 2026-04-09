@@ -822,33 +822,33 @@ func (hc *connectStreamingHandlerConn) ResponseTrailer() http.Header {
 	return hc.responseTrailer
 }
 
-func (hc *connectStreamingHandlerConn) Close(err error) error {
+func (hc *connectStreamingHandlerConn) Close(err error) (retErr error) {
+	defer func() {
+		// We don't want to copy unread portions of the body to /dev/null here: if
+		// the client hasn't closed the request body, we'll block until the server
+		// timeout kicks in. This could happen because the client is malicious, but
+		// a well-intentioned client may just not expect the server to be returning
+		// an error for a streaming RPC. Better to accept that we can't always reuse
+		// TCP connections.
+		//
+		// For bidirectional streams over HTTP/1.x, the response must be flushed
+		// For bidirectional streams over HTTP/1.x, request.Body.Close()
+		// blocks reading to the end of the current chunk. Expire the read
+		// deadline so Close returns immediately. We use a time well in the
+		// past (not time.Now()) to guarantee immediate expiry regardless of
+		// scheduling delays between time.Now() and time.Until().
+		if (hc.spec.StreamType&StreamTypeBidi) == StreamTypeBidi && hc.request.ProtoMajor < 2 {
+			rc := http.NewResponseController(hc.responseWriter)
+			_ = rc.SetReadDeadline(aLongTimeAgo)
+		}
+		if closeErr := hc.request.Body.Close(); closeErr != nil && retErr == nil {
+			retErr = closeErr
+		}
+	}()
 	defer flushResponseWriter(hc.responseWriter)
 	if err := hc.marshaler.MarshalEndStream(err, hc.responseTrailer); err != nil {
 		_ = hc.request.Body.Close()
 		return err
-	}
-	// We don't want to copy unread portions of the body to /dev/null here: if
-	// the client hasn't closed the request body, we'll block until the server
-	// timeout kicks in. This could happen because the client is malicious, but
-	// a well-intentioned client may just not expect the server to be returning
-	// an error for a streaming RPC. Better to accept that we can't always reuse
-	// TCP connections.
-	//
-	// For bidirectional streams over HTTP/1.x, request.Body.Close() can
-	// block reading to the end of the current chunk even though the HTTP
-	// server skips its post-handler drain (Connection: close +
-	// EnableFullDuplex). Expire the read deadline so Close returns
-	// immediately.
-	if (hc.spec.StreamType&StreamTypeBidi) == StreamTypeBidi && hc.request.ProtoMajor < 2 {
-		rc := http.NewResponseController(hc.responseWriter)
-		_ = rc.SetReadDeadline(time.Now())
-	}
-	if err := hc.request.Body.Close(); err != nil {
-		if connectErr, ok := asError(err); ok {
-			return connectErr
-		}
-		return NewError(CodeUnknown, err)
 	}
 	return nil // must be a literal nil: nil *Error is a non-nil error
 }

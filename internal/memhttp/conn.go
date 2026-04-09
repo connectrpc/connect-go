@@ -34,6 +34,8 @@ import (
 // OOM if a test has a runaway writer.
 const defaultConnBufferSize = 1 << 22 // 4MB
 
+var errClosedByPeer = errors.New("connection closed by peer")
+
 // memoryConn is an in-memory implementation of net.Conn.
 // Connections come in pairs: writes to one side are read by the other.
 type memoryConn struct {
@@ -47,16 +49,16 @@ type memoryConn struct {
 // parameter controls the maximum bytes buffered per direction. If a writer
 // exceeds this limit it blocks until the reader drains enough data.
 func newMemoryConnPair(addr memoryAddr, bufSize int) (*memoryConn, *memoryConn) {
-	h1 := newConnHalf(addr, bufSize)
-	h2 := newConnHalf(addr, bufSize)
-	c1 := &memoryConn{r: h1, w: h2}
-	c2 := &memoryConn{r: h2, w: h1}
-	return c1, c2
+	half1 := newConnHalf(addr, bufSize)
+	half2 := newConnHalf(addr, bufSize)
+	conn1 := &memoryConn{r: half1, w: half2}
+	conn2 := &memoryConn{r: half2, w: half1}
+	return conn1, conn2
 }
 
 // Read reads data from the connection.
-func (c *memoryConn) Read(b []byte) (int, error) {
-	n, err := c.r.read(b)
+func (c *memoryConn) Read(data []byte) (int, error) {
+	bytesRead, err := c.r.read(data)
 	if err != nil && !errors.Is(err, io.EOF) {
 		err = &net.OpError{
 			Op:     "read",
@@ -66,12 +68,12 @@ func (c *memoryConn) Read(b []byte) (int, error) {
 			Err:    err,
 		}
 	}
-	return n, err
+	return bytesRead, err
 }
 
 // Write writes data to the connection.
-func (c *memoryConn) Write(b []byte) (int, error) {
-	n, err := c.w.write(b)
+func (c *memoryConn) Write(data []byte) (int, error) {
+	bytesWritten, err := c.w.write(data)
 	if err != nil {
 		err = &net.OpError{
 			Op:     "write",
@@ -81,14 +83,17 @@ func (c *memoryConn) Write(b []byte) (int, error) {
 			Err:    err,
 		}
 	}
-	return n, err
+	return bytesWritten, err
 }
 
-// CloseRead shuts down the reading side of the connection.
+// CloseRead shuts down the reading side of the connection. Any blocked
+// reads are unblocked and return errors. Buffered data remains
+// available for reading; the error is returned once the buffer is
+// drained. This matches TCP behavior where a close does not discard
+// data already in the receive buffer.
 func (c *memoryConn) CloseRead() error {
 	c.r.mu.Lock()
 	defer c.r.mu.Unlock()
-	c.r.buf.Reset()
 	c.r.readErr = net.ErrClosed
 	c.r.writeErr = errClosedByPeer
 	c.r.readCond.Broadcast()
@@ -109,10 +114,11 @@ func (c *memoryConn) CloseWrite() error {
 	return nil
 }
 
-// Close closes both sides of the connection.
+// Close closes the connection. Any blocked Read or Write operations
+// will be unblocked and return errors.
 func (c *memoryConn) Close() error {
-	c.CloseRead()
-	c.CloseWrite()
+	_ = c.CloseWrite()
+	_ = c.CloseRead()
 	return nil
 }
 
@@ -127,25 +133,23 @@ func (c *memoryConn) RemoteAddr() net.Addr {
 }
 
 // SetDeadline sets both read and write deadlines.
-func (c *memoryConn) SetDeadline(t time.Time) error {
-	c.SetReadDeadline(t)
-	c.SetWriteDeadline(t)
+func (c *memoryConn) SetDeadline(deadline time.Time) error {
+	_ = c.SetReadDeadline(deadline)
+	_ = c.SetWriteDeadline(deadline)
 	return nil
 }
 
 // SetReadDeadline sets the read deadline.
-func (c *memoryConn) SetReadDeadline(t time.Time) error {
-	c.r.setReadDeadline(t)
+func (c *memoryConn) SetReadDeadline(deadline time.Time) error {
+	c.r.setReadDeadline(deadline)
 	return nil
 }
 
 // SetWriteDeadline sets the write deadline.
-func (c *memoryConn) SetWriteDeadline(t time.Time) error {
-	c.w.setWriteDeadline(t)
+func (c *memoryConn) SetWriteDeadline(deadline time.Time) error {
+	c.w.setWriteDeadline(deadline)
 	return nil
 }
-
-var errClosedByPeer = errors.New("connection closed by peer")
 
 // connHalf is one direction of data flow in a memoryConn.
 // Writes push data into the buffer; reads pull from it.
@@ -174,71 +178,71 @@ type connHalf struct {
 }
 
 func newConnHalf(addr memoryAddr, bufMax int) *connHalf {
-	h := &connHalf{
+	half := &connHalf{
 		addr:   addr,
 		bufMax: bufMax,
 	}
-	h.readCond.L = &h.mu
-	h.writeCond.L = &h.mu
-	return h
+	half.readCond.L = &half.mu
+	half.writeCond.L = &half.mu
+	return half
 }
 
-func (h *connHalf) read(b []byte) (int, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for h.buf.Len() == 0 && h.readErr == nil && !h.readDeadline.expired {
-		h.readCond.Wait()
+func (half *connHalf) read(data []byte) (int, error) {
+	half.mu.Lock()
+	defer half.mu.Unlock()
+	for half.buf.Len() == 0 && half.readErr == nil && !half.readDeadline.expired {
+		half.readCond.Wait()
 	}
-	if h.readDeadline.expired {
+	if half.readDeadline.expired {
 		return 0, os.ErrDeadlineExceeded
 	}
-	if h.buf.Len() == 0 && h.readErr != nil {
-		return 0, h.readErr
+	if half.buf.Len() == 0 && half.readErr != nil {
+		return 0, half.readErr
 	}
-	n, err := h.buf.Read(b)
-	h.writeCond.Broadcast() // buffer space freed, wake blocked writers
-	return n, err
+	bytesRead, err := half.buf.Read(data)
+	half.writeCond.Broadcast() // buffer space freed, wake blocked writers
+	return bytesRead, err
 }
 
-func (h *connHalf) write(b []byte) (int, error) {
-	var n int
-	for n < len(b) {
-		nn, err := h.writePartial(b[n:])
-		n += nn
+func (half *connHalf) write(data []byte) (int, error) {
+	var written int
+	for written < len(data) {
+		bytesWritten, err := half.writePartial(data[written:])
+		written += bytesWritten
 		if err != nil {
-			return n, err
+			return written, err
 		}
 	}
-	return n, nil
+	return written, nil
 }
 
-func (h *connHalf) writePartial(b []byte) (int, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for h.buf.Len() >= h.bufMax && h.writeErr == nil && !h.writeDeadline.expired {
-		h.writeCond.Wait()
+func (half *connHalf) writePartial(data []byte) (int, error) {
+	half.mu.Lock()
+	defer half.mu.Unlock()
+	for half.buf.Len() >= half.bufMax && half.writeErr == nil && !half.writeDeadline.expired {
+		half.writeCond.Wait()
 	}
-	if h.writeDeadline.expired {
+	if half.writeDeadline.expired {
 		return 0, os.ErrDeadlineExceeded
 	}
-	if h.writeErr != nil {
-		return 0, h.writeErr
+	if half.writeErr != nil {
+		return 0, half.writeErr
 	}
-	writeMax := h.bufMax - h.buf.Len()
-	if writeMax < len(b) {
-		b = b[:writeMax]
+	writeMax := half.bufMax - half.buf.Len()
+	if writeMax < len(data) {
+		data = data[:writeMax]
 	}
-	n, err := h.buf.Write(b)
-	h.readCond.Broadcast() // data available, wake blocked readers
-	return n, err
+	bytesWritten, err := half.buf.Write(data)
+	half.readCond.Broadcast() // data available, wake blocked readers
+	return bytesWritten, err
 }
 
-func (h *connHalf) setReadDeadline(t time.Time) {
-	h.readDeadline.setDeadline(&h.mu, &h.readCond, t)
+func (half *connHalf) setReadDeadline(deadline time.Time) {
+	half.readDeadline.setDeadline(&half.mu, &half.readCond, deadline)
 }
 
-func (h *connHalf) setWriteDeadline(t time.Time) {
-	h.writeDeadline.setDeadline(&h.mu, &h.writeCond, t)
+func (half *connHalf) setWriteDeadline(deadline time.Time) {
+	half.writeDeadline.setDeadline(&half.mu, &half.writeCond, deadline)
 }
 
 // connDeadline tracks a deadline timer and its expired state.
@@ -248,18 +252,18 @@ type connDeadline struct {
 }
 
 // setDeadline updates the deadline.
-func (d *connDeadline) setDeadline(mu *sync.Mutex, cond *sync.Cond, t time.Time) {
-	mu.Lock()
-	defer mu.Unlock()
+func (d *connDeadline) setDeadline(mutex *sync.Mutex, cond *sync.Cond, deadline time.Time) {
+	mutex.Lock()
+	defer mutex.Unlock()
 	if d.timer != nil {
 		d.timer.Stop()
 		d.timer = nil
 	}
-	if t.IsZero() {
+	if deadline.IsZero() {
 		d.expired = false
 		return
 	}
-	expiry := time.Until(t)
+	expiry := time.Until(deadline)
 	if expiry <= 0 {
 		d.expired = true
 		cond.Broadcast()
@@ -268,8 +272,8 @@ func (d *connDeadline) setDeadline(mu *sync.Mutex, cond *sync.Cond, t time.Time)
 	d.expired = false
 	var timer *time.Timer
 	timer = time.AfterFunc(expiry, func() {
-		mu.Lock()
-		defer mu.Unlock()
+		mutex.Lock()
+		defer mutex.Unlock()
 		if d.timer == timer {
 			d.timer = nil
 			d.expired = true

@@ -24,7 +24,13 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 )
+
+// aLongTimeAgo is a non-zero time in the distant past used with
+// SetReadDeadline to immediately unblock pending reads. This matches
+// the approach used in net/http's server (see rstAvoidanceDelay).
+var aLongTimeAgo = time.Unix(1, 0) //nolint:gochecknoglobals
 
 // The names of the Connect, gRPC, and gRPC-Web protocols (as exposed by
 // [Peer].Protocol). Additional protocols may be added in the future.
