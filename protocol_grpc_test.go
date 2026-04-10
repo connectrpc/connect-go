@@ -36,12 +36,12 @@ func TestGRPCHandlerSender(t *testing.T) {
 		responseWriter := httptest.NewRecorder()
 		protobufCodec := &protoBinaryCodec{}
 		bufferPool := newBufferPool()
-		request, err := http.NewRequest(
+		request := httptest.NewRequestWithContext(
+			t.Context(),
 			http.MethodPost,
 			"https://demo.example.com",
 			strings.NewReader(""),
 		)
-		assert.Nil(t, err)
 		return &grpcHandlerConn{
 			spec:       Spec{},
 			web:        web,

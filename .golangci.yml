@@ -4,6 +4,7 @@ linters:
   disable:
     - cyclop           # covered by gocyclo
     - depguard         # unnecessary for small libraries
+    - funcorder        # consider enabling in the future
     - funlen           # rely on code review to limit function length
     - gocognit         # dubious "cognitive overhead" quantification
     - inamedparam      # convention is not followed
@@ -12,11 +13,13 @@ linters:
     - maintidx         # covered by gocyclo
     - mnd              # status codes are clearer than constants
     - nlreturn         # generous whitespace violates house style
+    - noinlineerr      # inline is fine
     - nonamedreturns   # named returns are fine; it's *bare* returns that are bad
     - protogetter      # too many false positives
     - testpackage      # internal tests are fine
     - wrapcheck        # don't _always_ need to wrap errors
     - wsl              # generous whitespace violates house style
+    - wsl_v5           # generous whitespace violates house style
   settings:
     errcheck:
       check-type-assertions: true
@@ -51,6 +54,15 @@ linters:
       - legacy
       - std-error-handling
     rules:
+      # Loosen requirements on tests
+      - linters:
+          - funlen
+          - gosec
+          - gosmopolitan
+          - unparam
+          - varnamelen
+          - prealloc
+        path: _test.go
       # If future reflect.Kinds are nil-able, we'll find out when a test fails.
       - linters:
           - exhaustive

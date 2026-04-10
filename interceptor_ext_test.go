@@ -46,6 +46,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 		)
 		server := memhttptest.NewServer(t, mux)
 		t.Run("first_interceptor", func(t *testing.T) {
+			t.Parallel()
 			// Because we're creating a new context in the first interceptor, only the first interceptor should fire
 			createClient := func(counter1 *atomic.Int32, counter2 *atomic.Int32) pingv1connectsimple.PingServiceClient {
 				opts := connect.WithInterceptors(
@@ -59,6 +60,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				)
 			}
 			t.Run("unary", func(t *testing.T) {
+				t.Parallel()
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
 				resp, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 10})
@@ -111,6 +113,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 			})
 		})
 		t.Run("subsequent_interceptor", func(t *testing.T) {
+			t.Parallel()
 			// Because we're creating a new context in the last interceptor, all interceptors should fire
 			createClient := func(counter1 *atomic.Int32, counter2 *atomic.Int32) pingv1connectsimple.PingServiceClient {
 				opts := connect.WithInterceptors(
@@ -124,6 +127,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				)
 			}
 			t.Run("unary", func(t *testing.T) {
+				t.Parallel()
 				var clientCounter1, clientCounter2 atomic.Int32
 				client := createClient(&clientCounter1, &clientCounter2)
 
@@ -174,9 +178,9 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 			})
 		})
 		t.Run("sidequest_succeeds", func(t *testing.T) {
+			t.Parallel()
 			// These tests create a new context but it is used to issue a separate/new request and not reused in the
 			// interceptor chain. So, all interceptors should fire and no errors should be returned.
-			t.Parallel()
 			createClient := func(counter1 *atomic.Int32, counter2 *atomic.Int32) pingv1connectsimple.PingServiceClient {
 				opts := connect.WithInterceptors(
 					newSideQuestInterceptor(t, counter1, server),
@@ -251,6 +255,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 		)
 		server := memhttptest.NewServer(t, mux)
 		t.Run("first_interceptor", func(t *testing.T) {
+			t.Parallel()
 			// Because we're creating a new context in the first interceptor, only the first interceptor should fire
 			createClient := func(counter1 *atomic.Int32, counter2 *atomic.Int32) pingv1connect.PingServiceClient {
 				opts := connect.WithInterceptors(
@@ -335,6 +340,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 		})
 
 		t.Run("subsequent_interceptor", func(t *testing.T) {
+			t.Parallel()
 			// Because we're creating a new context in the last interceptor, all interceptors should fire
 			createClient := func(counter1 *atomic.Int32, counter2 *atomic.Int32) pingv1connect.PingServiceClient {
 				opts := connect.WithInterceptors(
@@ -418,6 +424,7 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 			})
 		})
 		t.Run("sidequest_succeeds", func(t *testing.T) {
+			t.Parallel()
 			// These tests create a new context but it is used to issue a separate/new request and not reused in the
 			// interceptor chain. So, all interceptors should fire and no errors should be returned.
 			createClient := func(counter1 *atomic.Int32, counter2 *atomic.Int32) pingv1connect.PingServiceClient {
