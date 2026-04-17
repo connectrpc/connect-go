@@ -36,11 +36,9 @@ type duplexHTTPCall struct {
 	onRequestSend    func(*http.Request)
 	validateResponse func(*http.Response) *Error
 
-	// io.Pipe is used to implement the request body for client-streaming and
-	// bidi calls. It is initialised in newDuplexHTTPCall for those stream
-	// types and is never reassigned after construction, so it is safe to read
-	// concurrently from any goroutine without further synchronisation. For
-	// unary and server-streaming RPCs it remains nil.
+	// requestBodyWriter streams the request body for client-streaming and bidi
+	// RPCs. Assigned once in newDuplexHTTPCall and never reassigned, so it is
+	// safe to read without synchronisation. Nil for unary and server-streaming.
 	requestBodyWriter *io.PipeWriter
 
 	// requestSent ensures we only send the request once.
@@ -91,15 +89,9 @@ func newDuplexHTTPCall(
 		request:       request,
 		responseReady: make(chan struct{}),
 	}
-	// For RPCs where the client sends multiple messages (client-streaming and
-	// bidi) we set up the request body pipe up-front so that requestBodyWriter
-	// is never observable as nil from any goroutine after the call has been
-	// handed out. Deferring this to the first Send previously required a CAS
-	// on requestSent to gate the setup, which could be lost to CloseWrite:
-	// CloseWrite won the CAS, skipped pipe setup, and a subsequent concurrent
-	// Send then nil-deref'd at payload.WriteTo(d.requestBodyWriter). Send and
-	// CloseWrite are explicitly expected to be safe under concurrent use (see
-	// the comment on makeRequest below).
+	// Client-streaming and bidi RPCs stream the request body through an
+	// io.Pipe. Set it up here so requestBodyWriter is assigned once at
+	// construction and safe to read concurrently from Send and CloseWrite.
 	if spec.StreamType&StreamTypeClient != 0 {
 		pipeReader, pipeWriter := io.Pipe()
 		duplex.requestBodyWriter = pipeWriter
