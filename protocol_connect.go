@@ -855,16 +855,18 @@ func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Hea
 			mergeNonProtocolHeaders(end.Trailer, connectErr.meta)
 		}
 	}
-	data, marshalErr := json.Marshal(end)
-	if marshalErr != nil {
-		return errorf(CodeInternal, "marshal end stream: %w", marshalErr)
+	marshal := func() ([]byte, *Error) {
+		data, marshalErr := json.Marshal(end)
+		if marshalErr != nil {
+			return nil, errorf(CodeInternal, "marshal end stream: %w", marshalErr)
+		}
+		return data, nil
 	}
-	raw := bytes.NewBuffer(data)
-	defer m.envelopeWriter.bufferPool.Put(raw)
-	return m.Write(&envelope{
-		Data:  raw,
-		Flags: connectFlagEnvelopeEndStream,
-	})
+	var reduce func()
+	if end.Error != nil && len(end.Error.Details) > 0 {
+		reduce = func() { end.Error.Details = nil }
+	}
+	return m.writeControlFrame(connectFlagEnvelopeEndStream, marshal, reduce)
 }
 
 type connectStreamingUnmarshaler struct {

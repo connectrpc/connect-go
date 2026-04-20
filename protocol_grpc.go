@@ -16,6 +16,7 @@ package connect
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -577,8 +578,6 @@ type grpcMarshaler struct {
 }
 
 func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *Error {
-	raw := m.envelopeWriter.bufferPool.Get()
-	defer m.envelopeWriter.bufferPool.Put(raw)
 	for key, values := range trailer {
 		// Per the Go specification, keys inserted during iteration may be produced
 		// later in the iteration or may be skipped. For safety, avoid mutating the
@@ -590,13 +589,21 @@ func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *Error {
 		delete(trailer, key)
 		trailer[lower] = values
 	}
-	if err := trailer.Write(raw); err != nil {
-		return errorf(CodeInternal, "format trailers: %w", err)
+	marshal := func() ([]byte, *Error) {
+		var buf bytes.Buffer
+		if err := trailer.Write(&buf); err != nil {
+			return nil, errorf(CodeInternal, "format trailers: %w", err)
+		}
+		return buf.Bytes(), nil
 	}
-	return m.Write(&envelope{
-		Data:  raw,
-		Flags: grpcFlagEnvelopeTrailer,
-	})
+	// Use direct map access because the loop above lowercased all keys,
+	// so http.Header.Get/Del (which canonicalize) won't find them.
+	detailsKey := strings.ToLower(grpcHeaderDetails)
+	var reduce func()
+	if _, ok := trailer[detailsKey]; ok {
+		reduce = func() { delete(trailer, detailsKey) }
+	}
+	return m.writeControlFrame(grpcFlagEnvelopeTrailer, marshal, reduce)
 }
 
 type grpcUnmarshaler struct {

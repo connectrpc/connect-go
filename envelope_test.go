@@ -16,6 +16,7 @@ package connect
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 
@@ -100,6 +101,67 @@ func TestEnvelope(t *testing.T) {
 			assert.Equal(t, env.Len(), 0)
 		})
 	})
+}
+
+func TestEnvelopeWriteSendMaxBytes(t *testing.T) {
+	t.Parallel()
+	testCases := []struct {
+		name       string
+		flags      uint8
+		compressed bool
+	}{
+		{
+			name: "rejects_oversized_message_uncompressed",
+		},
+		{
+			name:       "rejects_oversized_message_compressed",
+			compressed: true,
+		},
+		{
+			name:  "rejects_oversized_end_stream_uncompressed",
+			flags: connectFlagEnvelopeEndStream,
+		},
+		{
+			name:       "rejects_oversized_end_stream_compressed",
+			flags:      connectFlagEnvelopeEndStream,
+			compressed: true,
+		},
+		{
+			name:  "rejects_oversized_grpc_web_trailer_uncompressed",
+			flags: grpcFlagEnvelopeTrailer,
+		},
+		{
+			name:       "rejects_oversized_grpc_web_trailer_compressed",
+			flags:      grpcFlagEnvelopeTrailer,
+			compressed: true,
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			out := &bytes.Buffer{}
+			writer := envelopeWriter{
+				sender:       writeSender{writer: out},
+				bufferPool:   newBufferPool(),
+				sendMaxBytes: 1,
+			}
+			if testCase.compressed {
+				gzipOption, ok := withGzip().(*compressionOption)
+				assert.True(t, ok)
+				writer.compressMinBytes = 1
+				writer.compressionPool = gzipOption.CompressionPool
+				writer.bufferPool = newBufferPool()
+			}
+			env := &envelope{
+				Data:  bytes.NewBuffer(make([]byte, 64)),
+				Flags: testCase.flags,
+			}
+			err := writer.Write(env)
+			assert.NotNil(t, err)
+			assert.Equal(t, CodeOf(err), CodeResourceExhausted)
+			assert.True(t, errors.Is(err, errExceedsSendMax))
+		})
+	}
 }
 
 // byteByByteReader is test reader that reads a single byte at a time.
