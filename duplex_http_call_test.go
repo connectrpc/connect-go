@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"sync"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect/internal/assert"
 )
@@ -129,4 +130,73 @@ func TestHTTPCallGetBody(t *testing.T) {
 	}
 	close(workChan)
 	wg.Wait()
+}
+
+// TestDuplexHTTPCallSendCloseWriteNoNilDeref is a regression test for a nil
+// pointer dereference in duplexHTTPCall when Send and CloseWrite are invoked
+// concurrently on a client-streaming call.
+//
+// The failure mode: Send previously initialised requestBodyWriter only in
+// the branch that won the CompareAndSwap of requestSent. CloseWrite could
+// win the same CAS first and return without ever initialising the pipe; a
+// subsequent Send then observed isFirst=false, skipped the setup, and ran
+// payload.WriteTo(d.requestBodyWriter) with requestBodyWriter == nil,
+// crashing at io.(*PipeWriter).Write.
+//
+// Concurrent Send and CloseWrite are explicitly expected to be safe (see
+// the "This runs concurrently with Write and CloseWrite" comment on
+// duplexHTTPCall.makeRequest), so the nil-deref is a bug in duplexHTTPCall.
+//
+// With the fix, requestBodyWriter is initialised in newDuplexHTTPCall for
+// client-streaming and bidi calls and is therefore never observable as nil.
+// This test provokes the bad ordering deterministically by delaying the
+// sender goroutine's first Send until after the main goroutine has called
+// CloseWrite.
+func TestDuplexHTTPCallSendCloseWriteNoNilDeref(t *testing.T) {
+	t.Parallel()
+	handler := http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		// Drain the request body so Send on the client side doesn't block.
+		_, _ = io.Copy(io.Discard, request.Body)
+		_ = request.Body.Close()
+		responseWriter.WriteHeader(http.StatusOK)
+	})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	serverURL, err := url.Parse(server.URL)
+	assert.Nil(t, err)
+
+	// A handful of iterations is enough: the bad ordering is forced
+	// deterministically below.
+	const iterations = 5
+	for range iterations {
+		call := newDuplexHTTPCall(
+			t.Context(),
+			server.Client(),
+			serverURL,
+			Spec{StreamType: StreamTypeClient},
+			http.Header{},
+		)
+		call.SetValidateResponse(func(*http.Response) *Error { return nil })
+
+		// Start a goroutine that issues a Send after a short delay. The delay
+		// lets the main goroutine's CloseWrite win the CAS on requestSent
+		// first. The late Send then observes isFirst=false and - in the buggy
+		// implementation - reads requestBodyWriter==nil and nil-derefs.
+		sendDone := make(chan struct{})
+		go func() {
+			defer close(sendDone)
+			time.Sleep(50 * time.Millisecond)
+			// Ignore the error: with the bug present this panics before
+			// returning; with the fix it returns nil or io.EOF depending on
+			// whether CloseWrite has already completed.
+			_, _ = call.Send(bytes.NewReader([]byte{1}))
+		}()
+
+		assert.Nil(t, call.CloseWrite())
+
+		// Wait for the sender goroutine to finish. With the bug present it
+		// will have panicked already; with the fix it returns cleanly.
+		<-sendDone
+		_ = call.CloseRead()
+	}
 }
