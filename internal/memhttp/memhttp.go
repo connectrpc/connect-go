@@ -93,8 +93,11 @@ func (s *Server) Transport() *http.Transport {
 func (s *Server) TransportHTTP1() *http.Transport {
 	return &http.Transport{
 		DialContext: s.listener.DialContext,
-		// TODO(emcfarlane): DisableKeepAlives false causes tests
-		// to hang on shutdown.
+		// Keep-alives are disabled because [http.Server.Shutdown] defers
+		// closing StateNew connections for 5 seconds (see net/http
+		// server.go issue 22682), which races with the cleanup timeout.
+		// Leaving this disabled makes the client close each HTTP/1 conn
+		// after the response, giving the server EOF and unblocking shutdown.
 		DisableKeepAlives: true,
 	}
 }
