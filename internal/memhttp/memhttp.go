@@ -63,11 +63,9 @@ func NewServer(handler http.Handler, opts ...Option) *Server {
 		url:            "http://" + listener.Addr().String(),
 		cleanupTimeout: cfg.CleanupTimeout,
 	}
-	server.serverWG.Add(1)
-	go func() {
-		defer server.serverWG.Done()
+	server.serverWG.Go(func() {
 		server.serverErr = server.server.Serve(server.listener)
-	}()
+	})
 	return server
 }
 

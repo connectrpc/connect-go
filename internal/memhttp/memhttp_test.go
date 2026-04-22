@@ -49,9 +49,7 @@ func TestServerTransport(t *testing.T) {
 			t.Parallel()
 			var wg sync.WaitGroup
 			for range concurrency {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					req, err := http.NewRequestWithContext(
 						t.Context(),
 						http.MethodGet,
@@ -66,7 +64,7 @@ func TestServerTransport(t *testing.T) {
 					assert.Nil(t, err)
 					assert.Nil(t, res.Body.Close())
 					assert.Equal(t, string(body), greeting)
-				}()
+				})
 			}
 			wg.Wait()
 		})
