@@ -837,9 +837,7 @@ func TestConcurrentStreams(t *testing.T) {
 	var done, start sync.WaitGroup
 	start.Add(1)
 	for range runtime.GOMAXPROCS(0) * 8 {
-		done.Add(1)
-		go func() {
-			defer done.Done()
+		done.Go(func() {
 			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
 			var total int64
 			sum := client.CumSum(t.Context())
@@ -867,7 +865,7 @@ func TestConcurrentStreams(t *testing.T) {
 			if err := sum.CloseResponse(); err != nil {
 				t.Errorf("failed to close response: %v", err)
 			}
-		}()
+		})
 	}
 	start.Done()
 	done.Wait()

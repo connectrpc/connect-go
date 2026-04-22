@@ -721,9 +721,7 @@ func testClientDeadlineBruteForceLoop(
 
 	var wg sync.WaitGroup
 	for goroutine := range parallelism {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			// We try a range of timeouts since the timing issue is sensitive
 			// to execution environment (e.g. CPU, memory, and network speeds).
 			// So the lower timeout values may be more likely to trigger an issue
@@ -794,7 +792,7 @@ func testClientDeadlineBruteForceLoop(
 				}
 				t.Logf("goroutine %d: repeating duration loop", goroutine)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	t.Logf("Issued %d RPCs.", rpcCount.Load())
