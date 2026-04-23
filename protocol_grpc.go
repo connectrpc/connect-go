@@ -515,8 +515,18 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 		// a well-intentioned client may just not expect the server to be returning
 		// an error for a streaming RPC. Better to accept that we can't always reuse
 		// TCP connections.
-		closeErr := hc.request.Body.Close()
-		if retErr == nil {
+		//
+		// For bidirectional streams over HTTP/1.x, request.Body.Close()
+		// blocks reading to the end of the current chunk. Expire the read
+		// deadline so Close returns immediately. The response is already
+		// flushed by the deferred flushResponseWriter (LIFO ordering
+		// ensures the flush runs before this closure). We use a time well
+		// in the past (not time.Now()) to guarantee immediate expiry.
+		if (hc.spec.StreamType&StreamTypeBidi) == StreamTypeBidi && hc.request.ProtoMajor < 2 {
+			rc := http.NewResponseController(hc.responseWriter)
+			_ = rc.SetReadDeadline(aLongTimeAgo)
+		}
+		if closeErr := hc.request.Body.Close(); closeErr != nil && retErr == nil {
 			retErr = closeErr
 		}
 	}()
