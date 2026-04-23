@@ -51,7 +51,6 @@ func NewInProcessHTTPClient(handler http.Handler) (HTTPClient, string) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			// TODO: implement buffered pipe to prevent deadlocks.
 			serverConn, clientConn := net.Pipe()
 			// The server-side base context stays at Background so caller
 			// values don't leak into the handler. Per-request cancellation
