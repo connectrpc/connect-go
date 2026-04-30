@@ -10,8 +10,8 @@ BIN := .tmp/bin
 export PATH := $(abspath $(BIN)):$(PATH)
 export GOBIN := $(abspath $(BIN))
 COPYRIGHT_YEARS := 2021-2025
-LICENSE_IGNORE := --ignore /testdata/
-BUF_VERSION := 1.50.1
+LICENSE_IGNORE := --ignore /testdata/ --ignore .github/ --ignore ".*\.ya?ml"
+BUF_VERSION := 1.69.0
 GOLANGCI_LINT_VERSION ?= v2.11.4
 
 .PHONY: help
