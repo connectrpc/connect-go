@@ -360,3 +360,68 @@ func TestConnectValidateStreamResponseContentType(t *testing.T) {
 		})
 	}
 }
+
+func TestConnectUnaryGetURLQueryOrder(t *testing.T) {
+	t.Parallel()
+	const baseURL = "http://example.com/connect.ping.v1.PingService/Ping"
+	newMarshaler := func(t *testing.T, codec stableCodec, compressionName string) *connectUnaryRequestMarshaler {
+		t.Helper()
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, baseURL, http.NoBody)
+		assert.Nil(t, err)
+		return &connectUnaryRequestMarshaler{
+			connectUnaryMarshaler: connectUnaryMarshaler{
+				codec:           codec,
+				compressionName: compressionName,
+			},
+			stableCodec: codec,
+			duplexCall:  &duplexHTTPCall{request: req},
+		}
+	}
+	jsonCodec := &protoJSONCodec{name: "json"}
+	protoCodec := &protoBinaryCodec{}
+	testCases := []struct {
+		name            string
+		codec           stableCodec
+		data            []byte
+		compressed      bool
+		compressionName string
+		expectRawQuery  string
+	}{
+		{
+			name:           "binary uncompressed",
+			codec:          protoCodec,
+			data:           []byte{0x01, 0x02, 0x03},
+			expectRawQuery: "connect=v1&base64=1&encoding=proto&message=AQID",
+		},
+		{
+			name:            "binary compressed",
+			codec:           protoCodec,
+			data:            []byte{0x04, 0x05, 0x06},
+			compressed:      true,
+			compressionName: "gzip",
+			expectRawQuery:  "connect=v1&base64=1&compression=gzip&encoding=proto&message=BAUG",
+		},
+		{
+			name:           "text uncompressed",
+			codec:          jsonCodec,
+			data:           []byte(`{"value":"hi"}`),
+			expectRawQuery: "connect=v1&encoding=json&message=%7B%22value%22%3A%22hi%22%7D",
+		},
+		{
+			name:            "text compressed forces base64",
+			codec:           jsonCodec,
+			data:            []byte{0x07, 0x08, 0x09},
+			compressed:      true,
+			compressionName: "gzip",
+			expectRawQuery:  "connect=v1&base64=1&compression=gzip&encoding=json&message=BwgJ",
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			marshaler := newMarshaler(t, testCase.codec, testCase.compressionName)
+			got := marshaler.buildGetURL(testCase.data, testCase.compressed)
+			assert.Equal(t, got.RawQuery, testCase.expectRawQuery)
+		})
+	}
+}
