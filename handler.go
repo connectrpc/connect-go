@@ -262,10 +262,14 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	// return early when dealing with misbehaving clients. In those cases, it's
 	// okay if we can't re-use the connection.
 	isBidi := (h.spec.StreamType & StreamTypeBidi) == StreamTypeBidi
-	if isBidi && request.ProtoMajor < 2 {
+	if isBidi && request.ProtoMajor < 2 && !isWebSocketUpgrade(request) {
 		// Clients coded to expect full-duplex connections may hang if they've
 		// mistakenly negotiated HTTP/1.1. To unblock them, we must close the
 		// underlying TCP connection.
+		//
+		// The Connect-over-WebSocket transport (RFC 008) deliberately runs its
+		// handshake over HTTP/1.1 Upgrade and is exempt: the bidi semantics
+		// come from the WebSocket framing layer, not from HTTP/2.
 		responseWriter.Header().Set("Connection", "close")
 		responseWriter.WriteHeader(http.StatusHTTPVersionNotSupported)
 		return
@@ -352,6 +356,7 @@ type handlerConfig struct {
 	ReadMaxBytes                 int
 	SendMaxBytes                 int
 	StreamType                   StreamType
+	EnableWebSocket              bool
 }
 
 func newHandlerConfig(procedure string, streamType StreamType, options []HandlerOption) *handlerConfig {
@@ -386,6 +391,9 @@ func (c *handlerConfig) newProtocolHandlers() []protocolHandler {
 		&protocolConnect{},
 		&protocolGRPC{web: false},
 		&protocolGRPC{web: true},
+	}
+	if c.EnableWebSocket {
+		protocols = append(protocols, &protocolWebSocket{})
 	}
 	handlers := make([]protocolHandler, 0, len(protocols))
 	codecs := newReadOnlyCodecs(c.Codecs)

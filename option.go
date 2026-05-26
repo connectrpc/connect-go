@@ -524,6 +524,30 @@ func (o *grpcOption) applyToClient(config *clientConfig) {
 	config.Protocol = &protocolGRPC{web: o.web}
 }
 
+// WithWebSocket enables the Connect-over-WebSocket transport (RFC 008).
+//
+// On a [Handler], it registers the WebSocket protocol alongside the existing
+// Connect, gRPC, and gRPC-Web protocols; clients open a WebSocket connection
+// with Sec-WebSocket-Protocol set to connect.v1 (or connect.v1+proto /
+// connect.v1+json from browser clients). See [ProtocolConnectWebSocket].
+//
+// On a [Client], it selects the WebSocket transport for outgoing RPCs in
+// place of the default Connect protocol over HTTP. The supplied base URL's
+// http/https scheme is rewritten to ws/wss for the upgrade.
+func WithWebSocket() Option {
+	return &webSocketOption{}
+}
+
+type webSocketOption struct{}
+
+func (o *webSocketOption) applyToHandler(config *handlerConfig) {
+	config.EnableWebSocket = true
+}
+
+func (o *webSocketOption) applyToClient(config *clientConfig) {
+	config.Protocol = &protocolWebSocket{}
+}
+
 type enableGet struct{}
 
 func (o *enableGet) applyToClient(config *clientConfig) {
