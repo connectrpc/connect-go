@@ -1,4 +1,4 @@
-// Copyright 2021-2025 The Connect Authors
+// Copyright 2021-2026 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,8 +23,25 @@ import (
 )
 
 // inProcessURL is the placeholder URL returned alongside the in-process
-// [HTTPClient]. The host matches httptest.DefaultRemoteAddr.
-const inProcessURL = "http://1.2.3.4"
+// [HTTPClient]. The host surfaces in client-side [Peer.Addr].
+const inProcessURL = "http://inprocess"
+
+// inProcessAddr is the [net.Addr] reported by both ends of the in-process
+// pipe. It surfaces in server-side [Peer.Addr] (via [http.Request.RemoteAddr])
+// instead of [net.Pipe]'s default "pipe".
+type inProcessAddr struct{}
+
+func (inProcessAddr) Network() string { return "inprocess" }
+func (inProcessAddr) String() string  { return "inprocess" }
+
+// inProcessConn overrides [net.Pipe]'s addresses so they stringify to
+// "inprocess" instead of "pipe".
+type inProcessConn struct {
+	net.Conn
+}
+
+func (inProcessConn) LocalAddr() net.Addr  { return inProcessAddr{} }
+func (inProcessConn) RemoteAddr() net.Addr { return inProcessAddr{} }
 
 // NewInProcessHTTPClient returns an [HTTPClient] that dispatches requests
 // directly to handler, along with a URL to pair with it. It supports all
@@ -40,6 +57,8 @@ const inProcessURL = "http://1.2.3.4"
 //
 //	hc, url := connect.NewInProcessHTTPClient(mux)
 //	client := pingv1connect.NewPingServiceClient(hc, url, connect.WithGRPC())
+//
+// Both client-side and server-side [Peer.Addr] report "inprocess".
 func NewInProcessHTTPClient(handler http.Handler) (HTTPClient, string) {
 	http2Server := &http2.Server{}
 	transport := &http.Transport{
@@ -56,11 +75,11 @@ func NewInProcessHTTPClient(handler http.Handler) (HTTPClient, string) {
 			// values don't leak into the handler. Per-request cancellation
 			// still propagates: cancelling the caller's context triggers
 			// HTTP/2 RST_STREAM, which cancels the handler's req.Context().
-			go http2Server.ServeConn(serverConn, &http2.ServeConnOpts{
+			go http2Server.ServeConn(inProcessConn{serverConn}, &http2.ServeConnOpts{
 				Handler: handler,
 				Context: context.Background(),
 			})
-			return clientConn, nil
+			return inProcessConn{clientConn}, nil
 		},
 	}
 	protocols := new(http.Protocols)

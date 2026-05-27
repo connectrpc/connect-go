@@ -1,4 +1,4 @@
-// Copyright 2021-2025 The Connect Authors
+// Copyright 2021-2026 The Connect Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptrace"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,6 +41,62 @@ func TestInProcessClientUnary(t *testing.T) {
 	response, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{Number: 42}))
 	assert.Nil(t, err)
 	assert.Equal(t, response.Msg.GetNumber(), 42)
+}
+
+func TestInProcessClientPeerAddr(t *testing.T) {
+	t.Parallel()
+	var serverPeerAddr string
+	server := &pluggablePingServer{
+		ping: func(_ context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+			serverPeerAddr = request.Peer().Addr
+			return connect.NewResponse(&pingv1.PingResponse{}), nil
+		},
+	}
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(server))
+
+	client := pingv1connect.NewPingServiceClient(connect.NewInProcessHTTPClient(mux))
+	_, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{}))
+	assert.Nil(t, err)
+	assert.Equal(t, serverPeerAddr, "inprocess")
+}
+
+// TestInProcessClientHTTPTrace probes whether httptrace.ClientTrace can be
+// used to surface the actual conn RemoteAddr for in-process calls — the
+// approach jhump proposed as an alternative to baking the host name into the
+// URL. This bypasses connect's machinery to test the http layer directly.
+func TestInProcessClientHTTPTrace(t *testing.T) {
+	t.Parallel()
+	server := &pluggablePingServer{ping: echoPing}
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(server))
+
+	hc, baseURL := connect.NewInProcessHTTPClient(mux)
+	httpClient, ok := hc.(*http.Client)
+	assert.True(t, ok)
+
+	var gotConnAddr atomic.Value
+	var gotConnFired atomic.Bool
+	trace := &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
+			gotConnFired.Store(true)
+			gotConnAddr.Store(info.Conn.RemoteAddr().String())
+		},
+	}
+
+	ctx := httptrace.WithClientTrace(t.Context(), trace)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/connect.ping.v1.PingService/Ping", strings.NewReader("{}"))
+	assert.Nil(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	assert.Nil(t, err)
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	assert.True(t, gotConnFired.Load())
+	addr, _ := gotConnAddr.Load().(string)
+	assert.Equal(t, addr, "inprocess")
 }
 
 func TestInProcessClientUnaryGRPC(t *testing.T) {
