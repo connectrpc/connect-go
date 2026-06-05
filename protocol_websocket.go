@@ -1119,11 +1119,11 @@ func dialError(err error, response *http.Response) *Error {
 
 func isWebSocketProtocolHeader(key string) bool {
 	switch http.CanonicalHeaderKey(key) {
-	case "Upgrade",
-		"Connection",
+	case wsHeaderUpgrade,
+		wsHeaderConnection,
 		"Sec-Websocket-Accept",
-		"Sec-Websocket-Protocol",
-		"Sec-Websocket-Extensions",
+		wsHeaderProtocol,
+		wsHeaderExtensions,
 		"Sec-Websocket-Version",
 		"Sec-Websocket-Key":
 		return true
