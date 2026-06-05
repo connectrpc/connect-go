@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -448,17 +449,17 @@ func (u *websocketUnmarshaler) Unmarshal(message any) *Error {
 		// Reuse envelopeReader.Read against this single-frame reader. The
 		// reader field is mutated here; the embedded reader is otherwise
 		// stateful only via bytesRead, which we reset.
-		u.envelopeReader.reader = frame
-		u.envelopeReader.bytesRead = 0
-		buffer := u.envelopeReader.bufferPool.Get()
+		u.reader = frame
+		u.bytesRead = 0
+		buffer := u.bufferPool.Get()
 		env := &envelope{Data: buffer}
-		if readErr := u.envelopeReader.Read(env); readErr != nil {
-			u.envelopeReader.bufferPool.Put(buffer)
+		if readErr := u.Read(env); readErr != nil {
+			u.bufferPool.Put(buffer)
 			return readErr
 		}
 		// Each binary frame must contain exactly one envelope.
 		if extra, _ := io.Copy(io.Discard, frame); extra > 0 {
-			u.envelopeReader.bufferPool.Put(buffer)
+			u.bufferPool.Put(buffer)
 			return errorf(
 				CodeInvalidArgument,
 				"websocket frame contains %d extra bytes after envelope",
@@ -470,7 +471,7 @@ func (u *websocketUnmarshaler) Unmarshal(message any) *Error {
 		switch {
 		case flags&wsFlagEnvelopeLeadingMetadata != 0:
 			mergeErr := u.mergeLeadingMetadata(env)
-			u.envelopeReader.bufferPool.Put(buffer)
+			u.bufferPool.Put(buffer)
 			if mergeErr != nil {
 				return mergeErr
 			}
@@ -481,18 +482,18 @@ func (u *websocketUnmarshaler) Unmarshal(message any) *Error {
 			// call returns io.EOF.
 			u.eof = true
 			if env.Data.Len() == 0 {
-				u.envelopeReader.bufferPool.Put(buffer)
+				u.bufferPool.Put(buffer)
 				return NewError(CodeUnknown, io.EOF)
 			}
 			decodeErr := u.decodeData(env, message)
-			u.envelopeReader.bufferPool.Put(buffer)
+			u.bufferPool.Put(buffer)
 			return decodeErr
 		case flags == 0 || flags == flagEnvelopeCompressed:
 			decodeErr := u.decodeData(env, message)
-			u.envelopeReader.bufferPool.Put(buffer)
+			u.bufferPool.Put(buffer)
 			return decodeErr
 		default:
-			u.envelopeReader.bufferPool.Put(buffer)
+			u.bufferPool.Put(buffer)
 			return errorf(
 				CodeInvalidArgument,
 				"client sent envelope with reserved flags: 0x%02x", flags,
@@ -504,16 +505,16 @@ func (u *websocketUnmarshaler) Unmarshal(message any) *Error {
 func (u *websocketUnmarshaler) decodeData(env *envelope, message any) *Error {
 	data := env.Data
 	if env.IsSet(flagEnvelopeCompressed) {
-		if u.envelopeReader.compressionPool == nil {
+		if u.compressionPool == nil {
 			return errorf(
 				CodeInternal,
 				"protocol error: client sent compressed envelope without compression support",
 			)
 		}
-		decompressed := u.envelopeReader.bufferPool.Get()
-		defer u.envelopeReader.bufferPool.Put(decompressed)
-		if err := u.envelopeReader.compressionPool.Decompress(
-			decompressed, data, int64(u.envelopeReader.readMaxBytes),
+		decompressed := u.bufferPool.Get()
+		defer u.bufferPool.Put(decompressed)
+		if err := u.compressionPool.Decompress(
+			decompressed, data, int64(u.readMaxBytes),
 		); err != nil {
 			return err
 		}
@@ -523,7 +524,7 @@ func (u *websocketUnmarshaler) decodeData(env *envelope, message any) *Error {
 		// Zero value of the message is correct.
 		return nil
 	}
-	if err := u.envelopeReader.codec.Unmarshal(data.Bytes(), message); err != nil {
+	if err := u.codec.Unmarshal(data.Bytes(), message); err != nil {
 		return errorf(CodeInvalidArgument, "unmarshal message: %w", err)
 	}
 	return nil
@@ -532,16 +533,16 @@ func (u *websocketUnmarshaler) decodeData(env *envelope, message any) *Error {
 func (u *websocketUnmarshaler) mergeLeadingMetadata(env *envelope) *Error {
 	data := env.Data
 	if env.IsSet(flagEnvelopeCompressed) {
-		if u.envelopeReader.compressionPool == nil {
+		if u.compressionPool == nil {
 			return errorf(
 				CodeInternal,
 				"protocol error: client sent compressed Leading-Metadata envelope without compression support",
 			)
 		}
-		decompressed := u.envelopeReader.bufferPool.Get()
-		defer u.envelopeReader.bufferPool.Put(decompressed)
-		if err := u.envelopeReader.compressionPool.Decompress(
-			decompressed, data, int64(u.envelopeReader.readMaxBytes),
+		decompressed := u.bufferPool.Get()
+		defer u.bufferPool.Put(decompressed)
+		if err := u.compressionPool.Decompress(
+			decompressed, data, int64(u.readMaxBytes),
 		); err != nil {
 			return err
 		}
@@ -573,7 +574,7 @@ func isWebSocketUpgrade(request *http.Request) bool {
 
 func tokenListContainsFold(values []string, token string) bool {
 	for _, value := range values {
-		for _, candidate := range strings.Split(value, ",") {
+		for candidate := range strings.SplitSeq(value, ",") {
 			if strings.EqualFold(strings.TrimSpace(candidate), token) {
 				return true
 			}
@@ -586,7 +587,7 @@ func tokenListContainsFold(values []string, token string) bool {
 // token offered by the client, in client-priority order.
 func pickConnectSubprotocol(request *http.Request) (string, bool) {
 	for _, value := range request.Header.Values(wsHeaderProtocol) {
-		for _, token := range strings.Split(value, ",") {
+		for token := range strings.SplitSeq(value, ",") {
 			trimmed := strings.TrimSpace(token)
 			switch trimmed {
 			case wsSubprotocolProto, wsSubprotocolJSON, wsSubprotocolBase:
@@ -609,8 +610,8 @@ func chooseWebSocketCodec(subprotocol, contentType string) (string, error) {
 		subCodec = codecNameJSON
 	}
 	var headerCodec string
-	if strings.HasPrefix(contentType, connectStreamingContentTypePrefix) {
-		headerCodec = strings.TrimPrefix(contentType, connectStreamingContentTypePrefix)
+	if after, ok := strings.CutPrefix(contentType, connectStreamingContentTypePrefix); ok {
+		headerCodec = after
 		if i := strings.IndexByte(headerCodec, ';'); i >= 0 {
 			headerCodec = strings.TrimSpace(headerCodec[:i])
 		}
@@ -762,14 +763,18 @@ func (c *wsClientCall) ensureDialed() *Error {
 			// callback only and is never sent.
 			stub, _ := http.NewRequestWithContext(c.ctx, http.MethodGet, c.url.String(), http.NoBody)
 			if stub != nil {
-				for k, v := range c.header {
-					stub.Header[k] = v
-				}
+				maps.Copy(stub.Header, c.header)
 				c.onRequestSend(stub)
 			}
 		}
 		conn, response, err := c.dialer.DialContext(c.ctx, c.url.String(), c.header)
 		c.response = response
+		if response != nil && response.Body != nil {
+			// We only need the upgrade response's headers; close the body to
+			// avoid leaking it. The body is a buffered remainder, not the
+			// upgraded connection (that's returned separately as conn).
+			_ = response.Body.Close()
+		}
 		if err != nil {
 			c.dialErr = dialError(err, response)
 			return
@@ -818,10 +823,10 @@ func (c *wsClientCall) Send(payload messagePayload) (int64, error) {
 }
 
 type websocketClientConn struct {
-	spec    Spec
-	peer    Peer
-	call    *wsClientCall
-	codec   Codec
+	spec             Spec
+	peer             Peer
+	call             *wsClientCall
+	codec            Codec
 	compressionPools readOnlyCompressionPools
 
 	marshaler   envelopeWriter
@@ -975,11 +980,7 @@ func (u *websocketClientUnmarshaler) Unmarshal(message any) *Error {
 		// callers see context.Canceled / context.DeadlineExceeded rather than
 		// a generic transport "i/o timeout".
 		if ctxErr := u.call.ctx.Err(); ctxErr != nil {
-			if errors.Is(ctxErr, context.Canceled) {
-				u.endStreamError = errorf(CodeCanceled, "%w", ctxErr)
-			} else {
-				u.endStreamError = errorf(CodeDeadlineExceeded, "%w", ctxErr)
-			}
+			u.endStreamError = wsContextError(ctxErr)
 			return u.endStreamError
 		}
 		if isCleanWebSocketClose(readerErr) {
@@ -1098,6 +1099,15 @@ func (u *websocketClientUnmarshaler) Unmarshal(message any) *Error {
 			"server sent envelope with reserved flags: 0x%02x", flags,
 		)
 	}
+}
+
+// wsContextError maps a done context's error to the matching Connect code,
+// preserving the original error via %w.
+func wsContextError(ctxErr error) *Error {
+	if errors.Is(ctxErr, context.Canceled) {
+		return errorf(CodeCanceled, "%w", ctxErr)
+	}
+	return errorf(CodeDeadlineExceeded, "%w", ctxErr)
 }
 
 func dialError(err error, response *http.Response) *Error {
