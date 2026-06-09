@@ -237,7 +237,7 @@ func (g *grpcClient) Peer() Peer {
 func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
-	if getHeaderCanonical(header, headerUserAgent) == "" {
+	if !hasHeaderCanonical(header, headerUserAgent) {
 		header[headerUserAgent] = []string{defaultGrpcUserAgent}
 	}
 	if g.web && getHeaderCanonical(header, headerXUserAgent) == "" {

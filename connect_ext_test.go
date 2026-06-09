@@ -2444,35 +2444,88 @@ func TestConnectProtocolHeaderRequired(t *testing.T) {
 	}
 }
 
-func TestAllowCustomUserAgent(t *testing.T) {
+func TestUserAgent(t *testing.T) {
 	t.Parallel()
 
 	const customAgent = "custom"
-	mux := http.NewServeMux()
-	mux.Handle(pingv1connect.NewPingServiceHandler(&pluggablePingServer{
-		ping: func(_ context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
-			agent := req.Header().Get("User-Agent")
-			assert.Equal(t, agent, customAgent)
-			return connect.NewResponse(&pingv1.PingResponse{Number: req.Msg.GetNumber()}), nil
-		},
-	}))
-	server := memhttptest.NewServer(t, mux)
-
-	// If the user has set a User-Agent, we shouldn't clobber it.
-	tests := []struct {
-		protocol string
-		opts     []connect.ClientOption
+	protocols := []struct {
+		name string
+		opts []connect.ClientOption
 	}{
 		{"connect", nil},
 		{"grpc", []connect.ClientOption{connect.WithGRPC()}},
 		{"grpcweb", []connect.ClientOption{connect.WithGRPCWeb()}},
 	}
-	for _, testCase := range tests {
-		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), testCase.opts...)
-		req := connect.NewRequest(&pingv1.PingRequest{Number: 42})
-		req.Header().Set("User-Agent", customAgent)
-		_, err := client.Ping(t.Context(), req)
-		assert.Nil(t, err)
+	headers := []struct {
+		name string
+		// set mutates the outgoing request header. A nil func leaves the
+		// User-Agent unset, so the framework should supply its own default.
+		set func(http.Header)
+		// check verifies what the server received for the User-Agent header.
+		check func(t *testing.T, values []string, ok bool)
+	}{
+		{
+			// With no User-Agent provided, the framework injects its default.
+			name: "unset",
+			set:  nil,
+			check: func(t *testing.T, values []string, ok bool) {
+				t.Helper()
+				assert.True(t, ok)
+				assert.Equal(t, len(values), 1)
+				assert.NotZero(t, values[0])
+			},
+		},
+		{
+			// A user-provided User-Agent must not be clobbered.
+			name: "custom",
+			set:  func(h http.Header) { h.Set("User-Agent", customAgent) },
+			check: func(t *testing.T, values []string, _ bool) {
+				t.Helper()
+				assert.Equal(t, values, []string{customAgent})
+			},
+		},
+		{
+			// An explicit empty value suppresses the default; the server
+			// should see no User-Agent header at all.
+			name: "empty-string",
+			set:  func(h http.Header) { h["User-Agent"] = []string{""} },
+			check: func(t *testing.T, _ []string, ok bool) {
+				t.Helper()
+				assert.False(t, ok)
+			},
+		},
+		{
+			// An explicit nil slice also suppresses the default.
+			name: "nil-slice",
+			set:  func(h http.Header) { h["User-Agent"] = nil },
+			check: func(t *testing.T, _ []string, ok bool) {
+				t.Helper()
+				assert.False(t, ok)
+			},
+		},
+	}
+	for _, protocol := range protocols {
+		for _, header := range headers {
+			t.Run(protocol.name+"/"+header.name, func(t *testing.T) {
+				t.Parallel()
+				mux := http.NewServeMux()
+				mux.Handle(pingv1connect.NewPingServiceHandler(&pluggablePingServer{
+					ping: func(_ context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+						values, ok := req.Header()["User-Agent"]
+						header.check(t, values, ok)
+						return connect.NewResponse(&pingv1.PingResponse{Number: req.Msg.GetNumber()}), nil
+					},
+				}))
+				server := memhttptest.NewServer(t, mux)
+				client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), protocol.opts...)
+				req := connect.NewRequest(&pingv1.PingRequest{Number: 42})
+				if header.set != nil {
+					header.set(req.Header())
+				}
+				_, err := client.Ping(t.Context(), req)
+				assert.Nil(t, err)
+			})
+		}
 	}
 }
 

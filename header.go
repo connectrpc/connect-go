@@ -113,6 +113,17 @@ func getHeaderCanonical(h http.Header, key string) string {
 	return v[0]
 }
 
+func hasHeaderCanonical(hdr http.Header, key string) bool {
+	// Return true if the key exists at all. So if a user explicitly
+	// sets a nil/empty slice of values or an empty value, we still
+	// consider that to be present. This is more precise than
+	// getHeaderCanonical(...) == "" which indicates the value is
+	// not present, even when the key is present but explicitly
+	// unset/empty.
+	_, ok := hdr[key]
+	return ok
+}
+
 // setHeaderCanonical is a shortcut for Header.Set() which
 // bypasses the CanonicalMIMEHeaderKey operation when we
 // know the key is already in canonical form.
