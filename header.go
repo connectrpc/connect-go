@@ -17,6 +17,7 @@ package connect
 import (
 	"encoding/base64"
 	"net/http"
+	"strings"
 )
 
 //nolint:gochecknoglobals
@@ -31,7 +32,6 @@ var protocolHeaders = map[string]struct{}{
 	headerDate:            {},
 	// Connect headers.
 	connectUnaryHeaderAcceptCompression:     {},
-	connectUnaryTrailerPrefix:               {},
 	connectStreamingHeaderCompression:       {},
 	connectStreamingHeaderAcceptCompression: {},
 	connectHeaderTimeout:                    {},
@@ -43,6 +43,25 @@ var protocolHeaders = map[string]struct{}{
 	grpcHeaderStatus:            {},
 	grpcHeaderMessage:           {},
 	grpcHeaderDetails:           {},
+}
+
+//nolint:gochecknoglobals
+var protocolHeaderPrefixes = []string{
+	connectUnaryTrailerPrefix,
+}
+
+// isProtocolHeader reports whether the given header key is reserved by a
+// protocol, either by exact match or by a reserved prefix.
+func isProtocolHeader(key string) bool {
+	if _, ok := protocolHeaders[key]; ok {
+		return true
+	}
+	for _, prefix := range protocolHeaderPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // EncodeBinaryHeader base64-encodes the data. It always emits unpadded values.
@@ -84,7 +103,7 @@ func mergeHeaders(into, from http.Header) {
 }
 
 // mergeNonProtocolHeaders merges headers excluding protocol headers defined in
-// protocolHeaders.
+// protocolHeaders / protocolHeaderPrefixes.
 func mergeNonProtocolHeaders(into, from http.Header) {
 	for key, vals := range from {
 		if len(vals) == 0 {
@@ -93,7 +112,7 @@ func mergeNonProtocolHeaders(into, from http.Header) {
 			// are no actual values for those keys, we skip them.
 			continue
 		}
-		if _, isProtocolHeader := protocolHeaders[key]; !isProtocolHeader {
+		if !isProtocolHeader(key) {
 			into[key] = append(into[key], vals...)
 		}
 	}
