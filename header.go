@@ -113,6 +113,19 @@ func getHeaderCanonical(h http.Header, key string) string {
 	return v[0]
 }
 
+// setUserAgentIfAbsent sets the User-Agent header to the given value, but
+// only if the caller has not already provided one. We check for the key's
+// presence rather than comparing getHeaderCanonical(...) to "" so that a
+// caller can suppress the default entirely by explicitly setting a nil/empty
+// slice of values or an empty value.
+func setUserAgentIfAbsent(header http.Header, value string) {
+	// headerUserAgent is already in canonical form, so we can index the map
+	// directly and bypass the checks in Header.Get and Header.Set.
+	if _, ok := header[headerUserAgent]; !ok {
+		header[headerUserAgent] = []string{value}
+	}
+}
+
 // setHeaderCanonical is a shortcut for Header.Set() which
 // bypasses the CanonicalMIMEHeaderKey operation when we
 // know the key is already in canonical form.

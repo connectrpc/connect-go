@@ -235,11 +235,9 @@ func (g *grpcClient) Peer() Peer {
 }
 
 func (g *grpcClient) WriteRequestHeader(_ StreamType, header http.Header) {
+	setUserAgentIfAbsent(header, defaultGrpcUserAgent)
 	// We know these header keys are in canonical form, so we can bypass all the
 	// checks in Header.Set.
-	if getHeaderCanonical(header, headerUserAgent) == "" {
-		header[headerUserAgent] = []string{defaultGrpcUserAgent}
-	}
 	if g.web && getHeaderCanonical(header, headerXUserAgent) == "" {
 		// The gRPC-Web pseudo-specification seems to require X-User-Agent rather
 		// than User-Agent for all clients, even if they're not browser-based. This
