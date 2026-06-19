@@ -287,10 +287,14 @@ func (d *duplexHTTPCall) SetValidateResponse(validate func(*http.Response) *Erro
 }
 
 // BlockUntilResponseReady returns when the response is ready or reports an
-// error from initializing the request.
+// error from initializing the request or context cancellation.
 func (d *duplexHTTPCall) BlockUntilResponseReady() error {
-	<-d.responseReady
-	return d.responseErr
+	select {
+	case <-d.responseReady:
+		return d.responseErr
+	case <-d.ctx.Done():
+		return wrapIfContextError(d.ctx.Err())
+	}
 }
 
 func (d *duplexHTTPCall) makeRequest() {
