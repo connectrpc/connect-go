@@ -245,10 +245,11 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 }
 
 func (d *duplexHTTPCall) CloseRead() error {
-	if err := d.BlockUntilResponseReady(); err != nil {
-		return nil //nolint:nilerr // Response failed, close is successful.
+	response := d.responseAfterReady()
+	if response == nil {
+		return nil // Response failed, close is successful.
 	}
-	err := d.response.Body.Close()
+	err := response.Body.Close()
 	err = wrapIfContextDone(d.ctx, err)
 	return wrapIfRSTError(d.ctx, err)
 }
@@ -263,18 +264,18 @@ func (d *duplexHTTPCall) ResponseStatusCode() (int, error) {
 
 // ResponseHeader returns the response HTTP headers.
 func (d *duplexHTTPCall) ResponseHeader() http.Header {
-	if err := d.BlockUntilResponseReady(); err != nil {
-		return make(http.Header)
+	if response := d.responseAfterReady(); response != nil {
+		return response.Header
 	}
-	return d.response.Header
+	return make(http.Header)
 }
 
 // ResponseTrailer returns the response HTTP trailers.
 func (d *duplexHTTPCall) ResponseTrailer() http.Header {
-	if err := d.BlockUntilResponseReady(); err != nil {
-		return make(http.Header)
+	if response := d.responseAfterReady(); response != nil {
+		return response.Trailer
 	}
-	return d.response.Trailer
+	return make(http.Header)
 }
 
 // SetValidateResponse sets the response validation function. The function runs
@@ -286,18 +287,26 @@ func (d *duplexHTTPCall) SetValidateResponse(validate func(*http.Response) *Erro
 // BlockUntilResponseReady returns when the response is ready or reports an
 // error from initializing the request or context cancellation.
 func (d *duplexHTTPCall) BlockUntilResponseReady() error {
-	// Prefer responseReady, then check together with context.
-	// Context is required to avoid hung clients (golang/go#48908, golang/go#43989).
 	select {
 	case <-d.responseReady:
 		return d.responseErr
+	case <-d.ctx.Done():
+		return wrapIfContextError(d.ctx.Err())
+	}
+}
+
+// responseAfterReady blocks until the response is ready, then returns it, or
+// nil if the context was cancelled before the response arrived. A nil result
+// means makeRequest may still be writing d.response, so it must not be read.
+// An error-status response is returned like any other, so callers can close
+// its body and read its headers.
+func (d *duplexHTTPCall) responseAfterReady() *http.Response {
+	_ = d.BlockUntilResponseReady()
+	select {
+	case <-d.responseReady:
+		return d.response
 	default:
-		select {
-		case <-d.responseReady:
-			return d.responseErr
-		case <-d.ctx.Done():
-			return wrapIfContextError(d.ctx.Err())
-		}
+		return nil
 	}
 }
 
