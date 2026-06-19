@@ -16,6 +16,7 @@ package connect
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -199,4 +200,54 @@ func TestDuplexHTTPCallSendCloseWriteNoNilDeref(t *testing.T) {
 		<-sendDone
 		_ = call.CloseRead()
 	}
+}
+
+// TestBlockUntilResponseReadyRespectsContext is a regression test for
+// BlockUntilResponseReady not selecting on d.ctx.Done(). Go's HTTP/2
+// transport has known issues where Do() can block after context
+// cancellation (e.g. golang/go#48908, golang/go#43989). When this
+// happens, callers such as CloseAndReceive block indefinitely.
+func TestBlockUntilResponseReadyRespectsContext(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+
+	serverURL, err := url.Parse("http://localhost:0")
+	assert.Nil(t, err)
+
+	call := newDuplexHTTPCall(
+		ctx,
+		&hangingHTTPClient{},
+		serverURL,
+		Spec{StreamType: StreamTypeClient},
+		http.Header{},
+	)
+	call.SetValidateResponse(func(*http.Response) *Error { return nil })
+
+	_, err = call.Send(bytes.NewReader([]byte("hello")))
+	assert.Nil(t, err)
+	assert.Nil(t, call.CloseWrite())
+
+	<-ctx.Done()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- call.BlockUntilResponseReady()
+	}()
+	select {
+	case err := <-done:
+		assert.NotNil(t, err)
+		assert.Equal(t, CodeDeadlineExceeded, CodeOf(err))
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("BlockUntilResponseReady did not return after context expiry")
+	}
+}
+
+// hangingHTTPClient simulates Do() not returning promptly after context
+// cancellation, as can happen with Go's HTTP/2 transport.
+type hangingHTTPClient struct{}
+
+func (c *hangingHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	_, _ = io.Copy(io.Discard, req.Body)
+	select {} // block forever
 }
