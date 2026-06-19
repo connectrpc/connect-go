@@ -245,9 +245,8 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 }
 
 func (d *duplexHTTPCall) CloseRead() error {
-	_ = d.BlockUntilResponseReady()
-	if d.response == nil {
-		return nil
+	if err := d.BlockUntilResponseReady(); err != nil {
+		return nil //nolint:nilerr // Response failed, close is successful.
 	}
 	err := d.response.Body.Close()
 	err = wrapIfContextDone(d.ctx, err)
@@ -264,20 +263,18 @@ func (d *duplexHTTPCall) ResponseStatusCode() (int, error) {
 
 // ResponseHeader returns the response HTTP headers.
 func (d *duplexHTTPCall) ResponseHeader() http.Header {
-	_ = d.BlockUntilResponseReady()
-	if d.response != nil {
-		return d.response.Header
+	if err := d.BlockUntilResponseReady(); err != nil {
+		return make(http.Header)
 	}
-	return make(http.Header)
+	return d.response.Header
 }
 
 // ResponseTrailer returns the response HTTP trailers.
 func (d *duplexHTTPCall) ResponseTrailer() http.Header {
-	_ = d.BlockUntilResponseReady()
-	if d.response != nil {
-		return d.response.Trailer
+	if err := d.BlockUntilResponseReady(); err != nil {
+		return make(http.Header)
 	}
-	return make(http.Header)
+	return d.response.Trailer
 }
 
 // SetValidateResponse sets the response validation function. The function runs
@@ -289,11 +286,18 @@ func (d *duplexHTTPCall) SetValidateResponse(validate func(*http.Response) *Erro
 // BlockUntilResponseReady returns when the response is ready or reports an
 // error from initializing the request or context cancellation.
 func (d *duplexHTTPCall) BlockUntilResponseReady() error {
+	// Prefer responseReady, then check together with context.
+	// Context is required to avoid hung clients (golang/go#48908, golang/go#43989).
 	select {
 	case <-d.responseReady:
 		return d.responseErr
-	case <-d.ctx.Done():
-		return wrapIfContextError(d.ctx.Err())
+	default:
+		select {
+		case <-d.responseReady:
+			return d.responseErr
+		case <-d.ctx.Done():
+			return wrapIfContextError(d.ctx.Err())
+		}
 	}
 }
 
