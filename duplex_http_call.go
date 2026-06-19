@@ -264,7 +264,7 @@ func (d *duplexHTTPCall) ResponseStatusCode() (int, error) {
 
 // ResponseHeader returns the response HTTP headers.
 func (d *duplexHTTPCall) ResponseHeader() http.Header {
-	if response := d.responseAfterReady(); response != nil {
+	if response := d.responseAfterReady(); response != nil { //nolint:bodyclose // body is closed by CloseRead
 		return response.Header
 	}
 	return make(http.Header)
@@ -272,7 +272,7 @@ func (d *duplexHTTPCall) ResponseHeader() http.Header {
 
 // ResponseTrailer returns the response HTTP trailers.
 func (d *duplexHTTPCall) ResponseTrailer() http.Header {
-	if response := d.responseAfterReady(); response != nil {
+	if response := d.responseAfterReady(); response != nil { //nolint:bodyclose // body is closed by CloseRead
 		return response.Trailer
 	}
 	return make(http.Header)
