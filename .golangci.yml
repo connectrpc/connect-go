@@ -71,11 +71,11 @@ linters:
       - linters:
           - containedctx
         path: duplex_http_call.go
-      # BlockUntilResponseReady returns the shared response, whose body is
+      # blockUntilResponseReady returns the shared response, whose body is
       # closed once by CloseRead rather than at each call site.
       - linters:
           - bodyclose
-        source: BlockUntilResponseReady
+        source: blockUntilResponseReady
       # We need to init a global in-mem HTTP server for testable examples.
       - linters:
           - gochecknoglobals
