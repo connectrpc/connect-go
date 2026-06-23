@@ -228,7 +228,7 @@ func (d *duplexHTTPCall) SetMethod(method string) {
 func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 	// First, we wait until we've gotten the response headers and established the
 	// server-to-client side of the stream.
-	if _, err := d.BlockUntilResponseReady(); err != nil {
+	if _, err := d.blockUntilResponseReady(); err != nil {
 		// The stream is already closed or corrupted.
 		return 0, err
 	}
@@ -246,7 +246,7 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 
 func (d *duplexHTTPCall) CloseRead() error {
 	// Ignore the error: an error response still has a body that must be closed.
-	response, _ := d.BlockUntilResponseReady()
+	response, _ := d.blockUntilResponseReady()
 	if response == nil {
 		return nil // No response, so nothing to close.
 	}
@@ -257,7 +257,7 @@ func (d *duplexHTTPCall) CloseRead() error {
 
 // ResponseStatusCode is the response's HTTP status code.
 func (d *duplexHTTPCall) ResponseStatusCode() (int, error) {
-	response, err := d.BlockUntilResponseReady()
+	response, err := d.blockUntilResponseReady()
 	if err != nil {
 		return 0, err
 	}
@@ -267,7 +267,7 @@ func (d *duplexHTTPCall) ResponseStatusCode() (int, error) {
 // ResponseHeader returns the response HTTP headers.
 func (d *duplexHTTPCall) ResponseHeader() http.Header {
 	// Ignore the error: an error response still carries headers to forward.
-	if response, _ := d.BlockUntilResponseReady(); response != nil {
+	if response, _ := d.blockUntilResponseReady(); response != nil {
 		return response.Header
 	}
 	return make(http.Header)
@@ -276,7 +276,7 @@ func (d *duplexHTTPCall) ResponseHeader() http.Header {
 // ResponseTrailer returns the response HTTP trailers.
 func (d *duplexHTTPCall) ResponseTrailer() http.Header {
 	// Ignore the error: an error response still carries trailers to forward.
-	if response, _ := d.BlockUntilResponseReady(); response != nil {
+	if response, _ := d.blockUntilResponseReady(); response != nil {
 		return response.Trailer
 	}
 	return make(http.Header)
@@ -288,14 +288,14 @@ func (d *duplexHTTPCall) SetValidateResponse(validate func(*http.Response) *Erro
 	d.validateResponse = validate
 }
 
-// BlockUntilResponseReady blocks until the response is ready or the context is
+// blockUntilResponseReady blocks until the response is ready or the context is
 // cancelled. It returns a nil response when none was received, either because
 // the request failed or the context was cancelled before the response arrived.
 //
 // The response and the error may both be non-nil. An error response (one with a
 // non-success status or that fails validation) still carries a body to close
 // and headers to forward, so it is returned alongside its error.
-func (d *duplexHTTPCall) BlockUntilResponseReady() (*http.Response, error) {
+func (d *duplexHTTPCall) blockUntilResponseReady() (*http.Response, error) {
 	select {
 	case <-d.responseReady:
 		return d.response, d.responseErr

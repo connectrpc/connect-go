@@ -232,7 +232,7 @@ func TestBlockUntilResponseReadyRespectsContext(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := call.BlockUntilResponseReady()
+		_, err := call.blockUntilResponseReady()
 		done <- err
 	}()
 	select {
