@@ -364,7 +364,7 @@ func (cc *grpcClientConn) CloseRequest() error {
 }
 
 func (cc *grpcClientConn) Receive(msg any) error {
-	if err := cc.duplexCall.BlockUntilResponseReady(); err != nil {
+	if _, err := cc.duplexCall.blockUntilResponseReady(); err != nil {
 		return err
 	}
 	err := cc.unmarshaler.Unmarshal(msg)
@@ -419,12 +419,12 @@ func (cc *grpcClientConn) Receive(msg any) error {
 }
 
 func (cc *grpcClientConn) ResponseHeader() http.Header {
-	_ = cc.duplexCall.BlockUntilResponseReady()
+	_, _ = cc.duplexCall.blockUntilResponseReady()
 	return cc.responseHeader
 }
 
 func (cc *grpcClientConn) ResponseTrailer() http.Header {
-	_ = cc.duplexCall.BlockUntilResponseReady()
+	_, _ = cc.duplexCall.blockUntilResponseReady()
 	return cc.responseTrailer
 }
 
