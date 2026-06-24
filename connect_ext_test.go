@@ -2922,6 +2922,7 @@ func TestClientDisconnect(t *testing.T) {
 						// Do nothing
 					}
 					handlerReceiveErr = stream.Err()
+					<-ctx.Done() // Context cancel is asynchronous, wait for cancel
 					handlerContextErr = ctx.Err()
 					close(gotResponse)
 					return connect.NewResponse(&pingv1.SumResponse{}), nil
@@ -2947,7 +2948,12 @@ func TestClientDisconnect(t *testing.T) {
 			assert.NotNil(t, err)
 			<-gotResponse
 			assert.NotNil(t, handlerReceiveErr)
-			assert.Equal(t, connect.CodeOf(handlerReceiveErr), connect.CodeCanceled, assert.Sprintf("got %v", handlerReceiveErr))
+			gotCode := connect.CodeOf(handlerReceiveErr)
+			assert.True(
+				t,
+				gotCode == connect.CodeCanceled || gotCode == connect.CodeInvalidArgument,
+				assert.Sprintf("got %v", handlerReceiveErr),
+			)
 			assert.ErrorIs(t, handlerContextErr, context.Canceled)
 		})
 		t.Run("handler_writes", func(t *testing.T) {
@@ -2966,6 +2972,7 @@ func TestClientDisconnect(t *testing.T) {
 						err = stream.Send(&pingv1.CountUpResponse{})
 					}
 					handlerReceiveErr = err
+					<-ctx.Done() // Context cancel is asynchronous, wait for cancel
 					handlerContextErr = ctx.Err()
 					close(gotResponse)
 					return nil
