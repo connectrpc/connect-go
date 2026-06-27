@@ -261,14 +261,18 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	// EOF: the stream we construct later on already does that, and we only
 	// return early when dealing with misbehaving clients. In those cases, it's
 	// okay if we can't re-use the connection.
-	isBidi := (h.spec.StreamType & StreamTypeBidi) == StreamTypeBidi
-	if isBidi && request.ProtoMajor < 2 {
-		// Clients coded to expect full-duplex connections may hang if they've
-		// mistakenly negotiated HTTP/1.1. To unblock them, we must close the
-		// underlying TCP connection.
-		responseWriter.Header().Set("Connection", "close")
-		responseWriter.WriteHeader(http.StatusHTTPVersionNotSupported)
-		return
+	if (h.spec.StreamType&StreamTypeBidi) == StreamTypeBidi && request.ProtoMajor < 2 {
+		// HTTP/1.x doesn't natively support full-duplex bidirectional
+		// streaming. Enable full-duplex mode via the ResponseController,
+		// which allows the server to read the request body and write the
+		// response body concurrently. If the ResponseWriter doesn't
+		// support full-duplex, reject the request.
+		rc := http.NewResponseController(responseWriter)
+		if err := rc.EnableFullDuplex(); err != nil {
+			responseWriter.Header().Set("Connection", "close")
+			responseWriter.WriteHeader(http.StatusHTTPVersionNotSupported)
+			return
+		}
 	}
 
 	protocolHandlers := h.protocolHandlers[request.Method]
