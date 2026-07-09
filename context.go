@@ -68,7 +68,7 @@ type CallInfo interface {
 // can be used to set request metadata before the RPC is invoked and to inspect
 // response metadata after the RPC completes.
 //
-// The returned context may be re-used across RPCs as long as they are
+// The returned context may be reused across RPCs as long as they are
 // not concurrent. Results of all CallInfo methods other than
 // RequestHeader() are undefined if the context is used with concurrent RPCs.
 func NewClientContext(ctx context.Context) (context.Context, CallInfo) {

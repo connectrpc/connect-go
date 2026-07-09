@@ -179,7 +179,7 @@ func (w *envelopeWriter) Write(env *envelope) *Error {
 }
 
 func (w *envelopeWriter) marshalAppend(message any, codec marshalAppender) *Error {
-	// Codec supports MarshalAppend; try to re-use a []byte from the pool.
+	// Codec supports MarshalAppend; try to reuse a []byte from the pool.
 	buffer := w.bufferPool.Get()
 	defer w.bufferPool.Put(buffer)
 	raw, err := codec.MarshalAppend(buffer.Bytes(), message)

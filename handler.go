@@ -260,7 +260,7 @@ func (h *Handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	// We don't need to defer functions to close the request body or read to
 	// EOF: the stream we construct later on already does that, and we only
 	// return early when dealing with misbehaving clients. In those cases, it's
-	// okay if we can't re-use the connection.
+	// okay if we can't reuse the connection.
 	isBidi := (h.spec.StreamType & StreamTypeBidi) == StreamTypeBidi
 	if isBidi && request.ProtoMajor < 2 {
 		// Clients coded to expect full-duplex connections may hang if they've

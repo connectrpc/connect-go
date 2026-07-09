@@ -459,7 +459,7 @@ func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named b
 			"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
 			", error)"
 	}
-	// unary; symmetric so we can re-use server templating
+	// unary; symmetric so we can reuse server templating
 	return method.GoName + serverSignatureParams(g, method, named, simple)
 }
 

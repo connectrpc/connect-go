@@ -234,7 +234,7 @@ func (s *ServerStreamForClient[Res]) ResponseTrailer() http.Header {
 // Close the receive side of the stream.
 //
 // Close is non-blocking. To gracefully close the stream and allow for
-// connection resuse ensure all messages have been received before calling
+// connection reuse ensure all messages have been received before calling
 // Close. All messages are received when Receive returns false.
 func (s *ServerStreamForClient[Res]) Close() error {
 	if s.constructErr != nil {
@@ -329,7 +329,7 @@ func (b *BidiStreamForClient[Req, Res]) Receive() (*Res, error) {
 // CloseResponse closes the receive side of the stream.
 //
 // CloseResponse is non-blocking. To gracefully close the stream and allow for
-// connection resuse ensure all messages have been received before calling
+// connection reuse ensure all messages have been received before calling
 // CloseResponse. All messages are received when Receive returns an error
 // wrapping [io.EOF].
 func (b *BidiStreamForClient[Req, Res]) CloseResponse() error {
@@ -424,7 +424,7 @@ func (b *BidiStreamForClientSimple[Req, Res]) Receive() (*Res, error) {
 // CloseResponse closes the receive side of the stream.
 //
 // CloseResponse is non-blocking. To gracefully close the stream and allow for
-// connection resuse ensure all messages have been received before calling
+// connection reuse ensure all messages have been received before calling
 // CloseResponse. All messages are received when Receive returns an error
 // wrapping [io.EOF].
 func (b *BidiStreamForClientSimple[Req, Res]) CloseResponse() error {

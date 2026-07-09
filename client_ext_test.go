@@ -629,7 +629,7 @@ func TestClientDeadlineHandling(t *testing.T) {
 	})
 
 	// This case creates significantly more load than the above one, but uses a normal
-	// client so pools and re-uses connections. It also uses all stream types to send
+	// client so pools and reuses connections. It also uses all stream types to send
 	// messages, to make sure that all stream implementations handle deadlines correctly.
 	// The I/O errors related to deadlines are historically harder to reproduce, so it
 	// throws a lot more effort into reproducing, particularly a longer duration for
