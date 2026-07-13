@@ -22,7 +22,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -263,7 +263,7 @@ func sortedAcceptPostValue(handlers []protocolHandler) string {
 	for ct := range contentTypes {
 		accept = append(accept, ct)
 	}
-	sort.Strings(accept)
+	slices.Sort(accept)
 	return strings.Join(accept, ", ")
 }
 
@@ -278,7 +278,7 @@ func sortedAllowMethodValue(handlers []protocolHandler) string {
 	for ct := range methods {
 		allow = append(allow, ct)
 	}
-	sort.Strings(allow)
+	slices.Sort(allow)
 	return strings.Join(allow, ", ")
 }
 

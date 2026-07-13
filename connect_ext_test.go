@@ -30,7 +30,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -4464,8 +4464,8 @@ func compareValues(hdr1 []string, hdr2 []string) bool {
 	sorted2 := make([]string, len(hdr2))
 	copy(sorted2, hdr2)
 
-	sort.Strings(sorted1)
-	sort.Strings(sorted2)
+	slices.Sort(sorted1)
+	slices.Sort(sorted2)
 
 	for idx, el := range sorted1 {
 		if el != sorted2[idx] {
