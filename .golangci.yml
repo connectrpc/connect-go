@@ -7,6 +7,8 @@ linters:
     - funcorder        # consider enabling in the future
     - funlen           # rely on code review to limit function length
     - gocognit         # dubious "cognitive overhead" quantification
+    - goconst          # too many false positives
+    - gomodguard       # deprecated, replaced by gomodguard_v2
     - inamedparam      # convention is not followed
     - ireturn          # "accept interfaces, return structs" isn't ironclad
     - lll              # don't want hard limits for line length

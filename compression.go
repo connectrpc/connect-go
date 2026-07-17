@@ -20,6 +20,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -188,8 +189,7 @@ func newReadOnlyCompressionPools(
 	// but we want the last registered to be the most preferred.
 	names := make([]string, 0, len(reversedNames))
 	seen := make(map[string]struct{}, len(reversedNames))
-	for i := len(reversedNames) - 1; i >= 0; i-- {
-		name := reversedNames[i]
+	for _, name := range slices.Backward(reversedNames) {
 		if _, ok := seen[name]; ok {
 			continue
 		}
