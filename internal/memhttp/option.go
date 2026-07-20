@@ -22,6 +22,7 @@ import (
 // config is the configuration for a Server.
 type config struct {
 	CleanupTimeout time.Duration
+	ConnBufferSize int
 	ErrorLog       *log.Logger
 }
 
@@ -55,5 +56,14 @@ func WithErrorLog(l *log.Logger) Option {
 func WithCleanupTimeout(d time.Duration) Option {
 	return optionFunc(func(cfg *config) {
 		cfg.CleanupTimeout = d
+	})
+}
+
+// WithConnBufferSize sets the maximum number of bytes buffered per
+// direction on each in-memory connection. Writers block when the buffer
+// is full until the reader drains enough data. The default is 4MB.
+func WithConnBufferSize(size int) Option {
+	return optionFunc(func(cfg *config) {
+		cfg.ConnBufferSize = size
 	})
 }
