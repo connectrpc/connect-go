@@ -1,0 +1,88 @@
+# Full option coverage: every v1 client/handler option. The tool flips or
+# renames the options whose v2 form is compatible (to connecthttp) and warns
+# on the reshape cases whose signature changed (WithCompression,
+# WithAcceptCompression, WithConditionalHandlerOptions) plus the option type
+# itself. Golden-only: the warned options stay as connect.* until hand-fixed,
+# so the result does not compile by design.
+exec migrate
+cmp stdout out.txt
+-- opts.go --
+package p
+
+import "connectrpc.com/connect"
+
+func clientOpts() []connect.ClientOption {
+	return []connect.ClientOption{
+		connect.WithGRPC(),
+		connect.WithGRPCWeb(),
+		connect.WithProtoJSON(),
+		connect.WithCodec(nil),
+		connect.WithCompression("gzip", nil, nil),
+		connect.WithAcceptCompression("gzip", nil, nil),
+		connect.WithSendGzip(),
+		connect.WithSendCompression("gzip"),
+		connect.WithReadMaxBytes(1),
+		connect.WithSendMaxBytes(1),
+		connect.WithCompressMinBytes(1),
+		connect.WithHTTPGet(),
+		connect.WithHTTPGetMaxURLSize(1, true),
+		connect.WithRequireConnectProtocolHeader(),
+		connect.WithConditionalHandlerOptions(nil),
+	}
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./opts.go: import_add_connecthttp=1 option_protocol=2 option_to_connecthttp=10
+--- ./opts.go
++++ ./opts.go
+@@ -1,23 +1,26 @@
+ package p
+ 
+-import "connectrpc.com/connect"
++import (
++	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2/connecthttp"
++)
+ 
+ func clientOpts() []connect.ClientOption {
+ 	return []connect.ClientOption{
+-		connect.WithGRPC(),
+-		connect.WithGRPCWeb(),
+-		connect.WithProtoJSON(),
+-		connect.WithCodec(nil),
++		connecthttp.WithGRPC(),
++		connecthttp.WithGRPCWeb(),
++		connecthttp.WithProtoJSON(),
++		connecthttp.WithCodec(nil),
+ 		connect.WithCompression("gzip", nil, nil),
+ 		connect.WithAcceptCompression("gzip", nil, nil),
+-		connect.WithSendGzip(),
+-		connect.WithSendCompression("gzip"),
+-		connect.WithReadMaxBytes(1),
+-		connect.WithSendMaxBytes(1),
+-		connect.WithCompressMinBytes(1),
+-		connect.WithHTTPGet(),
+-		connect.WithHTTPGetMaxURLSize(1, true),
+-		connect.WithRequireConnectProtocolHeader(),
++		connecthttp.WithSendGzip(),
++		connecthttp.WithSendCompression("gzip"),
++		connecthttp.WithReadMaxBytes(1),
++		connecthttp.WithSendMaxBytes(1),
++		connecthttp.WithCompressMinBytes(1),
++		connecthttp.WithHTTPGet(),
++		connecthttp.WithHTTPGetMaxURLSize(1, true),
++		connecthttp.WithRequireConnectProtocolHeader(),
+ 		connect.WithConditionalHandlerOptions(nil),
+ 	}
+ }
+
+
+The following issues require manual code changes:
+  ./opts.go:3:8: connectrpc.com/connect (v1) import retained because it still uses connect.ClientOption, connect.WithAcceptCompression, connect.WithCompression, connect.WithConditionalHandlerOptions.
+  ./opts.go:5:21: connect.ClientOption -> connecthttp.Option (interceptors go to connect.NewClient, HTTP options to connecthttp.NewTransport)
+  ./opts.go:11:3: connect.WithCompression -> connecthttp.WithCompressor(connect.Compressor) (see connectgzip); the (name, decompressor, compressor) signature changed
+  ./opts.go:12:3: connect.WithAcceptCompression -> connecthttp.WithCompressor to register a connect.Compressor (see connectgzip), then connecthttp.WithAcceptCompression(name) to advertise it
+  ./opts.go:21:3: connect.WithConditionalHandlerOptions -> connecthttp.WithConditionalOptions(func(connect.Spec) []connecthttp.Option); the callback signature changed
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

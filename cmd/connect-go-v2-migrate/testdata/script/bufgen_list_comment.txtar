@@ -1,0 +1,40 @@
+# Regression: a comment interleaved in the opt list must not stop the simple strip.
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+cmp buf.gen.yaml want.yaml
+exec go build ./...
+-- doc.go --
+package app
+-- buf.gen.yaml --
+version: v2
+plugins:
+  - local: protoc-gen-connect-go
+    out: gen
+    opt:
+      - paths=source_relative
+      # keep this comment
+      - simple=true
+-- want.yaml --
+version: v2
+plugins:
+  - local: protoc-gen-connect-go
+    out: gen
+    opt:
+      - paths=source_relative
+      # keep this comment
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./buf.gen.yaml: bufgen_remove_simple=1
+--- ./buf.gen.yaml
++++ ./buf.gen.yaml
+@@ -5,5 +5,4 @@
+     opt:
+       - paths=source_relative
+       # keep this comment
+-      - simple=true
+ 
+
+
+Scanned 1 Go file and 1 Buf template. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

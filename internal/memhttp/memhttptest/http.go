@@ -19,7 +19,7 @@ import (
 	"net/http"
 	"testing"
 
-	"connectrpc.com/connect/internal/memhttp"
+	"connectrpc.com/connect/v2/internal/memhttp"
 )
 
 // NewServer constructs a [memhttp.Server] with defaults suitable for tests:

@@ -1,0 +1,42 @@
+# Response helper: *connect.Response[T] -> *T, connect.NewResponse(m) -> m.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+)
+
+func reply(text string) *connect.Response[pingv1.PingResponse] {
+	return connect.NewResponse(&pingv1.PingResponse{Text: text})
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_drop_v1=1 result_unwrap_response=1 strip_new_response=1
+--- ./service.go
++++ ./service.go
+@@ -1,11 +1,10 @@
+ package app
+ 
+ import (
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ )
+ 
+-func reply(text string) *connect.Response[pingv1.PingResponse] {
+-	return connect.NewResponse(&pingv1.PingResponse{Text: text})
++func reply(text string) *pingv1.PingResponse {
++	return &pingv1.PingResponse{Text: text}
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

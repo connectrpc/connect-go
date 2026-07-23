@@ -1,0 +1,94 @@
+# A comment inside the receive loop is preserved when the loop is reshaped.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) CountUp(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+	return nil
+}
+
+func runCountUp(ctx context.Context, client pingv1connect.PingServiceClient) error {
+	stream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 3}))
+	if err != nil {
+		return err
+	}
+	for stream.Receive() {
+		// Print every event as it arrives.
+		fmt.Println(stream.Msg().Number)
+	}
+	return stream.Err()
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_drop_v1=1 param_unwrap_request=1 stream_err_after_loop=1 stream_handler_param=1 stream_recv_loop=1 strip_new_request=1
+--- ./service.go
++++ ./service.go
+@@ -2,9 +2,10 @@
+ 
+ import (
+ 	"context"
++	"errors"
+ 	"fmt"
++	"io"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -13,19 +14,28 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) CountUp(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
++func (s *pingServer) CountUp(ctx context.Context, req *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
+ 	return nil
+ }
+ 
+ func runCountUp(ctx context.Context, client pingv1connect.PingServiceClient) error {
+-	stream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 3}))
++	stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 3})
+ 	if err != nil {
+ 		return err
+ 	}
+-	for stream.Receive() {
++	var streamErr error
++	for {
++		msg, err := stream.Receive()
++		if err != nil {
++			streamErr = err
++			break
++		}
+ 		// Print every event as it arrives.
+-		fmt.Println(stream.Msg().Number)
++		fmt.Println(msg.Number)
+ 	}
+-	return stream.Err()
++	if errors.Is(streamErr, io.EOF) {
++		streamErr = nil
++	}
++	return streamErr
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

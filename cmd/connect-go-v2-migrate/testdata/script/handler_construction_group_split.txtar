@@ -1,0 +1,83 @@
+# Split grouped handler construction (golden-only: validate v2 module unavailable).
+stubs v2
+exec migrate
+cmp stdout out.txt
+-- handler_construction_group_split.go --
+package example
+
+import (
+	"net/http"
+
+	"connectrpc.com/connect"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/grpchealth"
+	"connectrpc.com/validate"
+)
+
+type PingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func run() error {
+	checker := grpchealth.NewStaticChecker(pingv1connect.PingServiceName)
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(
+		&PingServer{},
+		connect.WithInterceptors(validate.NewInterceptor()),
+	))
+	mux.Handle(grpchealth.NewHandler(checker))
+	return http.ListenAndServe(":8080", mux)
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./handler_construction_group_split.go: grpchealth_register=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 import_ecosystem_v2=2 interceptor_validate_v2=1 server_construction=1
+--- ./handler_construction_group_split.go
++++ ./handler_construction_group_split.go
+@@ -3,10 +3,11 @@
+ import (
+ 	"net/http"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
++	"connectrpc.com/grpchealth/v2"
++	"connectrpc.com/validate/v2"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+-	"connectrpc.com/grpchealth"
+-	"connectrpc.com/validate"
+ )
+ 
+ type PingServer struct {
+@@ -16,11 +17,13 @@
+ func run() error {
+ 	checker := grpchealth.NewStaticChecker(pingv1connect.PingServiceName)
+ 	mux := http.NewServeMux()
+-	mux.Handle(pingv1connect.NewPingServiceHandler(
+-		&PingServer{},
+-		connect.WithInterceptors(validate.NewInterceptor()),
+-	))
+-	mux.Handle(grpchealth.NewHandler(checker))
++	server := connect.NewServer(validate.NewServerInterceptor())
++	pingv1connect.RegisterPingServiceHandler(server, &PingServer{})
++	connecthttp.Mount(mux, server)
++	srv := connect.NewServer()
++
++	grpchealth.Register(srv, checker)
++	connecthttp.Mount(mux, srv)
+ 	return http.ListenAndServe(":8080", mux)
+ }
+ 
+
+
+The following issues require manual code changes:
+  ./handler_construction_group_split.go:23:2: handlers on mux have differing options, so each group gets its own *connect.Server. v2 interceptors apply per server.
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+
+go.mod is missing the v2 modules. Pull them in and tidy:
+
+  go get -u \
+       connectrpc.com/grpchealth/v2 \
+       connectrpc.com/validate/v2
+  go mod tidy
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

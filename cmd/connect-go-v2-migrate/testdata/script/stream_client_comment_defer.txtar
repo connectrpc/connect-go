@@ -1,0 +1,148 @@
+# A _test.go streaming consumer: client construction migrates, the receive loop
+# reshapes, and `defer cancel()` plus the in-loop comment survive intact.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) CountUp(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+	return nil
+}
+-- service_test.go --
+package app
+
+import (
+	"context"
+	"net/http"
+	"testing"
+	"time"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func TestCountUp(t *testing.T) {
+	t.Run("counts", func(t *testing.T) {
+		cli := pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localhost:8080")
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+
+		// Start the stream before collecting so the server is already running
+		// when the receive loop begins.
+		stream, err := cli.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 3}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var nums []int64
+		for stream.Receive() {
+			// Collect every number the server streams back.
+			nums = append(nums, stream.Msg().Number)
+		}
+		if err := stream.Err(); err != nil {
+			t.Fatal(err)
+		}
+		if len(nums) == 0 {
+			t.Fatal("no numbers received")
+		}
+	})
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_drop_v1=1 param_unwrap_request=1 stream_handler_param=1
+--- ./service.go
++++ ./service.go
+@@ -3,7 +3,6 @@
+ import (
+ 	"context"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -12,7 +11,7 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) CountUp(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
++func (s *pingServer) CountUp(ctx context.Context, req *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
+ 	return nil
+ }
+ 
+
+  ./service_test.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 stream_recv_loop=1 strip_new_request=1
+--- ./service_test.go
++++ ./service_test.go
+@@ -2,35 +2,43 @@
+ 
+ import (
+ 	"context"
++	"errors"
++	"io"
+ 	"net/http"
+ 	"testing"
+ 	"time"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+ func TestCountUp(t *testing.T) {
+ 	t.Run("counts", func(t *testing.T) {
+-		cli := pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localhost:8080")
++		cli := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080")))
+ 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+ 		defer cancel()
+ 
+ 		// Start the stream before collecting so the server is already running
+ 		// when the receive loop begins.
+-		stream, err := cli.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 3}))
++		stream, err := cli.CountUp(ctx, &pingv1.CountUpRequest{Number: 3})
+ 		if err != nil {
+ 			t.Fatal(err)
+ 		}
+ 		var nums []int64
+-		for stream.Receive() {
++		for {
++			msg, err := stream.Receive()
++			if err != nil {
++				if errors.Is(err, io.EOF) {
++					break
++				}
++				t.Fatal(err)
++			}
+ 			// Collect every number the server streams back.
+-			nums = append(nums, stream.Msg().Number)
+-		}
+-		if err := stream.Err(); err != nil {
+-			t.Fatal(err)
++			nums = append(nums, msg.Number)
+ 		}
++
+ 		if len(nums) == 0 {
+ 			t.Fatal("no numbers received")
+ 		}
+
+
+Scanned 2 Go files and 0 Buf templates. 2 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

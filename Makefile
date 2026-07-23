@@ -52,6 +52,10 @@ slowtest: build
 runconformance: build ## Run conformance test suite
 	cd internal/conformance && ./runconformance.sh
 
+.PHONY: testmigrate
+testmigrate: ## Run connect-go-v2-migrate test suite
+	cd cmd/connect-go-v2-migrate && go test ./...
+
 .PHONY: bench
 bench: BENCH ?= .*
 bench: build ## Run benchmarks for root package
@@ -82,6 +86,7 @@ generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/li
 	go mod tidy
 	cd ./internal/conformance && go mod tidy
 	buf generate
+	cd internal/conformance && buf generate --template buf.gen.yaml buf.build/connectrpc/conformance
 	cd ./cmd/protoc-gen-connect-go/internal && \
 		find ./testdata -maxdepth 1 -type d \( ! -name testdata \) | xargs -n 1 -I % bash -c "cd '%' && buf generate"
 	license-header \

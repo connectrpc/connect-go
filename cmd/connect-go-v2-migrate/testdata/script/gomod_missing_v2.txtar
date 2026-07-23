@@ -1,0 +1,81 @@
+# A handwritten v1 client with no generated stubs: the second-pass report must
+# prompt for the v2 modules that go.mod is missing.
+exec migrate
+cmp stdout out.txt
+stdout 'go.mod is missing the v2 modules'
+stdout 'connectrpc.com/connect/v2'
+! stdout 'First, move the dependencies'
+-- go.mod --
+module example.com/app
+
+go 1.25
+
+require connectrpc.com/connect v1.18.1
+
+replace connectrpc.com/connect => ./connectv1
+-- connectv1/go.mod --
+module connectrpc.com/connect
+
+go 1.25
+-- connectv1/connect.go --
+// Package connect is a minimal stand-in for connectrpc.com/connect v1.
+package connect
+
+// Code is a stand-in error code.
+type Code uint32
+
+// CodeInternal is a stand-in code constant.
+const CodeInternal Code = 13
+
+// Error is a stand-in error type.
+type Error struct {
+	code Code
+	err  error
+}
+
+// NewError is the v1 constructor.
+func NewError(code Code, err error) *Error { return &Error{code: code, err: err} }
+
+func (e *Error) Error() string { return e.err.Error() }
+-- client.go --
+package app
+
+import (
+	"errors"
+
+	"connectrpc.com/connect"
+)
+
+func fail() error {
+	return connect.NewError(connect.CodeInternal, errors.New("boom"))
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./client.go: convert_code_const=1 convert_new_error=1 flip_residual_connect=1 import_add_connectv2=1 import_drop_v1=1
+--- ./client.go
++++ ./client.go
+@@ -1,12 +1,10 @@
+ package app
+ 
+ import (
+-	"errors"
+-
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
+ )
+ 
+ func fail() error {
+-	return connect.NewError(connect.CodeInternal, errors.New("boom"))
++	return connect.NewError(connect.CodeInternal, "boom")
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+
+go.mod is missing the v2 modules. Pull them in and tidy:
+
+  go get -u \
+       connectrpc.com/connect/v2
+  go mod tidy
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

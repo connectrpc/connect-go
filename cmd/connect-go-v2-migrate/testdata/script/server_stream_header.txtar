@@ -1,0 +1,77 @@
+# Streaming handler metadata: stream.RequestHeader()/ResponseHeader()/
+# ResponseTrailer() move to connect.CallInfoForServerContext(ctx).
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+	"errors"
+	"io"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+	_ = stream.RequestHeader().Get("X-Tenant")
+	stream.ResponseHeader().Set("X-Server", "ping")
+	stream.ResponseTrailer().Set("X-Trace", "abc")
+	for {
+		req, err := stream.Receive()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		if err := stream.Send(&pingv1.CumSumResponse{Sum: req.Number}); err != nil {
+			return err
+		}
+	}
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_add_connectv2=1 import_drop_v1=1 stream_handler_param=1 stream_metadata_rewrite=3
+--- ./service.go
++++ ./service.go
+@@ -5,7 +5,7 @@
+ 	"errors"
+ 	"io"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -14,10 +14,11 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+-	_ = stream.RequestHeader().Get("X-Tenant")
+-	stream.ResponseHeader().Set("X-Server", "ping")
+-	stream.ResponseTrailer().Set("X-Trace", "abc")
++func (s *pingServer) CumSum(ctx context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
++	info, _ := connect.CallInfoForServerContext(ctx)
++	_ = info.RequestHeader().Get("X-Tenant")
++	info.ResponseHeader().Set("X-Server", "ping")
++	info.ResponseTrailer().Set("X-Trace", "abc")
+ 	for {
+ 		req, err := stream.Receive()
+ 		if err != nil {
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

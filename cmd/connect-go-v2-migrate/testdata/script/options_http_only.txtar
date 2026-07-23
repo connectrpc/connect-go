@@ -1,0 +1,39 @@
+# Client options that are all transport options move to the connecthttp package.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package p
+
+import "connectrpc.com/connect"
+
+func opts() []connect.ClientOption {
+	return []connect.ClientOption{connect.WithCodec(nil), connect.WithReadMaxBytes(1)}
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_add_connecthttp=1 import_drop_v1=1 option_to_connecthttp=2 option_type_to_connecthttp=1
+--- ./service.go
++++ ./service.go
+@@ -1,8 +1,10 @@
+ package p
+ 
+-import "connectrpc.com/connect"
++import (
++	"connectrpc.com/connect/v2/connecthttp"
++)
+ 
+-func opts() []connect.ClientOption {
+-	return []connect.ClientOption{connect.WithCodec(nil), connect.WithReadMaxBytes(1)}
++func opts() []connecthttp.Option {
++	return []connecthttp.Option{connecthttp.WithCodec(nil), connecthttp.WithReadMaxBytes(1)}
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

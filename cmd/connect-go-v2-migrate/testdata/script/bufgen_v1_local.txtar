@@ -1,0 +1,37 @@
+# A v1 buf.gen.yaml: local connect plugin opt updated, version stays v1.
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+cmp buf.gen.yaml want.yaml
+exec go build ./...
+-- doc.go --
+package app
+-- buf.gen.yaml --
+version: v1
+managed:
+  enabled: true
+  go_package_prefix:
+    default: connect-examples-go/internal/gen
+plugins:
+  - name: go
+    out: internal/gen
+    opt: paths=source_relative
+  - name: connect-go
+    out: internal/gen
+    opt: paths=source_relative
+-- want.yaml --
+version: v1
+managed:
+  enabled: true
+  go_package_prefix:
+    default: connect-examples-go/internal/gen
+plugins:
+  - name: go
+    out: internal/gen
+    opt: paths=source_relative
+  - name: connect-go
+    out: internal/gen
+    opt: paths=source_relative
+-- out.txt --
+Scanned 1 Go file and 1 Buf template. No automatic rewrites were applied.
+None of the scanned Go files import connectrpc.com/connect, so there is nothing to migrate.

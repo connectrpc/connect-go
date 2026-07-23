@@ -1,0 +1,93 @@
+# v1 stubs present: the tool defers Go edits and prints regenerate-first advice.
+stubs v1generic
+exec migrate
+cmp stdout out.txt
+exec go build ./...
+-- service.go --
+package app
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct{}
+
+func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	return connect.NewResponse(&pingv1.PingResponse{Number: req.Msg.Number, Text: req.Msg.Text}), nil
+}
+
+func (s *pingServer) Fail(ctx context.Context, req *connect.Request[pingv1.FailRequest]) (*connect.Response[pingv1.FailResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fail"))
+}
+
+func (s *pingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+	var sum int64
+	for stream.Receive() {
+		sum += stream.Msg().Number
+	}
+	if err := stream.Err(); err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&pingv1.SumResponse{Sum: sum}), nil
+}
+
+func (s *pingServer) CountUp(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+	for i := int64(1); i <= req.Msg.Number; i++ {
+		if err := stream.Send(&pingv1.CountUpResponse{Number: i}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *pingServer) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+	var sum int64
+	for {
+		req, err := stream.Receive()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		sum += req.Number
+		if err := stream.Send(&pingv1.CumSumResponse{Sum: sum}); err != nil {
+			return err
+		}
+	}
+}
+
+func setup() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(&pingServer{}))
+	return mux
+}
+-- out.txt --
+Scanned 1 Go file and 0 Buf templates. The generated Connect code still
+targets v1, so no Go source changes are proposed yet.
+
+Generated v1 Connect code:
+  ./gen/connect/ping/v1/pingv1connect
+
+First, move the dependencies and generated code to v2:
+
+  1. go get -u \
+       connectrpc.com/connect/v2
+     (pulls the v2 core, generated SDKs, and ecosystem modules into go.mod)
+  2. go install connectrpc.com/connect/v2/cmd/protoc-gen-connect-go@latest
+     (see docs/v2-migration.md if you generate with a remote plugin or a
+     go.mod tool)
+  3. buf generate
+
+Then re-run connect-go-v2-migrate to work through the Go source changes: it
+rewrites the call sites against the v2 stubs and reports anything that needs
+a manual update.
+
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

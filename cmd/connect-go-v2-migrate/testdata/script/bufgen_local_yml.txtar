@@ -1,0 +1,38 @@
+# buf.gen.yml: list-form opt has the simple entry dropped.
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+cmp buf.gen.yml want.yml
+exec go build ./...
+-- doc.go --
+package app
+-- buf.gen.yml --
+version: v2
+plugins:
+  - local: protoc-gen-connect-go
+    out: gen
+    opt:
+      - paths=source_relative
+      - simple=true
+-- want.yml --
+version: v2
+plugins:
+  - local: protoc-gen-connect-go
+    out: gen
+    opt:
+      - paths=source_relative
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./buf.gen.yml: bufgen_remove_simple=1
+--- ./buf.gen.yml
++++ ./buf.gen.yml
+@@ -4,5 +4,4 @@
+     out: gen
+     opt:
+       - paths=source_relative
+-      - simple=true
+ 
+
+
+Scanned 1 Go file and 1 Buf template. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

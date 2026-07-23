@@ -1,0 +1,34 @@
+# connect.WithCodec -> connecthttp.WithCodecs; the v1 import drops for connecthttp.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package p
+
+import "connectrpc.com/connect"
+
+var _ = connect.WithCodec(nil)
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_add_connecthttp=1 import_drop_v1=1 option_to_connecthttp=1
+--- ./service.go
++++ ./service.go
+@@ -1,6 +1,8 @@
+ package p
+ 
+-import "connectrpc.com/connect"
++import (
++	"connectrpc.com/connect/v2/connecthttp"
++)
+ 
+-var _ = connect.WithCodec(nil)
++var _ = connecthttp.WithCodec(nil)
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

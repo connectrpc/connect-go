@@ -1,0 +1,299 @@
+# Partial migration: consumer_a's stubs are v2 (it migrates now), consumer_b's
+# are still v1 (deferred until regenerated). A dry-run phase-decision check:
+# not a regenerate-first run, and consumer_b is left for later.
+exec migrate
+cmp stdout out.txt
+stdout 'Deferred until their connect stubs are regenerated'
+stdout 'strip_new_request'
+! stdout 'First, move the dependencies'
+-- connectv1/connect.go --
+// Copyright 2021-2026 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package connect is a minimal stand-in for connectrpc.com/connect v1.
+package connect
+
+import "net/http"
+
+type HTTPClient interface{ Do(*http.Request) (*http.Response, error) }
+type ClientOption interface{ clientOption() }
+
+type Request[T any] struct{ Msg *T }
+
+func NewRequest[T any](msg *T) *Request[T] { return &Request[T]{Msg: msg} }
+
+type Response[T any] struct{ Msg *T }
+-- connectv1/go.mod --
+module connectrpc.com/connect
+
+go 1.25
+-- connectv2/connect.go --
+// Copyright 2021-2026 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package connect is a minimal stand-in for connectrpc.com/connect/v2.
+package connect
+
+import "net/http"
+
+type HTTPClient interface{ Do(*http.Request) (*http.Response, error) }
+type ClientOption interface{ clientOption() }
+type Client struct{}
+
+func NewClient(HTTPClient, string, ...ClientOption) *Client { return &Client{} }
+-- connectv2/go.mod --
+module connectrpc.com/connect/v2
+
+go 1.25
+-- consumer_a.go --
+// Copyright 2021-2026 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package app
+
+import (
+	"context"
+	"net/http"
+
+	"connectrpc.com/connect"
+
+	"example.com/app/gen/av1"
+	"example.com/app/gen/av1/av1connect"
+)
+
+// echo binds to service A, whose stub is already v2, so it migrates now.
+func echo(ctx context.Context) error {
+	client := av1connect.NewAServiceClient(http.DefaultClient, "http://localhost")
+	_, err := client.Echo(ctx, connect.NewRequest(&av1.EchoRequest{Text: "hi"}))
+	return err
+}
+-- consumer_b.go --
+// Copyright 2021-2026 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package app
+
+import (
+	"context"
+	"net/http"
+
+	"connectrpc.com/connect"
+
+	"example.com/app/gen/bv1"
+	"example.com/app/gen/bv1/bv1connect"
+)
+
+// ping binds to service B, whose stub is still v1, so it is deferred.
+func ping(ctx context.Context) error {
+	client := bv1connect.NewBServiceClient(http.DefaultClient, "http://localhost")
+	_, err := client.Ping(ctx, connect.NewRequest(&bv1.PingRequest{N: 1}))
+	return err
+}
+-- gen/av1/av1connect/echo.connect.go --
+// Copyright 2021-2026 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Code generated by protoc-gen-connect-go. DO NOT EDIT.
+
+package av1connect
+
+import (
+	"context"
+
+	"connectrpc.com/connect/v2"
+
+	"example.com/app/gen/av1"
+)
+
+type AServiceClient struct{ client *connect.Client }
+
+func NewAServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) *AServiceClient {
+	return &AServiceClient{client: connect.NewClient(httpClient, baseURL, opts...)}
+}
+
+func (c *AServiceClient) Echo(ctx context.Context, req *av1.EchoRequest) (*av1.EchoResponse, error) {
+	return nil, nil
+}
+-- gen/av1/echo.pb.go --
+// Copyright 2021-2026 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Code generated by protoc-gen-go. DO NOT EDIT.
+
+package av1
+
+type EchoRequest struct{ Text string }
+type EchoResponse struct{ Text string }
+-- gen/bv1/bv1connect/ping.connect.go --
+// Copyright 2021-2026 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Code generated by protoc-gen-connect-go. DO NOT EDIT.
+
+package bv1connect
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+
+	"example.com/app/gen/bv1"
+)
+
+type BServiceClient struct{}
+
+func NewBServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) *BServiceClient {
+	return &BServiceClient{}
+}
+
+func (c *BServiceClient) Ping(ctx context.Context, req *connect.Request[bv1.PingRequest]) (*connect.Response[bv1.PingResponse], error) {
+	return nil, nil
+}
+-- gen/bv1/ping.pb.go --
+// Copyright 2021-2026 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Code generated by protoc-gen-go. DO NOT EDIT.
+
+package bv1
+
+type PingRequest struct{ N int64 }
+type PingResponse struct{ N int64 }
+-- go.mod --
+module example.com/app
+
+go 1.25
+
+require (
+	connectrpc.com/connect v1.18.1
+	connectrpc.com/connect/v2 v2.0.0
+)
+
+replace connectrpc.com/connect => ./connectv1
+
+replace connectrpc.com/connect/v2 => ./connectv2
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./consumer_a.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 strip_new_request=1
+--- ./consumer_a.go
++++ ./consumer_a.go
+@@ -18,7 +18,8 @@
+ 	"context"
+ 	"net/http"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
+ 
+ 	"example.com/app/gen/av1"
+ 	"example.com/app/gen/av1/av1connect"
+@@ -26,8 +27,8 @@
+ 
+ // echo binds to service A, whose stub is already v2, so it migrates now.
+ func echo(ctx context.Context) error {
+-	client := av1connect.NewAServiceClient(http.DefaultClient, "http://localhost")
+-	_, err := client.Echo(ctx, connect.NewRequest(&av1.EchoRequest{Text: "hi"}))
++	client := av1connect.NewAServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost")))
++	_, err := client.Echo(ctx, &av1.EchoRequest{Text: "hi"})
+ 	return err
+ }
+ 
+
+
+The following issues require manual code changes:
+  ./consumer_b.go:21:2: connectrpc.com/connect (v1) import retained because it still uses connect.NewRequest.
+
+Deferred until their connect stubs are regenerated to v2:
+  ./consumer_b.go:29:12: stub-dependent rewrite (handler/client signatures, .Msg, NewRequest/NewResponse, streams, construction)
+Regenerate those stubs (buf generate) and re-run connect-go-v2-migrate.
+
+Scanned 2 Go files and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

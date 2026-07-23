@@ -72,7 +72,15 @@ linters:
       # We need our duplex HTTP call to have access to the context.
       - linters:
           - containedctx
-        path: duplex_http_call.go
+        path: connecthttp/duplex_http_call.go
+      # The in-process stream needs to capture the call context for cancellation.
+      - linters:
+          - containedctx
+        path: connectinprocess/stream.go
+      # The test conn wraps a stream and holds the call context to inspect headers.
+      - linters:
+          - containedctx
+        path: connecthttp/interceptor_ext_test.go
       # blockUntilResponseReady returns the shared response, whose body is
       # closed once by CloseRead rather than at each call site.
       - linters:
@@ -82,7 +90,7 @@ linters:
       - linters:
           - gochecknoglobals
           - gochecknoinits
-        path: example_init_test.go
+        path: connecthttp/example_init_test.go
       # We purposefully do an ineffectual assignment for an example.
       - linters:
           - ineffassign
@@ -96,57 +104,80 @@ linters:
       - linters:
           - errcheck
           - gosec
-        path: error_writer_example_test.go
+        path: connecthttp/error_writer_example_test.go
       # It should be crystal clear that Connect uses plain *http.Clients.
       - linters:
           - revive
           - staticcheck
-        path: client_example_test.go
+        path: connecthttp/client_example_test.go
       # Don't complain about timeout management or lack of output assertions in examples.
       - linters:
           - gosec
           - testableexamples
-        path: handler_example_test.go
+        path: connecthttp/handler_example_test.go
       # No output assertions needed for these examples.
       - linters:
           - testableexamples
-        path: error_writer_example_test.go
+        path: connecthttp/error_writer_example_test.go
       - linters:
           - testableexamples
-        path: error_not_modified_example_test.go
+        path: connecthttp/error_not_modified_example_test.go
       - linters:
           - testableexamples
-        path: error_example_test.go
+        path: connecthttp/error_example_test.go
       # In examples, it's okay to use http.ListenAndServe.
       - linters:
           - gosec
-        path: error_not_modified_example_test.go
+        path: connecthttp/error_not_modified_example_test.go
       # There are many instances where we want to keep unused parameters
       # as a matter of style or convention, for example when a context.Context
       # is the first parameter, we choose to just globally ignore this.
       - linters:
           - revive
         text: '^unused-parameter: '
+      # The interface is an unexported v1 internal interface.
+      - linters:
+          - interfacebloat
+        path: connecthttp/protocol.go
       # We want to return explicit nils in protocol_grpc.go
       - linters:
           - revive
-        path: protocol_grpc.go
+        path: connecthttp/protocol_grpc.go
         text: '^if-return: '
+      # The gRPC error marshaling keeps its nested structure for clarity.
+      - linters:
+          - nestif
+        path: connecthttp/protocol_grpc.go
+      # connectWireDetail embeds *anypb.Any, keep the explicit selector.
+      - linters:
+          - staticcheck
+        path: connecthttp/protocol_connect.*\.go
+        text: 'QF1008: '
       # We want to return explicit nils in protocol_connect.go
       - linters:
           - revive
-        path: protocol_connect.go
+        path: connecthttp/protocol_connect.go
         text: '^if-return: '
       # We want to return explicit nils in error_writer.go
       - linters:
           - revive
-        path: error_writer.go
+        path: connecthttp/error_writer.go
         text: '^if-return: '
       # We want to set http.Server's logger
       - linters:
           - forbidigo
         path: internal/memhttp
         text: use of `log.(New|Logger|Lshortfile)` forbidden by pattern .*
+      # The migration CLI writes its report to stdout.
+      - linters:
+          - forbidigo
+        path: cmd/connect-go-v2-migrate
+        text: use of `fmt.Print.*` forbidden by pattern .*
+      # The interceptor example sets a *log.Logger on its stream wrapper.
+      - linters:
+          - forbidigo
+        path: connecthttp/interceptor_example_test.go
+        text: use of `log.Logger` forbidden by pattern .*
       # We want to show examples with http.Get
       - linters:
           - noctx
@@ -159,10 +190,18 @@ linters:
       - linters:
           - canonicalheader
         path: .*_test.go
+      # TestServer is a large table-driven test.
+      - linters:
+          - gocyclo
+        path: connecthttp/connect_ext_test.go
+      # The benchmark builds a fresh option slice per client.
+      - linters:
+          - gocritic
+        path: connecthttp/bench_test.go
       # Allow Code pointer receiver for UnmarshalText method
       - linters:
           - recvcheck
-        path: code.go
+        path: connect.go
       # Avoid false positives for int overflow in tests
       - linters:
           - gosec

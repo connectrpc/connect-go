@@ -1,0 +1,71 @@
+# Wrapper types in struct fields and function-type signatures flip to bare messages.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"testing"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+)
+
+type testCase struct {
+	assertions func(*testing.T, *connect.Response[pingv1.PingResponse], error)
+	build      func() *connect.Request[pingv1.PingRequest]
+}
+
+func run(t *testing.T, check func(*testing.T, *connect.Response[pingv1.PingResponse], error)) {
+	var collected []*connect.Response[pingv1.PingResponse]
+	check(t, &connect.Response[pingv1.PingResponse]{}, nil)
+	_ = collected
+}
+
+func approve(_ *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	return &connect.Response[pingv1.PingResponse]{}, nil
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: flip_message_wrapper=4 import_drop_v1=1 param_unwrap_request=1 result_unwrap_response=1 strip_response_literal=2
+--- ./service.go
++++ ./service.go
+@@ -3,22 +3,21 @@
+ import (
+ 	"testing"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ )
+ 
+ type testCase struct {
+-	assertions func(*testing.T, *connect.Response[pingv1.PingResponse], error)
+-	build      func() *connect.Request[pingv1.PingRequest]
++	assertions func(*testing.T, *pingv1.PingResponse, error)
++	build      func() *pingv1.PingRequest
+ }
+ 
+-func run(t *testing.T, check func(*testing.T, *connect.Response[pingv1.PingResponse], error)) {
+-	var collected []*connect.Response[pingv1.PingResponse]
+-	check(t, &connect.Response[pingv1.PingResponse]{}, nil)
++func run(t *testing.T, check func(*testing.T, *pingv1.PingResponse, error)) {
++	var collected []*pingv1.PingResponse
++	check(t, &pingv1.PingResponse{}, nil)
+ 	_ = collected
+ }
+ 
+-func approve(_ *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+-	return &connect.Response[pingv1.PingResponse]{}, nil
++func approve(_ *pingv1.PingRequest) (*pingv1.PingResponse, error) {
++	return &pingv1.PingResponse{}, nil
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

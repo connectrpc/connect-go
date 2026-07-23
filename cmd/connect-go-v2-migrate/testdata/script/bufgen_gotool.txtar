@@ -1,0 +1,42 @@
+# buf.gen.yaml with go-tool plugins: the connect plugin's simple opt is dropped.
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+cmp buf.gen.yaml want.yaml
+exec go build ./...
+-- doc.go --
+package app
+-- buf.gen.yaml --
+version: v2
+plugins:
+  - local: [go, tool, protoc-gen-go]
+    out: gen
+    opt: paths=source_relative
+  - local: [go, tool, protoc-gen-connect-go]
+    out: gen
+    opt: paths=source_relative,simple=true
+-- want.yaml --
+version: v2
+plugins:
+  - local: [go, tool, protoc-gen-go]
+    out: gen
+    opt: paths=source_relative
+  - local: [go, tool, protoc-gen-connect-go]
+    out: gen
+    opt: paths=source_relative
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./buf.gen.yaml: bufgen_remove_simple=1
+--- ./buf.gen.yaml
++++ ./buf.gen.yaml
+@@ -5,5 +5,5 @@
+     opt: paths=source_relative
+   - local: [go, tool, protoc-gen-connect-go]
+     out: gen
+-    opt: paths=source_relative,simple=true
++    opt: paths=source_relative
+ 
+
+
+Scanned 1 Go file and 1 Buf template. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

@@ -38,9 +38,9 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"connectrpc.com/connect/internal/assert"
-	"connectrpc.com/connect/internal/memhttp"
-	"connectrpc.com/connect/internal/memhttp/memhttptest"
+	"connectrpc.com/connect/v2/internal/assert"
+	"connectrpc.com/connect/v2/internal/memhttp"
+	"connectrpc.com/connect/v2/internal/memhttp/memhttptest"
 )
 
 // TestMemhttpWithSynctest verifies that memhttp works correctly with synctest.

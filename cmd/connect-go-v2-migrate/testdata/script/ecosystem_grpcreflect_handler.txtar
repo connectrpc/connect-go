@@ -1,0 +1,46 @@
+# grpcreflect handler import flips to /v2 (golden-only: grpcreflect v2 unavailable).
+exec migrate
+cmp stdout out.txt
+-- ecosystem_grpcreflect_handler.go --
+package example
+
+import (
+	"net/http"
+
+	"connectrpc.com/grpcreflect"
+)
+
+func registerReflection(mux *http.ServeMux) {
+	reflector := grpcreflect.NewStaticReflector("acme.user.v1.UserService")
+	mux.Handle(grpcreflect.NewHandlerV1(reflector))
+	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./ecosystem_grpcreflect_handler.go: import_ecosystem_v2=1
+--- ./ecosystem_grpcreflect_handler.go
++++ ./ecosystem_grpcreflect_handler.go
+@@ -3,7 +3,7 @@
+ import (
+ 	"net/http"
+ 
+-	"connectrpc.com/grpcreflect"
++	"connectrpc.com/grpcreflect/v2"
+ )
+ 
+ func registerReflection(mux *http.ServeMux) {
+
+
+The following issues require manual code changes:
+  ./ecosystem_grpcreflect_handler.go:10:15: grpcreflect.NewStaticReflector -> grpcreflect.Register(server) serves v1 and v1alpha and lists the server's registered services by default. See docs/v2-migration.md
+  ./ecosystem_grpcreflect_handler.go:11:13: grpcreflect.NewHandlerV1 -> grpcreflect.Register(server) serves v1 and v1alpha and lists the server's registered services by default. See docs/v2-migration.md
+  ./ecosystem_grpcreflect_handler.go:12:13: grpcreflect.NewHandlerV1Alpha -> grpcreflect.Register(server) serves v1 and v1alpha and lists the server's registered services by default. See docs/v2-migration.md
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+
+go.mod is missing the v2 modules. Pull them in and tidy:
+
+  go get -u \
+       connectrpc.com/grpcreflect/v2
+  go mod tidy
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

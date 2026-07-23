@@ -1,0 +1,56 @@
+# With a blank (_) context the request-header access cannot be rewritten to
+# connect.CallInfoForServerContext(ctx); the migration is intentionally incomplete
+# (golden-only).
+stubs v2
+exec migrate
+cmp stdout out.txt
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) Ping(_ context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	token := req.Header().Get("Authorization")
+	return connect.NewResponse(&pingv1.PingResponse{Text: token}), nil
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_drop_v1=1 param_unwrap_request=1 result_unwrap_response=1 strip_new_response=1
+--- ./service.go
++++ ./service.go
+@@ -3,7 +3,6 @@
+ import (
+ 	"context"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -12,8 +11,8 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) Ping(_ context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
++func (s *pingServer) Ping(_ context.Context, req *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+ 	token := req.Header().Get("Authorization")
+-	return connect.NewResponse(&pingv1.PingResponse{Text: token}), nil
++	return &pingv1.PingResponse{Text: token}, nil
+ }
+ 
+
+
+The following issues require manual code changes:
+  ./service.go:16:11: req.Header() reads request headers via the connect.CallInfoForServerContext(ctx) info's RequestHeader() in v2
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md
