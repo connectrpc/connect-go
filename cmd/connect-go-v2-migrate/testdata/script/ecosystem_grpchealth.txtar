@@ -1,0 +1,53 @@
+# connectrpc.com/grpchealth import flips to /v2 (golden-only: grpchealth v2 unavailable).
+exec migrate
+cmp stdout out.txt
+-- ecosystem_grpchealth.go --
+package example
+
+import (
+	"net/http"
+
+	"connectrpc.com/grpchealth"
+)
+
+func run() error {
+	checker := grpchealth.NewStaticChecker("acme.user.v1.UserService")
+	mux := http.NewServeMux()
+	mux.Handle(grpchealth.NewHandler(checker))
+	return http.ListenAndServe(":8080", mux)
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./ecosystem_grpchealth.go: grpchealth_register=1 import_add_connecthttp=1 import_add_connectv2=1 import_ecosystem_v2=1
+--- ./ecosystem_grpchealth.go
++++ ./ecosystem_grpchealth.go
+@@ -3,13 +3,17 @@
+ import (
+ 	"net/http"
+ 
+-	"connectrpc.com/grpchealth"
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
++	"connectrpc.com/grpchealth/v2"
+ )
+ 
+ func run() error {
+ 	checker := grpchealth.NewStaticChecker("acme.user.v1.UserService")
+ 	mux := http.NewServeMux()
+-	mux.Handle(grpchealth.NewHandler(checker))
++	server := connect.NewServer()
++	grpchealth.Register(server, checker)
++	connecthttp.Mount(mux, server)
+ 	return http.ListenAndServe(":8080", mux)
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+
+go.mod is missing the v2 modules. Pull them in and tidy:
+
+  go get -u \
+       connectrpc.com/grpchealth/v2
+  go mod tidy
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

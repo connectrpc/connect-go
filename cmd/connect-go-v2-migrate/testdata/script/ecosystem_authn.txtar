@@ -1,0 +1,52 @@
+# connectrpc.com/authn import flips to /v2 (golden-only: authn v2 module unavailable).
+exec migrate
+cmp stdout out.txt
+-- ecosystem_authn.go --
+package example
+
+import (
+	"context"
+	"net/http"
+
+	"connectrpc.com/authn"
+)
+
+func authenticate(_ context.Context, req *http.Request) (any, error) {
+	token, ok := authn.BearerToken(req)
+	if !ok {
+		return nil, authn.Errorf("missing bearer token")
+	}
+	return token, nil
+}
+
+func wrap(mux *http.ServeMux) http.Handler {
+	middleware := authn.NewMiddleware(authenticate)
+	return middleware.Wrap(mux)
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./ecosystem_authn.go: import_ecosystem_v2=1
+--- ./ecosystem_authn.go
++++ ./ecosystem_authn.go
+@@ -4,7 +4,7 @@
+ 	"context"
+ 	"net/http"
+ 
+-	"connectrpc.com/authn"
++	"connectrpc.com/authn/v2"
+ )
+ 
+ func authenticate(_ context.Context, req *http.Request) (any, error) {
+
+
+The following issues require manual code changes:
+  ./ecosystem_authn.go:19:16: authn.NewMiddleware -> authn.NewServerInterceptor(authFunc) passed to connect.NewServer. AuthFunc takes (ctx, connect.Spec, *connect.Header). See docs/v2-migration.md
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+
+go.mod is missing the v2 modules. Pull them in and tidy:
+
+  go get -u \
+       connectrpc.com/authn/v2
+  go mod tidy
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

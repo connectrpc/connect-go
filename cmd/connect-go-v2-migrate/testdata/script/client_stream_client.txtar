@@ -1,0 +1,84 @@
+# Client-streaming consumer (Sum): single-return becomes (stream, err) and res.Msg -> res.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+	return connect.NewResponse(&pingv1.SumResponse{}), nil
+}
+
+func runSum(ctx context.Context, client pingv1connect.PingServiceClient) (*pingv1.SumResponse, error) {
+	stream := client.Sum(ctx)
+	for i := int64(1); i <= 3; i++ {
+		if err := stream.Send(&pingv1.SumRequest{Number: i}); err != nil {
+			return nil, err
+		}
+	}
+	res, err := stream.CloseAndReceive()
+	if err != nil {
+		return nil, err
+	}
+	return res.Msg, nil
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: body_drop_msg=1 import_drop_v1=1 result_unwrap_response=1 stream_client_ctor=1 stream_close_and_receive=1 stream_handler_param=1 strip_new_response=1
+--- ./service.go
++++ ./service.go
+@@ -3,7 +3,6 @@
+ import (
+ 	"context"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -12,12 +11,15 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+-	return connect.NewResponse(&pingv1.SumResponse{}), nil
++func (s *pingServer) Sum(ctx context.Context, stream pingv1connect.PingServiceSumServerStream) (*pingv1.SumResponse, error) {
++	return &pingv1.SumResponse{}, nil
+ }
+ 
+ func runSum(ctx context.Context, client pingv1connect.PingServiceClient) (*pingv1.SumResponse, error) {
+-	stream := client.Sum(ctx)
++	stream, err := client.Sum(ctx)
++	if err != nil {
++		return nil, err
++	}
+ 	for i := int64(1); i <= 3; i++ {
+ 		if err := stream.Send(&pingv1.SumRequest{Number: i}); err != nil {
+ 			return nil, err
+@@ -27,6 +29,6 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	return res.Msg, nil
++	return res, nil
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

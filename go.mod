@@ -1,11 +1,6 @@
-module connectrpc.com/connect
+module connectrpc.com/connect/v2
 
 go 1.25.0
-
-retract (
-	v1.10.0 // module cache poisoned, use v1.10.1
-	v1.9.0 // module cache poisoned, use v1.9.1
-)
 
 require (
 	github.com/google/go-cmp v0.7.0

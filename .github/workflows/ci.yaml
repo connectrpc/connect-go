@@ -74,3 +74,18 @@ jobs:
           go-version: 1.26.x
       - name: Run Slow Tests
         run: make slowtest
+  migrate:
+    name: migrate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          # only the latest
+          go-version: 1.26.x
+      - name: Test Migration Tool
+        run: make testmigrate

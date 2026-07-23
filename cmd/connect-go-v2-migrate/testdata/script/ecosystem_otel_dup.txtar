@@ -1,0 +1,67 @@
+# Regression: otelconnect.NewInterceptor in a handler's WithInterceptors is
+# warned once (by the construction pass), not duplicated by the ecosystem pass.
+# Golden-only: otelconnect has no v2 build yet.
+stubs v2
+exec migrate
+cmp stdout out.txt
+-- service.go --
+package app
+
+import (
+	"net/http"
+
+	"connectrpc.com/connect"
+	"connectrpc.com/otelconnect"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func run() error {
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(&pingServer{}, connect.WithInterceptors(otelconnect.NewInterceptor())))
+	return http.ListenAndServe(":8080", mux)
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 import_ecosystem_v2=1 server_construction=1
+--- ./service.go
++++ ./service.go
+@@ -3,8 +3,9 @@
+ import (
+ 	"net/http"
+ 
+-	"connectrpc.com/connect"
+-	"connectrpc.com/otelconnect"
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
++	"connectrpc.com/otelconnect/v2"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+@@ -14,7 +15,9 @@
+ 
+ func run() error {
+ 	mux := http.NewServeMux()
+-	mux.Handle(pingv1connect.NewPingServiceHandler(&pingServer{}, connect.WithInterceptors(otelconnect.NewInterceptor())))
++	server := connect.NewServer(otelconnect.NewInterceptor())
++	pingv1connect.RegisterPingServiceHandler(server, &pingServer{})
++	connecthttp.Mount(mux, server)
+ 	return http.ListenAndServe(":8080", mux)
+ }
+ 
+
+
+The following issues require manual code changes:
+  ./service.go:17:89: otelconnect.NewInterceptor stays in the connect.NewServer(...) list unmigrated. v2 uses otelconnect.NewServerInterceptor (connectrpc.com/otelconnect/v2), which returns an error and is assigned before the constructor.
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+
+go.mod is missing the v2 modules. Pull them in and tidy:
+
+  go get -u \
+       connectrpc.com/otelconnect/v2
+  go mod tidy
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md
