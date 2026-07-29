@@ -105,5 +105,8 @@ Proposed rewrites (rerun with -w to apply):
  
 
 
+The following issues require manual code changes:
+  ./service.go:23:2: v2 sends request headers when the stream is created. Set them before stream is created.
+
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
 Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

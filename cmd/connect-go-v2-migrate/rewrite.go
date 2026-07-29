@@ -58,6 +58,8 @@ const (
 	ruleInterceptorMigration = "interceptor_migration"
 	ruleStreamParamType      = "stream_param_type"
 	ruleStreamParamAmbiguous = "stream_param_ambiguous"
+	ruleStreamSendNil        = "stream_send_nil"
+	ruleRequestHeaderTiming  = "request_header_timing"
 	ruleEcosystemMigration   = "ecosystem_migration"
 	ruleBufgenReinstall      = "bufgen_reinstall_plugin"
 	ruleBufgenGoMod          = "bufgen_update_go_mod"
