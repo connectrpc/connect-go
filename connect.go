@@ -190,7 +190,8 @@ const (
 // can dispatch directly to a [Server], use a test double, or adapt another wire
 // protocol without regenerating clients.
 type Transport interface {
-	// NewClientStream opens a client stream for spec.
+	// NewClientStream opens a client stream for spec. Request headers are
+	// captured from the ctx's client [CallInfo].
 	NewClientStream(ctx context.Context, spec Spec) (ClientStream, error)
 }
 
@@ -404,11 +405,10 @@ type Spec struct {
 // resources and unblocks any pending operation.
 // [Client.CallUnary] drives this full sequence internally.
 //
-// The first Send or Receive flushes the request headers from
-// [CallInfo.RequestHeader] and opens the stream. Call
-// [ClientStream.SendHeaders] to flush them eagerly without sending a message.
-// After the headers are flushed, later mutations to the request headers may
-// not affect the request.
+// The stream is dispatched by the time the [Client] call returns, with the
+// request headers from [CallInfo.RequestHeader] committed. Set request
+// headers before invoking the call. Later mutations do not affect the
+// request.
 //
 // Send transmits request messages, and Receive reads response messages. The
 // msg passed to Send and Receive must match the message type described by the
@@ -431,12 +431,6 @@ type Spec struct {
 // alongside the stream into [ClientFunc], and the CallInfo is reached through
 // ctx via [CallInfoForClientContext].
 type ClientStream interface {
-	// SendHeaders flushes the request headers and opens the stream without
-	// sending a request message. The first Send or Receive does this
-	// implicitly; call SendHeaders only to flush eagerly, for example to let
-	// the server begin work, surface connection errors before the first
-	// message, or record timing. It is idempotent.
-	SendHeaders() error
 	// Send sends msg as the next request message.
 	Send(msg any) error
 	// CloseSend closes the request side of the stream. It is idempotent.
@@ -729,8 +723,8 @@ type CallInfo struct {
 	request, response, trailer Header
 }
 
-// RequestHeader returns the request headers. The client sets them before the
-// first Send, and the server reads them.
+// RequestHeader returns the request headers. The client sets them before
+// invoking the RPC, and the server reads them.
 func (c *CallInfo) RequestHeader() *Header { return &c.request }
 
 // ResponseHeader returns the response headers. The server sets them before

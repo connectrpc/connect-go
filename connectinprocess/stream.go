@@ -28,8 +28,9 @@ import (
 //
 // Messages flow through unbuffered channels, providing natural backpressure:
 // each Send blocks until the peer's Receive consumes the message. The server
-// runs on its own goroutine, which is started lazily upon the first call to
-// SendHeaders, Send, or Receive.
+// runs on its own goroutine. The transport starts it when a client-streaming
+// or bidi stream is created. Server-streaming RPCs start it on the first
+// Send or Receive.
 //
 // Lifecycle channels:
 //   - closeSendCh: Closed by the client's CloseSend. The server's Receive
@@ -118,11 +119,6 @@ func (p *streamPair) run() {
 // clientStream is the client-side half of a streamPair.
 type clientStream struct {
 	p *streamPair
-}
-
-func (s *clientStream) SendHeaders() error {
-	s.p.dispatch()
-	return nil
 }
 
 func (s *clientStream) Send(msg any) error {

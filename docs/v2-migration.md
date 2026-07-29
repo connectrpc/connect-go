@@ -472,9 +472,9 @@ The tool maps ecosystem interceptor constructors where it can:
 ### Streaming
 
 Streaming generated code defines a named stream type per RPC (for example,
-`PingServiceCumSumClientStream`) instead of the v1 generics. Stream `Send`, `Receive`,
-and `SendHeaders` keep their v1 shape and take no `context.Context`; the call's
-context is bound when the stream is opened.
+`PingServiceCumSumClientStream`) instead of the v1 generics. Stream `Send` and
+`Receive` keep their v1 shape. Client-streaming and bidi RPCs dispatch when
+the stream is created. Request headers are set on creation.
 
 Stream metadata moves off the stream and onto the `CallInfo`, since the
 generated stream types no longer carry headers. A handler stream's

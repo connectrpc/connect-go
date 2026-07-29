@@ -402,11 +402,6 @@ func generatePerRPCClientStreams(g *protogen.GeneratedFile, service *protogen.Se
 		g.P("}")
 		g.P()
 		if card == connect.StreamTypeClient || card == connect.StreamTypeBidi {
-			wrapComments(g, "SendHeaders opens the stream and flushes the request headers without a message. The first Send or Receive does this implicitly.")
-			g.P("func (s ", typeName, ") SendHeaders() error {")
-			g.P("return s.stream.SendHeaders()")
-			g.P("}")
-			g.P()
 			wrapComments(g, "Send sends a request message to the server.")
 			g.P("func (s ", typeName, ") Send(req *", input, ") error {")
 			g.P("return s.stream.Send(req)")
