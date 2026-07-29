@@ -1,10 +1,10 @@
 name: windows
 on:
   push:
-    branches: [main]
+    branches: [main, v2]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [main, v2]
   schedule:
     - cron: '15 22 * * *'
   workflow_dispatch: {} # support manual runs
