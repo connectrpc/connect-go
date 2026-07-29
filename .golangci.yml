@@ -173,6 +173,10 @@ linters:
           - forbidigo
         path: cmd/connect-go-v2-migrate
         text: use of `fmt.Print.*` forbidden by pattern .*
+      # The migration CLI keeps its rewrite rules in static lookup tables.
+      - linters:
+          - gochecknoglobals
+        path: cmd/connect-go-v2-migrate
       # The interceptor example sets a *log.Logger on its stream wrapper.
       - linters:
           - forbidigo
