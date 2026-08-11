@@ -228,6 +228,53 @@ func TestGetNoContentHeaders(t *testing.T) {
 	assert.Equal(t, http.MethodGet, unaryReq.HTTPMethod())
 }
 
+type urlSizeRecordingTransport struct {
+	base   http.RoundTripper
+	urlLen int
+}
+
+func (t *urlSizeRecordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.urlLen = len(req.URL.String())
+	return t.base.RoundTrip(req)
+}
+
+func TestGetURLSizeBoundary(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(&pingServer{}))
+	server := memhttptest.NewServer(t, mux)
+	ctx := t.Context()
+	call := func(httpClient connect.HTTPClient, options ...connect.ClientOption) (*connect.Request[pingv1.PingRequest], error) {
+		client := pingv1connect.NewPingServiceClient(
+			httpClient,
+			server.URL(),
+			append([]connect.ClientOption{connect.WithHTTPGet()}, options...)...,
+		)
+		request := connect.NewRequest(&pingv1.PingRequest{Text: "boundary"})
+		_, err := client.Ping(ctx, request)
+		return request, err
+	}
+
+	transport := &urlSizeRecordingTransport{base: server.Client().Transport}
+	unlimited, err := call(&http.Client{Transport: transport})
+	assert.Nil(t, err)
+	assert.Equal(t, unlimited.HTTPMethod(), http.MethodGet)
+	urlSize := transport.urlLen
+
+	atLimit, err := call(server.Client(), connect.WithHTTPGetMaxURLSize(urlSize, false))
+	assert.Nil(t, err)
+	assert.Equal(t, atLimit.HTTPMethod(), http.MethodGet)
+
+	atLimitWithFallback, err := call(server.Client(), connect.WithHTTPGetMaxURLSize(urlSize, true))
+	assert.Nil(t, err)
+	assert.Equal(t, atLimitWithFallback.HTTPMethod(), http.MethodGet)
+
+	overLimit, err := call(server.Client(), connect.WithHTTPGetMaxURLSize(urlSize-1, true))
+	assert.Nil(t, err)
+	assert.Equal(t, overLimit.HTTPMethod(), http.MethodPost)
+}
+
 func TestConnectionDropped(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
