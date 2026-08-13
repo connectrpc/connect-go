@@ -1015,7 +1015,7 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 	}
 	if !isTooBig {
 		url := m.buildGetURL(data, false /* compressed */)
-		if m.getURLMaxBytes <= 0 || len(url.String()) < m.getURLMaxBytes {
+		if m.getURLMaxBytes <= 0 || len(url.String()) <= m.getURLMaxBytes {
 			m.writeWithGet(url)
 			return nil
 		}
@@ -1042,7 +1042,7 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *Error {
 		return NewError(CodeResourceExhausted, fmt.Errorf("compressed message size %d exceeds sendMaxBytes %d", compressed.Len(), m.sendMaxBytes))
 	}
 	url := m.buildGetURL(compressed.Bytes(), true /* compressed */)
-	if m.getURLMaxBytes <= 0 || len(url.String()) < m.getURLMaxBytes {
+	if m.getURLMaxBytes <= 0 || len(url.String()) <= m.getURLMaxBytes {
 		m.writeWithGet(url)
 		return nil
 	}
