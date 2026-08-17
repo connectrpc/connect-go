@@ -202,6 +202,25 @@ func TestGetNotModified(t *testing.T) {
 	assert.Equal(t, http.MethodGet, unaryReq.HTTPMethod())
 }
 
+func TestNotModifiedOnlyForGet(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(&alwaysNotModifiedPingServer{}))
+	server := memhttptest.NewServer(t, http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
+		req.URL.RawQuery = "cache-buster=1"
+		mux.ServeHTTP(respWriter, req)
+	}))
+	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+
+	_, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{}))
+	assert.NotNil(t, err)
+	assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+	var connectErr *connect.Error
+	assert.True(t, errors.As(err, &connectErr))
+	assert.Equal(t, connectErr.Message(), "not modified")
+}
+
 func TestGetNoContentHeaders(t *testing.T) {
 	t.Parallel()
 
@@ -861,6 +880,17 @@ func (s *notModifiedPingServer) Ping(
 	resp := connect.NewResponse(&pingv1.PingResponse{})
 	resp.Header().Set("Etag", s.etag)
 	return resp, nil
+}
+
+type alwaysNotModifiedPingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (*alwaysNotModifiedPingServer) Ping(
+	_ context.Context,
+	_ *connect.Request[pingv1.PingRequest],
+) (*connect.Response[pingv1.PingResponse], error) {
+	return nil, connect.NewNotModifiedError(nil)
 }
 
 type assertPeerInterceptor struct {
