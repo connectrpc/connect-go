@@ -376,7 +376,7 @@ func wrapIfLikelyWithGRPCNotUsedError(err error) error {
 	if errString := err.Error(); strings.HasPrefix(errString, `Post "`) &&
 		strings.Contains(errString, `http2: Transport: cannot retry err`) &&
 		strings.HasSuffix(errString, `after Request.Body was written; define Request.GetBody to avoid this error`) {
-		return fmt.Errorf("possible missing connect.WithGPRC() client option when talking to gRPC server, see %s: %w", commonErrorsURL, err)
+		return fmt.Errorf("possible missing connect.WithGRPC() client option when talking to gRPC server, see %s: %w", commonErrorsURL, err)
 	}
 	return err
 }
