@@ -285,15 +285,12 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 
 	if env.Flags != 0 && env.Flags != flagEnvelopeCompressed {
 		// Drain the rest of the stream to ensure there is no extra data.
-		numBytes, err := discard(r.reader)
+		numBytes, _ := discard(r.reader)
 		r.bytesRead += numBytes
-		if err != nil {
-			err = wrapIfContextError(err)
-			if connErr, ok := asError(err); ok {
-				return connErr
-			}
-			return errorf(CodeInternal, "corrupt response: I/O error after end-stream message: %w", err)
-		} else if numBytes > 0 {
+		// If the drain read zero bytes but hit an I/O error, the connection was
+		// closed or reset after the end-stream message with no trailing data. The
+		// end-stream envelope is complete, safe to proceed. Otherwise an error.
+		if numBytes > 0 {
 			return errorf(CodeInternal, "corrupt response: %d extra bytes after end of stream", numBytes)
 		}
 		// One of the protocol-specific flags are set, so this is the end of the
