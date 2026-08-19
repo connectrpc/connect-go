@@ -1,0 +1,79 @@
+# Handler construction migrates; the validate interceptor module has no v2 build yet (golden-only).
+stubs v2
+exec migrate
+cmp stdout out.txt
+-- handler_construction.go --
+package example
+
+import (
+	"net/http"
+
+	"connectrpc.com/connect"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/validate"
+)
+
+type PingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func run() error {
+	mux := http.NewServeMux()
+	mux.Handle(
+		pingv1connect.NewPingServiceHandler(
+			&PingServer{},
+			// Validation via Protovalidate is almost always recommended.
+			connect.WithInterceptors(validate.NewInterceptor()),
+		),
+	)
+	return http.ListenAndServe(":8080", mux)
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./handler_construction.go: import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 import_ecosystem_v2=1 interceptor_validate_v2=1 server_construction=1
+--- ./handler_construction.go
++++ ./handler_construction.go
+@@ -3,9 +3,10 @@
+ import (
+ 	"net/http"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
++	"connectrpc.com/validate/v2"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+-	"connectrpc.com/validate"
+ )
+ 
+ type PingServer struct {
+@@ -14,13 +15,13 @@
+ 
+ func run() error {
+ 	mux := http.NewServeMux()
+-	mux.Handle(
+-		pingv1connect.NewPingServiceHandler(
+-			&PingServer{},
+-			// Validation via Protovalidate is almost always recommended.
+-			connect.WithInterceptors(validate.NewInterceptor()),
+-		),
+-	)
++	server := connect.NewServer(
++
++		// Validation via Protovalidate is almost always recommended.
++		validate.NewServerInterceptor())
++	pingv1connect.RegisterPingServiceHandler(server, &PingServer{})
++	connecthttp.Mount(mux, server)
++
+ 	return http.ListenAndServe(":8080", mux)
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+
+go.mod is missing the v2 modules. Pull them in and tidy:
+
+  go get -u \
+       connectrpc.com/validate/v2
+  go mod tidy
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

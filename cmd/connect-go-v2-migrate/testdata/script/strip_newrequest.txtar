@@ -1,0 +1,56 @@
+# Client call: connect.NewRequest(msg) -> msg, resp.Msg.Text -> resp.Text.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func call(ctx context.Context, c pingv1connect.PingServiceClient) error {
+	resp, err := c.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: "hi"}))
+	if err != nil {
+		return err
+	}
+	_ = resp.Msg.Text
+	return nil
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: body_drop_msg=1 import_drop_v1=1 strip_new_request=1
+--- ./service.go
++++ ./service.go
+@@ -3,17 +3,16 @@
+ import (
+ 	"context"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+ func call(ctx context.Context, c pingv1connect.PingServiceClient) error {
+-	resp, err := c.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{Text: "hi"}))
++	resp, err := c.Ping(ctx, &pingv1.PingRequest{Text: "hi"})
+ 	if err != nil {
+ 		return err
+ 	}
+-	_ = resp.Msg.Text
++	_ = resp.Text
+ 	return nil
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

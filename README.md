@@ -52,7 +52,7 @@ on [connectrpc.com][docs] (especially the [Getting Started] guide for Go), the
 
 Curious what all this looks like in practice? From a [Protobuf
 schema](internal/proto/connect/ping/v1/ping.proto), we generate [a small RPC
-package](internal/gen/simple/connect/ping/v1/pingv1connect/ping.connect.go). Using that
+package](internal/gen/connect/ping/v1/pingv1connect/ping.connect.go). Using that
 package, we can build a server. This example is available at [internal/example](internal/example):
 
 ```go
@@ -63,10 +63,11 @@ import (
   "log"
   "net/http"
 
-  "connectrpc.com/connect"
-  pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-  "connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
-  "connectrpc.com/validate"
+  "connectrpc.com/connect/v2"
+  "connectrpc.com/connect/v2/connecthttp"
+  pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
+  "connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
+  "connectrpc.com/validate/v2"
 )
 
 type PingServer struct {
@@ -80,16 +81,13 @@ func (ps *PingServer) Ping(ctx context.Context, req *pingv1.PingRequest) (*pingv
 }
 
 func main() {
+  // Register services on a *connect.Server, then mount it with connecthttp.
+  // Interceptors are arguments to NewServer. Validation via Protovalidate is
+  // almost always recommended.
+  server := connect.NewServer(validate.NewServerInterceptor())
+  pingv1connect.RegisterPingServiceHandler(server, &PingServer{})
   mux := http.NewServeMux()
-  // The generated constructors return a path and a plain net/http
-  // handler.
-  mux.Handle(
-    pingv1connect.NewPingServiceHandler(
-      &PingServer{},
-      // Validation via Protovalidate is almost always recommended
-      connect.WithInterceptors(validate.NewInterceptor()),
-    ),
-  )
+  connecthttp.Mount(mux, server)
   p := new(http.Protocols)
   p.SetHTTP1(true)
   // For gRPC clients, it's convenient to support HTTP/2 without TLS.
@@ -116,17 +114,19 @@ import (
   "log"
   "net/http"
 
-  pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
-  "connectrpc.com/connect/internal/gen/simple/connect/ping/v1/pingv1connect"
+  "connectrpc.com/connect/v2"
+  "connectrpc.com/connect/v2/connecthttp"
+  pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
+  "connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
 )
 
 func main() {
-  client := pingv1connect.NewPingServiceClient(
-    http.DefaultClient,
-    "http://localhost:8080/",
+  client := connect.NewClient(
+    connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080"),
   )
+  pingClient := pingv1connect.NewPingServiceClient(client)
   req := &pingv1.PingRequest{Number: 42}
-  res, err := client.Ping(context.Background(), req)
+  res, err := pingClient.Ping(context.Background(), req)
   if err != nil {
     log.Fatalln(err)
   }
@@ -138,6 +138,13 @@ Of course, `http.ListenAndServe` and `http.DefaultClient` aren't fit for
 production use! See Connect's [deployment docs][docs-deployment] for a guide to
 configuring timeouts, connection pools, observability, and h2c.
 
+## Migrating from v1
+
+If you are migrating from v1 to v2, check out our [migration guide](./docs/v2-migration.md).
+
+This project follows semantic versioning. The module `/v2` suffix is part of
+the module `connectrpc.com/connect/v2`.
+
 ## Ecosystem
 
 * [grpchealth]: gRPC-compatible health checks for connect-go
@@ -148,16 +155,24 @@ configuring timeouts, connection pools, observability, and h2c.
 * [Buf Studio]: web UI for ad-hoc RPCs
 * [conformance]: Connect, gRPC, and gRPC-Web interoperability tests
 
-## Status: Stable
+## Status
 
-This module is stable. It supports:
+This module, `connectrpc.com/connect/v2`, is in beta.
+The `v2` module will be published on the `main` branch of the repository when released.
+
+## Support and versioning
+
+`connect-go` supports:
 
 * The two most recent major releases of Go (the same versions of Go that continue
   to [receive security patches][go-support-policy]).
 * [APIv2] of Protocol Buffers in Go (`google.golang.org/protobuf`).
 
-Within those parameters, `connect` follows semantic versioning. We will
-_not_ make breaking changes in the 1.x series of releases.
+Within those parameters, `connect-go` follows semantic versioning.
+
+Module `connectrpc.com/connect` is the `v1` module. It remains stable and
+supported indefinitely. The `v1` module lives on the `v1` branch.
+See the [v2 guide](docs/v2-guide.md) for an overview of what changed and why.
 
 ## Legal
 

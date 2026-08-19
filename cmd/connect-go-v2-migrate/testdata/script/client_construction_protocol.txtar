@@ -1,0 +1,51 @@
+# Client construction with a protocol option (WithGRPC moves to connecthttp).
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- client_construction_protocol.go --
+package example
+
+import (
+	"net/http"
+
+	"connectrpc.com/connect"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+// newClient passes a v1 protocol-selecting option. In v2 the protocol option
+// keeps its name on the connecthttp transport, so connect.WithGRPC() becomes
+// connecthttp.WithGRPC() inside connecthttp.NewTransport.
+func newClient() pingv1connect.PingServiceClient {
+	return pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localhost:8080/", connect.WithGRPC())
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./client_construction_protocol.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 option_protocol=1
+--- ./client_construction_protocol.go
++++ ./client_construction_protocol.go
+@@ -3,7 +3,8 @@
+ import (
+ 	"net/http"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+@@ -11,6 +12,6 @@
+ // keeps its name on the connecthttp transport, so connect.WithGRPC() becomes
+ // connecthttp.WithGRPC() inside connecthttp.NewTransport.
+ func newClient() pingv1connect.PingServiceClient {
+-	return pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localhost:8080/", connect.WithGRPC())
++	return pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080/", connecthttp.WithGRPC())))
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

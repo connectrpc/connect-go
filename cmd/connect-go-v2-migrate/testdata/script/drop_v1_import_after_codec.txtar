@@ -1,0 +1,44 @@
+# After WithCodec moves to connecthttp, the now-unused v1 connect import is dropped.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package p
+
+import (
+	"fmt"
+
+	"connectrpc.com/connect"
+)
+
+func codec() {
+	opt := connect.WithCodec(nil)
+	fmt.Println(opt)
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_add_connecthttp=1 import_drop_v1=1 option_to_connecthttp=1
+--- ./service.go
++++ ./service.go
+@@ -3,11 +3,11 @@
+ import (
+ 	"fmt"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2/connecthttp"
+ )
+ 
+ func codec() {
+-	opt := connect.WithCodec(nil)
++	opt := connecthttp.WithCodec(nil)
+ 	fmt.Println(opt)
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

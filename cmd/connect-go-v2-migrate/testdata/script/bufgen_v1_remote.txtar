@@ -1,0 +1,53 @@
+# A v1 buf.gen.yaml: remote connect plugin bumped to v2, version stays v1.
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+cmp buf.gen.yaml want.yaml
+exec go build ./...
+-- doc.go --
+package app
+-- buf.gen.yaml --
+version: v1
+managed:
+  enabled: true
+plugins:
+  - plugin: buf.build/protocolbuffers/go
+    out: gen
+    opt: paths=source_relative
+  - plugin: buf.build/connectrpc/go:v1.18.1
+    out: gen
+    opt:
+      - paths=source_relative
+      - simple=true
+-- want.yaml --
+version: v1
+managed:
+  enabled: true
+plugins:
+  - plugin: buf.build/protocolbuffers/go
+    out: gen
+    opt: paths=source_relative
+  - plugin: buf.build/connectrpc/go:v2.0.0
+    out: gen
+    opt:
+      - paths=source_relative
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./buf.gen.yaml: bufgen_pin_remote_v2=1 bufgen_remove_simple=1
+--- ./buf.gen.yaml
++++ ./buf.gen.yaml
+@@ -5,9 +5,8 @@
+   - plugin: buf.build/protocolbuffers/go
+     out: gen
+     opt: paths=source_relative
+-  - plugin: buf.build/connectrpc/go:v1.18.1
++  - plugin: buf.build/connectrpc/go:v2.0.0
+     out: gen
+     opt:
+       - paths=source_relative
+-      - simple=true
+ 
+
+
+Scanned 1 Go file and 1 Buf template. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md
