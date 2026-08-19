@@ -757,7 +757,7 @@ func (hc *connectUnaryHandlerConn) Close(err error) error {
 		hc.mergeResponseHeader()
 		// If the handler received a GET request and the resource hasn't changed,
 		// return a 304.
-		if len(hc.peer.Query) > 0 && IsNotModifiedError(err) {
+		if hc.request.Method == http.MethodGet && IsNotModifiedError(err) {
 			hc.responseWriter.WriteHeader(http.StatusNotModified)
 			return hc.request.Body.Close()
 		}
@@ -1050,7 +1050,7 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *connect.Erro
 	data := buffer.Bytes()
 	if !isTooBig {
 		url := m.buildGetURL(data, false /* compressed */)
-		if m.getURLMaxBytes <= 0 || len(url.String()) < m.getURLMaxBytes {
+		if m.getURLMaxBytes <= 0 || len(url.String()) <= m.getURLMaxBytes {
 			m.writeWithGet(url)
 			m.recordStats(len(data), 0)
 			return nil
@@ -1078,7 +1078,7 @@ func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *connect.Erro
 		return connect.Errorf(connect.CodeResourceExhausted, "compressed message size %d exceeds sendMaxBytes %d", compressed.Len(), m.sendMaxBytes)
 	}
 	url := m.buildGetURL(compressed.Bytes(), true /* compressed */)
-	if m.getURLMaxBytes <= 0 || len(url.String()) < m.getURLMaxBytes {
+	if m.getURLMaxBytes <= 0 || len(url.String()) <= m.getURLMaxBytes {
 		m.writeWithGet(url)
 		m.recordStats(len(data), compressed.Len())
 		return nil

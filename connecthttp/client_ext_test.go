@@ -210,6 +210,32 @@ func TestGetNotModified(t *testing.T) {
 	assert.Equal(t, http.MethodGet, condHTTPInfo.HTTPMethod())
 }
 
+func TestNotModifiedOnlyForGet(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, &alwaysNotModifiedPingServer{})
+	connecthttp.Mount(mux, srv)
+	// Clients never put a query string on a POST, so add one here: the handler
+	// must key the 304 off the HTTP method, not off the query.
+	server := memhttptest.NewServer(t, http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
+		req.URL.RawQuery = "cache-buster=1"
+		mux.ServeHTTP(respWriter, req)
+	}))
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
+		server.Client(),
+		server.URL(),
+	)))
+
+	_, err := client.Ping(t.Context(), &pingv1.PingRequest{})
+	assert.NotNil(t, err)
+	assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+	var connectErr *connect.Error
+	assert.True(t, errors.As(err, &connectErr))
+	assert.Equal(t, connectErr.Message(), "not modified")
+}
+
 func TestGetNoContentHeaders(t *testing.T) {
 	t.Parallel()
 
@@ -234,6 +260,45 @@ func TestGetNoContentHeaders(t *testing.T) {
 	assert.Nil(t, err)
 	clientInfo, _ := connecthttp.ClientInfoForContext(ctx)
 	assert.Equal(t, http.MethodGet, clientInfo.HTTPMethod())
+}
+
+func TestGetURLSizeBoundary(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, &pingServer{})
+	connecthttp.Mount(mux, srv)
+	server := memhttptest.NewServer(t, mux)
+	call := func(options ...connecthttp.Option) (*connecthttp.ClientInfo, error) {
+		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
+			server.Client(),
+			server.URL(),
+			append([]connecthttp.Option{connecthttp.WithHTTPGet()}, options...)...,
+		)))
+		ctx, _ := connect.NewClientContext(t.Context())
+		_, err := client.Ping(ctx, &pingv1.PingRequest{Text: "boundary"})
+		clientInfo, _ := connecthttp.ClientInfoForContext(ctx)
+		return clientInfo, err
+	}
+
+	unlimited, err := call()
+	assert.Nil(t, err)
+	assert.Equal(t, unlimited.HTTPMethod(), http.MethodGet)
+	unlimitedURL := unlimited.RequestURL()
+	urlSize := len(unlimitedURL.String())
+
+	atLimit, err := call(connecthttp.WithHTTPGetMaxURLSize(urlSize, false))
+	assert.Nil(t, err)
+	assert.Equal(t, atLimit.HTTPMethod(), http.MethodGet)
+
+	atLimitWithFallback, err := call(connecthttp.WithHTTPGetMaxURLSize(urlSize, true))
+	assert.Nil(t, err)
+	assert.Equal(t, atLimitWithFallback.HTTPMethod(), http.MethodGet)
+
+	overLimit, err := call(connecthttp.WithHTTPGetMaxURLSize(urlSize-1, true))
+	assert.Nil(t, err)
+	assert.Equal(t, overLimit.HTTPMethod(), http.MethodPost)
 }
 
 func TestConnectionDropped(t *testing.T) {
@@ -723,6 +788,17 @@ func (s *notModifiedPingServer) Ping(
 	}
 	info.ResponseHeader().Set("Etag", s.etag)
 	return &pingv1.PingResponse{}, nil
+}
+
+type alwaysNotModifiedPingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (*alwaysNotModifiedPingServer) Ping(
+	_ context.Context,
+	_ *pingv1.PingRequest,
+) (*pingv1.PingResponse, error) {
+	return nil, connecthttp.NewNotModifiedError()
 }
 
 func assertPeerInterceptor(tb testing.TB) connect.ClientInterceptor {
