@@ -252,12 +252,6 @@ type ConformanceServiceClientStreamClientStream struct {
 	stream connect.ClientStream
 }
 
-// SendHeaders opens the stream and flushes the request headers without a message. The first Send or
-// Receive does this implicitly.
-func (s ConformanceServiceClientStreamClientStream) SendHeaders() error {
-	return s.stream.SendHeaders()
-}
-
 // Send sends a request message to the server.
 func (s ConformanceServiceClientStreamClientStream) Send(req *v1.ClientStreamRequest) error {
 	return s.stream.Send(req)
@@ -280,12 +274,6 @@ func (s ConformanceServiceClientStreamClientStream) CloseAndReceive() (*v1.Clien
 // BidiStream RPC.
 type ConformanceServiceBidiStreamClientStream struct {
 	stream connect.ClientStream
-}
-
-// SendHeaders opens the stream and flushes the request headers without a message. The first Send or
-// Receive does this implicitly.
-func (s ConformanceServiceBidiStreamClientStream) SendHeaders() error {
-	return s.stream.SendHeaders()
 }
 
 // Send sends a request message to the server.

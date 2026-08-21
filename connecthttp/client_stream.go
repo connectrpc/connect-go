@@ -62,11 +62,6 @@ func (s *connectUnaryClientStream) flushHeader() {
 	s.protoClient.WriteRequestHeader(s.streamType, header)
 }
 
-func (s *connectUnaryClientStream) SendHeaders() error {
-	s.flushHeader()
-	return nil
-}
-
 func (s *connectUnaryClientStream) Send(msg any) error {
 	if s.sendClosed {
 		return io.EOF
@@ -144,8 +139,8 @@ func (s *connectStreamingClientStream) flushHeader() {
 	s.protoClient.WriteRequestHeader(s.streamType, header)
 }
 
-// SendHeaders opens the stream without sending a message.
-func (s *connectStreamingClientStream) SendHeaders() error {
+// start flushes the request headers and dispatches the HTTP request.
+func (s *connectStreamingClientStream) start() error {
 	s.flushHeader()
 	return s.conn.Send(nil)
 }

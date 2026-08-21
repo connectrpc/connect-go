@@ -160,7 +160,7 @@ func rewriteStreams(funcType *ast.FuncType, body *ast.BlockStmt, state *rewriteS
 	holders := map[string]bool{}
 	rewriteStreamBlocks(body, streamVars, funcType, state, report, holders)
 	dropMsgForHolders(body, holders, report)
-	threadStreamMethods(body, streamVars, report)
+	threadStreamMethods(body, streamVars, params, report)
 	rewriteStreamMetadata(body, streamVars, params, state, report, contextParamName(funcType))
 }
 
@@ -206,7 +206,7 @@ func rewriteStreamMetadata(body *ast.BlockStmt, streamVars map[string]bool, para
 // stream is opened and rewrites its metadata reads to the seeded info. A single
 // client stream with a usable, not-yet-seeded context qualifies; others warn.
 func rewriteClientStreamMetadata(body *ast.BlockStmt, streamVars map[string]bool, params map[string]streamParam, state *rewriteState, report *Report, ctxName string) {
-	const warnMsg = "client stream %s metadata moves to connect.NewClientContext(ctx) and info.RequestHeader()/ResponseHeader()/ResponseTrailer() in v2"
+	const warnMsg = "client stream %s metadata moves to connect.NewClientContext(ctx) and info.RequestHeader()/ResponseHeader()/ResponseTrailer() in v2. Set request headers before the stream is created"
 	withMeta := map[string]token.Pos{}
 	for name := range streamVars {
 		if _, isHandler := params[name]; isHandler {
@@ -238,6 +238,7 @@ func rewriteClientStreamMetadata(body *ast.BlockStmt, streamVars map[string]bool
 	seed := newClientContextSeed(state, ctxName, infoName)
 	body.List = append(body.List[:insertAt], append([]ast.Stmt{seed}, body.List[insertAt:]...)...)
 	report.bump("client_context_insert")
+	headerReads := requestHeaderReadPositions(body, holder)
 	walkFuncBody(body, func(n ast.Node) {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -247,11 +248,47 @@ func rewriteClientStreamMetadata(body *ast.BlockStmt, streamVars map[string]bool
 		if !ok || !isStreamMetadataMethod(sel.Sel.Name) {
 			return
 		}
+		root := rootIdent(sel)
+		if root == nil || root.Name != holder {
+			return
+		}
+		pos := call.Pos()
+		if sel.Sel.Name == "RequestHeader" && !headerReads[pos] {
+			report.warnAtf(pos, ruleRequestHeaderTiming, "v2 sends request headers when the stream is created. Set them before %s is created.", holder)
+		}
+		call.Fun = &ast.SelectorExpr{X: ast.NewIdent(infoName), Sel: ast.NewIdent(sel.Sel.Name)}
+		report.bump("client_stream_metadata_rewrite")
+	})
+}
+
+// requestHeaderReadPositions marks holder.RequestHeader() calls chained into a
+// read-only method. Reads stay correct after the stream is created, writes do
+// not.
+func requestHeaderReadPositions(body *ast.BlockStmt, holder string) map[token.Pos]bool {
+	reads := map[token.Pos]bool{}
+	walkFuncBody(body, func(n ast.Node) {
+		outer, isSel := n.(*ast.SelectorExpr)
+		if !isSel {
+			return
+		}
+		switch outer.Sel.Name {
+		case "Get", "Values", "Clone":
+		default:
+			return
+		}
+		inner, isCall := outer.X.(*ast.CallExpr)
+		if !isCall {
+			return
+		}
+		sel, isInnerSel := inner.Fun.(*ast.SelectorExpr)
+		if !isInnerSel || sel.Sel.Name != "RequestHeader" {
+			return
+		}
 		if root := rootIdent(sel); root != nil && root.Name == holder {
-			call.Fun = &ast.SelectorExpr{X: ast.NewIdent(infoName), Sel: ast.NewIdent(sel.Sel.Name)}
-			report.bump("client_stream_metadata_rewrite")
+			reads[inner.Pos()] = true
 		}
 	})
+	return reads
 }
 
 // streamParam is a server handler stream parameter.
@@ -1021,8 +1058,10 @@ func isStreamMsgCall(node ast.Node, streamName string) bool {
 
 // threadStreamMethods renames CloseRequest/CloseResponse to CloseSend/Close on
 // stream variables. (Send/Receive keep their v1 shape; the loop reshape handles
-// the bool-to-error Receive change.)
-func threadStreamMethods(body *ast.BlockStmt, streamVars map[string]bool, report *Report) {
+// the bool-to-error Receive change.) It warns on the v1 Send(nil) idiom, which
+// v2 replaces with stream creation on the client and SendHeaders on the
+// handler.
+func threadStreamMethods(body *ast.BlockStmt, streamVars map[string]bool, params map[string]streamParam, report *Report) {
 	walkFuncBody(body, func(n ast.Node) {
 		call, isCall := n.(*ast.CallExpr)
 		if !isCall {
@@ -1032,8 +1071,8 @@ func threadStreamMethods(body *ast.BlockStmt, streamVars map[string]bool, report
 		if !isSel {
 			return
 		}
-		id, isIdent := sel.X.(*ast.Ident)
-		if !isIdent || !streamVars[id.Name] {
+		recv, isIdent := sel.X.(*ast.Ident)
+		if !isIdent || !streamVars[recv.Name] {
 			return
 		}
 		switch sel.Sel.Name {
@@ -1043,6 +1082,19 @@ func threadStreamMethods(body *ast.BlockStmt, streamVars map[string]bool, report
 		case "CloseResponse":
 			sel.Sel = ast.NewIdent("Close")
 			report.bump("stream_close_rename")
+		case identSend:
+			if len(call.Args) != 1 {
+				return
+			}
+			arg, isArgIdent := call.Args[0].(*ast.Ident)
+			if !isArgIdent || arg.Name != "nil" {
+				return
+			}
+			if _, isHandler := params[recv.Name]; isHandler {
+				report.warnAtf(call.Pos(), ruleStreamSendNil, "%s.Send(nil) sent response headers without a message in v1. Use %s.SendHeaders() in v2.", recv.Name, recv.Name)
+				return
+			}
+			report.warnAtf(call.Pos(), ruleStreamSendNil, "%s.Send(nil) sent request headers without a message in v1. v2 sends them when the stream is created. Delete this call.", recv.Name)
 		}
 	})
 }

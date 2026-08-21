@@ -317,12 +317,12 @@ func TestServer(t *testing.T) {
 		t.Run("sum_close_and_receive_without_send", func(t *testing.T) {
 			t.Parallel()
 			ctx, callInfo := connect.NewClientContext(t.Context())
+			for _, el := range expectedHeaderValues {
+				callInfo.RequestHeader().Add(clientHeader, el)
+			}
 			stream, err := client.Sum(ctx)
 			if err != nil {
 				t.Fatal(err)
-			}
-			for _, el := range expectedHeaderValues {
-				callInfo.RequestHeader().Add(clientHeader, el)
 			}
 			got, err := stream.CloseAndReceive()
 			assert.Nil(t, err)
@@ -414,12 +414,12 @@ func TestServer(t *testing.T) {
 		t.Run("cumsum_empty_stream", func(t *testing.T) {
 			t.Parallel()
 			ctx, callInfo := connect.NewClientContext(t.Context())
+			for _, el := range expectedHeaderValues {
+				callInfo.RequestHeader().Add(clientHeader, el)
+			}
 			stream, err := client.CumSum(ctx)
 			if err != nil {
 				t.Fatal(err)
-			}
-			for _, el := range expectedHeaderValues {
-				callInfo.RequestHeader().Add(clientHeader, el)
 			}
 			if !expectSuccess { // server doesn't support HTTP/2
 				failNoHTTP2(t, stream)
@@ -440,12 +440,12 @@ func TestServer(t *testing.T) {
 			t.Parallel()
 			ctx, cancel := context.WithCancel(t.Context())
 			ctx, callInfo := connect.NewClientContext(ctx)
+			for _, el := range expectedHeaderValues {
+				callInfo.RequestHeader().Add(clientHeader, el)
+			}
 			stream, err := client.CumSum(ctx)
 			if err != nil {
 				t.Fatal(err)
-			}
-			for _, el := range expectedHeaderValues {
-				callInfo.RequestHeader().Add(clientHeader, el)
 			}
 			if !expectSuccess { // server doesn't support HTTP/2
 				failNoHTTP2(t, stream)
@@ -474,6 +474,9 @@ func TestServer(t *testing.T) {
 			t.Parallel()
 			ctx, cancel := context.WithCancel(t.Context())
 			ctx, callInfo := connect.NewClientContext(ctx)
+			for _, el := range expectedHeaderValues {
+				callInfo.RequestHeader().Add(clientHeader, el)
+			}
 			stream, err := client.CumSum(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -482,9 +485,6 @@ func TestServer(t *testing.T) {
 				failNoHTTP2(t, stream)
 				cancel()
 				return
-			}
-			for _, el := range expectedHeaderValues {
-				callInfo.RequestHeader().Add(clientHeader, el)
 			}
 			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 8}))
 			cancel()
@@ -870,12 +870,9 @@ func TestErrorHeaderPropagation(t *testing.T) {
 		t.Run("bidi", func(t *testing.T) {
 			t.Parallel()
 			ctx, callInfo := connect.NewClientContext(t.Context())
+			callInfo.RequestHeader().Set("X-Test", t.Name())
 			stream, err := client.CumSum(ctx)
 			if err != nil {
-				t.Fatal(err)
-			}
-			callInfo.RequestHeader().Set("X-Test", t.Name())
-			if err := stream.SendHeaders(); err != nil {
 				t.Fatal(err)
 			}
 			_, err = stream.Receive()
@@ -886,13 +883,10 @@ func TestErrorHeaderPropagation(t *testing.T) {
 			t.Run("wire", func(t *testing.T) {
 				ctx, callInfo := connect.NewClientContext(t.Context())
 				t.Parallel()
-				stream, err := client.CumSum(ctx)
-				if err != nil {
-					t.Fatal(err)
-				}
 				callInfo.RequestHeader().Set("X-Test", t.Name())
 				callInfo.RequestHeader().Set("X-Test-Is-Wire", "true")
-				if err := stream.SendHeaders(); err != nil {
+				stream, err := client.CumSum(ctx)
+				if err != nil {
 					t.Fatal(err)
 				}
 				_, err = stream.Receive()
@@ -1307,9 +1301,6 @@ func TestHandlerErrorScrub(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer stream.Close()
-				if err := stream.SendHeaders(); err != nil {
-					t.Fatal(err)
-				}
 				_, err = stream.Receive()
 				assertScrubbed(t, err, wantCodes[name])
 			})
@@ -1476,11 +1467,7 @@ func TestContextError(t *testing.T) {
 	)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	stream, err := client.CumSum(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = stream.Send(&pingv1.CumSumRequest{})
+	_, err := client.CumSum(ctx)
 	var connectErr *connect.Error
 	assert.NotNil(t, err)
 	assert.True(t, errors.As(err, &connectErr))
@@ -2305,7 +2292,6 @@ func TestBidiStreamServerSendsFirstMessage(t *testing.T) {
 			assert.Nil(t, stream.CloseSend())
 			assert.Nil(t, stream.Close())
 		})
-		assert.Nil(t, stream.SendHeaders())
 		select {
 		case <-time.After(time.Second):
 			t.Error("timed out to get request headers")
@@ -2383,7 +2369,6 @@ func TestStreamForServer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Nil(t, stream.SendHeaders())
 		assert.Nil(t, stream.CloseSend())
 	})
 	t.Run("server-stream", func(t *testing.T) {
@@ -3201,8 +3186,6 @@ func TestClientDisconnect(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Send header.
-			assert.Nil(t, stream.Send(nil))
 			<-gotRequest
 			// Client abruptly disconnects.
 			if !assert.NotNil(t, clientConn) {
