@@ -43,11 +43,17 @@ type ClientStreamForClient[Req, Res any] struct {
 
 // Spec returns the specification for the RPC.
 func (c *ClientStreamForClient[_, _]) Spec() Spec {
+	if c.err != nil {
+		return Spec{}
+	}
 	return c.conn.Spec()
 }
 
 // Peer describes the server for the RPC.
 func (c *ClientStreamForClient[_, _]) Peer() Peer {
+	if c.err != nil {
+		return Peer{}
+	}
 	return c.conn.Peer()
 }
 
@@ -265,11 +271,17 @@ type BidiStreamForClient[Req, Res any] struct {
 
 // Spec returns the specification for the RPC.
 func (b *BidiStreamForClient[_, _]) Spec() Spec {
+	if b.err != nil {
+		return Spec{}
+	}
 	return b.conn.Spec()
 }
 
 // Peer describes the server for the RPC.
 func (b *BidiStreamForClient[_, _]) Peer() Peer {
+	if b.err != nil {
+		return Peer{}
+	}
 	return b.conn.Peer()
 }
 

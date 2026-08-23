@@ -30,6 +30,8 @@ func TestClientStreamForClient_InitErrNoPanics(t *testing.T) {
 	t.Parallel()
 	initErr := errors.New("client init failure")
 	clientStream := &ClientStreamForClient[pingv1.PingRequest, pingv1.PingResponse]{err: initErr}
+	assert.Equal(t, clientStream.Spec(), Spec{})
+	assert.Equal(t, clientStream.Peer(), Peer{})
 	assert.ErrorIs(t, clientStream.Send(&pingv1.PingRequest{}), initErr)
 	verifyHeaders(t, clientStream.RequestHeader())
 	res, err := clientStream.CloseAndReceive()
@@ -46,6 +48,8 @@ func TestClientStreamForClientSimple_InitErrNoPanics(t *testing.T) {
 	clientStream := &ClientStreamForClientSimple[pingv1.PingRequest, pingv1.PingResponse]{
 		stream: &ClientStreamForClient[pingv1.PingRequest, pingv1.PingResponse]{err: initErr},
 	}
+	assert.Equal(t, clientStream.Spec(), Spec{})
+	assert.Equal(t, clientStream.Peer(), Peer{})
 	assert.ErrorIs(t, clientStream.Send(&pingv1.PingRequest{}), initErr)
 	res, err := clientStream.CloseAndReceive()
 	assert.Nil(t, res)
@@ -106,6 +110,8 @@ func TestBidiStreamForClient_InitErrNoPanics(t *testing.T) {
 	t.Parallel()
 	initErr := errors.New("client init failure")
 	bidiStream := &BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]{err: initErr}
+	assert.Equal(t, bidiStream.Spec(), Spec{})
+	assert.Equal(t, bidiStream.Peer(), Peer{})
 	res, err := bidiStream.Receive()
 	assert.Nil(t, res)
 	assert.ErrorIs(t, err, initErr)
@@ -126,6 +132,8 @@ func TestBidiStreamForClientSimple_InitErrNoPanics(t *testing.T) {
 	bidiStream := &BidiStreamForClientSimple[pingv1.CumSumRequest, pingv1.CumSumResponse]{
 		stream: &BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]{err: initErr},
 	}
+	assert.Equal(t, bidiStream.Spec(), Spec{})
+	assert.Equal(t, bidiStream.Peer(), Peer{})
 	res, err := bidiStream.Receive()
 	assert.Nil(t, res)
 	assert.ErrorIs(t, err, initErr)
