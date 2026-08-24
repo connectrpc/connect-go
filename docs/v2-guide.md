@@ -266,8 +266,6 @@ type PingServiceSumClientStream struct {
 	stream connect.ClientStream
 }
 
-func (s PingServiceSumClientStream) SendHeaders() error { return s.stream.SendHeaders() }
-
 func (s PingServiceSumClientStream) Send(req *v1.SumRequest) error {
 	return s.stream.Send(req)
 }
@@ -414,7 +412,6 @@ Streaming RPCs operate on two interfaces. The client drives a [`ClientStream`](h
 
 ```go
 type ClientStream interface {
-	SendHeaders() error
 	Send(msg any) error
 	CloseSend() error
 	Receive(msg any) error
@@ -428,7 +425,7 @@ type ServerStream interface {
 }
 ```
 
-Stream operations take no context: the call context is bound when the transport opens the stream, so per-call values such as loggers are available without threading a context through every `Send` and `Receive`. Clean receive-side completion is reported by an error matching `io.EOF` under `errors.Is`, which separates a clean end-of-stream from a network `io.EOF` that v1 conflated ([#774](https://github.com/connectrpc/connect-go/issues/774), [#397](https://github.com/connectrpc/connect-go/issues/397)).
+Stream operations take no context: the call context is bound when the transport opens the stream, so per-call values such as loggers are available without threading a context through every `Send` and `Receive`. Client-streaming and bidi RPCs dispatch when the stream is created. Set request headers on the `CallInfo` before invoking the call. Clean receive-side completion is reported by an error matching `io.EOF` under `errors.Is`, which separates a clean end-of-stream from a network `io.EOF` that v1 conflated ([#774](https://github.com/connectrpc/connect-go/issues/774), [#397](https://github.com/connectrpc/connect-go/issues/397)).
 
 Ownership differs by side. A caller owns its `ClientStream`: reading to `io.EOF` releases the stream's resources, and canceling the call's context or calling `Close` abandons it early. `Close` is idempotent, so `defer stream.Close()` is always safe. A handler ends the RPC by returning, so `ServerStream` has no `Close`; the transport finalizes the response when the handler returns. Each stream allows one active send-side and one active receive-side operation at a time, and the two sides may run concurrently.
 

@@ -89,7 +89,11 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 	if spec.StreamType == connect.StreamTypeUnary {
 		return newUnaryClientStream(ctx, t, spec), nil
 	}
-	return &clientStream{p: newStreamPair(ctx, t, spec)}, nil
+	pair := newStreamPair(ctx, t, spec)
+	if spec.StreamType&connect.StreamTypeClient != 0 {
+		pair.dispatch()
+	}
+	return &clientStream{p: pair}, nil
 }
 
 type options struct {

@@ -343,7 +343,17 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 	if spec.StreamType == connect.StreamTypeUnary {
 		return &connectUnaryClientStream{conn: conn, info: info, protoClient: protocolClient, streamType: spec.StreamType}, nil
 	}
-	return &connectStreamingClientStream{conn: conn, info: info, protoClient: protocolClient, streamType: spec.StreamType}, nil
+	stream := &connectStreamingClientStream{conn: conn, info: info, protoClient: protocolClient, streamType: spec.StreamType}
+	if spec.StreamType&connect.StreamTypeClient != 0 {
+		// Client-streaming and bidi RPCs dispatch eagerly. Unary and
+		// server-streaming RPCs dispatch on Send to size the request body.
+		if err := stream.start(); err != nil {
+			_ = conn.CloseRequest()
+			_ = conn.CloseResponse()
+			return nil, err
+		}
+	}
+	return stream, nil
 }
 
 // urlForProcedure returns a cached *url.URL for the given procedure path,

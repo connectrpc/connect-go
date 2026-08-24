@@ -119,12 +119,6 @@ type PingServiceSumClientStream struct {
 	stream connect.ClientStream
 }
 
-// SendHeaders opens the stream and flushes the request headers without a message. The first Send or
-// Receive does this implicitly.
-func (s PingServiceSumClientStream) SendHeaders() error {
-	return s.stream.SendHeaders()
-}
-
 // Send sends a request message to the server.
 func (s PingServiceSumClientStream) Send(req *v1.SumRequest) error {
 	return s.stream.Send(req)
@@ -166,12 +160,6 @@ func (s PingServiceCountUpClientStream) Close() error {
 // PingServiceCumSumClientStream is the client stream for the PingService's CumSum RPC.
 type PingServiceCumSumClientStream struct {
 	stream connect.ClientStream
-}
-
-// SendHeaders opens the stream and flushes the request headers without a message. The first Send or
-// Receive does this implicitly.
-func (s PingServiceCumSumClientStream) SendHeaders() error {
-	return s.stream.SendHeaders()
 }
 
 // Send sends a request message to the server.

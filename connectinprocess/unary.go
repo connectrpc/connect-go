@@ -66,8 +66,6 @@ func newUnaryClientStream(ctx context.Context, t *transport, spec connect.Spec) 
 	return stream
 }
 
-func (s *unaryClientStream) SendHeaders() error { return nil }
-
 func (s *unaryClientStream) Send(msg any) error {
 	if s.sendClosed {
 		return io.EOF

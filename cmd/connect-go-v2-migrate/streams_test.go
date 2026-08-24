@@ -36,6 +36,33 @@ func TestStreamWarnings(t *testing.T) {
 }`,
 			wantWarn: "connect.BidiStream",
 		},
+		{
+			name: "client_send_nil",
+			body: `func f(ctx context.Context, client pingClient) error {
+	stream := client.CumSum(ctx)
+	if err := stream.Send(nil); err != nil {
+		return err
+	}
+	return stream.CloseRequest()
+}`,
+			wantWarn: "stream.Send(nil)",
+		},
+		{
+			name: "handler_send_nil",
+			body: `func h(ctx context.Context, stream *connect.BidiStream[in, out]) error {
+	return stream.Send(nil)
+}`,
+			wantWarn: "Use stream.SendHeaders() in v2",
+		},
+		{
+			name: "request_header_after_create",
+			body: `func f(ctx context.Context, client pingClient) error {
+	stream := client.CumSum(ctx)
+	stream.RequestHeader().Set("k", "v")
+	return stream.CloseRequest()
+}`,
+			wantWarn: "Set them before stream is created",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -56,6 +83,36 @@ func TestStreamWarnings(t *testing.T) {
 				t.Errorf("expected a warning containing %q; got %v", test.wantWarn, report.Warnings)
 			}
 		})
+	}
+}
+
+// TestRequestHeaderReadNoTimingWarning checks that a read-only chain on a
+// client stream's RequestHeader does not trigger the timing warning. Reads
+// stay correct after the stream is created.
+func TestRequestHeaderReadNoTimingWarning(t *testing.T) {
+	t.Parallel()
+	src := `package p
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+)
+
+func f(ctx context.Context, client pingClient) error {
+	stream := client.CumSum(ctx)
+	_ = stream.RequestHeader().Get("k")
+	return stream.CloseRequest()
+}
+`
+	_, report, err := Rewrite("input.go", []byte(src), true)
+	if err != nil {
+		t.Fatalf("Rewrite: %v", err)
+	}
+	for _, warning := range report.Warnings {
+		if warning.Rule == ruleRequestHeaderTiming {
+			t.Errorf("unexpected timing warning: %v", warning.Msg)
+		}
 	}
 }
 
