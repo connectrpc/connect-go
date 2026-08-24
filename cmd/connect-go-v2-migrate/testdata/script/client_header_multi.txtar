@@ -1,0 +1,61 @@
+# Two header-setting requests in one function defeat the NewClientContext
+# rewrite; left for a manual update (golden-only).
+stubs v2
+exec migrate
+cmp stdout out.txt
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func call(ctx context.Context, client pingv1connect.PingServiceClient) error {
+	reqA := connect.NewRequest(&pingv1.PingRequest{})
+	reqA.Header().Set("X-Tenant", "a")
+	if _, err := client.Ping(ctx, reqA); err != nil {
+		return err
+	}
+	reqB := connect.NewRequest(&pingv1.FailRequest{})
+	reqB.Header().Set("X-Tenant", "b")
+	_, err := client.Fail(ctx, reqB)
+	return err
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_drop_v1=1 strip_new_request=2
+--- ./service.go
++++ ./service.go
+@@ -3,18 +3,17 @@
+ import (
+ 	"context"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+ func call(ctx context.Context, client pingv1connect.PingServiceClient) error {
+-	reqA := connect.NewRequest(&pingv1.PingRequest{})
++	reqA := &pingv1.PingRequest{}
+ 	reqA.Header().Set("X-Tenant", "a")
+ 	if _, err := client.Ping(ctx, reqA); err != nil {
+ 		return err
+ 	}
+-	reqB := connect.NewRequest(&pingv1.FailRequest{})
++	reqB := &pingv1.FailRequest{}
+ 	reqB.Header().Set("X-Tenant", "b")
+ 	_, err := client.Fail(ctx, reqB)
+ 	return err
+
+
+The following issues require manual code changes:
+  ./service.go:13:2: reqA.Header() writes client request headers via connect.NewClientContext(ctx) and info.RequestHeader() in v2
+  ./service.go:18:2: reqB.Header() writes client request headers via connect.NewClientContext(ctx) and info.RequestHeader() in v2
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

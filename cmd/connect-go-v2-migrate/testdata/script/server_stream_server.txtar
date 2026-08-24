@@ -1,0 +1,59 @@
+# Server-streaming handler: req unwraps and the stream param resolves to the v2 type.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) CountUp(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+	for i := int64(1); i <= req.Msg.Number; i++ {
+		if err := stream.Send(&pingv1.CountUpResponse{Number: i}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: body_drop_msg=1 import_drop_v1=1 param_unwrap_request=1 stream_handler_param=1
+--- ./service.go
++++ ./service.go
+@@ -3,7 +3,6 @@
+ import (
+ 	"context"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -12,8 +11,8 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) CountUp(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+-	for i := int64(1); i <= req.Msg.Number; i++ {
++func (s *pingServer) CountUp(ctx context.Context, req *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
++	for i := int64(1); i <= req.Number; i++ {
+ 		if err := stream.Send(&pingv1.CountUpResponse{Number: i}); err != nil {
+ 			return err
+ 		}
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

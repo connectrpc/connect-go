@@ -1,0 +1,71 @@
+// Copyright 2021-2026 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package connecthttp_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
+	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
+	"connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
+)
+
+func ExampleError_Message() {
+	err := fmt.Errorf(
+		"another: %w",
+		connect.NewError(connect.CodeUnavailable, "failed to foo"),
+	)
+	if connectErr := (&connect.Error{}); errors.As(err, &connectErr) {
+		fmt.Println("underlying error message:", connectErr.Message())
+	}
+
+	// Output:
+	// underlying error message: failed to foo
+}
+
+func ExampleIsNotModifiedError() {
+	// Assume that the server from NewNotModifiedError's example is running on
+	// localhost:8080.
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient,
+		"http://localhost:8080",
+		// Enable client-side support for HTTP GETs.
+		connecthttp.WithHTTPGet())),
+	)
+	req := &pingv1.PingRequest{Number: 42}
+	ctx, callInfo := connect.NewClientContext(context.Background())
+	_, err := client.Ping(ctx, req)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	// If the server set an Etag, we can use it to cache the response.
+	etag := callInfo.ResponseHeader().Get("Etag")
+	if etag == "" {
+		fmt.Println("no Etag in response headers")
+		return
+	}
+	fmt.Println("cached response with Etag", etag)
+	// Now we'd like to make the same request again, but avoid re-fetching the
+	// response if possible.
+	callInfo.RequestHeader().Set("If-None-Match", etag)
+	_, err = client.Ping(context.Background(), req)
+	if connecthttp.IsNotModifiedError(err) {
+		fmt.Println("can reuse cached response")
+	}
+}

@@ -1,0 +1,160 @@
+# v2 stubs present: the tool rewrites the call sites against them.
+stubs v2
+exec migrate
+cmp stdout out.txt
+# The v1-style source only compiles once rewritten to v2.
+exec migrate -w
+exec go build ./...
+# Idempotent: a second run proposes nothing further.
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct{}
+
+func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	return connect.NewResponse(&pingv1.PingResponse{Number: req.Msg.Number, Text: req.Msg.Text}), nil
+}
+
+func (s *pingServer) Fail(ctx context.Context, req *connect.Request[pingv1.FailRequest]) (*connect.Response[pingv1.FailResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fail"))
+}
+
+func (s *pingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+	var sum int64
+	for stream.Receive() {
+		sum += stream.Msg().Number
+	}
+	if err := stream.Err(); err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&pingv1.SumResponse{Sum: sum}), nil
+}
+
+func (s *pingServer) CountUp(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+	for i := int64(1); i <= req.Msg.Number; i++ {
+		if err := stream.Send(&pingv1.CountUpResponse{Number: i}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *pingServer) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+	var sum int64
+	for {
+		req, err := stream.Receive()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		sum += req.Number
+		if err := stream.Send(&pingv1.CumSumResponse{Sum: sum}); err != nil {
+			return err
+		}
+	}
+}
+
+func setup() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(&pingServer{}))
+	return mux
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: body_drop_msg=3 convert_code_const=1 convert_new_error=1 flip_residual_connect=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 param_unwrap_request=3 result_unwrap_response=3 server_construction=1 stream_handler_param=3 stream_recv_loop=1 strip_new_response=2
+--- ./service.go
++++ ./service.go
+@@ -6,34 +6,40 @@
+ 	"io"
+ 	"net/http"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+ type pingServer struct{}
+ 
+-func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+-	return connect.NewResponse(&pingv1.PingResponse{Number: req.Msg.Number, Text: req.Msg.Text}), nil
++func (s *pingServer) Ping(ctx context.Context, req *pingv1.PingRequest) (*pingv1.PingResponse, error) {
++	return &pingv1.PingResponse{Number: req.Number, Text: req.Text}, nil
+ }
+ 
+-func (s *pingServer) Fail(ctx context.Context, req *connect.Request[pingv1.FailRequest]) (*connect.Response[pingv1.FailResponse], error) {
+-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fail"))
++func (s *pingServer) Fail(ctx context.Context, req *pingv1.FailRequest) (*pingv1.FailResponse, error) {
++	return nil, connect.NewError(connect.CodeUnimplemented, "fail")
+ }
+ 
+-func (s *pingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
++func (s *pingServer) Sum(ctx context.Context, stream pingv1connect.PingServiceSumServerStream) (*pingv1.SumResponse, error) {
+ 	var sum int64
+-	for stream.Receive() {
+-		sum += stream.Msg().Number
+-	}
+-	if err := stream.Err(); err != nil {
+-		return nil, err
++	for {
++		msg, err := stream.Receive()
++		if err != nil {
++			if errors.Is(err, io.EOF) {
++				break
++			}
++			return nil, err
++		}
++		sum += msg.Number
+ 	}
+-	return connect.NewResponse(&pingv1.SumResponse{Sum: sum}), nil
++
++	return &pingv1.SumResponse{Sum: sum}, nil
+ }
+ 
+-func (s *pingServer) CountUp(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+-	for i := int64(1); i <= req.Msg.Number; i++ {
++func (s *pingServer) CountUp(ctx context.Context, req *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
++	for i := int64(1); i <= req.Number; i++ {
+ 		if err := stream.Send(&pingv1.CountUpResponse{Number: i}); err != nil {
+ 			return err
+ 		}
+@@ -41,7 +47,7 @@
+ 	return nil
+ }
+ 
+-func (s *pingServer) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
++func (s *pingServer) CumSum(ctx context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
+ 	var sum int64
+ 	for {
+ 		req, err := stream.Receive()
+@@ -60,7 +66,9 @@
+ 
+ func setup() http.Handler {
+ 	mux := http.NewServeMux()
+-	mux.Handle(pingv1connect.NewPingServiceHandler(&pingServer{}))
++	server := connect.NewServer()
++	pingv1connect.RegisterPingServiceHandler(server, &pingServer{})
++	connecthttp.Mount(mux, server)
+ 	return mux
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

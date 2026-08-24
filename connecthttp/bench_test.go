@@ -1,0 +1,326 @@
+// Copyright 2021-2026 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package connecthttp_test
+
+import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
+	"connectrpc.com/connect/v2/internal/assert"
+	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
+	"connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
+)
+
+func BenchmarkConnect(b *testing.B) {
+	mux := http.NewServeMux()
+	srv := connect.NewServer()
+
+	pingv1connect.RegisterPingServiceHandler(srv, &ExamplePingServer{})
+	connecthttp.Mount(mux, srv)
+
+	server := httptest.NewUnstartedServer(mux)
+	p := new(http.Protocols)
+	p.SetHTTP1(true)
+	p.SetUnencryptedHTTP2(true)
+	server.Config.Protocols = p
+	server.Start()
+	b.Cleanup(server.Close)
+
+	httpClient := server.Client()
+	httpTransport, ok := httpClient.Transport.(*http.Transport)
+	assert.True(b, ok)
+	httpTransport.DisableCompression = true
+	clientProtos := new(http.Protocols)
+	clientProtos.SetUnencryptedHTTP2(true)
+	httpTransport.Protocols = clientProtos
+
+	clients := []struct {
+		name string
+		opts []connecthttp.Option
+	}{{
+		name: "connect",
+		opts: []connecthttp.Option{},
+	}, {
+		name: "grpc",
+		opts: []connecthttp.Option{
+			connecthttp.WithGRPC(),
+		},
+	}, {
+		name: "grpcweb",
+		opts: []connecthttp.Option{
+			connecthttp.WithGRPCWeb(),
+		},
+	}}
+
+	twoMiB := strings.Repeat("a", 2*1024*1024)
+	for _, client := range clients {
+		b.Run(client.name, func(b *testing.B) {
+			opts := append(client.opts, connecthttp.WithSendCompression("gzip"))
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(httpClient,
+				server.URL,
+				opts...,
+			)))
+
+			ctx := b.Context()
+			b.Run("unary_big", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						if _, err := client.Ping(
+							ctx, &pingv1.PingRequest{Text: twoMiB},
+						); err != nil {
+							b.Error(err)
+						}
+					}
+				})
+			})
+			b.Run("unary_small", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						response, err := client.Ping(
+							ctx, &pingv1.PingRequest{Number: 42},
+						)
+						if err != nil {
+							b.Error(err)
+						} else if num := response.GetNumber(); num != 42 {
+							b.Errorf("expected 42, got %d", num)
+						}
+					}
+				})
+			})
+			b.Run("client_stream", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						const (
+							upTo   = 1
+							expect = 1
+						)
+						stream, err := client.Sum(ctx)
+						if err != nil {
+							b.Error(err)
+						}
+						for number := int64(1); number <= upTo; number++ {
+							if err := stream.Send(&pingv1.SumRequest{Number: number}); err != nil {
+								b.Error(err)
+							}
+						}
+						response, err := stream.CloseAndReceive()
+						if err != nil {
+							b.Error(err)
+						} else if got := response.GetSum(); got != expect {
+							b.Errorf("expected %d, got %d", expect, got)
+						}
+					}
+				})
+			})
+			b.Run("server_stream", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						const (
+							upTo = 1
+						)
+						request := &pingv1.CountUpRequest{Number: upTo}
+						stream, err := client.CountUp(ctx, request)
+						if err != nil {
+							b.Error(err)
+							return
+						}
+						number := int64(0)
+						for {
+							msg, err := stream.Receive()
+							if err != nil {
+								if errors.Is(err, io.EOF) {
+									break
+								}
+								b.Fatal(err)
+							}
+							number++
+							if got := msg.GetNumber(); got != number {
+								b.Errorf("expected %d, got %d", number, got)
+							}
+						}
+						if number != upTo {
+							b.Errorf("expected %d, got %d", upTo, number)
+						}
+					}
+				})
+			})
+			b.Run("bidi_stream", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						const (
+							upTo = 1
+						)
+						stream, err := client.CumSum(ctx)
+						if err != nil {
+							b.Error(err)
+						}
+						number := int64(1)
+						for ; number <= upTo; number++ {
+							if err := stream.Send(&pingv1.CumSumRequest{Number: number}); err != nil {
+								b.Error(err)
+							}
+
+							msg, err := stream.Receive()
+							if err != nil {
+								b.Error(err)
+							}
+							if got, expected := msg.GetSum(), number*(number+1)/2; got != expected {
+								b.Errorf("expected %d, got %d", expected, got)
+							}
+						}
+						if err := stream.CloseSend(); err != nil {
+							b.Error(err)
+						}
+						if err := stream.Close(); err != nil {
+							b.Error(err)
+						}
+					}
+				})
+			})
+		})
+	}
+}
+
+type ping struct {
+	Text string `json:"text"`
+}
+
+func BenchmarkREST(b *testing.B) {
+	handler := func(writer http.ResponseWriter, request *http.Request) {
+		defer request.Body.Close()
+		defer func() {
+			_, err := io.Copy(io.Discard, request.Body)
+			if err != nil && !errors.Is(err, http.ErrBodyReadAfterClose) {
+				assert.Nil(b, err)
+			}
+		}()
+		writer.Header().Set("Content-Type", "application/json")
+		var body io.Reader = request.Body
+		if request.Header.Get("Content-Encoding") == "gzip" {
+			gzipReader, err := gzip.NewReader(body)
+			if err != nil {
+				b.Fatalf("get gzip reader: %v", err)
+			}
+			defer gzipReader.Close()
+			body = gzipReader
+		}
+		var out io.Writer = writer
+		if strings.Contains(request.Header.Get("Accept-Encoding"), "gzip") {
+			writer.Header().Set("Content-Encoding", "gzip")
+			gzipWriter := gzip.NewWriter(writer)
+			defer gzipWriter.Close()
+			out = gzipWriter
+		}
+		raw, err := io.ReadAll(body)
+		if err != nil {
+			b.Fatalf("read body: %v", err)
+		}
+		var pingRequest ping
+		if err := json.Unmarshal(raw, &pingRequest); err != nil {
+			b.Fatalf("json unmarshal: %v", err)
+		}
+		bs, err := json.Marshal(&pingRequest)
+		if err != nil {
+			b.Fatalf("json marshal: %v", err)
+		}
+		_, err = out.Write(bs)
+		assert.Nil(b, err)
+	}
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(handler))
+	p := new(http.Protocols)
+	p.SetHTTP1(true)
+	p.SetUnencryptedHTTP2(true)
+	server.Config.Protocols = p
+	server.Start()
+	b.Cleanup(server.Close)
+	twoMiB := strings.Repeat("a", 2*1024*1024)
+	b.ResetTimer()
+
+	clientProtos := new(http.Protocols)
+	clientProtos.SetUnencryptedHTTP2(true)
+	client := server.Client()
+	transport, ok := client.Transport.(*http.Transport)
+	assert.True(b, ok)
+	transport.Protocols = clientProtos
+
+	b.Run("unary", func(b *testing.B) {
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				unaryRESTIteration(b, client, server.URL, twoMiB)
+			}
+		})
+	})
+}
+
+func unaryRESTIteration(b *testing.B, client *http.Client, url string, text string) {
+	b.Helper()
+	rawRequestBody := bytes.NewBuffer(nil)
+	compressedRequestBody := gzip.NewWriter(rawRequestBody)
+	encoder := json.NewEncoder(compressedRequestBody)
+	if err := encoder.Encode(&ping{text}); err != nil {
+		b.Fatalf("marshal request: %v", err)
+	}
+	compressedRequestBody.Close()
+	request, err := http.NewRequestWithContext(
+		b.Context(),
+		http.MethodPost,
+		url,
+		rawRequestBody,
+	)
+	if err != nil {
+		b.Fatalf("construct request: %v", err)
+	}
+	request.Header.Set("Content-Encoding", "gzip")
+	request.Header.Set("Accept-Encoding", "gzip")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		b.Fatalf("do request: %v", err)
+	}
+	defer func() {
+		_, err := io.Copy(io.Discard, response.Body)
+		assert.Nil(b, err)
+	}()
+	if response.StatusCode != http.StatusOK {
+		b.Fatalf("response status: %v", response.Status)
+	}
+	uncompressed, err := gzip.NewReader(response.Body)
+	if err != nil {
+		b.Fatalf("uncompress response: %v", err)
+	}
+	raw, err := io.ReadAll(uncompressed)
+	if err != nil {
+		b.Fatalf("read response: %v", err)
+	}
+	var got ping
+	if err := json.Unmarshal(raw, &got); err != nil {
+		b.Fatalf("unmarshal: %v", err)
+	}
+}

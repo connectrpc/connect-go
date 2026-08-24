@@ -1,0 +1,82 @@
+# A trailing stream.Err() == nil success check must not become the loop error handler.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+	var sum int64
+	for stream.Receive() {
+		sum += stream.Msg().Number
+	}
+	if stream.Err() == nil {
+		sum *= 2
+	}
+	return connect.NewResponse(&pingv1.SumResponse{Sum: sum}), nil
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_drop_v1=1 result_unwrap_response=1 stream_err_after_loop=1 stream_handler_param=1 stream_recv_loop=1 strip_new_response=1
+--- ./service.go
++++ ./service.go
+@@ -2,8 +2,9 @@
+ 
+ import (
+ 	"context"
++	"errors"
++	"io"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -12,14 +13,23 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
++func (s *pingServer) Sum(ctx context.Context, stream pingv1connect.PingServiceSumServerStream) (*pingv1.SumResponse, error) {
+ 	var sum int64
+-	for stream.Receive() {
+-		sum += stream.Msg().Number
++	var streamErr error
++	for {
++		msg, err := stream.Receive()
++		if err != nil {
++			streamErr = err
++			break
++		}
++		sum += msg.Number
+ 	}
+-	if stream.Err() == nil {
++	if errors.Is(streamErr, io.EOF) {
++		streamErr = nil
++	}
++	if streamErr == nil {
+ 		sum *= 2
+ 	}
+-	return connect.NewResponse(&pingv1.SumResponse{Sum: sum}), nil
++	return &pingv1.SumResponse{Sum: sum}, nil
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

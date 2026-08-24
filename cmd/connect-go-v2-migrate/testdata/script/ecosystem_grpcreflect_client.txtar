@@ -1,0 +1,45 @@
+# grpcreflect client import flips to /v2 (golden-only: grpcreflect v2 unavailable).
+exec migrate
+cmp stdout out.txt
+-- ecosystem_grpcreflect_client.go --
+package example
+
+import (
+	"net/http"
+
+	"connectrpc.com/grpcreflect"
+)
+
+func newReflectClient() *grpcreflect.Client {
+	return grpcreflect.NewClient(http.DefaultClient, "http://localhost:8080")
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./ecosystem_grpcreflect_client.go: grpcreflect_client=1 import_add_connecthttp=1 import_add_connectv2=1 import_ecosystem_v2=1
+--- ./ecosystem_grpcreflect_client.go
++++ ./ecosystem_grpcreflect_client.go
+@@ -3,10 +3,12 @@
+ import (
+ 	"net/http"
+ 
+-	"connectrpc.com/grpcreflect"
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
++	"connectrpc.com/grpcreflect/v2"
+ )
+ 
+ func newReflectClient() *grpcreflect.Client {
+-	return grpcreflect.NewClient(http.DefaultClient, "http://localhost:8080")
++	return grpcreflect.NewClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080")))
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+
+go.mod is missing the v2 modules. Pull them in and tidy:
+
+  go get -u \
+       connectrpc.com/grpcreflect/v2
+  go mod tidy
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md
