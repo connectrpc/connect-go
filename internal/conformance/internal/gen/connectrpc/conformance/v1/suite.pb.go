@@ -320,8 +320,7 @@ type TestCase struct {
 	// seven fields (http_version, protocol, codec, compression, host, port,
 	// and server_tls_cert) must not be present. They are all populated by
 	// the test harness based on the test environment (e.g. actual server and
-	//
-	//	port to use) and characteristics of a single permutation.
+	//  port to use) and characteristics of a single permutation.
 	Request *ClientCompatRequest `protobuf:"bytes,1,opt,name=request,proto3" json:"request,omitempty"`
 	// To support extremely large messages, as well as very precisely-sized
 	// messages, without having to encode them fully or perfectly in YAML

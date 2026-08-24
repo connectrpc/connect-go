@@ -183,31 +183,32 @@ type ConformanceServiceClient interface {
 	// regardless of whether a response is sent or an error is thrown.
 	//
 	// If the full_duplex field is true:
-	//   - the handler should read one request and then send back one response, and
-	//     then alternate, reading another request and then sending back another response, etc.
+	// - the handler should read one request and then send back one response, and
+	//   then alternate, reading another request and then sending back another response, etc.
 	//
-	//   - if the server receives a request and has no responses to send, it
-	//     should throw the error specified in the request.
+	// - if the server receives a request and has no responses to send, it
+	//   should throw the error specified in the request.
 	//
-	//   - the service should echo back all request properties in the first response
-	//     including the last received request. Subsequent responses should only
-	//     echo back the last received request.
+	// - the service should echo back all request properties in the first response
+	//   including the last received request. Subsequent responses should only
+	//   echo back the last received request.
 	//
-	//   - if the response_delay_ms duration is specified, the server should wait the given
-	//     duration after reading the request before sending the corresponding
-	//     response.
+	// - if the response_delay_ms duration is specified, the server should wait the given
+	//   duration after reading the request before sending the corresponding
+	//   response.
 	//
 	// If the full_duplex field is false:
-	//   - the handler should read all requests until the client is done sending.
-	//     Once all requests are read, the server should then send back any responses
-	//     specified in the response definition.
+	// - the handler should read all requests until the client is done sending.
+	//   Once all requests are read, the server should then send back any responses
+	//   specified in the response definition.
 	//
-	//   - the server should echo back all request properties, including all request
-	//     messages in the order they were received, in the first response. Subsequent
-	//     responses should only include the message data in the data field.
+	// - the server should echo back all request properties, including all request
+	//   messages in the order they were received, in the first response. Subsequent
+	//   responses should only include the message data in the data field.
 	//
-	//   - if the response_delay_ms duration is specified, the server should wait that
-	//     long in between sending each response message.
+	// - if the response_delay_ms duration is specified, the server should wait that
+	//   long in between sending each response message.
+	//
 	BidiStream(context.Context) (ConformanceServiceBidiStreamClientStream, error)
 	// A unary endpoint that the server should not implement and should instead
 	// return an unimplemented error when invoked.
@@ -393,31 +394,32 @@ type ConformanceServiceHandler interface {
 	// regardless of whether a response is sent or an error is thrown.
 	//
 	// If the full_duplex field is true:
-	//   - the handler should read one request and then send back one response, and
-	//     then alternate, reading another request and then sending back another response, etc.
+	// - the handler should read one request and then send back one response, and
+	//   then alternate, reading another request and then sending back another response, etc.
 	//
-	//   - if the server receives a request and has no responses to send, it
-	//     should throw the error specified in the request.
+	// - if the server receives a request and has no responses to send, it
+	//   should throw the error specified in the request.
 	//
-	//   - the service should echo back all request properties in the first response
-	//     including the last received request. Subsequent responses should only
-	//     echo back the last received request.
+	// - the service should echo back all request properties in the first response
+	//   including the last received request. Subsequent responses should only
+	//   echo back the last received request.
 	//
-	//   - if the response_delay_ms duration is specified, the server should wait the given
-	//     duration after reading the request before sending the corresponding
-	//     response.
+	// - if the response_delay_ms duration is specified, the server should wait the given
+	//   duration after reading the request before sending the corresponding
+	//   response.
 	//
 	// If the full_duplex field is false:
-	//   - the handler should read all requests until the client is done sending.
-	//     Once all requests are read, the server should then send back any responses
-	//     specified in the response definition.
+	// - the handler should read all requests until the client is done sending.
+	//   Once all requests are read, the server should then send back any responses
+	//   specified in the response definition.
 	//
-	//   - the server should echo back all request properties, including all request
-	//     messages in the order they were received, in the first response. Subsequent
-	//     responses should only include the message data in the data field.
+	// - the server should echo back all request properties, including all request
+	//   messages in the order they were received, in the first response. Subsequent
+	//   responses should only include the message data in the data field.
 	//
-	//   - if the response_delay_ms duration is specified, the server should wait that
-	//     long in between sending each response message.
+	// - if the response_delay_ms duration is specified, the server should wait that
+	//   long in between sending each response message.
+	//
 	BidiStream(context.Context, ConformanceServiceBidiStreamServerStream) error
 	// A unary endpoint that the server should not implement and should instead
 	// return an unimplemented error when invoked.
