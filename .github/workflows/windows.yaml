@@ -18,9 +18,9 @@ jobs:
       matrix:
         go-version:
           - name: latest
-            version: 1.26.x
+            version: 1.27.x
           - name: previous
-            version: 1.25.x
+            version: 1.26.x
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
