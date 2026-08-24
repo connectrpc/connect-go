@@ -18,9 +18,9 @@ jobs:
       matrix:
         go-version:
         - name: latest
-          version: 1.26.x
+          version: 1.27.x
         - name: previous
-          version: 1.25.x
+          version: 1.26.x
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -30,6 +30,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go-version.version }}
+          check-latest: true
       - name: Unit Test
         run: make shorttest
       - name: Lint
@@ -46,9 +47,9 @@ jobs:
       matrix:
         go-version:
         - name: latest
-          version: 1.26.x
+          version: 1.27.x
         - name: previous
-          version: 1.25.x
+          version: 1.26.x
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -58,6 +59,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go-version.version }}
+          check-latest: true
       - name: Run Conformance Tests
         run: make runconformance
   slowtest:
@@ -71,7 +73,8 @@ jobs:
         uses: actions/setup-go@v7
         with:
           # only the latest
-          go-version: 1.26.x
+          go-version: 1.27.x
+          check-latest: true
       - name: Run Slow Tests
         run: make slowtest
   migrate:
