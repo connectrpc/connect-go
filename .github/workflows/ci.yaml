@@ -30,6 +30,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go-version.version }}
+          check-latest: true
       - name: Unit Test
         run: make shorttest
       - name: Lint
@@ -58,6 +59,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go-version.version }}
+          check-latest: true
       - name: Run Conformance Tests
         run: make runconformance
   slowtest:
@@ -72,5 +74,6 @@ jobs:
         with:
           # only the latest
           go-version: 1.27.x
+          check-latest: true
       - name: Run Slow Tests
         run: make slowtest

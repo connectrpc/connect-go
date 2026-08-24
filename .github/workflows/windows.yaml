@@ -30,6 +30,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go-version.version }}
+          check-latest: true
       - name: Test
         shell: bash
         run: |
