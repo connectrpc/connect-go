@@ -82,7 +82,8 @@ func TestIsConnectStubAST(t *testing.T) {
 
 // TestIsBSRConnectModule covers which BSR modules get the @v2 advice: only the
 // connect-go plugin's output (.../connectrpc/go), not other plugins under the
-// same buf.build/gen/go prefix, and not non-BSR modules.
+// same gen/go prefix, and not non-BSR modules. Self-hosted BSR instances use
+// the same path layout under a different host, so they match too.
 func TestIsBSRConnectModule(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -95,6 +96,15 @@ func TestIsBSRConnectModule(t *testing.T) {
 		{module: "buf.build/gen/go/acme/api/grpc/go", want: false},            // a different plugin
 		{module: "github.com/grafana/pyroscope/api", want: false},             // not a BSR module
 		{module: "connectrpc.com/connect", want: false},
+		// Self-hosted BSR instances share the layout under another host.
+		{module: "buf.example.com/gen/go/acme/api/connectrpc/go", want: true},
+		{module: "bsr.internal.acme.dev/gen/go/acme/api/connectrpc/go", want: true},
+		{module: "buf.example.com/gen/go/acme/api/protocolbuffers/go", want: false},
+		// A hostless or malformed path must not match.
+		{module: "gen/go/acme/api/connectrpc/go", want: false},
+		{module: "buf.build/gen/go/acme/api/connectrpc/go/extra", want: false},
+		{module: "buf.build/gen/go/acme/connectrpc/go", want: false},
+		{module: "notahost/gen/go/acme/api/connectrpc/go", want: false},
 	}
 	for _, test := range tests {
 		if got := isBSRConnectModule(test.module); got != test.want {

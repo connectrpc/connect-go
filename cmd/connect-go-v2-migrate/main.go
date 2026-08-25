@@ -17,7 +17,7 @@
 // transformations to update v1 code automatically, emitting warnings for
 // patterns that require manual intervention.
 //
-// Usage: connect-go-v2-migrate [-w] [-json] [paths...]. Paths default to the
+// Usage: connect-go-v2-migrate [-w] [-json] [-version] [paths...]. Paths default to the
 // current directory. Without -w the tool is a dry run that prints diffs.
 package main
 
@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 )
@@ -57,7 +58,7 @@ Migration runs in two phases. When v1 generated code is present, the tool only
 updates Buf templates and prints the steps to generate v2 bindings. Run it
 again after generation to rewrite Go call sites.
 
-usage: connect-go-v2-migrate [-w] [-json] [paths...]
+usage: connect-go-v2-migrate [-w] [-json] [-version] [paths...]
 
 Paths may be files or directories. They default to the current directory (".").
 By default the tool is a dry run that prints unified diffs for changed files.
@@ -69,6 +70,15 @@ Flags:
 	fmt.Fprintf(out, "\nFull migration guide: %s\n", migratingGuideURL)
 }
 
+// toolVersion reports the module version stamped into the binary.
+func toolVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok || info.Main.Version == "" {
+		return "(unknown)"
+	}
+	return info.Main.Version
+}
+
 func main() {
 	os.Exit(runMain(os.Args[1:]))
 }
@@ -77,9 +87,14 @@ func runMain(args []string) int {
 	flags := flag.NewFlagSet("connect-go-v2-migrate", flag.ContinueOnError)
 	write := flags.Bool("w", false, "write rewrites back to disk (default: dry-run, print diffs).")
 	jsonOut := flags.Bool("json", false, "emit a structured JSON report instead of text.")
+	showVersion := flags.Bool("version", false, "print the tool version and exit.")
 	flags.Usage = func() { usage(flags) }
 	if err := flags.Parse(args); err != nil {
 		return 2
+	}
+	if *showVersion {
+		fmt.Println("connect-go-v2-migrate", toolVersion())
+		return 0
 	}
 
 	roots := flags.Args()
@@ -209,7 +224,7 @@ func processFile(file fileContent, rewrite func(string, []byte) ([]byte, Report,
 		// A failed write must not be reported as applied.
 		recorded := true
 		if write {
-			if err := os.WriteFile(file.path, out, 0o644); err != nil { //nolint:gosec // rewriting Go source files, world-readable matches typical repo perms
+			if err := writeFilePreservingMode(file.path, out); err != nil {
 				fmt.Fprintf(os.Stderr, "%s: write: %v\n", file.path, err)
 				run.errored++
 				recorded = false
@@ -224,6 +239,16 @@ func processFile(file fileContent, rewrite func(string, []byte) ([]byte, Report,
 	for _, warning := range report.Warnings {
 		run.diagnostics = append(run.diagnostics, toDiagnostic(file.path, warning))
 	}
+}
+
+// writeFilePreservingMode writes data to path, keeping its current permissions.
+// os.WriteFile applies perm only on create, so 0644 only affects a new file.
+func writeFilePreservingMode(path string, data []byte) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	return os.WriteFile(path, data, mode)
 }
 
 // stripDanglingMsgPass runs the type-directed .Msg post-pass over an overlay of
@@ -245,7 +270,7 @@ func stripDanglingMsgPass(roots []string, write bool, run *results) {
 	}
 	for path, edit := range edits {
 		if write {
-			if err := os.WriteFile(path, edit.content, 0o644); err != nil { //nolint:gosec // rewriting Go source files, world-readable matches typical repo perms
+			if err := writeFilePreservingMode(path, edit.content); err != nil {
 				fmt.Fprintf(os.Stderr, "%s: write: %v\n", path, err)
 				run.errored++
 				continue
@@ -437,6 +462,15 @@ func printPhase1Text(run *results, proj *project, write, color bool) {
 			if !write {
 				fmt.Println(unifiedDiff(displayPath(rewrite.path), rewrite.src, rewrite.out, color))
 			}
+		}
+	}
+
+	// Sources are skipped in this phase, so any manual diagnostic here belongs to
+	// a Buf template. Show it before the steps: it can change how they are run.
+	if manual := byCategory(run.diagnostics, categoryManual); len(manual) > 0 {
+		fmt.Print("\nThe following issues require a manual update:\n")
+		for _, diag := range manual {
+			fmt.Printf("  %s\n", formatDiagnostic(diag))
 		}
 	}
 

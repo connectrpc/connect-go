@@ -65,7 +65,13 @@ plugins:
     opt: paths=source_relative
 ```
 
-✅ `connect-go-v2-migrate` handles this.
+✅ `connect-go-v2-migrate` handles this. It also replaces
+`buf.build/connectrpc/gosimple`, since v2 makes the simple API the default
+generator.
+
+> **Before v2.0.0 is released**, `buf.build/connectrpc/go:v2.0.0` is not
+> published, so `buf generate` will fail against it. Use the local plugin until
+> the release lands. The migration tool warns when it rewrites a remote entry.
 
 For local plugins (`local: protoc-gen-connect-go`), the `buf.gen.yaml` entry
 stays the same because the v1 and v2 plugins share the binary name.

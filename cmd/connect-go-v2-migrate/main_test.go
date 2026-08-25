@@ -25,7 +25,6 @@ import (
 // TestMain dispatches to the real tool instead of the tests.
 const migrateExecEnv = "MIGRATE_TEST_EXEC"
 
-// TestMain lets the test binary stand in for the migrate binary.
 func TestMain(m *testing.M) {
 	if os.Getenv(migrateExecEnv) == "1" {
 		os.Exit(runMain(os.Args[1:]))
@@ -33,9 +32,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// TestProcessFileWriteFailure checks that a file whose write fails is not
-// recorded as an applied rewrite: a failed write counts as an error, never a
-// success, so the report cannot claim a change that never reached disk.
 func TestProcessFileWriteFailure(t *testing.T) {
 	t.Parallel()
 	// A path under a directory that does not exist makes os.WriteFile fail.
@@ -50,8 +46,6 @@ func TestProcessFileWriteFailure(t *testing.T) {
 	}
 }
 
-// TestProcessFileDryRunRecords checks the dry-run path still records the
-// proposed rewrite: nothing is written, so there is no failure to gate on.
 func TestProcessFileDryRunRecords(t *testing.T) {
 	t.Parallel()
 	var run results
@@ -61,6 +55,61 @@ func TestProcessFileDryRunRecords(t *testing.T) {
 	}
 	if run.errored != 0 {
 		t.Errorf("dry-run should not error; got %d", run.errored)
+	}
+}
+
+func TestWriteFilePreservingMode(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []os.FileMode{0o600, 0o644, 0o664, 0o755} {
+		path := filepath.Join(t.TempDir(), "src.go")
+		if err := os.WriteFile(path, []byte("before"), mode); err != nil {
+			t.Fatal(err)
+		}
+		// Chmod explicitly: the umask would otherwise clear bits at creation.
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeFilePreservingMode(path, []byte("after")); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != mode {
+			t.Errorf("mode = %v, want %v", got, mode)
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(content) != "after" {
+			t.Errorf("content = %q, want %q", content, "after")
+		}
+	}
+
+	fresh := filepath.Join(t.TempDir(), "new.go")
+	if err := writeFilePreservingMode(fresh, []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The umask may clear bits on creation, so assert only that nothing beyond
+	// 0644 was granted.
+	if got := info.Mode().Perm(); got&^0o644 != 0 {
+		t.Errorf("new file mode = %v, want no bits beyond %v", got, os.FileMode(0o644))
+	}
+}
+
+func TestVersionFlag(t *testing.T) {
+	t.Parallel()
+	if got := runMain([]string{"-version"}); got != 0 {
+		t.Errorf("runMain(-version) = %d, want 0", got)
+	}
+	if toolVersion() == "" {
+		t.Error("toolVersion() is empty")
 	}
 }
 

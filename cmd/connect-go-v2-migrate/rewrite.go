@@ -26,7 +26,6 @@ import (
 	"strconv"
 	"strings"
 
-	connect "connectrpc.com/connect/v2"
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/imports"
 )
@@ -48,19 +47,20 @@ const (
 
 // Diagnostic rule identifiers, surfaced as stable handles in JSON output.
 const (
-	ruleAwaitingV2Bindings   = "awaiting_v2_bindings"
-	ruleRemoveV1Import       = "remove_v1_import"
-	ruleRequestMetadata      = "request_metadata_migration"
-	ruleHandlerConstruction  = "handler_construction"
-	ruleConnectHTTPOption    = "connecthttp_option_migration"
-	ruleErrorAPI             = "error_api_migration"
-	ruleServerInterceptor    = "server_interceptor_migration"
-	ruleInterceptorMigration = "interceptor_migration"
-	ruleStreamParamType      = "stream_param_type"
-	ruleStreamParamAmbiguous = "stream_param_ambiguous"
-	ruleEcosystemMigration   = "ecosystem_migration"
-	ruleBufgenReinstall      = "bufgen_reinstall_plugin"
-	ruleBufgenGoMod          = "bufgen_update_go_mod"
+	ruleAwaitingV2Bindings      = "awaiting_v2_bindings"
+	ruleRemoveV1Import          = "remove_v1_import"
+	ruleRequestMetadata         = "request_metadata_migration"
+	ruleHandlerConstruction     = "handler_construction"
+	ruleConnectHTTPOption       = "connecthttp_option_migration"
+	ruleErrorAPI                = "error_api_migration"
+	ruleServerInterceptor       = "server_interceptor_migration"
+	ruleInterceptorMigration    = "interceptor_migration"
+	ruleStreamParamType         = "stream_param_type"
+	ruleStreamParamAmbiguous    = "stream_param_ambiguous"
+	ruleEcosystemMigration      = "ecosystem_migration"
+	ruleBufgenReinstall         = "bufgen_reinstall_plugin"
+	ruleBufgenGoMod             = "bufgen_update_go_mod"
+	ruleBufgenRemoteUnpublished = "bufgen_remote_unpublished"
 )
 
 var (
@@ -100,10 +100,11 @@ var (
 	}
 	// connectProtocolOptions is the set of v1 protocol-selecting options. They keep
 	// their names in connecthttp (connect.WithGRPC() becomes connecthttp.WithGRPC()),
-	// so only the package qualifier changes.
+	// so only the package qualifier changes. Values mirror connect.ProtocolName*,
+	// inlined to keep this module free of a connect dependency.
 	connectProtocolOptions = map[string]string{
-		"WithGRPC":    connect.ProtocolNameGRPC,
-		"WithGRPCWeb": connect.ProtocolNameGRPCWeb,
+		"WithGRPC":    "grpc",
+		"WithGRPCWeb": "grpcweb",
 	}
 
 	// reshapedErrorAPI maps v1 connect error helpers that v2 folded into *connect.Error

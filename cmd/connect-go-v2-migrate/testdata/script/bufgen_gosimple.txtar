@@ -1,4 +1,5 @@
-# buf.gen.yaml remote plugin: bumped to connectrpc/go v2 and simple opt dropped.
+# buf.gen.yaml with the v1 gosimple plugin: v2 makes the simple API the default
+# generator, so the entry moves to connectrpc/go rather than a gosimple v2.
 exec migrate
 cmp stdout out.txt
 exec migrate -w
@@ -9,9 +10,8 @@ package app
 -- buf.gen.yaml --
 version: v2
 plugins:
-  - remote: buf.build/connectrpc/go:v1.18.1
+  - remote: buf.build/connectrpc/gosimple:v1.18.1
     out: gen
-    opt: simple=true
 -- want.yaml --
 version: v2
 plugins:
@@ -19,16 +19,15 @@ plugins:
     out: gen
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./buf.gen.yaml: bufgen_pin_remote_v2=1 bufgen_remove_simple=1
+  ./buf.gen.yaml: bufgen_replace_gosimple=1
 --- ./buf.gen.yaml
 +++ ./buf.gen.yaml
-@@ -1,6 +1,5 @@
+@@ -1,5 +1,5 @@
  version: v2
  plugins:
--  - remote: buf.build/connectrpc/go:v1.18.1
+-  - remote: buf.build/connectrpc/gosimple:v1.18.1
 +  - remote: buf.build/connectrpc/go:v2.0.0
      out: gen
--    opt: simple=true
  
 
 

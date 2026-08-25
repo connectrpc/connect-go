@@ -16,15 +16,18 @@ package main
 
 import (
 	"path"
+	"regexp"
 	"strings"
 )
 
 const (
-	connectV2Module       = "connectrpc.com/connect/v2"
-	connectLocalPlugin    = "protoc-gen-connect-go"
-	connectRemotePlugin   = "buf.build/connectrpc/go"
-	connectRemotePluginV2 = connectRemotePlugin + ":v2.0.0"
+	connectV2Module            = "connectrpc.com/connect/v2"
+	connectLocalPlugin         = "protoc-gen-connect-go"
+	connectRemotePluginVersion = "v2.0.0"
 )
+
+// connectRemotePluginRef matches connect-go remotes plugins.
+var connectRemotePluginRef = regexp.MustCompile(`^(` + bsrHostPattern + `)/connectrpc/(go|gosimple)(?::(\S+))?$`)
 
 // Plugin entry kinds returned by connectPluginItem.
 const (
@@ -80,7 +83,7 @@ func RewriteBufGen(filename string, src []byte) ([]byte, Report, error) {
 		case kindGotool:
 			report.warnAtLinef(filename, index+1, ruleBufgenGoMod, "the plugin runs via go.mod (%s). Update the tool dependency to the v2 module with `go get -tool %s/cmd/%s` then `go mod tidy`. The buf.gen.yaml entry stays the same.", ref, connectV2Module, connectLocalPlugin)
 		case kindRemote:
-			pinRemotePluginV2(lines, index, ref, &edits, &report)
+			pinRemotePluginV2(filename, lines, index, ref, &edits, &report)
 		}
 		index = end - 1
 	}
@@ -91,14 +94,26 @@ func RewriteBufGen(filename string, src []byte) ([]byte, Report, error) {
 	return []byte(strings.Join(edits.apply(lines), "\n")), report, nil
 }
 
-// pinRemotePluginV2 pins a v1 remote plugin reference (versioned or not) to
-// the v2 release. References already at v2 are left alone.
-func pinRemotePluginV2(lines []string, index int, ref string, edits *lineEdits, report *Report) {
-	if strings.HasPrefix(ref, connectRemotePlugin+":v2") {
+// pinRemotePluginV2 pins a v1 remote plugin reference (versioned or not) to the
+// v2 release. References already at v2 are left alone.
+func pinRemotePluginV2(filename string, lines []string, index int, ref string, edits *lineEdits, report *Report) {
+	match := connectRemotePluginRef.FindStringSubmatch(ref)
+	if match == nil {
 		return
 	}
-	edits.replace[index] = strings.Replace(lines[index], ref, connectRemotePluginV2, 1)
-	report.bump("bufgen_pin_remote_v2")
+	host, simple, version := match[1], match[2] == "gosimple", match[3]
+	if !simple && strings.HasPrefix(version, "v2") {
+		return
+	}
+	pinned := host + "/connectrpc/go:" + connectRemotePluginVersion
+	edits.replace[index] = strings.Replace(lines[index], ref, pinned, 1)
+	if simple {
+		report.bump("bufgen_replace_gosimple")
+	} else {
+		report.bump("bufgen_pin_remote_v2")
+	}
+	// TODO: drop once connect-go v2.0.0 ships and the plugin is on the BSR.
+	report.warnAtLinef(filename, index+1, ruleBufgenRemoteUnpublished, "%s is not published yet. Until connect-go %s is released, generate with the local plugin instead: `go install %s/cmd/%s@latest` and a `local: %s` entry.", pinned, connectRemotePluginVersion, connectV2Module, connectLocalPlugin, connectLocalPlugin)
 }
 
 // lineEdits records pending line replacements or deletions keyed by line index.
@@ -157,10 +172,10 @@ func connectPluginItem(line string) (kind, ref string, ok bool) {
 	return "", "", false
 }
 
-// isConnectRemoteRef reports whether value references the connect-go remote
+// isConnectRemoteRef reports whether value references either connect-go remote
 // plugin, bare or version-tagged.
 func isConnectRemoteRef(value string) bool {
-	return value == connectRemotePlugin || strings.HasPrefix(value, connectRemotePlugin+":")
+	return connectRemotePluginRef.MatchString(value)
 }
 
 // pathOverride scans a v1 plugin block for a `path:` whose value is a command

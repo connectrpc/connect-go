@@ -2,7 +2,7 @@ name: ci
 on:
   push:
     branches: [main, v2]
-    tags: ['v*']
+    tags: ['v*', 'cmd/connect-go-v2-migrate/v*']
   pull_request:
     branches: [main, v2]
   schedule:
@@ -86,9 +86,10 @@ jobs:
         with:
           fetch-depth: 1
       - name: Install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           # only the latest
-          go-version: 1.26.x
+          go-version: 1.27.x
+          check-latest: true
       - name: Test Migration Tool
         run: make testmigrate
