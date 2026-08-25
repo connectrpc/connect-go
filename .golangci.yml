@@ -4,6 +4,7 @@ linters:
   disable:
     - cyclop           # covered by gocyclo
     - depguard         # unnecessary for small libraries
+    - exhaustruct      # deprecated, replaced by exhaustruct_v5
     - funcorder        # consider enabling in the future
     - funlen           # rely on code review to limit function length
     - gocognit         # dubious "cognitive overhead" quantification
@@ -25,9 +26,10 @@ linters:
   settings:
     errcheck:
       check-type-assertions: true
-    exhaustruct:
-      include:
+    exhaustruct_v5:
+      enforce-patterns:
         - connectrpc\.com/connect\..*[pP]arams
+      explicit-mode: true
     forbidigo:
       forbid:
         - pattern: ^fmt\.Print
