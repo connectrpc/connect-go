@@ -29,7 +29,7 @@ clean: ## Delete intermediate build artifacts
 	git clean -Xdf
 
 .PHONY: test
-test: shorttest slowtest
+test: shorttest slowtest testmigrate
 
 .PHONY: shorttest
 shorttest: build ## Run unit tests
@@ -54,7 +54,7 @@ runconformance: build ## Run conformance test suite
 
 .PHONY: testmigrate
 testmigrate: ## Run connect-go-v2-migrate test suite
-	cd cmd/connect-go-v2-migrate && go test ./...
+	cd ./cmd/connect-go-v2-migrate && go test ./...
 
 .PHONY: bench
 bench: BENCH ?= .*
@@ -64,27 +64,33 @@ bench: build ## Run benchmarks for root package
 .PHONY: build
 build: generate ## Build all packages
 	go build ./...
+	cd ./cmd/connect-go-v2-migrate && go build ./...
 
 .PHONY: install
 install: ## Install all binaries
 	go install ./...
+	cd ./cmd/connect-go-v2-migrate && go install ./...
 
 .PHONY: lint
 lint: $(BIN)/golangci-lint $(BIN)/buf ## Lint Go and protobuf
 	go vet ./...
 	golangci-lint run --modules-download-mode=readonly --timeout=3m0s
+	cd ./cmd/connect-go-v2-migrate && go vet ./...
+	cd ./cmd/connect-go-v2-migrate && golangci-lint run --modules-download-mode=readonly --timeout=3m0s
 	buf lint
 	buf format -d --exit-code
 
 .PHONY: lintfix
 lintfix: $(BIN)/golangci-lint $(BIN)/buf ## Automatically fix some lint errors
 	golangci-lint run --fix --modules-download-mode=readonly --timeout=3m0s
+	cd ./cmd/connect-go-v2-migrate && golangci-lint run --fix --modules-download-mode=readonly --timeout=3m0s
 	buf format -w
 
 .PHONY: generate
 generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/license-header ## Regenerate code and licenses
 	go mod tidy
 	cd ./internal/conformance && go mod tidy
+	cd ./cmd/connect-go-v2-migrate && go mod tidy
 	buf generate
 	cd internal/conformance && buf generate --template buf.gen.yaml buf.build/connectrpc/conformance
 	cd ./cmd/protoc-gen-connect-go/internal && \
@@ -97,6 +103,7 @@ generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/li
 .PHONY: upgrade
 upgrade: ## Upgrade dependencies
 	go get -u -t ./... && go mod tidy -v
+	cd ./cmd/connect-go-v2-migrate && go get -u -t ./... && go mod tidy -v
 
 .PHONY: checkgenerate
 checkgenerate:
