@@ -361,6 +361,7 @@ func newHandlerConfig(procedure string, streamType StreamType, options []Handler
 		CompressionPools: make(map[string]*compressionPool),
 		Codecs:           make(map[string]Codec),
 		BufferPool:       newBufferPool(),
+		ReadMaxBytes:     defaultReadMaxBytes,
 		StreamType:       streamType,
 	}
 	withProtoBinaryCodec().applyToHandler(&config)

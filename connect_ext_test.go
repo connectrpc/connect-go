@@ -430,7 +430,7 @@ func TestServer(t *testing.T) {
 			if testing.Short() {
 				t.Skipf("skipping %s test in short mode", t.Name())
 			}
-			hellos := strings.Repeat("hello", 1024*1024) // ~5mb
+			hellos := strings.Repeat("hello", 512*1024) // ~2.5mb
 			request := connect.NewRequest(&pingv1.PingRequest{Text: hellos})
 			for _, el := range expectedHeaderValues {
 				request.Header().Add(clientHeader, el)
@@ -1686,7 +1686,7 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 		} else {
 			compressionOption = connect.WithCompressMinBytes(math.MaxInt)
 		}
-		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}, compressionOption))
+		mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}, compressionOption, connect.WithReadMaxBytes(0)))
 		server := memhttptest.NewServer(t, mux)
 		return server
 	}
@@ -1822,7 +1822,7 @@ func TestHandlerWithSendMaxBytes(t *testing.T) {
 	newHTTP2Server := func(t *testing.T, compressed bool, sendMaxBytes int) *memhttp.Server {
 		t.Helper()
 		mux := http.NewServeMux()
-		options := []connect.HandlerOption{connect.WithSendMaxBytes(sendMaxBytes)}
+		options := []connect.HandlerOption{connect.WithSendMaxBytes(sendMaxBytes), connect.WithReadMaxBytes(0)}
 		if compressed {
 			options = append(options, connect.WithCompressMinBytes(1))
 		} else {

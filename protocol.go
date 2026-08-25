@@ -44,6 +44,8 @@ const (
 	headerDate            = "Date"
 
 	discardLimit = 1024 * 1024 * 4 // 4MiB
+
+	defaultReadMaxBytes = 1024 * 1024 * 4 // 4MiB
 )
 
 var errNoTimeout = errors.New("no timeout")
