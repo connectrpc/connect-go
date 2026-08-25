@@ -69,6 +69,8 @@ func TestNewClient_InitFailure(t *testing.T) {
 	t.Run("bidi", func(t *testing.T) {
 		t.Parallel()
 		bidiStream := client.CumSum(t.Context())
+		assert.Equal(t, bidiStream.Spec(), connect.Spec{})
+		assert.Equal(t, bidiStream.Peer(), connect.Peer{})
 		err := bidiStream.Send(&pingv1.CumSumRequest{})
 		validateExpectedError(t, err)
 	})
@@ -76,6 +78,8 @@ func TestNewClient_InitFailure(t *testing.T) {
 	t.Run("client_stream", func(t *testing.T) {
 		t.Parallel()
 		clientStream := client.Sum(t.Context())
+		assert.Equal(t, clientStream.Spec(), connect.Spec{})
+		assert.Equal(t, clientStream.Peer(), connect.Peer{})
 		err := clientStream.Send(&pingv1.SumRequest{})
 		validateExpectedError(t, err)
 	})
