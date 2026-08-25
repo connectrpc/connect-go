@@ -64,7 +64,7 @@ bench: build ## Run benchmarks for root package
 .PHONY: build
 build: generate ## Build all packages
 	go build ./...
-	cd ./cmd/connect-go-v2-migrate && go build ./...
+	cd ./cmd/connect-go-v2-migrate && go build -o /dev/null .
 
 .PHONY: install
 install: ## Install all binaries
