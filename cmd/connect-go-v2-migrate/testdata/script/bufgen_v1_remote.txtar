@@ -49,5 +49,8 @@ Proposed rewrites (rerun with -w to apply):
  
 
 
+The following issues require manual code changes:
+  ./buf.gen.yaml:8:1: buf.build/connectrpc/go:v2.0.0 is not published yet. Until connect-go v2.0.0 is released, generate with the local plugin instead: `go install connectrpc.com/connect/v2/cmd/protoc-gen-connect-go@latest` and a `local: protoc-gen-connect-go` entry.
+
 Scanned 1 Go file and 1 Buf template. 1 rewrite(s) ready (rerun with -w to apply).
 Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

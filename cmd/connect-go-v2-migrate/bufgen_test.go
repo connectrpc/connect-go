@@ -136,6 +136,116 @@ plugins:
 			wantChanged: false,
 		},
 		{
+			// v2 folds the simple API into the default generator, so the
+			// gosimple plugin migrates onto connectrpc/go, not a gosimple v2.
+			name: "remote_gosimple_replaced_by_default_plugin",
+			in: `version: v2
+plugins:
+  - remote: buf.build/connectrpc/gosimple:v1.18.1
+    out: gen
+`,
+			want: `version: v2
+plugins:
+  - remote: buf.build/connectrpc/go:v2.0.0
+    out: gen
+`,
+			wantChanged: true,
+		},
+		{
+			name: "remote_gosimple_unversioned_replaced",
+			in: `version: v2
+plugins:
+  - remote: buf.build/connectrpc/gosimple
+    out: gen
+`,
+			want: `version: v2
+plugins:
+  - remote: buf.build/connectrpc/go:v2.0.0
+    out: gen
+`,
+			wantChanged: true,
+		},
+		{
+			name: "v1_plugin_gosimple_replaced",
+			in: `version: v1
+plugins:
+  - plugin: buf.build/connectrpc/gosimple:v1.18.1
+    out: gen
+`,
+			want: `version: v1
+plugins:
+  - plugin: buf.build/connectrpc/go:v2.0.0
+    out: gen
+`,
+			wantChanged: true,
+		},
+		{
+			// Private BSR instances use the same plugin path under another host,
+			// and the rewrite must keep that host rather than jump to buf.build.
+			name: "remote_private_host_keeps_host",
+			in: `version: v2
+plugins:
+  - remote: buf.example.com/connectrpc/go:v1.18.1
+    out: gen
+`,
+			want: `version: v2
+plugins:
+  - remote: buf.example.com/connectrpc/go:v2.0.0
+    out: gen
+`,
+			wantChanged: true,
+		},
+		{
+			name: "remote_private_host_gosimple_replaced",
+			in: `version: v2
+plugins:
+  - remote: bsr.internal.acme.dev/connectrpc/gosimple:v1.18.1
+    out: gen
+`,
+			want: `version: v2
+plugins:
+  - remote: bsr.internal.acme.dev/connectrpc/go:v2.0.0
+    out: gen
+`,
+			wantChanged: true,
+		},
+		{
+			name: "remote_private_host_already_v2_is_noop",
+			in: `version: v2
+plugins:
+  - remote: buf.example.com/connectrpc/go:v2.0.0
+    out: gen
+`,
+			want:        "",
+			wantChanged: false,
+		},
+		{
+			// A hostless reference is not a BSR plugin and must be left alone.
+			name: "remote_hostless_ref_ignored",
+			in: `version: v2
+plugins:
+  - remote: connectrpc/go:v1.18.1
+    out: gen
+`,
+			want:        "",
+			wantChanged: false,
+		},
+		{
+			name: "remote_pin_warns_plugin_not_published",
+			in: `version: v2
+plugins:
+  - remote: buf.build/connectrpc/go:v1.18.1
+    out: gen
+`,
+			want: `version: v2
+plugins:
+  - remote: buf.build/connectrpc/go:v2.0.0
+    out: gen
+`,
+			wantChanged: true,
+			wantWarn:    "is not published yet",
+		},
+		{
 			name: "gotool_warns_about_gomod_and_strips",
 			in: `version: v2
 plugins:
