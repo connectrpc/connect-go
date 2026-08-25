@@ -1,6 +1,6 @@
 # Releasing connect-go
 
-This document outlines how to create a release of connect-go.
+This document outlines how to create a release of connect-go v2 from the main branch. v1 releases follow the same steps on the `v1` branch.
 
 1. Clone the repo, ensuring you have the latest main.
 
@@ -9,8 +9,8 @@ This document outlines how to create a release of connect-go.
   * If there are features being released, remove the `-dev` suffix, set the MINOR number to be 1 more than the MINOR number of the [latest release], and set the PATCH number to `0`. In the common case, the diff here will just be to remove the `-dev` suffix.
 
    ```patch
-   -const Version = "1.14.0-dev"
-   +const Version = "1.14.0"
+   -const Version = "2.0.0-dev"
+   +const Version = "2.0.0"
    ```
 
 3. Check for any changes in [cmd/protoc-gen-connect-go/main.go](cmd/protoc-gen-connect-go/main.go) that require a version restriction. A constant `IsAtLeastVersionX_Y_Z` should be defined in [connect.go](connect.go) if generated code has begun to use a new API. Make sure the generated code references this constant. If a new constant has been added since the last release, ensure that the name of the constant matches the version being released ([Example PR #496](https://github.com/connectrpc/connect-go/pull/496)).
@@ -35,10 +35,24 @@ This document outlines how to create a release of connect-go.
 8. On a new branch, open [connect.go](connect.go) and change the `Version` to increment the minor tag and append the `-dev` suffix. Use the next minor release - we never anticipate bugs and patch releases.
 
    ```patch
-   -const Version = "1.14.0"
-   +const Version = "1.15.0-dev"
+   -const Version = "2.0.0"
+   +const Version = "2.1.0-dev"
    ```
 
 9. Open a PR titled "Back to development" ([Example PR #662](https://github.com/connectrpc/connect-go/pull/662)). Once it's reviewed and CI passes, merge it.
 
 [latest release]: https://github.com/connectrpc/connect-go/releases/latest
+
+# Releasing connect-go-v2-migrate
+
+`cmd/connect-go-v2-migrate` is its own Go module, `connectrpc.com/connect/v2/cmd/connect-go-v2-migrate`.
+
+1. Using the Github UI, create a new release.
+    - Under “Choose a tag”, type in “cmd/connect-go-v2-migrate/vX.Y.Z” to create a new tag for the release upon publish. The directory prefix is what keeps it from colliding with the library’s tags in this repository. The version is the module’s own and starts at `v1.0.0`.
+    - Target the main branch.
+    - Title the Release “connect-go-v2-migrate vX.Y.Z”.
+    - Do not click “set as latest release”. That badge is picked by date, so it should stay on the most recent connect-go release.
+    - Set the last connect-go-v2-migrate release as the “Previous tag”, so the generated notes cover this module rather than the library.
+    - Click “Generate release notes” to autogenerate release notes.
+
+2. Publish the release.
