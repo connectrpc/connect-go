@@ -23,14 +23,13 @@ func newClient() pingv1connect.PingServiceClient {
 }
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./client_construction.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1
+  ./client_construction.go: client_construction=1 import_add_connecthttp=1
 --- ./client_construction.go
 +++ ./client_construction.go
-@@ -3,13 +3,14 @@
+@@ -3,13 +3,13 @@
  import (
  	"net/http"
  
-+	"connectrpc.com/connect/v2"
 +	"connectrpc.com/connect/v2/connecthttp"
  	"example.com/app/gen/connect/ping/v1/pingv1connect"
  )
@@ -39,8 +38,8 @@ Proposed rewrites (rerun with -w to apply):
 -	return pingv1connect.NewPingServiceClient(
 -		http.DefaultClient,
 -		"http://localhost:8080/",
-+	return pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient,
-+		"http://localhost:8080/")),
++	return pingv1connect.NewPingServiceClient(connecthttp.NewClient(http.DefaultClient,
++		"http://localhost:8080/", nil),
  	)
  }
  

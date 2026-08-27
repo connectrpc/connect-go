@@ -92,7 +92,7 @@ var (
 	// changed name or signature, so the tool warns instead of rewriting.
 	reshapedToConnectHTTP = map[string]string{
 		"HandlerOption":                 "connecthttp.Option (interceptors go to connect.NewServer, HTTP options to connecthttp.Mount)",
-		"ClientOption":                  "connecthttp.Option (interceptors go to connect.NewClient, HTTP options to connecthttp.NewTransport)",
+		"ClientOption":                  "connecthttp.Option, passed to connecthttp.NewClient after its []connect.ClientInterceptor argument",
 		"WithAcceptCompression":         "connecthttp.WithCompressor to register a connect.Compressor (see connectgzip), then connecthttp.WithAcceptCompression(name) to advertise it",
 		"WithCompression":               "connecthttp.WithCompressor(connect.Compressor) (see connectgzip); the (name, decompressor, compressor) signature changed",
 		"WithConditionalHandlerOptions": "connecthttp.WithConditionalOptions(func(connect.Spec) []connecthttp.Option); the callback signature changed",
@@ -118,7 +118,7 @@ var (
 	// reshapedConstruction maps v1 connect options that became positional args to
 	// connect.NewServer / connect.NewClient in v2, so the tool warns.
 	reshapedConstruction = map[string]string{
-		"WithInterceptors": "interceptors pass to connect.NewServer(...) or connect.NewClient(...). The v2 type is connect.ServerInterceptor or connect.ClientInterceptor.",
+		"WithInterceptors": "interceptors pass to connect.NewServer(...) for handlers or the []connect.ClientInterceptor argument of connecthttp.NewClient(...) for clients. The v2 type is connect.ServerInterceptor or connect.ClientInterceptor.",
 		"WithRecover":      "reimplement as a connect.ServerInterceptor that recovers panics. Re-panic http.ErrAbortHandler so the server still aborts the response.",
 	}
 

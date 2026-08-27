@@ -1,0 +1,62 @@
+# Client construction with interceptors: connecthttp.NewClient keeps the v1
+# argument shape, so interceptors stay in the same option list behind
+# connecthttp.WithInterceptors rather than moving to a separate call. The
+# validate interceptor module has no v2 build yet (golden-only).
+stubs v2
+exec migrate
+cmp stdout out.txt
+-- client_interceptor.go --
+package app
+
+import (
+	"net/http"
+
+	"connectrpc.com/connect"
+	"connectrpc.com/validate"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func newClient() pingv1connect.PingServiceClient {
+	return pingv1connect.NewPingServiceClient(
+		http.DefaultClient,
+		"http://localhost:8080/",
+		connect.WithInterceptors(validate.NewInterceptor()),
+	)
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./client_interceptor.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 import_ecosystem_v2=1 interceptor_validate_v2=1
+--- ./client_interceptor.go
++++ ./client_interceptor.go
+@@ -3,16 +3,15 @@
+ import (
+ 	"net/http"
+ 
+-	"connectrpc.com/connect"
+-	"connectrpc.com/validate"
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
++	"connectrpc.com/validate/v2"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+ func newClient() pingv1connect.PingServiceClient {
+-	return pingv1connect.NewPingServiceClient(
+-		http.DefaultClient,
+-		"http://localhost:8080/",
+-		connect.WithInterceptors(validate.NewInterceptor()),
++	return pingv1connect.NewPingServiceClient(connecthttp.NewClient(http.DefaultClient,
++		"http://localhost:8080/", []connect.ClientInterceptor{validate.NewClientInterceptor()}),
+ 	)
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+
+go.mod is missing the v2 modules. Pull them in and tidy:
+
+  go get -u \
+       connectrpc.com/validate/v2
+  go mod tidy
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

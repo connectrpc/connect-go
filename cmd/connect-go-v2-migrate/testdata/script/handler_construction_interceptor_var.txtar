@@ -59,7 +59,7 @@ Proposed rewrites (rerun with -w to apply):
 
 
 The following issues require manual code changes:
-  ./handler_construction_interceptor_var.go:19:9: connect.WithInterceptors -> interceptors pass to connect.NewServer(...) or connect.NewClient(...). The v2 type is connect.ServerInterceptor or connect.ClientInterceptor.
+  ./handler_construction_interceptor_var.go:19:9: connect.WithInterceptors -> interceptors pass to connect.NewServer(...) for handlers or the []connect.ClientInterceptor argument of connecthttp.NewClient(...) for clients. The v2 type is connect.ServerInterceptor or connect.ClientInterceptor.
   ./handler_construction_interceptor_var.go:21:64: interceptor opt stays in the connect.NewServer(...) list unmigrated. Its v2 type is connect.ServerInterceptor.
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).

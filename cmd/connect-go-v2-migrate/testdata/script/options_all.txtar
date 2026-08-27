@@ -79,7 +79,7 @@ Proposed rewrites (rerun with -w to apply):
 
 The following issues require manual code changes:
   ./opts.go:3:8: connectrpc.com/connect (v1) import retained because it still uses connect.ClientOption, connect.WithAcceptCompression, connect.WithCompression, connect.WithConditionalHandlerOptions.
-  ./opts.go:5:21: connect.ClientOption -> connecthttp.Option (interceptors go to connect.NewClient, HTTP options to connecthttp.NewTransport)
+  ./opts.go:5:21: connect.ClientOption -> connecthttp.Option, passed to connecthttp.NewClient after its []connect.ClientInterceptor argument
   ./opts.go:11:3: connect.WithCompression -> connecthttp.WithCompressor(connect.Compressor) (see connectgzip); the (name, decompressor, compressor) signature changed
   ./opts.go:12:3: connect.WithAcceptCompression -> connecthttp.WithCompressor to register a connect.Compressor (see connectgzip), then connecthttp.WithAcceptCompression(name) to advertise it
   ./opts.go:21:3: connect.WithConditionalHandlerOptions -> connecthttp.WithConditionalOptions(func(connect.Spec) []connecthttp.Option); the callback signature changed

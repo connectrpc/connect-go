@@ -24,25 +24,24 @@ func newClient() pingv1connect.PingServiceClient {
 }
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./client_construction_protocol.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 option_protocol=1
+  ./client_construction_protocol.go: client_construction=1 import_add_connecthttp=1 import_drop_v1=1 option_protocol=1
 --- ./client_construction_protocol.go
 +++ ./client_construction_protocol.go
-@@ -3,7 +3,8 @@
+@@ -3,7 +3,7 @@
  import (
  	"net/http"
  
 -	"connectrpc.com/connect"
-+	"connectrpc.com/connect/v2"
 +	"connectrpc.com/connect/v2/connecthttp"
  	"example.com/app/gen/connect/ping/v1/pingv1connect"
  )
  
-@@ -11,6 +12,6 @@
+@@ -11,6 +11,6 @@
  // keeps its name on the connecthttp transport, so connect.WithGRPC() becomes
  // connecthttp.WithGRPC() inside connecthttp.NewTransport.
  func newClient() pingv1connect.PingServiceClient {
 -	return pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localhost:8080/", connect.WithGRPC())
-+	return pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080/", connecthttp.WithGRPC())))
++	return pingv1connect.NewPingServiceClient(connecthttp.NewClient(http.DefaultClient, "http://localhost:8080/", nil, connecthttp.WithGRPC()))
  }
  
 

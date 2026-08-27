@@ -208,6 +208,14 @@ func NewTransport(httpClient HTTPClient, baseURL string, options ...Option) conn
 	}
 }
 
+// NewClient returns a [connect.Client] that dispatches RPCs over httpClient
+// against baseURL, ready to pass to a generated service client. It is shorthand
+// for handing [NewTransport] to [connect.NewClient]. The interceptors run in
+// slice order, outermost first; pass nil when there are none.
+func NewClient(httpClient HTTPClient, baseURL string, interceptors []connect.ClientInterceptor, options ...Option) *connect.Client {
+	return connect.NewClient(NewTransport(httpClient, baseURL, options...), interceptors...)
+}
+
 // defaultOptions returns the options with the defaults every transport and
 // server starts from before user options are applied.
 func defaultOptions() options {

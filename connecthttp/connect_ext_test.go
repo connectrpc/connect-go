@@ -4155,3 +4155,61 @@ func assertErrorResponseMetadata(t *testing.T, callInfo *connect.CallInfo) { //n
 	assert.True(t, compareValues(header, expectedHeaderValues))
 	assert.True(t, compareValues(callInfo.ResponseTrailer().Values(handlerTrailer), expectedHeaderValues))
 }
+
+// TestNewClient checks the convenience constructor against the layered form it
+// replaces: same RPC behaviour, HTTP options honoured, and interceptors running
+// outermost-first in slice order.
+func TestNewClient(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, pingServer{})
+	connecthttp.Mount(mux, srv)
+	server := memhttptest.NewServer(t, mux)
+
+	t.Run("matches_layered_form", func(t *testing.T) {
+		t.Parallel()
+		layered := pingv1connect.NewPingServiceClient(
+			connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL())),
+		)
+		direct := pingv1connect.NewPingServiceClient(
+			connecthttp.NewClient(server.Client(), server.URL(), nil),
+		)
+		want, err := layered.Ping(t.Context(), &pingv1.PingRequest{Number: 42})
+		assert.Nil(t, err)
+		got, err := direct.Ping(t.Context(), &pingv1.PingRequest{Number: 42})
+		assert.Nil(t, err)
+		assert.Equal(t, got.Number, want.Number)
+	})
+
+	t.Run("applies_http_options", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connect.NewPingServiceClient(
+			connecthttp.NewClient(server.Client(), server.URL(), nil, connecthttp.WithProtoJSON()),
+		)
+		response, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 7})
+		assert.Nil(t, err)
+		assert.Equal(t, response.Number, int64(7))
+	})
+
+	t.Run("runs_interceptors_in_order", func(t *testing.T) {
+		t.Parallel()
+		var order []string
+		record := func(name string) connect.ClientInterceptor {
+			return func(next connect.ClientFunc) connect.ClientFunc {
+				return func(ctx context.Context, spec connect.Spec) (connect.ClientStream, error) {
+					order = append(order, name)
+					return next(ctx, spec)
+				}
+			}
+		}
+		client := pingv1connect.NewPingServiceClient(
+			connecthttp.NewClient(server.Client(), server.URL(),
+				[]connect.ClientInterceptor{record("first"), record("second")},
+			),
+		)
+		_, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 1})
+		assert.Nil(t, err)
+		assert.Equal(t, order, []string{"first", "second"})
+	})
+}

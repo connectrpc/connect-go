@@ -256,8 +256,8 @@ func mapInterceptor(interceptor ast.Expr, report *Report, ictx ecosystemContext,
 
 // rewriteClientConstruction rewrites the v1 generated client constructor
 // <pkg>connect.New<Svc>Client(httpClient, baseURL, opts...) to the v2 form that
-// takes a *connect.Client built from a transport. Interceptor options move to
-// connect.NewClient, the rest to connecthttp.NewTransport.
+// takes a *connect.Client. connecthttp.NewClient keeps the v1 argument shape,
+// so interceptors ride along in the same option list via WithInterceptors.
 func rewriteClientConstruction(file *ast.File, state *rewriteState, report *Report) {
 	ictx := newEcosystemContext(file)
 	stubs := connectStubAliases(file)
@@ -283,11 +283,10 @@ func rewriteClientConstruction(file *ast.File, state *rewriteState, report *Repo
 		for _, interceptor := range interceptors {
 			mapped = append(mapped, mapInterceptor(interceptor, report, ictx, "Client"))
 		}
-		transportArgs := append([]ast.Expr{call.Args[0], call.Args[1]}, otherOpts...)
-		transport := callExpr(state.connectHTTPAlias, "NewTransport", transportArgs...)
-		newClient := callExpr(state.connectV2Alias, "NewClient", append([]ast.Expr{transport}, mapped...)...)
-		call.Args = []ast.Expr{newClient}
-		state.usedV2 = true
+		clientArgs := make([]ast.Expr, 0, 3+len(otherOpts))
+		clientArgs = append(clientArgs, call.Args[0], call.Args[1], interceptorSlice(mapped, state))
+		clientArgs = append(clientArgs, otherOpts...)
+		call.Args = []ast.Expr{callExpr(state.connectHTTPAlias, "NewClient", clientArgs...)}
 		state.usedConnectHTTP = true
 		report.bump(counter)
 	})
@@ -447,6 +446,22 @@ func importLocalName(file *ast.File, importPath string) string {
 		return path.Base(importPath)
 	}
 	return ""
+}
+
+// interceptorSlice renders the interceptors argument of connecthttp.NewClient:
+// a []connect.ClientInterceptor literal, or nil when there are none.
+func interceptorSlice(interceptors []ast.Expr, state *rewriteState) ast.Expr {
+	if len(interceptors) == 0 {
+		return ast.NewIdent("nil")
+	}
+	state.usedV2 = true
+	return &ast.CompositeLit{
+		Type: &ast.ArrayType{Elt: &ast.SelectorExpr{
+			X:   ast.NewIdent(state.connectV2Alias),
+			Sel: ast.NewIdent("ClientInterceptor"),
+		}},
+		Elts: interceptors,
+	}
 }
 
 func callExpr(pkg, fn string, args ...ast.Expr) *ast.CallExpr {

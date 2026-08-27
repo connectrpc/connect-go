@@ -87,10 +87,10 @@ Proposed rewrites (rerun with -w to apply):
  }
  
 
-  ./service_test.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 stream_recv_loop=1 strip_new_request=1
+  ./service_test.go: client_construction=1 import_add_connecthttp=1 import_drop_v1=1 stream_recv_loop=1 strip_new_request=1
 --- ./service_test.go
 +++ ./service_test.go
-@@ -2,35 +2,43 @@
+@@ -2,35 +2,42 @@
  
  import (
  	"context"
@@ -101,7 +101,6 @@ Proposed rewrites (rerun with -w to apply):
  	"time"
  
 -	"connectrpc.com/connect"
-+	"connectrpc.com/connect/v2"
 +	"connectrpc.com/connect/v2/connecthttp"
  	pingv1 "example.com/app/gen/connect/ping/v1"
  	"example.com/app/gen/connect/ping/v1/pingv1connect"
@@ -110,7 +109,7 @@ Proposed rewrites (rerun with -w to apply):
  func TestCountUp(t *testing.T) {
  	t.Run("counts", func(t *testing.T) {
 -		cli := pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localhost:8080")
-+		cli := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080")))
++		cli := pingv1connect.NewPingServiceClient(connecthttp.NewClient(http.DefaultClient, "http://localhost:8080", nil))
  		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
  		defer cancel()
  

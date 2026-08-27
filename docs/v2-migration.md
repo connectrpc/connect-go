@@ -229,7 +229,7 @@ update.
 ### Client construction
 
 v1 clients took an HTTP client and a base URL. v2 clients take a
-`*connect.Client`, which wraps a transport:
+`*connect.Client`. `connecthttp.NewClient` keeps the v1 argument shape:
 
 ```go
 // v1
@@ -238,13 +238,15 @@ client := pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localho
 
 ```go
 // v2
-client := pingv1connect.NewPingServiceClient(connect.NewClient(
-	connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080"),
-))
+client := pingv1connect.NewPingServiceClient(
+	connecthttp.NewClient(http.DefaultClient, "http://localhost:8080", nil),
+)
 ```
 
-Interceptors move to `connect.NewClient`. Other client options move to
-`connecthttp.NewTransport`.
+Interceptors are an explicit `[]connect.ClientInterceptor` argument, and pass
+`nil` when there are none. Client options keep their place at the end of the
+argument list. To build the client from a transport instead, pass
+`connecthttp.NewTransport` to `connect.NewClient`.
 
 ✅ `connect-go-v2-migrate` handles this.
 

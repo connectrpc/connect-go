@@ -150,26 +150,25 @@ replace connectrpc.com/connect => ./connectv1
 replace connectrpc.com/connect/v2 => ./connectv2
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./consumer_a.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 strip_new_request=1
+  ./consumer_a.go: client_construction=1 import_add_connecthttp=1 import_drop_v1=1 strip_new_request=1
 --- ./consumer_a.go
 +++ ./consumer_a.go
-@@ -4,7 +4,8 @@
+@@ -4,7 +4,7 @@
  	"context"
  	"net/http"
  
 -	"connectrpc.com/connect"
-+	"connectrpc.com/connect/v2"
 +	"connectrpc.com/connect/v2/connecthttp"
  
  	"example.com/app/gen/av1"
  	"example.com/app/gen/av1/av1connect"
-@@ -12,8 +13,8 @@
+@@ -12,8 +12,8 @@
  
  // echo binds to service A, whose stub is already v2, so it migrates now.
  func echo(ctx context.Context) error {
 -	client := av1connect.NewAServiceClient(http.DefaultClient, "http://localhost")
 -	_, err := client.Echo(ctx, connect.NewRequest(&av1.EchoRequest{Text: "hi"}))
-+	client := av1connect.NewAServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost")))
++	client := av1connect.NewAServiceClient(connecthttp.NewClient(http.DefaultClient, "http://localhost", nil))
 +	_, err := client.Echo(ctx, &av1.EchoRequest{Text: "hi"})
  	return err
  }
