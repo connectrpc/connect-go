@@ -195,9 +195,9 @@ func invoke(ctx context.Context, transports *transports, req *conformancev1.Clie
 		return nil, fmt.Errorf("compression %v is not supported (the v2 reference client supports gzip only)", req.Compression)
 	}
 
-	if req.MessageReceiveLimit > 0 {
-		clientOptions = append(clientOptions, connecthttp.WithReadMaxBytes(int(req.MessageReceiveLimit)))
-	}
+	// A zero limit means unlimited, which is what the conformance suite expects
+	// when it does not set one.
+	clientOptions = append(clientOptions, connecthttp.WithReadMaxBytes(int(req.MessageReceiveLimit)))
 
 	switch req.GetService() {
 	case conformancev1connect.ConformanceServiceName:

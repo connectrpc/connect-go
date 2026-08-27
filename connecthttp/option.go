@@ -139,8 +139,8 @@ func WithCompressMinBytes(n int) Option {
 // limits the size of a message that the server can respond with. Limits apply
 // to each Protobuf message, not to the stream as a whole.
 //
-// Setting WithReadMaxBytes to zero allows any message size. Both clients and
-// handlers default to allowing any request size.
+// Both clients and handlers default to a limit of 4 MiB. Setting
+// WithReadMaxBytes to zero allows any message size.
 //
 // Handlers may also use [net/http.MaxBytesHandler] to limit the total size of
 // the HTTP request stream (rather than the per-message size). Connect handles

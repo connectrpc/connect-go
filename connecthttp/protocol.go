@@ -37,6 +37,10 @@ const (
 	headerDate            = "Date"
 
 	discardLimit = 1024 * 1024 * 4 // 4MiB
+
+	// defaultReadMaxBytes is the default per-message read limit for clients and
+	// handlers, matching gRPC's default. WithReadMaxBytes overrides it.
+	defaultReadMaxBytes = 1024 * 1024 * 4 // 4MiB
 )
 
 var errNoTimeout = errors.New("no timeout")
