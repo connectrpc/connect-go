@@ -150,7 +150,7 @@ replace connectrpc.com/connect => ./connectv1
 replace connectrpc.com/connect/v2 => ./connectv2
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./consumer_a.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 strip_new_request=1
+  ./consumer_a.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 read_limit_pinned=1 strip_new_request=1
 --- ./consumer_a.go
 +++ ./consumer_a.go
 @@ -4,7 +4,8 @@
@@ -169,7 +169,7 @@ Proposed rewrites (rerun with -w to apply):
  func echo(ctx context.Context) error {
 -	client := av1connect.NewAServiceClient(http.DefaultClient, "http://localhost")
 -	_, err := client.Echo(ctx, connect.NewRequest(&av1.EchoRequest{Text: "hi"}))
-+	client := av1connect.NewAServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost")))
++	client := av1connect.NewAServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost", connecthttp.WithReadMaxBytes(0))))
 +	_, err := client.Echo(ctx, &av1.EchoRequest{Text: "hi"})
  	return err
  }
@@ -177,6 +177,7 @@ Proposed rewrites (rerun with -w to apply):
 
 
 The following issues require manual code changes:
+  ./consumer_a.go:15:12: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
   ./consumer_b.go:7:2: connectrpc.com/connect (v1) import retained because it still uses connect.NewRequest.
 
 Deferred until their connect stubs are regenerated to v2:

@@ -32,7 +32,7 @@ func run() error {
 func newErrorInterceptor() connect.Interceptor { return nil }
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./handler_construction_interceptor_var.go: import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 server_construction=1
+  ./handler_construction_interceptor_var.go: import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 read_limit_pinned=1 server_construction=1
 --- ./handler_construction_interceptor_var.go
 +++ ./handler_construction_interceptor_var.go
 @@ -3,7 +3,8 @@
@@ -52,7 +52,7 @@ Proposed rewrites (rerun with -w to apply):
 -	mux.Handle(pingv1connect.NewPingServiceHandler(&PingServer{}, opt))
 +	server := connect.NewServer(opt)
 +	pingv1connect.RegisterPingServiceHandler(server, &PingServer{})
-+	connecthttp.Mount(mux, server)
++	connecthttp.Mount(mux, server, connecthttp.WithReadMaxBytes(0))
  	return http.ListenAndServe(":8080", mux)
  }
  
@@ -60,6 +60,7 @@ Proposed rewrites (rerun with -w to apply):
 
 The following issues require manual code changes:
   ./handler_construction_interceptor_var.go:19:9: connect.WithInterceptors -> interceptors pass to connect.NewServer(...) or connect.NewClient(...). The v2 type is connect.ServerInterceptor or connect.ClientInterceptor.
+  ./handler_construction_interceptor_var.go:21:13: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
   ./handler_construction_interceptor_var.go:21:64: interceptor opt stays in the connect.NewServer(...) list unmigrated. Its v2 type is connect.ServerInterceptor.
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).

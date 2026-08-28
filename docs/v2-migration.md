@@ -431,6 +431,25 @@ The `ErrorWriter` type, `NewErrorWriter`, and `IsNotModifiedError` move to
 
 ✅ `connect-go-v2-migrate` handles these.
 
+### Read limits are bounded by default
+
+In v1, the default read limit was unbounded. This meant any caller,
+authenticated or not, could force a server to buffer a message of any size. To
+improve safety, v2 introduces a default limit of 4 MiB per message, which can
+be overridden using `WithReadMaxBytes`. Messages exceeding this limit fail with
+the `CodeResourceExhausted` error code.
+
+To prevent unexpected runtime behavior changes during upgrades, the migration
+tool preserves the v1 unbounded behavior by default:
+
+```go
+// v2, as the tool writes it
+connecthttp.NewTransport(httpClient, baseURL, connecthttp.WithReadMaxBytes(0))
+connecthttp.Mount(mux, server, connecthttp.WithReadMaxBytes(0))
+```
+
+✅ `connect-go-v2-migrate` handles this, and ⚠️ warns at every call it pins.
+
 Options whose signature changed are warned with the v2 replacement:
 
 | v1 | v2 |

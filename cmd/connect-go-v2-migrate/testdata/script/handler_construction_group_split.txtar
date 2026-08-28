@@ -30,7 +30,7 @@ func run() error {
 }
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./handler_construction_group_split.go: grpchealth_register=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 import_ecosystem_v2=2 interceptor_validate_v2=1 server_construction=1
+  ./handler_construction_group_split.go: grpchealth_register=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 import_ecosystem_v2=2 interceptor_validate_v2=1 read_limit_pinned=2 server_construction=1
 --- ./handler_construction_group_split.go
 +++ ./handler_construction_group_split.go
 @@ -3,10 +3,11 @@
@@ -59,18 +59,20 @@ Proposed rewrites (rerun with -w to apply):
 -	mux.Handle(grpchealth.NewHandler(checker))
 +	server := connect.NewServer(validate.NewServerInterceptor())
 +	pingv1connect.RegisterPingServiceHandler(server, &PingServer{})
-+	connecthttp.Mount(mux, server)
++	connecthttp.Mount(mux, server, connecthttp.WithReadMaxBytes(0))
 +	srv := connect.NewServer()
 +
 +	grpchealth.Register(srv, checker)
-+	connecthttp.Mount(mux, srv)
++	connecthttp.Mount(mux, srv, connecthttp.WithReadMaxBytes(0))
  	return http.ListenAndServe(":8080", mux)
  }
  
 
 
 The following issues require manual code changes:
+  ./handler_construction_group_split.go:19:13: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
   ./handler_construction_group_split.go:23:2: handlers on mux have differing options, so each group gets its own *connect.Server. v2 interceptors apply per server.
+  ./handler_construction_group_split.go:23:13: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
 

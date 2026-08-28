@@ -33,6 +33,7 @@ func rewriteServerConstruction(file *ast.File, state *rewriteState, report *Repo
 	ictx := newEcosystemContext(file)
 	stubs := connectStubAliases(file)
 	interceptorVars := interceptorOptionVars(file, state.connectAlias)
+	readLimitVars := readLimitOptionVars(file, state.connectAlias)
 	var blocks []*ast.BlockStmt
 	walk(file, func(n ast.Node) {
 		if block, ok := n.(*ast.BlockStmt); ok {
@@ -63,7 +64,7 @@ func rewriteServerConstruction(file *ast.File, state *rewriteState, report *Repo
 				}
 				run = append(run, nextMatch)
 			}
-			repl := buildConstructionReplacement(block, run, state, report, ictx)
+			repl := buildConstructionReplacement(block, run, state, report, ictx, readLimitVars)
 			block.List = append(block.List[:index:index], append(repl, block.List[index+len(run):]...)...)
 			index += len(repl) - 1
 		}
@@ -82,6 +83,8 @@ type constructionMatch struct {
 	interceptors []ast.Expr
 	otherOpts    []ast.Expr
 	groupKey     string
+	optsSpread   bool
+	pos          token.Pos
 }
 
 // matchConstruction matches `<mux>.Handle(<pkg>connect.New<Svc>Handler(svc, opts...))`
@@ -144,13 +147,15 @@ func matchConstruction(stmt ast.Stmt, state *rewriteState, ictx ecosystemContext
 		interceptors: interceptors,
 		otherOpts:    otherOpts,
 		groupKey:     key.String(),
+		optsSpread:   ctorCall.Ellipsis.IsValid(),
+		pos:          ctorCall.Pos(),
 	}, true
 }
 
 // buildConstructionReplacement emits the v2 statements for a run of matches
 // sharing one server: a connect.NewServer assignment, one Register call per
 // match, and a single connecthttp.Mount.
-func buildConstructionReplacement(block *ast.BlockStmt, run []constructionMatch, state *rewriteState, report *Report, ictx ecosystemContext) []ast.Stmt {
+func buildConstructionReplacement(block *ast.BlockStmt, run []constructionMatch, state *rewriteState, report *Report, ictx ecosystemContext, readLimitVars map[string]bool) []ast.Stmt {
 	first := run[0]
 	mapped := make([]ast.Expr, 0, len(first.interceptors))
 	for _, interceptor := range first.interceptors {
@@ -171,12 +176,82 @@ func buildConstructionReplacement(block *ast.BlockStmt, run []constructionMatch,
 		}})
 		report.bump(match.counter)
 	}
-	mountArgs := append([]ast.Expr{first.mux, ast.NewIdent(serverName)}, first.otherOpts...)
+	mountOpts := first.otherOpts
+	if presence := findReadLimit(mountOpts, first.optsSpread, state, readLimitVars); presence != readLimitSet {
+		mountOpts = injectReadLimit(mountOpts, state)
+		reportReadLimit(report, presence, first.pos)
+		report.bump("read_limit_pinned")
+	}
+	mountArgs := append([]ast.Expr{first.mux, ast.NewIdent(serverName)}, mountOpts...)
 	stmts = append(stmts, &ast.ExprStmt{X: callExpr(state.connectHTTPAlias, "Mount", mountArgs...)})
 
 	state.usedV2 = true
 	state.usedConnectHTTP = true
 	return stmts
+}
+
+// readLimitPresence reports whether an option list already pins the read limit.
+type readLimitPresence int
+
+const (
+	readLimitAbsent readLimitPresence = iota
+	readLimitSet
+	readLimitHidden
+)
+
+// findReadLimit classifies opts, treating a trailing spread as hidden.
+func findReadLimit(opts []ast.Expr, spread bool, state *rewriteState, vars map[string]bool) readLimitPresence {
+	for _, opt := range opts {
+		if call, ok := opt.(*ast.CallExpr); ok && isConnectSelector(call.Fun, state.connectAlias, "WithReadMaxBytes") {
+			return readLimitSet
+		}
+		if id, ok := opt.(*ast.Ident); ok && vars[id.Name] {
+			return readLimitSet
+		}
+	}
+	if spread {
+		return readLimitHidden
+	}
+	return readLimitAbsent
+}
+
+// readLimitOptionVars returns local variables assigned a connect.WithReadMaxBytes value.
+func readLimitOptionVars(file *ast.File, connectAlias string) map[string]bool {
+	vars := map[string]bool{}
+	walk(file, func(n ast.Node) {
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok || len(assign.Lhs) != len(assign.Rhs) {
+			return
+		}
+		for i, rhs := range assign.Rhs {
+			call, isCall := rhs.(*ast.CallExpr)
+			if !isCall || !isConnectSelector(call.Fun, connectAlias, "WithReadMaxBytes") {
+				continue
+			}
+			if id, ok := assign.Lhs[i].(*ast.Ident); ok {
+				vars[id.Name] = true
+			}
+		}
+	})
+	return vars
+}
+
+// injectReadLimit prepends an unlimited read limit, preserving the v1 default.
+// It goes first so a later option, including one inside a spread, still wins.
+func injectReadLimit(opts []ast.Expr, state *rewriteState) []ast.Expr {
+	zero := &ast.BasicLit{Kind: token.INT, Value: "0"}
+	pinned := callExpr(state.connectHTTPAlias, "WithReadMaxBytes", zero)
+	return append([]ast.Expr{pinned}, opts...)
+}
+
+// reportReadLimit warns that the call was pinned and how to take the v2 default.
+func reportReadLimit(report *Report, presence readLimitPresence, pos token.Pos) {
+	const base = "v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default."
+	if presence == readLimitHidden {
+		report.warnAtf(pos, ruleReadLimitDefault, "%s The pin goes first, ahead of options this tool cannot read into, so a limit set there still wins.", base)
+		return
+	}
+	report.warnAtf(pos, ruleReadLimitDefault, "%s", base)
 }
 
 // splitHandlerOptions partitions constructor options into interceptors (inline
@@ -262,6 +337,7 @@ func rewriteClientConstruction(file *ast.File, state *rewriteState, report *Repo
 	ictx := newEcosystemContext(file)
 	stubs := connectStubAliases(file)
 	interceptorVars := interceptorOptionVars(file, state.connectAlias)
+	readLimitVars := readLimitOptionVars(file, state.connectAlias)
 	walk(file, func(n ast.Node) {
 		call, isCall := n.(*ast.CallExpr)
 		if !isCall || len(call.Args) < 2 {
@@ -283,8 +359,19 @@ func rewriteClientConstruction(file *ast.File, state *rewriteState, report *Repo
 		for _, interceptor := range interceptors {
 			mapped = append(mapped, mapInterceptor(interceptor, report, ictx, "Client"))
 		}
+		if presence := findReadLimit(otherOpts, call.Ellipsis.IsValid(), state, readLimitVars); presence != readLimitSet {
+			otherOpts = injectReadLimit(otherOpts, state)
+			reportReadLimit(report, presence, call.Pos())
+			report.bump("read_limit_pinned")
+		}
 		transportArgs := append([]ast.Expr{call.Args[0], call.Args[1]}, otherOpts...)
 		transport := callExpr(state.connectHTTPAlias, "NewTransport", transportArgs...)
+		// The spread belongs on the transport, which now owns the option list;
+		// left on the outer call it would spread the client instead.
+		if call.Ellipsis.IsValid() {
+			transport.Ellipsis = call.Ellipsis
+			call.Ellipsis = token.NoPos
+		}
 		newClient := callExpr(state.connectV2Alias, "NewClient", append([]ast.Expr{transport}, mapped...)...)
 		call.Args = []ast.Expr{newClient}
 		state.usedV2 = true

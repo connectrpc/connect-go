@@ -87,7 +87,7 @@ Proposed rewrites (rerun with -w to apply):
  }
  
 
-  ./service_test.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 stream_recv_loop=1 strip_new_request=1
+  ./service_test.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 read_limit_pinned=1 stream_recv_loop=1 strip_new_request=1
 --- ./service_test.go
 +++ ./service_test.go
 @@ -2,35 +2,43 @@
@@ -110,7 +110,7 @@ Proposed rewrites (rerun with -w to apply):
  func TestCountUp(t *testing.T) {
  	t.Run("counts", func(t *testing.T) {
 -		cli := pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localhost:8080")
-+		cli := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080")))
++		cli := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080", connecthttp.WithReadMaxBytes(0))))
  		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
  		defer cancel()
  
@@ -143,6 +143,9 @@ Proposed rewrites (rerun with -w to apply):
  			t.Fatal("no numbers received")
  		}
 
+
+The following issues require manual code changes:
+  ./service_test.go:16:10: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
 
 Scanned 2 Go files and 0 Buf templates. 2 rewrite(s) ready (rerun with -w to apply).
 Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

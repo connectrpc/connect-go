@@ -24,7 +24,7 @@ func newClient() pingv1connect.PingServiceClient {
 }
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./client_construction_protocol.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 option_protocol=1
+  ./client_construction_protocol.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 option_protocol=1 read_limit_pinned=1
 --- ./client_construction_protocol.go
 +++ ./client_construction_protocol.go
 @@ -3,7 +3,8 @@
@@ -42,10 +42,13 @@ Proposed rewrites (rerun with -w to apply):
  // connecthttp.WithGRPC() inside connecthttp.NewTransport.
  func newClient() pingv1connect.PingServiceClient {
 -	return pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localhost:8080/", connect.WithGRPC())
-+	return pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080/", connecthttp.WithGRPC())))
++	return pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080/", connecthttp.WithReadMaxBytes(0), connecthttp.WithGRPC())))
  }
  
 
+
+The following issues require manual code changes:
+  ./client_construction_protocol.go:14:9: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
 Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md
