@@ -26,7 +26,7 @@ func run() error {
 }
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./service.go: import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 import_ecosystem_v2=1 server_construction=1
+  ./service.go: import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 import_ecosystem_v2=1 read_limit_pinned=1 server_construction=1
 --- ./service.go
 +++ ./service.go
 @@ -3,8 +3,9 @@
@@ -48,13 +48,14 @@ Proposed rewrites (rerun with -w to apply):
 -	mux.Handle(pingv1connect.NewPingServiceHandler(&pingServer{}, connect.WithInterceptors(otelconnect.NewInterceptor())))
 +	server := connect.NewServer(otelconnect.NewInterceptor())
 +	pingv1connect.RegisterPingServiceHandler(server, &pingServer{})
-+	connecthttp.Mount(mux, server)
++	connecthttp.Mount(mux, server, connecthttp.WithReadMaxBytes(0))
  	return http.ListenAndServe(":8080", mux)
  }
  
 
 
 The following issues require manual code changes:
+  ./service.go:17:13: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
   ./service.go:17:89: otelconnect.NewInterceptor stays in the connect.NewServer(...) list unmigrated. v2 uses otelconnect.NewServerInterceptor (connectrpc.com/otelconnect/v2), which returns an error and is assigned before the constructor.
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).

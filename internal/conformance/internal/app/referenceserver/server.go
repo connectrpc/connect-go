@@ -182,9 +182,9 @@ func createServer(req *conformancev1.ServerCompatRequest, listenAddr, tlsCertFil
 		connecthttp.WithCompressor(connectgzip.New()),
 		connecthttp.WithCodec(internal.NewStrictJSONCodec()),
 	}
-	if req.MessageReceiveLimit > 0 {
-		opts = append(opts, connecthttp.WithReadMaxBytes(int(req.MessageReceiveLimit)))
-	}
+	// A zero limit means unlimited, which is what the conformance suite expects
+	// when it does not set one.
+	opts = append(opts, connecthttp.WithReadMaxBytes(int(req.MessageReceiveLimit)))
 	srv := connect.NewServer(serverNameHandlerInterceptor)
 
 	conformancev1connect.RegisterConformanceServiceHandler(srv, &conformanceServer{})

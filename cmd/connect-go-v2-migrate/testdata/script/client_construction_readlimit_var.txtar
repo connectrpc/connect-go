@@ -1,0 +1,49 @@
+# A read limit held in a local variable still counts as set, so the migrator
+# leaves the call alone rather than pinning it to unlimited.
+stubs v2
+exec migrate
+cmp stdout out.txt
+! stdout 'read_limit_pinned'
+! stdout 'WithReadMaxBytes\(0\)'
+exec migrate -w
+exec go build ./...
+-- readlimit_var.go --
+package app
+
+import (
+	"net/http"
+
+	"connectrpc.com/connect"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func newClient() pingv1connect.PingServiceClient {
+	limit := connect.WithReadMaxBytes(1 << 20)
+	return pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localhost:8080/", limit)
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./readlimit_var.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 option_to_connecthttp=1
+--- ./readlimit_var.go
++++ ./readlimit_var.go
+@@ -3,12 +3,13 @@
+ import (
+ 	"net/http"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+ func newClient() pingv1connect.PingServiceClient {
+-	limit := connect.WithReadMaxBytes(1 << 20)
+-	return pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localhost:8080/", limit)
++	limit := connecthttp.WithReadMaxBytes(1 << 20)
++	return pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080/", limit)))
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

@@ -18,7 +18,7 @@ func run() error {
 }
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./ecosystem_grpchealth.go: grpchealth_register=1 import_add_connecthttp=1 import_add_connectv2=1 import_ecosystem_v2=1
+  ./ecosystem_grpchealth.go: grpchealth_register=1 import_add_connecthttp=1 import_add_connectv2=1 import_ecosystem_v2=1 read_limit_pinned=1
 --- ./ecosystem_grpchealth.go
 +++ ./ecosystem_grpchealth.go
 @@ -3,13 +3,17 @@
@@ -37,11 +37,14 @@ Proposed rewrites (rerun with -w to apply):
 -	mux.Handle(grpchealth.NewHandler(checker))
 +	server := connect.NewServer()
 +	grpchealth.Register(server, checker)
-+	connecthttp.Mount(mux, server)
++	connecthttp.Mount(mux, server, connecthttp.WithReadMaxBytes(0))
  	return http.ListenAndServe(":8080", mux)
  }
  
 
+
+The following issues require manual code changes:
+  ./ecosystem_grpchealth.go:12:13: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
 

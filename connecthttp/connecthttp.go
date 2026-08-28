@@ -217,6 +217,7 @@ func defaultOptions() options {
 		sendCodecName:   connect.CodecNameProto,
 		compressors:     defaultCompressors(),
 		compressorNames: []string{connect.CompressionNameGzip},
+		readMaxBytes:    defaultReadMaxBytes,
 		getUseFallback:  true,
 	}
 }

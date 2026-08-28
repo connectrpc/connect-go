@@ -15,7 +15,7 @@ func newReflectClient() *grpcreflect.Client {
 }
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./ecosystem_grpcreflect_client.go: grpcreflect_client=1 import_add_connecthttp=1 import_add_connectv2=1 import_ecosystem_v2=1
+  ./ecosystem_grpcreflect_client.go: grpcreflect_client=1 import_add_connecthttp=1 import_add_connectv2=1 import_ecosystem_v2=1 read_limit_pinned=1
 --- ./ecosystem_grpcreflect_client.go
 +++ ./ecosystem_grpcreflect_client.go
 @@ -3,10 +3,12 @@
@@ -30,10 +30,13 @@ Proposed rewrites (rerun with -w to apply):
  
  func newReflectClient() *grpcreflect.Client {
 -	return grpcreflect.NewClient(http.DefaultClient, "http://localhost:8080")
-+	return grpcreflect.NewClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080")))
++	return grpcreflect.NewClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080", connecthttp.WithReadMaxBytes(0))))
  }
  
 
+
+The following issues require manual code changes:
+  ./ecosystem_grpcreflect_client.go:10:9: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
 
