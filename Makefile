@@ -13,6 +13,7 @@ COPYRIGHT_YEARS := 2021-2026
 LICENSE_IGNORE := --ignore .github/ --ignore ".*\.ya?ml"
 BUF_VERSION := 1.69.0
 GOLANGCI_LINT_VERSION ?= v2.13.1
+GORELEASER_VERSION ?= v2.18.0
 
 .PHONY: help
 help: ## Describe useful make targets
@@ -98,6 +99,16 @@ checkgenerate:
 	@# Used in CI to verify that `make generate` doesn't produce a diff.
 	test -z "$$(git status --porcelain | tee /dev/stderr)"
 
+.PHONY: release
+release: $(BIN)/goreleaser ## Build release artifacts and attach them to the release
+	goreleaser release
+
+.PHONY: checkrelease
+checkrelease: $(BIN)/goreleaser
+	@# Used in CI to verify that the release build works. Skips validation and
+	@# doesn't publish anything.
+	goreleaser release --clean --snapshot
+
 .PHONY: $(BIN)/protoc-gen-connect-go
 $(BIN)/protoc-gen-connect-go:
 	@mkdir -p $(@D)
@@ -114,6 +125,10 @@ $(BIN)/license-header: Makefile
 $(BIN)/golangci-lint: Makefile
 	@mkdir -p $(@D)
 	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+$(BIN)/goreleaser: Makefile
+	@mkdir -p $(@D)
+	go install github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
 
 $(BIN)/protoc-gen-go: Makefile go.mod
 	@mkdir -p $(@D)
