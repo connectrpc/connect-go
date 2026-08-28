@@ -387,7 +387,19 @@ type hasHTTPMethod interface {
 
 // errStreamingClientConn is a sentinel error implementation of StreamingClientConn.
 type errStreamingClientConn struct {
-	err error
+	err             error
+	requestHeader   http.Header
+	responseHeader  http.Header
+	responseTrailer http.Header
+}
+
+func newErrStreamingClientConn(err error) *errStreamingClientConn {
+	return &errStreamingClientConn{
+		err:             err,
+		requestHeader:   make(http.Header),
+		responseHeader:  make(http.Header),
+		responseTrailer: make(http.Header),
+	}
 }
 
 func (c *errStreamingClientConn) Receive(msg any) error {
@@ -415,15 +427,15 @@ func (c *errStreamingClientConn) CloseResponse() error {
 }
 
 func (c *errStreamingClientConn) RequestHeader() http.Header {
-	return make(http.Header)
+	return c.requestHeader
 }
 
 func (c *errStreamingClientConn) ResponseHeader() http.Header {
-	return make(http.Header)
+	return c.responseHeader
 }
 
 func (c *errStreamingClientConn) ResponseTrailer() http.Header {
-	return make(http.Header)
+	return c.responseTrailer
 }
 
 // receiveUnaryResponse unmarshals a message from a StreamingClientConn, then
