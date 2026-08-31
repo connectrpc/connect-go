@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connectgzip"
 	"connectrpc.com/connect/v2/connecthttp"
 	"connectrpc.com/connect/v2/connectproto"
 	"connectrpc.com/connect/v2/internal/assert"
@@ -1454,7 +1455,7 @@ func TestFailCodec(t *testing.T) {
 	server := memhttptest.NewServer(t, handler)
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(),
 		server.URL(),
-		connecthttp.WithCodec(failCodec{}))),
+		connecthttp.WithCodecs(failCodec{}))),
 	)
 	stream, err := client.CumSum(t.Context())
 	if err != nil {
@@ -1736,18 +1737,44 @@ func TestCustomCompression(t *testing.T) {
 	mux := http.NewServeMux()
 	srv := connect.NewServer()
 	pingv1connect.RegisterPingServiceHandler(srv, pingServer{})
-	connecthttp.Mount(mux, srv, connecthttp.WithCompressor(deflateCompressor{}))
+	connecthttp.Mount(mux, srv, connecthttp.WithCompressors(deflateCompressor{}))
 
 	server := memhttptest.NewServer(t, mux)
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(),
 		server.URL(),
-		connecthttp.WithCompressor(deflateCompressor{}),
+		connecthttp.WithCompressors(deflateCompressor{}),
 		connecthttp.WithSendCompression("deflate"))),
 	)
 	request := &pingv1.PingRequest{Text: "testing 1..2..3.."}
 	response, err := client.Ping(t.Context(), request)
 	assert.Nil(t, err)
 	assert.Equal(t, response, &pingv1.PingResponse{Text: request.GetText()})
+}
+
+func TestServerCompressionPreference(t *testing.T) {
+	// The server picks its own most preferred encoding out of the client's
+	// accept list, rather than honoring the order the client sent. See
+	// https://github.com/connectrpc/connectrpc.com/pull/322.
+	t.Parallel()
+	mux := http.NewServeMux()
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, pingServer{})
+	// The handler prefers gzip and falls back to deflate.
+	connecthttp.Mount(mux, srv,
+		connecthttp.WithCompressors(connectgzip.New(), deflateCompressor{}),
+	)
+	server := memhttptest.NewServer(t, mux)
+	// The client advertises "deflate,gzip", listing deflate first. The
+	// handler's preference wins over the client's ordering.
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
+		server.Client(),
+		server.URL(),
+		connecthttp.WithCompressors(deflateCompressor{}, connectgzip.New()),
+	)))
+	ctx, info := connect.NewClientContext(t.Context())
+	_, err := client.Ping(ctx, &pingv1.PingRequest{Text: strings.Repeat("connect", 32)})
+	assert.Nil(t, err)
+	assert.Equal(t, info.ResponseEncoding, connect.CompressionNameGzip)
 }
 
 func TestClientWithoutGzipSupport(t *testing.T) {
@@ -1762,7 +1789,7 @@ func TestClientWithoutGzipSupport(t *testing.T) {
 	server := memhttptest.NewServer(t, mux)
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(),
 		server.URL(),
-		connecthttp.WithNoCompression(),
+		connecthttp.WithCompressors(),
 		connecthttp.WithSendGzip())),
 	)
 	request := &pingv1.PingRequest{Text: "gzip me!"}
@@ -2557,11 +2584,11 @@ func TestFailCompression(t *testing.T) {
 	mux := http.NewServeMux()
 	srv := connect.NewServer()
 	pingv1connect.RegisterPingServiceHandler(srv, pingServer{})
-	connecthttp.Mount(mux, srv, connecthttp.WithCompressor(failCompressor{}))
+	connecthttp.Mount(mux, srv, connecthttp.WithCompressors(failCompressor{}))
 	server := memhttptest.NewServer(t, mux)
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(
 		connecthttp.NewTransport(server.Client(), server.URL(),
-			connecthttp.WithCompressor(failCompressor{}),
+			connecthttp.WithCompressors(failCompressor{}),
 			connecthttp.WithSendCompression(failCompressor{}.Name()),
 		),
 	))

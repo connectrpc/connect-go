@@ -308,17 +308,21 @@ func discard(reader io.Reader) (int64, error) {
 // negotiateCompression determines and validates the request compression and
 // response compression using the available compressors and protocol-specific
 // Content-Encoding and Accept-Encoding headers.
-func negotiateCompression( //nolint:nonamedreturns
+//
+// Compression is symmetric: a compressed request gets a response in the same
+// encoding. Otherwise we choose from the client's accept list, which we treat
+// as unordered since neither the Connect nor the gRPC compression spec ranks
+// it, so the response uses the server's most preferred encoding that the
+// client accepts. Quality values aren't supported.
+func negotiateCompression(
 	availableCompressors readOnlyCompressionPools,
 	sent, accept string,
-) (requestCompression, responseCompression string, clientVisibleErr *connect.Error) {
-	requestCompression = connect.CompressionNameIdentity
+) (string, string, *connect.Error) {
+
 	if sent != "" && sent != connect.CompressionNameIdentity {
 		// We default to identity, so we only care if the client sends something
 		// other than the empty string or compressIdentity.
-		if availableCompressors.Contains(sent) {
-			requestCompression = sent
-		} else {
+		if !availableCompressors.Contains(sent) {
 			// To comply with
 			// https://github.com/grpc/grpc/blob/master/doc/compression.md and the
 			// Connect protocol, we should return connect.CodeUnimplemented and specify
@@ -330,24 +334,27 @@ func negotiateCompression( //nolint:nonamedreturns
 				sent, availableCompressors.CommaSeparatedNames(),
 			)
 		}
+		// Echo the request's encoding. This logic follows
+		// https://github.com/grpc/grpc/blob/master/doc/compression.md and common
+		// sense: a client that compressed its request can read that encoding back.
+		return sent, sent, nil
 	}
-	// Support asymmetric compression. This logic follows
-	// https://github.com/grpc/grpc/blob/master/doc/compression.md and common
-	// sense.
-	responseCompression = requestCompression
-	// If we're not already planning to compress the response, check whether the
-	// client requested a compression algorithm we support.
-	if responseCompression == connect.CompressionNameIdentity && accept != "" {
-		for _, name := range strings.FieldsFunc(accept, isCommaOrSpace) {
-			if availableCompressors.Contains(name) {
-				// We found a mutually supported compression algorithm. Unlike standard
-				// HTTP, there's no preference weighting, so can bail out immediately.
-				responseCompression = name
-				break
+
+	// If the request was uncompressed, we're free to choose. Walk our own
+	// compressors in preference order and take the first one the client
+	// accepts: both protocols leave the choice to the server.
+	if accept != "" {
+		names := availableCompressors.CommaSeparatedNames()
+		for name := range strings.FieldsFuncSeq(names, isCommaOrSpace) {
+			for accepted := range strings.FieldsFuncSeq(accept, isCommaOrSpace) {
+				if name == accepted {
+					return connect.CompressionNameIdentity, name, nil
+				}
 			}
 		}
 	}
-	return requestCompression, responseCompression, nil
+
+	return connect.CompressionNameIdentity, connect.CompressionNameIdentity, nil
 }
 
 // checkServerStreamsCanFlush ensures that bidi and server streaming handlers

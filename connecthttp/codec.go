@@ -39,7 +39,14 @@ type readOnlyCodecs interface {
 	Names() []string
 }
 
-func newReadOnlyCodecs(nameToCodec map[string]connect.Codec) readOnlyCodecs {
+func newReadOnlyCodecs(codecs []connect.Codec) readOnlyCodecs {
+	nameToCodec := make(map[string]connect.Codec, len(codecs))
+	for _, codec := range codecs {
+		if _, ok := nameToCodec[codec.Name()]; ok {
+			continue
+		}
+		nameToCodec[codec.Name()] = codec
+	}
 	return &codecMap{
 		nameToCodec: nameToCodec,
 	}
