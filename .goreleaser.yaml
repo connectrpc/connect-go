@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+project_name: protoc-gen-connect-go
+
+before:
+  hooks:
+    # connect.go's Version constant is edited by hand (RELEASE.md step 2) and is
+    # what the plugin reports via --version, while the archive names below come
+    # from the git tag. Nothing else checks that the two agree, so a missed edit
+    # would silently ship mislabelled binaries. Skipped for snapshot builds,
+    # where there is no release tag to compare against.
+    - sh -c 'if [ "{{ .IsSnapshot }}" != "true" ]; then version="v$(go run ./cmd/protoc-gen-connect-go --version)"; if [ "$version" != "{{ .Tag }}" ]; then echo "connect.Version is $version, but the release tag is {{ .Tag }}" >&2; exit 1; fi; fi'
+
+builds:
+  - id: protoc-gen-connect-go
+    binary: protoc-gen-connect-go
+    main: ./cmd/protoc-gen-connect-go
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      # Omit the symbol table and DWARF data, this is not a debuggable artifact.
+      - -s -w
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    # Matches the naming used by bufbuild/buf and connectconformance releases.
+    name_template: >-
+      protoc-gen-connect-go-
+      {{- .Tag }}-
+      {{- title .Os }}-
+      {{- if and (eq .Os "linux") (eq .Arch "arm64") }}aarch64
+      {{- else if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - LICENSE
+
+checksum:
+  # The default template uses .Version, which renders without the leading "v"
+  # that the archives above use. Pin it so the whole release is consistent.
+  name_template: 'protoc-gen-connect-go-{{ .Tag }}-checksums.txt'
+
+changelog:
+  # Release notes are written by hand in the GitHub UI, so there is nothing to
+  # generate here. Skipping it also avoids walking history that the release
+  # workflow's shallow checkout doesn't have.
+  disable: true
+
+release:
+  github:
+    owner: connectrpc
+    name: connect-go
+  # Releases are created and their notes curated by hand in the GitHub UI, as
+  # described in RELEASE.md. This only attaches artifacts to the existing
+  # release.
+  mode: keep-existing
