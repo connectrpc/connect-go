@@ -568,6 +568,127 @@ func TestDynamicHandler(t *testing.T) {
 	})
 }
 
+func TestHandlerWithRequestGate(t *testing.T) {
+	t.Parallel()
+	errRejected := connect.NewError(connect.CodeUnauthenticated, errors.New("no credentials"))
+	const tokenHeader = "Test-Token"
+
+	t.Run("rejects_before_decode", func(t *testing.T) {
+		t.Parallel()
+		var handlerCalls, gateCalls int
+		var gateSpec connect.Spec
+		var gatePeer connect.Peer
+		var gateToken string
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connect.NewPingServiceHandler(
+			&pluggablePingServer{ping: func(context.Context, *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+				handlerCalls++
+				return connect.NewResponse(&pingv1.PingResponse{}), nil
+			}},
+			connect.WithRequestGate(func(ctx context.Context, spec connect.Spec, peer connect.Peer, header http.Header) (context.Context, error) {
+				gateCalls++
+				gateSpec, gatePeer, gateToken = spec, peer, header.Get(tokenHeader)
+				return nil, errRejected
+			}),
+		))
+		server := memhttptest.NewServer(t, mux)
+
+		// A body that cannot be unmarshaled. Without a gate this request gets
+		// 400 invalid_argument from the codec, so a 401 proves that the gate ran
+		// before the receive.
+		request, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			server.URL()+pingv1connect.PingServicePingProcedure,
+			bytes.NewReader([]byte("invalid message")),
+		)
+		assert.Nil(t, err)
+		request.Header.Set("Content-Type", "application/proto")
+		request.Header.Set(tokenHeader, "sesame")
+		response, err := server.Client().Do(request)
+		assert.Nil(t, err)
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		assert.Nil(t, err)
+		assert.Equal(t, response.StatusCode, http.StatusUnauthorized)
+		assert.True(t, strings.Contains(string(body), "no credentials"), assert.Sprintf("body: %s", body))
+		assert.Equal(t, gateCalls, 1)
+		assert.Equal(t, handlerCalls, 0)
+		assert.Equal(t, gateSpec.Procedure, pingv1connect.PingServicePingProcedure)
+		assert.Equal(t, gateSpec.StreamType, connect.StreamTypeUnary)
+		assert.Equal(t, gateToken, "sesame")
+		assert.NotZero(t, gatePeer.Addr)
+	})
+
+	t.Run("passes_context_to_handler", func(t *testing.T) {
+		t.Parallel()
+		type gateKey struct{}
+		var seen any
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connect.NewPingServiceHandler(
+			&pluggablePingServer{ping: func(ctx context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+				seen = ctx.Value(gateKey{})
+				return connect.NewResponse(&pingv1.PingResponse{Number: request.Msg.GetNumber()}), nil
+			}},
+			connect.WithRequestGate(func(ctx context.Context, _ connect.Spec, _ connect.Peer, _ http.Header) (context.Context, error) {
+				return context.WithValue(ctx, gateKey{}, "gated"), nil
+			}),
+		))
+		server := memhttptest.NewServer(t, mux)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		response, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{Number: 42}))
+		assert.Nil(t, err)
+		assert.Equal(t, response.Msg.GetNumber(), int64(42))
+		assert.Equal(t, seen, "gated")
+	})
+
+	t.Run("runs_in_order", func(t *testing.T) {
+		t.Parallel()
+		var order []string
+		gate := func(name string, err error) connect.HandlerOption {
+			return connect.WithRequestGate(func(ctx context.Context, _ connect.Spec, _ connect.Peer, _ http.Header) (context.Context, error) {
+				order = append(order, name)
+				return ctx, err
+			})
+		}
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connect.NewPingServiceHandler(
+			successPingServer{},
+			gate("first", nil),
+			gate("second", errRejected),
+			gate("third", nil),
+		))
+		server := memhttptest.NewServer(t, mux)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		_, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{}))
+		assert.Equal(t, connect.CodeOf(err), connect.CodeUnauthenticated)
+		// The third gate does not run: the second short-circuits the RPC.
+		assert.Equal(t, order, []string{"first", "second"})
+	})
+
+	t.Run("gates_streaming_procedures", func(t *testing.T) {
+		t.Parallel()
+		var gateStreamType connect.StreamType
+		mux := http.NewServeMux()
+		mux.Handle(pingv1connect.NewPingServiceHandler(
+			successPingServer{},
+			connect.WithRequestGate(func(_ context.Context, spec connect.Spec, _ connect.Peer, _ http.Header) (context.Context, error) {
+				gateStreamType = spec.StreamType
+				return nil, errRejected
+			}),
+		))
+		server := memhttptest.NewServer(t, mux)
+		client := pingv1connect.NewPingServiceClient(server.Client(), server.URL())
+		stream := client.CumSum(t.Context())
+		assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+		_, err := stream.Receive()
+		assert.Equal(t, connect.CodeOf(err), connect.CodeUnauthenticated)
+		assert.Equal(t, gateStreamType, connect.StreamTypeBidi)
+		assert.Nil(t, stream.CloseRequest())
+		assert.Nil(t, stream.CloseResponse())
+	})
+}
+
 type successPingServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
 }

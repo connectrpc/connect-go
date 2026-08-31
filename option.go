@@ -154,6 +154,26 @@ func WithRecover(handle func(context.Context, Spec, http.Header, any) error) Han
 	return WithInterceptors(&recoverHandlerInterceptor{handle: handle})
 }
 
+// WithRequestGate registers a function that runs once the request headers are
+// available and before any message is received. Returning a non-nil error
+// rejects the RPC: the error is sent to the client, and neither the interceptor
+// chain nor the handler runs, so the request message is never decompressed or
+// unmarshaled. Returning a non-nil context replaces the one passed to
+// interceptors and the handler.
+//
+// Gates suit authentication, which is costly to do in an [Interceptor]:
+// interceptors run after the request message has been received, so rejecting an
+// unauthenticated unary call there pays for the decode first. Gates run for
+// every stream type. Authenticating in net/http middleware, with
+// connectrpc.com/authn or otherwise, runs earlier still.
+//
+// Applying this option more than once registers multiple gates, which run in
+// the order they were applied. Gates must be safe to call concurrently, and
+// panics in a gate are not recovered by [WithRecover].
+func WithRequestGate(gate func(ctx context.Context, spec Spec, peer Peer, header http.Header) (context.Context, error)) HandlerOption {
+	return &requestGateOption{gate: gate}
+}
+
 // WithRequireConnectProtocolHeader configures the Handler to require requests
 // using the Connect RPC protocol to include the Connect-Protocol-Version
 // header. This ensures that HTTP proxies and net/http middleware can easily
@@ -496,6 +516,14 @@ func (o *handlerOptionsOption) applyToHandler(config *handlerConfig) {
 	for _, option := range o.options {
 		option.applyToHandler(config)
 	}
+}
+
+type requestGateOption struct {
+	gate func(ctx context.Context, spec Spec, peer Peer, header http.Header) (context.Context, error)
+}
+
+func (o *requestGateOption) applyToHandler(config *handlerConfig) {
+	config.RequestGates = append(config.RequestGates, o.gate)
 }
 
 type requireConnectProtocolHeaderOption struct{}
