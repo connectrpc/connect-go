@@ -33,6 +33,7 @@ import (
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectgzip"
 	"connectrpc.com/connect/v2/connecthttp"
+	"connectrpc.com/connect/v2/connectproto"
 	"connectrpc.com/connect/v2/internal/conformance/internal"
 	conformancev1 "connectrpc.com/connect/v2/internal/conformance/internal/gen/connectrpc/conformance/v1"
 	"connectrpc.com/connect/v2/internal/conformance/internal/gen/connectrpc/conformance/v1/conformancev1connect"
@@ -179,8 +180,8 @@ const (
 func createServer(req *conformancev1.ServerCompatRequest, listenAddr, tlsCertFile, tlsKeyFile string) (httpServer, []byte, error) {
 	mux := http.NewServeMux()
 	opts := []connecthttp.Option{
-		connecthttp.WithCompressor(connectgzip.New()),
-		connecthttp.WithCodec(internal.NewStrictJSONCodec()),
+		connecthttp.WithCompressors(connectgzip.New()),
+		connecthttp.WithCodecs(connectproto.NewBinaryCodec(), internal.NewStrictJSONCodec()),
 	}
 	// A zero limit means unlimited, which is what the conformance suite expects
 	// when it does not set one.

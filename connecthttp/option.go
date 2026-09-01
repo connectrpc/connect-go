@@ -51,73 +51,62 @@ func WithProtoJSON() Option {
 	return WithSendCodec(connect.CodecNameJSON)
 }
 
-// WithSendCodec selects the codec (by name) used for outgoing client requests.
-// The codec must also be registered via [WithCodec]. Defaults to
-// [connect.CodecNameProto]. [Mount] ignores this option.
+// WithSendCodec configures a client to use the specified codec by name for
+// outgoing requests. The named codec must be registered via [WithCodecs].
+//
+// If this option is not used, clients default to using the first codec
+// provided to [WithCodecs]. [Mount] ignore this option.
 func WithSendCodec(name string) Option {
 	return sendCodecOption(name)
 }
 
-// WithCodec registers a [connect.Codec]. Clients may use it for outgoing
-// requests. Servers accept it on inbound requests. Multiple WithCodec options
-// merge. Defaults to
-// [connectrpc.com/connect/v2/connectproto.BinaryCodec] and
-// [connectrpc.com/connect/v2/connectproto.JSONCodec].
-func WithCodec(codec connect.Codec) Option {
-	return codecsOption([]connect.Codec{codec})
+// WithCodecs configures the supported codecs for a client or handler. It
+// replaces any previously configured codecs, including the defaults.
+//
+// Handlers match incoming requests to codecs by name based on the content
+// type, so order only matters for clients. By default, a client sends
+// requests using the first codec in this list unless [WithSendCodec]
+// specifies otherwise. If multiple codecs share the same name, only the
+// first is kept.
+//
+// By default, the Protobuf binary and JSON codecs from
+// [connectrpc.com/connect/v2/connectproto] are registered, with binary
+// Protobuf listed first (making it the default send codec).
+func WithCodecs(codecs ...connect.Codec) Option {
+	return codecsOption(codecs)
 }
 
-// WithCompressor registers a [connect.Compressor]. Clients advertise it in
-// Accept-Encoding and may use it for sending; servers accept it on inbound
-// requests and use it for responses. Compressors add to the default set, and
-// the most recently registered is the most preferred. Multiple WithCompressor
-// options accumulate.
+// WithCompressors configures the supported compressors for a client or
+// handler. It replaces any previously configured compressors, including the
+// default gzip.
 //
-// The default is gzip. Use [WithNoCompression] to disable compression.
-func WithCompressor(compressor connect.Compressor) Option {
-	return compressorsOption([]connect.Compressor{compressor})
+// Order determines preference, with the most preferred compressor listed
+// first. Clients advertise this preference order, and handlers respond using
+// their most preferred compressor that the client also accepts. If a client
+// sends a compressed request, the handler will always reply using the same
+// encoding.
+//
+// Calling WithCompressors with no arguments disables compression entirely. If
+// multiple compressors share the same name, only the first is kept.
+//
+// The default is gzip.
+func WithCompressors(compressors ...connect.Compressor) Option {
+	return compressorsOption(compressors)
 }
 
-// WithNoCompression disables compression on both clients and servers: it
-// removes every registered compressor (including the default gzip) so nothing
-// is advertised, accepted, or sent compressed. A later [WithCompressor]
-// re-registers compressors after it.
-func WithNoCompression() Option {
-	return noCompressionOption{}
-}
-
-// WithAcceptCompression makes a compression algorithm available to a client or
-// handler by name, advertising it in Accept-Encoding. The named compressor must
-// be registered via [WithCompressor]; the name simply selects from that pool.
-// The first registered algorithm is treated as the least preferred, and the
-// last registered algorithm is the most preferred.
+// WithSendCompression configures a client to compress outgoing requests using
+// the specified algorithm by name. The named compressor must already be
+// registered via [WithCompressors] (or be the default gzip compressor).
 //
-// It's safe to use this option liberally: servers will ignore any compression
-// algorithms they don't support. To compress requests, pair this option with
-// [WithSendCompression].
-//
-// Clients and servers support gzip by default.
-//
-// Calling WithAcceptCompression with an empty name is a no-op.
-func WithAcceptCompression(name string) Option {
-	return acceptCompressionOption(name)
-}
-
-// WithSendCompression selects the compressor (by name) to apply to outgoing
-// client payloads. The compressor must be registered via [WithCompressor] (or
-// be the default "gzip" compressor). Requests are sent uncompressed by default,
-// to support servers that don't support compression. [Mount] ignores this
-// option.
+// By default, clients send uncompressed requests to ensure compatibility with
+// servers that do not support compression. [Mount] ignores this option.
 func WithSendCompression(name string) Option {
 	return sendCompressorOption(name)
 }
 
-// WithSendGzip configures the client to gzip requests. Since clients have
-// access to a gzip compressor by default, WithSendGzip doesn't require
-// [WithCompressor].
-//
-// Some servers don't support gzip, so clients default to sending uncompressed
-// requests.
+// WithSendGzip is a convenience option that configures a client to gzip
+// outgoing requests. Because gzip is registered by default, this does not
+// require a corresponding [WithCompressors] option.
 func WithSendGzip() Option {
 	return WithSendCompression(connect.CompressionNameGzip)
 }
@@ -237,42 +226,13 @@ func (o sendCodecOption) apply(opts *options) { opts.sendCodecName = string(o) }
 type codecsOption []connect.Codec
 
 func (o codecsOption) apply(opts *options) {
-	if opts.codecs == nil {
-		opts.codecs = make(map[string]connect.Codec, len(o))
-	}
-	for _, c := range o {
-		opts.codecs[c.Name()] = c
-	}
+	opts.codecs = slices.Clone(o)
 }
 
 type compressorsOption []connect.Compressor
 
 func (o compressorsOption) apply(opts *options) {
-	for _, c := range o {
-		if _, dup := opts.compressors[c.Name()]; !dup {
-			opts.compressorNames = append(opts.compressorNames, c.Name())
-		}
-		opts.compressors[c.Name()] = c
-	}
-}
-
-type noCompressionOption struct{}
-
-func (noCompressionOption) apply(opts *options) {
-	opts.compressors = map[string]connect.Compressor{}
-	opts.compressorNames = nil
-}
-
-type acceptCompressionOption string
-
-func (o acceptCompressionOption) apply(opts *options) {
-	name := string(o)
-	if name == "" {
-		return
-	}
-	if !slices.Contains(opts.compressorNames, name) {
-		opts.compressorNames = append(opts.compressorNames, name)
-	}
+	opts.compressors = slices.Clone(o)
 }
 
 type sendCompressorOption string

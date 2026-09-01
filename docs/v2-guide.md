@@ -384,11 +384,16 @@ connecthttp.WithSendMaxBytes(2048)
 connecthttp.WithCompressMinBytes(512)
 connecthttp.WithHTTPGet()                            // client only
 connecthttp.WithRequireConnectProtocolHeader()      // server only
-connecthttp.WithCodec(connectproto.NewJSONCodec())  // register; one per call
-connecthttp.WithCompressor(connectgzip.New())
+connecthttp.WithCodecs(connectproto.NewBinaryCodec(), connectproto.NewJSONCodec())
+connecthttp.WithCompressors(connectgzip.New())
 ```
 
-By default `connecthttp` registers the protobuf binary and JSON codecs from `connectproto` and sends with the binary codec, so a transport built with no options is ready to use.
+By default, `connecthttp` is ready to use without configuration. It registers the gzip compressor alongside the Protobuf binary and JSON codecs from `connectproto`, defaulting to binary for outgoing requests.
+
+When customizing these, `WithCodecs` and `WithCompressors` replace the default sets entirely, so you must list everything you need in a single call. Order matters for both, but in different ways:
+
+* **Compressors:** Listed in order of preference (most preferred first). This order dictates which encoding a handler chooses for its response.
+* **Codecs:** Handlers match incoming requests by content type, so order only affects clients. Clients send outgoing requests using the first codec in the list, unless explicitly overridden by `WithSendCodec`.
 
 ### connectinprocess
 

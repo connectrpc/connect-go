@@ -406,7 +406,6 @@ connect.WithHTTPGetMaxURLSize(8192, true)
 connect.WithProtoJSON()
 connect.WithGRPC()
 connect.WithGRPCWeb()
-connect.WithCodec(codec)
 connect.WithSendCompression("gzip")
 ```
 
@@ -422,7 +421,6 @@ connecthttp.WithHTTPGetMaxURLSize(8192, true)
 connecthttp.WithProtoJSON()
 connecthttp.WithGRPC()
 connecthttp.WithGRPCWeb()
-connecthttp.WithCodec(codec)
 connecthttp.WithSendCompression("gzip")
 ```
 
@@ -454,8 +452,9 @@ Options whose signature changed are warned with the v2 replacement:
 
 | v1 | v2 |
 | --- | --- |
-| `connect.WithCompression(name, dec, comp)` | `connecthttp.WithCompressor(connect.Compressor)` (register a `connectgzip`-style compressor) |
-| `connect.WithAcceptCompression(name, dec, comp)` | `connecthttp.WithCompressor(...)` to register, then `connecthttp.WithAcceptCompression(name)` to advertise; `connecthttp.WithNoCompression()` to disable |
+| `connect.WithCodec(codec)` | `connecthttp.WithCodecs(...connect.Codec)`, which **replaces** the default codecs instead of adding to them. List every codec you need in one call, including `connectproto.NewBinaryCodec()` if you still want it |
+| `connect.WithCompression(name, dec, comp)` | `connecthttp.WithCompressors(...connect.Compressor)` (a `connectgzip`-style compressor), which **replaces** the defaults. The `(name, decompressor, compressor)` signature is gone |
+| `connect.WithAcceptCompression(name, dec, comp)` | `connecthttp.WithCompressors(...connect.Compressor)`; registered compressors are advertised automatically, and the order is the preference order, most preferred first. The `nil` constructors that removed one become an empty `connecthttp.WithCompressors()` |
 | `connect.WithConditionalHandlerOptions(fn)` | `connecthttp.WithConditionalOptions(func(connect.Spec) []connecthttp.Option)` (callback signature changed) |
 | `connect.NewNotModifiedError(header)` | `connecthttp.NewNotModifiedError()` (no header argument) |
 

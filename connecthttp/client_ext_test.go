@@ -84,7 +84,7 @@ func TestNewClient_UnknownSendCodec(t *testing.T) {
 	t.Parallel()
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient,
 		"http://127.0.0.1:8080",
-		// The codec is never registered with WithCodec, so each call fails.
+		// The codec is never registered with WithCodecs, so each call fails.
 		connecthttp.WithSendCodec("invalid"))),
 	)
 	_, err := client.Ping(t.Context(), &pingv1.PingRequest{})

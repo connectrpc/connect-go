@@ -16,6 +16,7 @@ package connecthttp
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -124,5 +125,58 @@ func TestJSONCodec(t *testing.T) {
 			strings.Contains(err.Error(), "valid JSON"),
 			assert.Sprintf(`error message should explain that "" is not a valid JSON object`),
 		)
+	})
+}
+
+func TestCodecsOption(t *testing.T) {
+	t.Parallel()
+
+	names := func(options ...Option) []string {
+		opts := defaultOptions()
+		for _, option := range options {
+			option.apply(&opts)
+		}
+		got := newReadOnlyCodecs(opts.codecs).Names()
+		slices.Sort(got)
+		return got
+	}
+
+	t.Run("defaults to proto and json", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, names(), []string{connect.CodecNameJSON, connect.CodecNameProto})
+	})
+	t.Run("replaces the defaults", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, names(WithCodecs(connectproto.NewBinaryCodec())), []string{connect.CodecNameProto})
+	})
+	t.Run("last call wins", func(t *testing.T) {
+		t.Parallel()
+		opts := []Option{WithCodecs(connectproto.NewJSONCodec()), WithCodecs(connectproto.NewBinaryCodec())}
+		assert.Equal(t, names(opts...), []string{connect.CodecNameProto})
+	})
+	t.Run("sends with the first codec by default", func(t *testing.T) {
+		t.Parallel()
+		sendCodec := func(options ...Option) string {
+			opts := defaultOptions()
+			for _, option := range options {
+				option.apply(&opts)
+			}
+			return opts.getSendCodecName()
+		}
+		assert.Equal(t, sendCodec(), connect.CodecNameProto)
+		assert.Equal(t, sendCodec(
+			WithCodecs(connectproto.NewJSONCodec(), connectproto.NewBinaryCodec()),
+		), connect.CodecNameJSON)
+		// WithSendCodec overrides the first-listed default.
+		assert.Equal(t, sendCodec(
+			WithCodecs(connectproto.NewJSONCodec(), connectproto.NewBinaryCodec()),
+			WithSendCodec(connect.CodecNameProto),
+		), connect.CodecNameProto)
+		assert.Equal(t, sendCodec(WithCodecs()), "")
+	})
+	t.Run("repeated name is dropped", func(t *testing.T) {
+		t.Parallel()
+		opts := WithCodecs(connectproto.NewBinaryCodec(), connectproto.NewJSONCodec(), connectproto.NewBinaryCodec())
+		assert.Equal(t, names(opts), []string{connect.CodecNameJSON, connect.CodecNameProto})
 	})
 }
