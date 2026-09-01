@@ -318,7 +318,6 @@ func negotiateCompression(
 	availableCompressors readOnlyCompressionPools,
 	sent, accept string,
 ) (string, string, *connect.Error) {
-
 	if sent != "" && sent != connect.CompressionNameIdentity {
 		// We default to identity, so we only care if the client sends something
 		// other than the empty string or compressIdentity.
