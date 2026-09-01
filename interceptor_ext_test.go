@@ -320,6 +320,13 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				stream := client.CumSum(t.Context())
 				assert.NotNil(t, stream)
 
+				stream.RequestHeader().Set("X-Trace-ID", "abc-123")
+				assert.Equal(t, stream.RequestHeader().Get("X-Trace-ID"), "abc-123")
+				stream.ResponseHeader().Set("X-Response", "value-1")
+				assert.Equal(t, stream.ResponseHeader().Get("X-Response"), "value-1")
+				stream.ResponseTrailer().Set("X-Trailer", "value-2")
+				assert.Equal(t, stream.ResponseTrailer().Get("X-Trailer"), "value-2")
+
 				// With bidi-streaming and the generics API, a call to stream.Send is required to receive an error.
 				err := stream.Send(&pingv1.CumSumRequest{Number: 1})
 				assert.NotNil(t, err)
@@ -404,6 +411,13 @@ func TestNewClientContextInInterceptor(t *testing.T) {
 				client := createClient(&clientCounter1, &clientCounter2)
 				stream := client.CumSum(t.Context())
 				assert.NotNil(t, stream)
+
+				stream.RequestHeader().Set("X-Trace-ID", "abc-123")
+				assert.Equal(t, stream.RequestHeader().Get("X-Trace-ID"), "abc-123")
+				stream.ResponseHeader().Set("X-Response", "value-1")
+				assert.Equal(t, stream.ResponseHeader().Get("X-Response"), "value-1")
+				stream.ResponseTrailer().Set("X-Trailer", "value-2")
+				assert.Equal(t, stream.ResponseTrailer().Get("X-Trailer"), "value-2")
 
 				// With bidi-streaming and the generics API, a call to stream.Send is required to receive an error.
 				err := stream.Send(&pingv1.CumSumRequest{Number: 1})
