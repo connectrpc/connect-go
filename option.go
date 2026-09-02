@@ -154,23 +154,33 @@ func WithRecover(handle func(context.Context, Spec, http.Header, any) error) Han
 	return WithInterceptors(&recoverHandlerInterceptor{handle: handle})
 }
 
+// A RequestGateFunc runs before an RPC reaches the interceptor chain and the
+// handler. See [WithRequestGate].
+type RequestGateFunc func(ctx context.Context, spec Spec, peer Peer, header http.Header) (context.Context, error)
+
 // WithRequestGate registers a function that runs once the request headers are
-// available and before any message is received. Returning a non-nil error
-// rejects the RPC: the error is sent to the client, and neither the interceptor
-// chain nor the handler runs, so the request message is never decompressed or
-// unmarshaled. Returning a non-nil context replaces the one passed to
-// interceptors and the handler.
+// available, but before any message is received or decoded.
 //
-// Gates suit authentication, which is costly to do in an [Interceptor]:
-// interceptors run after the request message has been received, so rejecting an
-// unauthenticated unary call there pays for the decode first. Gates run for
-// every stream type. Authenticating in net/http middleware, with
-// connectrpc.com/authn or otherwise, runs earlier still.
+// If the gate returns an error, the RPC is rejected immediately. The error is
+// sent to the client and neither the interceptor chain nor the handler runs.
+// A gate may return a non-nil context to update the context. It must be derived
+// from the passed context.
 //
-// Applying this option more than once registers multiple gates, which run in
-// the order they were applied. Gates must be safe to call concurrently, and
-// panics in a gate are not recovered by [WithRecover].
-func WithRequestGate(gate func(ctx context.Context, spec Spec, peer Peer, header http.Header) (context.Context, error)) HandlerOption {
+// Gates are ideal for authentication. Rejecting an unauthenticated call inside
+// an [Interceptor] is inefficient because the request message has already been
+// decoded. By using a gate, you avoid this cost. Because rejected RPCs never
+// reach the interceptor chain, logging or metrics interceptors will not observe
+// them. For even earlier rejection, use standard net/http middleware.
+//
+// Multiple WithRequestGate options accumulate and run in the order they were
+// applied. Gates must be safe to call concurrently. Panics inside a gate are
+// not recovered by [WithRecover], which only wraps interceptors and handlers.
+//
+// WithRequestGate panics if the provided gate is nil.
+func WithRequestGate(gate RequestGateFunc) HandlerOption {
+	if gate == nil {
+		panic("connect: WithRequestGate called with nil gate") //nolint:forbidigo
+	}
 	return &requestGateOption{gate: gate}
 }
 
@@ -519,7 +529,7 @@ func (o *handlerOptionsOption) applyToHandler(config *handlerConfig) {
 }
 
 type requestGateOption struct {
-	gate func(ctx context.Context, spec Spec, peer Peer, header http.Header) (context.Context, error)
+	gate RequestGateFunc
 }
 
 func (o *requestGateOption) applyToHandler(config *handlerConfig) {
