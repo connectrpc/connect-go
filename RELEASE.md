@@ -32,13 +32,16 @@ This document outlines how to create a release of connect-go.
 
 7. Publish the release.
 
-8. On a new branch, open [connect.go](connect.go) and change the `Version` to increment the minor tag and append the `-dev` suffix. Use the next minor release - we never anticipate bugs and patch releases.
+8. Check the [release workflow] triggered by publishing. It attaches the `protoc-gen-connect-go` binaries and a checksums file to the release. It fails if the `Version` constant doesn't match the tag: correct the constant, then delete the release and its tag and repeat step 6.
+
+9. On a new branch, open [connect.go](connect.go) and change the `Version` to increment the minor tag and append the `-dev` suffix. Use the next minor release - we never anticipate bugs and patch releases.
 
    ```patch
    -const Version = "1.14.0"
    +const Version = "1.15.0-dev"
    ```
 
-9. Open a PR titled "Back to development" ([Example PR #662](https://github.com/connectrpc/connect-go/pull/662)). Once it's reviewed and CI passes, merge it.
+10. Open a PR titled "Back to development" ([Example PR #662](https://github.com/connectrpc/connect-go/pull/662)). Once it's reviewed and CI passes, merge it.
 
 [latest release]: https://github.com/connectrpc/connect-go/releases/latest
+[release workflow]: https://github.com/connectrpc/connect-go/actions/workflows/release.yaml

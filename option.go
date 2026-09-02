@@ -154,6 +154,36 @@ func WithRecover(handle func(context.Context, Spec, http.Header, any) error) Han
 	return WithInterceptors(&recoverHandlerInterceptor{handle: handle})
 }
 
+// A RequestGateFunc runs before an RPC reaches the interceptor chain and the
+// handler. See [WithRequestGate].
+type RequestGateFunc func(ctx context.Context, spec Spec, peer Peer, header http.Header) (context.Context, error)
+
+// WithRequestGate registers a function that runs once the request headers are
+// available, but before any message is received or decoded.
+//
+// If the gate returns an error, the RPC is rejected immediately. The error is
+// sent to the client and neither the interceptor chain nor the handler runs.
+// A gate may return a non-nil context to update the context. It must be derived
+// from the passed context.
+//
+// Gates are ideal for authentication. Rejecting an unauthenticated call inside
+// an [Interceptor] is inefficient because the request message has already been
+// decoded. By using a gate, you avoid this cost. Because rejected RPCs never
+// reach the interceptor chain, logging or metrics interceptors will not observe
+// them. For even earlier rejection, use standard net/http middleware.
+//
+// Multiple WithRequestGate options accumulate and run in the order they were
+// applied. Gates must be safe to call concurrently. Panics inside a gate are
+// not recovered by [WithRecover], which only wraps interceptors and handlers.
+//
+// WithRequestGate panics if the provided gate is nil.
+func WithRequestGate(gate RequestGateFunc) HandlerOption {
+	if gate == nil {
+		panic("connect: WithRequestGate called with nil gate") //nolint:forbidigo
+	}
+	return &requestGateOption{gate: gate}
+}
+
 // WithRequireConnectProtocolHeader configures the Handler to require requests
 // using the Connect RPC protocol to include the Connect-Protocol-Version
 // header. This ensures that HTTP proxies and net/http middleware can easily
@@ -496,6 +526,14 @@ func (o *handlerOptionsOption) applyToHandler(config *handlerConfig) {
 	for _, option := range o.options {
 		option.applyToHandler(config)
 	}
+}
+
+type requestGateOption struct {
+	gate RequestGateFunc
+}
+
+func (o *requestGateOption) applyToHandler(config *handlerConfig) {
+	config.RequestGates = append(config.RequestGates, o.gate)
 }
 
 type requireConnectProtocolHeaderOption struct{}
