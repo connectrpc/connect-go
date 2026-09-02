@@ -992,4 +992,3 @@ type httpClientFunc func(*http.Request) (*http.Response, error)
 func (fn httpClientFunc) Do(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
-
