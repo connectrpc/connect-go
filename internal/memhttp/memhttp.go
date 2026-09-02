@@ -45,6 +45,7 @@ type Server struct {
 func NewServer(handler http.Handler, opts ...Option) *Server {
 	var cfg config
 	WithCleanupTimeout(5 * time.Second).apply(&cfg)
+	WithConnBufferSize(defaultConnBufferSize).apply(&cfg)
 	for _, opt := range opts {
 		opt.apply(&cfg)
 	}
@@ -52,7 +53,7 @@ func NewServer(handler http.Handler, opts ...Option) *Server {
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
-	listener := newMemoryListener("1.2.3.4") // httptest.DefaultRemoteAddr
+	listener := newMemoryListener("1.2.3.4", cfg.ConnBufferSize) // httptest.DefaultRemoteAddr
 	server := &Server{
 		server: http.Server{
 			Handler:           handler,
@@ -90,8 +91,11 @@ func (s *Server) Transport() *http.Transport {
 func (s *Server) TransportHTTP1() *http.Transport {
 	return &http.Transport{
 		DialContext: s.listener.DialContext,
-		// TODO(emcfarlane): DisableKeepAlives false can causes tests
-		// to hang on shutdown.
+		// Keep-alives are disabled because [http.Server.Shutdown] defers
+		// closing StateNew connections for 5 seconds (see net/http
+		// server.go issue 22682), which races with the cleanup timeout.
+		// Leaving this disabled makes the client close each HTTP/1 conn
+		// after the response, giving the server EOF and unblocking shutdown.
 		DisableKeepAlives: true,
 	}
 }

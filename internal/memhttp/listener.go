@@ -21,11 +21,15 @@ import (
 	"sync"
 )
 
+// TODO(go.dev/issue/77362): Replace memoryListener and memoryConn with
+// testing/nettest.Listener and testing/nettest.Conn when available.
+
 var errListenerClosed = errors.New("listener closed")
 
 // memoryListener is a net.Listener that listens on an in memory network.
 type memoryListener struct {
-	addr memoryAddr
+	addr        memoryAddr
+	connBufSize int
 
 	conns  chan net.Conn
 	once   sync.Once
@@ -33,11 +37,12 @@ type memoryListener struct {
 }
 
 // newMemoryListener returns a new in-memory listener.
-func newMemoryListener(addr string) *memoryListener {
+func newMemoryListener(addr string, connBufSize int) *memoryListener {
 	return &memoryListener{
-		addr:   memoryAddr(addr),
-		conns:  make(chan net.Conn),
-		closed: make(chan struct{}),
+		addr:        memoryAddr(addr),
+		connBufSize: connBufSize,
+		conns:       make(chan net.Conn),
+		closed:      make(chan struct{}),
 	}
 }
 
@@ -70,8 +75,8 @@ func (l *memoryListener) Addr() net.Addr {
 }
 
 // DialContext is the type expected by http.Transport.DialContext.
-func (l *memoryListener) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	server, client := net.Pipe()
+func (l *memoryListener) DialContext(ctx context.Context, _, _ string) (net.Conn, error) {
+	server, client := newMemoryConnPair(l.addr, l.connBufSize)
 	select {
 	case <-ctx.Done():
 		return nil, &net.OpError{Op: "dial", Net: l.addr.Network(), Err: ctx.Err()}
