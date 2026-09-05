@@ -118,3 +118,25 @@ func (b byteByByteReader) Read(data []byte) (int, error) {
 	data[0] = next
 	return 1, nil
 }
+
+func TestEnvelopeWriterEndStreamExceedsSendMaxBytes(t *testing.T) {
+	t.Parallel()
+	dst := &bytes.Buffer{}
+	wtr := envelopeWriter{
+		sender:       writeSender{writer: dst},
+		sendMaxBytes: 10,
+	}
+	largePayload := bytes.Repeat([]byte("a"), 100)
+	normalEnv := &envelope{Data: bytes.NewBuffer(largePayload)}
+	err := wtr.Write(normalEnv)
+	assert.NotNil(t, err)
+	assert.Equal(t, err.Code(), CodeResourceExhausted)
+
+	endStreamEnv := &envelope{
+		Data:  bytes.NewBuffer(largePayload),
+		Flags: connectFlagEnvelopeEndStream,
+	}
+	err = wtr.Write(endStreamEnv)
+	assert.Nil(t, err)
+}
+

@@ -156,6 +156,9 @@ func (w *envelopeWriter) Marshal(message any) *Error {
 // Write writes the enveloped message, compressing as necessary. It doesn't
 // retain any references to the supplied envelope or its underlying data.
 func (w *envelopeWriter) Write(env *envelope) *Error {
+	if env.IsSet(connectFlagEnvelopeEndStream) {
+		return w.write(env)
+	}
 	if env.IsSet(flagEnvelopeCompressed) ||
 		w.compressionPool == nil ||
 		env.Data.Len() < w.compressMinBytes {
