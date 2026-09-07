@@ -853,16 +853,23 @@ func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Hea
 			mergeNonProtocolHeaders(end.Trailer, connectErr.meta)
 		}
 	}
-	data, marshalErr := json.Marshal(end)
-	if marshalErr != nil {
-		return errorf(CodeInternal, "marshal end stream: %w", marshalErr)
+	marshal := func() ([]byte, *Error) {
+		data, marshalErr := json.Marshal(end)
+		if marshalErr != nil {
+			return nil, errorf(CodeInternal, "marshal end stream: %w", marshalErr)
+		}
+		return data, nil
 	}
-	raw := bytes.NewBuffer(data)
-	defer m.bufferPool.Put(raw)
-	return m.Write(&envelope{
-		Data:  raw,
-		Flags: connectFlagEnvelopeEndStream,
-	})
+	reduce := func() {
+		end.Trailer = nil
+		if end.Error != nil {
+			end.Error = &connectWireError{
+				Code:    end.Error.Code,
+				Message: fmt.Sprintf("end stream message exceeded sendMaxBytes %d", m.sendMaxBytes),
+			}
+		}
+	}
+	return m.writeControlFrame(connectFlagEnvelopeEndStream, marshal, reduce)
 }
 
 type connectStreamingUnmarshaler struct {

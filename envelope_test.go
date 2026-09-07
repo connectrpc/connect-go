@@ -16,7 +16,11 @@ package connect
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect/internal/assert"
@@ -119,24 +123,146 @@ func (b byteByByteReader) Read(data []byte) (int, error) {
 	return 1, nil
 }
 
-func TestEnvelopeWriterEndStreamExceedsSendMaxBytes(t *testing.T) {
+func TestEnvelopeWriteSendMaxBytes(t *testing.T) {
 	t.Parallel()
-	dst := &bytes.Buffer{}
-	wtr := envelopeWriter{
-		sender:       writeSender{writer: dst},
-		sendMaxBytes: 10,
+	testCases := []struct {
+		name       string
+		flags      uint8
+		compressed bool
+	}{
+		{
+			name: "rejects_oversized_message_uncompressed",
+		},
+		{
+			name:       "rejects_oversized_message_compressed",
+			compressed: true,
+		},
+		{
+			name:  "rejects_oversized_end_stream_uncompressed",
+			flags: connectFlagEnvelopeEndStream,
+		},
+		{
+			name:       "rejects_oversized_end_stream_compressed",
+			flags:      connectFlagEnvelopeEndStream,
+			compressed: true,
+		},
+		{
+			name:  "rejects_oversized_grpc_web_trailer_uncompressed",
+			flags: grpcFlagEnvelopeTrailer,
+		},
+		{
+			name:       "rejects_oversized_grpc_web_trailer_compressed",
+			flags:      grpcFlagEnvelopeTrailer,
+			compressed: true,
+		},
 	}
-	largePayload := bytes.Repeat([]byte("a"), 100)
-	normalEnv := &envelope{Data: bytes.NewBuffer(largePayload)}
-	err := wtr.Write(normalEnv)
-	assert.NotNil(t, err)
-	assert.Equal(t, err.Code(), CodeResourceExhausted)
-
-	endStreamEnv := &envelope{
-		Data:  bytes.NewBuffer(largePayload),
-		Flags: connectFlagEnvelopeEndStream,
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			out := &bytes.Buffer{}
+			writer := envelopeWriter{
+				sender:       writeSender{writer: out},
+				bufferPool:   newBufferPool(),
+				sendMaxBytes: 1,
+			}
+			if testCase.compressed {
+				gzipOption, ok := withGzip().(*compressionOption)
+				assert.True(t, ok)
+				writer.compressMinBytes = 1
+				writer.compressionPool = gzipOption.CompressionPool
+				writer.bufferPool = newBufferPool()
+			}
+			env := &envelope{
+				Data:  bytes.NewBuffer(make([]byte, 64)),
+				Flags: testCase.flags,
+			}
+			err := writer.Write(env)
+			assert.NotNil(t, err)
+			assert.Equal(t, CodeOf(err), CodeResourceExhausted)
+			assert.True(t, errors.Is(err, errExceedsSendMax))
+		})
 	}
-	err = wtr.Write(endStreamEnv)
-	assert.Nil(t, err)
 }
 
+func TestWriteControlFrameFallback(t *testing.T) {
+	t.Parallel()
+	t.Run("minimal_fallback_fits_under_max", func(t *testing.T) {
+		t.Parallel()
+		out := &bytes.Buffer{}
+		writer := envelopeWriter{
+			sender:       writeSender{writer: out},
+			bufferPool:   newBufferPool(),
+			sendMaxBytes: 128,
+		}
+		large := strings.Repeat("x", 256)
+		end := &connectEndStreamMessage{
+			Error: &connectWireError{
+				Code:    CodeInternal,
+				Message: large,
+			},
+			Trailer: http.Header{"large-header": []string{large}},
+		}
+		marshal := func() ([]byte, *Error) {
+			data, err := json.Marshal(end)
+			if err != nil {
+				return nil, errorf(CodeInternal, "marshal: %w", err)
+			}
+			return data, nil
+		}
+		reduce := func() {
+			end.Trailer = nil
+			end.Error = &connectWireError{
+				Code:    end.Error.Code,
+				Message: "end stream message exceeded sendMaxBytes 128",
+			}
+		}
+		err := writer.writeControlFrame(connectFlagEnvelopeEndStream, marshal, reduce)
+		assert.Nil(t, err)
+		assert.True(t, out.Len() > 0)
+		unmarshaler := connectStreamingUnmarshaler{
+			envelopeReader: envelopeReader{
+				ctx:        t.Context(),
+				reader:     out,
+				bufferPool: newBufferPool(),
+			},
+		}
+		readErr := unmarshaler.Unmarshal(nil)
+		assert.ErrorIs(t, readErr, errSpecialEnvelope)
+		streamErr := unmarshaler.EndStreamError()
+		assert.NotNil(t, streamErr)
+		assert.Equal(t, streamErr.Code(), CodeInternal)
+		assert.Equal(t, streamErr.Message(), "end stream message exceeded sendMaxBytes 128")
+		assert.Equal(t, len(unmarshaler.Trailer()), 0)
+	})
+	t.Run("force_send_when_fallback_exceeds_max", func(t *testing.T) {
+		t.Parallel()
+		out := &bytes.Buffer{}
+		writer := envelopeWriter{
+			sender:       writeSender{writer: out},
+			bufferPool:   newBufferPool(),
+			sendMaxBytes: 1,
+		}
+		end := &connectEndStreamMessage{
+			Error: &connectWireError{
+				Code:    CodeResourceExhausted,
+				Message: "original",
+			},
+		}
+		marshal := func() ([]byte, *Error) {
+			data, err := json.Marshal(end)
+			if err != nil {
+				return nil, errorf(CodeInternal, "marshal: %w", err)
+			}
+			return data, nil
+		}
+		reduce := func() {
+			end.Error = &connectWireError{
+				Code:    CodeResourceExhausted,
+				Message: "end stream message exceeded sendMaxBytes 1",
+			}
+		}
+		err := writer.writeControlFrame(connectFlagEnvelopeEndStream, marshal, reduce)
+		assert.Nil(t, err)
+		assert.True(t, out.Len() > 0)
+	})
+}

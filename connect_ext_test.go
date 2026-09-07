@@ -1873,6 +1873,65 @@ func TestHandlerWithSendMaxBytes(t *testing.T) {
 	})
 }
 
+func TestHandlerWithSendMaxBytesStreamEndStream(t *testing.T) {
+	// Regression test for issue #907: when a streaming handler returns an error
+	// because a message exceeds sendMaxBytes, the client must receive that error
+	// via the EndStream control frame instead of an empty successful response.
+	t.Parallel()
+	const sendMaxBytes = 1 // Tiny limit so even a minimal message exceeds it.
+	testCases := []struct {
+		name             string
+		compressMinBytes int
+		clientOptions    []connect.ClientOption
+	}{
+		{
+			name:             "connect_uncompressed",
+			compressMinBytes: math.MaxInt,
+		},
+		{
+			name:             "connect_compressed",
+			compressMinBytes: 1,
+		},
+		{
+			name:             "grpcweb_uncompressed",
+			compressMinBytes: math.MaxInt,
+			clientOptions:    []connect.ClientOption{connect.WithGRPCWeb()},
+		},
+		{
+			name:             "grpcweb_compressed",
+			compressMinBytes: 1,
+			clientOptions:    []connect.ClientOption{connect.WithGRPCWeb()},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			mux := http.NewServeMux()
+			mux.Handle(pingv1connect.NewPingServiceHandler(
+				&pluggablePingServer{
+					countUp: func(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+						err := stream.Send(&pingv1.CountUpResponse{Number: 42})
+						if err != nil {
+							return err
+						}
+						return nil
+					},
+				},
+				connect.WithSendMaxBytes(sendMaxBytes),
+				connect.WithCompressMinBytes(testCase.compressMinBytes),
+			))
+			server := memhttptest.NewServer(t, mux)
+			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), testCase.clientOptions...)
+			stream, err := client.CountUp(t.Context(), connect.NewRequest(&pingv1.CountUpRequest{Number: 1}))
+			assert.Nil(t, err)
+			assert.False(t, stream.Receive())
+			assert.NotNil(t, stream.Err(), assert.Sprintf("expected error from stream"))
+			assert.Equal(t, connect.CodeOf(stream.Err()), connect.CodeResourceExhausted)
+			assert.Nil(t, stream.Close())
+		})
+	}
+}
+
 func TestClientWithSendMaxBytes(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()

@@ -17,6 +17,7 @@ package connect
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -130,6 +131,82 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 	assert.Equal(t, unmarshaler.Trailer().Values("Not-Canonical-Header"), []string{"a"})
 	assert.Equal(t, unmarshaler.Trailer().Values("Mixed-Canonical"), []string{"b", "b"})
 	assert.Equal(t, unmarshaler.Trailer().Values("Canonical-Header"), []string{"c"})
+}
+
+func TestConnectMarshalEndStreamSendMaxBytes(t *testing.T) {
+	t.Parallel()
+	t.Run("preserves_frame_below_max", func(t *testing.T) {
+		t.Parallel()
+		out := &bytes.Buffer{}
+		marshaler := connectStreamingMarshaler{
+			envelopeWriter: envelopeWriter{
+				sender:       writeSender{writer: out},
+				bufferPool:   newBufferPool(),
+				sendMaxBytes: 4096,
+			},
+		}
+		originalErr := NewError(CodeInvalidArgument, errors.New("small error"))
+		trailer := http.Header{"custom-trailer": []string{"value"}}
+		assert.Nil(t, marshaler.MarshalEndStream(originalErr, trailer))
+		unmarshaler := connectStreamingUnmarshaler{
+			envelopeReader: envelopeReader{
+				ctx:        t.Context(),
+				reader:     out,
+				bufferPool: newBufferPool(),
+			},
+		}
+		assert.ErrorIs(t, unmarshaler.Unmarshal(nil), errSpecialEnvelope)
+		streamErr := unmarshaler.EndStreamError()
+		assert.NotNil(t, streamErr)
+		assert.Equal(t, streamErr.Code(), CodeInvalidArgument)
+		assert.Equal(t, streamErr.Message(), "small error")
+		assert.Equal(t, unmarshaler.Trailer().Values("Custom-Trailer"), []string{"value"})
+	})
+	t.Run("falls_back_when_frame_exceeds_max", func(t *testing.T) {
+		t.Parallel()
+		out := &bytes.Buffer{}
+		const sendMaxBytes = 256
+		marshaler := connectStreamingMarshaler{
+			envelopeWriter: envelopeWriter{
+				sender:       writeSender{writer: out},
+				bufferPool:   newBufferPool(),
+				sendMaxBytes: sendMaxBytes,
+			},
+		}
+		large := strings.Repeat("x", 1024)
+		originalErr := NewError(CodeInternal, errors.New(large))
+		detail, err := NewErrorDetail(durationpb.New(time.Second))
+		assert.Nil(t, err)
+		originalErr.AddDetail(detail)
+		originalErr.Meta().Set("large-header", large)
+		trailer := http.Header{"another-large-header": []string{large}}
+		fullFrame := &connectEndStreamMessage{
+			Error:   newConnectWireError(originalErr),
+			Trailer: trailer,
+		}
+		mergeNonProtocolHeaders(fullFrame.Trailer, originalErr.Meta())
+		fullData, err := json.Marshal(fullFrame)
+		assert.Nil(t, err)
+		assert.True(t, len(fullData) > sendMaxBytes)
+
+		assert.Nil(t, marshaler.MarshalEndStream(originalErr, trailer))
+		assert.True(t, out.Len() > 0)
+		assert.True(t, out.Len() < len(fullData)+5)
+
+		unmarshaler := connectStreamingUnmarshaler{
+			envelopeReader: envelopeReader{
+				ctx:        t.Context(),
+				reader:     out,
+				bufferPool: newBufferPool(),
+			},
+		}
+		assert.ErrorIs(t, unmarshaler.Unmarshal(nil), errSpecialEnvelope)
+		streamErr := unmarshaler.EndStreamError()
+		assert.NotNil(t, streamErr)
+		assert.Equal(t, streamErr.Code(), CodeInternal)
+		assert.Equal(t, streamErr.Message(), fmt.Sprintf("end stream message exceeded sendMaxBytes %d", sendMaxBytes))
+		assert.Equal(t, len(unmarshaler.Trailer()), 0)
+	})
 }
 
 func TestConnectValidateUnaryResponseContentType(t *testing.T) {
