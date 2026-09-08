@@ -28,7 +28,7 @@ import (
 type Handler struct {
 	spec             Spec
 	implementation   StreamingHandlerFunc
-	requestGates     []func(ctx context.Context, spec Spec, peer Peer, header http.Header) (context.Context, error)
+	requestGates     []RequestGateFunc
 	protocolHandlers map[string][]protocolHandler // Method to protocol handlers
 	allowMethod      string                       // Allow header
 	acceptPost       string                       // Accept-Post header
@@ -366,7 +366,7 @@ type handlerConfig struct {
 	ReadMaxBytes                 int
 	SendMaxBytes                 int
 	StreamType                   StreamType
-	RequestGates                 []func(ctx context.Context, spec Spec, peer Peer, header http.Header) (context.Context, error)
+	RequestGates                 []RequestGateFunc
 }
 
 func newHandlerConfig(procedure string, streamType StreamType, options []HandlerOption) *handlerConfig {

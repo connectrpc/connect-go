@@ -666,6 +666,11 @@ func TestHandlerWithRequestGate(t *testing.T) {
 		assert.Equal(t, order, []string{"first", "second"})
 	})
 
+	t.Run("panics_on_nil_gate", func(t *testing.T) {
+		t.Parallel()
+		assert.Panics(t, func() { connect.WithRequestGate(nil) })
+	})
+
 	t.Run("gates_streaming_procedures", func(t *testing.T) {
 		t.Parallel()
 		var gateStreamType connect.StreamType

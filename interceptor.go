@@ -127,7 +127,7 @@ func unaryThunk(next UnaryFunc) UnaryFunc {
 func streamingClientThunk(next StreamingClientFunc) StreamingClientFunc {
 	return func(ctx context.Context, spec Spec) StreamingClientConn {
 		if err := checkSentinel(ctx); err != nil {
-			return &errStreamingClientConn{err: err}
+			return newErrStreamingClientConn(err)
 		}
 		return next(ctx, spec)
 	}
