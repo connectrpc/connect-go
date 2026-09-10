@@ -1751,21 +1751,20 @@ func TestCustomCompression(t *testing.T) {
 	assert.Equal(t, response, &pingv1.PingResponse{Text: request.GetText()})
 }
 
-func TestServerCompressionPreference(t *testing.T) {
-	// The server picks its own most preferred encoding out of the client's
-	// accept list, rather than honoring the order the client sent. See
-	// https://github.com/connectrpc/connectrpc.com/pull/322.
+func TestClientCompressionPreference(t *testing.T) {
+	// The response encoding comes from the client's Accept-Encoding order: the
+	// server uses the first encoding the client listed that it also supports.
 	t.Parallel()
 	mux := http.NewServeMux()
 	srv := connect.NewServer()
 	pingv1connect.RegisterPingServiceHandler(srv, pingServer{})
-	// The handler prefers gzip and falls back to deflate.
+	// The handler supports both, listing gzip first.
 	connecthttp.Mount(mux, srv,
 		connecthttp.WithCompressors(connectgzip.New(), deflateCompressor{}),
 	)
 	server := memhttptest.NewServer(t, mux)
-	// The client advertises "deflate,gzip", listing deflate first. The
-	// handler's preference wins over the client's ordering.
+	// The client advertises "deflate,gzip", listing deflate first, so the
+	// handler responds with deflate.
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
 		server.Client(),
 		server.URL(),
@@ -1774,7 +1773,7 @@ func TestServerCompressionPreference(t *testing.T) {
 	ctx, info := connect.NewClientContext(t.Context())
 	_, err := client.Ping(ctx, &pingv1.PingRequest{Text: strings.Repeat("connect", 32)})
 	assert.Nil(t, err)
-	assert.Equal(t, info.ResponseEncoding, connect.CompressionNameGzip)
+	assert.Equal(t, info.ResponseEncoding, "deflate")
 }
 
 func TestClientWithoutGzipSupport(t *testing.T) {

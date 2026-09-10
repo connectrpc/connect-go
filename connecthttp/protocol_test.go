@@ -68,8 +68,9 @@ func BenchmarkCanonicalizeContentType(b *testing.B) {
 
 func TestNegotiateCompression(t *testing.T) {
 	t.Parallel()
-	// pools builds the server's compressors in preference order, so the first
-	// name given is the most preferred.
+	// pools builds the server's compressors. Order is the order they're
+	// advertised in, but the client's Accept-Encoding order decides the
+	// response encoding.
 	pools := func(registered ...string) readOnlyCompressionPools {
 		compressors := make([]connect.Compressor, 0, len(registered))
 		for _, name := range registered {
@@ -87,38 +88,36 @@ func TestNegotiateCompression(t *testing.T) {
 		wantResponse string
 		wantErrCode  connect.Code
 	}{{
-		// The three worked examples from connectrpc.com#322, where the client
-		// sends "gzip,br,zstd" and the server's configuration decides.
 		name:         "server supports gzip only",
 		pools:        pools("gzip"),
 		accept:       "gzip,br,zstd",
 		wantRequest:  "identity",
 		wantResponse: "gzip",
 	}, {
-		name:         "server prefers gzip over zstd and br",
+		name:         "client order wins",
 		pools:        pools("gzip", "zstd", "br"),
-		accept:       "gzip,br,zstd",
+		accept:       "br,gzip,zstd",
+		wantRequest:  "identity",
+		wantResponse: "br",
+	}, {
+		name:         "client order wins over server order",
+		pools:        pools("br", "gzip"),
+		accept:       "gzip,br",
 		wantRequest:  "identity",
 		wantResponse: "gzip",
 	}, {
-		name:         "server prefers br over zstd and gzip",
-		pools:        pools("br", "zstd", "gzip"),
-		accept:       "gzip,br,zstd",
+		name:         "skips unsupported client preferences",
+		pools:        pools("gzip"),
+		accept:       "zstd,br,gzip",
 		wantRequest:  "identity",
-		wantResponse: "br",
-	}, {
-		name:         "server preference beats client order",
-		pools:        pools("br", "gzip"),
-		accept:       "gzip,br",
-		wantRequest:  "identity",
-		wantResponse: "br",
+		wantResponse: "gzip",
 	}, {
 		// Compression is symmetric: a compressed request is answered in the
-		// same encoding, even when the server would otherwise prefer br.
-		name:         "request encoding echoed over server preference",
+		// same encoding, whatever the client accepts.
+		name:         "request encoding echoed",
 		pools:        pools("br", "gzip"),
 		sent:         "gzip",
-		accept:       "gzip,br",
+		accept:       "br,gzip",
 		wantRequest:  "gzip",
 		wantResponse: "gzip",
 	}, {
@@ -128,13 +127,12 @@ func TestNegotiateCompression(t *testing.T) {
 		wantRequest:  "gzip",
 		wantResponse: "gzip",
 	}, {
-		// Server preference only decides when the request was uncompressed.
-		name:         "server preference applies to uncompressed request",
+		name:         "explicit identity request encoding",
 		pools:        pools("br", "gzip"),
 		sent:         "identity",
 		accept:       "gzip,br",
 		wantRequest:  "identity",
-		wantResponse: "br",
+		wantResponse: "gzip",
 	}, {
 		name:         "no mutually supported encoding",
 		pools:        pools("gzip"),
@@ -152,7 +150,7 @@ func TestNegotiateCompression(t *testing.T) {
 		pools:        pools("br", "gzip"),
 		accept:       "gzip, br",
 		wantRequest:  "identity",
-		wantResponse: "br",
+		wantResponse: "gzip",
 	}, {
 		name:         "no compressors registered",
 		pools:        pools(),

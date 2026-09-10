@@ -81,10 +81,10 @@ func WithCodecs(codecs ...connect.Codec) Option {
 // default gzip.
 //
 // Order determines preference, with the most preferred compressor listed
-// first. Clients advertise this preference order, and handlers respond using
-// their most preferred compressor that the client also accepts. If a client
-// sends a compressed request, the handler will always reply using the same
-// encoding.
+// first. Clients and handlers advertise this order in Accept-Encoding, and a
+// handler responds using the first encoding the client listed that it also
+// supports. If a client sends a compressed request, the handler will always
+// reply using the same encoding.
 //
 // Calling WithCompressors with no arguments disables compression entirely. If
 // multiple compressors share the same name, only the first is kept.

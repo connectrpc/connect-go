@@ -392,7 +392,7 @@ By default, `connecthttp` is ready to use without configuration. It registers th
 
 When customizing these, `WithCodecs` and `WithCompressors` replace the default sets entirely, so you must list everything you need in a single call. Order matters for both, but in different ways:
 
-* **Compressors:** Listed in order of preference (most preferred first). This order dictates which encoding a handler chooses for its response.
+* **Compressors:** Listed in order of preference (most preferred first). Clients and handlers advertise this order in `Accept-Encoding`, and a handler responds using the first encoding the client listed that it also supports.
 * **Codecs:** Handlers match incoming requests by content type, so order only affects clients. Clients send outgoing requests using the first codec in the list, unless explicitly overridden by `WithSendCodec`.
 
 ### connectinprocess
