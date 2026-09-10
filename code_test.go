@@ -54,3 +54,16 @@ func assertCodeRoundTrips(tb testing.TB, code Code) {
 		assert.NotNil(tb, invalid.UnmarshalText([]byte("code_"+strconv.Itoa(int(code)))))
 	}
 }
+
+func TestCodeOfNil(t *testing.T) {
+	t.Parallel()
+	t.Run("nil error", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, CodeOf(nil), CodeUnknown)
+	})
+	t.Run("boxed (*Error)(nil) error", func(t *testing.T) {
+		t.Parallel()
+		var nilErr *Error = nil
+		assert.Equal(t, CodeOf(nilErr), CodeUnknown)
+	})
+}

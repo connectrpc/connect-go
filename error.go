@@ -265,11 +265,11 @@ func errorf(c Code, template string, args ...any) *Error {
 	return NewError(c, fmt.Errorf(template, args...))
 }
 
-// asError uses errors.As to unwrap any error and look for a connect *Error.
+// asError uses errors.As to unwrap any error and look for a non-nil connect *Error.
 func asError(err error) (*Error, bool) {
 	var connectErr *Error
 	ok := errors.As(err, &connectErr)
-	return connectErr, ok
+	return connectErr, ok && connectErr != nil // Protect against typed nils (*Error)(nil).
 }
 
 // wrapIfUncoded ensures that all errors are wrapped. It leaves already-wrapped

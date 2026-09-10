@@ -27,6 +27,15 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+func TestErrorNil(t *testing.T) {
+	t.Parallel()
+	// This library never boxes (*Error)(nil) as a golang error. Users may do this, asError must handle it gracefully.
+	var connectErr *Error = nil
+
+	_, ok := asError(connectErr)
+	assert.False(t, ok)
+}
+
 func TestErrorNilUnderlying(t *testing.T) {
 	t.Parallel()
 	err := NewError(CodeUnknown, nil)
