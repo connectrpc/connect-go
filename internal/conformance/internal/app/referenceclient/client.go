@@ -27,6 +27,7 @@ import (
 
 	"connectrpc.com/connect/v2/connectgzip"
 	"connectrpc.com/connect/v2/connecthttp"
+	"connectrpc.com/connect/v2/connectproto"
 	"connectrpc.com/connect/v2/internal/conformance/internal"
 	conformancev1 "connectrpc.com/connect/v2/internal/conformance/internal/gen/connectrpc/conformance/v1"
 	"connectrpc.com/connect/v2/internal/conformance/internal/gen/connectrpc/conformance/v1/conformancev1connect"
@@ -170,7 +171,7 @@ func invoke(ctx context.Context, transports *transports, req *conformancev1.Clie
 	case conformancev1.Codec_CODEC_JSON:
 		jsonCodec := internal.NewStrictJSONCodec()
 		clientOptions = append(clientOptions,
-			connecthttp.WithCodec(jsonCodec),
+			connecthttp.WithCodecs(connectproto.NewBinaryCodec(), jsonCodec),
 			connecthttp.WithSendCodec(jsonCodec.Name()),
 		)
 	case conformancev1.Codec_CODEC_TEXT: //nolint:staticcheck // staticcheck complains because this const is deprecated
@@ -186,7 +187,7 @@ func invoke(ctx context.Context, transports *transports, req *conformancev1.Clie
 		// send gzipped requests
 		gzipCompressor := connectgzip.New()
 		clientOptions = append(clientOptions,
-			connecthttp.WithCompressor(gzipCompressor),
+			connecthttp.WithCompressors(gzipCompressor),
 			connecthttp.WithSendCompression(gzipCompressor.Name()),
 		)
 	case conformancev1.Compression_COMPRESSION_IDENTITY, conformancev1.Compression_COMPRESSION_UNSPECIFIED:

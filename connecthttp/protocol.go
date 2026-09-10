@@ -338,7 +338,7 @@ func negotiateCompression( //nolint:nonamedreturns
 	// If we're not already planning to compress the response, check whether the
 	// client requested a compression algorithm we support.
 	if responseCompression == connect.CompressionNameIdentity && accept != "" {
-		for _, name := range strings.FieldsFunc(accept, isCommaOrSpace) {
+		for name := range strings.FieldsFuncSeq(accept, isCommaOrSpace) {
 			if availableCompressors.Contains(name) {
 				// We found a mutually supported compression algorithm. Unlike standard
 				// HTTP, there's no preference weighting, so can bail out immediately.

@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"io"
 	"math"
-	"slices"
 	"strings"
 
 	"connectrpc.com/connect/v2"
@@ -90,19 +89,16 @@ type readOnlyCompressionPools interface {
 	CommaSeparatedNames() string
 }
 
-func newReadOnlyCompressionPools(
-	nameToPool map[string]*compressionPool,
-	reversedNames []string,
-) readOnlyCompressionPools {
-	// Client and handler configs keep compression names in registration order,
-	// but we want the last registered to be the most preferred.
-	names := make([]string, 0, len(reversedNames))
-	seen := make(map[string]struct{}, len(reversedNames))
-	for _, name := range slices.Backward(reversedNames) {
-		if _, ok := seen[name]; ok {
+func newReadOnlyCompressionPools(compressors []connect.Compressor) readOnlyCompressionPools {
+	// List of compressors in preference order. A repeated name is ignored.
+	nameToPool := make(map[string]*compressionPool, len(compressors))
+	names := make([]string, 0, len(compressors))
+	for _, compressor := range compressors {
+		name := compressor.Name()
+		if _, ok := nameToPool[name]; ok {
 			continue
 		}
-		seen[name] = struct{}{}
+		nameToPool[name] = newCompressionPool(compressor)
 		names = append(names, name)
 	}
 	return &namedCompressionPools{

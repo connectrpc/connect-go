@@ -84,7 +84,6 @@ var (
 		"WithHTTPGet":                      true,
 		"WithHTTPGetMaxURLSize":            true,
 		"WithProtoJSON":                    true,
-		"WithCodec":                        true,
 		"ErrorWriter":                      true,
 		"NewErrorWriter":                   true,
 		"IsNotModifiedError":               true,
@@ -94,8 +93,9 @@ var (
 	reshapedToConnectHTTP = map[string]string{
 		"HandlerOption":                 "connecthttp.Option (interceptors go to connect.NewServer, HTTP options to connecthttp.Mount)",
 		"ClientOption":                  "connecthttp.Option (interceptors go to connect.NewClient, HTTP options to connecthttp.NewTransport)",
-		"WithAcceptCompression":         "connecthttp.WithCompressor to register a connect.Compressor (see connectgzip), then connecthttp.WithAcceptCompression(name) to advertise it",
-		"WithCompression":               "connecthttp.WithCompressor(connect.Compressor) (see connectgzip); the (name, decompressor, compressor) signature changed",
+		"WithCodec":                     "connecthttp.WithCodecs(...connect.Codec), which REPLACES the default codecs instead of adding to them; list every codec you need in one call",
+		"WithAcceptCompression":         "connecthttp.WithCompressors(...connect.Compressor) (see connectgzip), which REPLACES the default compressors; they are advertised automatically, and nil constructors become an empty connecthttp.WithCompressors()",
+		"WithCompression":               "connecthttp.WithCompressors(...connect.Compressor) (see connectgzip), which REPLACES the default compressors; the (name, decompressor, compressor) signature changed",
 		"WithConditionalHandlerOptions": "connecthttp.WithConditionalOptions(func(connect.Spec) []connecthttp.Option); the callback signature changed",
 		"NewNotModifiedError":           "connecthttp.NewNotModifiedError (takes no http.Header argument)",
 	}

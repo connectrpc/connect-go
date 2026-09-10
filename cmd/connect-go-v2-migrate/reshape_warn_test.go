@@ -130,7 +130,7 @@ func TestReshapedSymbolWarnings(t *testing.T) {
 		{
 			name:     "with_accept_compression",
 			body:     `var _ = connect.WithAcceptCompression`,
-			wantWarn: "connecthttp.WithCompressor",
+			wantWarn: "connecthttp.WithCompressors",
 		},
 		{
 			name:     "with_interceptors",

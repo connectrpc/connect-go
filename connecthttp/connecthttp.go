@@ -22,7 +22,6 @@ package connecthttp
 import (
 	"context"
 	"crypto/tls"
-	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -212,30 +211,26 @@ func NewTransport(httpClient HTTPClient, baseURL string, options ...Option) conn
 // server starts from before user options are applied.
 func defaultOptions() options {
 	return options{
-		protocol:        connect.ProtocolNameConnect,
-		codecs:          defaultCodecs(),
-		sendCodecName:   connect.CodecNameProto,
-		compressors:     defaultCompressors(),
-		compressorNames: []string{connect.CompressionNameGzip},
-		readMaxBytes:    defaultReadMaxBytes,
-		getUseFallback:  true,
+		protocol:       connect.ProtocolNameConnect,
+		codecs:         defaultCodecs(),
+		compressors:    defaultCompressors(),
+		readMaxBytes:   defaultReadMaxBytes,
+		getUseFallback: true,
 	}
 }
 
 // defaultCodecs returns the proto and JSON codecs every transport and handler
 // registers by default.
-func defaultCodecs() map[string]connect.Codec {
-	return map[string]connect.Codec{
-		connect.CodecNameProto: connectproto.NewBinaryCodec(),
-		connect.CodecNameJSON:  connectproto.NewJSONCodec(),
+func defaultCodecs() []connect.Codec {
+	return []connect.Codec{
+		connectproto.NewBinaryCodec(),
+		connectproto.NewJSONCodec(),
 	}
 }
 
 // defaultCompressors returns the gzip compressor registered by default.
-func defaultCompressors() map[string]connect.Compressor {
-	return map[string]connect.Compressor{
-		connect.CompressionNameGzip: connectgzip.New(),
-	}
+func defaultCompressors() []connect.Compressor {
+	return []connect.Compressor{connectgzip.New()}
 }
 
 // Mount registers an [http.Handler] for each of server's procedures on mux,
@@ -314,12 +309,20 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 	info.TransportInfo = clientInfo
 	opts := t.options.forSpec(spec)
 	if opts.sendCompressor != "" && opts.sendCompressor != connect.CompressionNameIdentity {
-		if _, ok := opts.compressors[opts.sendCompressor]; !ok {
+		if !slices.ContainsFunc(opts.compressors, func(c connect.Compressor) bool {
+			return c.Name() == opts.sendCompressor
+		}) {
 			return nil, connect.Errorf(connect.CodeUnknown, "unknown compression %q", opts.sendCompressor)
 		}
 	}
-	if _, ok := opts.codecs[opts.sendCodecName]; !ok {
-		return nil, connect.Errorf(connect.CodeUnknown, "unknown codec %q", opts.sendCodecName)
+	sendCodecName := opts.getSendCodecName()
+	if sendCodecName == "" {
+		return nil, connect.Errorf(connect.CodeUnknown, "no codecs registered")
+	}
+	if !slices.ContainsFunc(opts.codecs, func(c connect.Codec) bool {
+		return c.Name() == sendCodecName
+	}) {
+		return nil, connect.Errorf(connect.CodeUnknown, "unknown codec %q", sendCodecName)
 	}
 	if t.baseURLErr != nil {
 		return nil, connect.Errorf(connect.CodeUnavailable, "invalid base URL: %v", t.baseURLErr)
@@ -333,7 +336,7 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 	info.Spec = spec
 	info.PeerAddr = peer.Addr
 	info.Protocol = peer.Protocol
-	info.Codec = opts.sendCodecName
+	info.Codec = sendCodecName
 	info.RequestEncoding = encodingOrIdentity(opts.sendCompressor)
 	conn.onRequestSend(func(request *http.Request) {
 		clientInfo.request = request
@@ -365,9 +368,8 @@ func (t *transport) urlForProcedure(procedure string) *url.URL {
 // fields relevant to it and ignores the rest.
 type options struct {
 	// Shared by clients and servers.
-	codecs           map[string]connect.Codec
-	compressors      map[string]connect.Compressor
-	compressorNames  []string
+	codecs           []connect.Codec
+	compressors      []connect.Compressor
 	compressMinBytes int
 	readMaxBytes     int
 	sendMaxBytes     int
@@ -404,14 +406,24 @@ func (o *options) forSpec(spec connect.Spec) *options {
 	return clone
 }
 
+// getSendCodecName returns the name of codec to use.
+func (o *options) getSendCodecName() string {
+	if o.sendCodecName != "" {
+		return o.sendCodecName
+	}
+	if len(o.codecs) == 0 {
+		return ""
+	}
+	return o.codecs[0].Name()
+}
+
 // clone returns a deep-enough copy of c that applying options to the copy does
 // not mutate the receiver's maps and slices. The conditional list is dropped to
 // avoid re-evaluating it.
 func (o *options) clone() *options {
 	opts := *o
-	opts.codecs = maps.Clone(o.codecs)
-	opts.compressors = maps.Clone(o.compressors)
-	opts.compressorNames = slices.Clone(o.compressorNames)
+	opts.codecs = slices.Clone(o.codecs)
+	opts.compressors = slices.Clone(o.compressors)
 	opts.conditional = nil
 	return &opts
 }

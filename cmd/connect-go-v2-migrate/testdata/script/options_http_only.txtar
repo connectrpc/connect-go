@@ -12,7 +12,7 @@ package p
 import "connectrpc.com/connect"
 
 func opts() []connect.ClientOption {
-	return []connect.ClientOption{connect.WithCodec(nil), connect.WithReadMaxBytes(1)}
+	return []connect.ClientOption{connect.WithProtoJSON(), connect.WithReadMaxBytes(1)}
 }
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
@@ -28,9 +28,9 @@ Proposed rewrites (rerun with -w to apply):
 +)
  
 -func opts() []connect.ClientOption {
--	return []connect.ClientOption{connect.WithCodec(nil), connect.WithReadMaxBytes(1)}
+-	return []connect.ClientOption{connect.WithProtoJSON(), connect.WithReadMaxBytes(1)}
 +func opts() []connecthttp.Option {
-+	return []connecthttp.Option{connecthttp.WithCodec(nil), connecthttp.WithReadMaxBytes(1)}
++	return []connecthttp.Option{connecthttp.WithProtoJSON(), connecthttp.WithReadMaxBytes(1)}
  }
  
 

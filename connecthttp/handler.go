@@ -124,9 +124,8 @@ func (h *handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 }
 
 type handlerConfig struct {
-	CompressionPools             map[string]*compressionPool
-	CompressionNames             []string
-	Codecs                       map[string]connect.Codec
+	Compressors                  []connect.Compressor
+	Codecs                       []connect.Codec
 	CompressMinBytes             int
 	Procedure                    string
 	Schema                       any
@@ -154,10 +153,7 @@ func (c *handlerConfig) newProtocolHandlers() []protocolHandler {
 	}
 	handlers := make([]protocolHandler, 0, len(protocols))
 	codecs := newReadOnlyCodecs(c.Codecs)
-	compressors := newReadOnlyCompressionPools(
-		c.CompressionPools,
-		c.CompressionNames,
-	)
+	compressors := newReadOnlyCompressionPools(c.Compressors)
 	for _, protocol := range protocols {
 		handlers = append(handlers, protocol.NewHandler(&protocolHandlerParams{
 			spec:                         c.newSpec(),

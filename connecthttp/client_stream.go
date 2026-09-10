@@ -195,15 +195,12 @@ func (t *transport) newProtocolClient(spec connect.Spec, opts *options) (protoco
 	if err != nil {
 		return nil, err
 	}
-	pools := make(map[string]*compressionPool, len(opts.compressors))
-	for name, compressor := range opts.compressors {
-		pools[name] = newCompressionPool(compressor)
-	}
+	codecs := newReadOnlyCodecs(opts.codecs)
 	return proto.NewClient(&protocolClientParams{
 		CompressionName:  opts.sendCompressor,
-		CompressionPools: newReadOnlyCompressionPools(pools, opts.compressorNames),
-		Codec:            opts.codecs[opts.sendCodecName],
-		Protobuf:         newReadOnlyCodecs(opts.codecs).Protobuf(),
+		CompressionPools: newReadOnlyCompressionPools(opts.compressors),
+		Codec:            codecs.Get(opts.getSendCodecName()),
+		Protobuf:         codecs.Protobuf(),
 		CompressMinBytes: opts.compressMinBytes,
 		HTTPClient:       t.httpClient,
 		URL:              t.urlForProcedure(spec.Procedure),

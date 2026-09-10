@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"maps"
 	"net/http"
 
 	"connectrpc.com/connect/v2"
@@ -90,16 +89,9 @@ func (s *handlerStream) Send(msg any) error {
 // newServerHandlerConfig builds a v1 handlerConfig for spec from the resolved
 // server options, adapting the v2 codec/compressors to the in-package types.
 func newServerHandlerConfig(spec connect.Spec, opts *options) *handlerConfig {
-	codecs := make(map[string]connect.Codec, len(opts.codecs))
-	maps.Copy(codecs, opts.codecs)
-	pools := make(map[string]*compressionPool, len(opts.compressors))
-	for name, compressor := range opts.compressors {
-		pools[name] = newCompressionPool(compressor)
-	}
 	return &handlerConfig{
-		CompressionPools:             pools,
-		CompressionNames:             opts.compressorNames,
-		Codecs:                       codecs,
+		Compressors:                  opts.compressors,
+		Codecs:                       opts.codecs,
 		CompressMinBytes:             opts.compressMinBytes,
 		Procedure:                    spec.Procedure,
 		Schema:                       spec.Schema,

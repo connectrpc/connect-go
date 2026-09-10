@@ -15,8 +15,10 @@
 package connecthttp
 
 import (
+	"io"
 	"testing"
 
+	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/internal/assert"
 )
 
@@ -62,4 +64,166 @@ func BenchmarkCanonicalizeContentType(b *testing.B) {
 		}
 		b.ReportAllocs()
 	})
+}
+
+func TestNegotiateCompression(t *testing.T) {
+	t.Parallel()
+	// pools builds the server's compressors. Order is the order they're
+	// advertised in, but the client's Accept-Encoding order decides the
+	// response encoding.
+	pools := func(registered ...string) readOnlyCompressionPools {
+		compressors := make([]connect.Compressor, 0, len(registered))
+		for _, name := range registered {
+			compressors = append(compressors, stubCompressor(name))
+		}
+		return newReadOnlyCompressionPools(compressors)
+	}
+
+	tests := []struct {
+		name         string
+		pools        readOnlyCompressionPools
+		sent         string
+		accept       string
+		wantRequest  string
+		wantResponse string
+		wantErrCode  connect.Code
+	}{{
+		name:         "server supports gzip only",
+		pools:        pools("gzip"),
+		accept:       "gzip,br,zstd",
+		wantRequest:  "identity",
+		wantResponse: "gzip",
+	}, {
+		name:         "client order wins",
+		pools:        pools("gzip", "zstd", "br"),
+		accept:       "br,gzip,zstd",
+		wantRequest:  "identity",
+		wantResponse: "br",
+	}, {
+		name:         "client order wins over server order",
+		pools:        pools("br", "gzip"),
+		accept:       "gzip,br",
+		wantRequest:  "identity",
+		wantResponse: "gzip",
+	}, {
+		name:         "skips unsupported client preferences",
+		pools:        pools("gzip"),
+		accept:       "zstd,br,gzip",
+		wantRequest:  "identity",
+		wantResponse: "gzip",
+	}, {
+		// Compression is symmetric: a compressed request is answered in the
+		// same encoding, whatever the client accepts.
+		name:         "request encoding echoed",
+		pools:        pools("br", "gzip"),
+		sent:         "gzip",
+		accept:       "br,gzip",
+		wantRequest:  "gzip",
+		wantResponse: "gzip",
+	}, {
+		name:         "request encoding echoed without accept",
+		pools:        pools("br", "gzip"),
+		sent:         "gzip",
+		wantRequest:  "gzip",
+		wantResponse: "gzip",
+	}, {
+		name:         "explicit identity request encoding",
+		pools:        pools("br", "gzip"),
+		sent:         "identity",
+		accept:       "gzip,br",
+		wantRequest:  "identity",
+		wantResponse: "gzip",
+	}, {
+		name:         "no mutually supported encoding",
+		pools:        pools("gzip"),
+		accept:       "br,zstd",
+		wantRequest:  "identity",
+		wantResponse: "identity",
+	}, {
+		name:         "identity accepted",
+		pools:        pools("gzip"),
+		accept:       "identity",
+		wantRequest:  "identity",
+		wantResponse: "identity",
+	}, {
+		name:         "space separated accept",
+		pools:        pools("br", "gzip"),
+		accept:       "gzip, br",
+		wantRequest:  "identity",
+		wantResponse: "gzip",
+	}, {
+		name:         "no compressors registered",
+		pools:        pools(),
+		accept:       "gzip,br",
+		wantRequest:  "identity",
+		wantResponse: "identity",
+	}, {
+		name:        "unknown request encoding",
+		pools:       pools("gzip"),
+		sent:        "br",
+		accept:      "gzip",
+		wantErrCode: connect.CodeUnimplemented,
+	}}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			request, response, err := negotiateCompression(test.pools, test.sent, test.accept)
+			if test.wantErrCode != 0 {
+				assert.NotNil(t, err)
+				assert.Equal(t, connect.CodeOf(err), test.wantErrCode)
+				return
+			}
+			assert.Nil(t, err)
+			assert.Equal(t, request, test.wantRequest)
+			assert.Equal(t, response, test.wantResponse)
+		})
+	}
+}
+
+func BenchmarkNegotiateCompression(b *testing.B) {
+	pools := func(registered ...string) readOnlyCompressionPools {
+		compressors := make([]connect.Compressor, 0, len(registered))
+		for _, name := range registered {
+			compressors = append(compressors, stubCompressor(name))
+		}
+		return newReadOnlyCompressionPools(compressors)
+	}
+
+	b.Run("default", func(b *testing.B) {
+		available := pools(connect.CompressionNameGzip)
+		for b.Loop() {
+			_, _, _ = negotiateCompression(available, "", "gzip")
+		}
+		b.ReportAllocs()
+	})
+
+	b.Run("multiple compressors", func(b *testing.B) {
+		available := pools(connect.CompressionNameGzip, "zstd", "br")
+		for b.Loop() {
+			_, _, _ = negotiateCompression(available, "", "gzip,br,zstd")
+		}
+		b.ReportAllocs()
+	})
+
+	b.Run("no mutually supported encoding", func(b *testing.B) {
+		available := pools(connect.CompressionNameGzip)
+		for b.Loop() {
+			_, _, _ = negotiateCompression(available, "", "br,zstd")
+		}
+		b.ReportAllocs()
+	})
+}
+
+// stubCompressor is a [connect.Compressor] that only carries a name. The
+// negotiation tests exercise name selection, never the payload path.
+type stubCompressor string
+
+func (c stubCompressor) Name() string { return string(c) }
+
+func (stubCompressor) Compress(dst io.Writer) (io.WriteCloser, error) {
+	return identityWriteCloser{dst}, nil
+}
+
+func (stubCompressor) Decompress(src io.Reader) (io.ReadCloser, error) {
+	return io.NopCloser(src), nil
 }

@@ -20,7 +20,7 @@ func options() []connect.HandlerOption {
 		connect.WithCompressMinBytes(512),
 		connect.WithRequireConnectProtocolHeader(),
 		connect.WithGRPC(),
-		connect.WithCodec(nil),
+		connect.WithProtoJSON(),
 	}
 }
 -- out.txt --
@@ -43,7 +43,7 @@ Proposed rewrites (rerun with -w to apply):
 -		connect.WithCompressMinBytes(512),
 -		connect.WithRequireConnectProtocolHeader(),
 -		connect.WithGRPC(),
--		connect.WithCodec(nil),
+-		connect.WithProtoJSON(),
 +func options() []connecthttp.Option {
 +	return []connecthttp.Option{
 +		connecthttp.WithReadMaxBytes(1024),
@@ -51,7 +51,7 @@ Proposed rewrites (rerun with -w to apply):
 +		connecthttp.WithCompressMinBytes(512),
 +		connecthttp.WithRequireConnectProtocolHeader(),
 +		connecthttp.WithGRPC(),
-+		connecthttp.WithCodec(nil),
++		connecthttp.WithProtoJSON(),
  	}
  }
  

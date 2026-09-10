@@ -25,53 +25,44 @@ import (
 func TestCompressionOption(t *testing.T) {
 	t.Parallel()
 
-	apply := func(opts ...Option) *options {
-		o := defaultOptions()
-		for _, opt := range opts {
-			opt.apply(&o)
+	// preference returns the negotiated preference order, most preferred first.
+	preference := func(options ...Option) string {
+		opts := defaultOptions()
+		for _, option := range options {
+			option.apply(&opts)
 		}
-		return &o
+		return newReadOnlyCompressionPools(opts.compressors).CommaSeparatedNames()
 	}
-	checkPools := func(t *testing.T, opts *options) {
-		t.Helper()
-		assert.Equal(t, len(opts.compressorNames), len(opts.compressors))
-		for _, name := range opts.compressorNames {
-			assert.NotNil(t, opts.compressors[name])
-		}
-	}
+	const (
+		gzip     = connect.CompressionNameGzip
+		identity = connect.CompressionNameIdentity
+	)
 
-	t.Run("defaults", func(t *testing.T) {
+	t.Run("defaults to gzip", func(t *testing.T) {
 		t.Parallel()
-		opts := apply()
-		assert.Equal(t, opts.compressorNames, []string{connect.CompressionNameGzip})
-		checkPools(t, opts)
+		assert.Equal(t, preference(), gzip)
 	})
-	t.Run("withCompressors registers and accepts", func(t *testing.T) {
+	t.Run("first listed is most preferred", func(t *testing.T) {
 		t.Parallel()
-		opts := apply(WithCompressor(identityCompressor{}))
-		assert.Equal(t, opts.compressorNames, []string{connect.CompressionNameGzip, connect.CompressionNameIdentity})
-		checkPools(t, opts)
+		assert.Equal(t, preference(WithCompressors(identityCompressor{}, stubCompressor(gzip))), identity+","+gzip)
 	})
-	t.Run("withNoCompression-disables", func(t *testing.T) {
+	t.Run("replaces the defaults", func(t *testing.T) {
 		t.Parallel()
-		opts := apply(WithNoCompression())
-		assert.Equal(t, opts.compressorNames, nil)
-		assert.Equal(t, len(opts.compressors), 0)
+		assert.Equal(t, preference(WithCompressors(identityCompressor{})), identity)
 	})
-	t.Run("withAcceptCompression-selects-name", func(t *testing.T) {
+	t.Run("no arguments disables compression", func(t *testing.T) {
 		t.Parallel()
-		opts := apply(WithAcceptCompression("br"))
-		assert.Equal(t, opts.compressorNames, []string{connect.CompressionNameGzip, "br"})
+		assert.Equal(t, preference(WithCompressors()), "")
 	})
-	t.Run("withAcceptCompression-empty-name-noop", func(t *testing.T) {
+	t.Run("last call wins", func(t *testing.T) {
 		t.Parallel()
-		opts := apply(WithAcceptCompression(""))
-		assert.Equal(t, opts.compressorNames, []string{connect.CompressionNameGzip})
+		opts := []Option{WithCompressors(identityCompressor{}), WithCompressors(stubCompressor(gzip))}
+		assert.Equal(t, preference(opts...), gzip)
 	})
-	t.Run("withAcceptCompression-deduplicates", func(t *testing.T) {
+	t.Run("repeated name keeps its first entry", func(t *testing.T) {
 		t.Parallel()
-		opts := apply(WithAcceptCompression(connect.CompressionNameGzip))
-		assert.Equal(t, opts.compressorNames, []string{connect.CompressionNameGzip})
+		opts := []Option{WithCompressors(identityCompressor{}, stubCompressor(gzip), identityCompressor{})}
+		assert.Equal(t, preference(opts...), identity+","+gzip)
 	})
 }
 

@@ -1,4 +1,4 @@
-# After WithCodec moves to connecthttp, the now-unused v1 connect import is dropped.
+# After WithProtoJSON moves to connecthttp, the now-unused v1 connect import is dropped.
 stubs v2
 exec migrate
 cmp stdout out.txt
@@ -16,7 +16,7 @@ import (
 )
 
 func codec() {
-	opt := connect.WithCodec(nil)
+	opt := connect.WithProtoJSON()
 	fmt.Println(opt)
 }
 -- out.txt --
@@ -33,8 +33,8 @@ Proposed rewrites (rerun with -w to apply):
  )
  
  func codec() {
--	opt := connect.WithCodec(nil)
-+	opt := connecthttp.WithCodec(nil)
+-	opt := connect.WithProtoJSON()
++	opt := connecthttp.WithProtoJSON()
  	fmt.Println(opt)
  }
  
