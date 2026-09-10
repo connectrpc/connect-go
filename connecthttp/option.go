@@ -55,7 +55,7 @@ func WithProtoJSON() Option {
 // outgoing requests. The named codec must be registered via [WithCodecs].
 //
 // If this option is not used, clients default to using the first codec
-// provided to [WithCodecs]. [Mount] ignore this option.
+// provided to [WithCodecs]. [Mount] ignores this option.
 func WithSendCodec(name string) Option {
 	return sendCodecOption(name)
 }
