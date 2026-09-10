@@ -40,6 +40,12 @@ jobs:
         # supported version.
         if: matrix.go-version.name == 'latest'
         run: make checkgenerate && make lint
+      - name: Check Release
+        # Verifies that the release build works, so breakage surfaces here
+        # rather than when a release is being cut. Releases are built with the
+        # most recent supported version, so that's all we need to check.
+        if: matrix.go-version.name == 'latest'
+        run: make checkrelease
   conformance:
     name: conformance (go:${{ matrix.go-version.name }})
     runs-on: ubuntu-latest
