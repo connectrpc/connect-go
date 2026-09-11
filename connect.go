@@ -38,7 +38,7 @@ import (
 )
 
 // Version is the semantic version of the connect module.
-const Version = "2.0.0-dev"
+const Version = "2.0.0-alpha.1"
 
 // Well-known codec names.
 const (
