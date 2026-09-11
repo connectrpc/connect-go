@@ -1,0 +1,42 @@
+# Generates the build-harness scaffold stubs from the repo's
+# internal/proto/connect/ping/v1/ping.proto with the test module's import
+# prefix (example.com/app/gen). The four trees cover every state the migration
+# tool must handle:
+#
+#   gen/          shared *.pb.go (version-independent)
+#   genv1generic/ connect v1 stubs, generic form (connect.Request[T] wrappers)
+#   genv1simple/  connect v1 stubs, simple form (raw message types; `simple` opt)
+#   genv2/        connect v2 stubs
+#
+# The v1 and v2 connect plugins share the binary name protoc-gen-connect-go, so
+# they are built under distinct names and referenced explicitly. Regenerate:
+#
+#   tmp=$(mktemp -d)
+#   GOBIN=$tmp go install connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.20.0
+#   mv $tmp/protoc-gen-connect-go $tmp/protoc-gen-connect-go-v1
+#   go build -o $tmp/protoc-gen-connect-go-v2 ./cmd/protoc-gen-connect-go
+#   PATH="$tmp:$PATH" buf generate \
+#     --template cmd/connect-go-v2-migrate/testdata/build/buf.gen.yaml \
+#     --path internal/proto/connect/ping/v1/ping.proto \
+#     -o cmd/connect-go-v2-migrate/testdata/build
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: example.com/app/gen
+plugins:
+  - local: protoc-gen-go
+    out: gen
+    opt: paths=source_relative
+  - local: protoc-gen-connect-go-v1
+    out: genv1generic
+    opt: paths=source_relative
+  - local: protoc-gen-connect-go-v1
+    out: genv1simple
+    opt:
+      - paths=source_relative
+      - simple
+  - local: protoc-gen-connect-go-v2
+    out: genv2
+    opt: paths=source_relative

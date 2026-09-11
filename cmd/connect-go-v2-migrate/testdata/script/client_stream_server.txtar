@@ -1,0 +1,80 @@
+# Server-streaming consumer: NewRequest unwraps; the bool Receive loop becomes the v2 form.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func runCountUp(ctx context.Context, client pingv1connect.PingServiceClient) error {
+	stream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 3}))
+	if err != nil {
+		return err
+	}
+	for stream.Receive() {
+		fmt.Println(stream.Msg().Number)
+	}
+	if err := stream.Err(); err != nil {
+		return err
+	}
+	return stream.Close()
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_drop_v1=1 stream_recv_loop=1 strip_new_request=1
+--- ./service.go
++++ ./service.go
+@@ -2,24 +2,30 @@
+ 
+ import (
+ 	"context"
++	"errors"
+ 	"fmt"
++	"io"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+ func runCountUp(ctx context.Context, client pingv1connect.PingServiceClient) error {
+-	stream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 3}))
++	stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 3})
+ 	if err != nil {
+ 		return err
+ 	}
+-	for stream.Receive() {
+-		fmt.Println(stream.Msg().Number)
+-	}
+-	if err := stream.Err(); err != nil {
+-		return err
++	for {
++		msg, err := stream.Receive()
++		if err != nil {
++			if errors.Is(err, io.EOF) {
++				break
++			}
++			return err
++		}
++		fmt.Println(msg.Number)
+ 	}
++
+ 	return stream.Close()
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

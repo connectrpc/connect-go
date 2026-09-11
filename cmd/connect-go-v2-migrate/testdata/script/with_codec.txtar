@@ -1,0 +1,22 @@
+# connect.WithCodec is warned, not rewritten: v2's WithCodecs replaces the
+# default codecs instead of adding to them, so the v1 import is retained.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package p
+
+import "connectrpc.com/connect"
+
+var _ = connect.WithCodec(nil)
+-- out.txt --
+The following issues require manual code changes:
+  ./service.go:3:8: connectrpc.com/connect (v1) import retained because it still uses connect.WithCodec.
+  ./service.go:5:9: connect.WithCodec -> connecthttp.WithCodecs(...connect.Codec), which REPLACES the default codecs instead of adding to them; list every codec you need in one call
+
+Scanned 1 Go file and 0 Buf templates. No automatic rewrites were applied.
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

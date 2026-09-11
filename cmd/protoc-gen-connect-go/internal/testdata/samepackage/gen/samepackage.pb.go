@@ -116,8 +116,8 @@ const file_samepackage_proto_rawDesc = "" +
 	"\n" +
 	"\bResponse2b\n" +
 	"\vTestService\x12S\n" +
-	"\x06Method\x12\".connect.test.same_package.Request\x1a#.connect.test.same_package.Response\"\x00B\x87\x02\n" +
-	"\x1dcom.connect.test.same_packageB\x10SamepackageProtoP\x01ZRconnectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/samepackage/gen\xa2\x02\x03CTS\xaa\x02\x18Connect.Test.SamePackage\xca\x02\x18Connect\\Test\\SamePackage\xe2\x02$Connect\\Test\\SamePackage\\GPBMetadata\xea\x02\x1aConnect::Test::SamePackageb\x06proto3"
+	"\x06Method\x12\".connect.test.same_package.Request\x1a#.connect.test.same_package.Response\"\x00B\x8a\x02\n" +
+	"\x1dcom.connect.test.same_packageB\x10SamepackageProtoP\x01ZUconnectrpc.com/connect/v2/cmd/protoc-gen-connect-go/internal/testdata/samepackage/gen\xa2\x02\x03CTS\xaa\x02\x18Connect.Test.SamePackage\xca\x02\x18Connect\\Test\\SamePackage\xe2\x02$Connect\\Test\\SamePackage\\GPBMetadata\xea\x02\x1aConnect::Test::SamePackageb\x06proto3"
 
 var (
 	file_samepackage_proto_rawDescOnce sync.Once

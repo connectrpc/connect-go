@@ -1,0 +1,57 @@
+# NewClientContext renames its info var to dodge an existing identifier.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func call(ctx context.Context, client pingv1connect.PingServiceClient) error {
+	info := "trace"
+	callInfo := "span"
+	req := connect.NewRequest(&pingv1.PingRequest{Text: "hello"})
+	req.Header().Set("X-Trace", info+callInfo)
+	_, err := client.Ping(ctx, req)
+	return err
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: client_context_insert=1 client_header_rewrite=1 import_add_connectv2=1 import_drop_v1=1 strip_new_request=1
+--- ./service.go
++++ ./service.go
+@@ -3,7 +3,7 @@
+ import (
+ 	"context"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -11,8 +11,9 @@
+ func call(ctx context.Context, client pingv1connect.PingServiceClient) error {
+ 	info := "trace"
+ 	callInfo := "span"
+-	req := connect.NewRequest(&pingv1.PingRequest{Text: "hello"})
+-	req.Header().Set("X-Trace", info+callInfo)
++	req := &pingv1.PingRequest{Text: "hello"}
++	ctx, callInfo2 := connect.NewClientContext(ctx)
++	callInfo2.RequestHeader().Set("X-Trace", info+callInfo)
+ 	_, err := client.Ping(ctx, req)
+ 	return err
+ }
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

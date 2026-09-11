@@ -1,0 +1,39 @@
+# The dangling-.Msg post-pass: after toPb's return type flips to the bare
+# message, the _test.go caller's got.Msg selector is stripped.
+stubs v2
+exec migrate -w
+exec go build ./...
+! grep 'connect\.Response' pkg/helper.go
+grep '\*pingv1\.PingResponse' pkg/helper.go
+! grep 'got\.Msg' pkg/helper_test.go
+grep 'got\.Text' pkg/helper_test.go
+exec migrate
+! stdout 'Proposed rewrites'
+-- pkg/helper.go --
+package pkg
+
+import (
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+)
+
+// toPb returns the v1 response wrapper. After migration it returns the bare
+// message, so callers that reach through .Msg are left dangling.
+func toPb() (*connect.Response[pingv1.PingResponse], error) {
+	return connect.NewResponse(&pingv1.PingResponse{Text: "x"}), nil
+}
+-- pkg/helper_test.go --
+package pkg
+
+import "testing"
+
+func TestToPb(t *testing.T) {
+	got, err := toPb()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Msg.Text != "x" {
+		t.Fatalf("text = %q", got.Msg.Text)
+	}
+	_ = got.Msg
+}

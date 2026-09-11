@@ -521,8 +521,8 @@ const file_connect_ping_v1_ping_proto_rawDesc = "" +
 	"\x04Fail\x12\x1c.connect.ping.v1.FailRequest\x1a\x1d.connect.ping.v1.FailResponse\"\x00\x12D\n" +
 	"\x03Sum\x12\x1b.connect.ping.v1.SumRequest\x1a\x1c.connect.ping.v1.SumResponse\"\x00(\x01\x12P\n" +
 	"\aCountUp\x12\x1f.connect.ping.v1.CountUpRequest\x1a .connect.ping.v1.CountUpResponse\"\x000\x01\x12O\n" +
-	"\x06CumSum\x12\x1e.connect.ping.v1.CumSumRequest\x1a\x1f.connect.ping.v1.CumSumResponse\"\x00(\x010\x01B\xba\x01\n" +
-	"\x13com.connect.ping.v1B\tPingProtoP\x01Z:connectrpc.com/connect/internal/gen/connect/ping/v1;pingv1\xa2\x02\x03CPX\xaa\x02\x0fConnect.Ping.V1\xca\x02\x0fConnect\\Ping\\V1\xe2\x02\x1bConnect\\Ping\\V1\\GPBMetadata\xea\x02\x11Connect::Ping::V1b\x06proto3"
+	"\x06CumSum\x12\x1e.connect.ping.v1.CumSumRequest\x1a\x1f.connect.ping.v1.CumSumResponse\"\x00(\x010\x01B\xbd\x01\n" +
+	"\x13com.connect.ping.v1B\tPingProtoP\x01Z=connectrpc.com/connect/v2/internal/gen/connect/ping/v1;pingv1\xa2\x02\x03CPX\xaa\x02\x0fConnect.Ping.V1\xca\x02\x0fConnect\\Ping\\V1\xe2\x02\x1bConnect\\Ping\\V1\\GPBMetadata\xea\x02\x11Connect::Ping::V1b\x06proto3"
 
 var (
 	file_connect_ping_v1_ping_proto_rawDescOnce sync.Once

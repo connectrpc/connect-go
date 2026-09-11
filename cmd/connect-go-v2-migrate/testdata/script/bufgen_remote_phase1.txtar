@@ -1,0 +1,70 @@
+# Regenerate-first with a remote plugin: the template is pinned to v2 and the
+# report must still surface the not-published warning, because the steps below
+# tell the user to run buf generate against that pin.
+stubs v1generic
+exec migrate
+cmp stdout out.txt
+stdout 'not published yet'
+stdout 'no Go source changes are proposed yet'
+stdout 'Proposed Buf template updates'
+stdout 'no Go source changes are proposed yet'
+exec go build ./...
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	return connect.NewResponse(&pingv1.PingResponse{Number: req.Msg.Number, Text: req.Msg.Text}), nil
+}
+-- buf.gen.yaml --
+version: v2
+plugins:
+  - remote: buf.build/connectrpc/go:v1.18.1
+    out: gen
+-- out.txt --
+Scanned 1 Go file and 1 Buf template. The generated Connect code still targets
+v1, so no Go source changes are proposed yet.
+
+Generated v1 Connect code:
+  ./gen/connect/ping/v1/pingv1connect
+
+Proposed Buf template updates (rerun with -w to apply):
+  ./buf.gen.yaml: bufgen_pin_remote_v2=1
+--- ./buf.gen.yaml
++++ ./buf.gen.yaml
+@@ -1,5 +1,5 @@
+ version: v2
+ plugins:
+-  - remote: buf.build/connectrpc/go:v1.18.1
++  - remote: buf.build/connectrpc/go:v2.0.0
+     out: gen
+ 
+
+
+The following issues require a manual update:
+  ./buf.gen.yaml:3:1: buf.build/connectrpc/go:v2.0.0 is not published yet. Until connect-go v2.0.0 is released, generate with the local plugin instead: `go install connectrpc.com/connect/v2/cmd/protoc-gen-connect-go@latest` and a `local: protoc-gen-connect-go` entry.
+
+First, move the dependencies and generated code to v2:
+
+  1. connect-go-v2-migrate -w  (applies the Buf template update above)
+  2. go get -u \
+       connectrpc.com/connect/v2
+     (pulls the v2 core, generated SDKs, and ecosystem modules into go.mod)
+  3. buf generate
+
+Then re-run connect-go-v2-migrate to work through the Go source changes: it
+rewrites the call sites against the v2 stubs and reports anything that needs
+a manual update.
+
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

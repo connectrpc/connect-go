@@ -1,0 +1,53 @@
+# Client construction: NewClient/transport wrapping.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- client_construction.go --
+package example
+
+import (
+	"net/http"
+
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func newClient() pingv1connect.PingServiceClient {
+	return pingv1connect.NewPingServiceClient(
+		http.DefaultClient,
+		"http://localhost:8080/",
+	)
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./client_construction.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 read_limit_pinned=1
+--- ./client_construction.go
++++ ./client_construction.go
+@@ -3,13 +3,14 @@
+ import (
+ 	"net/http"
+ 
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+ func newClient() pingv1connect.PingServiceClient {
+-	return pingv1connect.NewPingServiceClient(
+-		http.DefaultClient,
+-		"http://localhost:8080/",
++	return pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient,
++		"http://localhost:8080/", connecthttp.WithReadMaxBytes(0))),
+ 	)
+ }
+ 
+
+
+The following issues require manual code changes:
+  ./client_construction.go:10:9: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

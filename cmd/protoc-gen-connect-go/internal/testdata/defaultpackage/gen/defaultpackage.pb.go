@@ -116,8 +116,8 @@ const file_defaultpackage_proto_rawDesc = "" +
 	"\n" +
 	"\bResponse2h\n" +
 	"\vTestService\x12Y\n" +
-	"\x06Method\x12%.connect.test.default_package.Request\x1a&.connect.test.default_package.Response\"\x00B\x9c\x02\n" +
-	" com.connect.test.default_packageB\x13DefaultpackageProtoP\x01ZUconnectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/defaultpackage/gen\xa2\x02\x03CTD\xaa\x02\x1bConnect.Test.DefaultPackage\xca\x02\x1bConnect\\Test\\DefaultPackage\xe2\x02'Connect\\Test\\DefaultPackage\\GPBMetadata\xea\x02\x1dConnect::Test::DefaultPackageb\x06proto3"
+	"\x06Method\x12%.connect.test.default_package.Request\x1a&.connect.test.default_package.Response\"\x00B\x9f\x02\n" +
+	" com.connect.test.default_packageB\x13DefaultpackageProtoP\x01ZXconnectrpc.com/connect/v2/cmd/protoc-gen-connect-go/internal/testdata/defaultpackage/gen\xa2\x02\x03CTD\xaa\x02\x1bConnect.Test.DefaultPackage\xca\x02\x1bConnect\\Test\\DefaultPackage\xe2\x02'Connect\\Test\\DefaultPackage\\GPBMetadata\xea\x02\x1dConnect::Test::DefaultPackageb\x06proto3"
 
 var (
 	file_defaultpackage_proto_rawDescOnce sync.Once

@@ -117,8 +117,8 @@ const file_v1beta1service_proto_rawDesc = "" +
 	"\x12GetExample_Request\"\x16\n" +
 	"\x14Get1example_response2W\n" +
 	"\rExampleV1beta\x12F\n" +
-	"\x06Method\x12\x1b.example.GetExample_Request\x1a\x1d.example.Get1example_response\"\x00B\xb5\x01\n" +
-	"\vcom.exampleB\x13V1beta1serviceProtoP\x01ZUconnectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/v1beta1service/gen\xa2\x02\x03EXX\xaa\x02\aExample\xca\x02\aExample\xe2\x02\x13Example\\GPBMetadata\xea\x02\aExampleb\x06proto3"
+	"\x06Method\x12\x1b.example.GetExample_Request\x1a\x1d.example.Get1example_response\"\x00B\xb8\x01\n" +
+	"\vcom.exampleB\x13V1beta1serviceProtoP\x01ZXconnectrpc.com/connect/v2/cmd/protoc-gen-connect-go/internal/testdata/v1beta1service/gen\xa2\x02\x03EXX\xaa\x02\aExample\xca\x02\aExample\xe2\x02\x13Example\\GPBMetadata\xea\x02\aExampleb\x06proto3"
 
 var (
 	file_v1beta1service_proto_rawDescOnce sync.Once

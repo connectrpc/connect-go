@@ -1,14 +1,14 @@
 # Simple example
 
-This is the example from the [README.md](../../.README.md).
+This is the example from the [README](../../README.md), runnable end to end.
 
-In one terminal:
+In one terminal, start the server:
 
 ```bash
 go run ./server
 ```
 
-In another terminal:
+In another, run the client:
 
 ```bash
 go run ./client

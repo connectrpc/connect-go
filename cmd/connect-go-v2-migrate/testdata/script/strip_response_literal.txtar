@@ -1,0 +1,53 @@
+# A struct-literal &connect.Response[T]{Msg: m} unwraps to the bare message.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+)
+
+func reply(text string) (*connect.Response[pingv1.PingResponse], error) {
+	return &connect.Response[pingv1.PingResponse]{
+		Msg: &pingv1.PingResponse{
+			// TODO: return the correct value.
+			Text: text,
+		},
+	}, nil
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_drop_v1=1 result_unwrap_response=1 strip_response_literal=1
+--- ./service.go
++++ ./service.go
+@@ -1,16 +1,14 @@
+ package app
+ 
+ import (
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ )
+ 
+-func reply(text string) (*connect.Response[pingv1.PingResponse], error) {
+-	return &connect.Response[pingv1.PingResponse]{
+-		Msg: &pingv1.PingResponse{
++func reply(text string) (*pingv1.PingResponse, error) {
++	return &pingv1.PingResponse{
+ 			// TODO: return the correct value.
+ 			Text: text,
+ 		},
+-	}, nil
++		nil
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

@@ -1,0 +1,56 @@
+# connect.NewErrorWriter, the connect.ErrorWriter type, and
+# connect.IsNotModifiedError relocate verbatim to connecthttp, so they rewrite
+# mechanically instead of warning.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- errorwriter.go --
+package p
+
+import (
+	"net/http"
+
+	"connectrpc.com/connect"
+)
+
+var writer *connect.ErrorWriter = connect.NewErrorWriter(connect.WithRequireConnectProtocolHeader())
+
+func handle(w http.ResponseWriter, r *http.Request, err error) {
+	if connect.IsNotModifiedError(err) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	if writer.IsSupported(r) {
+		_ = writer.Write(w, r, err)
+	}
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./errorwriter.go: import_add_connecthttp=1 import_drop_v1=1 option_to_connecthttp=4
+--- ./errorwriter.go
++++ ./errorwriter.go
+@@ -3,13 +3,13 @@
+ import (
+ 	"net/http"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2/connecthttp"
+ )
+ 
+-var writer *connect.ErrorWriter = connect.NewErrorWriter(connect.WithRequireConnectProtocolHeader())
++var writer *connecthttp.ErrorWriter = connecthttp.NewErrorWriter(connecthttp.WithRequireConnectProtocolHeader())
+ 
+ func handle(w http.ResponseWriter, r *http.Request, err error) {
+-	if connect.IsNotModifiedError(err) {
++	if connecthttp.IsNotModifiedError(err) {
+ 		w.WriteHeader(http.StatusNotModified)
+ 		return
+ 	}
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

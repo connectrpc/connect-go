@@ -1,0 +1,62 @@
+# Regression: collapsing a NewErrorDetail guard must preserve a sibling closure's layout.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
+)
+
+func run(fn func()) {
+	fn()
+}
+
+func toConnectError(code uint32, err error, info proto.Message) error {
+	cErr := connect.NewError(connect.Code(code), err)
+	if detail, detailErr := connect.NewErrorDetail(info); detailErr == nil {
+		cErr.AddDetail(detail)
+	}
+	run(func() {
+		_ = info
+	})
+	return cErr
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: convert_code_const=1 convert_new_error=1 flip_residual_connect=1 import_add_connectv2=1 import_drop_v1=1 retarget_error_detail=1
+--- ./service.go
++++ ./service.go
+@@ -1,7 +1,8 @@
+ package app
+ 
+ import (
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connectproto"
+ 	"google.golang.org/protobuf/proto"
+ )
+ 
+@@ -10,9 +11,9 @@
+ }
+ 
+ func toConnectError(code uint32, err error, info proto.Message) error {
+-	cErr := connect.NewError(connect.Code(code), err)
+-	if detail, detailErr := connect.NewErrorDetail(info); detailErr == nil {
+-		cErr.AddDetail(detail)
++	cErr := connect.NewError(connect.Code(code), err.Error())
++	if detail, detailErr := connectproto.NewErrorDetail(info); detailErr == nil {
++		cErr = cErr.WithDetail(detail)
+ 	}
+ 	run(func() {
+ 		_ = info
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md
