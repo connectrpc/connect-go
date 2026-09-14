@@ -1798,6 +1798,50 @@ func TestClientWithoutGzipSupport(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), "unknown compression"))
 }
 
+func TestClientUnaryAcceptEncoding(t *testing.T) {
+	// Assert Accept-Encoding is correctly set for unary clients. It must be
+	// explicit to avoid net/http defaults.
+	t.Parallel()
+	tests := []struct {
+		name    string
+		options []connecthttp.Option
+		want    string
+	}{{
+		name: "default gzip",
+		want: connect.CompressionNameGzip,
+	}, {
+		name:    "no compressors sends identity",
+		options: []connecthttp.Option{connecthttp.WithCompressors()},
+		want:    connect.CompressionNameIdentity,
+	}, {
+		name:    "custom order preserved",
+		options: []connecthttp.Option{connecthttp.WithCompressors(deflateCompressor{}, connectgzip.New())},
+		want:    "deflate,gzip",
+	}}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			mux := http.NewServeMux()
+			srv := connect.NewServer()
+			pingv1connect.RegisterPingServiceHandler(srv, pingServer{})
+			connecthttp.Mount(mux, srv)
+			// Record the header exactly as the server receives it on the wire.
+			var got string
+			recorder := http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+				got = request.Header.Get("Accept-Encoding")
+				mux.ServeHTTP(responseWriter, request)
+			})
+			server := memhttptest.NewServer(t, recorder)
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(
+				connecthttp.NewTransport(server.Client(), server.URL(), test.options...),
+			))
+			_, err := client.Ping(t.Context(), &pingv1.PingRequest{Text: "hello"})
+			assert.Nil(t, err)
+			assert.Equal(t, got, test.want)
+		})
+	}
+}
+
 func TestInvalidHeaderTimeout(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
