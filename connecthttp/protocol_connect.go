@@ -333,12 +333,13 @@ func (c *connectClient) WriteRequestHeader(streamType connect.StreamType, header
 	header[headerContentType] = []string{
 		connectContentTypeForCodecName(streamType, c.Codec.Name()),
 	}
+	// Always set Accept-Encoding. If left unset, http.Client will set a default
+	// gzip and transparently decode the response. This applies to both unary and
+	// streaming RPCs. For streaming calls it stays "identity" as compression is
+	// applied per message.
+	header[connectUnaryHeaderAcceptCompression] = []string{connect.CompressionNameIdentity}
 	acceptCompressionHeader := connectUnaryHeaderAcceptCompression
 	if streamType != connect.StreamTypeUnary {
-		// If we don't set Accept-Encoding, by default http.Client will ask the
-		// server to compress the whole stream. Since we're already compressing
-		// each message, this is a waste.
-		header[connectUnaryHeaderAcceptCompression] = []string{connect.CompressionNameIdentity}
 		acceptCompressionHeader = connectStreamingHeaderAcceptCompression
 		// We only write the request encoding header here for streaming calls,
 		// since the streaming envelope lets us choose whether to compress each
