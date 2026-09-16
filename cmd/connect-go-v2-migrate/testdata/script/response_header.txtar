@@ -1,0 +1,60 @@
+# Client response-header read: seeds connect.NewClientContext and reads via
+# info.ResponseHeader().
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func call(ctx context.Context, client pingv1connect.PingServiceClient) (string, string, error) {
+	res, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
+	if err != nil {
+		return "", "", err
+	}
+	trace := res.Header().Get("X-Trace")
+	return res.Msg.Text, trace, nil
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: body_drop_msg=1 client_context_insert=1 client_response_metadata_rewrite=1 import_add_connectv2=1 import_drop_v1=1 strip_new_request=1
+--- ./service.go
++++ ./service.go
+@@ -3,17 +3,18 @@
+ import (
+ 	"context"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+ func call(ctx context.Context, client pingv1connect.PingServiceClient) (string, string, error) {
+-	res, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
++	ctx, info := connect.NewClientContext(ctx)
++	res, err := client.Ping(ctx, &pingv1.PingRequest{})
+ 	if err != nil {
+ 		return "", "", err
+ 	}
+-	trace := res.Header().Get("X-Trace")
+-	return res.Msg.Text, trace, nil
++	trace := info.ResponseHeader().Get("X-Trace")
++	return res.Text, trace, nil
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

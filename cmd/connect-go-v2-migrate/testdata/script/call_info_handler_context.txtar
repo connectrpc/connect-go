@@ -1,0 +1,59 @@
+# The v1 connect.CallInfoForHandlerContext renames to connect.CallInfoForServerContext.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	info, _ := connect.CallInfoForHandlerContext(ctx)
+	token := info.RequestHeader().Get("Authorization")
+	return connect.NewResponse(&pingv1.PingResponse{Text: token}), nil
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_add_connectv2=1 import_drop_v1=1 param_unwrap_request=1 rename_connect_core=1 result_unwrap_response=1 strip_new_response=1
+--- ./service.go
++++ ./service.go
+@@ -3,7 +3,7 @@
+ import (
+ 	"context"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -12,9 +12,9 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+-	info, _ := connect.CallInfoForHandlerContext(ctx)
++func (s *pingServer) Ping(ctx context.Context, req *pingv1.PingRequest) (*pingv1.PingResponse, error) {
++	info, _ := connect.CallInfoForServerContext(ctx)
+ 	token := info.RequestHeader().Get("Authorization")
+-	return connect.NewResponse(&pingv1.PingResponse{Text: token}), nil
++	return &pingv1.PingResponse{Text: token}, nil
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

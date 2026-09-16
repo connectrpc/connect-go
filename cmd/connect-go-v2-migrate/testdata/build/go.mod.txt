@@ -1,0 +1,11 @@
+module example.com/app
+
+go 1.25.0
+
+require (
+	connectrpc.com/connect v1.20.0
+	connectrpc.com/connect/v2 v2.0.0
+	google.golang.org/protobuf v1.36.11
+)
+
+replace connectrpc.com/connect/v2 => REPLACE_DIR

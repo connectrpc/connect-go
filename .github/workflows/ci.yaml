@@ -1,10 +1,10 @@
 name: ci
 on:
   push:
-    branches: [main]
-    tags: ['v*']
+    branches: [main, v2]
+    tags: ['v*', 'cmd/connect-go-v2-migrate/v*']
   pull_request:
-    branches: [main]
+    branches: [main, v2]
   schedule:
     - cron: '15 22 * * *'
   workflow_dispatch: {} # support manual runs
@@ -18,18 +18,19 @@ jobs:
       matrix:
         go-version:
         - name: latest
-          version: 1.26.x
+          version: 1.27.x
         - name: previous
-          version: 1.25.x
+          version: 1.26.x
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - name: Install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go-version.version }}
+          check-latest: true
       - name: Unit Test
         run: make shorttest
       - name: Lint
@@ -39,6 +40,12 @@ jobs:
         # supported version.
         if: matrix.go-version.name == 'latest'
         run: make checkgenerate && make lint
+      - name: Check Release
+        # Verifies that the release build works, so breakage surfaces here
+        # rather than when a release is being cut. Releases are built with the
+        # most recent supported version, so that's all we need to check.
+        if: matrix.go-version.name == 'latest'
+        run: make checkrelease
   conformance:
     name: conformance (go:${{ matrix.go-version.name }})
     runs-on: ubuntu-latest
@@ -46,31 +53,49 @@ jobs:
       matrix:
         go-version:
         - name: latest
-          version: 1.26.x
+          version: 1.27.x
         - name: previous
-          version: 1.25.x
+          version: 1.26.x
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - name: Install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go-version.version }}
+          check-latest: true
       - name: Run Conformance Tests
         run: make runconformance
   slowtest:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - name: Install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           # only the latest
-          go-version: 1.26.x
+          go-version: 1.27.x
+          check-latest: true
       - name: Run Slow Tests
         run: make slowtest
+  migrate:
+    name: migrate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          # only the latest
+          go-version: 1.27.x
+          check-latest: true
+      - name: Test Migration Tool
+        run: make testmigrate

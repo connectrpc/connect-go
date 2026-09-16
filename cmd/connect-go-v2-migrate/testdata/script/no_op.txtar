@@ -1,0 +1,19 @@
+# A file with no connect usage is left untouched.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package example
+
+import "fmt"
+
+func unrelated() string {
+	return fmt.Sprintf("no connect here")
+}
+-- out.txt --
+Scanned 1 Go file and 0 Buf templates. No automatic rewrites were applied.
+None of the scanned Go files import connectrpc.com/connect, so there is nothing to migrate.

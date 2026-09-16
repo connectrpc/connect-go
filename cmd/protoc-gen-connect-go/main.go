@@ -73,7 +73,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	connect "connectrpc.com/connect"
+	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -81,16 +81,14 @@ import (
 )
 
 const (
-	contextPackage = protogen.GoImportPath("context")
-	errorsPackage  = protogen.GoImportPath("errors")
-	httpPackage    = protogen.GoImportPath("net/http")
-	stringsPackage = protogen.GoImportPath("strings")
-	connectPackage = protogen.GoImportPath("connectrpc.com/connect")
+	contextPackage   = protogen.GoImportPath("context")
+	syncPackage      = protogen.GoImportPath("sync")
+	connectPackage   = protogen.GoImportPath("connectrpc.com/connect")
+	connectV2Package = protogen.GoImportPath("connectrpc.com/connect/v2")
 
 	generatedFilenameExtension = ".connect.go"
 	defaultPackageSuffix       = "connect"
 	packageSuffixFlagName      = "package_suffix"
-	simpleFlagName             = "simple"
 
 	usage = "See https://connectrpc.com/docs/go/getting-started to learn how to use this plugin.\n\nFlags:\n  -h, --help\tPrint this help and exit.\n      --version\tPrint the version and exit."
 
@@ -121,27 +119,17 @@ func main() {
 		defaultPackageSuffix,
 		"Generate files into a sub-package of the package containing the base .pb.go files using the given suffix. An empty suffix denotes to generate into the same package as the base pb.go files.",
 	)
-	// "simple" is a bool, but we want to support just setting "simple" without needing to set "simple=true"
-	// We do this via making the flag a string, and then parsing manually in getSimpleBool.
-	simpleString := flagSet.String(
-		simpleFlagName,
-		"false",
-		"Generate client and handler interfaces with simple function signatures. This eliminates the wrapper connect.Request and connect.Response types, instead having functions directly use generated RPC request and responses. Clients and handlers will instead use context.Contexts to propagate information such as headers. Most users will be more familiar with these interfaces than the default.",
-	)
 	protogen.Options{
-		ParamFunc: flagSet.Set,
+		ParamFunc:         flagSet.Set,
+		ImportRewriteFunc: importRewriteFunc,
 	}.Run(
 		func(plugin *protogen.Plugin) error {
 			plugin.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL) | uint64(pluginpb.CodeGeneratorResponse_FEATURE_SUPPORTS_EDITIONS)
-			simple, err := getSimpleBool(*simpleString)
-			if err != nil {
-				return err
-			}
 			plugin.SupportedEditionsMinimum = descriptorpb.Edition_EDITION_PROTO2
 			plugin.SupportedEditionsMaximum = descriptorpb.Edition_EDITION_2024
 			for _, file := range plugin.Files {
 				if file.Generate {
-					generate(plugin, file, *packageSuffix, simple)
+					generate(plugin, file, *packageSuffix)
 				}
 			}
 			return nil
@@ -149,7 +137,16 @@ func main() {
 	)
 }
 
-func generate(plugin *protogen.Plugin, file *protogen.File, packageSuffix string, simple bool) {
+// importRewriteFunc is a workaround for import alias naming.
+// See https://github.com/golang/protobuf/issues/1205
+func importRewriteFunc(path protogen.GoImportPath) protogen.GoImportPath {
+	if path == connectPackage {
+		return connectV2Package
+	}
+	return path
+}
+
+func generate(plugin *protogen.Plugin, file *protogen.File, packageSuffix string) {
 	if len(file.Services) == 0 {
 		return
 	}
@@ -182,7 +179,7 @@ func generate(plugin *protogen.Plugin, file *protogen.File, packageSuffix string
 	generatePreamble(generatedFile, file)
 	generateServiceNameConstants(generatedFile, file.Services)
 	for _, service := range file.Services {
-		generateService(generatedFile, file, service, simple)
+		generateService(generatedFile, file, service)
 	}
 }
 
@@ -221,20 +218,13 @@ func generatePreamble(g *protogen.GeneratedFile, file *protogen.File) {
 
 	g.P("package ", file.GoPackageName)
 	g.P()
-	wrapComments(g, "This is a compile-time assertion to ensure that this generated file ",
-		"and the connect package are compatible. If you get a compiler error that this constant ",
-		"is not defined, this code was generated with a version of connect newer than the one ",
-		"compiled into your binary. You can fix the problem by either regenerating this code ",
-		"with an older version of connect or updating the connect version compiled into your binary.")
-	g.P("const _ = ", connectPackage.Ident("IsAtLeastVersion1_13_0"))
-	g.P()
 }
 
 func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protogen.Service) {
 	var numMethods int
 	g.P("const (")
 	for _, service := range services {
-		constName := fmt.Sprintf("%sName", service.Desc.Name())
+		constName := serviceNameConst(service)
 		wrapComments(g, constName, " is the fully-qualified name of the ",
 			service.Desc.Name(), " service.")
 		g.P(constName, ` = "`, service.Desc.FullName(), `"`)
@@ -246,7 +236,7 @@ func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protoge
 	if numMethods == 0 {
 		return
 	}
-	wrapComments(g, "These constants are the fully-qualified names of the RPCs defined in this package. ",
+	wrapComments(g, "These constants are the procedure names of the RPCs defined in this package. ",
 		"They're exposed at runtime as Spec.Procedure and as the final two segments of the HTTP route.")
 	g.P("//")
 	wrapComments(g, "Note that these are different from the fully-qualified method names used by ",
@@ -258,7 +248,7 @@ func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protoge
 		for _, method := range service.Methods {
 			// The runtime exposes this value as Spec.Procedure, so we should use the
 			// same term here.
-			wrapComments(g, procedureConstName(method), " is the fully-qualified name of the ",
+			wrapComments(g, procedureConstName(method), " is the procedure name of the ",
 				service.Desc.Name(), "'s ", method.Desc.Name(), " RPC.")
 			g.P(procedureConstName(method), ` = "`, fmt.Sprintf("/%s/%s", service.Desc.FullName(), method.Desc.Name()), `"`)
 		}
@@ -267,389 +257,396 @@ func generateServiceNameConstants(g *protogen.GeneratedFile, services []*protoge
 	g.P()
 }
 
-func generateServiceMethodsVar(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service) {
+// generateSpecVars emits one lazily-resolved Spec per method. The Spec's
+// Schema reads the file descriptor from the protoc-gen-go package.
+func generateSpecVars(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service) {
 	if len(service.Methods) == 0 {
 		return
 	}
-	serviceMethodsName := serviceVarMethodsName(service)
-	g.P(serviceMethodsName, ` := `,
-		g.QualifiedGoIdent(file.GoDescriptorIdent),
-		`.Services().ByName("`, service.Desc.Name(), `").Methods()`)
+	specType := g.QualifiedGoIdent(connectPackage.Ident("Spec"))
+	onceValue := g.QualifiedGoIdent(syncPackage.Ident("OnceValue"))
+	descIdent := g.QualifiedGoIdent(file.GoDescriptorIdent)
+	g.P("var (")
+	for _, method := range service.Methods {
+		g.P(specVar(service, method), " = ", onceValue, "(func() ", specType, " {")
+		g.P("return ", specType, "{")
+		g.P("StreamType: ", methodStreamName(g, method), ",")
+		g.P("Schema: ", descIdent, `.Services().ByName("`, service.Desc.Name(), `").Methods().ByName("`, method.Desc.Name(), `"),`)
+		g.P("Procedure: ", procedureConstName(method), ",")
+		if idem := methodIdempotencyName(g, method); idem != "" {
+			g.P("IdempotencyLevel: ", idem, ",")
+		}
+		g.P("}")
+		g.P("})")
+	}
+	g.P(")")
+	g.P()
 }
 
-func generateService(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, simple bool) {
-	names := newNames(service)
-	generateClientInterface(g, service, names, simple)
-	generateClientImplementation(g, file, service, names, simple)
-	generateServerInterface(g, service, names, simple)
-	generateServerConstructor(g, file, service, names, simple)
-	generateUnimplementedServerImplementation(g, service, names, simple)
+func generateService(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service) {
+	generateSpecVars(g, file, service)
+	generateClientInterface(g, service)
+	generateClientConstructor(g, service)
+	generatePerRPCClientStreams(g, service)
+	generateServerInterface(g, service)
+	generateRegisterHandler(g, service)
+	generatePerRPCServerStreams(g, service)
+	generateUnimplementedServerImplementation(g, service)
+	// Unexported implementation types at the bottom of the file.
+	generateClientImplementation(g, service)
+	generateHandlerAdapter(g, service)
 }
 
-func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Service, names names, simple bool) {
-	wrapComments(g, names.Client, " is a client for the ", service.Desc.FullName(), " service.")
+func generateClientInterface(g *protogen.GeneratedFile, service *protogen.Service) {
+	wrapComments(g, service.GoName, "Client is a client for the ", service.Desc.FullName(), " service.")
 	if isDeprecatedService(service) {
 		g.P("//")
 		deprecated(g)
 	}
-	g.AnnotateSymbol(names.Client, protogen.Annotation{Location: service.Location})
-	g.P("type ", names.Client, " interface {")
+	g.AnnotateSymbol(service.GoName+"Client", protogen.Annotation{Location: service.Location})
+	g.P("type ", service.GoName, "Client interface {")
 	for _, method := range service.Methods {
-		g.AnnotateSymbol(names.Client+"."+method.GoName, protogen.Annotation{Location: method.Location})
-		leadingComments(
-			g,
-			method.Comments.Leading,
-			isDeprecatedMethod(method),
-		)
-		g.P(clientSignature(g, method, false /* named */, simple))
+		ctx := g.QualifiedGoIdent(contextPackage.Ident("Context"))
+		input := g.QualifiedGoIdent(method.Input.GoIdent)
+		out := g.QualifiedGoIdent(method.Output.GoIdent)
+		name := method.GoName
+		streamT := clientStreamType(service, method)
+		g.AnnotateSymbol(service.GoName+"Client"+"."+method.GoName, protogen.Annotation{Location: method.Location})
+		leadingComments(g, method.Comments.Leading, isDeprecatedMethod(method))
+		switch methodCardinality(method) {
+		case connect.StreamTypeUnary:
+			g.P(name, "(", ctx, ", *", input, ") (*", out, ", error)")
+		case connect.StreamTypeClient, connect.StreamTypeBidi:
+			g.P(name, "(", ctx, ") (", streamT, ", error)")
+		case connect.StreamTypeServer:
+			g.P(name, "(", ctx, ", *", input, ") (", streamT, ", error)")
+		}
 	}
 	g.P("}")
 	g.P()
 }
 
-func generateClientImplementation(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, names names, simple bool) {
-	clientOption := connectPackage.Ident("ClientOption")
+func generateClientConstructor(g *protogen.GeneratedFile, service *protogen.Service) {
+	clientType := g.QualifiedGoIdent(connectPackage.Ident("Client"))
+	// Take a *connect.Client rather than a Transport so several service clients
+	// can share one Client (and its transport plus interceptor chain), mirroring
+	// how the generated Register*Handler shares one *connect.Server.
+	wrapComments(g, "New", service.GoName, "Client constructs a client for the ", service.Desc.FullName(), " service. ",
+		"Multiple service clients may share a single ", clientType, ".",
+	)
+	g.P("func New", service.GoName, "Client(client *", clientType, ") ", service.GoName, "Client {")
+	g.P("return &", clientStruct(service), "{client: client}")
+	g.P("}")
+	g.P()
+}
 
-	// Client constructor.
-	wrapComments(g, names.ClientConstructor, " constructs a client for the ", service.Desc.FullName(),
-		" service. By default, it uses the Connect protocol with the binary Protobuf Codec, ",
-		"asks for gzipped responses, and sends uncompressed requests. ",
-		"To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or ",
-		"connect.WithGRPCWeb() options.")
-	g.P("//")
-	wrapComments(g, "The URL supplied here should be the base URL for the Connect or gRPC server ",
-		"(for example, http://api.acme.com or https://acme.com/grpc).")
+func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Service) {
+	wrapComments(g, service.GoName, "Handler is an implementation of the ", service.Desc.FullName(), " service.")
 	if isDeprecatedService(service) {
 		g.P("//")
 		deprecated(g)
 	}
-	g.P("func ", names.ClientConstructor, " (httpClient ", connectPackage.Ident("HTTPClient"),
-		", baseURL string, opts ...", clientOption, ") ", names.Client, " {")
+	g.AnnotateSymbol(service.GoName+"Handler", protogen.Annotation{Location: service.Location})
+	g.P("type ", service.GoName, "Handler interface {")
+	for _, method := range service.Methods {
+		ctx := g.QualifiedGoIdent(contextPackage.Ident("Context"))
+		input := g.QualifiedGoIdent(method.Input.GoIdent)
+		out := g.QualifiedGoIdent(method.Output.GoIdent)
+		name := method.GoName
+		leadingComments(g, method.Comments.Leading, isDeprecatedMethod(method))
+		g.AnnotateSymbol(service.GoName+"Handler"+"."+method.GoName, protogen.Annotation{Location: method.Location})
+		switch methodCardinality(method) {
+		case connect.StreamTypeUnary:
+			g.P(name, "(", ctx, ", *", input, ") (*", out, ", error)")
+		case connect.StreamTypeClient:
+			g.P(name, "(", ctx, ", ", serverStreamType(service, method), ") (*", out, ", error)")
+		case connect.StreamTypeServer:
+			g.P(name, "(", ctx, ", *", input, ", ", serverStreamType(service, method), ") error")
+		case connect.StreamTypeBidi:
+			g.P(name, "(", ctx, ", ", serverStreamType(service, method), ") error")
+		}
+	}
+	g.P("}")
+	g.P()
+}
+
+func generateRegisterHandler(g *protogen.GeneratedFile, service *protogen.Service) {
+	serverType := g.QualifiedGoIdent(connectPackage.Ident("Server"))
+	methodType := g.QualifiedGoIdent(connectPackage.Ident("Method"))
+	wrapComments(g, "Register", service.GoName, "Handler registers svc as the ", service.Desc.FullName(), " implementation on server.")
+	g.P("func Register", service.GoName, "Handler(server *", serverType, ", svc ", service.GoName, "Handler) {")
 	if len(service.Methods) > 0 {
-		g.P("baseURL = ", stringsPackage.Ident("TrimRight"), `(baseURL, "/")`)
+		g.P("adapter := ", adapterStruct(service), "{svc: svc}")
 	}
-	generateServiceMethodsVar(g, file, service)
-	g.P("return &", names.ClientImpl, "{")
+	g.P("server.Register(")
 	for _, method := range service.Methods {
-		g.P(unexport(method.GoName), ": ",
-			connectPackage.Ident("NewClient"),
-			"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]",
-			"(",
-		)
-		g.P("httpClient,")
-		g.P(`baseURL + `, procedureConstName(method), `,`)
-		g.P(connectPackage.Ident("WithSchema"), "(", procedureVarMethodDescriptor(method), "),")
-		idempotency := methodIdempotency(method)
-		switch idempotency {
-		case connect.IdempotencyNoSideEffects:
-			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyNoSideEffects"), "),")
-		case connect.IdempotencyIdempotent:
-			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyIdempotent"), "),")
-		case connect.IdempotencyUnknown:
-		}
-		g.P(connectPackage.Ident("WithClientOptions"), "(opts...),")
-		g.P("),")
+		g.P(methodType, "{Spec: ", specVar(service, method), "(), Handler: adapter.", adapterMethod(method), "},")
 	}
-	g.P("}")
+	g.P(")")
 	g.P("}")
 	g.P()
-
-	// Client struct.
-	wrapComments(g, names.ClientImpl, " implements ", names.Client, ".")
-	g.P("type ", names.ClientImpl, " struct {")
-	for _, method := range service.Methods {
-		g.P(unexport(method.GoName), " *", connectPackage.Ident("Client"),
-			"[", method.Input.GoIdent, ", ", method.Output.GoIdent, "]")
-	}
-	g.P("}")
-	g.P()
-	for _, method := range service.Methods {
-		generateClientMethod(g, method, names, simple)
-	}
 }
-
-func generateClientMethod(g *protogen.GeneratedFile, method *protogen.Method, names names, simple bool) {
-	receiver := names.ClientImpl
-	isStreamingClient := method.Desc.IsStreamingClient()
-	isStreamingServer := method.Desc.IsStreamingServer()
-	wrapComments(g, method.GoName, " calls ", method.Desc.FullName(), ".")
-	if isDeprecatedMethod(method) {
-		g.P("//")
-		deprecated(g)
-	}
-	g.P("func (c *", receiver, ") ", clientSignature(g, method, true /* named */, simple), " {")
-
-	switch {
-	case isStreamingClient && !isStreamingServer:
-		if simple {
-			g.P("return c.", unexport(method.GoName), ".CallClientStreamSimple(ctx)")
-		} else {
-			g.P("return c.", unexport(method.GoName), ".CallClientStream(ctx)")
+func generatePerRPCClientStreams(g *protogen.GeneratedFile, service *protogen.Service) {
+	streamIface := g.QualifiedGoIdent(connectPackage.Ident("ClientStream"))
+	for _, method := range service.Methods {
+		card := methodCardinality(method)
+		if card == connect.StreamTypeUnary {
+			continue
 		}
-	case !isStreamingClient && isStreamingServer:
-		if simple {
-			g.P("return c.", unexport(method.GoName), ".CallServerStream(ctx, ", connectPackage.Ident("NewRequest"), "(req))")
-		} else {
-			g.P("return c.", unexport(method.GoName), ".CallServerStream(ctx, req)")
-		}
-	case isStreamingClient && isStreamingServer:
-		if simple {
-			g.P("return c.", unexport(method.GoName), ".CallBidiStreamSimple(ctx)")
-		} else {
-			g.P("return c.", unexport(method.GoName), ".CallBidiStream(ctx)")
-		}
-	default:
-		if simple {
-			g.P("response, err := c.", unexport(method.GoName), ".CallUnary(ctx, ", connectPackage.Ident("NewRequest"), "(req))")
-			g.P("if response != nil {")
-			g.P("return response.Msg, err")
+		typeName := clientStreamType(service, method)
+		input := g.QualifiedGoIdent(method.Input.GoIdent)
+		out := g.QualifiedGoIdent(method.Output.GoIdent)
+		wrapComments(g, typeName, " is the client stream for the ", service.Desc.Name(), "'s ", method.Desc.Name(), " RPC.")
+		g.P("type ", typeName, " struct {")
+		g.P("stream ", streamIface)
+		g.P("}")
+		g.P()
+		if card == connect.StreamTypeClient || card == connect.StreamTypeBidi {
+			wrapComments(g, "SendHeaders opens the stream and flushes the request headers without a message. The first Send or Receive does this implicitly.")
+			g.P("func (s ", typeName, ") SendHeaders() error {")
+			g.P("return s.stream.SendHeaders()")
 			g.P("}")
+			g.P()
+			wrapComments(g, "Send sends a request message to the server.")
+			g.P("func (s ", typeName, ") Send(req *", input, ") error {")
+			g.P("return s.stream.Send(req)")
+			g.P("}")
+			g.P()
+		}
+		if card == connect.StreamTypeBidi {
+			wrapComments(g, "CloseSend closes the request side of the stream.")
+			g.P("func (s ", typeName, ") CloseSend() error {")
+			g.P("return s.stream.CloseSend()")
+			g.P("}")
+			g.P()
+		}
+		if card == connect.StreamTypeClient {
+			wrapComments(g, "CloseAndReceive closes the request side of the stream and returns the single response message. It reads the stream to completion to release its resources.")
+			g.P("func (s ", typeName, ") CloseAndReceive() (*", out, ", error) {")
+			g.P("if err := s.stream.CloseSend(); err != nil {")
 			g.P("return nil, err")
+			g.P("}")
+			g.P("var res ", out)
+			g.P("if err := s.stream.Receive(&res); err != nil {")
+			g.P("return nil, err")
+			g.P("}")
+			g.P("return &res, nil")
+			g.P("}")
+			g.P()
 		} else {
-			g.P("return c.", unexport(method.GoName), ".CallUnary(ctx, req)")
+			wrapComments(g, "Receive returns the next response message from the server.")
+			g.P("func (s ", typeName, ") Receive() (*", out, ", error) {")
+			g.P("var res ", out)
+			g.P("if err := s.stream.Receive(&res); err != nil {")
+			g.P("return nil, err")
+			g.P("}")
+			g.P("return &res, nil")
+			g.P("}")
+			g.P()
+			wrapComments(g, "Close releases the stream's resources. It is idempotent and is typically deferred to clean up a stream abandoned before io.EOF.")
+			g.P("func (s ", typeName, ") Close() error {")
+			g.P("return s.stream.Close()")
+			g.P("}")
+			g.P()
 		}
 	}
-	g.P("}")
-	g.P()
 }
 
-func clientSignature(g *protogen.GeneratedFile, method *protogen.Method, named bool, simple bool) string {
-	reqName := "req"
-	ctxName := "ctx"
-	if !named {
-		reqName, ctxName = "", ""
-	}
-	if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
-		// bidi streaming
-		if simple {
-			return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
-				"(*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClientSimple")) +
-				"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
-				", error)"
+func generatePerRPCServerStreams(g *protogen.GeneratedFile, service *protogen.Service) {
+	streamIface := g.QualifiedGoIdent(connectPackage.Ident("ServerStream"))
+	for _, method := range service.Methods {
+		card := methodCardinality(method)
+		if card == connect.StreamTypeUnary {
+			continue
 		}
-		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
-			"*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStreamForClient")) +
-			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
-	}
-	if method.Desc.IsStreamingClient() {
-		// client streaming
-		if simple {
-			return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
-				"(*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClientSimple")) +
-				"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
-				", error)"
+		typeName := serverStreamType(service, method)
+		input := g.QualifiedGoIdent(method.Input.GoIdent)
+		out := g.QualifiedGoIdent(method.Output.GoIdent)
+		wrapComments(g, typeName, " is the server stream for the ", service.Desc.Name(), "'s ", method.Desc.Name(), " RPC.")
+		g.P("type ", typeName, " struct {")
+		g.P("stream ", streamIface)
+		g.P("}")
+		g.P()
+		if card == connect.StreamTypeClient || card == connect.StreamTypeBidi {
+			wrapComments(g, "Receive returns the next request message from the client.")
+			g.P("func (s ", typeName, ") Receive() (*", input, ", error) {")
+			g.P("var req ", input)
+			g.P("if err := s.stream.Receive(&req); err != nil {")
+			g.P("return nil, err")
+			g.P("}")
+			g.P("return &req, nil")
+			g.P("}")
+			g.P()
 		}
-		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ") " +
-			"*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStreamForClient")) +
-			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]"
-	}
-	if method.Desc.IsStreamingServer() {
-		if simple {
-			return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
-				", " + reqName + " *" +
-				g.QualifiedGoIdent(method.Input.GoIdent) + ") " +
-				"(*" + g.QualifiedGoIdent(connectPackage.Ident("ServerStreamForClient")) +
-				"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
-				", error)"
+		if card == connect.StreamTypeServer || card == connect.StreamTypeBidi {
+			wrapComments(g, "SendHeaders flushes the response headers without a message. The first Send does this implicitly.")
+			g.P("func (s ", typeName, ") SendHeaders() error {")
+			g.P("return s.stream.SendHeaders()")
+			g.P("}")
+			g.P()
+			wrapComments(g, "Send sends a response message to the client.")
+			g.P("func (s ", typeName, ") Send(res *", out, ") error {")
+			g.P("return s.stream.Send(res)")
+			g.P("}")
+			g.P()
 		}
-		return method.GoName + "(" + ctxName + " " + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
-			", " + reqName + " *" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
-			g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
-			"(*" + g.QualifiedGoIdent(connectPackage.Ident("ServerStreamForClient")) +
-			"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
-			", error)"
 	}
-	// unary; symmetric so we can re-use server templating
-	return method.GoName + serverSignatureParams(g, method, named, simple)
 }
 
-func generateServerInterface(g *protogen.GeneratedFile, service *protogen.Service, names names, simple bool) {
-	wrapComments(g, names.Server, " is an implementation of the ", service.Desc.FullName(), " service.")
-	if isDeprecatedService(service) {
-		g.P("//")
-		deprecated(g)
-	}
-	g.AnnotateSymbol(names.Server, protogen.Annotation{Location: service.Location})
-	g.P("type ", names.Server, " interface {")
-	for _, method := range service.Methods {
-		leadingComments(
-			g,
-			method.Comments.Leading,
-			isDeprecatedMethod(method),
-		)
-		g.AnnotateSymbol(names.Server+"."+method.GoName, protogen.Annotation{Location: method.Location})
-		g.P(serverSignature(g, method, simple))
-	}
+func generateClientImplementation(g *protogen.GeneratedFile, service *protogen.Service) {
+	clientType := g.QualifiedGoIdent(connectPackage.Ident("Client"))
+	g.P("type ", clientStruct(service), " struct {")
+	g.P("client *", clientType)
 	g.P("}")
 	g.P()
+	recv := fmt.Sprintf("c *%s", clientStruct(service))
+	for _, method := range service.Methods {
+		ctx := g.QualifiedGoIdent(contextPackage.Ident("Context"))
+		input := g.QualifiedGoIdent(method.Input.GoIdent)
+		out := g.QualifiedGoIdent(method.Output.GoIdent)
+		name := method.GoName
+		streamT := clientStreamType(service, method)
+		spec := specVar(service, method) + "()"
+		switch methodCardinality(method) {
+		case connect.StreamTypeUnary:
+			g.P("func (", recv, ") ", name, "(ctx ", ctx, ", req *", input, ") (*", out, ", error) {")
+			g.P("var res ", out)
+			g.P("if err := c.client.CallUnary(ctx, ", spec, ", req, &res); err != nil {")
+			g.P("return nil, err")
+			g.P("}")
+			g.P("return &res, nil")
+			g.P("}")
+		case connect.StreamTypeClient, connect.StreamTypeBidi:
+			g.P("func (", recv, ") ", name, "(ctx ", ctx, ") (", streamT, ", error) {")
+			g.P("stream, err := c.client.CallClientStream(ctx, ", spec, ")")
+			g.P("if err != nil {")
+			g.P("return ", streamT, "{}, err")
+			g.P("}")
+			g.P("return ", streamT, "{stream: stream}, nil")
+			g.P("}")
+		case connect.StreamTypeServer:
+			g.P("func (", recv, ") ", name, "(ctx ", ctx, ", req *", input, ") (", streamT, ", error) {")
+			g.P("stream, err := c.client.CallServerStream(ctx, ", spec, ", req)")
+			g.P("if err != nil {")
+			g.P("return ", streamT, "{}, err")
+			g.P("}")
+			g.P("return ", streamT, "{stream: stream}, nil")
+			g.P("}")
+		}
+		g.P()
+	}
 }
 
-func generateServerConstructor(g *protogen.GeneratedFile, file *protogen.File, service *protogen.Service, names names, simple bool) {
-	wrapComments(g, names.ServerConstructor, " builds an HTTP handler from the service implementation.",
-		" It returns the path on which to mount the handler and the handler itself.")
-	g.P("//")
-	wrapComments(g, "By default, handlers support the Connect, gRPC, and gRPC-Web protocols with ",
-		"the binary Protobuf and JSON codecs. They also support gzip compression.")
-	if isDeprecatedService(service) {
-		g.P("//")
-		deprecated(g)
-	}
-	handlerOption := connectPackage.Ident("HandlerOption")
-	g.P("func ", names.ServerConstructor, "(svc ", names.Server, ", opts ...", handlerOption,
-		") (string, ", httpPackage.Ident("Handler"), ") {")
-	generateServiceMethodsVar(g, file, service)
-	for _, method := range service.Methods {
-		isStreamingServer := method.Desc.IsStreamingServer()
-		isStreamingClient := method.Desc.IsStreamingClient()
-		idempotency := methodIdempotency(method)
-		switch {
-		case isStreamingClient && !isStreamingServer:
-			if simple {
-				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewClientStreamHandlerSimple"), "(")
-			} else {
-				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewClientStreamHandler"), "(")
-			}
-		case !isStreamingClient && isStreamingServer:
-			if simple {
-				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewServerStreamHandlerSimple"), "(")
-			} else {
-				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewServerStreamHandler"), "(")
-			}
-		case isStreamingClient && isStreamingServer:
-			g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewBidiStreamHandler"), "(")
-		default:
-			if simple {
-				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewUnaryHandlerSimple"), "(")
-			} else {
-				g.P(procedureHandlerName(method), ` := `, connectPackage.Ident("NewUnaryHandler"), "(")
-			}
-		}
-		g.P(procedureConstName(method), `,`)
-		g.P("svc.", method.GoName, ",")
-		g.P(connectPackage.Ident("WithSchema"), "(", procedureVarMethodDescriptor(method), "),")
-		switch idempotency {
-		case connect.IdempotencyNoSideEffects:
-			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyNoSideEffects"), "),")
-		case connect.IdempotencyIdempotent:
-			g.P(connectPackage.Ident("WithIdempotency"), "(", connectPackage.Ident("IdempotencyIdempotent"), "),")
-		case connect.IdempotencyUnknown:
-		}
-		g.P(connectPackage.Ident("WithHandlerOptions"), "(opts...),")
-		g.P(")")
-	}
-	g.P(`return "/`, service.Desc.FullName(), `/", `, httpPackage.Ident("HandlerFunc"), `(func(w `, httpPackage.Ident("ResponseWriter"), `, r *`, httpPackage.Ident("Request"), `){`)
-	g.P("switch r.URL.Path {")
-	for _, method := range service.Methods {
-		g.P("case ", procedureConstName(method), ":")
-		g.P(procedureHandlerName(method), ".ServeHTTP(w, r)")
-	}
-	g.P("default:")
-	g.P(httpPackage.Ident("NotFound"), "(w, r)")
-	g.P("}")
-	g.P("})")
-	g.P("}")
+func generateHandlerAdapter(g *protogen.GeneratedFile, service *protogen.Service) {
+	recv := "h " + adapterStruct(service)
+	g.P("type ", adapterStruct(service), " struct{ svc ", service.GoName, "Handler }")
 	g.P()
+	for _, method := range service.Methods {
+		ctx := g.QualifiedGoIdent(contextPackage.Ident("Context"))
+		specType := g.QualifiedGoIdent(connectPackage.Ident("Spec"))
+		handlerStream := g.QualifiedGoIdent(connectPackage.Ident("ServerStream"))
+		name := adapterMethod(method)
+		input := g.QualifiedGoIdent(method.Input.GoIdent)
+		streamT := serverStreamType(service, method)
+		switch methodCardinality(method) {
+		case connect.StreamTypeUnary:
+			g.P("func (", recv, ") ", name, "(ctx ", ctx, ", _ ", specType, ", stream ", handlerStream, ") error {")
+			g.P("var req ", input)
+			g.P("if err := stream.Receive(&req); err != nil {")
+			g.P("return err")
+			g.P("}")
+			g.P("res, err := h.svc.", method.GoName, "(ctx, &req)")
+			g.P("if err != nil {")
+			g.P("return err")
+			g.P("}")
+			g.P("return stream.Send(res)")
+			g.P("}")
+		case connect.StreamTypeClient:
+			g.P("func (", recv, ") ", name, "(ctx ", ctx, ", _ ", specType, ", stream ", handlerStream, ") error {")
+			g.P("res, err := h.svc.", method.GoName, "(ctx, ", streamT, "{stream: stream})")
+			g.P("if err != nil {")
+			g.P("return err")
+			g.P("}")
+			g.P("return stream.Send(res)")
+			g.P("}")
+		case connect.StreamTypeServer:
+			g.P("func (", recv, ") ", name, "(ctx ", ctx, ", _ ", specType, ", stream ", handlerStream, ") error {")
+			g.P("var req ", input)
+			g.P("if err := stream.Receive(&req); err != nil {")
+			g.P("return err")
+			g.P("}")
+			g.P("return h.svc.", method.GoName, "(ctx, &req, ", streamT, "{stream: stream})")
+			g.P("}")
+		case connect.StreamTypeBidi:
+			g.P("func (", recv, ") ", name, "(ctx ", ctx, ", _ ", specType, ", stream ", handlerStream, ") error {")
+			g.P("return h.svc.", method.GoName, "(ctx, ", streamT, "{stream: stream})")
+			g.P("}")
+		}
+		g.P()
+	}
 }
 
-func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, service *protogen.Service, names names, simple bool) {
-	wrapComments(g, names.UnimplementedServer, " returns CodeUnimplemented from all methods.")
-	g.P("type ", names.UnimplementedServer, " struct {}")
+func generateUnimplementedServerImplementation(g *protogen.GeneratedFile, service *protogen.Service) {
+	newError := g.QualifiedGoIdent(connectPackage.Ident("NewError"))
+	codeUnimplemented := g.QualifiedGoIdent(connectPackage.Ident("CodeUnimplemented"))
+	typeName := "Unimplemented" + service.GoName + "Handler"
+	wrapComments(g, typeName, " returns CodeUnimplemented from all methods.")
+	g.P("type ", typeName, " struct{}")
 	g.P()
 	for _, method := range service.Methods {
-		g.P("func (", names.UnimplementedServer, ") ", serverSignature(g, method, simple), "{")
-		if method.Desc.IsStreamingServer() {
-			g.P("return ", connectPackage.Ident("NewError"), "(",
-				connectPackage.Ident("CodeUnimplemented"), ", ", errorsPackage.Ident("New"),
-				`("`, method.Desc.FullName(), ` is not implemented"))`)
-		} else {
-			g.P("return nil, ", connectPackage.Ident("NewError"), "(",
-				connectPackage.Ident("CodeUnimplemented"), ", ", errorsPackage.Ident("New"),
-				`("`, method.Desc.FullName(), ` is not implemented"))`)
+		ctx := g.QualifiedGoIdent(contextPackage.Ident("Context"))
+		input := g.QualifiedGoIdent(method.Input.GoIdent)
+		out := g.QualifiedGoIdent(method.Output.GoIdent)
+		msg := fmt.Sprintf("%q", fmt.Sprintf("%s is not implemented", method.Desc.FullName()))
+		switch methodCardinality(method) {
+		case connect.StreamTypeUnary:
+			g.P("func (", typeName, ") ", method.GoName, "(", ctx, ", *", input, ") (*", out, ", error) {")
+			g.P("return nil, ", newError, "(", codeUnimplemented, ", ", msg, ")")
+		case connect.StreamTypeClient:
+			g.P("func (", typeName, ") ", method.GoName, "(", ctx, ", ", serverStreamType(service, method), ") (*", out, ", error) {")
+			g.P("return nil, ", newError, "(", codeUnimplemented, ", ", msg, ")")
+		case connect.StreamTypeServer:
+			g.P("func (", typeName, ") ", method.GoName, "(", ctx, ", *", input, ", ", serverStreamType(service, method), ") error {")
+			g.P("return ", newError, "(", codeUnimplemented, ", ", msg, ")")
+		case connect.StreamTypeBidi:
+			g.P("func (", typeName, ") ", method.GoName, "(", ctx, ", ", serverStreamType(service, method), ") error {")
+			g.P("return ", newError, "(", codeUnimplemented, ", ", msg, ")")
 		}
 		g.P("}")
 		g.P()
 	}
-	g.P()
 }
 
-func serverSignature(g *protogen.GeneratedFile, method *protogen.Method, simple bool) string {
-	return method.GoName + serverSignatureParams(g, method, false /* named */, simple)
-}
-
-func serverSignatureParams(g *protogen.GeneratedFile, method *protogen.Method, named bool, simple bool) string {
-	ctxName := "ctx "
-	reqName := "req "
-	streamName := "stream "
-	if !named {
-		ctxName, reqName, streamName = "", "", ""
-	}
-	if method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer() {
-		// bidi streaming
-		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ", " +
-			streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("BidiStream")) +
-			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + ", " + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
-			") error"
-	}
-	if method.Desc.IsStreamingClient() {
-		// client streaming
-		if simple {
-			return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ", " +
-				streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStream")) +
-				"[" + g.QualifiedGoIdent(method.Input.GoIdent) + "]" +
-				") (*" + g.QualifiedGoIdent(method.Output.GoIdent) + " ,error)"
-		}
-		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) + ", " +
-			streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ClientStream")) +
-			"[" + g.QualifiedGoIdent(method.Input.GoIdent) + "]" +
-			") (*" + g.QualifiedGoIdent(connectPackage.Ident("Response")) + "[" + g.QualifiedGoIdent(method.Output.GoIdent) + "] ,error)"
-	}
-	if method.Desc.IsStreamingServer() {
-		// server streaming
-		if simple {
-			return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
-				", " + reqName + " *" +
-				g.QualifiedGoIdent(method.Input.GoIdent) + ", " +
-				streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ServerStream")) +
-				"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
-				") error"
-		}
-		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
-			", " + reqName + "*" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
-			g.QualifiedGoIdent(method.Input.GoIdent) + "], " +
-			streamName + "*" + g.QualifiedGoIdent(connectPackage.Ident("ServerStream")) +
-			"[" + g.QualifiedGoIdent(method.Output.GoIdent) + "]" +
-			") error"
-	}
-	// unary
-	if simple {
-		return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
-			", " + reqName + " *" +
-			g.QualifiedGoIdent(method.Input.GoIdent) + ") " +
-			"(*" +
-			g.QualifiedGoIdent(method.Output.GoIdent) + ", error)"
-	}
-	return "(" + ctxName + g.QualifiedGoIdent(contextPackage.Ident("Context")) +
-		", " + reqName + " *" + g.QualifiedGoIdent(connectPackage.Ident("Request")) + "[" +
-		g.QualifiedGoIdent(method.Input.GoIdent) + "]) " +
-		"(*" + g.QualifiedGoIdent(connectPackage.Ident("Response")) + "[" +
-		g.QualifiedGoIdent(method.Output.GoIdent) + "], error)"
+func serviceNameConst(service *protogen.Service) string {
+	return service.GoName + "Name"
 }
 
 func procedureConstName(m *protogen.Method) string {
 	return fmt.Sprintf("%s%sProcedure", m.Parent.GoName, m.GoName)
 }
 
-func procedureHandlerName(m *protogen.Method) string {
-	return fmt.Sprintf("%s%sHandler", unexport(m.Parent.GoName), m.GoName)
+func specVar(service *protogen.Service, method *protogen.Method) string {
+	return unexport(service.GoName) + method.GoName + "Spec"
 }
 
-func serviceVarMethodsName(m *protogen.Service) string {
-	return unexport(fmt.Sprintf("%sMethods", m.GoName))
+func clientStruct(service *protogen.Service) string {
+	return unexport(service.GoName) + "Client"
 }
 
-func procedureVarMethodDescriptor(m *protogen.Method) string {
-	serviceMethodsName := serviceVarMethodsName(m.Parent)
-	return serviceMethodsName + `.ByName("` + string(m.Desc.Name()) + `")`
+func adapterStruct(service *protogen.Service) string {
+	return unexport(service.GoName) + "Handler"
+}
+
+func adapterMethod(method *protogen.Method) string {
+	return unexport(method.GoName)
+}
+
+func clientStreamType(service *protogen.Service, method *protogen.Method) string {
+	return service.GoName + method.GoName + "ClientStream"
+}
+
+func serverStreamType(service *protogen.Service, method *protogen.Method) string {
+	return service.GoName + method.GoName + "ServerStream"
 }
 
 func isDeprecatedService(service *protogen.Service) bool {
@@ -662,20 +659,46 @@ func isDeprecatedMethod(method *protogen.Method) bool {
 	return ok && methodOptions.GetDeprecated()
 }
 
-func methodIdempotency(method *protogen.Method) connect.IdempotencyLevel {
-	methodOptions, ok := method.Desc.Options().(*descriptorpb.MethodOptions)
-	if !ok {
-		return connect.IdempotencyUnknown
+func methodIdempotencyName(g *protogen.GeneratedFile, method *protogen.Method) string {
+	opts, ok := method.Desc.Options().(*descriptorpb.MethodOptions)
+	if !ok || opts == nil {
+		return ""
 	}
-	switch methodOptions.GetIdempotencyLevel() {
+	switch opts.GetIdempotencyLevel() {
 	case descriptorpb.MethodOptions_NO_SIDE_EFFECTS:
-		return connect.IdempotencyNoSideEffects
+		return g.QualifiedGoIdent(connectPackage.Ident("IdempotencyNoSideEffects"))
 	case descriptorpb.MethodOptions_IDEMPOTENT:
-		return connect.IdempotencyIdempotent
+		return g.QualifiedGoIdent(connectPackage.Ident("IdempotencyIdempotent"))
 	case descriptorpb.MethodOptions_IDEMPOTENCY_UNKNOWN:
-		return connect.IdempotencyUnknown
+		return ""
 	}
-	return connect.IdempotencyUnknown
+	return ""
+}
+
+func methodCardinality(method *protogen.Method) connect.StreamType {
+	switch {
+	case method.Desc.IsStreamingClient() && method.Desc.IsStreamingServer():
+		return connect.StreamTypeBidi
+	case method.Desc.IsStreamingClient():
+		return connect.StreamTypeClient
+	case method.Desc.IsStreamingServer():
+		return connect.StreamTypeServer
+	}
+	return connect.StreamTypeUnary
+}
+
+func methodStreamName(g *protogen.GeneratedFile, method *protogen.Method) string {
+	switch methodCardinality(method) {
+	case connect.StreamTypeClient:
+		return g.QualifiedGoIdent(connectPackage.Ident("StreamTypeClient"))
+	case connect.StreamTypeServer:
+		return g.QualifiedGoIdent(connectPackage.Ident("StreamTypeServer"))
+	case connect.StreamTypeBidi:
+		return g.QualifiedGoIdent(connectPackage.Ident("StreamTypeBidi"))
+	case connect.StreamTypeUnary:
+		return g.QualifiedGoIdent(connectPackage.Ident("StreamTypeUnary"))
+	}
+	return g.QualifiedGoIdent(connectPackage.Ident("StreamTypeUnary"))
 }
 
 // Raggedy comments in the generated code are driving me insane. This
@@ -740,42 +763,5 @@ func unexport(s string) string {
 		return "_" + lowercased
 	default:
 		return lowercased
-	}
-}
-
-type names struct {
-	Base                string
-	Client              string
-	ClientConstructor   string
-	ClientImpl          string
-	ClientExposeMethod  string
-	Server              string
-	ServerConstructor   string
-	UnimplementedServer string
-}
-
-func newNames(service *protogen.Service) names {
-	base := service.GoName
-	return names{
-		Base:                base,
-		Client:              fmt.Sprintf("%sClient", base),
-		ClientConstructor:   fmt.Sprintf("New%sClient", base),
-		ClientImpl:          fmt.Sprintf("%sClient", unexport(base)),
-		Server:              fmt.Sprintf("%sHandler", base),
-		ServerConstructor:   fmt.Sprintf("New%sHandler", base),
-		UnimplementedServer: fmt.Sprintf("Unimplemented%sHandler", base),
-	}
-}
-
-// "simple" is a bool, but we want to support just setting "simple" without needing to set "simple=true"
-// We do this via making the flag a string, and then parsing manually here.
-func getSimpleBool(simpleString string) (bool, error) {
-	switch simpleString {
-	case "", "true":
-		return true, nil
-	case "false":
-		return false, nil
-	default:
-		return false, fmt.Errorf(`unknown value for option "simple" (must be one of "", "true", "false"): %q`, simpleString)
 	}
 }

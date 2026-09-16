@@ -1,0 +1,51 @@
+# A v1 client built from a spread option slice. The spread must move onto the
+# transport, which now owns the option list; left on the outer call it would
+# spread the client itself and fail to compile. The []connect.ClientOption
+# parameter type still needs a manual update, so this is golden-only.
+stubs v2
+exec migrate
+cmp stdout out.txt
+# The pin goes before the spread, so a limit inside opts is applied later and wins.
+stdout 'NewTransport\(http.DefaultClient, "http://localhost:8080/", connecthttp.WithReadMaxBytes\(0\), opts...\)'
+stdout 'connect.ClientOption -> connecthttp.Option'
+-- spread.go --
+package app
+
+import (
+	"net/http"
+
+	"connectrpc.com/connect"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func newClient(opts []connect.ClientOption) pingv1connect.PingServiceClient {
+	return pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localhost:8080/", opts...)
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./spread.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 read_limit_pinned=1
+--- ./spread.go
++++ ./spread.go
+@@ -3,11 +3,12 @@
+ import (
+ 	"net/http"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+ func newClient(opts []connect.ClientOption) pingv1connect.PingServiceClient {
+-	return pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localhost:8080/", opts...)
++	return pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080/", connecthttp.WithReadMaxBytes(0), opts...)))
+ }
+ 
+
+
+The following issues require manual code changes:
+  ./spread.go:10:23: connect.ClientOption -> connecthttp.Option (interceptors go to connect.NewClient, HTTP options to connecthttp.NewTransport)
+  ./spread.go:11:9: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default. The pin goes first, ahead of options this tool cannot read into, so a limit set there still wins.
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

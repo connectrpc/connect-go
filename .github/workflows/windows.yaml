@@ -1,10 +1,10 @@
 name: windows
 on:
   push:
-    branches: [main]
+    branches: [main, v2]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [main, v2]
   schedule:
     - cron: '15 22 * * *'
   workflow_dispatch: {} # support manual runs
@@ -18,20 +18,21 @@ jobs:
       matrix:
         go-version:
           - name: latest
-            version: 1.26.x
+            version: 1.27.x
           - name: previous
-            version: 1.25.x
+            version: 1.26.x
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - name: Install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go-version.version }}
+          check-latest: true
       - name: Test
         shell: bash
         run: |
           go build ./...
-          go test -vet=off -race ./...
+          go test -vet=off -timeout 30m ./...

@@ -1,0 +1,109 @@
+# Client stream metadata: seeds connect.NewClientContext and rewrites the
+# stream's RequestHeader/ResponseHeader/ResponseTrailer to the seeded info.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+	"errors"
+	"io"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+	return nil
+}
+
+func runCumSum(ctx context.Context, client pingv1connect.PingServiceClient) error {
+	stream := client.CumSum(ctx)
+	stream.RequestHeader().Set("X-Tenant", "acme")
+	if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+		return err
+	}
+	if err := stream.CloseRequest(); err != nil {
+		return err
+	}
+	for {
+		res, err := stream.Receive()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return err
+		}
+		_ = res
+	}
+	_ = stream.ResponseHeader().Get("X-Trace")
+	_ = stream.ResponseTrailer().Get("X-Trace")
+	return stream.CloseResponse()
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: client_context_insert=1 client_stream_metadata_rewrite=3 import_add_connectv2=1 import_drop_v1=1 stream_client_ctor=1 stream_close_rename=2 stream_handler_param=1
+--- ./service.go
++++ ./service.go
+@@ -5,7 +5,7 @@
+ 	"errors"
+ 	"io"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -14,17 +14,21 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
++func (s *pingServer) CumSum(ctx context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
+ 	return nil
+ }
+ 
+ func runCumSum(ctx context.Context, client pingv1connect.PingServiceClient) error {
+-	stream := client.CumSum(ctx)
+-	stream.RequestHeader().Set("X-Tenant", "acme")
++	ctx, info := connect.NewClientContext(ctx)
++	stream, err := client.CumSum(ctx)
++	if err != nil {
++		return err
++	}
++	info.RequestHeader().Set("X-Tenant", "acme")
+ 	if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+ 		return err
+ 	}
+-	if err := stream.CloseRequest(); err != nil {
++	if err := stream.CloseSend(); err != nil {
+ 		return err
+ 	}
+ 	for {
+@@ -37,8 +41,8 @@
+ 		}
+ 		_ = res
+ 	}
+-	_ = stream.ResponseHeader().Get("X-Trace")
+-	_ = stream.ResponseTrailer().Get("X-Trace")
+-	return stream.CloseResponse()
++	_ = info.ResponseHeader().Get("X-Trace")
++	_ = info.ResponseTrailer().Get("X-Trace")
++	return stream.Close()
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

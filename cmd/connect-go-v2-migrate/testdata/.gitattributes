@@ -1,0 +1,9 @@
+# Script archives embed Go sources and golden output that the tests compare
+# byte-for-byte against rewriter output, which emits LF. Force LF on checkout
+# so the comparisons hold on Windows runners (Git for Windows defaults to
+# autocrlf=true and would otherwise yield CRLF).
+*.txtar text eol=lf
+*.go text eol=lf
+*.txt text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf

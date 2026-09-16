@@ -1,4 +1,5 @@
 /.tmp/
+/dist/
 *.pprof
 *.svg
 .idea

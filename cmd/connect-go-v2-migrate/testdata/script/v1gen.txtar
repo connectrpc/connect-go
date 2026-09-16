@@ -1,0 +1,103 @@
+# v1 local generation: v1 stubs plus a v1 buf.gen.yaml. The tool is
+# regenerate-first (no Go edits), names the template update, and --json emits
+# the structured report with next steps and a documentation URL.
+stubs v1generic
+exec migrate
+cmp stdout out.txt
+stdout 'Proposed Buf template updates'
+stdout 'no Go source changes are proposed yet'
+exec migrate --json
+cmp stdout report.json
+stdout 'documentation_url'
+exec go build ./...
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	return connect.NewResponse(&pingv1.PingResponse{Number: req.Msg.Number, Text: req.Msg.Text}), nil
+}
+-- buf.gen.yaml --
+version: v1
+managed:
+  enabled: true
+  go_package_prefix:
+    default: example.com/app/gen
+plugins:
+  - name: go
+    out: gen
+    opt: paths=source_relative
+  - name: connect-go
+    out: gen
+    opt: paths=source_relative,simple=true
+-- out.txt --
+Scanned 1 Go file and 1 Buf template. The generated Connect code still targets
+v1, so no Go source changes are proposed yet.
+
+Generated v1 Connect code:
+  ./gen/connect/ping/v1/pingv1connect
+
+Proposed Buf template updates (rerun with -w to apply):
+  ./buf.gen.yaml: bufgen_remove_simple=1
+--- ./buf.gen.yaml
++++ ./buf.gen.yaml
+@@ -9,5 +9,5 @@
+     opt: paths=source_relative
+   - name: connect-go
+     out: gen
+-    opt: paths=source_relative,simple=true
++    opt: paths=source_relative
+ 
+
+
+First, move the dependencies and generated code to v2:
+
+  1. connect-go-v2-migrate -w  (applies the Buf template update above)
+  2. go get -u \
+       connectrpc.com/connect/v2
+     (pulls the v2 core, generated SDKs, and ecosystem modules into go.mod)
+  3. go install connectrpc.com/connect/v2/cmd/protoc-gen-connect-go@latest
+     (./buf.gen.yaml runs the local protoc-gen-connect-go binary. v1 and v2
+     share the binary name, so reinstalling from the /v2 module switches
+     generation to v2)
+  4. buf generate
+
+Then re-run connect-go-v2-migrate to work through the Go source changes: it
+rewrites the call sites against the v2 stubs and reports anything that needs
+a manual update.
+
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md
+-- report.json --
+{
+  "summary": {
+    "files_scanned": 2,
+    "rewrites_applied": 1,
+    "files_needing_follow_up": 0
+  },
+  "diagnostics": [],
+  "buf_templates": [
+    "./buf.gen.yaml"
+  ],
+  "ignored_paths": [
+    "./gen/connect/ping/v1/pingv1connect"
+  ],
+  "next_steps": [
+    "connect-go-v2-migrate -w  (applies the Buf template update above)",
+    "go get -u \\\n       connectrpc.com/connect/v2",
+    "go install connectrpc.com/connect/v2/cmd/protoc-gen-connect-go@latest",
+    "buf generate",
+    "re-run connect-go-v2-migrate"
+  ],
+  "documentation_url": "https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md"
+}

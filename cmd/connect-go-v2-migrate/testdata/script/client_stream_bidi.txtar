@@ -1,0 +1,101 @@
+# Bidi consumer (CumSum): single-return becomes (stream, err); CloseRequest/CloseResponse -> CloseSend/Close.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+	"errors"
+	"io"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+	return nil
+}
+
+func runCumSum(ctx context.Context, client pingv1connect.PingServiceClient) error {
+	stream := client.CumSum(ctx)
+	for i := int64(1); i <= 3; i++ {
+		if err := stream.Send(&pingv1.CumSumRequest{Number: i}); err != nil {
+			return err
+		}
+	}
+	if err := stream.CloseRequest(); err != nil {
+		return err
+	}
+	for {
+		res, err := stream.Receive()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return err
+		}
+		_ = res
+	}
+	return stream.CloseResponse()
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_drop_v1=1 stream_client_ctor=1 stream_close_rename=2 stream_handler_param=1
+--- ./service.go
++++ ./service.go
+@@ -5,7 +5,6 @@
+ 	"errors"
+ 	"io"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -14,18 +13,21 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
++func (s *pingServer) CumSum(ctx context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
+ 	return nil
+ }
+ 
+ func runCumSum(ctx context.Context, client pingv1connect.PingServiceClient) error {
+-	stream := client.CumSum(ctx)
++	stream, err := client.CumSum(ctx)
++	if err != nil {
++		return err
++	}
+ 	for i := int64(1); i <= 3; i++ {
+ 		if err := stream.Send(&pingv1.CumSumRequest{Number: i}); err != nil {
+ 			return err
+ 		}
+ 	}
+-	if err := stream.CloseRequest(); err != nil {
++	if err := stream.CloseSend(); err != nil {
+ 		return err
+ 	}
+ 	for {
+@@ -38,6 +40,6 @@
+ 		}
+ 		_ = res
+ 	}
+-	return stream.CloseResponse()
++	return stream.Close()
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

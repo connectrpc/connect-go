@@ -114,8 +114,8 @@ const file_noservice_proto_rawDesc = "" +
 	"\x0fnoservice.proto\x12\x17connect.test.no_service\"\t\n" +
 	"\aRequest\"\n" +
 	"\n" +
-	"\bResponseB\xf9\x01\n" +
-	"\x1bcom.connect.test.no_serviceB\x0eNoserviceProtoP\x01ZPconnectrpc.com/connect/cmd/protoc-gen-connect-go/internal/testdata/noservice/gen\xa2\x02\x03CTN\xaa\x02\x16Connect.Test.NoService\xca\x02\x16Connect\\Test\\NoService\xe2\x02\"Connect\\Test\\NoService\\GPBMetadata\xea\x02\x18Connect::Test::NoServiceb\x06proto3"
+	"\bResponseB\xfc\x01\n" +
+	"\x1bcom.connect.test.no_serviceB\x0eNoserviceProtoP\x01ZSconnectrpc.com/connect/v2/cmd/protoc-gen-connect-go/internal/testdata/noservice/gen\xa2\x02\x03CTN\xaa\x02\x16Connect.Test.NoService\xca\x02\x16Connect\\Test\\NoService\xe2\x02\"Connect\\Test\\NoService\\GPBMetadata\xea\x02\x18Connect::Test::NoServiceb\x06proto3"
 
 var (
 	file_noservice_proto_rawDescOnce sync.Once

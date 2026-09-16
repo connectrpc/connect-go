@@ -1,0 +1,26 @@
+# Negative test: a non-service stream param and its Send must be left untouched.
+exec migrate
+cmp stdout out.txt
+exec go build ./...
+! stdout 'Proposed rewrites'
+-- service.go --
+package p
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+)
+
+type out struct{}
+
+func h(ctx context.Context, s *connect.ServerStream[out]) error {
+	return s.Send(&out{})
+}
+-- out.txt --
+The following issues require manual code changes:
+  ./service.go:6:2: connectrpc.com/connect (v1) import retained because it still uses connect.ServerStream.
+  ./service.go:11:29: stream parameter "s" has v1 type connect.ServerStream. Its v2 type is the generated handler stream type for this RPC.
+
+Scanned 1 Go file and 0 Buf templates. No automatic rewrites were applied.
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md
