@@ -1875,6 +1875,10 @@ func TestInvalidHeaderTimeout(t *testing.T) {
 		t.Parallel()
 		assert.Equal(t, getPingResponseWithTimeout(t, "12345678901").StatusCode, http.StatusBadRequest) //nolint:bodyclose
 	})
+	t.Run("timeout_negative", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, getPingResponseWithTimeout(t, "-1").StatusCode, http.StatusBadRequest) //nolint:bodyclose
+	})
 }
 
 func TestHandlerWithReadMaxBytes(t *testing.T) {
