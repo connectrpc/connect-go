@@ -31,8 +31,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connectproto"
 	"connectrpc.com/connect/v2/internal/bufferpool"
+	"connectrpc.com/connect/v2/internal/connectwire"
 )
 
 const (
@@ -46,7 +46,7 @@ const (
 	connectProtocolVersion                  = "1"
 	headerVary                              = "Vary"
 
-	connectFlagEnvelopeEndStream = 0b00000010
+	connectFlagEnvelopeEndStream = connectwire.FlagEnvelopeEndStream
 
 	connectUnaryContentTypePrefix     = "application/"
 	connectUnaryContentTypeJSON       = connectUnaryContentTypePrefix + connect.CodecNameJSON
@@ -282,24 +282,24 @@ func (h *connectHandler) NewConn(
 			request:        request,
 			responseWriter: responseWriter,
 			marshaler: connectStreamingMarshaler{
-				envelopeWriter: envelopeWriter{
-					ctx:              ctx,
-					sender:           writeSender{responseWriter},
-					codec:            codec,
-					compressMinBytes: h.CompressMinBytes,
-					compressionPool:  h.CompressionPools.Get(responseCompression),
-					sendMaxBytes:     h.SendMaxBytes,
-					stats:            sendStats,
+				Writer: envelopeWriter{
+					Ctx:              ctx,
+					Sender:           writeSender{responseWriter},
+					Codec:            codec,
+					CompressMinBytes: h.CompressMinBytes,
+					CompressionPool:  h.CompressionPools.Get(responseCompression),
+					SendMaxBytes:     h.SendMaxBytes,
+					Stats:            sendStats,
 				},
 			},
 			unmarshaler: connectStreamingUnmarshaler{
 				envelopeReader: envelopeReader{
-					ctx:             ctx,
-					reader:          requestBody,
-					codec:           codec,
-					compressionPool: h.CompressionPools.Get(requestCompression),
-					readMaxBytes:    h.ReadMaxBytes,
-					stats:           receiveStats,
+					Ctx:             ctx,
+					Src:             requestBody,
+					Codec:           codec,
+					CompressionPool: h.CompressionPools.Get(requestCompression),
+					ReadMaxBytes:    h.ReadMaxBytes,
+					Stats:           receiveStats,
 				},
 			},
 			responseTrailer: make(http.Header),
@@ -425,23 +425,23 @@ func (c *connectClient) NewConn(
 			compressionPools: c.CompressionPools,
 			codec:            c.Codec,
 			marshaler: connectStreamingMarshaler{
-				envelopeWriter: envelopeWriter{
-					ctx:              ctx,
-					sender:           duplexCall,
-					codec:            c.Codec,
-					compressMinBytes: c.CompressMinBytes,
-					compressionPool:  c.CompressionPools.Get(c.CompressionName),
-					sendMaxBytes:     c.SendMaxBytes,
-					stats:            sendStats,
+				Writer: envelopeWriter{
+					Ctx:              ctx,
+					Sender:           duplexCall,
+					Codec:            c.Codec,
+					CompressMinBytes: c.CompressMinBytes,
+					CompressionPool:  c.CompressionPools.Get(c.CompressionName),
+					SendMaxBytes:     c.SendMaxBytes,
+					Stats:            sendStats,
 				},
 			},
 			unmarshaler: connectStreamingUnmarshaler{
 				envelopeReader: envelopeReader{
-					ctx:          ctx,
-					reader:       duplexCall,
-					codec:        c.Codec,
-					readMaxBytes: c.ReadMaxBytes,
-					stats:        receiveStats,
+					Ctx:          ctx,
+					Src:          duplexCall,
+					Codec:        c.Codec,
+					ReadMaxBytes: c.ReadMaxBytes,
+					Stats:        receiveStats,
 				},
 			},
 			responseHeader:  make(http.Header),
@@ -576,7 +576,7 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *con
 			// code not set? default to one implied by HTTP status
 			wireErr.Code = httpToCode(response.StatusCode)
 		}
-		serverErr := wireErr.asError()
+		serverErr := wireErr.AsError()
 		if serverErr == nil {
 			return nil
 		}
@@ -700,7 +700,7 @@ func (cc *connectStreamingClientConn) validateResponse(response *http.Response) 
 			cc.compressionPools.CommaSeparatedNames(),
 		)
 	}
-	cc.unmarshaler.compressionPool = cc.compressionPools.Get(compression)
+	cc.unmarshaler.CompressionPool = cc.compressionPools.Get(compression)
 	if cc.info != nil {
 		cc.info.ResponseEncoding = encodingOrIdentity(compression)
 	}
@@ -866,27 +866,6 @@ func (hc *connectStreamingHandlerConn) Close(err error) error {
 	return nil // must be a literal nil: nil *connect.Error is a non-nil error
 }
 
-type connectStreamingMarshaler struct {
-	envelopeWriter
-}
-
-func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Header) *connect.Error {
-	end := &connectEndStreamMessage{Trailer: trailer}
-	if err != nil {
-		end.Error = newConnectWireError(err)
-	}
-	data, marshalErr := json.Marshal(end)
-	if marshalErr != nil {
-		return connect.Errorf(connect.CodeInternal, "marshal end stream: %s", marshalErr).WithCause(marshalErr)
-	}
-	raw := bytes.NewBuffer(data)
-	defer bufferpool.Put(raw)
-	return m.Write(&envelope{
-		Data:  raw,
-		Flags: connectFlagEnvelopeEndStream,
-	})
-}
-
 type connectStreamingUnmarshaler struct {
 	envelopeReader
 
@@ -902,9 +881,9 @@ func (u *connectStreamingUnmarshaler) Unmarshal(message any) *connect.Error {
 	if !errors.Is(err, errSpecialEnvelope) {
 		return err
 	}
-	env := u.last
+	env := u.Last
 	data := env.Data
-	u.last.Data = nil // don't keep a reference to it
+	u.Last.Data = nil // don't keep a reference to it
 	defer bufferpool.Put(data)
 	if !env.IsSet(connectFlagEnvelopeEndStream) {
 		return connect.Errorf(connect.CodeInternal, "protocol error: invalid envelope flags %d", env.Flags)
@@ -921,7 +900,7 @@ func (u *connectStreamingUnmarshaler) Unmarshal(message any) *connect.Error {
 		}
 	}
 	u.trailer = end.Trailer
-	u.endStreamErr = end.Error.asError()
+	u.endStreamErr = end.Error.AsError()
 	return errSpecialEnvelope
 }
 
@@ -1193,115 +1172,18 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func(cont
 	return nil
 }
 
-// connectWireDetail adapts a [connect.ErrorDetail] to the Connect protocol's
-// error detail object.
-type connectWireDetail connect.ErrorDetail
-
-func (d *connectWireDetail) MarshalJSON() ([]byte, error) {
-	wire := struct {
-		Type  string          `json:"type"`
-		Value string          `json:"value"`
-		Debug json.RawMessage `json:"debug,omitempty"`
-	}{
-		Type:  d.Type,
-		Value: base64.RawStdEncoding.EncodeToString(d.Value),
-	}
-	if json.Valid(d.Debug) {
-		wire.Debug = json.RawMessage(d.Debug)
-	} else if msg, err := connectproto.ErrorDetailToAny((*connect.ErrorDetail)(d)).UnmarshalNew(); err == nil {
-		var buffer bytes.Buffer
-		var codec connectproto.JSONCodec
-		if err := codec.MarshalWrite(context.Background(), &buffer, msg); err == nil {
-			wire.Debug = buffer.Bytes()
-		}
-	}
-	return json.Marshal(wire)
-}
-
-func (d *connectWireDetail) UnmarshalJSON(data []byte) error {
-	var wire struct {
-		Type  string          `json:"type"`
-		Value string          `json:"value"`
-		Debug json.RawMessage `json:"debug,omitempty"`
-	}
-	if err := json.Unmarshal(data, &wire); err != nil {
-		return err
-	}
-	value, err := connect.DecodeBinaryHeader(wire.Value)
-	if err != nil {
-		return fmt.Errorf("decode base64: %w", err)
-	}
-	*d = connectWireDetail{
-		Type:  wire.Type,
-		Value: value,
-		Debug: wire.Debug,
-	}
-	return nil
-}
-
-type connectWireError struct {
-	Code    connect.Code         `json:"code"`
-	Message string               `json:"message,omitempty"`
-	Details []*connectWireDetail `json:"details,omitempty"`
-}
+// The Connect protocol's wire error and end-of-stream envelope live in
+// internal/connectwire so that non-HTTP transports can share them. These
+// aliases keep the in-package spellings.
+type (
+	connectWireDetail         = connectwire.WireDetail
+	connectWireError          = connectwire.WireError
+	connectEndStreamMessage   = connectwire.EndStreamMessage
+	connectStreamingMarshaler = connectwire.StreamingMarshaler
+)
 
 func newConnectWireError(err error) *connectWireError {
-	wire := &connectWireError{
-		Code:    connect.CodeUnknown,
-		Message: err.Error(),
-	}
-	if connectErr, ok := asError(err); ok {
-		wire.Code = connectErr.Code()
-		wire.Message = connectErr.Message()
-		if details := connectErr.Details(); len(details) > 0 {
-			wire.Details = make([]*connectWireDetail, len(details))
-			for i, detail := range details {
-				wire.Details[i] = (*connectWireDetail)(detail)
-			}
-		}
-	}
-	return wire
-}
-
-func (e *connectWireError) asError() *connect.Error {
-	if e == nil {
-		return nil
-	}
-	if e.Code < connect.CodeCanceled || e.Code > connect.CodeUnauthenticated {
-		e.Code = connect.CodeUnknown
-	}
-	err := connect.NewError(e.Code, e.Message).WithRemote()
-	if len(e.Details) > 0 {
-		for _, detail := range e.Details {
-			err = err.WithDetail((*connect.ErrorDetail)(detail))
-		}
-	}
-	return err
-}
-
-func (e *connectWireError) UnmarshalJSON(data []byte) error {
-	// We want to be lenient if the JSON has an unrecognized or invalid code.
-	// So if that occurs, we leave the code unset but can still de-serialize
-	// the other fields from the input JSON.
-	var wireError struct {
-		Code    string               `json:"code"`
-		Message string               `json:"message"`
-		Details []*connectWireDetail `json:"details"`
-	}
-	err := json.Unmarshal(data, &wireError)
-	if err != nil {
-		return err
-	}
-	e.Message = wireError.Message
-	e.Details = wireError.Details
-	// This will leave e.Code unset if we can't unmarshal the given string.
-	_ = e.Code.UnmarshalText([]byte(wireError.Code))
-	return nil
-}
-
-type connectEndStreamMessage struct {
-	Error   *connectWireError `json:"error,omitempty"`
-	Trailer http.Header       `json:"metadata,omitempty"`
+	return connectwire.NewWireError(err)
 }
 
 func connectCodeToHTTP(code connect.Code) int {

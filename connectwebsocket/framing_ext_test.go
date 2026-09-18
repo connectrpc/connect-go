@@ -1,0 +1,168 @@
+// Copyright 2021-2026 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package connectwebsocket_test
+
+import (
+	"context"
+	"encoding/binary"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
+	"connectrpc.com/connect/v2/connectwebsocket"
+	"connectrpc.com/connect/v2/internal/assert"
+	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
+	"connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
+	"google.golang.org/protobuf/proto"
+)
+
+const pingUnaryProcedure = "/connect.ping.v1.PingService/Ping"
+
+// readServerFrame reads one frame from the server and reports whether RSV1 is
+// set — the bit that says the payload is permessage-deflate compressed. It is
+// the only way to observe compression from outside: the library inflates
+// transparently, so a decoded message looks the same either way.
+func readServerFrame(tb testing.TB, conn net.Conn) (compressed bool, payload []byte) {
+	tb.Helper()
+	header := make([]byte, 2)
+	_, err := io.ReadFull(conn, header)
+	assert.Nil(tb, err)
+	compressed = header[0]&0x40 != 0 // RSV1
+	// Server frames are never masked.
+	assert.Equal(tb, header[1]&0x80, byte(0))
+
+	size := int(header[1] & 0x7F)
+	switch size {
+	case 126:
+		extended := make([]byte, 2)
+		_, err = io.ReadFull(conn, extended)
+		assert.Nil(tb, err)
+		size = int(binary.BigEndian.Uint16(extended))
+	case 127:
+		extended := make([]byte, 8)
+		_, err = io.ReadFull(conn, extended)
+		assert.Nil(tb, err)
+		size = int(binary.BigEndian.Uint64(extended))
+	}
+	payload = make([]byte, size)
+	_, err = io.ReadFull(conn, payload)
+	assert.Nil(tb, err)
+	return compressed, payload
+}
+
+// envelopeFor frames a proto message as one Connect envelope.
+func envelopeFor(tb testing.TB, message proto.Message) []byte {
+	tb.Helper()
+	encoded, err := proto.Marshal(message)
+	assert.Nil(tb, err)
+	frame := make([]byte, 5+len(encoded))
+	binary.BigEndian.PutUint32(frame[1:5], uint32(len(encoded)))
+	copy(frame[5:], encoded)
+	return frame
+}
+
+// pingOverRawFrames sends one unary Ping and reports whether the server
+// compressed its response.
+func pingOverRawFrames(tb testing.TB, text string, options ...connectwebsocket.ServerOption) bool {
+	tb.Helper()
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+	mux := http.NewServeMux()
+	connecthttp.Mount(
+		connectwebsocket.Mux(mux, server, options...),
+		server,
+	)
+	httpServer := httptest.NewServer(mux)
+	tb.Cleanup(httpServer.Close)
+
+	addr := httpServer.Listener.Addr().String()
+	ctx, cancel := context.WithTimeout(tb.Context(), 20*time.Second)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	assert.Nil(tb, err)
+	tb.Cleanup(func() { _ = conn.Close() })
+	_ = rawHandshake(tb, conn, addr, pingUnaryProcedure)
+
+	assert.Nil(tb, conn.SetDeadline(time.Now().Add(20*time.Second)))
+	// The request goes uncompressed: RSV1 is per message, so a peer may send
+	// plain frames even once the extension is negotiated.
+	assert.Nil(tb, writeClientFrame(conn, envelopeFor(tb, &pingv1.PingRequest{Text: text}), false))
+
+	compressed, payload := readServerFrame(tb, conn)
+	// The response envelope must be the echoed message, not the terminal one.
+	assert.True(tb, len(payload) > 0)
+	return compressed
+}
+
+// A response comfortably over the threshold must actually go out compressed.
+func TestServerCompressesLargeResponse(t *testing.T) {
+	t.Parallel()
+	assert.True(t, pingOverRawFrames(t, strings.Repeat("compress me ", 1024)))
+}
+
+// One comfortably under it must not: deflate on a tiny payload costs bytes.
+func TestServerSkipsCompressionBelowThreshold(t *testing.T) {
+	t.Parallel()
+	assert.False(t, pingOverRawFrames(t, "tiny"))
+}
+
+// The threshold is the knob that decides, so raising it past a payload that
+// would otherwise be compressed must turn compression off for it.
+func TestCompressMinBytesMovesTheThreshold(t *testing.T) {
+	t.Parallel()
+	text := strings.Repeat("compress me ", 1024) // ~12KiB, compressed by default
+	assert.False(t, pingOverRawFrames(t, text, connectwebsocket.WithCompressMinBytes(1<<20)))
+}
+
+// And WithoutCompression must stop it regardless of size.
+func TestWithoutCompressionLeavesRSV1Clear(t *testing.T) {
+	t.Parallel()
+	text := strings.Repeat("compress me ", 1024)
+	assert.False(t, pingOverRawFrames(t, text, connectwebsocket.WithoutCompression()))
+}
+
+// A flag that belongs to the other direction is a different mistake from a bit
+// nobody has defined, and the peer can only correct what it is told. Bit 1 is
+// the server's to set; a client setting it has the roles backwards, which
+// "reserved flags" would not convey.
+func TestWrongDirectionFlagIsNamedAsSuch(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		flags byte
+		want  string
+	}{
+		{"end-stream is server-only", 0b00000010, "server-only flags: 0x02"},
+		{"nothing recognized is reserved", 0b00010000, "reserved flags: 0x10"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			httpServer := newHybridServer(t, pingServer{})
+			conn := dialCumSum(t, httpServer, "")
+			sendRawEnvelope(t, conn, test.flags, []byte(`{}`))
+
+			_, data, err := conn.Read(t.Context())
+			assert.Nil(t, err)
+			assert.True(t, strings.Contains(string(data), test.want))
+			assert.True(t, strings.Contains(string(data), "invalid_argument"))
+		})
+	}
+}

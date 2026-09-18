@@ -15,115 +15,17 @@
 package connecthttp
 
 import (
-	"bytes"
-	"io"
-	"math"
-	"strings"
-
 	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/internal/compression"
 )
 
-type compressionPool struct {
-	compressor connect.Compressor
-}
-
-func newCompressionPool(compressor connect.Compressor) *compressionPool {
-	if compressor == nil {
-		return nil
-	}
-	return &compressionPool{
-		compressor: compressor,
-	}
-}
-
-func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readMaxBytes int64) *connect.Error {
-	decompressor, err := c.compressor.Decompress(src)
-	if err != nil {
-		return connect.Errorf(connect.CodeInvalidArgument, "get decompressor: %s", err).WithCause(err)
-	}
-	defer decompressor.Close()
-	reader := io.Reader(decompressor)
-	if readMaxBytes > 0 && readMaxBytes < math.MaxInt64 {
-		reader = io.LimitReader(decompressor, readMaxBytes+1)
-	}
-	bytesRead, err := dst.ReadFrom(reader)
-	if err != nil {
-		err = wrapIfContextError(err)
-		if connectErr, ok := asError(err); ok {
-			return connectErr
-		}
-		return connect.Errorf(connect.CodeInvalidArgument, "decompress: %s", err).WithCause(err)
-	}
-	if readMaxBytes > 0 && bytesRead > readMaxBytes {
-		discardedBytes, err := io.Copy(io.Discard, decompressor)
-		if err != nil {
-			return connect.Errorf(connect.CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %s", readMaxBytes, err).WithCause(err)
-		}
-		return connect.Errorf(connect.CodeResourceExhausted, "message size %d is larger than configured max %d", bytesRead+discardedBytes, readMaxBytes)
-	}
-	return nil
-}
-
-func (c *compressionPool) Compress(dst *bytes.Buffer, src *bytes.Buffer) *connect.Error {
-	compressor, err := c.compressor.Compress(dst)
-	if err != nil {
-		return connect.Errorf(connect.CodeUnknown, "get compressor: %s", err).WithCause(err)
-	}
-	defer compressor.Close()
-	if _, err := src.WriteTo(compressor); err != nil {
-		err = wrapIfContextError(err)
-		if connectErr, ok := asError(err); ok {
-			return connectErr
-		}
-		return connect.Errorf(connect.CodeInternal, "compress: %s", err).WithCause(err)
-	}
-	return nil
-}
-
-// readOnlyCompressionPools is a read-only interface to a map of named
-// compressionPools.
-type readOnlyCompressionPools interface {
-	Get(string) *compressionPool
-	Contains(string) bool
-	// Wordy, but clarifies how this is different from readOnlyCodecs.Names().
-	CommaSeparatedNames() string
-}
+// Compression pooling lives in internal/compression so that non-HTTP
+// transports can share it. These aliases keep the in-package spellings.
+type (
+	compressionPool          = compression.Pool
+	readOnlyCompressionPools = compression.ReadOnlyPools
+)
 
 func newReadOnlyCompressionPools(compressors []connect.Compressor) readOnlyCompressionPools {
-	// List of compressors in preference order. A repeated name is ignored.
-	nameToPool := make(map[string]*compressionPool, len(compressors))
-	names := make([]string, 0, len(compressors))
-	for _, compressor := range compressors {
-		name := compressor.Name()
-		if _, ok := nameToPool[name]; ok {
-			continue
-		}
-		nameToPool[name] = newCompressionPool(compressor)
-		names = append(names, name)
-	}
-	return &namedCompressionPools{
-		nameToPool:          nameToPool,
-		commaSeparatedNames: strings.Join(names, ","),
-	}
-}
-
-type namedCompressionPools struct {
-	nameToPool          map[string]*compressionPool
-	commaSeparatedNames string
-}
-
-func (m *namedCompressionPools) Get(name string) *compressionPool {
-	if name == "" || name == connect.CompressionNameIdentity {
-		return nil
-	}
-	return m.nameToPool[name]
-}
-
-func (m *namedCompressionPools) Contains(name string) bool {
-	_, ok := m.nameToPool[name]
-	return ok
-}
-
-func (m *namedCompressionPools) CommaSeparatedNames() string {
-	return m.commaSeparatedNames
+	return compression.NewReadOnlyPools(compressors)
 }

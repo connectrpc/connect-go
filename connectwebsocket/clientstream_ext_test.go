@@ -1,0 +1,118 @@
+// Copyright 2021-2026 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package connectwebsocket_test
+
+import (
+	"strings"
+	"testing"
+
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connectwebsocket"
+	"connectrpc.com/connect/v2/internal/assert"
+	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
+	"connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
+	"github.com/coder/websocket"
+	"google.golang.org/protobuf/proto"
+)
+
+// The shape of a client-streaming RPC on the wire: several values, an
+// End-Of-Client-Stream envelope, one response message, one EndStream envelope,
+// and the server's close. Written as a reference trace, because a second
+// implementation has to reproduce it exactly.
+func TestClientStreamingWireSequence(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		// foldFinalValue puts the last value inside the End-Of-Client-Stream
+		// envelope instead of sending it in an envelope of its own. Both are
+		// permitted, and the sum must come out the same either way.
+		foldFinalValue bool
+	}{
+		{name: "final value in its own envelope"},
+		{name: "final value folded into End-Of-Client-Stream", foldFinalValue: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			httpServer := newServerFor(t, scriptedServer{})
+			client := dialBrowserClient(t, httpServer, pingv1connect.PingServiceSumProcedure)
+
+			values := []int64{1, 2, 3, 4}
+			var want int64
+			for _, value := range values {
+				want += value
+			}
+			for _, value := range values[:len(values)-1] {
+				payload, err := proto.Marshal(&pingv1.SumRequest{Number: value})
+				assert.Nil(t, err)
+				client.writeEnvelope(t, 0, payload)
+			}
+			payload, err := proto.Marshal(&pingv1.SumRequest{Number: values[len(values)-1]})
+			assert.Nil(t, err)
+			if test.foldFinalValue {
+				client.writeEnvelope(t, flagEndClientStream, payload)
+			} else {
+				client.writeEnvelope(t, 0, payload)
+				client.writeEnvelope(t, flagEndClientStream, nil)
+			}
+
+			// The response is two envelopes, not one: the message, then the
+			// terminal envelope carrying the trailers. A client that stops
+			// after the first silently drops them.
+			flags, payload := client.readEnvelope(t)
+			assert.Equal(t, flags, uint8(0))
+			var response pingv1.SumResponse
+			assert.Nil(t, proto.Unmarshal(payload, &response))
+			assert.Equal(t, response.Sum, want)
+
+			flags, payload = client.readEnvelope(t)
+			assert.Equal(t, flags, uint8(flagEndStream))
+			assert.True(t, strings.Contains(string(payload), "set-by-handler"))
+			assert.True(t, !strings.Contains(string(payload), "error"))
+
+			// Nothing follows but the close, which the server sends itself: the
+			// RPC is over, and one connection carries only the one RPC.
+			_, _, err = client.conn.Read(t.Context())
+			assert.NotNil(t, err)
+			assert.Equal(t, websocket.CloseStatus(err), websocket.StatusNormalClosure)
+		})
+	}
+}
+
+// The same exchange through the generated client, which is what a Go caller
+// actually writes. CloseAndReceive sends End-Of-Client-Stream, reads the single
+// response, and reads the terminal envelope behind it so the trailers survive.
+func TestClientStreamingThroughTheGeneratedClient(t *testing.T) {
+	t.Parallel()
+	httpServer := newServerFor(t, scriptedServer{})
+	transport, err := connectwebsocket.NewTransport(
+		httpServer.URL,
+		connectwebsocket.WithHTTPClient(httpServer.Client()),
+	)
+	assert.Nil(t, err)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+
+	ctx, info := connect.NewClientContext(t.Context())
+	stream, err := client.Sum(ctx)
+	assert.Nil(t, err)
+	var want int64
+	for _, value := range []int64{1, 2, 3, 4} {
+		assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: value}))
+		want += value
+	}
+	response, err := stream.CloseAndReceive()
+	assert.Nil(t, err)
+	assert.Equal(t, response.Sum, want)
+	assert.Equal(t, info.ResponseTrailer().Get(trailerKey), "set-by-handler")
+}

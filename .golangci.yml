@@ -83,6 +83,12 @@ linters:
       - linters:
           - containedctx
         path: connecthttp/interceptor_ext_test.go
+      # The WebSocket call owns the RPC's context so that Send and Receive, which
+      # take none, dial against the right one. Passing a context to ensureDialed
+      # would let a caller bind the dial to some other lifetime.
+      - linters:
+          - contextcheck
+        path: connectwebsocket/client.go
       # blockUntilResponseReady returns the shared response, whose body is
       # closed once by CloseRead rather than at each call site.
       - linters:
@@ -170,6 +176,17 @@ linters:
           - forbidigo
         path: internal/memhttp
         text: use of `log.(New|Logger|Lshortfile)` forbidden by pattern .*
+      # The WebSocket session re-panics after closing the hijacked connection,
+      # so the panic still reaches whatever would have recovered it.
+      - linters:
+          - forbidigo
+        path: connectwebsocket/session.go
+        text: use of `panic` forbidden by pattern .*
+      # A panicking handler is the subject of the test, and it silences
+      # net/http's expected panic trace with its own logger.
+      - linters:
+          - forbidigo
+        path: connectwebsocket/lifecycle_ext_test.go
       # The migration CLI writes its report to stdout.
       - linters:
           - forbidigo

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/internal/connecterr"
 )
 
 const commonErrorsURL = "https://connectrpc.com/docs/go/common-errors"
@@ -62,9 +63,7 @@ func IsNotModifiedError(err error) bool {
 
 // asError uses errors.As to unwrap any error and look for a connect *connect.Error.
 func asError(err error) (*connect.Error, bool) {
-	var connectErr *connect.Error
-	ok := errors.As(err, &connectErr)
-	return connectErr, ok
+	return connecterr.AsError(err)
 }
 
 // wrapIfUncoded ensures that all errors are wrapped. It leaves already-wrapped
@@ -111,44 +110,13 @@ func scrubHandlerError(err error) error {
 // context.Canceled and context.DeadlineExceeded errors, but only if they
 // haven't already been wrapped.
 func wrapIfContextError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if _, ok := asError(err); ok {
-		return err
-	}
-	if errors.Is(err, context.Canceled) {
-		return connect.NewError(connect.CodeCanceled, err.Error()).WithCause(err)
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return connect.NewError(connect.CodeDeadlineExceeded, err.Error()).WithCause(err)
-	}
-	// Ick, some dial errors can be returned as os.ErrDeadlineExceeded
-	// instead of context.DeadlineExceeded :(
-	// https://github.com/golang/go/issues/64449
-	if errors.Is(err, os.ErrDeadlineExceeded) {
-		return connect.NewError(connect.CodeDeadlineExceeded, err.Error()).WithCause(err)
-	}
-	return err
+	return connecterr.WrapIfContextError(err)
 }
 
 // wrapIfContextDone wraps errors with connect.CodeCanceled or connect.CodeDeadlineExceeded
 // if the context is done. It leaves already-wrapped errors unchanged.
 func wrapIfContextDone(ctx context.Context, err error) error {
-	if err == nil {
-		return nil
-	}
-	err = wrapIfContextError(err)
-	if _, ok := asError(err); ok {
-		return err
-	}
-	ctxErr := ctx.Err()
-	if errors.Is(ctxErr, context.Canceled) {
-		return connect.NewError(connect.CodeCanceled, err.Error()).WithCause(err)
-	} else if errors.Is(ctxErr, context.DeadlineExceeded) {
-		return connect.NewError(connect.CodeDeadlineExceeded, err.Error()).WithCause(err)
-	}
-	return err
+	return connecterr.WrapIfContextDone(ctx, err)
 }
 
 // wrapIfLikelyH2CNotConfiguredError adds a wrapping error that has a message
@@ -272,16 +240,5 @@ func wrapIfRSTError(ctx context.Context, err error) error {
 // wrapIfMaxBytesError wraps errors returned reading from a http.MaxBytesHandler
 // whose limit has been exceeded.
 func wrapIfMaxBytesError(err error, tmpl string, args ...any) error {
-	if err == nil {
-		return nil
-	}
-	if _, ok := asError(err); ok {
-		return err
-	}
-	var maxBytesErr *http.MaxBytesError
-	if ok := errors.As(err, &maxBytesErr); !ok {
-		return err
-	}
-	prefix := fmt.Sprintf(tmpl, args...)
-	return connect.Errorf(connect.CodeResourceExhausted, "%s: exceeded %d byte http.MaxBytesReader limit", prefix, maxBytesErr.Limit)
+	return connecterr.WrapIfMaxBytesError(err, tmpl, args...)
 }

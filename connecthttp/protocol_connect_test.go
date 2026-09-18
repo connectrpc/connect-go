@@ -42,7 +42,7 @@ func TestConnectErrorDetailMarshaling(t *testing.T) {
 		{
 			name: "normal",
 			errorDetail: &descriptorpb.FieldOptions{
-				Deprecated: proto.Bool(true),
+				Deprecated: new(true),
 				Jstype:     descriptorpb.FieldOptions_JS_STRING.Enum(),
 			},
 			expectDebug: map[string]any{
@@ -117,7 +117,7 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 	assert.Nil(t, err)
 
 	writer := envelopeWriter{
-		sender: writeSender{writer: &buffer},
+		Sender: writeSender{writer: &buffer},
 	}
 	err = writer.Write(&envelope{
 		Flags: connectFlagEnvelopeEndStream,
@@ -127,8 +127,8 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 
 	unmarshaler := connectStreamingUnmarshaler{
 		envelopeReader: envelopeReader{
-			ctx:    t.Context(),
-			reader: &buffer,
+			Ctx: t.Context(),
+			Src: &buffer,
 		},
 	}
 	err = unmarshaler.Unmarshal(nil) // parameter won't be used
