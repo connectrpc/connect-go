@@ -451,3 +451,27 @@ func TestConnectWireErrorDetailBestEffortDebug(t *testing.T) {
 	assert.Equal(t, reparsed.Type, detail.Type)
 	assert.Equal(t, reparsed.Value, detail.Value)
 }
+
+func TestConnectEncodeTimeout(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		timeout time.Duration
+		want    string
+	}{
+		{name: "hour", timeout: time.Hour, want: "3600000"},
+		{name: "millisecond", timeout: time.Millisecond, want: "1"},
+		{name: "rounds_down", timeout: 10*time.Millisecond + 1, want: "10"},
+		{name: "sub_millisecond", timeout: 999 * time.Microsecond, want: "0"}, // Less then 1ms truncates to 0, not unbounded.
+		{name: "zero", timeout: 0, want: "0"},
+		{name: "expired", timeout: -time.Hour, want: "0"},
+		{name: "max_digits", timeout: 9999999999 * time.Millisecond, want: "9999999999"}, // 10 digit max.
+		{name: "eleven_digits", timeout: 10000000000 * time.Millisecond, want: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, connectEncodeTimeout(test.timeout), test.want)
+		})
+	}
+}
