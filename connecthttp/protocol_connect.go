@@ -127,6 +127,9 @@ func (*connectHandler) SetTimeout(request *http.Request) (context.Context, conte
 	if err != nil {
 		return nil, nil, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %s", err).WithCause(err)
 	}
+	if millis < 0 {
+		return nil, nil, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %q is negative", timeout)
+	}
 	ctx, cancel := context.WithTimeout(
 		request.Context(),
 		time.Duration(millis)*time.Millisecond,
