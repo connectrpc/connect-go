@@ -1344,10 +1344,10 @@ func connectCodeToHTTP(code connect.Code) int {
 	}
 }
 
-// connectEncodeTimeout encodes timeout as milliseconds, clamped to zero.
+// connectEncodeTimeout encodes timeout as a positive number of milliseconds.
 // Returns an empty string for timeouts over the protocol's ten-digit limit.
 func connectEncodeTimeout(timeout time.Duration) string {
-	millis := max(int64(timeout/time.Millisecond), 0)
+	millis := max(int64(timeout/time.Millisecond), 1)
 	encoded := strconv.FormatInt(millis, 10 /* base */)
 	if len(encoded) > 10 {
 		return ""
