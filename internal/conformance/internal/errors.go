@@ -22,7 +22,6 @@ import (
 	conformancev1 "connectrpc.com/connect/v2/internal/conformance/internal/gen/connectrpc/conformance/v1"
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectproto"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -33,8 +32,8 @@ func ConvertErrorToConnectError(err error) *connect.Error {
 	if err == nil {
 		return nil
 	}
-	connectErr := new(connect.Error)
-	if !errors.As(err, &connectErr) {
+	connectErr, ok := errors.AsType[*connect.Error](err)
+	if !ok {
 		connectErr = connect.NewError(connect.CodeUnknown, err.Error())
 	}
 	return connectErr
@@ -47,11 +46,11 @@ func ConvertErrorToProtoError(err error) *conformancev1.Error {
 	if err == nil {
 		return nil
 	}
-	connectErr := new(connect.Error)
-	if !errors.As(err, &connectErr) {
+	connectErr, ok := errors.AsType[*connect.Error](err)
+	if !ok {
 		return &conformancev1.Error{
 			Code:    conformancev1.Code_CODE_UNKNOWN,
-			Message: proto.String(err.Error()),
+			Message: new(err.Error()),
 		}
 	}
 	return ConvertConnectToProtoError(connectErr)
@@ -66,7 +65,7 @@ func ConvertConnectToProtoError(err *connect.Error) *conformancev1.Error {
 	}
 	protoErr := &conformancev1.Error{
 		Code:    conformancev1.Code(int32(err.Code())),
-		Message: proto.String(err.Message()),
+		Message: new(err.Message()),
 	}
 	details := make([]*anypb.Any, 0, len(err.Details()))
 	for _, detail := range err.Details() {

@@ -112,7 +112,7 @@ var (
 	// methods. They stay in core but changed shape, so the tool warns.
 	reshapedErrorAPI = map[string]string{
 		"NewErrorDetail": "connectproto.NewErrorDetail(msg), then attach with (*connect.Error).WithDetail(detail)",
-		"IsWireError":    "errors.As(err, &cerr) into a *connect.Error, then cerr.IsRemote()",
+		"IsWireError":    "cerr, ok := errors.AsType[*connect.Error](err), then cerr.IsRemote()",
 		"NewWireError":   "connect.NewError(code, msg).WithRemote()",
 	}
 
