@@ -378,7 +378,7 @@ The wire-error helpers became `*connect.Error` methods:
 | v1 | v2 |
 | --- | --- |
 | `connect.NewWireError(code, err)` | `connect.NewError(code, msg).WithRemote()` |
-| `connect.IsWireError(err)` | `errors.As(err, &cerr)` then `cerr.IsRemote()` |
+| `connect.IsWireError(err)` | `cerr, ok := errors.AsType[*connect.Error](err)` then `cerr.IsRemote()` |
 
 Error codes (`connect.CodeNotFound`, `connect.CodeOf`, and friends) are
 unchanged.

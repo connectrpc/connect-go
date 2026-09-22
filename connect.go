@@ -1101,8 +1101,7 @@ func CallInfoForServerContext(ctx context.Context) (*CallInfo, bool) {
 // [*Error], CodeOf returns [CodeUnknown]. Passing nil is not meaningful and
 // also returns CodeUnknown.
 func CodeOf(err error) Code {
-	var e *Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*Error](err); ok {
 		return e.Code()
 	}
 	return CodeUnknown
