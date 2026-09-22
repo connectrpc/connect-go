@@ -231,8 +231,7 @@ func asClientErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	var cerr *connect.Error
-	if errors.As(err, &cerr) {
+	if cerr, ok := errors.AsType[*connect.Error](err); ok {
 		if cerr.IsRemote() {
 			return connect.NewError(connect.CodeInternal, "").WithCause(err).WithRemote()
 		}

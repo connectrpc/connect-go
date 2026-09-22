@@ -524,10 +524,10 @@ func checkDeadlineError(ctx context.Context, err error) error {
 		streamErrPrefix = "stream error: "
 		fromPeerSuffix  = "; received from peer"
 	)
-	if connectErr := (*connect.Error)(nil); errors.As(err, &connectErr) {
+	if connectErr, ok := errors.AsType[*connect.Error](err); ok {
 		err = connectErr.Unwrap()
 	}
-	if urlErr := (*url.Error)(nil); errors.As(err, &urlErr) {
+	if urlErr, ok := errors.AsType[*url.Error](err); ok {
 		// If we get an RST_STREAM error from http.Client.Do, it's wrapped in a
 		// *url.Error.
 		err = urlErr.Unwrap()

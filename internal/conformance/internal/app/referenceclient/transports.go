@@ -173,12 +173,10 @@ func maybeWrapContextError(ctx context.Context, err error) error {
 	if ctxErr == nil {
 		return err
 	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
+	if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
 		return &contextFixError{timeout: true, error: err}
 	}
-	var httpErr *http3.Error
-	if errors.As(err, &httpErr) && httpErr.ErrorCode == http3.ErrCodeRequestCanceled {
+	if httpErr, ok := errors.AsType[*http3.Error](err); ok && httpErr.ErrorCode == http3.ErrCodeRequestCanceled {
 		return &contextFixError{timeout: errors.Is(ctxErr, context.DeadlineExceeded), error: err}
 	}
 	return err

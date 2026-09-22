@@ -58,10 +58,10 @@ func TestGenerate(t *testing.T) {
 	t.Parallel()
 	pingFileDesc := protodesc.ToFileDescriptorProto(pingv1.File_connect_ping_v1_ping_proto)
 	compilerVersion := &pluginpb.Version{
-		Major:  ptr(int32(0)),
-		Minor:  ptr(int32(0)),
-		Patch:  ptr(int32(1)),
-		Suffix: ptr("test"),
+		Major:  new(int32(0)),
+		Minor:  new(int32(0)),
+		Patch:  new(int32(1)),
+		Suffix: new("test"),
 	}
 	t.Run("ping.proto", func(t *testing.T) {
 		t.Parallel()
@@ -113,7 +113,7 @@ func TestGenerate(t *testing.T) {
 		samePackageFileDesc := protodesc.ToFileDescriptorProto(samepackage.File_samepackage_proto)
 		req := &pluginpb.CodeGeneratorRequest{
 			FileToGenerate:        []string{"samepackage.proto"},
-			Parameter:             ptr("package_suffix"),
+			Parameter:             new("package_suffix"),
 			ProtoFile:             []*descriptorpb.FileDescriptorProto{samePackageFileDesc},
 			SourceFileDescriptors: []*descriptorpb.FileDescriptorProto{samePackageFileDesc},
 			CompilerVersion:       compilerVersion,
@@ -133,7 +133,7 @@ func TestGenerate(t *testing.T) {
 		diffPackageFileDesc := protodesc.ToFileDescriptorProto(diffpackage.File_diffpackage_proto)
 		req := &pluginpb.CodeGeneratorRequest{
 			FileToGenerate:        []string{"diffpackage.proto"},
-			Parameter:             ptr("package_suffix=diff"),
+			Parameter:             new("package_suffix=diff"),
 			ProtoFile:             []*descriptorpb.FileDescriptorProto{diffPackageFileDesc},
 			SourceFileDescriptors: []*descriptorpb.FileDescriptorProto{diffPackageFileDesc},
 			CompilerVersion:       compilerVersion,
@@ -152,7 +152,7 @@ func TestGenerate(t *testing.T) {
 		t.Parallel()
 		req := &pluginpb.CodeGeneratorRequest{
 			FileToGenerate:        []string{"connect/ping/v1/ping.proto"},
-			Parameter:             ptr("package_suffix=1234"),
+			Parameter:             new("package_suffix=1234"),
 			ProtoFile:             []*descriptorpb.FileDescriptorProto{pingFileDesc},
 			SourceFileDescriptors: []*descriptorpb.FileDescriptorProto{pingFileDesc},
 			CompilerVersion:       compilerVersion,
@@ -256,10 +256,6 @@ func testRunProtocGenGo(t *testing.T, stdin io.Reader, args ...string) (stdout, 
 	assert.Nil(t, cmd.Run(), assert.Sprintf("Run go %v", args))
 	exitCode = cmd.ProcessState.ExitCode()
 	return stdout, stderr, exitCode
-}
-
-func ptr[T any](v T) *T {
-	return &v
 }
 
 type testDefaultPackageService struct {
