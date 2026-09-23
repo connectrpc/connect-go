@@ -1252,12 +1252,15 @@ func TestHandlerErrorScrub(t *testing.T) {
 		"wrapped":  fmt.Errorf("query users: %w", errors.New("pq: connection refused")),
 		"canceled": fmt.Errorf("copy data: %w", context.Canceled),
 		"deadline": fmt.Errorf("copy data: %w", context.DeadlineExceeded),
+		// A handler returning a nil *connect.Error as error boxes a typed nil.
+		"typed_nil": (*connect.Error)(nil),
 	}
 	wantCodes := map[string]connect.Code{
-		"plain":    connect.CodeUnknown,
-		"wrapped":  connect.CodeUnknown,
-		"canceled": connect.CodeCanceled,
-		"deadline": connect.CodeDeadlineExceeded,
+		"plain":     connect.CodeUnknown,
+		"wrapped":   connect.CodeUnknown,
+		"canceled":  connect.CodeCanceled,
+		"deadline":  connect.CodeDeadlineExceeded,
+		"typed_nil": connect.CodeUnknown,
 	}
 	pingServer := &pluggablePingServer{
 		ping: func(ctx context.Context, _ *pingv1.PingRequest) (*pingv1.PingResponse, error) {

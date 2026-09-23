@@ -75,6 +75,21 @@ func TestCodeOf(t *testing.T) {
 		connect.CodeUnavailable,
 	)
 	assert.Equal(t, connect.CodeOf(errors.New("foo")), connect.CodeUnknown)
+	assert.Equal(t, connect.CodeOf(nil), connect.CodeUnknown)
+	var nilErr *connect.Error
+	assert.Equal(t, connect.CodeOf(nilErr), connect.CodeUnknown)
+	assert.Equal(t, connect.CodeOf(fmt.Errorf("wrapped: %w", nilErr)), connect.CodeUnknown)
+}
+
+func TestErrorTypedNil(t *testing.T) {
+	t.Parallel()
+	// The library never boxes (*connect.Error)(nil) as an error, but users
+	// may. asError must not report it as a Connect error.
+	var nilErr *connect.Error
+	_, ok := asError(nilErr)
+	assert.False(t, ok)
+	_, ok = asError(fmt.Errorf("wrapped: %w", nilErr))
+	assert.False(t, ok)
 }
 
 func TestErrorDetails(t *testing.T) {
