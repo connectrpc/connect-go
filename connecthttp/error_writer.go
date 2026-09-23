@@ -144,7 +144,7 @@ func (w *ErrorWriter) writeConnectStreaming(response http.ResponseWriter, err er
 	response.WriteHeader(http.StatusOK)
 	marshaler := &connectStreamingMarshaler{
 		envelopeWriter: envelopeWriter{
-			Sender: writeSender{writer: response},
+			sender: writeSender{writer: response},
 		},
 	}
 	// MarshalEndStream returns *connect.Error: check return value to avoid typed nils.

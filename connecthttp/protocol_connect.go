@@ -46,7 +46,7 @@ const (
 	connectProtocolVersion                  = "1"
 	headerVary                              = "Vary"
 
-	connectFlagEnvelopeEndStream = connectwire.FlagEnvelopeEndStream
+	connectFlagEnvelopeEndStream = 0b00000010
 
 	connectUnaryContentTypePrefix     = "application/"
 	connectUnaryContentTypeJSON       = connectUnaryContentTypePrefix + connect.CodecNameJSON
@@ -283,23 +283,23 @@ func (h *connectHandler) NewConn(
 			responseWriter: responseWriter,
 			marshaler: connectStreamingMarshaler{
 				envelopeWriter: envelopeWriter{
-					Ctx:              ctx,
-					Sender:           writeSender{responseWriter},
-					Codec:            codec,
-					CompressMinBytes: h.CompressMinBytes,
-					CompressionPool:  h.CompressionPools.Get(responseCompression),
-					SendMaxBytes:     h.SendMaxBytes,
-					Stats:            sendStats,
+					ctx:              ctx,
+					sender:           writeSender{responseWriter},
+					codec:            codec,
+					compressMinBytes: h.CompressMinBytes,
+					compressionPool:  h.CompressionPools.Get(responseCompression),
+					sendMaxBytes:     h.SendMaxBytes,
+					stats:            sendStats,
 				},
 			},
 			unmarshaler: connectStreamingUnmarshaler{
 				envelopeReader: envelopeReader{
-					Ctx:             ctx,
-					Src:             requestBody,
-					Codec:           codec,
-					CompressionPool: h.CompressionPools.Get(requestCompression),
-					ReadMaxBytes:    h.ReadMaxBytes,
-					Stats:           receiveStats,
+					ctx:             ctx,
+					reader:          requestBody,
+					codec:           codec,
+					compressionPool: h.CompressionPools.Get(requestCompression),
+					readMaxBytes:    h.ReadMaxBytes,
+					stats:           receiveStats,
 				},
 			},
 			responseTrailer: make(http.Header),
@@ -426,22 +426,22 @@ func (c *connectClient) NewConn(
 			codec:            c.Codec,
 			marshaler: connectStreamingMarshaler{
 				envelopeWriter: envelopeWriter{
-					Ctx:              ctx,
-					Sender:           duplexCall,
-					Codec:            c.Codec,
-					CompressMinBytes: c.CompressMinBytes,
-					CompressionPool:  c.CompressionPools.Get(c.CompressionName),
-					SendMaxBytes:     c.SendMaxBytes,
-					Stats:            sendStats,
+					ctx:              ctx,
+					sender:           duplexCall,
+					codec:            c.Codec,
+					compressMinBytes: c.CompressMinBytes,
+					compressionPool:  c.CompressionPools.Get(c.CompressionName),
+					sendMaxBytes:     c.SendMaxBytes,
+					stats:            sendStats,
 				},
 			},
 			unmarshaler: connectStreamingUnmarshaler{
 				envelopeReader: envelopeReader{
-					Ctx:          ctx,
-					Src:          duplexCall,
-					Codec:        c.Codec,
-					ReadMaxBytes: c.ReadMaxBytes,
-					Stats:        receiveStats,
+					ctx:          ctx,
+					reader:       duplexCall,
+					codec:        c.Codec,
+					readMaxBytes: c.ReadMaxBytes,
+					stats:        receiveStats,
 				},
 			},
 			responseHeader:  make(http.Header),
@@ -700,7 +700,7 @@ func (cc *connectStreamingClientConn) validateResponse(response *http.Response) 
 			cc.compressionPools.CommaSeparatedNames(),
 		)
 	}
-	cc.unmarshaler.CompressionPool = cc.compressionPools.Get(compression)
+	cc.unmarshaler.compressionPool = cc.compressionPools.Get(compression)
 	if cc.info != nil {
 		cc.info.ResponseEncoding = encodingOrIdentity(compression)
 	}
@@ -866,6 +866,27 @@ func (hc *connectStreamingHandlerConn) Close(err error) error {
 	return nil // must be a literal nil: nil *connect.Error is a non-nil error
 }
 
+type connectStreamingMarshaler struct {
+	envelopeWriter
+}
+
+func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Header) *connect.Error {
+	end := &connectEndStreamMessage{Trailer: trailer}
+	if err != nil {
+		end.Error = newConnectWireError(err)
+	}
+	data, marshalErr := json.Marshal(end)
+	if marshalErr != nil {
+		return connect.Errorf(connect.CodeInternal, "marshal end stream: %s", marshalErr).WithCause(marshalErr)
+	}
+	raw := bytes.NewBuffer(data)
+	defer bufferpool.Put(raw)
+	return m.Write(&envelope{
+		Data:  raw,
+		Flags: connectFlagEnvelopeEndStream,
+	})
+}
+
 type connectStreamingUnmarshaler struct {
 	envelopeReader
 
@@ -881,9 +902,9 @@ func (u *connectStreamingUnmarshaler) Unmarshal(message any) *connect.Error {
 	if !errors.Is(err, errSpecialEnvelope) {
 		return err
 	}
-	env := u.Last
+	env := u.last
 	data := env.Data
-	u.Last.Data = nil // don't keep a reference to it
+	u.last.Data = nil // don't keep a reference to it
 	defer bufferpool.Put(data)
 	if !env.IsSet(connectFlagEnvelopeEndStream) {
 		return connect.Errorf(connect.CodeInternal, "protocol error: invalid envelope flags %d", env.Flags)
@@ -1176,12 +1197,9 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func(cont
 // internal/connectwire so that non-HTTP transports can share them. These
 // aliases keep the in-package spellings.
 type (
-	connectWireDetail         = connectwire.WireDetail
-	connectWireError          = connectwire.WireError
-	connectEndStreamMessage   = connectwire.EndStreamMessage
-	connectStreamingMarshaler struct {
-		envelopeWriter
-	}
+	connectWireDetail       = connectwire.WireDetail
+	connectWireError        = connectwire.WireError
+	connectEndStreamMessage = connectwire.EndStreamMessage
 )
 
 func newConnectWireError(err error) *connectWireError {

@@ -388,6 +388,43 @@ func getNoBody() (io.ReadCloser, error) {
 	return http.NoBody, nil
 }
 
+// messagePayload is a sized and seekable message payload. The interface is
+// implemented by [*bytes.Reader] and *envelope. Reads must be non-blocking.
+type messagePayload interface {
+	io.Reader
+	io.WriterTo
+	io.Seeker
+	Len() int
+}
+
+// nopPayload is a message payload that does nothing. It's used to send headers
+// to the server.
+type nopPayload struct{}
+
+var _ messagePayload = nopPayload{}
+
+func (nopPayload) Read([]byte) (int, error) {
+	return 0, io.EOF
+}
+
+func (nopPayload) WriteTo(io.Writer) (int64, error) {
+	return 0, nil
+}
+
+func (nopPayload) Seek(int64, int) (int64, error) {
+	return 0, nil
+}
+
+func (nopPayload) Len() int {
+	return 0
+}
+
+// messageSender sends a message payload. The interface is implemented by
+// [*duplexHTTPCall] and writeSender.
+type messageSender interface {
+	Send(messagePayload) (int64, error)
+}
+
 // writeSender is a sender that writes to an [io.Writer]. Useful for wrapping
 // [http.ResponseWriter].
 type writeSender struct {

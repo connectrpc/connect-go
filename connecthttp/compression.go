@@ -12,13 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Compression pooling for the Connect, gRPC, and gRPC-Web protocols.
-//
-// This lived in internal/compression while connectwebsocket shared it. That
-// transport compresses whole messages with permessage-deflate instead, below
-// the protocol, so the pooling came home rather than staying factored out for
-// a single caller.
-
 package connecthttp
 
 import (
@@ -28,15 +21,12 @@ import (
 	"strings"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/internal/connecterr"
 )
 
-// compressionPool applies one [connect.Compressor] to whole messages.
 type compressionPool struct {
 	compressor connect.Compressor
 }
 
-// newCompressionPool returns a [compressionPool] for compressor, or nil when compressor is nil.
 func newCompressionPool(compressor connect.Compressor) *compressionPool {
 	if compressor == nil {
 		return nil
@@ -46,9 +36,6 @@ func newCompressionPool(compressor connect.Compressor) *compressionPool {
 	}
 }
 
-// Decompress expands src into dst, failing with
-// [connect.CodeResourceExhausted] when the result would exceed readMaxBytes. A
-// readMaxBytes of zero means no limit.
 func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readMaxBytes int64) *connect.Error {
 	decompressor, err := c.compressor.Decompress(src)
 	if err != nil {
@@ -61,8 +48,8 @@ func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readM
 	}
 	bytesRead, err := dst.ReadFrom(reader)
 	if err != nil {
-		err = connecterr.WrapIfContextError(err)
-		if connectErr, ok := connecterr.AsError(err); ok {
+		err = wrapIfContextError(err)
+		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
 		return connect.Errorf(connect.CodeInvalidArgument, "decompress: %s", err).WithCause(err)
@@ -77,7 +64,6 @@ func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readM
 	return nil
 }
 
-// Compress writes the compressed form of src into dst.
 func (c *compressionPool) Compress(dst *bytes.Buffer, src *bytes.Buffer) *connect.Error {
 	compressor, err := c.compressor.Compress(dst)
 	if err != nil {
@@ -85,8 +71,8 @@ func (c *compressionPool) Compress(dst *bytes.Buffer, src *bytes.Buffer) *connec
 	}
 	defer compressor.Close()
 	if _, err := src.WriteTo(compressor); err != nil {
-		err = connecterr.WrapIfContextError(err)
-		if connectErr, ok := connecterr.AsError(err); ok {
+		err = wrapIfContextError(err)
+		if connectErr, ok := asError(err); ok {
 			return connectErr
 		}
 		return connect.Errorf(connect.CodeInternal, "compress: %s", err).WithCause(err)
@@ -94,18 +80,17 @@ func (c *compressionPool) Compress(dst *bytes.Buffer, src *bytes.Buffer) *connec
 	return nil
 }
 
-// readOnlyCompressionPools is a read-only interface to a map of named [compressionPool]s.
+// readOnlyCompressionPools is a read-only interface to a map of named
+// compressionPools.
 type readOnlyCompressionPools interface {
 	Get(string) *compressionPool
 	Contains(string) bool
-	// Wordy, but clarifies how this is different from a codec registry's
-	// Names().
+	// Wordy, but clarifies how this is different from readOnlyCodecs.Names().
 	CommaSeparatedNames() string
 }
 
-// newReadOnlyCompressionPools indexes compressors by name, in preference order. A
-// repeated name is ignored.
 func newReadOnlyCompressionPools(compressors []connect.Compressor) readOnlyCompressionPools {
+	// List of compressors in preference order. A repeated name is ignored.
 	nameToPool := make(map[string]*compressionPool, len(compressors))
 	names := make([]string, 0, len(compressors))
 	for _, compressor := range compressors {

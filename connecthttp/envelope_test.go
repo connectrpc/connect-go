@@ -36,7 +36,7 @@ func TestEnvelope(t *testing.T) {
 			t.Parallel()
 			env := &envelope{Data: &bytes.Buffer{}}
 			rdr := envelopeReader{
-				Src: bytes.NewReader(buf.Bytes()),
+				reader: bytes.NewReader(buf.Bytes()),
 			}
 			assert.Nil(t, rdr.Read(env))
 			assert.Equal(t, payload, env.Data.Bytes())
@@ -45,8 +45,8 @@ func TestEnvelope(t *testing.T) {
 			t.Parallel()
 			env := &envelope{Data: &bytes.Buffer{}}
 			rdr := envelopeReader{
-				Ctx: t.Context(),
-				Src: byteByByteReader{
+				ctx: t.Context(),
+				reader: byteByByteReader{
 					reader: bytes.NewReader(buf.Bytes()),
 				},
 			}
@@ -60,7 +60,7 @@ func TestEnvelope(t *testing.T) {
 			t.Parallel()
 			dst := &bytes.Buffer{}
 			wtr := envelopeWriter{
-				Sender: writerSender{writer: dst},
+				sender: writeSender{writer: dst},
 			}
 			env := &envelope{Data: bytes.NewBuffer(payload)}
 			err := wtr.Write(env)
@@ -100,15 +100,6 @@ func TestEnvelope(t *testing.T) {
 			assert.Equal(t, env.Len(), 0)
 		})
 	})
-}
-
-// writerSender is a [messageSender] that writes to an [io.Writer].
-type writerSender struct {
-	writer io.Writer
-}
-
-func (w writerSender) Send(payload messagePayload) (int64, error) {
-	return payload.WriteTo(w.writer)
 }
 
 // byteByByteReader is test reader that reads a single byte at a time.

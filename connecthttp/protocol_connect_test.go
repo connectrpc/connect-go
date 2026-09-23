@@ -117,7 +117,7 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 	assert.Nil(t, err)
 
 	writer := envelopeWriter{
-		Sender: writeSender{writer: &buffer},
+		sender: writeSender{writer: &buffer},
 	}
 	err = writer.Write(&envelope{
 		Flags: connectFlagEnvelopeEndStream,
@@ -127,8 +127,8 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 
 	unmarshaler := connectStreamingUnmarshaler{
 		envelopeReader: envelopeReader{
-			Ctx: t.Context(),
-			Src: &buffer,
+			ctx:    t.Context(),
+			reader: &buffer,
 		},
 	}
 	err = unmarshaler.Unmarshal(nil) // parameter won't be used
