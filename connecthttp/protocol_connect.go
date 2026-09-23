@@ -560,12 +560,17 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *con
 			ctx:             cc.unmarshaler.ctx,
 			reader:          response.Body,
 			compressionPool: cc.unmarshaler.compressionPool,
+			readMaxBytes:    cc.unmarshaler.readMaxBytes,
 		}
 		var wireErr connectWireError
 		jsonUnmarshaller := func(_ context.Context, src io.Reader, msg any) error {
 			return json.NewDecoder(src).Decode(msg)
 		}
-		if err := unmarshaler.UnmarshalFunc(&wireErr, jsonUnmarshaller); err != nil {
+		err := unmarshaler.UnmarshalFunc(&wireErr, jsonUnmarshaller)
+		if err.Code() == connect.CodeResourceExhausted {
+			return err // error body exceeds readMaxBytes
+		}
+		if err != nil {
 			return connect.NewError(
 				httpToCode(response.StatusCode),
 				response.Status,
