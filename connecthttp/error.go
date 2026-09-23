@@ -68,11 +68,9 @@ func IsNotModifiedError(err error) bool {
 	return errors.Is(err, errNotModified)
 }
 
-// asError uses errors.As to unwrap any error and look for a connect *connect.Error.
+// asError unwraps any error and looks for a connect *connect.Error.
 func asError(err error) (*connect.Error, bool) {
-	var connectErr *connect.Error
-	ok := errors.As(err, &connectErr)
-	return connectErr, ok
+	return errors.AsType[*connect.Error](err)
 }
 
 // wrapIfUncoded ensures that all errors are wrapped. It leaves already-wrapped
@@ -246,7 +244,7 @@ func wrapIfRSTError(ctx context.Context, err error) error {
 	if _, ok := asError(err); ok {
 		return err
 	}
-	if urlErr := new(url.Error); errors.As(err, &urlErr) {
+	if urlErr, ok := errors.AsType[*url.Error](err); ok {
 		// If we get an RST_STREAM error from http.Client.Do, it's wrapped in a
 		// *url.Error.
 		err = urlErr.Unwrap()
@@ -303,8 +301,8 @@ func wrapIfMaxBytesError(err error, tmpl string, args ...any) error {
 	if _, ok := asError(err); ok {
 		return err
 	}
-	var maxBytesErr *http.MaxBytesError
-	if ok := errors.As(err, &maxBytesErr); !ok {
+	maxBytesErr, ok := errors.AsType[*http.MaxBytesError](err)
+	if !ok {
 		return err
 	}
 	prefix := fmt.Sprintf(tmpl, args...)
