@@ -22,12 +22,20 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"connectrpc.com/connect/v2"
 )
 
 const commonErrorsURL = "https://connectrpc.com/docs/go/common-errors"
+
+// Messages of the unexported net/http errors for a write to a stream the
+// client has abandoned.
+const (
+	clientDisconnectedMessage = "client disconnected"
+	streamClosedMessage       = "http2: stream closed"
+)
 
 var (
 	// errNotModified signals Connect-protocol responses to GET requests to use the
@@ -128,7 +136,24 @@ func wrapIfContextError(err error) error {
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		return connect.NewError(connect.CodeDeadlineExceeded, err.Error()).WithCause(err)
 	}
+	// The request context is cancelled from a different goroutine than the one
+	// failing the write, so a write can fail while ctx.Err() is still nil.
+	// https://github.com/golang/go/issues/52183
+	if isClientDisconnected(err) {
+		return connect.NewError(connect.CodeCanceled, err.Error()).WithCause(err)
+	}
 	return err
+}
+
+// isClientDisconnected reports whether err is a write failure caused by the
+// client going away. HTTP/2 has its own errors for this, other transports
+// surface the connection's error.
+func isClientDisconnected(err error) bool {
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	msg := err.Error()
+	return msg == clientDisconnectedMessage || msg == streamClosedMessage
 }
 
 // wrapIfContextDone wraps errors with connect.CodeCanceled or connect.CodeDeadlineExceeded
