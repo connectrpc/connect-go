@@ -417,6 +417,22 @@ func TestUnaryHandlerRemoteErrorScrubbed(t *testing.T) {
 	}
 }
 
+func TestUnaryHandlerTypedNilError(t *testing.T) {
+	t.Parallel()
+	handler := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(handler, typedNilErrPingServer{})
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(connectinprocess.New(handler)))
+
+	_, err := client.Ping(t.Context(), &pingv1.PingRequest{})
+	ce, ok := errors.AsType[*connect.Error](err)
+	if !ok || ce == nil {
+		t.Fatalf("error = %#v, want a non-nil *connect.Error", err)
+	}
+	if got := ce.Code(); got != connect.CodeUnknown {
+		t.Fatalf("code = %s, want CodeUnknown", got)
+	}
+}
+
 // TestClientStreamCloseAbortsServer verifies Close cancels the stream
 // context, so a handler streaming indefinitely returns.
 func TestClientStreamCloseAbortsServer(t *testing.T) {
@@ -694,6 +710,14 @@ type remoteErrPingServer struct{ pingServer }
 
 func (remoteErrPingServer) Ping(context.Context, *pingv1.PingRequest) (*pingv1.PingResponse, error) {
 	return nil, connect.NewError(connect.CodePermissionDenied, "upstream secret").WithRemote()
+}
+
+// typedNilErrPingServer returns a nil *connect.Error boxed as error.
+type typedNilErrPingServer struct{ pingServer }
+
+func (typedNilErrPingServer) Ping(context.Context, *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+	var err *connect.Error
+	return nil, err
 }
 
 type infiniteCountUpServer struct {

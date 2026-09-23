@@ -1097,11 +1097,11 @@ func CallInfoForServerContext(ctx context.Context) (*CallInfo, bool) {
 	return info, info != nil
 }
 
-// CodeOf returns the Connect code carried by err. If err does not wrap an
-// [*Error], CodeOf returns [CodeUnknown]. Passing nil is not meaningful and
-// also returns CodeUnknown.
+// CodeOf returns the Connect code carried by err. If err does not wrap a
+// non-nil [*Error], CodeOf returns [CodeUnknown]. Passing nil is not
+// meaningful and also returns CodeUnknown.
 func CodeOf(err error) Code {
-	if e, ok := errors.AsType[*Error](err); ok {
+	if e, ok := errors.AsType[*Error](err); ok && e != nil {
 		return e.Code()
 	}
 	return CodeUnknown

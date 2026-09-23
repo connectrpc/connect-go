@@ -68,9 +68,10 @@ func IsNotModifiedError(err error) bool {
 	return errors.Is(err, errNotModified)
 }
 
-// asError unwraps any error and looks for a connect *connect.Error.
+// asError unwraps any error and looks for a non-nil *connect.Error.
 func asError(err error) (*connect.Error, bool) {
-	return errors.AsType[*connect.Error](err)
+	connectErr, ok := errors.AsType[*connect.Error](err)
+	return connectErr, ok && connectErr != nil // Protect against typed nils (*connect.Error)(nil).
 }
 
 // wrapIfUncoded ensures that all errors are wrapped. It leaves already-wrapped
