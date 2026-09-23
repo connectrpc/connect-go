@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package envelope
+package connecthttp
 
 import (
 	"bytes"
@@ -34,8 +34,8 @@ func TestEnvelope(t *testing.T) {
 		t.Parallel()
 		t.Run("full", func(t *testing.T) {
 			t.Parallel()
-			env := &Envelope{Data: &bytes.Buffer{}}
-			rdr := Reader{
+			env := &envelope{Data: &bytes.Buffer{}}
+			rdr := envelopeReader{
 				Src: bytes.NewReader(buf.Bytes()),
 			}
 			assert.Nil(t, rdr.Read(env))
@@ -43,8 +43,8 @@ func TestEnvelope(t *testing.T) {
 		})
 		t.Run("byteByByte", func(t *testing.T) {
 			t.Parallel()
-			env := &Envelope{Data: &bytes.Buffer{}}
-			rdr := Reader{
+			env := &envelope{Data: &bytes.Buffer{}}
+			rdr := envelopeReader{
 				Ctx: t.Context(),
 				Src: byteByByteReader{
 					reader: bytes.NewReader(buf.Bytes()),
@@ -59,10 +59,10 @@ func TestEnvelope(t *testing.T) {
 		t.Run("full", func(t *testing.T) {
 			t.Parallel()
 			dst := &bytes.Buffer{}
-			wtr := Writer{
+			wtr := envelopeWriter{
 				Sender: writerSender{writer: dst},
 			}
-			env := &Envelope{Data: bytes.NewBuffer(payload)}
+			env := &envelope{Data: bytes.NewBuffer(payload)}
 			err := wtr.Write(env)
 			assert.Nil(t, err)
 			assert.Equal(t, buf.Bytes(), dst.Bytes())
@@ -70,7 +70,7 @@ func TestEnvelope(t *testing.T) {
 		t.Run("partial", func(t *testing.T) {
 			t.Parallel()
 			dst := &bytes.Buffer{}
-			env := &Envelope{Data: bytes.NewBuffer(payload)}
+			env := &envelope{Data: bytes.NewBuffer(payload)}
 			_, err := io.CopyN(dst, env, 2)
 			assert.Nil(t, err)
 			_, err = env.WriteTo(dst)
@@ -84,7 +84,7 @@ func TestEnvelope(t *testing.T) {
 			t.Parallel()
 			dst1 := &bytes.Buffer{}
 			dst2 := &bytes.Buffer{}
-			env := &Envelope{Data: bytes.NewBuffer(payload)}
+			env := &envelope{Data: bytes.NewBuffer(payload)}
 			_, err := io.CopyN(dst1, env, 2)
 			assert.Nil(t, err)
 			assert.Equal(t, env.Len(), len(payload)+3)
@@ -102,12 +102,12 @@ func TestEnvelope(t *testing.T) {
 	})
 }
 
-// writerSender is a [MessageSender] that writes to an [io.Writer].
+// writerSender is a [messageSender] that writes to an [io.Writer].
 type writerSender struct {
 	writer io.Writer
 }
 
-func (w writerSender) Send(payload MessagePayload) (int64, error) {
+func (w writerSender) Send(payload messagePayload) (int64, error) {
 	return payload.WriteTo(w.writer)
 }
 

@@ -108,7 +108,7 @@ func TestUnaryTrailersOverWebSocket(t *testing.T) {
 }
 
 // The streaming case, where the caller reads to io.EOF and so does consume the
-// terminal envelope.
+// end-of-stream message.
 func TestStreamingTrailersOverWebSocket(t *testing.T) {
 	t.Parallel()
 	client := newTrailerClient(t, trailerServer{})

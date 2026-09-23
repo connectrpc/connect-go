@@ -87,9 +87,13 @@ func zeroOutputDeflate(size int) []byte {
 }
 
 // writeClientFrame writes one masked client frame with FIN set. compressed
-// sets RSV1, which marks the payload as permessage-deflate compressed.
-func writeClientFrame(conn net.Conn, payload []byte, compressed bool) error {
+// sets RSV1, which marks the payload as permessage-deflate compressed; text
+// picks the text opcode, which is what a JSON payload travels under.
+func writeClientFrame(conn net.Conn, payload []byte, compressed, text bool) error {
 	first := byte(0x80 | 0x02) // FIN | binary
+	if text {
+		first = byte(0x80 | 0x01)
+	}
 	if compressed {
 		first |= 0x40 // RSV1
 	}
@@ -191,7 +195,7 @@ func TestCompressionBombIsBoundedOnTheWire(t *testing.T) {
 	// A partial write is the expected outcome: the server stops reading and
 	// tears the connection down well before 8MiB has been sent.
 	assert.Nil(t, conn.SetWriteDeadline(time.Now().Add(20*time.Second)))
-	_ = writeClientFrame(conn, zeroOutputDeflate(bombCompressed), true)
+	_ = writeClientFrame(conn, zeroOutputDeflate(bombCompressed), true, false)
 
 	// Drain until the server closes, so the measurement covers everything it
 	// was willing to read.

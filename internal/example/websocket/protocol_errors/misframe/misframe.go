@@ -23,7 +23,6 @@
 package misframe
 
 import (
-	"encoding/binary"
 	"net/http"
 
 	v1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
@@ -31,9 +30,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Handler answers an upgrade with a response envelope whose declared length is
-// one byte short of its payload — the mistake a client reports as
-// connectwebsocket.FaultEnvelopeLength.
+// Handler answers an upgrade with a response carrying a marker nobody has
+// defined — the mistake a client reports as connectwebsocket.FaultMarker.
 //
 // It speaks the wire format by hand rather than going through
 // connectwebsocket, because that transport frames correctly and no option
@@ -56,8 +54,6 @@ func Handler(responseWriter http.ResponseWriter, request *http.Request) {
 	if err != nil {
 		return
 	}
-	frame := make([]byte, 5+len(payload))
-	binary.BigEndian.PutUint32(frame[1:5], uint32(len(payload)-1)) // the lie
-	copy(frame[5:], payload)
+	frame := append([]byte("Z"), payload...) // the lie
 	_ = conn.Write(ctx, websocket.MessageBinary, frame)
 }

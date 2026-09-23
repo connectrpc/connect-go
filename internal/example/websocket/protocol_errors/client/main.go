@@ -27,7 +27,6 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"flag"
 	"log"
 	"strings"
@@ -39,6 +38,13 @@ import (
 	pingv1connect "connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
 	"github.com/coder/websocket"
 	"google.golang.org/protobuf/proto"
+)
+
+// The message markers, one BMP scalar each.
+const (
+	markerBody            = 'B'
+	markerMetadata        = 'M'
+	markerServerEndStream = 'S'
 )
 
 func main() {
@@ -59,51 +65,45 @@ func main() {
 			name:  "a well-framed message",
 			which: "no fault: the monitor stays silent",
 			send: func(ctx context.Context, conn *websocket.Conn) error {
-				return writeEnvelope(ctx, conn, 0, len(message), message)
+				return writeMessage(ctx, conn, false, markerBody, message)
 			},
 		},
 		{
-			name:  "a length one byte short",
-			which: "envelope_length",
+			name:  "a marker nobody has defined",
+			which: "marker",
 			send: func(ctx context.Context, conn *websocket.Conn) error {
-				return writeEnvelope(ctx, conn, 0, len(message)-1, message)
+				return writeMessage(ctx, conn, false, 'Z', message)
 			},
 		},
 		{
 			// Repeated on purpose: the server counts per client, so this is
 			// what a consistently broken implementation looks like in its log.
-			name:  "the same length mistake again",
-			which: "envelope_length",
+			name:  "the same unknown marker again",
+			which: "marker",
 			send: func(ctx context.Context, conn *websocket.Conn) error {
-				return writeEnvelope(ctx, conn, 0, len(message)+1, message)
+				return writeMessage(ctx, conn, false, 'Z', message)
 			},
 		},
 		{
-			name:  "a reserved flag bit",
-			which: "envelope_flags",
+			name:  "the server's own end-of-stream marker",
+			which: "marker",
 			send: func(ctx context.Context, conn *websocket.Conn) error {
-				return writeEnvelope(ctx, conn, 0b00010000, len(message), message)
+				return writeMessage(ctx, conn, true, markerServerEndStream, []byte("{}"))
 			},
 		},
 		{
-			name:  "the server's own end-of-stream flag",
-			which: "envelope_flags",
-			send: func(ctx context.Context, conn *websocket.Conn) error {
-				return writeEnvelope(ctx, conn, 0b00000010, 2, []byte("{}"))
-			},
-		},
-		{
-			name:  "a text frame",
+			name:  "an empty body in a text frame",
 			which: "frame_type",
 			send: func(ctx context.Context, conn *websocket.Conn) error {
-				return conn.Write(ctx, websocket.MessageText, []byte("hello"))
+				// An empty JSON message is {}, never zero bytes.
+				return writeMessage(ctx, conn, true, markerBody, nil)
 			},
 		},
 		{
-			name:  "Leading-Metadata that is not JSON",
+			name:  "a second M message",
 			which: "metadata",
 			send: func(ctx context.Context, conn *websocket.Conn) error {
-				return writeEnvelope(ctx, conn, 0b00001000, 8, []byte("not json"))
+				return writeMessage(ctx, conn, true, markerMetadata, []byte("{}"))
 			},
 		},
 	}
@@ -183,6 +183,11 @@ func exchange(
 	}
 	defer func() { _ = conn.CloseNow() }()
 
+	// Every stream opens with exactly one M message, empty when the client has
+	// none. Anything else first is refused before the RPC starts.
+	if err := writeMessage(ctx, conn, true, markerMetadata, []byte("{}")); err != nil {
+		return "", err
+	}
 	if err := send(ctx, conn); err != nil {
 		return "", err
 	}
@@ -190,29 +195,30 @@ func exchange(
 	if err != nil {
 		return "", err
 	}
-	if len(data) < 5 {
+	if len(data) == 0 {
 		return "", nil
 	}
-	// Flags byte 0x02 marks the end-of-stream envelope, whose payload is the
-	// JSON verdict; anything else is a normal response message.
-	if data[0] == 0b00000010 {
-		return string(data[5:]), nil
+	// S marks the end-of-stream message, whose payload is the JSON verdict;
+	// anything else is a normal response message.
+	if rune(data[0]) == markerServerEndStream {
+		return string(data[1:]), nil
 	}
 	return "a response message", nil
 }
 
-// writeEnvelope frames one envelope with an arbitrary flags byte and declared
-// length, which is how this client produces mistakes the transport would not.
-func writeEnvelope(
+// writeMessage frames one message with an arbitrary marker and frame type,
+// which is how this client produces mistakes the transport would not.
+func writeMessage(
 	ctx context.Context,
 	conn *websocket.Conn,
-	flags byte,
-	declared int,
+	text bool,
+	marker rune,
 	payload []byte,
 ) error {
-	frame := make([]byte, 5+len(payload))
-	frame[0] = flags
-	binary.BigEndian.PutUint32(frame[1:5], uint32(declared))
-	copy(frame[5:], payload)
-	return conn.Write(ctx, websocket.MessageBinary, frame)
+	frame := append([]byte(string(marker)), payload...)
+	messageType := websocket.MessageBinary
+	if text {
+		messageType = websocket.MessageText
+	}
+	return conn.Write(ctx, messageType, frame)
 }

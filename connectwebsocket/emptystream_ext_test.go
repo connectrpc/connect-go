@@ -32,7 +32,7 @@ import (
 
 // scriptedServer sends a fixed number of messages and then either ends the
 // stream or fails, so a test can place the error before, after, or instead of
-// the messages. Every RPC sets a trailer: the terminal envelope carries it, and
+// the messages. Every RPC sets a trailer: the end-of-stream message carries it, and
 // a stream that ends the wrong way loses it.
 type scriptedServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
@@ -155,7 +155,7 @@ func TestBidiEndsWithNoMessagesEitherWay(t *testing.T) {
 }
 
 // A client stream with no messages: the request side opens and closes without
-// a single envelope, and the handler still answers.
+// a single message, and the handler still answers.
 func TestClientStreamEndsWithNoMessages(t *testing.T) {
 	t.Parallel()
 	client := newScriptedClient(t, scriptedServer{})
@@ -169,7 +169,7 @@ func TestClientStreamEndsWithNoMessages(t *testing.T) {
 }
 
 // An error with no messages ahead of it must arrive as the error, not as EOF:
-// the two are a single envelope apart on the wire.
+// the two are a single message apart on the wire.
 func TestServerStreamErrorsBeforeAnyMessage(t *testing.T) {
 	t.Parallel()
 	client := newScriptedClient(t, scriptedServer{

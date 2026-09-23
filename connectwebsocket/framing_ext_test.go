@@ -68,15 +68,12 @@ func readServerFrame(tb testing.TB, conn net.Conn) (compressed bool, payload []b
 	return compressed, payload
 }
 
-// envelopeFor frames a proto message as one Connect envelope.
-func envelopeFor(tb testing.TB, message proto.Message) []byte {
+// bodyFor frames a proto message as one B message.
+func bodyFor(tb testing.TB, message proto.Message) []byte {
 	tb.Helper()
 	encoded, err := proto.Marshal(message)
 	assert.Nil(tb, err)
-	frame := make([]byte, 5+len(encoded))
-	binary.BigEndian.PutUint32(frame[1:5], uint32(len(encoded)))
-	copy(frame[5:], encoded)
-	return frame
+	return append([]byte(string(wireBody)), encoded...)
 }
 
 // pingOverRawFrames sends one unary Ping and reports whether the server
@@ -102,14 +99,21 @@ func pingOverRawFrames(tb testing.TB, text string, options ...connectwebsocket.S
 	_ = rawHandshake(tb, conn, addr, pingUnaryProcedure)
 
 	assert.Nil(tb, conn.SetDeadline(time.Now().Add(20*time.Second)))
+	// Every stream opens with Leading-Metadata before anything else.
+	assert.Nil(tb, writeClientFrame(conn, openMessage(), false, true))
 	// The request goes uncompressed: RSV1 is per message, so a peer may send
 	// plain frames even once the extension is negotiated.
-	assert.Nil(tb, writeClientFrame(conn, envelopeFor(tb, &pingv1.PingRequest{Text: text}), false))
+	assert.Nil(tb, writeClientFrame(conn, bodyFor(tb, &pingv1.PingRequest{Text: text}), false, false))
 
 	compressed, payload := readServerFrame(tb, conn)
-	// The response envelope must be the echoed message, not the terminal one.
+	// The response must be the echoed message, not the terminal one.
 	assert.True(tb, len(payload) > 0)
 	return compressed
+}
+
+// openMessage is the empty M message that starts a stream.
+func openMessage() []byte {
+	return append([]byte(string(wireMetadata)), []byte("{}")...)
 }
 
 // A response comfortably over the threshold must actually go out compressed.
@@ -139,25 +143,25 @@ func TestWithoutCompressionLeavesRSV1Clear(t *testing.T) {
 	assert.False(t, pingOverRawFrames(t, text, connectwebsocket.WithoutCompression()))
 }
 
-// A flag that belongs to the other direction is a different mistake from a bit
-// nobody has defined, and the peer can only correct what it is told. Bit 1 is
-// the server's to set; a client setting it has the roles backwards, which
-// "reserved flags" would not convey.
-func TestWrongDirectionFlagIsNamedAsSuch(t *testing.T) {
+// A marker that belongs to the other direction is a different mistake from one
+// nobody has defined, and the peer can only correct what it is told. S is the
+// server's to send; a client sending it has the roles backwards, which
+// "unknown marker" would not convey.
+func TestWrongDirectionMarkerIsNamedAsSuch(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
-		name  string
-		flags byte
-		want  string
+		name   string
+		marker rune
+		want   string
 	}{
-		{"end-stream is server-only", 0b00000010, "server-only flags: 0x02"},
-		{"nothing recognized is reserved", 0b00010000, "reserved flags: 0x10"},
+		{"end-stream is server-only", wireServerEndStream, "only a server may send"},
+		{"nothing recognized is unknown", 'Z', "unknown marker Z"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			httpServer := newHybridServer(t, pingServer{})
 			conn := dialCumSum(t, httpServer, "")
-			sendRawEnvelope(t, conn, test.flags, []byte(`{}`))
+			sendJSONMessage(t, conn, test.marker, []byte(`{}`))
 
 			_, data, err := conn.Read(t.Context())
 			assert.Nil(t, err)

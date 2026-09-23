@@ -21,8 +21,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/internal/connectwire"
-	"connectrpc.com/connect/v2/internal/envelope"
 	"github.com/coder/websocket"
 )
 
@@ -59,7 +57,7 @@ func (s *session) Serve(
 	// See peerMisbehaved, and TestCompressionBombIsBoundedOnTheWire, which
 	// fails if either half regresses.
 	conn.SetReadLimit(frameReadLimit(info.ReadMaxBytes))
-	ctx, cancel, timeoutErr := timeoutFromRequest(ctx, info.Request)
+	ctx, cancel, timeoutErr := timeoutFromRequest(ctx, info.Request, info.MaxTimeout)
 	if cancel != nil {
 		defer cancel()
 	}
@@ -91,22 +89,21 @@ func (s *session) Serve(
 	handlerConn := &websocketHandlerConn{
 		request: info.Request,
 		wsConn:  conn,
-		marshaler: connectwire.StreamingMarshaler{
-			Writer: envelope.Writer{
-				Ctx:    ctx,
-				Sender: &websocketBinarySender{ctx: ctx, conn: conn},
-				Codec:  info.Codec,
-				// No CompressionPool: the WebSocket transport compresses whole
-				// messages itself, so a second pass here would deflate gzip.
-				SendMaxBytes: info.SendMaxBytes,
-				Stats:        &callInfo.SendStats,
-			},
+		marshaler: messageWriter{
+			// No compression here: the WebSocket transport compresses whole
+			// messages itself, so a second pass would deflate gzip.
+			ctx:          ctx,
+			sender:       &websocketBinarySender{ctx: ctx, conn: conn},
+			codecs:       info.Codecs,
+			bodyIsText:   info.Codec.Name() == connect.CodecNameJSON,
+			sendMaxBytes: info.SendMaxBytes,
+			stats:        &callInfo.SendStats,
 		},
 		unmarshaler: websocketUnmarshaler{
 			ctx:          ctx,
 			wsConn:       conn,
 			callInfo:     callInfo,
-			codec:        info.Codec,
+			codecs:       info.Codecs,
 			readMaxBytes: info.ReadMaxBytes,
 			info:         info,
 		},
@@ -117,7 +114,7 @@ func (s *session) Serve(
 
 	if timeoutErr != nil {
 		// The handshake already committed the HTTP response, so a malformed
-		// deadline can only be reported in the end-of-stream envelope.
+		// deadline can only be reported in the end-of-stream message.
 		return handlerConn.Close(timeoutErr)
 	}
 
@@ -133,6 +130,13 @@ func (s *session) Serve(
 			panic(recovered)
 		}
 	}()
+
+	// Consume the client's Leading-Metadata before the handler exists, so
+	// CallInfo is complete for interceptors and frozen for the handler. See
+	// drainLeadingMetadata.
+	if drainErr := handlerConn.unmarshaler.drainLeadingMetadata(); drainErr != nil {
+		return handlerConn.Close(drainErr)
+	}
 
 	callErr := server.Call(ctx, procedure, callInfo, &serverStream{conn: handlerConn})
 	// Trailing metadata is only knowable once the handler has returned. Leading
@@ -169,6 +173,7 @@ func (s *serverStream) Send(msg any) error {
 func timeoutFromRequest(
 	ctx context.Context,
 	request *http.Request,
+	maxTimeout time.Duration,
 ) (context.Context, context.CancelFunc, *connect.Error) {
 	headerValue := request.Header.Get(headerTimeout)
 	queryValue := request.URL.Query().Get(wsQueryTimeoutMs)
@@ -185,7 +190,12 @@ func timeoutFromRequest(
 	case queryValue != "":
 		timeout = queryValue
 	default:
-		return ctx, nil, nil
+		// No client deadline, so the server's bound is the whole of it.
+		if maxTimeout <= 0 {
+			return ctx, nil, nil
+		}
+		ctx, cancel := context.WithTimeout(ctx, maxTimeout)
+		return ctx, cancel, nil
 	}
 	if len(timeout) > 10 {
 		return ctx, nil, errorf(connect.CodeInvalidArgument, "parse timeout: %q has >10 digits", timeout)
@@ -194,7 +204,12 @@ func timeoutFromRequest(
 	if err != nil {
 		return ctx, nil, errorf(connect.CodeInvalidArgument, "parse timeout: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(millis)*time.Millisecond)
+	requested := time.Duration(millis) * time.Millisecond
+	// A client may ask for less time than the server allows, never more.
+	if maxTimeout > 0 && requested > maxTimeout {
+		requested = maxTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, requested)
 	return ctx, cancel, nil
 }
 

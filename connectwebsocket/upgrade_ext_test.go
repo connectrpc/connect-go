@@ -335,6 +335,8 @@ var (
 	_ connectwebsocket.ServerOption = connectwebsocket.WithCheckOrigin(nil)
 	_ connectwebsocket.ServerOption = connectwebsocket.WithSession(nil)
 	_ connectwebsocket.ServerOption = connectwebsocket.WithLogger(nil)
+	_ connectwebsocket.ClientOption = connectwebsocket.WithPathPrefix("")
+	_ connectwebsocket.ServerOption = connectwebsocket.WithPathPrefix("")
 	_ connectwebsocket.ServerOption = connectwebsocket.WithHTTPOptions()
 	// The monitoring hooks mirror each other, one per side.
 	_ connectwebsocket.ServerOption = connectwebsocket.WithServerProtocolErrorHandler(nil)

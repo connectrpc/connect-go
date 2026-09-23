@@ -139,7 +139,7 @@ func TestHandlerPanicDoesNotStrandTheClient(t *testing.T) {
 }
 
 // Once the client has said it is done sending, a further Send has nowhere to
-// go: the peer has stopped reading data envelopes. Reporting it keeps the
+// go: the peer has stopped reading body messages. Reporting it keeps the
 // caller from believing the message was delivered, and matches connecthttp.
 func TestSendAfterCloseSendFails(t *testing.T) {
 	t.Parallel()

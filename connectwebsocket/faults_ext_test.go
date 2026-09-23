@@ -16,12 +16,12 @@ package connectwebsocket_test
 
 import (
 	"context"
-	"encoding/binary"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectwebsocket"
@@ -83,70 +83,63 @@ func TestProtocolFaultsAreClassified(t *testing.T) {
 	assert.Nil(t, err)
 
 	for _, test := range []struct {
-		name  string
-		flags byte
-		// declare overrides the length field; -1 means "tell the truth".
-		declare int
-		payload []byte
+		name    string
+		marker  rune
 		text    bool
-		want    connectwebsocket.ProtocolFault
+		payload []byte
+		// raw replaces the whole frame, for a message the marker scheme cannot
+		// express.
+		raw  []byte
+		want connectwebsocket.ProtocolFault
 	}{
 		{
-			name:    "length shorter than the frame",
-			declare: len(message) - 1,
+			name:    "unknown marker",
+			marker:  'Z',
 			payload: message,
-			want:    connectwebsocket.FaultEnvelopeLength,
+			want:    connectwebsocket.FaultMarker,
 		},
 		{
-			name:    "length longer than the frame",
-			declare: len(message) + 1,
-			payload: message,
-			want:    connectwebsocket.FaultEnvelopeLength,
-		},
-		{
-			name:    "reserved flag bit",
-			flags:   0b00010000,
-			declare: -1,
-			payload: message,
-			want:    connectwebsocket.FaultEnvelopeFlags,
-		},
-		{
-			name:    "server-only flag bit",
-			flags:   0b00000010,
-			declare: -1,
+			name:    "server-only marker",
+			marker:  wireServerEndStream,
+			text:    true,
 			payload: []byte("{}"),
-			want:    connectwebsocket.FaultEnvelopeFlags,
+			want:    connectwebsocket.FaultMarker,
 		},
 		{
-			name:    "Connect-level compression flag",
-			flags:   0b00000001,
-			declare: -1,
-			payload: message,
-			want:    connectwebsocket.FaultEnvelopeFlags,
+			name: "marker outside the BMP",
+			// U+1F600, four bytes: rejected on the leading byte alone.
+			raw:  append([]byte(string(rune(0x1F600))), message...),
+			want: connectwebsocket.FaultMarker,
+		},
+		{
+			name: "empty message",
+			raw:  []byte{},
+			want: connectwebsocket.FaultMarker,
 		},
 		{
 			name:    "message past the read limit",
-			declare: -1,
+			marker:  wireBody,
 			payload: make([]byte, 4096),
 			want:    connectwebsocket.FaultSizeLimit,
 		},
 		{
-			name:    "malformed Leading-Metadata",
-			flags:   0b00001000,
-			declare: -1,
+			name:    "malformed metadata",
+			marker:  wireMetadata,
+			text:    true,
 			payload: []byte("not json"),
 			want:    connectwebsocket.FaultMetadata,
 		},
 		{
 			name:    "undecodable payload",
-			declare: -1,
+			marker:  wireBody,
 			payload: []byte{0xff, 0xff, 0xff, 0xff},
 			want:    connectwebsocket.FaultMessageEncoding,
 		},
 		{
-			name: "text frame",
-			text: true,
-			want: connectwebsocket.FaultFrameType,
+			name:   "empty body in a text frame",
+			marker: wireBody,
+			text:   true,
+			want:   connectwebsocket.FaultFrameType,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -155,19 +148,15 @@ func TestProtocolFaultsAreClassified(t *testing.T) {
 			httpServer := newFaultServer(t, recorder)
 			conn := dialCumSum(t, httpServer, "")
 
-			if test.text {
-				assert.Nil(t, conn.Write(t.Context(), websocket.MessageText, []byte("hello")))
-			} else {
-				declared := len(test.payload)
-				if test.declare >= 0 {
-					declared = test.declare
-				}
-				frame := make([]byte, 5+len(test.payload))
-				frame[0] = test.flags
-				binary.BigEndian.PutUint32(frame[1:5], uint32(declared))
-				copy(frame[5:], test.payload)
-				assert.Nil(t, conn.Write(t.Context(), websocket.MessageBinary, frame))
+			frame := test.raw
+			if frame == nil {
+				frame = append([]byte(string(test.marker)), test.payload...)
 			}
+			messageType := websocket.MessageBinary
+			if test.text {
+				messageType = websocket.MessageText
+			}
+			assert.Nil(t, conn.Write(t.Context(), messageType, frame))
 
 			// Read the server's verdict, which is what makes the fault
 			// observable to the peer as well as to the monitor.
@@ -192,17 +181,14 @@ func TestProtocolErrorHandlerCannotSuppress(t *testing.T) {
 
 	message, err := proto.Marshal(&pingv1.CumSumRequest{Number: 7})
 	assert.Nil(t, err)
-	frame := make([]byte, 5+len(message))
-	binary.BigEndian.PutUint32(frame[1:5], uint32(len(message)-1))
-	copy(frame[5:], message)
-	assert.Nil(t, conn.Write(t.Context(), websocket.MessageBinary, frame))
+	writeRawFrame(conn, false, 'Z', message)
 
 	_, data, err := conn.Read(t.Context())
 	assert.Nil(t, err)
-	// An EndStream envelope carrying the error, exactly as without a handler.
-	assert.Equal(t, data[0], byte(0b00000010))
+	// An S message carrying the error, exactly as without a handler.
+	assert.Equal(t, rune(data[0]), wireServerEndStream)
 	assert.True(t, strings.Contains(string(data), "invalid_argument"))
-	assert.True(t, strings.Contains(string(data), "extra bytes after envelope"))
+	assert.True(t, strings.Contains(string(data), "unknown marker Z"))
 
 	faults, _ := recorder.seen()
 	assert.Equal(t, len(faults), 1)
@@ -273,6 +259,16 @@ func misframingServer(tb testing.TB, write func(*websocket.Conn)) *httptest.Serv
 			}
 			defer func() { _ = conn.CloseNow() }()
 			write(conn)
+			// Stay up until the client is done. Closing straight after the
+			// write would race the client's own frames, and the test would see
+			// a write failure rather than the fault it asked for.
+			readCtx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
+			defer cancel()
+			for {
+				if _, _, err := conn.Read(readCtx); err != nil {
+					return
+				}
+			}
 		},
 	))
 	tb.Cleanup(httpServer.Close)
@@ -292,46 +288,44 @@ func TestClientProtocolFaultsAreClassified(t *testing.T) {
 		want  connectwebsocket.ProtocolFault
 	}{
 		{
-			name: "length shorter than the frame",
+			name: "unknown marker",
 			write: func(conn *websocket.Conn) {
-				writeRawFrame(conn, 0, len(message)-1, message)
+				writeRawFrame(conn, false, 'Z', message)
 			},
-			want: connectwebsocket.FaultEnvelopeLength,
+			want: connectwebsocket.FaultMarker,
 		},
 		{
-			name: "reserved flag bit",
+			name: "client-only marker",
 			write: func(conn *websocket.Conn) {
-				writeRawFrame(conn, 0b00010000, len(message), message)
+				writeRawFrame(conn, true, wireClientEndStream, nil)
 			},
-			want: connectwebsocket.FaultEnvelopeFlags,
+			want: connectwebsocket.FaultMarker,
 		},
 		{
-			name: "client-only flag bit",
+			name: "marker outside the BMP",
 			write: func(conn *websocket.Conn) {
-				writeRawFrame(conn, 0b00000100, 0, nil)
+				writeRawFrame(conn, false, rune(0x1F600), message)
 			},
-			want: connectwebsocket.FaultEnvelopeFlags,
+			want: connectwebsocket.FaultMarker,
 		},
 		{
 			name: "undecodable payload",
 			write: func(conn *websocket.Conn) {
-				bad := []byte{0xff, 0xff, 0xff, 0xff}
-				writeRawFrame(conn, 0, len(bad), bad)
+				writeRawFrame(conn, false, wireBody, []byte{0xff, 0xff, 0xff, 0xff})
 			},
 			want: connectwebsocket.FaultMessageEncoding,
 		},
 		{
 			name: "malformed EndStream message",
 			write: func(conn *websocket.Conn) {
-				bad := []byte("not json")
-				writeRawFrame(conn, 0b00000010, len(bad), bad)
+				writeRawFrame(conn, true, wireServerEndStream, []byte("not json"))
 			},
 			want: connectwebsocket.FaultMetadata,
 		},
 		{
-			name: "text frame",
+			name: "empty body in a text frame",
 			write: func(conn *websocket.Conn) {
-				_ = conn.Write(context.Background(), websocket.MessageText, []byte("hello"))
+				writeRawFrame(conn, true, wireBody, nil)
 			},
 			want: connectwebsocket.FaultFrameType,
 		},
@@ -363,12 +357,13 @@ func TestClientProtocolFaultsAreClassified(t *testing.T) {
 	}
 }
 
-// writeRawFrame sends one envelope with an arbitrary flags byte and declared
-// length, which is how a hostile server misframes a response.
-func writeRawFrame(conn *websocket.Conn, flags byte, declared int, payload []byte) {
-	frame := make([]byte, 5+len(payload))
-	frame[0] = flags
-	binary.BigEndian.PutUint32(frame[1:5], uint32(declared))
-	copy(frame[5:], payload)
-	_ = conn.Write(context.Background(), websocket.MessageBinary, frame)
+// writeRawFrame sends one message with an arbitrary marker and frame type,
+// which is how a misframing server produces a mistake the transport would not.
+func writeRawFrame(conn *websocket.Conn, text bool, marker rune, payload []byte) {
+	frame := append([]byte(string(marker)), payload...)
+	messageType := websocket.MessageBinary
+	if text {
+		messageType = websocket.MessageText
+	}
+	_ = conn.Write(context.Background(), messageType, frame)
 }

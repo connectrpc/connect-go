@@ -70,8 +70,8 @@ func TestClientHandlerSeesAMisframingServer(t *testing.T) {
 	if calls != 1 {
 		t.Errorf("handler called %d times; want 1", calls)
 	}
-	if gotFault != connectwebsocket.FaultEnvelopeLength {
-		t.Errorf("got fault %s; want %s", gotFault, connectwebsocket.FaultEnvelopeLength)
+	if gotFault != connectwebsocket.FaultMarker {
+		t.Errorf("got fault %s; want %s", gotFault, connectwebsocket.FaultMarker)
 	}
 	if gotProcedure != pingv1connect.PingServiceCumSumProcedure {
 		t.Errorf("got procedure %q; want %q", gotProcedure, pingv1connect.PingServiceCumSumProcedure)

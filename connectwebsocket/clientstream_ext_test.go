@@ -28,7 +28,7 @@ import (
 )
 
 // The shape of a client-streaming RPC on the wire: several values, an
-// End-Of-Client-Stream envelope, one response message, one EndStream envelope,
+// C message, one response message, one S message,
 // and the server's close. Written as a reference trace, because a second
 // implementation has to reproduce it exactly.
 func TestClientStreamingWireSequence(t *testing.T) {
@@ -36,11 +36,11 @@ func TestClientStreamingWireSequence(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		// foldFinalValue puts the last value inside the End-Of-Client-Stream
-		// envelope instead of sending it in an envelope of its own. Both are
+		// message instead of sending it in a message of its own. Both are
 		// permitted, and the sum must come out the same either way.
 		foldFinalValue bool
 	}{
-		{name: "final value in its own envelope"},
+		{name: "final value in its own message"},
 		{name: "final value folded into End-Of-Client-Stream", foldFinalValue: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -56,28 +56,30 @@ func TestClientStreamingWireSequence(t *testing.T) {
 			for _, value := range values[:len(values)-1] {
 				payload, err := proto.Marshal(&pingv1.SumRequest{Number: value})
 				assert.Nil(t, err)
-				client.writeEnvelope(t, 0, payload)
+				client.writeProto(t, payload)
 			}
 			payload, err := proto.Marshal(&pingv1.SumRequest{Number: values[len(values)-1]})
 			assert.Nil(t, err)
 			if test.foldFinalValue {
-				client.writeEnvelope(t, flagEndClientStream, payload)
+				client.writeProtoEnd(t, payload)
 			} else {
-				client.writeEnvelope(t, 0, payload)
-				client.writeEnvelope(t, flagEndClientStream, nil)
+				client.writeProto(t, payload)
+				client.writeJSON(t, wireClientEndStream, nil)
 			}
 
-			// The response is two envelopes, not one: the message, then the
-			// terminal envelope carrying the trailers. A client that stops
+			// The response is two messages, not one: the body, then the
+			// end-of-stream message carrying the trailers. A client that stops
 			// after the first silently drops them.
-			flags, payload := client.readEnvelope(t)
-			assert.Equal(t, flags, uint8(0))
+			marker, payload, text := client.readMessage(t)
+			assert.Equal(t, marker, wireBody)
+			assert.False(t, text) // Protobuf body, binary frame
 			var response pingv1.SumResponse
 			assert.Nil(t, proto.Unmarshal(payload, &response))
 			assert.Equal(t, response.Sum, want)
 
-			flags, payload = client.readEnvelope(t)
-			assert.Equal(t, flags, uint8(flagEndStream))
+			marker, payload, text = client.readMessage(t)
+			assert.Equal(t, marker, wireServerEndStream)
+			assert.True(t, text) // EndStreamMessage JSON, text frame
 			assert.True(t, strings.Contains(string(payload), "set-by-handler"))
 			assert.True(t, !strings.Contains(string(payload), "error"))
 
@@ -92,7 +94,7 @@ func TestClientStreamingWireSequence(t *testing.T) {
 
 // The same exchange through the generated client, which is what a Go caller
 // actually writes. CloseAndReceive sends End-Of-Client-Stream, reads the single
-// response, and reads the terminal envelope behind it so the trailers survive.
+// response, and reads the end-of-stream message behind it so the trailers survive.
 func TestClientStreamingThroughTheGeneratedClient(t *testing.T) {
 	t.Parallel()
 	httpServer := newServerFor(t, scriptedServer{})

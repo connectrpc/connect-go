@@ -15,7 +15,7 @@
 // Command server monitors clients that send malformed frames.
 //
 // A framing fault is reported to the offending client in the end-of-stream
-// envelope, which means it is a *successful* outcome from the server's point of
+// message, which means it is a *successful* outcome from the server's point of
 // view: it never reaches the logger, and a Session wrapper sees a nil error. An
 // interceptor does see it, but only as InvalidArgument — the same code every
 // framing fault carries. WithServerProtocolErrorHandler is the hook that says
@@ -68,8 +68,8 @@ func (pingServer) CumSum(_ context.Context, stream pingv1connect.PingServiceCumS
 }
 
 // faultMonitor is the shape a real deployment would give this: a counter per
-// peer and per kind of mistake, so a client that consistently mis-states
-// envelope lengths stands out from one that trips over a flag bit once.
+// peer and per kind of mistake, so a client that consistently sends unknown
+// markers stands out from one that trips over a frame type once.
 type faultMonitor struct {
 	mu     sync.Mutex
 	counts map[string]map[connectwebsocket.ProtocolFault]int

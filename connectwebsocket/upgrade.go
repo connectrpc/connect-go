@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect/v2"
 	"github.com/coder/websocket"
@@ -37,8 +38,13 @@ const hijackerHelp = "Connect over WebSocket requires the HTTP listener to suppo
 // handshake. Every field is resolved before the 101 response, because HTTP
 // headers cannot be added once the connection is upgraded.
 type SessionInfo struct {
-	// Codec is the codec negotiated through the WebSocket subprotocol.
+	// Codec is the codec negotiated through the WebSocket subprotocol. It is
+	// the default for bodies this server sends; an incoming body is decoded
+	// with whichever codec its frame type names.
 	Codec connect.Codec
+	// Codecs are both codecs the frame type selects between, since a client
+	// may send either on any connection.
+	Codecs codecPair
 	// Subprotocol is the token echoed to the client in Sec-WebSocket-Protocol.
 	Subprotocol string
 	// PeerAddr is the client's address, for [connect.CallInfo].
@@ -49,6 +55,8 @@ type SessionInfo struct {
 	// OnProtocolError observes a client's framing mistakes; see
 	// [WithServerProtocolErrorHandler]. It is nil unless one was registered.
 	OnProtocolError ServerProtocolErrorHandler
+	// MaxTimeout bounds the RPC; see [WithMaxTimeout]. Zero means no bound.
+	MaxTimeout time.Duration
 	// ReadMaxBytes and SendMaxBytes are the size limits configured on the
 	// handler. They travel with the connection rather than being held by the
 	// Session so that a Session supplied through WithSession is configured by
@@ -59,7 +67,7 @@ type SessionInfo struct {
 }
 
 // Session serves RPCs on an upgraded WebSocket connection. Serve reads
-// envelopes from conn, builds a [connect.ServerStream] per logical stream, and
+// messages from conn, builds a [connect.ServerStream] per logical stream, and
 // dispatches each through [connect.Server.Call]. It owns conn and closes it.
 //
 // Serve returns when the connection ends. Its error is logged, not sent: the
@@ -95,21 +103,24 @@ func Upgrade(server *connect.Server, next http.Handler, options ...ServerOption)
 	if serve == nil {
 		serve = &session{}
 	}
+	pair, _ := newCodecPair(opts.codecs)
 	return &upgradeHandler{
-		server:  server,
-		session: serve,
-		next:    next,
-		codecs:  newCodecRegistry(opts.codecs),
-		opts:    &opts,
+		server:    server,
+		session:   serve,
+		next:      next,
+		codecs:    newCodecRegistry(opts.codecs),
+		codecPair: pair,
+		opts:      &opts,
 	}
 }
 
 type upgradeHandler struct {
-	server  *connect.Server
-	session Session
-	next    http.Handler
-	codecs  registry[connect.Codec]
-	opts    *options
+	server    *connect.Server
+	session   Session
+	next      http.Handler
+	codecs    registry[connect.Codec]
+	codecPair codecPair
+	opts      *options
 }
 
 func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
@@ -157,7 +168,7 @@ func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *
 		Subprotocols: []string{subprotocol},
 		// Only when WithCheckOrigin supplied a policy, which has already run.
 		InsecureSkipVerify: h.opts.checkOrigin != nil,
-		// Compression is the transport's job, not the envelope layer's: browsers
+		// Compression is the transport's job, not the framing layer's: browsers
 		// get permessage-deflate for free and cannot negotiate a Connect-level
 		// encoding on an upgrade request.
 		//
@@ -175,9 +186,11 @@ func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *
 	}
 	info := SessionInfo{
 		Codec:           codec,
+		Codecs:          h.codecPair,
 		Subprotocol:     subprotocol,
 		PeerAddr:        request.RemoteAddr,
 		Request:         request,
+		MaxTimeout:      h.opts.maxTimeout,
 		ReadMaxBytes:    h.opts.readMaxBytes,
 		SendMaxBytes:    h.opts.sendMaxBytes,
 		OnProtocolError: h.opts.onProtocolError,

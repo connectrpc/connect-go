@@ -101,7 +101,7 @@ func TestRepeatedTrailerValuesSurvive(t *testing.T) {
 // Leading metadata a handler sets must reach the caller as a *header*, the
 // same as it does over HTTP. The 101 is written before the handler runs, so
 // there is no response header block to carry it; it travels in a
-// Leading-Metadata envelope instead. Asserted against connecthttp rather than
+// Leading-Metadata message instead. Asserted against connecthttp rather than
 // against a constant, so the two transports cannot drift apart.
 func TestResponseHeadersArriveAsHeaders(t *testing.T) {
 	t.Parallel()
@@ -162,7 +162,7 @@ func TestLeadingMetadataIsReadableAfterFirstReceive(t *testing.T) {
 
 // failingMetadataServer sets leading metadata and then fails without sending a
 // message: the case where the metadata has nothing to ride ahead of, and would
-// be lost if the envelope only flushed on the first Send.
+// be lost if the metadata only flushed on the first Send.
 type failingMetadataServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
 }
@@ -179,8 +179,8 @@ func (failingMetadataServer) CountUp(
 	return connect.NewError(connect.CodeUnavailable, "no messages for you")
 }
 
-// The flush point is "before the first message, or before the end-of-stream
-// envelope if there is no message" — this is the second clause.
+// The flush point is "before the first body, or before the end-of-stream
+// message if there is no body" — this is the second clause.
 func TestLeadingMetadataSurvivesAStreamWithNoMessages(t *testing.T) {
 	t.Parallel()
 	httpServer := newServerFor(t, failingMetadataServer{})
@@ -203,22 +203,23 @@ func TestLeadingMetadataSurvivesAStreamWithNoMessages(t *testing.T) {
 	assert.Equal(t, info.ResponseTrailer().Values("Trail"), []string{"trailer-value"})
 }
 
-// Metadata is "leading" only while no message has gone by. A peer that sends it
-// afterwards is not describing the stream it is in, so the receiver rejects it
-// rather than quietly merging.
+// A stream carries exactly one M message and it opens the stream, so a later
+// one is refused. It has to be: the opening message is
+// consumed before the handler is dispatched, and a second would write the
+// handler's own request metadata while it is running.
 func TestLateLeadingMetadataIsRejected(t *testing.T) {
 	t.Parallel()
 	httpServer := newHybridServer(t, pingServer{})
 	conn := dialCumSum(t, httpServer, "")
 
-	// A data envelope first, then metadata: the illegal order.
-	sendEnvelope(t, conn, &pingv1.CumSumRequest{Number: 1})
+	// A body first, then metadata: the illegal order.
+	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 	_, _, err := conn.Read(t.Context()) // the handler's reply
 	assert.Nil(t, err)
 
-	sendRawEnvelope(t, conn, 0b00001000, []byte(`{"Acme-Late":["nope"]}`))
+	sendJSONMessage(t, conn, wireMetadata, []byte(`{"Acme-Late":["nope"]}`))
 	_, data, err := conn.Read(t.Context())
 	assert.Nil(t, err)
 	assert.True(t, strings.Contains(string(data), "invalid_argument"))
-	assert.True(t, strings.Contains(string(data), "Leading-Metadata after a message"))
+	assert.True(t, strings.Contains(string(data), "second M message"))
 }

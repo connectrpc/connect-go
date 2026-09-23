@@ -59,22 +59,26 @@ func TestCodecSelectsWireFormat(t *testing.T) {
 				payload, err = proto.Marshal(request)
 			}
 			assert.Nil(t, err)
-			client.writeEnvelope(t, 0, payload)
-			client.writeEnvelope(t, flagEndClientStream, nil)
+			// The frame type *is* the encoding: JSON goes out as text,
+			// Protobuf as binary.
+			client.writeMessage(t, wireBody, test.json, payload)
+			client.writeJSON(t, wireClientEndStream, nil)
 
-			flags, body := client.readEnvelope(t)
-			assert.Equal(t, flags, uint8(0))
+			marker, body, text := client.readMessage(t)
+			assert.Equal(t, marker, wireBody)
+			assert.Equal(t, text, test.json)
 			if test.json {
 				assertProtoJSON(t, body, value)
 			} else {
 				assertProtoBinary(t, body, value)
 			}
 
-			// The terminal envelope is JSON whichever codec carries the
-			// messages: it is protocol, not payload. A client built for the
-			// proto subprotocol still has to parse JSON here.
-			flags, body = client.readEnvelope(t)
-			assert.Equal(t, flags, uint8(flagEndStream))
+			// The terminal message is JSON whichever codec carries the bodies:
+			// it is protocol, not payload. A client built for the proto
+			// subprotocol still has to parse JSON here, in a text frame.
+			marker, body, text = client.readMessage(t)
+			assert.Equal(t, marker, wireServerEndStream)
+			assert.True(t, text)
 			assert.True(t, json.Valid(body))
 			assert.True(t, strings.Contains(string(body), "set-by-handler"))
 		})

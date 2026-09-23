@@ -29,9 +29,7 @@ import (
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectproto"
-	"connectrpc.com/connect/v2/internal/bufferpool"
 	"connectrpc.com/connect/v2/internal/connecterr"
-	"connectrpc.com/connect/v2/internal/envelope"
 )
 
 // FlagEnvelopeEndStream marks the envelope that ends a Connect stream. Its
@@ -156,29 +154,4 @@ func (e *WireError) UnmarshalJSON(data []byte) error {
 type EndStreamMessage struct {
 	Error   *WireError  `json:"error,omitempty"`
 	Trailer http.Header `json:"metadata,omitempty"`
-}
-
-// StreamingMarshaler writes Connect stream messages, terminating the stream
-// with an [EndStreamMessage].
-type StreamingMarshaler struct {
-	envelope.Writer
-}
-
-// MarshalEndStream writes the end-of-stream envelope, carrying err and
-// trailer to the peer.
-func (m *StreamingMarshaler) MarshalEndStream(err error, trailer http.Header) *connect.Error {
-	end := &EndStreamMessage{Trailer: trailer}
-	if err != nil {
-		end.Error = NewWireError(err)
-	}
-	data, marshalErr := json.Marshal(end)
-	if marshalErr != nil {
-		return connect.Errorf(connect.CodeInternal, "marshal end stream: %s", marshalErr).WithCause(marshalErr)
-	}
-	raw := bytes.NewBuffer(data)
-	defer bufferpool.Put(raw)
-	return m.Write(&envelope.Envelope{
-		Data:  raw,
-		Flags: FlagEnvelopeEndStream,
-	})
 }

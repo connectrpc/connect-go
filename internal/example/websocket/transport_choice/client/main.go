@@ -70,7 +70,7 @@ func main() {
 	flag.Parse()
 
 	for _, choice := range choices {
-		options := []connectwebsocket.ClientOption{}
+		var options []connectwebsocket.ClientOption
 		if choice.selector != nil {
 			options = append(options, connectwebsocket.WithSelector(choice.selector))
 		}

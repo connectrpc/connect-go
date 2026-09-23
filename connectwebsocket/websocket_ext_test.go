@@ -173,6 +173,7 @@ func TestWebSocketCarriesDeadline(t *testing.T) {
 	assert.Equal(t, protocol, connectwebsocket.ProtocolConnectWebSocket)
 }
 
+// A client with no deadline of its own inherits the server's default bound.
 func TestWebSocketWithoutDeadline(t *testing.T) {
 	t.Parallel()
 	deadlines := make(chan time.Duration, 1)
@@ -184,8 +185,10 @@ func TestWebSocketWithoutDeadline(t *testing.T) {
 	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
 	_, err = stream.Receive()
 	assert.Nil(t, err)
-	// t.Context() has no deadline, so none should be manufactured.
-	assert.Equal(t, <-deadlines, time.Duration(0))
+	// t.Context() has no deadline, so the server's default applies.
+	remaining := <-deadlines
+	assert.True(t, remaining > 59*time.Minute)
+	assert.True(t, remaining <= time.Hour)
 	assert.Nil(t, stream.CloseSend())
 	assert.Nil(t, stream.Close())
 }
@@ -317,7 +320,7 @@ func TestWebSocketRoundTripsCompressiblePayload(t *testing.T) {
 
 // TestWebSocketIgnoresSendCompression pins that a Connect-level send
 // compressor does not reach the WebSocket path. The peer rejects a
-// compressed-envelope flag outright, so if this option ever leaked through
+// compressed-message flag outright, so if this option ever leaked through
 // again the RPC would fail rather than merely double-compress.
 func TestWebSocketIgnoresSendCompression(t *testing.T) {
 	t.Parallel()

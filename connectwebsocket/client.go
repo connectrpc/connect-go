@@ -27,7 +27,6 @@ import (
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
-	"connectrpc.com/connect/v2/internal/envelope"
 	"github.com/coder/websocket"
 )
 
@@ -56,14 +55,18 @@ func NewTransport(baseURL string, options ...ClientOption) (connect.Transport, e
 	default:
 		return nil, connect.Errorf(connect.CodeUnavailable, "unsupported URL scheme %q", parsed.Scheme)
 	}
-	codec, ok := newCodecRegistry(opts.codecs).get(opts.sendCodec)
-	if !ok {
+	codecs, codecErr := newCodecPair(opts.codecs)
+	if codecErr != nil {
+		return nil, codecErr
+	}
+	if _, ok := newCodecRegistry(opts.codecs).get(opts.sendCodec); !ok {
 		return nil, connect.Errorf(connect.CodeUnknown, "unknown codec %q", opts.sendCodec)
 	}
 	websocketTransport := &clientTransport{
 		baseURL:    parsed,
 		httpClient: opts.httpClient,
-		codec:      codec,
+		codecs:     codecs,
+		bodyIsText: opts.sendCodec == connect.CodecNameJSON,
 		opts:       &opts,
 	}
 	fallback := opts.fallbackTransport
@@ -95,7 +98,11 @@ func httpOptions(opts *options) []connecthttp.Option {
 type clientTransport struct {
 	baseURL    *url.URL
 	httpClient *http.Client
-	codec      connect.Codec
+	// Both codecs are live on every connection: the frame type selects between
+	// them per message, so a peer may answer in either. bodyIsText is the
+	// negotiated default for what this client sends.
+	codecs     codecPair
+	bodyIsText bool
 	opts       *options
 }
 
@@ -124,7 +131,10 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 	}
 
 	dialURL := *t.baseURL
-	dialURL.Path = strings.TrimSuffix(dialURL.Path, "/") + spec.Procedure
+	// The prefix goes on the WebSocket half only: the HTTP fallback keeps the
+	// bare procedure paths, which is what makes the two distinguishable to a
+	// load balancer. See WithPathPrefix.
+	dialURL.Path = strings.TrimSuffix(dialURL.Path, "/") + t.opts.pathPrefix + spec.Procedure
 
 	call := &wsClientCall{
 		ctx: ctx,
@@ -134,7 +144,7 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 			// The subprotocol names both the transport and the codec, so it
 			// has to follow WithSendCodec: offering the wrong token would have
 			// the server decode with a codec the client is not encoding with.
-			Subprotocols: []string{subprotocolForCodec(t.codec.Name())},
+			Subprotocols: []string{subprotocolForCodec(t.opts.sendCodec)},
 			// Offer permessage-deflate with a per-message context. A server
 			// that declines leaves messages uncompressed; one that requires
 			// no-context-takeover is already satisfied by this offer.
@@ -142,37 +152,38 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 			CompressionThreshold: t.opts.compressionThreshold(),
 		},
 		url:              &dialURL,
-		subprotocol:      subprotocolForCodec(t.codec.Name()),
+		subprotocol:      subprotocolForCodec(t.opts.sendCodec),
 		handshakeTimeout: t.opts.handshakeTimeout,
 		dialDone:         make(chan struct{}),
 		readLimit:        frameReadLimit(t.opts.readMaxBytes),
 	}
 	conn := &websocketClientConn{
-		call:  call,
-		codec: t.codec,
-		marshaler: envelope.Writer{
-			Ctx:    ctx,
-			Sender: call,
-			Codec:  t.codec,
-			// No CompressionPool: permessage-deflate compresses whole messages
-			// below this layer, and the peer rejects a compressed-envelope flag
-			// outright.
-			SendMaxBytes: t.opts.sendMaxBytes,
+		call:   call,
+		codecs: t.codecs,
+		marshaler: messageWriter{
+			// No compression here: permessage-deflate compresses whole messages
+			// below this layer.
+			ctx:          ctx,
+			sender:       call,
+			codecs:       t.codecs,
+			bodyIsText:   t.bodyIsText,
+			sendMaxBytes: t.opts.sendMaxBytes,
 		},
 		unmarshaler: websocketClientUnmarshaler{
 			call:            call,
-			codec:           t.codec,
+			codecs:          t.codecs,
 			readMaxBytes:    t.opts.readMaxBytes,
 			spec:            spec,
 			onProtocolError: t.opts.onClientProtocolError,
 		},
+		requestMeta:     header,
 		responseHeader:  make(http.Header),
 		responseTrailer: make(http.Header),
 	}
 	if info != nil {
 		info.PeerAddr = dialURL.Host
 		info.Protocol = ProtocolConnectWebSocket
-		info.Codec = t.codec.Name()
+		info.Codec = t.opts.sendCodec
 		info.RequestEncoding = connect.CompressionNameIdentity
 	}
 	if t.opts.fallbackOnUpgradeError {
@@ -206,10 +217,13 @@ type clientStream struct {
 	publishHeadersOnce sync.Once
 }
 
-// SendHeaders dials, which is what actually transmits the request headers:
-// they are the headers of the WebSocket upgrade request.
+// SendHeaders dials and writes the M message that opens the
+// stream, which is what actually transmits the request metadata.
 func (s *clientStream) SendHeaders() error {
 	if err := s.conn.call.ensureDialed(); err != nil {
+		return err
+	}
+	if err := s.conn.open(); err != nil {
 		return err
 	}
 	return nil // literal nil; a nil *connect.Error is a non-nil error
@@ -235,7 +249,7 @@ func (s *clientStream) Receive(msg any) error {
 	s.publishHeadersOnce.Do(s.publishHeaders)
 	if s.singleResponse {
 		// Such a caller receives exactly once, so nothing would ever read the
-		// terminal envelope — and the trailers it carries would be lost. A
+		// end-of-stream message — and the trailers it carries would be lost. A
 		// server-streaming caller reaches it by reading to io.EOF.
 		endErr := s.conn.Receive(nil)
 		s.publishMetadata()
@@ -254,6 +268,13 @@ func (s *clientStream) Close() error {
 
 // publishMetadata copies the response metadata onto the call's [connect.CallInfo],
 // where callers read it. It runs once.
+//
+// The write happens during Receive, so a caller reading CallInfo from another
+// goroutine while receiving on the same stream races it. That is not specific
+// to this transport — connecthttp writes the same object from inside its own
+// Receive — so it is left to be fixed where connect.Header is defined rather
+// than papered over here; see "Current limitations" in
+// docs/websocket-transport-design.md.
 func (s *clientStream) publishMetadata() {
 	if s.info == nil {
 		return

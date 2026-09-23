@@ -282,7 +282,7 @@ func (h *connectHandler) NewConn(
 			request:        request,
 			responseWriter: responseWriter,
 			marshaler: connectStreamingMarshaler{
-				Writer: envelopeWriter{
+				envelopeWriter: envelopeWriter{
 					Ctx:              ctx,
 					Sender:           writeSender{responseWriter},
 					Codec:            codec,
@@ -425,7 +425,7 @@ func (c *connectClient) NewConn(
 			compressionPools: c.CompressionPools,
 			codec:            c.Codec,
 			marshaler: connectStreamingMarshaler{
-				Writer: envelopeWriter{
+				envelopeWriter: envelopeWriter{
 					Ctx:              ctx,
 					Sender:           duplexCall,
 					Codec:            c.Codec,
@@ -1179,7 +1179,9 @@ type (
 	connectWireDetail         = connectwire.WireDetail
 	connectWireError          = connectwire.WireError
 	connectEndStreamMessage   = connectwire.EndStreamMessage
-	connectStreamingMarshaler = connectwire.StreamingMarshaler
+	connectStreamingMarshaler struct {
+		envelopeWriter
+	}
 )
 
 func newConnectWireError(err error) *connectWireError {

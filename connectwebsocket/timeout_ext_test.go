@@ -16,7 +16,6 @@ package connectwebsocket_test
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"io"
 	"net/http/httptest"
@@ -49,26 +48,36 @@ func dialCumSum(tb testing.TB, httpServer *httptest.Server, query string) *webso
 	}
 	assert.Nil(tb, err)
 	tb.Cleanup(func() { _ = conn.CloseNow() })
+	// Every stream opens with Leading-Metadata; see the protocol's ordering rule.
+	sendJSONMessage(tb, conn, wireMetadata, []byte("{}"))
 	return conn
 }
 
-// sendEnvelope writes one flagless data envelope, which is what starts the RPC.
-func sendEnvelope(tb testing.TB, conn *websocket.Conn, msg proto.Message) {
+// sendProtoBody writes one Protobuf body, which starts the RPC. Protobuf means
+// a binary frame.
+func sendProtoBody(tb testing.TB, conn *websocket.Conn, msg proto.Message) {
 	tb.Helper()
 	payload, err := proto.Marshal(msg)
 	assert.Nil(tb, err)
-	sendRawEnvelope(tb, conn, 0, payload)
+	sendWireMessage(tb, conn, false, wireBody, payload)
 }
 
-// sendRawEnvelope writes one envelope with the given flags byte, so a test can
-// produce a frame the Go client would never send.
-func sendRawEnvelope(tb testing.TB, conn *websocket.Conn, flags byte, payload []byte) {
+// sendJSONMessage writes one control message: JSON, hence a text frame.
+func sendJSONMessage(tb testing.TB, conn *websocket.Conn, marker rune, payload []byte) {
 	tb.Helper()
-	frame := make([]byte, 5+len(payload))
-	frame[0] = flags
-	binary.BigEndian.PutUint32(frame[1:5], uint32(len(payload)))
-	copy(frame[5:], payload)
-	assert.Nil(tb, conn.Write(tb.Context(), websocket.MessageBinary, frame))
+	sendWireMessage(tb, conn, true, marker, payload)
+}
+
+// sendWireMessage writes one marker and payload, so a test can produce a
+// message the Go client would never send.
+func sendWireMessage(tb testing.TB, conn *websocket.Conn, text bool, marker rune, payload []byte) {
+	tb.Helper()
+	frame := append([]byte(string(marker)), payload...)
+	messageType := websocket.MessageBinary
+	if text {
+		messageType = websocket.MessageText
+	}
+	assert.Nil(tb, conn.Write(tb.Context(), messageType, frame))
 }
 
 // The query parameter has to produce a real deadline on the handler's context,
@@ -78,7 +87,7 @@ func TestTimeoutQueryParameterReachesHandler(t *testing.T) {
 	deadlines := make(chan time.Duration, 1)
 	httpServer := newHybridServer(t, pingServer{sawDeadline: deadlines})
 	conn := dialCumSum(t, httpServer, "?connect-timeout-ms=1500")
-	sendEnvelope(t, conn, &pingv1.CumSumRequest{Number: 1})
+	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
 	select {
 	case remaining := <-deadlines:
@@ -89,17 +98,21 @@ func TestTimeoutQueryParameterReachesHandler(t *testing.T) {
 	}
 }
 
-// With no deadline anywhere, the handler must see none rather than a zero one.
-func TestNoTimeoutLeavesHandlerWithoutDeadline(t *testing.T) {
+// A client that requests no deadline still gets one: the server's default
+// bounds every RPC, so a peer cannot hold a connection open forever.
+func TestNoClientTimeoutFallsBackToTheServerDefault(t *testing.T) {
 	t.Parallel()
 	deadlines := make(chan time.Duration, 1)
 	httpServer := newHybridServer(t, pingServer{sawDeadline: deadlines})
 	conn := dialCumSum(t, httpServer, "")
-	sendEnvelope(t, conn, &pingv1.CumSumRequest{Number: 1})
+	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
 	select {
 	case remaining := <-deadlines:
-		assert.Equal(t, remaining, time.Duration(0))
+		// The package default, minus the flight time to get here.
+		assert.True(t, remaining > 0)
+		assert.True(t, remaining <= time.Hour)
+		assert.True(t, remaining > 59*time.Minute)
 	case <-time.After(5 * time.Second):
 		t.Fatal("handler never ran")
 	}
@@ -124,7 +137,7 @@ func TestConflictingTimeoutsAreRejected(t *testing.T) {
 	t.Cleanup(func() { _ = conn.CloseNow() })
 
 	// The handshake succeeds — it is already committed — so the complaint
-	// arrives as an EndStream envelope.
+	// arrives as an S message.
 	_, data, err := conn.Read(t.Context())
 	assert.Nil(t, err)
 	assert.True(t, strings.Contains(string(data), "invalid_argument"))
@@ -169,13 +182,14 @@ func TestServerReportsItsOwnExpiredDeadline(t *testing.T) {
 	}
 	assert.Nil(t, err)
 	t.Cleanup(func() { _ = conn.CloseNow() })
-	sendEnvelope(t, conn, &pingv1.CountUpRequest{Number: 1})
+	sendJSONMessage(t, conn, wireMetadata, []byte("{}"))
+	sendProtoBody(t, conn, &pingv1.CountUpRequest{Number: 1})
 
 	_, data, err := conn.Read(t.Context())
 	assert.Nil(t, err)
-	// An EndStream envelope carrying the verdict, not a mute close.
+	// An S message carrying the verdict, not a mute close.
 	assert.True(t, len(data) > 5)
-	assert.Equal(t, data[0], byte(0b00000010))
+	assert.Equal(t, rune(data[0]), wireServerEndStream)
 	assert.True(t, strings.Contains(string(data), "deadline exceeded"))
 }
 

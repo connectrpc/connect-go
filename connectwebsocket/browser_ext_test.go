@@ -16,13 +16,13 @@ package connectwebsocket_test
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectwebsocket"
@@ -33,12 +33,13 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Envelope flag bits, restated here so the test asserts against the wire
-// format rather than against the implementation's constants.
+// Message markers, restated here so the tests assert against the wire format
+// rather than against the implementation's constants.
 const (
-	flagEndStream       = 0b00000010 // server -> client
-	flagEndClientStream = 0b00000100 // client -> server
-	flagLeadingMetadata = 0b00001000 // client -> server
+	wireBody            = 'B' // either direction
+	wireMetadata        = 'M' // either direction
+	wireServerEndStream = 'S' // server -> client
+	wireClientEndStream = 'C' // client -> server
 )
 
 // browserClient is the hand-rolled stand-in for a browser: it speaks the wire
@@ -75,39 +76,84 @@ func dialBrowserClientWithToken(
 		tb.Fatalf("dial: %v", err)
 	}
 	tb.Cleanup(func() { _ = conn.CloseNow() })
-	return &browserClient{conn: conn}
+	client := &browserClient{conn: conn}
+	// Every stream opens with exactly one M message, empty when
+	// there is none. Tests with metadata of their own use dialBrowserClientOpening.
+	client.writeJSON(tb, wireMetadata, []byte("{}"))
+	return client
 }
 
-// writeEnvelope frames one envelope into one binary message.
-func (c *browserClient) writeEnvelope(tb testing.TB, flags uint8, payload []byte) {
+// dialBrowserClientOpening opens the stream with the given metadata payload
+// rather than an empty one — a stream carries exactly one such message, so a
+// test cannot send its metadata as a second.
+func dialBrowserClientOpening(
+	tb testing.TB,
+	server *httptest.Server,
+	procedure string,
+	metadata []byte,
+) *browserClient {
 	tb.Helper()
-	frame := make([]byte, 5+len(payload))
-	frame[0] = flags
-	binary.BigEndian.PutUint32(frame[1:5], uint32(len(payload)))
-	copy(frame[5:], payload)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	tb.Cleanup(cancel)
+	conn, res, err := websocket.Dial(ctx, "ws"+server.URL[4:]+procedure, &websocket.DialOptions{
+		HTTPClient:   server.Client(),
+		Subprotocols: []string{"connect.v2+proto"},
+	})
+	if res != nil && res.Body != nil {
+		_ = res.Body.Close()
+	}
+	if err != nil {
+		tb.Fatalf("dial: %v", err)
+	}
+	tb.Cleanup(func() { _ = conn.CloseNow() })
+	client := &browserClient{conn: conn}
+	client.writeJSON(tb, wireMetadata, metadata)
+	return client
+}
+
+// writeMessage frames one marker and payload into one WebSocket message. text
+// picks the frame type, which is what tells the peer how to read the payload.
+func (c *browserClient) writeMessage(tb testing.TB, marker rune, text bool, payload []byte) {
+	tb.Helper()
+	frame := append([]byte(string(marker)), payload...)
+	messageType := websocket.MessageBinary
+	if text {
+		messageType = websocket.MessageText
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := c.conn.Write(ctx, websocket.MessageBinary, frame); err != nil {
-		tb.Fatalf("write envelope: %v", err)
+	if err := c.conn.Write(ctx, messageType, frame); err != nil {
+		tb.Fatalf("write message: %v", err)
 	}
 }
 
-// readEnvelope reads one binary message and splits off the 5-byte prefix.
-func (c *browserClient) readEnvelope(tb testing.TB) (uint8, []byte) {
+// writeJSON sends a control message, which is always JSON in a text frame.
+func (c *browserClient) writeJSON(tb testing.TB, marker rune, payload []byte) {
+	tb.Helper()
+	c.writeMessage(tb, marker, true, payload)
+}
+
+// writeProto sends a body encoded as Protobuf, hence a binary frame.
+func (c *browserClient) writeProto(tb testing.TB, payload []byte) {
+	tb.Helper()
+	c.writeMessage(tb, wireBody, false, payload)
+}
+
+// readMessage reads one message and splits off its marker, reporting whether
+// it arrived in a text frame.
+func (c *browserClient) readMessage(tb testing.TB) (rune, []byte, bool) {
 	tb.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	messageType, data, err := c.conn.Read(ctx)
 	if err != nil {
-		tb.Fatalf("read envelope: %v", err)
+		tb.Fatalf("read message: %v", err)
 	}
-	assert.Equal(tb, messageType, websocket.MessageBinary)
-	if len(data) < 5 {
-		tb.Fatalf("short envelope: %d bytes", len(data))
+	if len(data) == 0 {
+		tb.Fatal("empty message carries no marker")
 	}
-	size := binary.BigEndian.Uint32(data[1:5])
-	assert.Equal(tb, int(size), len(data)-5)
-	return data[0], data[5:]
+	marker, size := utf8.DecodeRune(data)
+	return marker, data[size:], messageType == websocket.MessageText
 }
 
 // metadataServer records the request metadata the handler observed.
@@ -118,7 +164,7 @@ type metadataServer struct {
 }
 
 func (m metadataServer) CumSum(ctx context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
-	// Receive first: Leading-Metadata envelopes arrive before the first data
+	// Receive first: M messages arrive before the first body
 	// message, so the metadata is only complete after a read.
 	req, err := stream.Receive()
 	if err != nil {
@@ -143,25 +189,24 @@ func newMetadataServer(tb testing.TB, seen chan http.Header) *httptest.Server {
 	return httpServer
 }
 
-// TestBrowserLeadingMetadataEnvelope drives the bit-3 path: a client that
-// cannot set headers on the upgrade sends them as an envelope instead.
-func TestBrowserLeadingMetadataEnvelope(t *testing.T) {
+// TestBrowserLeadingMetadataMessage drives the M path: a client that cannot
+// set headers on the upgrade sends them as a message instead.
+func TestBrowserLeadingMetadataMessage(t *testing.T) {
 	t.Parallel()
 	seen := make(chan http.Header, 1)
-	client := dialBrowserClient(t, newMetadataServer(t, seen), pingProcedure)
-
 	metadata, err := json.Marshal(map[string][]string{
 		"Acme-Tenant": {"tenant-42"},
 	})
 	assert.Nil(t, err)
-	client.writeEnvelope(t, flagLeadingMetadata, metadata)
+	client := dialBrowserClientOpening(t, newMetadataServer(t, seen), pingProcedure, metadata)
 
 	request, err := proto.Marshal(&pingv1.CumSumRequest{Number: 3})
 	assert.Nil(t, err)
-	client.writeEnvelope(t, 0, request)
+	client.writeProto(t, request)
 
-	flags, payload := client.readEnvelope(t)
-	assert.Equal(t, flags, uint8(0))
+	marker, payload, text := client.readMessage(t)
+	assert.Equal(t, marker, wireBody)
+	assert.False(t, text) // a Protobuf body is a binary frame
 	var response pingv1.CumSumResponse
 	assert.Nil(t, proto.Unmarshal(payload, &response))
 	assert.Equal(t, response.Sum, int64(3))
@@ -170,28 +215,29 @@ func TestBrowserLeadingMetadataEnvelope(t *testing.T) {
 	assert.Equal(t, header.Get("Acme-Tenant"), "tenant-42")
 }
 
-// TestBrowserEndOfClientStreamEnvelope drives the bit-2 path, which stands in
-// for the request-body EOF a WebSocket cannot send.
-func TestBrowserEndOfClientStreamEnvelope(t *testing.T) {
+// TestBrowserEndOfClientStreamMessage drives the C path, which stands in for
+// the request-body EOF a WebSocket cannot send.
+func TestBrowserEndOfClientStreamMessage(t *testing.T) {
 	t.Parallel()
 	seen := make(chan http.Header, 1)
 	client := dialBrowserClient(t, newMetadataServer(t, seen), pingProcedure)
 
 	request, err := proto.Marshal(&pingv1.CumSumRequest{Number: 5})
 	assert.Nil(t, err)
-	client.writeEnvelope(t, 0, request)
-	flags, payload := client.readEnvelope(t)
-	assert.Equal(t, flags, uint8(0))
+	client.writeProto(t, request)
+	marker, payload, _ := client.readMessage(t)
+	assert.Equal(t, marker, wireBody)
 	var response pingv1.CumSumResponse
 	assert.Nil(t, proto.Unmarshal(payload, &response))
 	assert.Equal(t, response.Sum, int64(5))
 	<-seen
 
-	// Empty bit-2 envelope: the handler should see io.EOF and return, which
-	// makes the server send its EndStream envelope.
-	client.writeEnvelope(t, flagEndClientStream, nil)
-	endFlags, endPayload := client.readEnvelope(t)
-	assert.Equal(t, endFlags, uint8(flagEndStream))
+	// A bare C: the handler should see io.EOF and return, which makes the
+	// server send its S message.
+	client.writeJSON(t, wireClientEndStream, nil)
+	endMarker, endPayload, endText := client.readMessage(t)
+	assert.Equal(t, endMarker, wireServerEndStream)
+	assert.True(t, endText) // EndStreamMessage is JSON, so a text frame
 	var end map[string]any
 	assert.Nil(t, json.Unmarshal(endPayload, &end))
 	// A clean finish carries no error member.
@@ -199,20 +245,27 @@ func TestBrowserEndOfClientStreamEnvelope(t *testing.T) {
 	assert.False(t, hasError)
 }
 
-// TestBrowserRejectsServerOnlyFlag pins the direction check: a client must not
-// be able to send the server's EndStream flag.
-func TestBrowserRejectsServerOnlyFlag(t *testing.T) {
+// TestBrowserRejectsServerOnlyMarker pins the direction check: a client must
+// not be able to send the server's end-of-stream marker.
+func TestBrowserRejectsServerOnlyMarker(t *testing.T) {
 	t.Parallel()
 	seen := make(chan http.Header, 1)
 	client := dialBrowserClient(t, newMetadataServer(t, seen), pingProcedure)
 
-	client.writeEnvelope(t, flagEndStream, []byte("{}"))
-	// The server rejects it and terminates the RPC with an EndStream envelope
-	// carrying the error.
-	flags, payload := client.readEnvelope(t)
-	assert.Equal(t, flags, uint8(flagEndStream))
+	client.writeJSON(t, wireServerEndStream, []byte("{}"))
+	// The server rejects it and terminates the RPC with an S message carrying
+	// the error.
+	marker, payload, _ := client.readMessage(t)
+	assert.Equal(t, marker, wireServerEndStream)
 	var end map[string]any
 	assert.Nil(t, json.Unmarshal(payload, &end))
 	_, hasError := end["error"]
 	assert.True(t, hasError)
+}
+
+// writeProtoEnd sends the final client message carrying a Protobuf body, which
+// follows the codec and is therefore a binary frame.
+func (c *browserClient) writeProtoEnd(tb testing.TB, payload []byte) {
+	tb.Helper()
+	c.writeMessage(tb, wireClientEndStream, false, payload)
 }

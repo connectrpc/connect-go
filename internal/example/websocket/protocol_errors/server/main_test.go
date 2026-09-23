@@ -20,7 +20,6 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,7 +51,7 @@ func newMonitoredServer(tb testing.TB) (*httptest.Server, *faultMonitor) {
 }
 
 // sendOneFrame opens a connection, writes one frame, and reads the verdict.
-func sendOneFrame(tb testing.TB, serverURL string, flags byte, declared int, payload []byte) {
+func sendOneFrame(tb testing.TB, serverURL string, text bool, marker rune, payload []byte) {
 	tb.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -68,11 +67,17 @@ func sendOneFrame(tb testing.TB, serverURL string, flags byte, declared int, pay
 	}
 	defer func() { _ = conn.CloseNow() }()
 
-	frame := make([]byte, 5+len(payload))
-	frame[0] = flags
-	binary.BigEndian.PutUint32(frame[1:5], uint32(declared))
-	copy(frame[5:], payload)
-	if err := conn.Write(ctx, websocket.MessageBinary, frame); err != nil {
+	// Every stream opens with one M message; the frame under test follows it.
+	if err := conn.Write(ctx, websocket.MessageText, []byte("M{}")); err != nil {
+		tb.Fatalf("write opening metadata: %v", err)
+	}
+
+	frame := append([]byte(string(marker)), payload...)
+	messageType := websocket.MessageBinary
+	if text {
+		messageType = websocket.MessageText
+	}
+	if err := conn.Write(ctx, messageType, frame); err != nil {
 		tb.Fatalf("write: %v", err)
 	}
 	_, _, _ = conn.Read(ctx)
@@ -88,11 +93,11 @@ func TestMonitorCountsRepeatOffenders(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	// Two length mistakes, on two connections.
-	sendOneFrame(t, httpServer.URL, 0, len(message)-1, message)
-	sendOneFrame(t, httpServer.URL, 0, len(message)+1, message)
+	// Two unknown markers, on two connections.
+	sendOneFrame(t, httpServer.URL, false, 'Z', message)
+	sendOneFrame(t, httpServer.URL, false, 'Y', message)
 	// And one of a different kind, which must count separately.
-	sendOneFrame(t, httpServer.URL, 0b00010000, len(message), message)
+	sendOneFrame(t, httpServer.URL, true, 'B', nil)
 
 	monitor.mu.Lock()
 	defer monitor.mu.Unlock()
@@ -100,11 +105,11 @@ func TestMonitorCountsRepeatOffenders(t *testing.T) {
 		t.Fatalf("got %d clients; want 1 (all faults came from one host)", len(monitor.counts))
 	}
 	for client, byFault := range monitor.counts {
-		if got := byFault[connectwebsocket.FaultEnvelopeLength]; got != 2 {
-			t.Errorf("%s: got %d envelope_length faults; want 2", client, got)
+		if got := byFault[connectwebsocket.FaultMarker]; got != 2 {
+			t.Errorf("%s: got %d marker faults; want 2", client, got)
 		}
-		if got := byFault[connectwebsocket.FaultEnvelopeFlags]; got != 1 {
-			t.Errorf("%s: got %d envelope_flags faults; want 1", client, got)
+		if got := byFault[connectwebsocket.FaultFrameType]; got != 1 {
+			t.Errorf("%s: got %d frame_type faults; want 1", client, got)
 		}
 	}
 }

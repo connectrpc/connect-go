@@ -143,7 +143,7 @@ func (w *ErrorWriter) writeConnectUnary(response http.ResponseWriter, err error)
 func (w *ErrorWriter) writeConnectStreaming(response http.ResponseWriter, err error) error {
 	response.WriteHeader(http.StatusOK)
 	marshaler := &connectStreamingMarshaler{
-		Writer: envelopeWriter{
+		envelopeWriter: envelopeWriter{
 			Sender: writeSender{writer: response},
 		},
 	}
