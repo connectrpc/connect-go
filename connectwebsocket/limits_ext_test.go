@@ -16,8 +16,13 @@ package connectwebsocket_test
 
 import (
 	"context"
+	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectwebsocket"
@@ -64,6 +69,74 @@ func TestSendMaxBytesRejectsOversizeRequest(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), "sendMaxBytes"))
 }
 
+// A server that rejects an oversized request explains itself in an S message
+// rather than hanging up with a bare 1009. Asserted through IsRemote: a close
+// status the client mapped locally would carry the same code, and only the
+// origin tells the two apart.
+func TestOversizeRequestIsExplainedInBand(t *testing.T) {
+	t.Parallel()
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, echoSizeServer{})
+	mux := http.NewServeMux()
+	connectwebsocket.Mount(mux, server, connectwebsocket.WithReadMaxBytes(1024))
+	httpServer := httptest.NewServer(mux)
+	t.Cleanup(httpServer.Close)
+
+	transport, err := connectwebsocket.NewTransport(
+		httpServer.URL,
+		connectwebsocket.WithHTTPClient(httpServer.Client()),
+		connectwebsocket.WithSelector(connectwebsocket.SelectAll),
+	)
+	assert.Nil(t, err)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+
+	_, err = client.Ping(t.Context(), &pingv1.PingRequest{Text: strings.Repeat("x", 8192)})
+	assert.NotNil(t, err)
+	assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+
+	var connectErr *connect.Error
+	assert.True(t, errors.As(err, &connectErr))
+	assert.True(t, connectErr.IsRemote())
+	// The configured limit, not the wire limit that carries the marker margin.
+	assert.True(t, strings.Contains(err.Error(), "configured max of 1024 bytes"))
+}
+
+// The read limit bounds a whole WebSocket message, not a frame. A sender that
+// fragments past the limit must still be refused, or the limit is decorative.
+func TestReadLimitSpansFragments(t *testing.T) {
+	t.Parallel()
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+	mux := http.NewServeMux()
+	connectwebsocket.Mount(mux, server, connectwebsocket.WithReadMaxBytes(1024))
+	httpServer := httptest.NewServer(mux)
+	t.Cleanup(httpServer.Close)
+
+	addr := httpServer.Listener.Addr().String()
+	conn, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", addr)
+	assert.Nil(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = rawHandshake(t, conn, addr, pingv1connect.PingServiceCumSumProcedure)
+	assert.Nil(t, conn.SetDeadline(time.Now().Add(20*time.Second)))
+	assert.Nil(t, writeClientFragment(conn, []byte("M{}"), true, opcodeText))
+
+	// 4 KiB in 64-byte pieces: every frame is far under the limit, and the
+	// message they reassemble into is four times over it.
+	const fragmentBytes = 64
+	chunk := make([]byte, fragmentBytes)
+	assert.Nil(t, writeClientFragment(conn, append([]byte("B"), chunk...), false, opcodeBinary))
+	for range 64 {
+		if err := writeClientFragment(conn, chunk, false, opcodeContinuation); err != nil {
+			break // the server stopped reading, which is the point
+		}
+	}
+
+	_, payload := readServerFrame(t, conn)
+	assert.Equal(t, rune(payload[0]), wireServerEndStream)
+	assert.True(t, strings.Contains(string(payload), "resource_exhausted"))
+	assert.True(t, strings.Contains(string(payload), "configured max of 1024 bytes"))
+}
+
 // The receiving half of the same limit: a response the client never asked to
 // be this large must be refused rather than buffered.
 func TestReadMaxBytesRejectsOversizeResponse(t *testing.T) {
@@ -81,6 +154,33 @@ func TestReadMaxBytesRejectsOversizeResponse(t *testing.T) {
 	_, err = client.Ping(t.Context(), &pingv1.PingRequest{Number: 1})
 	assert.NotNil(t, err)
 	assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+	// The number a caller configured, not the WebSocket library's wire limit,
+	// which is four bytes larger to leave room for the marker.
+	assert.True(t, strings.Contains(err.Error(), "configured max of 1024 bytes"))
+}
+
+// A client enforces its limit per reassembled message too, and classifies the
+// overrun the same way a server does so one monitor sees both directions.
+func TestClientReportsSizeLimitFaults(t *testing.T) {
+	t.Parallel()
+	httpServer := newServerFor(t, echoSizeServer{responseBytes: 64 * 1024})
+	recorder := &clientFaultRecorder{}
+	transport, err := connectwebsocket.NewTransport(
+		httpServer.URL,
+		connectwebsocket.WithHTTPClient(httpServer.Client()),
+		connectwebsocket.WithSelector(connectwebsocket.SelectAll),
+		connectwebsocket.WithReadMaxBytes(1024),
+		connectwebsocket.WithClientProtocolErrorHandler(recorder.handle),
+	)
+	assert.Nil(t, err)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+
+	_, err = client.Ping(t.Context(), &pingv1.PingRequest{Number: 1})
+	assert.NotNil(t, err)
+
+	faults, _ := recorder.seen()
+	assert.Equal(t, len(faults), 1)
+	assert.Equal(t, faults[0], connectwebsocket.FaultSizeLimit)
 }
 
 // A JSON round trip over WebSocket. The subprotocol test pins the token; this

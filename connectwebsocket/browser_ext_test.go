@@ -51,7 +51,7 @@ type browserClient struct {
 
 func dialBrowserClient(tb testing.TB, server *httptest.Server, procedure string) *browserClient {
 	tb.Helper()
-	return dialBrowserClientWithToken(tb, server, procedure, "connect.v2")
+	return dialBrowserClientWithToken(tb, server, procedure, "connectrpc.1+proto")
 }
 
 // dialBrowserClientWithToken offers one specific subprotocol, for tests that
@@ -97,7 +97,7 @@ func dialBrowserClientOpening(
 	tb.Cleanup(cancel)
 	conn, res, err := websocket.Dial(ctx, "ws"+server.URL[4:]+procedure, &websocket.DialOptions{
 		HTTPClient:   server.Client(),
-		Subprotocols: []string{"connect.v2+proto"},
+		Subprotocols: []string{"connectrpc.1+proto"},
 	})
 	if res != nil && res.Body != nil {
 		_ = res.Body.Close()

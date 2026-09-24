@@ -23,6 +23,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"time"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectwebsocket"
@@ -68,7 +69,14 @@ func transportInterceptor(next connect.ServerFunc) connect.ServerFunc {
 		if info, ok := connect.CallInfoForServerContext(ctx); ok {
 			protocol = info.Protocol
 		}
-		log.Printf("serving %s over %s", spec.Procedure, protocol)
+		// The client's deadline reaches a WebSocket RPC as a query parameter on
+		// the handshake, and a plain HTTP one as a header. Logged so the two
+		// routes can be seen arriving at the same place.
+		remaining := "none"
+		if deadline, ok := ctx.Deadline(); ok {
+			remaining = time.Until(deadline).Round(time.Second).String()
+		}
+		log.Printf("serving %s over %s (deadline in %s)", spec.Procedure, protocol, remaining)
 		return next(ctx, spec, stream)
 	}
 }

@@ -18,7 +18,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -32,16 +35,15 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// dialCumSum opens a raw CumSum stream with the given query string. A browser
-// cannot set headers on a WebSocket handshake, so the query is the only place
-// it can put a deadline — and the Go client never exercises that path.
+// dialCumSum opens a raw CumSum stream with the given query string, so a test
+// can drive the wire directly rather than through the Go client.
 func dialCumSum(tb testing.TB, httpServer *httptest.Server, query string) *websocket.Conn {
 	tb.Helper()
 	url := "ws" + strings.TrimPrefix(httpServer.URL, "http") +
 		pingv1connect.PingServiceCumSumProcedure + query
 	conn, res, err := websocket.Dial(tb.Context(), url, &websocket.DialOptions{
 		HTTPClient:   httpServer.Client(),
-		Subprotocols: []string{"connect.v2+proto"},
+		Subprotocols: []string{"connectrpc.1+proto"},
 	})
 	if res != nil && res.Body != nil {
 		_ = res.Body.Close()
@@ -118,16 +120,18 @@ func TestNoClientTimeoutFallsBackToTheServerDefault(t *testing.T) {
 	}
 }
 
-// A header and a query parameter that disagree are ambiguous, and guessing
-// would silently shorten or extend someone's deadline.
-func TestConflictingTimeoutsAreRejected(t *testing.T) {
+// The query parameter is the deadline's only channel. A Connect-Timeout-Ms
+// header is ordinary request metadata here, so a header that disagrees with
+// the query parameter does not shorten the RPC — and does not fail it either.
+func TestTimeoutHeaderIsNotADeadline(t *testing.T) {
 	t.Parallel()
-	httpServer := newHybridServer(t, pingServer{})
+	deadlines := make(chan time.Duration, 1)
+	httpServer := newHybridServer(t, pingServer{sawDeadline: deadlines})
 	url := "ws" + strings.TrimPrefix(httpServer.URL, "http") +
 		pingv1connect.PingServiceCumSumProcedure + "?connect-timeout-ms=1500"
 	conn, res, err := websocket.Dial(t.Context(), url, &websocket.DialOptions{
 		HTTPClient:   httpServer.Client(),
-		Subprotocols: []string{"connect.v2+proto"},
+		Subprotocols: []string{"connectrpc.1+proto"},
 		HTTPHeader:   map[string][]string{"Connect-Timeout-Ms": {"9000"}},
 	})
 	if res != nil && res.Body != nil {
@@ -135,13 +139,17 @@ func TestConflictingTimeoutsAreRejected(t *testing.T) {
 	}
 	assert.Nil(t, err)
 	t.Cleanup(func() { _ = conn.CloseNow() })
+	sendJSONMessage(t, conn, wireMetadata, []byte("{}"))
+	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
-	// The handshake succeeds — it is already committed — so the complaint
-	// arrives as an S message.
-	_, data, err := conn.Read(t.Context())
-	assert.Nil(t, err)
-	assert.True(t, strings.Contains(string(data), "invalid_argument"))
-	assert.True(t, strings.Contains(string(data), "conflicting"))
+	select {
+	case remaining := <-deadlines:
+		// The query parameter's 1.5s, not the header's 9s.
+		assert.True(t, remaining <= 1500*time.Millisecond)
+		assert.True(t, remaining > time.Second)
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler never ran")
+	}
 }
 
 // slowDeadlineServer overruns its deadline while computing rather than while
@@ -175,7 +183,7 @@ func TestServerReportsItsOwnExpiredDeadline(t *testing.T) {
 		pingv1connect.PingServiceCountUpProcedure + "?connect-timeout-ms=200"
 	conn, res, err := websocket.Dial(t.Context(), url, &websocket.DialOptions{
 		HTTPClient:   httpServer.Client(),
-		Subprotocols: []string{"connect.v2+proto"},
+		Subprotocols: []string{"connectrpc.1+proto"},
 	})
 	if res != nil && res.Body != nil {
 		_ = res.Body.Close()
@@ -289,4 +297,80 @@ func TestIdleStreamFailsAtItsDeadlineAndNotBefore(t *testing.T) {
 	// blocked read cannot have waited the full timeout.
 	assert.True(t, elapsed > timeout/2)
 	_ = stream.Close()
+}
+
+// The Go client must put its deadline where the protocol says it goes. Nothing
+// caught the header-only client for a long while, because every test that
+// checked the deadline drove the wire by hand and every test that used the Go
+// client had this server on the other end, which accepted both.
+func TestGoClientSendsTheTimeoutQueryParameter(t *testing.T) {
+	t.Parallel()
+	queries := make(chan string, 1)
+	mux := http.NewServeMux()
+	mux.Handle("/", http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		select {
+		case queries <- request.URL.RawQuery:
+		default:
+		}
+	}))
+	httpServer := httptest.NewServer(mux)
+	t.Cleanup(httpServer.Close)
+
+	transport, err := connectwebsocket.NewTransport(
+		httpServer.URL,
+		connectwebsocket.WithHTTPClient(httpServer.Client()),
+		connectwebsocket.WithSelector(connectwebsocket.SelectAll),
+	)
+	assert.Nil(t, err)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	// The handshake fails — this server never upgrades — but the request it
+	// refused is the one under test.
+	_, _ = client.Ping(ctx, &pingv1.PingRequest{Number: 1})
+
+	select {
+	case query := <-queries:
+		values, parseErr := url.ParseQuery(query)
+		assert.Nil(t, parseErr)
+		millis, convErr := strconv.Atoi(values.Get("connect-timeout-ms"))
+		assert.Nil(t, convErr)
+		assert.True(t, millis > 29_000)
+		assert.True(t, millis <= 30_000)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the client never sent a handshake")
+	}
+}
+
+// A context with no deadline sends no parameter at all, rather than a zero
+// that would mean an instantly expired RPC.
+func TestGoClientOmitsTheParameterWithoutADeadline(t *testing.T) {
+	t.Parallel()
+	queries := make(chan string, 1)
+	mux := http.NewServeMux()
+	mux.Handle("/", http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		select {
+		case queries <- request.URL.RawQuery:
+		default:
+		}
+	}))
+	httpServer := httptest.NewServer(mux)
+	t.Cleanup(httpServer.Close)
+
+	transport, err := connectwebsocket.NewTransport(
+		httpServer.URL,
+		connectwebsocket.WithHTTPClient(httpServer.Client()),
+		connectwebsocket.WithSelector(connectwebsocket.SelectAll),
+	)
+	assert.Nil(t, err)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+	_, _ = client.Ping(context.Background(), &pingv1.PingRequest{Number: 1})
+
+	select {
+	case query := <-queries:
+		assert.Equal(t, query, "")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the client never sent a handshake")
+	}
 }

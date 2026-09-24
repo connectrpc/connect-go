@@ -106,41 +106,60 @@ type clientTransport struct {
 	opts       *options
 }
 
+// encodeTimeout renders the context's deadline for the connect-timeout-ms
+// query parameter. The query string is the deadline's only channel: a browser
+// cannot set a header on a handshake, so a header would serve no client this
+// transport has to interoperate with.
+func encodeTimeout(ctx context.Context) (string, bool) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return "", false
+	}
+	// Rounded up, never down. Truncating can advertise a deadline shorter than
+	// the caller's own, and a server that gives up first is killed mid-read by
+	// the WebSocket library — which closes the connection, so the deadline
+	// error never reaches the client and it reports the close as Unavailable
+	// instead.
+	millis := int64((time.Until(deadline) + time.Millisecond - 1) / time.Millisecond)
+	// A non-positive or absurdly distant deadline is not expressible; let the
+	// context alone enforce it rather than sending nonsense.
+	encoded := strconv.FormatInt(millis, 10)
+	if millis <= 0 || len(encoded) > 10 {
+		return "", false
+	}
+	return encoded, true
+}
+
 func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec) (connect.ClientStream, error) {
 	info, _ := connect.CallInfoForClientContext(ctx)
 
-	header := make(http.Header, 8)
+	// The caller's metadata travels in the M message and nowhere else. Copying
+	// it onto the handshake as well would put the same keys on two channels
+	// where the handshake wins, so a client's own M would be shadowed by its
+	// own headers — redundant at best, and confusing the moment the two
+	// disagree. The handshake's headers are for what the connection carries,
+	// not for what the RPC says.
+	requestMeta := make(http.Header, 8)
 	if info != nil {
 		for key, values := range info.RequestHeader().All() {
-			header[http.CanonicalHeaderKey(key)] = append([]string(nil), values...)
+			requestMeta[http.CanonicalHeaderKey(key)] = append([]string(nil), values...)
 		}
 	}
-	if deadline, ok := ctx.Deadline(); ok {
-		// Rounded up, never down. Truncating can advertise a deadline shorter
-		// than the caller's own, and a server that gives up first is killed
-		// mid-read by the WebSocket library — which closes the connection, so
-		// the deadline error never reaches the client and it reports the close
-		// as Unavailable instead.
-		remaining := time.Until(deadline)
-		millis := int64((remaining + time.Millisecond - 1) / time.Millisecond)
-		// A non-positive or absurdly distant deadline is not expressible; let
-		// the context alone enforce it rather than sending nonsense.
-		if encoded := strconv.FormatInt(millis, 10); millis > 0 && len(encoded) <= 10 {
-			header.Set(headerTimeout, encoded)
-		}
-	}
-
 	dialURL := *t.baseURL
 	// The prefix goes on the WebSocket half only: the HTTP fallback keeps the
 	// bare procedure paths, which is what makes the two distinguishable to a
 	// load balancer. See WithPathPrefix.
 	dialURL.Path = strings.TrimSuffix(dialURL.Path, "/") + t.opts.pathPrefix + spec.Procedure
+	if encoded, ok := encodeTimeout(ctx); ok {
+		query := dialURL.Query()
+		query.Set(wsQueryTimeoutMs, encoded)
+		dialURL.RawQuery = query.Encode()
+	}
 
 	call := &wsClientCall{
 		ctx: ctx,
 		dialOptions: &websocket.DialOptions{
 			HTTPClient: t.httpClient,
-			HTTPHeader: header,
 			// The subprotocol names both the transport and the codec, so it
 			// has to follow WithSendCodec: offering the wrong token would have
 			// the server decode with a codec the client is not encoding with.
@@ -155,7 +174,7 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 		subprotocol:      subprotocolForCodec(t.opts.sendCodec),
 		handshakeTimeout: t.opts.handshakeTimeout,
 		dialDone:         make(chan struct{}),
-		readLimit:        frameReadLimit(t.opts.readMaxBytes),
+		readLimit:        messageReadLimit(t.opts.readMaxBytes),
 	}
 	conn := &websocketClientConn{
 		call:   call,
@@ -176,7 +195,7 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 			spec:            spec,
 			onProtocolError: t.opts.onClientProtocolError,
 		},
-		requestMeta:     header,
+		requestMeta:     requestMeta,
 		responseHeader:  make(http.Header),
 		responseTrailer: make(http.Header),
 	}

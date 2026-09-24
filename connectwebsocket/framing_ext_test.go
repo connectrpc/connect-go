@@ -16,6 +16,8 @@ package connectwebsocket_test
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/binary"
 	"io"
 	"net"
@@ -35,6 +37,13 @@ import (
 )
 
 const pingUnaryProcedure = "/connect.ping.v1.PingService/Ping"
+
+// WebSocket opcodes, for tests that build frames by hand.
+const (
+	opcodeContinuation = 0x00
+	opcodeText         = 0x01
+	opcodeBinary       = 0x02
+)
 
 // readServerFrame reads one frame from the server and reports whether RSV1 is
 // set — the bit that says the payload is permessage-deflate compressed. It is
@@ -168,5 +177,103 @@ func TestWrongDirectionMarkerIsNamedAsSuch(t *testing.T) {
 			assert.True(t, strings.Contains(string(data), test.want))
 			assert.True(t, strings.Contains(string(data), "invalid_argument"))
 		})
+	}
+}
+
+// A server that negotiates permessage-deflate without no-context-takeover is
+// refused. The server is required not to do it, but a client that trusted the
+// server to be conforming would be protected only as far as the peer is — and
+// the plaintext leaking across messages would be the client's own.
+func TestClientRefusesSharedCompressionContext(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name      string
+		extension string
+		refuse    bool
+	}{
+		{
+			name:      "both directions bounded",
+			extension: "permessage-deflate; client_no_context_takeover; server_no_context_takeover",
+		},
+		{
+			name:      "no extension at all",
+			extension: "",
+		},
+		{
+			name:      "plain deflate",
+			extension: "permessage-deflate",
+			refuse:    true,
+		},
+		{
+			name:      "only the server's side bounded",
+			extension: "permessage-deflate; server_no_context_takeover",
+			refuse:    true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			httpServer := httptest.NewServer(http.HandlerFunc(
+				func(responseWriter http.ResponseWriter, request *http.Request) {
+					handshakeWithExtension(t, responseWriter, request, test.extension)
+				},
+			))
+			t.Cleanup(httpServer.Close)
+
+			transport, err := connectwebsocket.NewTransport(
+				httpServer.URL,
+				connectwebsocket.WithHTTPClient(httpServer.Client()),
+			)
+			assert.Nil(t, err)
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+			stream, err := client.CumSum(t.Context())
+			assert.Nil(t, err)
+			sendErr := stream.Send(&pingv1.CumSumRequest{Number: 1})
+
+			if !test.refuse {
+				assert.Nil(t, sendErr)
+				assert.Nil(t, stream.CloseSend())
+				return
+			}
+			assert.NotNil(t, sendErr)
+			assert.True(t, strings.Contains(sendErr.Error(), "no-context-takeover"))
+		})
+	}
+}
+
+// handshakeWithExtension completes an upgrade by hand, echoing an arbitrary
+// Sec-WebSocket-Extensions value that coder's own server would never produce.
+func handshakeWithExtension(
+	tb testing.TB,
+	responseWriter http.ResponseWriter,
+	request *http.Request,
+	extension string,
+) {
+	tb.Helper()
+	hijacker, ok := responseWriter.(http.Hijacker)
+	if !ok {
+		return
+	}
+	conn, _, err := hijacker.Hijack()
+	if err != nil {
+		return
+	}
+	defer func() { _ = conn.Close() }()
+	sum := sha1.Sum([]byte(request.Header.Get("Sec-WebSocket-Key") + websocketGUID))
+	response := "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+		"Sec-WebSocket-Accept: " + base64.StdEncoding.EncodeToString(sum[:]) + "\r\n" +
+		"Sec-WebSocket-Protocol: " + request.Header.Get("Sec-WebSocket-Protocol") + "\r\n"
+	if extension != "" {
+		response += "Sec-WebSocket-Extensions: " + extension + "\r\n"
+	}
+	if _, err := conn.Write([]byte(response + "\r\n")); err != nil {
+		return
+	}
+	// Hold the connection open so the client's own verdict is what the test
+	// observes, not a closed socket.
+	buffer := make([]byte, 1024)
+	for {
+		if _, err := conn.Read(buffer); err != nil {
+			return
+		}
 	}
 }

@@ -211,7 +211,7 @@ func dialRaw(tb testing.TB, server *httptest.Server, procedure string) *websocke
 		"ws"+strings.TrimPrefix(server.URL, "http")+procedure,
 		&websocket.DialOptions{
 			HTTPClient:   server.Client(),
-			Subprotocols: []string{"connect.v2+proto"},
+			Subprotocols: []string{"connectrpc.1+proto"},
 		},
 	)
 	if response != nil && response.Body != nil {
@@ -220,4 +220,81 @@ func dialRaw(tb testing.TB, server *httptest.Server, procedure string) *websocke
 	assert.Nil(tb, err)
 	tb.Cleanup(func() { _ = conn.CloseNow() })
 	return conn
+}
+
+// A key that arrived on the handshake is not overwritable from an M message.
+// The precedence is a security property: a proxy sets headers on the upgrade
+// and never sees the M, so the opposite order would let any client forge the
+// identity headers such a proxy injects.
+func TestHandshakeHeadersOutrankLeadingMetadata(t *testing.T) {
+	t.Parallel()
+	observations := make(chan string, 4)
+	httpServer := newObservationServer(t, observations)
+
+	url := "ws" + strings.TrimPrefix(httpServer.URL, "http") +
+		pingv1connect.PingServiceCumSumProcedure
+	conn, response, err := websocket.Dial(t.Context(), url, &websocket.DialOptions{
+		HTTPClient:   httpServer.Client(),
+		Subprotocols: []string{"connectrpc.1+proto"},
+		// What a proxy in front of the server would have set.
+		HTTPHeader: http.Header{"Acme-Tenant": []string{"from-the-proxy"}},
+	})
+	if response != nil && response.Body != nil {
+		_ = response.Body.Close()
+	}
+	assert.Nil(t, err)
+	t.Cleanup(func() { _ = conn.CloseNow() })
+
+	// The client tries to claim a different tenant, and to add one the
+	// handshake never carried.
+	sendJSONMessage(t, conn, wireMetadata,
+		[]byte(`{"Acme-Tenant":["forged"],"Acme-Trace":["added"]}`))
+	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+
+	assert.Equal(t, <-observations, "from-the-proxy")
+	_, _, err = conn.Read(t.Context())
+	assert.Nil(t, err)
+	assert.Equal(t, <-observations, "from-the-proxy")
+}
+
+// The other half of the same rule: a key the handshake did not carry is the
+// client's to set, which is the only channel a browser has.
+func TestLeadingMetadataAddsNewKeys(t *testing.T) {
+	t.Parallel()
+	observations := make(chan string, 4)
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, traceObservingServer{observations: observations})
+	mux := http.NewServeMux()
+	connectwebsocket.Mount(mux, server)
+	httpServer := httptest.NewServer(mux)
+	t.Cleanup(httpServer.Close)
+
+	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
+	sendJSONMessage(t, conn, wireMetadata, []byte(`{"Acme-Trace":["added"]}`))
+	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+
+	assert.Equal(t, <-observations, "added")
+}
+
+// traceObservingServer reports a header the handshake never carried.
+type traceObservingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+
+	observations chan string
+}
+
+func (s traceObservingServer) CumSum(
+	ctx context.Context,
+	stream pingv1connect.PingServiceCumSumServerStream,
+) error {
+	info, _ := connect.CallInfoForServerContext(ctx)
+	s.observations <- info.RequestHeader().Get("Acme-Trace")
+	for {
+		if _, err := stream.Receive(); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+	}
 }

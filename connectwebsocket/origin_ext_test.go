@@ -100,6 +100,6 @@ func newUpgradeRequest(tb testing.TB, baseURL string) *http.Request {
 	request.Header.Set("Upgrade", "websocket")
 	request.Header.Set("Sec-WebSocket-Version", "13")
 	request.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
-	request.Header.Set("Sec-WebSocket-Protocol", "connect.v2+proto")
+	request.Header.Set("Sec-WebSocket-Protocol", "connectrpc.1+proto")
 	return request
 }

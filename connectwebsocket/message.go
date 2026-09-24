@@ -26,9 +26,11 @@ package connectwebsocket
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"connectrpc.com/connect/v2"
@@ -67,15 +69,30 @@ func encodeMessage(dst *bytes.Buffer, marker rune, payload []byte) {
 	dst.Write(payload)
 }
 
-// decodeMessage splits a frame into its marker and payload.
-func decodeMessage(frame []byte) (rune, []byte, *connect.Error) {
+// wireMessage is one message as it arrived: the marker that names its kind,
+// the payload behind it, and the frame type that says how that payload is
+// encoded.
+//
+// The three travel together from the read all the way to the codec, because
+// none of them means anything without the others: a payload without its frame
+// type has no encoding, and a marker without its payload has no content.
+type wireMessage struct {
+	marker  rune
+	payload []byte
+	// text reports a text frame, whose payload is JSON.
+	text bool
+}
+
+// decodeMessage splits a frame into the message it carries. text is the frame
+// type it arrived in, which the caller reads from the transport.
+func decodeMessage(frame []byte, text bool) (wireMessage, *connect.Error) {
 	if len(frame) == 0 {
-		return 0, nil, errorf(connect.CodeInvalidArgument, "protocol error: empty message carries no marker")
+		return wireMessage{}, errorf(connect.CodeInvalidArgument, "protocol error: empty message carries no marker")
 	}
 	// UTF-8's leading byte gives the length, so an astral marker is out of
 	// range on sight: four-byte sequences start at 0xF0.
 	if frame[0] >= 0xF0 {
-		return 0, nil, errorf(
+		return wireMessage{}, errorf(
 			connect.CodeInvalidArgument,
 			"protocol error: marker outside the Basic Multilingual Plane (leading byte 0x%02x)",
 			frame[0],
@@ -83,9 +100,9 @@ func decodeMessage(frame []byte) (rune, []byte, *connect.Error) {
 	}
 	marker, size := utf8.DecodeRune(frame)
 	if marker == utf8.RuneError && size <= 1 {
-		return 0, nil, errorf(connect.CodeInvalidArgument, "protocol error: marker is not valid UTF-8")
+		return wireMessage{}, errorf(connect.CodeInvalidArgument, "protocol error: marker is not valid UTF-8")
 	}
-	return marker, frame[size:], nil
+	return wireMessage{marker: marker, payload: frame[size:], text: text}, nil
 }
 
 // messageSender writes one encoded message as one WebSocket frame. text says
@@ -97,17 +114,31 @@ type messageSender interface {
 // codecPair is the two codecs a connection may need. The frame type selects
 // between them per message, so both are live on every connection even though
 // most connections only ever use one.
+//
+// Either may be absent: a peer configured for one encoding is a supported
+// configuration, and negotiation never hands it a subprotocol it cannot serve.
+// A body arriving in the other frame type anyway is a peer that ignored the
+// negotiated subprotocol, and is reported rather than dereferenced.
 type codecPair struct {
 	binary connect.Codec // Protobuf
 	text   connect.Codec // JSON
 }
 
-// forFrame returns the codec a frame of this type carries.
+// forFrame returns the codec a frame of this type carries, or nil when this
+// end was not configured with it.
 func (c codecPair) forFrame(text bool) connect.Codec {
 	if text {
 		return c.text
 	}
 	return c.binary
+}
+
+// encodingForFrame names the encoding a frame type carries, for a diagnostic.
+func encodingForFrame(text bool) string {
+	if text {
+		return connect.CodecNameJSON
+	}
+	return connect.CodecNameProto
 }
 
 // messageWriter encodes messages and hands them to a sender.
@@ -127,7 +158,14 @@ type messageWriter struct {
 func (w *messageWriter) writeBody(message any) *connect.Error {
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
-	if err := w.codecs.forFrame(w.bodyIsText).MarshalWrite(w.ctx, buffer, message); err != nil {
+	codec := w.codecs.forFrame(w.bodyIsText)
+	if codec == nil {
+		return errorf(
+			connect.CodeInternal,
+			"no %q codec to encode this body", encodingForFrame(w.bodyIsText),
+		)
+	}
+	if err := codec.MarshalWrite(w.ctx, buffer, message); err != nil {
 		return errorf(connect.CodeInternal, "marshal message: %w", err)
 	}
 	if err := w.send(markerBody, w.bodyIsText, buffer.Bytes()); err != nil {
@@ -152,7 +190,7 @@ func (w *messageWriter) writeJSON(marker rune, value any) *connect.Error {
 // writeEndStream sends the terminal message. Its EndStreamMessage schema is
 // shared with Connect over HTTP; only the framing around it differs.
 func (w *messageWriter) writeEndStream(err error, trailer http.Header) *connect.Error {
-	end := &connectwire.EndStreamMessage{Trailer: trailer}
+	end := &connectwire.EndStreamMessage{Trailer: encodeMetadata(trailer)}
 	if err != nil {
 		end.Error = connectwire.NewWireError(err)
 	}
@@ -180,23 +218,75 @@ func (w *messageWriter) send(marker rune, text bool, payload []byte) *connect.Er
 	return nil
 }
 
-// newCodecPair resolves the two codecs the frame type selects between. Both
-// must be present: a peer may answer in either, whatever this end negotiated.
+// newCodecPair resolves the codecs the frame type selects between. Either may
+// be missing — one encoding is a legitimate configuration — but not both, which
+// leaves no body this end could decode and no subprotocol it could negotiate.
 func newCodecPair(codecs []connect.Codec) (codecPair, *connect.Error) {
 	registry := newCodecRegistry(codecs)
-	binary, found := registry.get(connect.CodecNameProto)
-	if !found {
+	binary, _ := registry.get(connect.CodecNameProto)
+	text, _ := registry.get(connect.CodecNameJSON)
+	if binary == nil && text == nil {
 		return codecPair{}, errorf(
 			connect.CodeUnknown,
-			"no %q codec registered; binary frames carry Protobuf", connect.CodecNameProto,
-		)
-	}
-	text, found := registry.get(connect.CodecNameJSON)
-	if !found {
-		return codecPair{}, errorf(
-			connect.CodeUnknown,
-			"no %q codec registered; text frames carry JSON", connect.CodecNameJSON,
+			"no %q or %q codec registered; WebSocket bodies carry one or the other",
+			connect.CodecNameProto, connect.CodecNameJSON,
 		)
 	}
 	return codecPair{binary: binary, text: text}, nil
+}
+
+// Metadata on the wire is a JSON object of string arrays. Two things separate
+// it from the http.Header this package keeps in memory: keys are lower-case,
+// matching HTTP/2 and HTTP/3, and a key ending in -bin carries base64 rather
+// than text, because JSON strings are Unicode and arbitrary bytes are not.
+
+// metadataBinarySuffix marks a key whose values are raw bytes.
+const metadataBinarySuffix = "-bin"
+
+// encodeMetadata renders headers for the wire.
+func encodeMetadata(header http.Header) map[string][]string {
+	if len(header) == 0 {
+		return map[string][]string{}
+	}
+	encoded := make(map[string][]string, len(header))
+	for key, values := range header {
+		lower := strings.ToLower(key)
+		if !strings.HasSuffix(lower, metadataBinarySuffix) {
+			encoded[lower] = values
+			continue
+		}
+		binary := make([]string, len(values))
+		for index, value := range values {
+			binary[index] = base64.RawStdEncoding.EncodeToString([]byte(value))
+		}
+		encoded[lower] = binary
+	}
+	return encoded
+}
+
+// decodeMetadata reads wire metadata into an http.Header. Keys are canonical
+// MIME form in memory so that Go's own case-insensitive accessors work; the
+// case-insensitivity the protocol requires is theirs.
+func decodeMetadata(wire map[string][]string) (http.Header, *connect.Error) {
+	header := make(http.Header, len(wire))
+	for key, values := range wire {
+		canonical := http.CanonicalHeaderKey(key)
+		if !strings.HasSuffix(strings.ToLower(key), metadataBinarySuffix) {
+			header[canonical] = values
+			continue
+		}
+		decoded := make([]string, len(values))
+		for index, value := range values {
+			raw, err := base64.RawStdEncoding.DecodeString(value)
+			if err != nil {
+				return nil, errorf(
+					connect.CodeInvalidArgument,
+					"metadata %q is not unpadded base64: %w", key, err,
+				)
+			}
+			decoded[index] = string(raw)
+		}
+		header[canonical] = decoded
+	}
+	return header, nil
 }

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"time"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectwebsocket"
@@ -43,7 +44,13 @@ func transportInterceptor(next connect.ClientFunc) connect.ClientFunc {
 }
 
 func main() {
-	ctx := context.Background()
+	// A deadline bounds the whole session. Over WebSocket it reaches the server
+	// as the connect-timeout-ms query parameter on the handshake URI — a
+	// browser cannot set a request header there, so the query string is the
+	// deadline's only channel. The server takes the shorter of this and its own
+	// maximum.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// One transport, two wires: streaming RPCs go over WebSocket and everything
 	// else over the HTTP transport this builds for itself. Swap the routing

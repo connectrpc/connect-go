@@ -15,8 +15,12 @@
 package connectwebsocket_test
 
 import (
+	"context"
+	"errors"
+	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectwebsocket"
@@ -117,4 +121,66 @@ func TestClientStreamingThroughTheGeneratedClient(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, response.Sum, want)
 	assert.Equal(t, info.ResponseTrailer().Get(trailerKey), "set-by-handler")
+}
+
+// A client that keeps sending after its C message must not stall. The server
+// has stopped delivering those messages, but it goes on reading and discarding
+// them, so the peer's writes never block on a full socket buffer.
+//
+// The handler lingers on purpose, holding the connection open: once it
+// returns, the connection closes and the writes drain into nothing, which
+// would hide a stall. The assertion is that the writes finish while the
+// handler is still in that window — without the drain they instead wait it
+// out, because a full buffer only clears when the connection dies.
+func TestMessagesAfterEndOfClientStreamAreDiscarded(t *testing.T) {
+	t.Parallel()
+	const linger = 5 * time.Second
+	handlerDone := make(chan struct{})
+	httpServer := newHybridServer2(t, lingeringServer{linger: linger, done: handlerDone})
+	conn := dialCumSum(t, httpServer, "")
+	conn.SetReadLimit(-1)
+	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+	sendJSONMessage(t, conn, wireClientEndStream, nil)
+
+	// More than any socket buffer will hold.
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	body := make([]byte, 64*1024)
+	for range 256 {
+		if err := conn.Write(ctx, websocket.MessageBinary, append([]byte("B"), body...)); err != nil {
+			t.Fatalf("write blocked or failed after C: %v", err)
+		}
+	}
+
+	select {
+	case <-handlerDone:
+		t.Fatal("writes after C outlasted the handler, so nothing was draining them")
+	default:
+	}
+}
+
+// lingeringServer reads to EOF and then stays in the handler, holding the
+// connection open, before signalling that it has left.
+type lingeringServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+
+	linger time.Duration
+	done   chan struct{}
+}
+
+func (s lingeringServer) CumSum(
+	_ context.Context,
+	stream pingv1connect.PingServiceCumSumServerStream,
+) error {
+	for {
+		if _, err := stream.Receive(); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return err
+		}
+	}
+	time.Sleep(s.linger)
+	close(s.done)
+	return nil
 }

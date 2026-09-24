@@ -56,7 +56,11 @@ func (s *session) Serve(
 	// closed politely: the closing handshake drains whatever the peer queued.
 	// See peerMisbehaved, and TestCompressionBombIsBoundedOnTheWire, which
 	// fails if either half regresses.
-	conn.SetReadLimit(frameReadLimit(info.ReadMaxBytes))
+	//
+	// The limit is enforced in readBoundedMessage rather than here: coder's own
+	// SetReadLimit closes with 1009 the moment it trips, leaving nothing to
+	// write the S message on.
+	conn.SetReadLimit(-1)
 	ctx, cancel, timeoutErr := timeoutFromRequest(ctx, info.Request, info.MaxTimeout)
 	if cancel != nil {
 		defer cancel()
@@ -167,29 +171,17 @@ func (s *serverStream) Send(msg any) error {
 
 // timeoutFromRequest applies the client's deadline to ctx.
 //
-// The deadline arrives as a header, or as a query parameter for browsers,
-// whose WebSocket API cannot set headers on the upgrade request. Both are
-// accepted, and they must agree.
+// The query parameter is the only channel: a browser's WebSocket API cannot
+// set a header on the upgrade, so a header would serve no client this
+// transport has to interoperate with. A Connect-Timeout-Ms header that arrives
+// anyway is ordinary request metadata, not a deadline.
 func timeoutFromRequest(
 	ctx context.Context,
 	request *http.Request,
 	maxTimeout time.Duration,
 ) (context.Context, context.CancelFunc, *connect.Error) {
-	headerValue := request.Header.Get(headerTimeout)
-	queryValue := request.URL.Query().Get(wsQueryTimeoutMs)
-	var timeout string
-	switch {
-	case headerValue != "" && queryValue != "" && headerValue != queryValue:
-		return ctx, nil, errorf(
-			connect.CodeInvalidArgument,
-			"conflicting %s header (%q) and %s query parameter (%q)",
-			headerTimeout, headerValue, wsQueryTimeoutMs, queryValue,
-		)
-	case headerValue != "":
-		timeout = headerValue
-	case queryValue != "":
-		timeout = queryValue
-	default:
+	timeout := request.URL.Query().Get(wsQueryTimeoutMs)
+	if timeout == "" {
 		// No client deadline, so the server's bound is the whole of it.
 		if maxTimeout <= 0 {
 			return ctx, nil, nil

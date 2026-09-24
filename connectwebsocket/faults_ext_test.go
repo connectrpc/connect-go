@@ -251,7 +251,7 @@ func misframingServer(tb testing.TB, write func(*websocket.Conn)) *httptest.Serv
 	httpServer := httptest.NewServer(http.HandlerFunc(
 		func(responseWriter http.ResponseWriter, request *http.Request) {
 			conn, err := websocket.Accept(responseWriter, request, &websocket.AcceptOptions{
-				Subprotocols:       []string{"connect.v2+proto"},
+				Subprotocols:       []string{"connectrpc.1+proto"},
 				InsecureSkipVerify: true,
 			})
 			if err != nil {

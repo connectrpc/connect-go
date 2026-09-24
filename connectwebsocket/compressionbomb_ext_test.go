@@ -86,6 +86,37 @@ func zeroOutputDeflate(size int) []byte {
 	return payload[:len(payload)-4]
 }
 
+// writeClientFragment writes one masked client frame with an explicit FIN bit
+// and opcode, so a test can split one message across continuation frames.
+func writeClientFragment(conn net.Conn, payload []byte, fin bool, opcode byte) error {
+	first := opcode
+	if fin {
+		first |= 0x80
+	}
+	header := []byte{first}
+	switch n := len(payload); {
+	case n < 126:
+		header = append(header, byte(0x80|n))
+	default:
+		header = append(header, 0x80|126, 0, 0)
+		binary.BigEndian.PutUint16(header[len(header)-2:], uint16(n))
+	}
+	var mask [4]byte
+	if _, err := rand.Read(mask[:]); err != nil {
+		return err
+	}
+	header = append(header, mask[:]...)
+	masked := make([]byte, len(payload))
+	for index, b := range payload {
+		masked[index] = b ^ mask[index%4]
+	}
+	if _, err := conn.Write(header); err != nil {
+		return err
+	}
+	_, err := conn.Write(masked)
+	return err
+}
+
 // writeClientFrame writes one masked client frame with FIN set. compressed
 // sets RSV1, which marks the payload as permessage-deflate compressed; text
 // picks the text opcode, which is what a JSON payload travels under.
@@ -134,7 +165,7 @@ func rawHandshake(tb testing.TB, conn net.Conn, addr, procedure string) string {
 	request := fmt.Sprintf(
 		"GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"+
 			"Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n"+
-			"Sec-WebSocket-Protocol: connect.v2\r\n"+
+			"Sec-WebSocket-Protocol: connectrpc.1+proto\r\n"+
 			"Sec-WebSocket-Extensions: permessage-deflate; client_no_context_takeover; server_no_context_takeover\r\n\r\n",
 		procedure, addr, base64.StdEncoding.EncodeToString(keyBytes[:]),
 	)

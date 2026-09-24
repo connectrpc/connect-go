@@ -81,7 +81,7 @@ func upgradeRequest(tb testing.TB, subprotocol string) *http.Request {
 func TestUpgradeRejectsUnhijackableListener(t *testing.T) {
 	t.Parallel()
 	recorder := httptest.NewRecorder()
-	newUpgradeHandler(t).ServeHTTP(recorder, upgradeRequest(t, "connect.v2"))
+	newUpgradeHandler(t).ServeHTTP(recorder, upgradeRequest(t, "connectrpc.1"))
 	assert.Equal(t, recorder.Code, http.StatusInternalServerError)
 	// The message must name h2c: an operator who sees a bare 500 looks in the
 	// wrong place.
@@ -95,7 +95,7 @@ func TestUpgradeRejectsDisallowedOrigin(t *testing.T) {
 		func(*http.Request) bool { return false },
 	))
 	recorder := newHijackableRecorder()
-	handler.ServeHTTP(recorder, upgradeRequest(t, "connect.v2"))
+	handler.ServeHTTP(recorder, upgradeRequest(t, "connectrpc.1"))
 	assert.Equal(t, recorder.Code, http.StatusForbidden)
 }
 
@@ -121,7 +121,7 @@ func TestUpgradeRejectsUnsupportedCodec(t *testing.T) {
 	// Only the JSON codec is registered, so the +proto token has no codec.
 	handler := newUpgradeHandler(t, connectwebsocket.WithCodecs(connectproto.NewJSONCodec()))
 	recorder := newHijackableRecorder()
-	handler.ServeHTTP(recorder, upgradeRequest(t, "connect.v2+proto"))
+	handler.ServeHTTP(recorder, upgradeRequest(t, "connectrpc.1+proto"))
 	assert.Equal(t, recorder.Code, http.StatusUnsupportedMediaType)
 }
 

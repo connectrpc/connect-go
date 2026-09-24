@@ -173,7 +173,7 @@ func exchange(
 ) (string, error) {
 	url := "ws" + strings.TrimPrefix(serverURL, "http") + pingv1connect.PingServiceCumSumProcedure
 	conn, response, err := websocket.Dial(ctx, url, &websocket.DialOptions{
-		Subprotocols: []string{"connect.v2+proto"},
+		Subprotocols: []string{"connectrpc.1+proto"},
 	})
 	if response != nil && response.Body != nil {
 		_ = response.Body.Close()

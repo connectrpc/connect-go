@@ -23,6 +23,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -58,9 +59,9 @@ const (
 	// Connect protocol on the [connect.CallInfo].Protocol field.
 	ProtocolConnectWebSocket = "connect+ws"
 
-	wsSubprotocolBase  = "connect.v2"
-	wsSubprotocolProto = "connect.v2+proto"
-	wsSubprotocolJSON  = "connect.v2+json"
+	wsSubprotocolBase  = "connectrpc.1"
+	wsSubprotocolProto = "connectrpc.1+proto"
+	wsSubprotocolJSON  = "connectrpc.1+json"
 
 	wsHeaderUpgrade    = "Upgrade"
 	wsHeaderConnection = "Connection"
@@ -134,14 +135,14 @@ func (c *websocketHandlerConn) flushLeadingMetadata() *connect.Error {
 	if c.callInfo == nil {
 		return nil
 	}
-	header := make(map[string][]string)
+	header := make(http.Header)
 	for key, values := range c.callInfo.ResponseHeader().All() {
 		header[http.CanonicalHeaderKey(key)] = values
 	}
 	if len(header) == 0 {
 		return nil
 	}
-	return c.marshaler.writeJSON(markerMetadata, header)
+	return c.marshaler.writeJSON(markerMetadata, encodeMetadata(header))
 }
 
 // peerFault reports whether err says the peer sent something malformed or
@@ -260,6 +261,8 @@ type websocketUnmarshaler struct {
 	fault       ProtocolFault
 	eof         bool
 	peerFaulted bool
+	// discardOnce guards the post-C drain, which must not be started twice.
+	discardOnce sync.Once
 }
 
 // Unmarshal records whether a failure was the peer's doing, which decides how
@@ -310,57 +313,56 @@ func (u *websocketUnmarshaler) unmarshal(message any) *connect.Error {
 	if u.eof {
 		return errorf(connect.CodeUnknown, "%w", io.EOF)
 	}
-	marker, payload, text, readErr := u.nextMessage()
+	wire, readErr := u.nextMessage()
 	if readErr != nil {
 		return readErr
 	}
-	return u.dispatch(marker, payload, text, message)
+	return u.dispatch(wire, message)
 }
 
 // nextMessage reads one frame and returns the message it carries.
-func (u *websocketUnmarshaler) nextMessage() (rune, []byte, bool, *connect.Error) {
-	messageType, frame, readerErr := u.wsConn.Read(u.ctx)
+func (u *websocketUnmarshaler) nextMessage() (wireMessage, *connect.Error) {
+	messageType, frame, readerErr := readBoundedMessage(u.ctx, u.wsConn, messageReadLimit(u.readMaxBytes))
 	if readerErr != nil {
 		u.eof = true
 		if isCleanWebSocketClose(readerErr) {
-			return 0, nil, false, errorf(connect.CodeUnknown, "%w", io.EOF)
+			return wireMessage{}, errorf(connect.CodeUnknown, "%w", io.EOF)
 		}
-		if limitErr := readLimitError(readerErr); limitErr != nil {
+		if errors.Is(readerErr, errMessageTooBig) {
 			u.fault = FaultSizeLimit
-			return 0, nil, false, limitErr
+			return wireMessage{}, exceedsReadLimit(u.readMaxBytes)
+		}
+		if limitErr := readLimitError(readerErr, u.readMaxBytes); limitErr != nil {
+			u.fault = FaultSizeLimit
+			return wireMessage{}, limitErr
 		}
 		// The client vanished before signalling end-of-stream. Canceled
 		// rather than Unavailable: the peer stopped, the transport did not
 		// fail, and a caller should not retry on the client's behalf.
-		return 0, nil, false, errorf(connect.CodeCanceled, "websocket closed before end-of-stream: %w", readerErr)
+		return wireMessage{}, errorf(connect.CodeCanceled, "websocket closed before end-of-stream: %w", readerErr)
 	}
 	text := messageType == websocket.MessageText
 	if !text && messageType != websocket.MessageBinary {
-		return 0, nil, false, u.fail(FaultFrameType, "unknown WebSocket message type %d", messageType)
+		return wireMessage{}, u.fail(FaultFrameType, "unknown WebSocket message type %d", messageType)
 	}
-	marker, payload, decodeErr := decodeMessage(frame)
+	wire, decodeErr := decodeMessage(frame, text)
 	if decodeErr != nil {
 		u.fault = FaultMarker
-		return 0, nil, false, decodeErr
+		return wireMessage{}, decodeErr
 	}
-	if len(payload) > u.readMaxBytes && u.readMaxBytes > 0 {
+	if len(wire.payload) > u.readMaxBytes && u.readMaxBytes > 0 {
 		u.fault = FaultSizeLimit
-		return 0, nil, false, errorf(
+		return wireMessage{}, errorf(
 			connect.CodeResourceExhausted,
-			"message size %d is larger than configured max %d", len(payload), u.readMaxBytes,
+			"message size %d is larger than configured max %d", len(wire.payload), u.readMaxBytes,
 		)
 	}
-	return marker, payload, text, nil
+	return wire, nil
 }
 
 // dispatch interprets one message and decodes its payload into message.
-func (u *websocketUnmarshaler) dispatch(
-	marker rune,
-	payload []byte,
-	text bool,
-	message any,
-) *connect.Error {
-	switch marker {
+func (u *websocketUnmarshaler) dispatch(wire wireMessage, message any) *connect.Error {
+	switch wire.marker {
 	case markerMetadata:
 		// The opening message was consumed before dispatch; a second one would
 		// write CallInfo while the handler is already reading it.
@@ -372,20 +374,45 @@ func (u *websocketUnmarshaler) dispatch(
 		// The last message from the client. If it carries a body, deliver it;
 		// mark EOF either way so the next Receive returns io.EOF.
 		u.eof = true
-		if len(payload) == 0 {
+		u.discardAfterEndOfStream()
+		if len(wire.payload) == 0 {
 			return errorf(connect.CodeUnknown, "%w", io.EOF)
 		}
-		return u.decodeBody(payload, text, message)
+		return u.decodeBody(wire, message)
 	case markerBody:
-		return u.decodeBody(payload, text, message)
+		return u.decodeBody(wire, message)
 	case markerServerEndStream:
 		return u.fail(
 			FaultMarker,
-			"client sent %s, which only a server may send", markerName(marker),
+			"client sent %s, which only a server may send", markerName(wire.marker),
 		)
 	default:
-		return u.fail(FaultMarker, "client sent unknown marker %s", markerName(marker))
+		return u.fail(FaultMarker, "client sent unknown marker %s", markerName(wire.marker))
 	}
+}
+
+// discardAfterEndOfStream reads and throws away whatever the client sends
+// after its C message, until the connection closes.
+//
+// Nothing reads this stream again — Receive returns io.EOF from the flag — so
+// without this the socket buffer fills and a peer that keeps sending blocks in
+// its own write. Its protocol mistake would become a stall on its side, at the
+// point where this end has already decided to ignore it.
+//
+// Each message is still bounded by the read limit, and the RPC's deadline
+// bounds the whole thing, so a peer cannot use this to buy unbounded work. The
+// goroutine ends when the context is done or the connection closes.
+func (u *websocketUnmarshaler) discardAfterEndOfStream() {
+	u.discardOnce.Do(func() {
+		go func() {
+			limit := messageReadLimit(u.readMaxBytes)
+			for {
+				if _, _, err := readBoundedMessage(u.ctx, u.wsConn, limit); err != nil {
+					return
+				}
+			}
+		}()
+	})
 }
 
 // drainLeadingMetadata consumes the single M message that opens
@@ -400,22 +427,22 @@ func (u *websocketUnmarshaler) dispatch(
 // waits for the server, so the drain must know it is done after one frame.
 func (u *websocketUnmarshaler) drainLeadingMetadata() *connect.Error {
 	u.fault = FaultUnknown
-	marker, payload, _, readErr := u.nextMessage()
+	wire, readErr := u.nextMessage()
 	if readErr != nil {
 		u.reportFault(readErr)
 		return readErr
 	}
-	if marker != markerMetadata {
+	if wire.marker != markerMetadata {
 		// Anything before the opening metadata means the peer is not speaking
 		// this protocol; there is no partial state worth keeping.
 		failure := u.fail(
 			FaultMetadata,
-			"client's first message must be M; got %s", markerName(marker),
+			"client's first message must be M; got %s", markerName(wire.marker),
 		)
 		u.reportFault(failure)
 		return failure
 	}
-	mergeErr := u.mergeLeadingMetadata(payload)
+	mergeErr := u.mergeLeadingMetadata(wire.payload)
 	if mergeErr != nil {
 		u.reportFault(mergeErr)
 	}
@@ -423,9 +450,9 @@ func (u *websocketUnmarshaler) drainLeadingMetadata() *connect.Error {
 }
 
 // decodeBody decodes a body payload with the codec its frame type names.
-func (u *websocketUnmarshaler) decodeBody(payload []byte, text bool, message any) *connect.Error {
-	if len(payload) == 0 {
-		if text {
+func (u *websocketUnmarshaler) decodeBody(wire wireMessage, message any) *connect.Error {
+	if len(wire.payload) == 0 {
+		if wire.text {
 			// An empty JSON body is "{}", never zero bytes, so a text frame
 			// carrying only a marker says nothing the codec could decode.
 			return u.fail(FaultFrameType, "empty body in a text frame; an empty JSON message is {}")
@@ -433,37 +460,63 @@ func (u *websocketUnmarshaler) decodeBody(payload []byte, text bool, message any
 		// The empty Protobuf message: the zero value is correct.
 		return nil
 	}
-	codec := u.codecs.forFrame(text)
-	if err := codec.UnmarshalRead(u.ctx, bytes.NewReader(payload), message); err != nil {
+	codec := u.codecs.forFrame(wire.text)
+	if codec == nil {
+		return u.fail(
+			FaultFrameType,
+			"client sent a %s body, which this server was not configured to decode",
+			encodingForFrame(wire.text),
+		)
+	}
+	if err := codec.UnmarshalRead(u.ctx, bytes.NewReader(wire.payload), message); err != nil {
 		return u.fail(FaultMessageEncoding, "unmarshal message: %w", err)
 	}
 	return nil
 }
 
 func (u *websocketUnmarshaler) mergeLeadingMetadata(payload []byte) *connect.Error {
+	// The empty object, never zero bytes: an M carries a JSON object, and a
+	// bare marker is not one.
 	if len(payload) == 0 {
-		return nil
+		return u.fail(FaultMetadata, "empty M message; an empty metadata object is {}")
 	}
-	var meta map[string][]string
-	if err := json.Unmarshal(payload, &meta); err != nil {
+	var wire map[string][]string
+	if err := json.Unmarshal(payload, &wire); err != nil {
 		return u.fail(FaultMetadata, "unmarshal M message: %w", err)
 	}
-	// M metadata wins over the upgrade headers: it is the only channel a
-	// browser has, and it arrives later, so it is the more specific statement.
+	meta, decodeErr := decodeMetadata(wire)
+	if decodeErr != nil {
+		u.fault = FaultMetadata
+		return decodeErr
+	}
+	// The handshake wins, so an M message adds metadata but never overwrites
+	// what arrived with the connection. A proxy is in the path of the upgrade
+	// and can set a header there, but it never sees the M; the opposite
+	// precedence would let any client forge X-Forwarded-For or an identity
+	// header an authenticating proxy injected.
+	header := u.callInfo.RequestHeader()
 	for key, values := range meta {
-		u.callInfo.RequestHeader().SetValues(http.CanonicalHeaderKey(key), values)
+		if len(header.Values(key)) > 0 {
+			continue
+		}
+		header.SetValues(key, values)
 	}
 	return nil
 }
 
 // Helpers.
 
-// frameReadLimit turns a per-message limit into a per-frame one. A legal frame
-// carries exactly one message, so it is the marker plus the payload.
+// messageReadLimit turns a payload limit into a wire limit by allowing for the
+// marker that precedes it.
 //
-// The result is always passed to SetReadLimit, never skipped: coder's default
-// is 32KiB, and a zero would cap frames at a single byte. Unlimited is -1.
-func frameReadLimit(readMaxBytes int) int64 {
+// The bound is per WebSocket message, not per frame: a message may be
+// fragmented across continuation frames, and both this package's reader and
+// coder's SetReadLimit count the reassembled whole. A per-frame bound would be
+// defeated by fragmenting.
+//
+// Zero is never passed through: coder's default is 32KiB, and a zero would cap
+// messages at a single byte. Unlimited is -1.
+func messageReadLimit(readMaxBytes int) int64 {
 	if readMaxBytes <= 0 {
 		return -1
 	}
@@ -471,17 +524,69 @@ func frameReadLimit(readMaxBytes int) int64 {
 	return int64(readMaxBytes) + utf8.UTFMax
 }
 
+// errMessageTooBig reports a message that overran the limit this side
+// enforces. The reader knows the wire limit; only the caller knows the
+// configured one worth naming, so the sentinel carries no number.
+var errMessageTooBig = errors.New("message exceeds read limit")
+
+// readBoundedMessage reads one WebSocket message, abandoning it as soon as it
+// passes limit rather than consuming it. Stopping early is what leaves the
+// connection usable enough to tell the peer why it was rejected; coder's own
+// SetReadLimit closes with 1009 before this layer can say anything.
+//
+// The reader spans continuation frames, so the bound is on the reassembled
+// message and fragmenting does not evade it. A limit below zero means
+// unlimited.
+func readBoundedMessage(
+	ctx context.Context,
+	conn *websocket.Conn,
+	limit int64,
+) (websocket.MessageType, []byte, error) {
+	messageType, reader, err := conn.Reader(ctx)
+	if err != nil {
+		return 0, nil, err
+	}
+	if limit < 0 {
+		data, err := io.ReadAll(reader)
+		return messageType, data, err
+	}
+	// One byte past the limit is all it takes to know the message overran, and
+	// reading more is what the limit exists to prevent.
+	var message bytes.Buffer
+	switch _, err := io.CopyN(&message, reader, limit+1); {
+	case err == nil:
+		return messageType, nil, errMessageTooBig
+	case errors.Is(err, io.EOF):
+		return messageType, message.Bytes(), nil
+	default:
+		return messageType, nil, err
+	}
+}
+
 // readLimitError recognizes a message that blew a read limit, whether this
 // side enforced it or the peer closed the connection because of it. Both mean
 // the same thing to a caller, and neither is a transport failure.
-func readLimitError(err error) *connect.Error {
+//
+// Only this side's limit is reported as a number. A peer's is its own
+// business, and its close reason is the only account of it there is.
+func readLimitError(err error, readMaxBytes int) *connect.Error {
 	if websocket.CloseStatus(err) == websocket.StatusMessageTooBig {
 		return errorf(connect.CodeResourceExhausted, "peer rejected message as too big: %w", err)
 	}
 	if errors.Is(err, websocket.ErrMessageTooBig) {
-		return errorf(connect.CodeResourceExhausted, "message exceeds read limit: %w", err)
+		return exceedsReadLimit(readMaxBytes)
 	}
 	return nil
+}
+
+// exceedsReadLimit reports a message abandoned before its size was known, so
+// it names the configured limit rather than a size it never measured. The
+// limit on the wire carries a marker margin that no caller configured.
+func exceedsReadLimit(readMaxBytes int) *connect.Error {
+	return errorf(
+		connect.CodeResourceExhausted,
+		"message exceeds the configured max of %d bytes", readMaxBytes,
+	)
 }
 
 func isCleanWebSocketClose(err error) bool {
@@ -546,13 +651,22 @@ func (c *wsClientCall) ensureDialed() *connect.Error {
 			c.dialErr = dialError(err, response)
 			return
 		}
+		// CloseNow, not Close: the closing handshake waits for the peer's own
+		// close frame, and a server that just failed the handshake's terms is
+		// the last peer worth waiting five seconds on. Same policy as a peer
+		// that faults mid-stream.
 		if got := conn.Subprotocol(); got != c.subprotocol {
-			_ = conn.Close(websocket.StatusProtocolError, "unexpected subprotocol")
+			_ = conn.CloseNow()
 			c.dialErr = errorf(
 				connect.CodeInternal,
 				"server selected unexpected Sec-WebSocket-Protocol %q (want %q)",
 				got, c.subprotocol,
 			)
+			return
+		}
+		if takeoverErr := checkNoContextTakeover(response); takeoverErr != nil {
+			_ = conn.CloseNow()
+			c.dialErr = takeoverErr
 			return
 		}
 		// Bounds the inflated message and the compressed input both; see the
@@ -602,11 +716,7 @@ type websocketClientConn struct {
 // it to know the stream has begun, and waits for nothing else.
 func (c *websocketClientConn) open() *connect.Error {
 	c.openOnce.Do(func() {
-		metadata := c.requestMeta
-		if metadata == nil {
-			metadata = http.Header{}
-		}
-		c.openErr = c.marshaler.writeJSON(markerMetadata, metadata)
+		c.openErr = c.marshaler.writeJSON(markerMetadata, encodeMetadata(c.requestMeta))
 	})
 	return c.openErr
 }
@@ -807,7 +917,11 @@ func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 			)
 			return u.endStreamError
 		}
-		if limitErr := readLimitError(readerErr); limitErr != nil {
+		if limitErr := readLimitError(readerErr, u.readMaxBytes); limitErr != nil {
+			// Classified like any other peer fault: a server sending more than
+			// this client agreed to read is the server's mistake, and the
+			// monitor should see it under the same name the server uses.
+			u.fault = FaultSizeLimit
 			return limitErr
 		}
 		return errorf(connect.CodeUnavailable, "read websocket message: %w", readerErr)
@@ -816,66 +930,72 @@ func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 	if !text && messageType != websocket.MessageBinary {
 		return u.fail(FaultFrameType, "unknown WebSocket message type %d", messageType)
 	}
-	marker, payload, decodeErr := decodeMessage(frame)
+	wire, decodeErr := decodeMessage(frame, text)
 	if decodeErr != nil {
 		u.fault = FaultMarker
 		return decodeErr
 	}
-	if u.readMaxBytes > 0 && len(payload) > u.readMaxBytes {
+	if u.readMaxBytes > 0 && len(wire.payload) > u.readMaxBytes {
 		u.fault = FaultSizeLimit
 		return errorf(
 			connect.CodeResourceExhausted,
-			"message size %d is larger than configured max %d", len(payload), u.readMaxBytes,
+			"message size %d is larger than configured max %d", len(wire.payload), u.readMaxBytes,
 		)
 	}
 
-	switch marker {
+	switch wire.marker {
 	case markerClientEndStream:
 		u.fault = FaultMarker
 		return errorf(
 			connect.CodeInternal,
-			"server sent %s, which only a client may send", markerName(marker),
+			"server sent %s, which only a client may send", markerName(wire.marker),
 		)
 	case markerMetadata:
-		if mergeErr := u.mergeLeadingMetadata(payload); mergeErr != nil {
+		if mergeErr := u.mergeLeadingMetadata(wire.payload); mergeErr != nil {
 			return mergeErr
 		}
 		u.metadataConsumed = true
 		return nil
 	case markerServerEndStream:
+		// Parsed unconditionally, so a bare S fails here exactly as a
+		// zero-length end-of-stream payload fails in Connect's HTTP streaming
+		// protocol. The framing differs; the message does not.
 		var end connectwire.EndStreamMessage
-		if len(payload) > 0 {
-			if err := json.Unmarshal(payload, &end); err != nil {
-				u.fault = FaultMetadata
-				return errorf(connect.CodeInternal, "unmarshal EndStreamMessage: %w", err)
-			}
+		if err := json.Unmarshal(wire.payload, &end); err != nil {
+			u.fault = FaultMetadata
+			return errorf(connect.CodeInternal, "unmarshal EndStreamMessage: %w", err)
 		}
-		for name, value := range end.Trailer {
-			canonical := http.CanonicalHeaderKey(name)
-			if name != canonical {
-				delete(end.Trailer, name)
-				end.Trailer[canonical] = append(end.Trailer[canonical], value...)
-			}
+		trailer, decodeErr := decodeMetadata(end.Trailer)
+		if decodeErr != nil {
+			u.fault = FaultMetadata
+			return decodeErr
 		}
 		u.endStreamSeen = true
-		u.trailer = end.Trailer
+		u.trailer = trailer
 		u.endStreamError = end.Error.AsError()
 		return errorf(connect.CodeUnknown, "%w", io.EOF)
 	case markerBody:
 		u.sawData = true
-		if len(payload) == 0 {
-			if text {
+		if len(wire.payload) == 0 {
+			if wire.text {
 				return u.fail(FaultFrameType, "empty body in a text frame; an empty JSON message is {}")
 			}
 			return nil
 		}
-		codec := u.codecs.forFrame(text)
-		if err := codec.UnmarshalRead(u.call.ctx, bytes.NewReader(payload), message); err != nil {
+		codec := u.codecs.forFrame(wire.text)
+		if codec == nil {
+			return u.fail(
+				FaultFrameType,
+				"server sent a %s body, which this client was not configured to decode",
+				encodingForFrame(wire.text),
+			)
+		}
+		if err := codec.UnmarshalRead(u.call.ctx, bytes.NewReader(wire.payload), message); err != nil {
 			return u.fail(FaultMessageEncoding, "unmarshal message: %w", err)
 		}
 		return nil
 	default:
-		return u.fail(FaultMarker, "server sent unknown marker %s", markerName(marker))
+		return u.fail(FaultMarker, "server sent unknown marker %s", markerName(wire.marker))
 	}
 }
 
@@ -890,19 +1010,23 @@ func (u *websocketClientUnmarshaler) mergeLeadingMetadata(payload []byte) *conne
 		)
 	}
 	if len(payload) == 0 {
-		return nil
+		u.fault = FaultMetadata
+		return errorf(connect.CodeInternal, "empty M message; an empty metadata object is {}")
 	}
-	var meta map[string][]string
-	if err := json.Unmarshal(payload, &meta); err != nil {
+	var wire map[string][]string
+	if err := json.Unmarshal(payload, &wire); err != nil {
 		u.fault = FaultMetadata
 		return errorf(connect.CodeInternal, "unmarshal M message: %w", err)
+	}
+	meta, decodeErr := decodeMetadata(wire)
+	if decodeErr != nil {
+		u.fault = FaultMetadata
+		return decodeErr
 	}
 	if u.header == nil {
 		u.header = make(http.Header, len(meta))
 	}
-	for key, values := range meta {
-		u.header[http.CanonicalHeaderKey(key)] = values
-	}
+	maps.Copy(u.header, meta)
 	return nil
 }
 
@@ -957,6 +1081,48 @@ func httpToCode(httpCode int) connect.Code {
 	default:
 		return connect.CodeUnknown
 	}
+}
+
+// checkNoContextTakeover refuses a handshake that negotiated
+// permessage-deflate with a compression context shared across messages.
+//
+// A shared context leaks plaintext between messages whenever attacker-
+// influenced and secret data travel on one connection — the CRIME/BREACH
+// family. The server is required to impose no-context-takeover, but a client
+// that trusts it to have done so is protected only as far as the peer is
+// conforming, and the client's own plaintext is what leaks.
+//
+// No extension at all is fine: nothing is compressed, so nothing leaks.
+func checkNoContextTakeover(response *http.Response) *connect.Error {
+	if response == nil {
+		return nil
+	}
+	for _, value := range response.Header.Values(wsHeaderExtensions) {
+		for extension := range strings.SplitSeq(value, ",") {
+			parameters := strings.Split(extension, ";")
+			if strings.TrimSpace(parameters[0]) != "permessage-deflate" {
+				continue
+			}
+			var client, server bool
+			for _, parameter := range parameters[1:] {
+				switch strings.TrimSpace(parameter) {
+				case "client_no_context_takeover":
+					client = true
+				case "server_no_context_takeover":
+					server = true
+				}
+			}
+			if !client || !server {
+				return errorf(
+					connect.CodeInternal,
+					"server negotiated %q without no-context-takeover in both directions; "+
+						"a shared compression context leaks plaintext across messages",
+					strings.TrimSpace(extension),
+				)
+			}
+		}
+	}
+	return nil
 }
 
 func isWebSocketProtocolHeader(key string) bool {

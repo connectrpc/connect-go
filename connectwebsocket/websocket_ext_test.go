@@ -464,8 +464,8 @@ func TestSendCodecSelectsSubprotocol(t *testing.T) {
 		codec string
 		token string
 	}{
-		{connect.CodecNameProto, "connect.v2+proto"},
-		{connect.CodecNameJSON, "connect.v2+json"},
+		{connect.CodecNameProto, "connectrpc.1+proto"},
+		{connect.CodecNameJSON, "connectrpc.1+json"},
 	} {
 		t.Run(test.codec, func(t *testing.T) {
 			t.Parallel()

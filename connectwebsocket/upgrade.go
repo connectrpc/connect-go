@@ -25,10 +25,6 @@ import (
 	"github.com/coder/websocket"
 )
 
-// headerTimeout is the Connect deadline header. It is unexported in
-// connecthttp, so the name is repeated here.
-const headerTimeout = "Connect-Timeout-Ms"
-
 // hijackerHelp is returned when the listener cannot hijack the connection,
 // which is the usual symptom of an h2c-only server.
 const hijackerHelp = "Connect over WebSocket requires the HTTP listener to support http.Hijacker; " +
@@ -103,6 +99,9 @@ func Upgrade(server *connect.Server, next http.Handler, options ...ServerOption)
 	if serve == nil {
 		serve = &session{}
 	}
+	// The error is not fatal here, unlike on the client: a handler with
+	// neither codec negotiates nothing, so every upgrade is refused with a 415
+	// naming the empty set rather than failing at some later point.
 	pair, _ := newCodecPair(opts.codecs)
 	return &upgradeHandler{
 		server:    server,
@@ -145,24 +144,31 @@ func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *
 		http.Error(responseWriter, "origin not allowed", http.StatusForbidden)
 		return
 	}
-	subprotocol, codecName, negotiated := negotiateSubprotocol(requestedSubprotocols(request))
-	if !negotiated {
+	subprotocol, codecName, outcome := negotiateSubprotocol(
+		requestedSubprotocols(request),
+		h.servesCodec,
+	)
+	switch outcome {
+	case negotiationUnrecognized:
 		http.Error(
 			responseWriter,
 			"no supported WebSocket subprotocol in Sec-WebSocket-Protocol",
 			http.StatusBadRequest,
 		)
 		return
-	}
-	codec, ok := h.codecs.get(codecName)
-	if !ok {
+	case negotiationUnsupportedCodec:
 		http.Error(
 			responseWriter,
-			fmt.Sprintf("unsupported message encoding %q: supported encodings are %v", codecName, h.codecs.names()),
+			fmt.Sprintf(
+				"no message encoding in common: this server speaks %v",
+				h.servedCodecNames(),
+			),
 			http.StatusUnsupportedMediaType,
 		)
 		return
+	case negotiationOK:
 	}
+	codec, _ := h.codecs.get(codecName)
 	// Accept echoes Sec-WebSocket-Protocol itself from the list it is given.
 	conn, upgradeErr := websocket.Accept(responseWriter, request, &websocket.AcceptOptions{
 		Subprotocols: []string{subprotocol},
@@ -217,6 +223,26 @@ func IsUpgrade(request *http.Request) bool {
 	return strings.EqualFold(request.Header.Get(wsHeaderUpgrade), "websocket")
 }
 
+// servesCodec reports whether this server can encode and decode bodies with
+// the named codec. A server MAY be configured with only one of the two.
+func (h *upgradeHandler) servesCodec(name string) bool {
+	_, ok := h.codecs.get(name)
+	return ok
+}
+
+// servedCodecNames lists the codecs a client could negotiate, for the 415
+// body. It is the registry filtered to the two this binding can carry, not
+// every codec the server happens to hold.
+func (h *upgradeHandler) servedCodecNames() []string {
+	var names []string
+	for _, name := range []string{connect.CodecNameProto, connect.CodecNameJSON} {
+		if h.servesCodec(name) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // requestedSubprotocols parses the client's Sec-WebSocket-Protocol offer, in
 // the order it was offered.
 func requestedSubprotocols(request *http.Request) []string {
@@ -231,18 +257,54 @@ func requestedSubprotocols(request *http.Request) []string {
 	return protocols
 }
 
-// negotiateSubprotocol picks the first requested subprotocol this transport
-// supports and returns it with the codec name it selects.
-func negotiateSubprotocol(requested []string) (subprotocol, codecName string, ok bool) {
+// negotiationOutcome distinguishes a client that is not speaking this protocol
+// from one that is but offered an encoding this server does not have. The
+// remedies differ, and so do the HTTP statuses.
+type negotiationOutcome int
+
+const (
+	negotiationOK negotiationOutcome = iota
+	negotiationUnrecognized
+	negotiationUnsupportedCodec
+)
+
+// codecForSubprotocol maps a token to the codec it selects, or "" if the token
+// is not one of this binding's.
+func codecForSubprotocol(name string) string {
+	switch name {
+	case wsSubprotocolProto:
+		return connect.CodecNameProto
+	case wsSubprotocolJSON, wsSubprotocolBase:
+		return connect.CodecNameJSON
+	}
+	return ""
+}
+
+// negotiateSubprotocol picks the first offered subprotocol this server both
+// recognizes and can serve.
+//
+// A recognized token whose codec is missing is skipped rather than accepted,
+// so a client offering JSON first still reaches a Protobuf-only server through
+// its second choice.
+func negotiateSubprotocol(
+	requested []string,
+	supported func(string) bool,
+) (subprotocol, codecName string, outcome negotiationOutcome) {
+	recognized := false
 	for _, name := range requested {
-		switch name {
-		case wsSubprotocolProto, wsSubprotocolBase:
-			return name, connect.CodecNameProto, true
-		case wsSubprotocolJSON:
-			return name, connect.CodecNameJSON, true
+		codec := codecForSubprotocol(name)
+		if codec == "" {
+			continue
+		}
+		recognized = true
+		if supported(codec) {
+			return name, codec, negotiationOK
 		}
 	}
-	return "", "", false
+	if recognized {
+		return "", "", negotiationUnsupportedCodec
+	}
+	return "", "", negotiationUnrecognized
 }
 
 func headerContainsToken(header http.Header, key, token string) bool {
@@ -256,10 +318,9 @@ func headerContainsToken(header http.Header, key, token string) bool {
 	return false
 }
 
-// registry is an ordered, name-keyed lookup for codecs and compressors.
+// registry is a name-keyed lookup for codecs and compressors.
 type registry[T interface{ Name() string }] struct {
-	byName  map[string]T
-	ordered []string
+	byName map[string]T
 }
 
 func newCodecRegistry(codecs []connect.Codec) registry[connect.Codec] {
@@ -274,7 +335,6 @@ func newRegistry[T interface{ Name() string }](entries []T) registry[T] {
 			continue
 		}
 		reg.byName[name] = entry
-		reg.ordered = append(reg.ordered, name)
 	}
 	return reg
 }
@@ -283,5 +343,3 @@ func (r registry[T]) get(name string) (T, bool) {
 	entry, ok := r.byName[name]
 	return entry, ok
 }
-
-func (r registry[T]) names() []string { return r.ordered }
