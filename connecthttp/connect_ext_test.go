@@ -2386,6 +2386,31 @@ func TestHandlerWithSendMaxBytesEndStream(t *testing.T) {
 	}
 }
 
+func TestHandlerWithSendMaxBytesUnaryError(t *testing.T) {
+	// Like the end of stream, an oversized unary error falls back to only the
+	// code and message.
+	t.Parallel()
+	const sendMaxBytes = 256
+	detail, err := connectproto.NewErrorDetail(&pingv1.PingResponse{Text: strings.Repeat("a", 1024)})
+	assert.Nil(t, err)
+	mux := http.NewServeMux()
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, &pluggablePingServer{
+		ping: func(context.Context, *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, "small").WithDetail(detail)
+		},
+	})
+	connecthttp.Mount(mux, srv, connecthttp.WithSendMaxBytes(sendMaxBytes))
+	server := memhttptest.NewServer(t, mux)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL())))
+	_, err = client.Ping(t.Context(), &pingv1.PingRequest{})
+	connectErr, ok := errors.AsType[*connect.Error](err)
+	assert.True(t, ok)
+	assert.Equal(t, connectErr.Code(), connect.CodeFailedPrecondition)
+	assert.Equal(t, connectErr.Message(), "small")
+	assert.Zero(t, connectErr.Details())
+}
+
 func TestClientWithSendMaxBytes(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()

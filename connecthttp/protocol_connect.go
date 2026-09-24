@@ -768,7 +768,14 @@ func (hc *connectUnaryHandlerConn) Close(err error) error {
 	// In unary Connect, errors always use application/json.
 	setHeaderCanonical(hc.responseWriter.Header(), headerContentType, connectUnaryContentTypeJSON)
 	hc.responseWriter.WriteHeader(connectCodeToHTTP(connect.CodeOf(err)))
-	data, marshalErr := json.Marshal(newConnectWireError(err))
+	wireErr := newConnectWireError(err)
+	data, marshalErr := json.Marshal(wireErr)
+	if marshalErr == nil && hc.marshaler.sendMaxBytes > 0 && len(data) > hc.marshaler.sendMaxBytes {
+		// The error exceeds sendMaxBytes. Rather than drop it, send only the
+		// code and message.
+		wireErr.Details = nil
+		data, marshalErr = json.Marshal(wireErr)
+	}
 	if marshalErr != nil {
 		_ = hc.request.Body.Close()
 		return connect.Errorf(connect.CodeInternal, "marshal error: %s", err).WithCause(err)
