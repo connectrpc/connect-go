@@ -144,6 +144,8 @@ func WithReadMaxBytes(n int) Option {
 // WithSendMaxBytes limits the size of a message that the handler can respond
 // with. For clients, WithSendMaxBytes limits the size of a message that the
 // client can send. Limits apply to each message, not to the stream as a whole.
+// Handler errors are always sent. If an error exceeds the limit, the handler
+// sends a minimal error with only the code and message.
 //
 // Setting WithSendMaxBytes to zero allows any message size. Both clients and
 // handlers default to allowing any message size.

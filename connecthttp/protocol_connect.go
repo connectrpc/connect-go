@@ -880,7 +880,27 @@ func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Hea
 	}
 	raw := bytes.NewBuffer(data)
 	defer bufferpool.Put(raw)
-	return m.Write(&envelope{
+	writeErr := m.Write(&envelope{
+		Data:  raw,
+		Flags: connectFlagEnvelopeEndStream,
+	})
+	if writeErr == nil || writeErr.Code() != connect.CodeResourceExhausted {
+		return writeErr
+	}
+	// The end of stream exceeds sendMaxBytes. Rather than drop it, send only
+	// the error code and message, reporting the limit if there's no error.
+	if err == nil {
+		err = writeErr
+	}
+	end = &connectEndStreamMessage{Error: newConnectWireError(err)}
+	end.Error.Details = nil
+	data, marshalErr = json.Marshal(end)
+	if marshalErr != nil {
+		return connect.Errorf(connect.CodeInternal, "marshal end stream: %s", marshalErr).WithCause(marshalErr)
+	}
+	raw.Reset()
+	_, _ = raw.Write(data)
+	return m.write(&envelope{
 		Data:  raw,
 		Flags: connectFlagEnvelopeEndStream,
 	})
