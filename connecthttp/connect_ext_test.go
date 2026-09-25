@@ -2265,6 +2265,152 @@ func TestHandlerWithSendMaxBytes(t *testing.T) {
 	})
 }
 
+func TestHandlerWithSendMaxBytesEndStream(t *testing.T) {
+	// The end of stream (Connect EndStream or gRPC-Web trailers) carries the
+	// RPC's final status, so it must never be dropped. An oversized end of
+	// stream falls back to a minimal frame, which is sent even if it's still
+	// over the limit.
+	t.Parallel()
+	const sendMaxBytes = 256
+	// Random text doesn't compress below the limit.
+	rng := rand.New(rand.NewPCG(1, 2))
+	randomText := func(size int) string {
+		const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+		text := make([]byte, size)
+		for i := range text {
+			text[i] = alphabet[rng.IntN(len(alphabet))]
+		}
+		return string(text)
+	}
+	detail, err := connectproto.NewErrorDetail(&pingv1.PingResponse{Text: randomText(1024)})
+	assert.Nil(t, err)
+	largeText := randomText(1024)
+	largeTrailer := randomText(1024)
+	pingServer := &pluggablePingServer{
+		countUp: func(ctx context.Context, _ *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
+			// Send a message so gRPC-Web can't use a trailers-only response.
+			if err := stream.Send(&pingv1.CountUpResponse{Number: 1}); err != nil {
+				return err
+			}
+			info, _ := connect.CallInfoForServerContext(ctx)
+			switch info.RequestHeader().Get("X-Test-Case") {
+			case "large_details":
+				return connect.NewError(connect.CodeFailedPrecondition, "small").WithDetail(detail)
+			case "large_error_message":
+				return connect.NewError(connect.CodeFailedPrecondition, largeText)
+			case "large_trailer":
+				info.ResponseTrailer().Set("X-Large", largeTrailer)
+				return nil
+			}
+			return errors.New("unknown test case")
+		},
+	}
+	newServer := func(t *testing.T, compressed bool) *memhttp.Server {
+		t.Helper()
+		mux := http.NewServeMux()
+		options := []connecthttp.Option{connecthttp.WithSendMaxBytes(sendMaxBytes)}
+		if compressed {
+			options = append(options, connecthttp.WithCompressMinBytes(1))
+		}
+		srv := connect.NewServer()
+		pingv1connect.RegisterPingServiceHandler(srv, pingServer)
+		connecthttp.Mount(mux, srv, options...)
+		return memhttptest.NewServer(t, mux)
+	}
+	countUp := func(t *testing.T, client pingv1connect.PingServiceClient, testCase string) (*connect.CallInfo, error) {
+		t.Helper()
+		ctx, callInfo := connect.NewClientContext(t.Context())
+		callInfo.RequestHeader().Set("X-Test-Case", testCase)
+		stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 1})
+		if err != nil {
+			return callInfo, err
+		}
+		defer stream.Close()
+		for {
+			if _, err := stream.Receive(); err != nil {
+				if errors.Is(err, io.EOF) {
+					return callInfo, nil
+				}
+				return callInfo, err
+			}
+		}
+	}
+	testCases := func(t *testing.T, client pingv1connect.PingServiceClient) {
+		t.Helper()
+		t.Run("large_details", func(t *testing.T) {
+			t.Parallel()
+			// The minimal frame drops the details.
+			_, err := countUp(t, client, "large_details")
+			connectErr, ok := errors.AsType[*connect.Error](err)
+			assert.True(t, ok)
+			assert.Equal(t, connectErr.Code(), connect.CodeFailedPrecondition)
+			assert.Equal(t, connectErr.Message(), "small")
+			assert.Zero(t, connectErr.Details())
+		})
+		t.Run("large_error_message", func(t *testing.T) {
+			t.Parallel()
+			// Even the minimal frame exceeds the limit, so it's sent anyway.
+			_, err := countUp(t, client, "large_error_message")
+			connectErr, ok := errors.AsType[*connect.Error](err)
+			assert.True(t, ok)
+			assert.Equal(t, connectErr.Code(), connect.CodeFailedPrecondition)
+			assert.Equal(t, connectErr.Message(), largeText)
+		})
+		t.Run("large_trailer", func(t *testing.T) {
+			t.Parallel()
+			// The minimal frame drops the trailers, so report the limit rather
+			// than silently succeeding.
+			callInfo, err := countUp(t, client, "large_trailer")
+			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+			assert.Equal(t, callInfo.ResponseTrailer().Get("X-Large"), "")
+		})
+	}
+	for _, compressed := range []bool{false, true} {
+		server := newServer(t, compressed)
+		name := "uncompressed"
+		if compressed {
+			name = "compressed"
+		}
+		t.Run("connect_"+name, func(t *testing.T) {
+			t.Parallel()
+			testCases(t, pingv1connect.NewPingServiceClient(connect.NewClient(
+				connecthttp.NewTransport(server.Client(), server.URL()),
+			)))
+		})
+		t.Run("grpcweb_"+name, func(t *testing.T) {
+			t.Parallel()
+			testCases(t, pingv1connect.NewPingServiceClient(connect.NewClient(
+				connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPCWeb()),
+			)))
+		})
+	}
+}
+
+func TestHandlerWithSendMaxBytesUnaryError(t *testing.T) {
+	// Like the end of stream, an oversized unary error falls back to only the
+	// code and message.
+	t.Parallel()
+	const sendMaxBytes = 256
+	detail, err := connectproto.NewErrorDetail(&pingv1.PingResponse{Text: strings.Repeat("a", 1024)})
+	assert.Nil(t, err)
+	mux := http.NewServeMux()
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, &pluggablePingServer{
+		ping: func(context.Context, *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, "small").WithDetail(detail)
+		},
+	})
+	connecthttp.Mount(mux, srv, connecthttp.WithSendMaxBytes(sendMaxBytes))
+	server := memhttptest.NewServer(t, mux)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL())))
+	_, err = client.Ping(t.Context(), &pingv1.PingRequest{})
+	connectErr, ok := errors.AsType[*connect.Error](err)
+	assert.True(t, ok)
+	assert.Equal(t, connectErr.Code(), connect.CodeFailedPrecondition)
+	assert.Equal(t, connectErr.Message(), "small")
+	assert.Zero(t, connectErr.Details())
+}
+
 func TestClientWithSendMaxBytes(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
