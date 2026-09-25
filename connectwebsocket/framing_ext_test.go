@@ -19,6 +19,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -33,6 +34,7 @@ import (
 	"connectrpc.com/connect/v2/internal/assert"
 	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
+	"github.com/coder/websocket"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -82,7 +84,7 @@ func bodyFor(tb testing.TB, message proto.Message) []byte {
 	tb.Helper()
 	encoded, err := proto.Marshal(message)
 	assert.Nil(tb, err)
-	return append([]byte(string(wireBody)), encoded...)
+	return append([]byte{wireBody}, encoded...)
 }
 
 // pingOverRawFrames sends one unary Ping and reports whether the server
@@ -117,7 +119,7 @@ func pingOverRawFrames(tb testing.TB, text string, options ...connectwebsocket.S
 	// Past the server's opening M, which is tiny and says nothing about how
 	// the response body was framed.
 	_, opening := readServerFrame(tb, conn)
-	assert.Equal(tb, rune(opening[0]), wireMetadata)
+	assert.Equal(tb, opening[0], wireMetadata)
 
 	compressed, payload := readServerFrame(tb, conn)
 	// The response must be the echoed message, not the terminal one. Its
@@ -129,7 +131,7 @@ func pingOverRawFrames(tb testing.TB, text string, options ...connectwebsocket.S
 
 // openMessage is the empty M message that starts a stream.
 func openMessage() []byte {
-	return append([]byte(string(wireMetadata)), []byte("{}")...)
+	return append([]byte{wireMetadata}, []byte("{}")...)
 }
 
 // A response comfortably over the threshold must actually go out compressed.
@@ -167,7 +169,7 @@ func TestWrongDirectionMarkerIsNamedAsSuch(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
 		name   string
-		marker rune
+		marker byte
 		want   string
 	}{
 		{"end-stream is server-only", wireServerEndStream, "only a server may send"},
@@ -281,5 +283,48 @@ func handshakeWithExtension(
 		if _, err := conn.Read(buffer); err != nil {
 			return
 		}
+	}
+}
+
+// The high bit is reserved for a later revision of the protocol, so a first
+// byte at or above 0x80 is refused before anything behind it is interpreted.
+// Holding it back is only worth anything if this revision actually rejects it:
+// a peer that accepted 0x80 today would make the signal unusable tomorrow.
+func TestMarkerHighBitIsReserved(t *testing.T) {
+	t.Parallel()
+	for _, first := range []byte{0x80, 0xC3, 0xF0, 0xFF} {
+		t.Run(fmt.Sprintf("0x%02x", first), func(t *testing.T) {
+			t.Parallel()
+			httpServer := newHybridServer(t, pingServer{})
+			conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
+			// Written as raw bytes: encoding this through a string would
+			// UTF-8 it into two bytes and test something else entirely.
+			assert.Nil(t, conn.Write(t.Context(), websocket.MessageBinary,
+				append([]byte{first}, 0x01, 0x02)))
+
+			data := readServerOpening(t, conn)
+			assert.Equal(t, data[0], wireServerEndStream)
+			assert.True(t, strings.Contains(string(data), "invalid_argument"))
+			assert.True(t, strings.Contains(string(data), "reserved high bit"))
+		})
+	}
+}
+
+// Every value below the high bit is a marker this revision has not assigned,
+// and an unassigned one is an unknown marker rather than something to skip.
+func TestUnassignedMarkersAreUnknown(t *testing.T) {
+	t.Parallel()
+	for _, marker := range []byte{0x00, 0x01, 'A', 'Z', 0x7F} {
+		t.Run(fmt.Sprintf("0x%02x", marker), func(t *testing.T) {
+			t.Parallel()
+			httpServer := newHybridServer(t, pingServer{})
+			conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
+			assert.Nil(t, conn.Write(t.Context(), websocket.MessageBinary,
+				append([]byte{marker}, 0x01)))
+
+			data := readServerOpening(t, conn)
+			assert.Equal(t, data[0], wireServerEndStream)
+			assert.True(t, strings.Contains(string(data), "invalid_argument"))
+		})
 	}
 }

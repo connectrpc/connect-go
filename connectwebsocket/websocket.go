@@ -157,7 +157,7 @@ const (
 	// FaultUnknown is a peer fault this package has not classified.
 	FaultUnknown ProtocolFault = iota
 	// FaultMarker is a marker that is unknown, belongs to the other direction,
-	// or falls outside the Basic Multilingual Plane.
+	// or sets the reserved high bit.
 	FaultMarker
 	// FaultFrameType is a frame whose type does not match its payload: an
 	// empty body in a text frame, or a message type that is neither.
@@ -336,6 +336,26 @@ func WithCompressMinBytes(minBytes int) Option {
 	return optionFunc(func(o *options) { o.compressMinBytes = minBytes })
 }
 
+// WithInfrastructureHeaders replaces the request headers a client may not set
+// in its Leading-Metadata message because this deployment's own infrastructure
+// sets them. A trailing "*" matches any suffix, so "X-Forwarded-*" covers the
+// family. Matching is case-insensitive.
+//
+// The default is Forwarded, X-Forwarded-*, and X-Real-IP: what a proxy in
+// front of the server sets, and what a client must not be able to forge. Which
+// names a deployment's infrastructure actually controls is a property of that
+// deployment, so this replaces the list rather than adding to it — pass no
+// names to allow all of them.
+//
+// It does not affect the names the Fetch standard forbids as request headers,
+// or the ones this protocol controls. Those are reserved whatever a deployment
+// configures.
+func WithInfrastructureHeaders(names ...string) ServerOption {
+	return serverOptionFunc(func(o *options) {
+		o.infrastructureHeaders = names
+	})
+}
+
 // WithReadMaxBytes bounds the size of a message this side will accept. Zero
 // means no limit.
 func WithReadMaxBytes(maxBytes int) Option {
@@ -483,6 +503,7 @@ type options struct {
 	compressionDisabled    bool
 	readMaxBytes           int
 	sendMaxBytes           int
+	infrastructureHeaders  []string
 	httpClient             *http.Client
 	fallbackTransport      connect.Transport
 }
@@ -494,8 +515,9 @@ func defaultOptions() options {
 		maxTimeout:       defaultMaxTimeout,
 		// nil defers to the WebSocket library's own same-origin check; see
 		// WithCheckOrigin.
-		checkOrigin: nil,
-		logger:      slog.Default(),
+		checkOrigin:           nil,
+		logger:                slog.Default(),
+		infrastructureHeaders: defaultInfrastructureHeaders(),
 		codecs: []connect.Codec{
 			connectproto.NewBinaryCodec(),
 			connectproto.NewJSONCodec(),

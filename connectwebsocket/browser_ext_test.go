@@ -22,7 +22,6 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectwebsocket"
@@ -36,10 +35,10 @@ import (
 // Message markers, restated here so the tests assert against the wire format
 // rather than against the implementation's constants.
 const (
-	wireBody            = 'B' // either direction
-	wireMetadata        = 'M' // either direction
-	wireServerEndStream = 'S' // server -> client
-	wireClientEndStream = 'C' // client -> server
+	wireBody            byte = 'B' // either direction
+	wireMetadata        byte = 'M' // either direction
+	wireServerEndStream byte = 'S' // server -> client
+	wireClientEndStream byte = 'C' // client -> server
 )
 
 // browserClient is the hand-rolled stand-in for a browser: it speaks the wire
@@ -113,9 +112,9 @@ func dialBrowserClientOpening(
 
 // writeMessage frames one marker and payload into one WebSocket message. text
 // picks the frame type, which is what tells the peer how to read the payload.
-func (c *browserClient) writeMessage(tb testing.TB, marker rune, text bool, payload []byte) {
+func (c *browserClient) writeMessage(tb testing.TB, marker byte, text bool, payload []byte) {
 	tb.Helper()
-	frame := append([]byte(string(marker)), payload...)
+	frame := append([]byte{marker}, payload...)
 	messageType := websocket.MessageBinary
 	if text {
 		messageType = websocket.MessageText
@@ -128,7 +127,7 @@ func (c *browserClient) writeMessage(tb testing.TB, marker rune, text bool, payl
 }
 
 // writeJSON sends a control message, which is always JSON in a text frame.
-func (c *browserClient) writeJSON(tb testing.TB, marker rune, payload []byte) {
+func (c *browserClient) writeJSON(tb testing.TB, marker byte, payload []byte) {
 	tb.Helper()
 	c.writeMessage(tb, marker, true, payload)
 }
@@ -141,7 +140,7 @@ func (c *browserClient) writeProto(tb testing.TB, payload []byte) {
 
 // readMessage reads one message and splits off its marker, reporting whether
 // it arrived in a text frame.
-func (c *browserClient) readMessage(tb testing.TB) (rune, []byte, bool) {
+func (c *browserClient) readMessage(tb testing.TB) (byte, []byte, bool) {
 	tb.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -152,8 +151,7 @@ func (c *browserClient) readMessage(tb testing.TB) (rune, []byte, bool) {
 	if len(data) == 0 {
 		tb.Fatal("empty message carries no marker")
 	}
-	marker, size := utf8.DecodeRune(data)
-	return marker, data[size:], messageType == websocket.MessageText
+	return data[0], data[1:], messageType == websocket.MessageText
 }
 
 // metadataServer records the request metadata the handler observed.

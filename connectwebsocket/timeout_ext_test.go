@@ -65,16 +65,16 @@ func sendProtoBody(tb testing.TB, conn *websocket.Conn, msg proto.Message) {
 }
 
 // sendJSONMessage writes one control message: JSON, hence a text frame.
-func sendJSONMessage(tb testing.TB, conn *websocket.Conn, marker rune, payload []byte) {
+func sendJSONMessage(tb testing.TB, conn *websocket.Conn, marker byte, payload []byte) {
 	tb.Helper()
 	sendWireMessage(tb, conn, true, marker, payload)
 }
 
 // sendWireMessage writes one marker and payload, so a test can produce a
 // message the Go client would never send.
-func sendWireMessage(tb testing.TB, conn *websocket.Conn, text bool, marker rune, payload []byte) {
+func sendWireMessage(tb testing.TB, conn *websocket.Conn, text bool, marker byte, payload []byte) {
 	tb.Helper()
-	frame := append([]byte(string(marker)), payload...)
+	frame := append([]byte{marker}, payload...)
 	messageType := websocket.MessageBinary
 	if text {
 		messageType = websocket.MessageText
@@ -196,7 +196,7 @@ func TestServerReportsItsOwnExpiredDeadline(t *testing.T) {
 	data := readServerOpening(t, conn)
 	// An S message carrying the verdict, not a mute close.
 	assert.True(t, len(data) > 5)
-	assert.Equal(t, rune(data[0]), wireServerEndStream)
+	assert.Equal(t, data[0], wireServerEndStream)
 	assert.True(t, strings.Contains(string(data), "deadline exceeded"))
 }
 
@@ -383,7 +383,7 @@ func readServerOpening(tb testing.TB, conn *websocket.Conn) []byte {
 	_, opening, err := conn.Read(tb.Context())
 	assert.Nil(tb, err)
 	assert.True(tb, len(opening) > 0)
-	assert.Equal(tb, rune(opening[0]), wireMetadata)
+	assert.Equal(tb, opening[0], wireMetadata)
 	_, data, err := conn.Read(tb.Context())
 	assert.Nil(tb, err)
 	return data

@@ -132,9 +132,9 @@ func TestReadLimitSpansFragments(t *testing.T) {
 	}
 
 	_, opening := readServerFrame(t, conn)
-	assert.Equal(t, rune(opening[0]), wireMetadata)
+	assert.Equal(t, opening[0], wireMetadata)
 	_, payload := readServerFrame(t, conn)
-	assert.Equal(t, rune(payload[0]), wireServerEndStream)
+	assert.Equal(t, payload[0], wireServerEndStream)
 	assert.True(t, strings.Contains(string(payload), "resource_exhausted"))
 	assert.True(t, strings.Contains(string(payload), "configured max of 1024 bytes"))
 }

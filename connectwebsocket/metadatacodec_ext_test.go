@@ -111,7 +111,7 @@ func TestMetadataWireForm(t *testing.T) {
 	sendJSONMessage(t, conn, wireClientEndStream, nil)
 
 	data := readServerOpening(t, conn)
-	assert.Equal(t, rune(data[0]), wireServerEndStream)
+	assert.Equal(t, data[0], wireServerEndStream)
 
 	var end struct {
 		Metadata map[string][]string `json:"metadata"`
@@ -164,7 +164,7 @@ func TestUndecodableBinaryMetadataIsRejected(t *testing.T) {
 	sendJSONMessage(t, conn, wireMetadata, []byte(`{"acme-token-bin":["not!base64"]}`))
 
 	data := readServerOpening(t, conn)
-	assert.Equal(t, rune(data[0]), wireServerEndStream)
+	assert.Equal(t, data[0], wireServerEndStream)
 	assert.True(t, strings.Contains(string(data), "invalid_argument"))
 	assert.True(t, strings.Contains(string(data), "base64"))
 }
@@ -177,7 +177,7 @@ func TestBareMetadataMarkerIsRejected(t *testing.T) {
 	sendJSONMessage(t, conn, wireMetadata, nil)
 
 	data := readServerOpening(t, conn)
-	assert.Equal(t, rune(data[0]), wireServerEndStream)
+	assert.Equal(t, data[0], wireServerEndStream)
 	assert.True(t, strings.Contains(string(data), "empty M message"))
 }
 

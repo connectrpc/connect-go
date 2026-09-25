@@ -238,7 +238,7 @@ func TestBodyInAnUnsupportedEncodingIsRejected(t *testing.T) {
 	sendJSONMessage(t, conn, wireBody, []byte(`{"number":"1"}`))
 
 	data := readServerOpening(t, conn)
-	assert.Equal(t, rune(data[0]), wireServerEndStream)
+	assert.Equal(t, data[0], wireServerEndStream)
 	assert.True(t, strings.Contains(string(data), "invalid_argument"))
 	assert.True(t, strings.Contains(string(data), "not configured to decode"))
 	assert.True(t, strings.Contains(string(data), "json"))

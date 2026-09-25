@@ -172,9 +172,11 @@ an authenticated stream.
 
 ## 5. Message markers
 
-Every message begins with one marker: a single Unicode scalar value, UTF-8
-encoded, saying what the rest of the message is. The payload follows it
-immediately, with nothing in between.
+Every message begins with one marker: a single byte whose high bit is `0`.
+This marker specifies the type of the message. The payload follows it immediately,
+with nothing in between.
+
+The valid markers and message types are:
 
 | Marker | Name              | Direction       | Payload                                                       |
 | ------ | ----------------- | --------------- | ------------------------------------------------------------- |
@@ -204,27 +206,24 @@ does not have, and continuing would silently misread whatever follows.
 
 ### 5.1 The marker space
 
-The four markers above are ASCII, one byte each. They are printable
-deliberately: a text frame then reads as its marker followed by its JSON in any
-debugger that shows WebSocket traffic, which is where a browser client is
-diagnosed.
+A marker is one byte in the range `0x00`–`0x7F`. The four markers listed above are the only
+valid values in this revision; the other 124 are unassigned, and a receiver
+MUST treat any of them as an unknown marker.
 
-Future markers MUST be Unicode scalar values in the Basic Multilingual Plane —
-`U+0000`–`U+FFFF`, excluding the surrogate range `U+D800`–`U+DFFF`, which is
-not encodable in UTF-8. That is 63,488 values, against four in use.
+**The high bit is reserved and MUST be `0`.** A receiver MUST reject a first
+byte of `0x80` or greater as a protocol error, without interpreting the rest of
+the message. Nothing in this revision sets that bit, so holding it back leaves
+a later one a signal it can define — a longer marker, or a different framing
+entirely — that no conforming implementation of this revision can already be
+emitting.
 
-A receiver MUST reject a marker outside the BMP. UTF-8's leading byte gives the
-length, so `0xF0`–`0xF7` is a four-byte sequence and therefore out of range on
-sight, before any decoding.
+Any marker defined in a future revision of this specification SHOULD be printable ASCII, for the same reason the first four
+are: it provides a mnemonic name for the message which is easily viewable in a browser client's developer tools. In addition, most messages are sent using text frames, so a printable character is advantageous.
 
-The bound exists for the benefit of clients written in languages whose strings
-are UTF-16. A BMP scalar is one UTF-16 code unit, so stripping the marker is an
-index-1 slice; an astral one is a surrogate pair, and the same slice would
-leave a lone low surrogate glued to the payload. Allowing four-byte markers
-would make the obvious client implementation silently wrong, and only for
-markers that do not exist yet.
-
-New markers SHOULD be printable, for the same reason the first four are.
+Keeping the marker inside `0x00`–`0x7F` also keeps it a single UTF-8 code unit,
+allowing for possible future expansion to more bytes in the highly unlikely 
+event that more than 95 (the number of printable UTF-8 characters below `0x80`)
+different header markers are needed.
 
 ## 6. Message framing
 
@@ -267,8 +266,9 @@ The frame type is a type tag the transport supplies for free, and a receiver
 knows how to parse a payload before it has looked at anything but the frame.
 
 A text frame MUST contain valid UTF-8, which [RFC 6455][rfc6455] §8.1 requires
-of every text frame and which a browser enforces. Since the marker is UTF-8 and
-JSON is UTF-8, a conforming message satisfies this by construction. 
+of every text frame and which a browser enforces. A marker is a byte below
+`0x80` ([§5.1](#51-the-marker-space)) and JSON is UTF-8, so a conforming
+message satisfies this by construction.
 
 An implementation SHOULD verify the contents of a message. A peer that emits
 invalid UTF-8 in a text frame has its connection closed by a browser, and a
@@ -341,7 +341,11 @@ more than one Leading-Metadata message, to send it after sending a `B`, `S`, or 
 message before sending an `M` message. A peer with no metadata sends `{}`; the payload is never absent, since a bare `M` is not a JSON object
 ([§6.1](#61-text-and-binary)).
 
-The metadata specified in a Leading-Metadata message MUST NOT override any headers provided during the initial HTTP upgrade request. Any keys in the Leading-Metadata message whose canonical form is identical to the canonical form of a header submitted as a query parameter or an HTTP header MUST be ignored.
+A key in a Leading-Metadata message **replaces** any value the upgrade request
+carried for that key, unless the key is reserved
+([§7.3.2](#732-reserved-header-names)). The result is the RPC's _effective
+headers_: what the business logic and its interceptors see, and what
+authentication and authorization MUST be based on.
 
 #### 7.3.1 Rules for Keys and values in a Leading-Metadata Message
 
@@ -381,6 +385,47 @@ The encoding is required because the carrier is JSON, whose strings are
 Unicode: a byte sequence that is not valid UTF-8 cannot be represented, so an
 unencoded `-bin` value is corrupted in transit rather than rejected. Connect
 over HTTP uses the same technique to address this issue.
+
+#### 7.3.2 Reserved header names
+
+A key in a Leading-Metadata message MUST NOT be any of:
+
+1. A **forbidden request-header name** as defined by the [Fetch
+   standard][fetch-forbidden]: `Accept-Charset`, `Accept-Encoding`,
+   `Access-Control-Request-Headers`, `Access-Control-Request-Method`,
+   `Connection`, `Content-Length`, `Cookie`, `Cookie2`, `Date`, `DNT`,
+   `Expect`, `Host`, `Keep-Alive`, `Origin`, `Referer`, `Set-Cookie`, `TE`,
+   `Trailer`, `Transfer-Encoding`, `Upgrade`, `Via`, any name beginning
+   `Proxy-` or `Sec-`, and `X-HTTP-Method`, `X-HTTP-Method-Override` and
+   `X-Method-Override`. Fetch forbids the last three only for certain values;
+   this binding forbids them outright, since the method they would override has
+   no meaning here.
+2. A name on the **server's infrastructure deny list**. This MUST default to
+   `Forwarded`, any `X-Forwarded-*`, and `X-Real-IP` — what a proxy in front of
+   the server sets, and what a client must not be able to forge. A deployment
+   MAY configure a different list, because which names its own infrastructure
+   controls is a property of that deployment.
+3. A name **this protocol controls**: `Connect-Protocol-Version`
+   ([§4.3](#43-subprotocol-negotiation)). The `Sec-` prefix in (1) already
+   covers the WebSocket handshake's own headers.
+
+A server MUST end the RPC with an error when a Leading-Metadata message carries
+a reserved name, and MUST NOT ignore the key and continue. Ignoring it would
+leave the two ends disagreeing about the effective headers with nothing on the
+wire to show it: the client believes it set a value the server does not have.
+
+**Ambient credentials and `Origin`.** The upgrade request can carry ambient
+credentials — cookies, HTTP authentication, TLS client certificates — when a
+page from a different origin starts the connection. A server that accepts
+ambient credentials MUST therefore validate the upgrade request's `Origin`
+([§4.4](#44-origin)).
+
+**Middleware sees only the upgrade.** HTTP middleware in front of the server
+runs once, on the handshake, and never sees a Leading-Metadata message.
+Authentication and authorization for an RPC MUST therefore be performed against
+the effective headers — in a Connect interceptor or in the business logic — and
+not in HTTP middleware. Middleware can authorize the connection; only the RPC
+layer can authorize the RPC.
 
 ### 7.4 Response metadata
 
@@ -613,3 +658,4 @@ its absence as an error once it has sent `S`.
 [rfc6455-5.4]: https://datatracker.ietf.org/doc/html/rfc6455#section-5.4
 [rfc7692]: https://datatracker.ietf.org/doc/html/rfc7692
 [rfc8441]: https://datatracker.ietf.org/doc/html/rfc8441
+[fetch-forbidden]: https://fetch.spec.whatwg.org/#forbidden-request-header

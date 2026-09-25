@@ -27,7 +27,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/internal/connectwire"
@@ -36,10 +35,10 @@ import (
 
 // Marker framing over WebSocket frames, for both directions.
 //
-// Each WebSocket frame carries exactly one message: a single BMP Unicode
-// scalar naming its kind, then the payload. There is no length prefix — the
-// frame is the boundary — and the frame type says how the payload is encoded,
-// binary for Protobuf and text for JSON.
+// Each WebSocket frame carries exactly one message: a single byte below 0x80
+// naming its kind, then the payload. There is no length prefix — the frame is
+// the boundary — and the frame type says how the payload is encoded, binary
+// for Protobuf and text for JSON.
 //
 // Two markers are client-only, because WebSocket lacks two things HTTP
 // provides:
@@ -275,6 +274,9 @@ type websocketUnmarshaler struct {
 	callInfo     *connect.CallInfo
 	codecs       codecPair
 	readMaxBytes int
+	// infrastructureHeaders names what this deployment's own proxies set, and
+	// so what a client may not send in an M message.
+	infrastructureHeaders []string
 	// info is carried so a fault can be attributed to the connection that
 	// produced it; its OnProtocolError is the monitor.
 	info SessionInfo
@@ -523,21 +525,29 @@ func (u *websocketUnmarshaler) mergeLeadingMetadata(payload []byte) *connect.Err
 	if err := json.Unmarshal(payload, &wire); err != nil {
 		return u.fail(FaultMetadata, "unmarshal M message: %w", err)
 	}
+	// Checked against the keys as sent, before canonicalization, so the error
+	// names the spelling the client used rather than an internal form of it.
+	// A reserved key ends the RPC rather than being dropped: a client that
+	// believed it had set an identity header would otherwise never learn that
+	// the server does not have it.
+	for key := range wire {
+		if reason, reserved := reservedHeaderReason(key, u.infrastructureHeaders); reserved {
+			return u.fail(
+				FaultMetadata,
+				"client set %q in its M message, which is %s", key, reason,
+			)
+		}
+	}
 	meta, decodeErr := decodeMetadata(wire)
 	if decodeErr != nil {
 		u.fault = FaultMetadata
 		return decodeErr
 	}
-	// The handshake wins, so an M message adds metadata but never overwrites
-	// what arrived with the connection. A proxy is in the path of the upgrade
-	// and can set a header there, but it never sees the M; the opposite
-	// precedence would let any client forge X-Forwarded-For or an identity
-	// header an authenticating proxy injected.
+	// An M key replaces the upgrade request's value, producing the effective
+	// headers the handler and its interceptors see. What the connection itself
+	// established is protected by the reserved list above, not by precedence.
 	header := u.callInfo.RequestHeader()
 	for key, values := range meta {
-		if len(header.Values(key)) > 0 {
-			continue
-		}
 		header.SetValues(key, values)
 	}
 	return nil
@@ -559,8 +569,8 @@ func messageReadLimit(readMaxBytes int) int64 {
 	if readMaxBytes <= 0 {
 		return -1
 	}
-	// The marker is at most four bytes; the payload limit is the rest.
-	return int64(readMaxBytes) + utf8.UTFMax
+	// The marker is one byte; the payload limit is the rest.
+	return int64(readMaxBytes) + 1
 }
 
 // errMessageTooBig reports a message that overran the limit this side

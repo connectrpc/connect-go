@@ -60,6 +60,10 @@ type SessionInfo struct {
 	// and disagree. Zero means no limit.
 	ReadMaxBytes int
 	SendMaxBytes int
+	// InfrastructureHeaders names the request headers this deployment's own
+	// proxies set, which a client may therefore not send in a Leading-Metadata
+	// message. A trailing "*" matches any suffix. See WithInfrastructureHeaders.
+	InfrastructureHeaders []string
 }
 
 // Session serves RPCs on an upgraded WebSocket connection. Serve reads
@@ -191,15 +195,16 @@ func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *
 		return
 	}
 	info := SessionInfo{
-		Codec:           codec,
-		Codecs:          h.codecPair,
-		Subprotocol:     subprotocol,
-		PeerAddr:        request.RemoteAddr,
-		Request:         request,
-		MaxTimeout:      h.opts.maxTimeout,
-		ReadMaxBytes:    h.opts.readMaxBytes,
-		SendMaxBytes:    h.opts.sendMaxBytes,
-		OnProtocolError: h.opts.onProtocolError,
+		Codec:                 codec,
+		Codecs:                h.codecPair,
+		Subprotocol:           subprotocol,
+		PeerAddr:              request.RemoteAddr,
+		Request:               request,
+		MaxTimeout:            h.opts.maxTimeout,
+		ReadMaxBytes:          h.opts.readMaxBytes,
+		SendMaxBytes:          h.opts.sendMaxBytes,
+		InfrastructureHeaders: h.opts.infrastructureHeaders,
+		OnProtocolError:       h.opts.onProtocolError,
 	}
 	if err := h.session.Serve(request.Context(), h.server, conn, info); err != nil {
 		h.opts.logger.Error(

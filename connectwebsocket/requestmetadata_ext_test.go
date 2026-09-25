@@ -196,7 +196,7 @@ func TestStreamMustOpenWithLeadingMetadata(t *testing.T) {
 	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
 	data := readServerOpening(t, conn)
-	assert.Equal(t, rune(data[0]), wireServerEndStream) // S carries the verdict
+	assert.Equal(t, data[0], wireServerEndStream) // S carries the verdict
 	assert.True(t, strings.Contains(string(data), "invalid_argument"))
 	assert.True(t, strings.Contains(string(data), "first message must be M"))
 }
@@ -221,11 +221,12 @@ func dialRaw(tb testing.TB, server *httptest.Server, procedure string) *websocke
 	return conn
 }
 
-// A key that arrived on the handshake is not overwritable from an M message.
-// The precedence is a security property: a proxy sets headers on the upgrade
-// and never sees the M, so the opposite order would let any client forge the
-// identity headers such a proxy injects.
-func TestHandshakeHeadersOutrankLeadingMetadata(t *testing.T) {
+// An ordinary key from an M message replaces what the handshake carried. The
+// result is the effective headers: what the handler and its interceptors see.
+//
+// Protecting what the connection established is the reserved list's job, not
+// this rule's — see TestReservedHeadersEndTheRPC.
+func TestLeadingMetadataReplacesHandshakeHeaders(t *testing.T) {
 	t.Parallel()
 	observations := make(chan string, 4)
 	httpServer := newObservationServer(t, observations)
@@ -235,8 +236,7 @@ func TestHandshakeHeadersOutrankLeadingMetadata(t *testing.T) {
 	conn, response, err := websocket.Dial(t.Context(), url, &websocket.DialOptions{
 		HTTPClient:   httpServer.Client(),
 		Subprotocols: []string{"connectrpc.1+proto"},
-		// What a proxy in front of the server would have set.
-		HTTPHeader: http.Header{"Acme-Tenant": []string{"from-the-proxy"}},
+		HTTPHeader:   http.Header{"Acme-Tenant": []string{"from-the-handshake"}},
 	})
 	if response != nil && response.Body != nil {
 		_ = response.Body.Close()
@@ -244,16 +244,71 @@ func TestHandshakeHeadersOutrankLeadingMetadata(t *testing.T) {
 	assert.Nil(t, err)
 	t.Cleanup(func() { _ = conn.CloseNow() })
 
-	// The client tries to claim a different tenant, and to add one the
-	// handshake never carried.
-	sendJSONMessage(t, conn, wireMetadata,
-		[]byte(`{"Acme-Tenant":["forged"],"Acme-Trace":["added"]}`))
+	sendJSONMessage(t, conn, wireMetadata, []byte(`{"acme-tenant":["from-the-message"]}`))
 	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
-	assert.Equal(t, <-observations, "from-the-proxy")
+	assert.Equal(t, <-observations, "from-the-message")
 	_, _, err = conn.Read(t.Context())
 	assert.Nil(t, err)
-	assert.Equal(t, <-observations, "from-the-proxy")
+	assert.Equal(t, <-observations, "from-the-message")
+}
+
+// A reserved name ends the RPC rather than being dropped. Dropping it would
+// leave the client believing it had set something the server does not have —
+// and for an identity header, believing it while the server authorizes on a
+// different value.
+func TestReservedHeadersEndTheRPC(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		key    string
+		reason string
+	}{
+		{name: "Fetch forbids it", key: "cookie", reason: "Fetch standard"},
+		{name: "Fetch forbids the prefix", key: "sec-websocket-key", reason: "Fetch standard"},
+		{name: "proxy- prefix", key: "proxy-authorization", reason: "Fetch standard"},
+		{name: "method override", key: "x-http-method-override", reason: "Fetch standard"},
+		{name: "this protocol controls it", key: "connect-protocol-version", reason: "controlled by this protocol"},
+		{name: "infrastructure sets it", key: "x-forwarded-for", reason: "infrastructure deny list"},
+		{name: "infrastructure, exact name", key: "x-real-ip", reason: "infrastructure deny list"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			httpServer := newHybridServer(t, pingServer{})
+			conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
+			sendJSONMessage(t, conn, wireMetadata,
+				[]byte(`{"`+test.key+`":["forged"]}`))
+
+			data := readServerOpening(t, conn)
+			assert.Equal(t, data[0], wireServerEndStream)
+			assert.True(t, strings.Contains(string(data), "invalid_argument"))
+			// The key as the client spelled it, not an internal form of it.
+			assert.True(t, strings.Contains(string(data), test.key))
+			assert.True(t, strings.Contains(string(data), test.reason))
+		})
+	}
+}
+
+// The deny list is the deployment's to set, because which names its own
+// infrastructure controls is a property of that deployment.
+func TestInfrastructureHeadersAreConfigurable(t *testing.T) {
+	t.Parallel()
+	observations := make(chan string, 4)
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, observationServer{observations: observations})
+	mux := http.NewServeMux()
+	connectwebsocket.Mount(mux, server,
+		// X-Forwarded-For is no longer reserved here; Acme-Tenant now is.
+		connectwebsocket.WithInfrastructureHeaders("Acme-*"))
+	httpServer := httptest.NewServer(mux)
+	t.Cleanup(httpServer.Close)
+
+	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
+	sendJSONMessage(t, conn, wireMetadata, []byte(`{"acme-tenant":["forged"]}`))
+
+	data := readServerOpening(t, conn)
+	assert.Equal(t, data[0], wireServerEndStream)
+	assert.True(t, strings.Contains(string(data), "infrastructure deny list"))
 }
 
 // The other half of the same rule: a key the handshake did not carry is the

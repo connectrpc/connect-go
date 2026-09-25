@@ -31,7 +31,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/internal/bufferpool"
@@ -39,22 +38,27 @@ import (
 	"connectrpc.com/connect/v2/internal/connectwire"
 )
 
-// Message markers. Printable on purpose: a text frame reads as its marker
-// followed by its JSON in a browser's network panel, which is where a JS
-// client gets debugged.
+// Message markers: one byte each, printable on purpose. A text frame then
+// reads as its marker followed by its JSON in a browser's network panel, which
+// is where a JS client gets debugged.
 const (
-	markerBody            = 'B' // an RPC message, either direction
-	markerMetadata        = 'M' // JSON http.Header, either direction
-	markerServerEndStream = 'S' // EndStreamMessage JSON, server -> client
-	markerClientEndStream = 'C' // end of the request stream, client -> server
+	markerBody            byte = 'B' // an RPC message, either direction
+	markerMetadata        byte = 'M' // JSON http.Header, either direction
+	markerServerEndStream byte = 'S' // EndStreamMessage JSON, server -> client
+	markerClientEndStream byte = 'C' // end of the request stream, client -> server
+
+	// markerHighBit is reserved: every marker this revision defines is below
+	// it, so a later revision has a signal no conforming peer can already be
+	// emitting.
+	markerHighBit byte = 0x80
 )
 
 // markerName renders a marker for a diagnostic, printably where it can.
-func markerName(marker rune) string {
+func markerName(marker byte) string {
 	if marker >= 0x20 && marker < 0x7F {
-		return string(marker)
+		return string(rune(marker))
 	}
-	return "U+" + strconv.FormatInt(int64(marker), 16)
+	return "0x" + strconv.FormatUint(uint64(marker), 16)
 }
 
 // encodeMessage writes marker and payload into dst as one message.
@@ -63,9 +67,9 @@ func markerName(marker rune) string {
 // library decides whether to compress from the size of the first write it
 // sees. Writing the marker alone would offer one byte, fall under any sane
 // threshold, and silently disable compression for every message.
-func encodeMessage(dst *bytes.Buffer, marker rune, payload []byte) {
-	dst.Grow(utf8.RuneLen(marker) + len(payload))
-	dst.WriteRune(marker)
+func encodeMessage(dst *bytes.Buffer, marker byte, payload []byte) {
+	dst.Grow(1 + len(payload))
+	dst.WriteByte(marker)
 	dst.Write(payload)
 }
 
@@ -77,7 +81,7 @@ func encodeMessage(dst *bytes.Buffer, marker rune, payload []byte) {
 // none of them means anything without the others: a payload without its frame
 // type has no encoding, and a marker without its payload has no content.
 type wireMessage struct {
-	marker  rune
+	marker  byte
 	payload []byte
 	// text reports a text frame, whose payload is JSON.
 	text bool
@@ -89,20 +93,15 @@ func decodeMessage(frame []byte, text bool) (wireMessage, *connect.Error) {
 	if len(frame) == 0 {
 		return wireMessage{}, errorf(connect.CodeInvalidArgument, "protocol error: empty message carries no marker")
 	}
-	// UTF-8's leading byte gives the length, so an astral marker is out of
-	// range on sight: four-byte sequences start at 0xF0.
-	if frame[0] >= 0xF0 {
+	// The high bit is reserved for a later revision, so a byte that sets it is
+	// refused before anything behind it is interpreted.
+	if frame[0] >= markerHighBit {
 		return wireMessage{}, errorf(
 			connect.CodeInvalidArgument,
-			"protocol error: marker outside the Basic Multilingual Plane (leading byte 0x%02x)",
-			frame[0],
+			"protocol error: marker 0x%02x sets the reserved high bit", frame[0],
 		)
 	}
-	marker, size := utf8.DecodeRune(frame)
-	if marker == utf8.RuneError && size <= 1 {
-		return wireMessage{}, errorf(connect.CodeInvalidArgument, "protocol error: marker is not valid UTF-8")
-	}
-	return wireMessage{marker: marker, payload: frame[size:], text: text}, nil
+	return wireMessage{marker: frame[0], payload: frame[1:], text: text}, nil
 }
 
 // messageSender writes one encoded message as one WebSocket frame. text says
@@ -179,7 +178,7 @@ func (w *messageWriter) writeBody(message any) *connect.Error {
 
 // writeJSON sends a control message, whose payload is always JSON and whose
 // frame is therefore always text.
-func (w *messageWriter) writeJSON(marker rune, value any) *connect.Error {
+func (w *messageWriter) writeJSON(marker byte, value any) *connect.Error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return errorf(connect.CodeInternal, "marshal %s message: %w", markerName(marker), err)
@@ -198,7 +197,7 @@ func (w *messageWriter) writeEndStream(err error, trailer http.Header) *connect.
 }
 
 // send encodes one message and hands it to the sender.
-func (w *messageWriter) send(marker rune, text bool, payload []byte) *connect.Error {
+func (w *messageWriter) send(marker byte, text bool, payload []byte) *connect.Error {
 	if w.sendMaxBytes > 0 && len(payload) > w.sendMaxBytes {
 		return errorf(
 			connect.CodeResourceExhausted,

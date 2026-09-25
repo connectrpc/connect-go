@@ -216,7 +216,7 @@ func TestLateLeadingMetadataIsRejected(t *testing.T) {
 	// A body first, then metadata: the illegal order.
 	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 	reply := readServerOpening(t, conn) // past the server's own M, to the handler's reply
-	assert.Equal(t, rune(reply[0]), wireBody)
+	assert.Equal(t, reply[0], wireBody)
 
 	sendJSONMessage(t, conn, wireMetadata, []byte(`{"Acme-Late":["nope"]}`))
 	_, data, err := conn.Read(t.Context())

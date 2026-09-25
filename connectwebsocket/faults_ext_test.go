@@ -84,7 +84,7 @@ func TestProtocolFaultsAreClassified(t *testing.T) {
 
 	for _, test := range []struct {
 		name    string
-		marker  rune
+		marker  byte
 		text    bool
 		payload []byte
 		// raw replaces the whole frame, for a message the marker scheme cannot
@@ -106,9 +106,9 @@ func TestProtocolFaultsAreClassified(t *testing.T) {
 			want:    connectwebsocket.FaultMarker,
 		},
 		{
-			name: "marker outside the BMP",
-			// U+1F600, four bytes: rejected on the leading byte alone.
-			raw:  append([]byte(string(rune(0x1F600))), message...),
+			name: "marker with the reserved high bit set",
+			// Refused on the first byte, before anything behind it is read.
+			raw:  append([]byte{0x80}, message...),
 			want: connectwebsocket.FaultMarker,
 		},
 		{
@@ -150,7 +150,7 @@ func TestProtocolFaultsAreClassified(t *testing.T) {
 
 			frame := test.raw
 			if frame == nil {
-				frame = append([]byte(string(test.marker)), test.payload...)
+				frame = append([]byte{test.marker}, test.payload...)
 			}
 			messageType := websocket.MessageBinary
 			if test.text {
@@ -185,7 +185,7 @@ func TestProtocolErrorHandlerCannotSuppress(t *testing.T) {
 
 	data := readServerOpening(t, conn)
 	// An S message carrying the error, exactly as without a handler.
-	assert.Equal(t, rune(data[0]), wireServerEndStream)
+	assert.Equal(t, data[0], wireServerEndStream)
 	assert.True(t, strings.Contains(string(data), "invalid_argument"))
 	assert.True(t, strings.Contains(string(data), "unknown marker Z"))
 
@@ -306,9 +306,9 @@ func TestClientProtocolFaultsAreClassified(t *testing.T) {
 			want: connectwebsocket.FaultMarker,
 		},
 		{
-			name: "marker outside the BMP",
+			name: "marker with the reserved high bit set",
 			write: func(conn *websocket.Conn) {
-				writeRawFrame(conn, false, rune(0x1F600), message)
+				writeRawFrame(conn, false, 0x80, message)
 			},
 			want: connectwebsocket.FaultMarker,
 		},
@@ -363,8 +363,8 @@ func TestClientProtocolFaultsAreClassified(t *testing.T) {
 
 // writeRawFrame sends one message with an arbitrary marker and frame type,
 // which is how a misframing server produces a mistake the transport would not.
-func writeRawFrame(conn *websocket.Conn, text bool, marker rune, payload []byte) {
-	frame := append([]byte(string(marker)), payload...)
+func writeRawFrame(conn *websocket.Conn, text bool, marker byte, payload []byte) {
+	frame := append([]byte{marker}, payload...)
 	messageType := websocket.MessageBinary
 	if text {
 		messageType = websocket.MessageText
