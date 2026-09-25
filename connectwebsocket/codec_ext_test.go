@@ -70,6 +70,9 @@ func TestCodecSelectsWireFormat(t *testing.T) {
 			client.writeMessage(t, wireBody, test.json, payload)
 			client.writeJSON(t, wireClientEndStream, nil)
 
+			opening, _, _ := client.readMessage(t)
+			assert.Equal(t, opening, wireMetadata)
+
 			marker, body, text := client.readMessage(t)
 			assert.Equal(t, marker, wireBody)
 			assert.Equal(t, text, test.json)
@@ -234,8 +237,7 @@ func TestBodyInAnUnsupportedEncodingIsRejected(t *testing.T) {
 	// A JSON body against a server that holds no JSON codec.
 	sendJSONMessage(t, conn, wireBody, []byte(`{"number":"1"}`))
 
-	_, data, err := conn.Read(t.Context())
-	assert.Nil(t, err)
+	data := readServerOpening(t, conn)
 	assert.Equal(t, rune(data[0]), wireServerEndStream)
 	assert.True(t, strings.Contains(string(data), "invalid_argument"))
 	assert.True(t, strings.Contains(string(data), "not configured to decode"))

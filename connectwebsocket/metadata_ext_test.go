@@ -27,6 +27,7 @@ import (
 	"connectrpc.com/connect/v2/internal/assert"
 	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
+	"github.com/coder/websocket"
 )
 
 // newServerFor mounts an arbitrary handler on both transports, which
@@ -214,12 +215,58 @@ func TestLateLeadingMetadataIsRejected(t *testing.T) {
 
 	// A body first, then metadata: the illegal order.
 	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
-	_, _, err := conn.Read(t.Context()) // the handler's reply
-	assert.Nil(t, err)
+	reply := readServerOpening(t, conn) // past the server's own M, to the handler's reply
+	assert.Equal(t, rune(reply[0]), wireBody)
 
 	sendJSONMessage(t, conn, wireMetadata, []byte(`{"Acme-Late":["nope"]}`))
 	_, data, err := conn.Read(t.Context())
 	assert.Nil(t, err)
 	assert.True(t, strings.Contains(string(data), "invalid_argument"))
 	assert.True(t, strings.Contains(string(data), "second M message"))
+}
+
+// Every response stream opens with exactly one M, even when the handler sets
+// no metadata at all. The empty message is not waste: it is what tells a
+// client the server has accepted the stream and begun, which the response
+// header block does for free over HTTP.
+func TestServerAlwaysOpensWithLeadingMetadata(t *testing.T) {
+	t.Parallel()
+	httpServer := newHybridServer(t, pingServer{})
+	conn := dialCumSum(t, httpServer, "")
+	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+
+	messageType, opening, err := conn.Read(t.Context())
+	assert.Nil(t, err)
+	assert.Equal(t, messageType, websocket.MessageText) // JSON, so a text frame
+	assert.Equal(t, string(opening), "M{}")             // empty, but present
+}
+
+// A server that sent a second M would be rewriting headers the application may
+// already have read — the race the request side refuses for the same reason.
+func TestSecondServerLeadingMetadataIsRejected(t *testing.T) {
+	t.Parallel()
+	httpServer := misframingServer(t, func(conn *websocket.Conn) {
+		// misframingServer already sent the opening M; this is the second.
+		_ = conn.Write(context.Background(), websocket.MessageText, []byte(`M{"acme-late":["nope"]}`))
+	})
+	recorder := &clientFaultRecorder{}
+	transport, err := connectwebsocket.NewTransport(
+		httpServer.URL,
+		connectwebsocket.WithHTTPClient(httpServer.Client()),
+		connectwebsocket.WithClientProtocolErrorHandler(recorder.handle),
+	)
+	assert.Nil(t, err)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+	stream, err := client.CumSum(t.Context())
+	assert.Nil(t, err)
+	t.Cleanup(func() { _ = stream.Close() })
+	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+
+	_, receiveErr := stream.Receive()
+	assert.NotNil(t, receiveErr)
+	assert.True(t, strings.Contains(receiveErr.Error(), "second M message"))
+
+	faults, _ := recorder.seen()
+	assert.Equal(t, len(faults), 1)
+	assert.Equal(t, faults[0], connectwebsocket.FaultMetadata)
 }

@@ -127,22 +127,43 @@ func (c *websocketHandlerConn) terminalMarshaler() messageWriter {
 // first body and before the S message alike: a stream that fails without
 // sending a body is where leading metadata is most wanted, and there would be
 // nothing else to carry it.
+//
+// It goes out even when there is no metadata, as {}. Every stream opens with
+// exactly one M in each direction, so a client can read its first message
+// without a branch for the empty case — and can take that message as the
+// signal that the server has accepted the stream, which is what the response
+// header block gives it for free over HTTP.
 func (c *websocketHandlerConn) flushLeadingMetadata() *connect.Error {
 	if c.leadingSent {
 		return nil
 	}
 	c.leadingSent = true
-	if c.callInfo == nil {
-		return nil
-	}
 	header := make(http.Header)
-	for key, values := range c.callInfo.ResponseHeader().All() {
-		header[http.CanonicalHeaderKey(key)] = values
-	}
-	if len(header) == 0 {
-		return nil
+	if c.callInfo != nil {
+		for key, values := range c.callInfo.ResponseHeader().All() {
+			header[http.CanonicalHeaderKey(key)] = values
+		}
 	}
 	return c.marshaler.writeJSON(markerMetadata, encodeMetadata(header))
+}
+
+// terminalWriteError decides whether a failed terminal write is worth
+// reporting.
+//
+// It is not when the peer has already left: the write was always going to
+// fail, a sender must not assume its S was read anyway, and reporting it would
+// log an error for every subscription a client walks away from.
+func (c *websocketHandlerConn) terminalWriteError(marshalErr *connect.Error) *connect.Error {
+	if marshalErr != nil && c.peerGone() {
+		return nil
+	}
+	return marshalErr
+}
+
+// peerGone reports that the read path already saw this connection end without
+// the client's C message. Anything written afterwards is written to nobody.
+func (c *websocketHandlerConn) peerGone() bool {
+	return c.unmarshaler.eof && !c.unmarshaler.sawEndOfClientStream
 }
 
 // peerFault reports whether err says the peer sent something malformed or
@@ -183,6 +204,7 @@ func (c *websocketHandlerConn) Close(err error) error {
 	if marshalErr == nil {
 		marshalErr = c.marshaler.writeEndStream(err, c.responseTrailer)
 	}
+	marshalErr = c.terminalWriteError(marshalErr)
 	closeCode := websocket.StatusNormalClosure
 	var closeMessage string
 	if marshalErr != nil {
@@ -258,9 +280,13 @@ type websocketUnmarshaler struct {
 	info SessionInfo
 
 	// fault classifies the most recent peer fault for OnProtocolError.
-	fault       ProtocolFault
-	eof         bool
-	peerFaulted bool
+	fault ProtocolFault
+	// eof stops the read path; sawEndOfClientStream says why it stopped. A
+	// client that sent C finished, and one whose connection died did not —
+	// the same condition at the same call site, told apart only by this.
+	eof                  bool
+	sawEndOfClientStream bool
+	peerFaulted          bool
 	// discardOnce guards the post-C drain, which must not be started twice.
 	discardOnce sync.Once
 }
@@ -311,7 +337,7 @@ func (u *websocketUnmarshaler) fail(
 
 func (u *websocketUnmarshaler) unmarshal(message any) *connect.Error {
 	if u.eof {
-		return errorf(connect.CodeUnknown, "%w", io.EOF)
+		return u.endOfStreamError()
 	}
 	wire, readErr := u.nextMessage()
 	if readErr != nil {
@@ -320,14 +346,29 @@ func (u *websocketUnmarshaler) unmarshal(message any) *connect.Error {
 	return u.dispatch(wire, message)
 }
 
+// endOfStreamError says why the request stream stopped: the client finished,
+// or it went away.
+//
+// The cancellation deliberately does not wrap the transport's error. A read on
+// a closed connection reports io.EOF at the bottom of its chain, and wrapping
+// it would make errors.Is(err, io.EOF) true — the test every handler uses to
+// learn that a stream ended cleanly. A dead client would read as a finished
+// one, and a handler that commits on end-of-stream would commit a truncated
+// stream. The text keeps the detail; the chain must not.
+func (u *websocketUnmarshaler) endOfStreamError() *connect.Error {
+	if u.sawEndOfClientStream {
+		return errorf(connect.CodeUnknown, "%w", io.EOF)
+	}
+	// Canceled rather than Unavailable: the peer stopped, the transport did
+	// not fail, and a caller should not retry on the client's behalf.
+	return errorf(connect.CodeCanceled, "websocket closed before end-of-stream")
+}
+
 // nextMessage reads one frame and returns the message it carries.
 func (u *websocketUnmarshaler) nextMessage() (wireMessage, *connect.Error) {
 	messageType, frame, readerErr := readBoundedMessage(u.ctx, u.wsConn, messageReadLimit(u.readMaxBytes))
 	if readerErr != nil {
 		u.eof = true
-		if isCleanWebSocketClose(readerErr) {
-			return wireMessage{}, errorf(connect.CodeUnknown, "%w", io.EOF)
-		}
 		if errors.Is(readerErr, errMessageTooBig) {
 			u.fault = FaultSizeLimit
 			return wireMessage{}, exceedsReadLimit(u.readMaxBytes)
@@ -336,10 +377,7 @@ func (u *websocketUnmarshaler) nextMessage() (wireMessage, *connect.Error) {
 			u.fault = FaultSizeLimit
 			return wireMessage{}, limitErr
 		}
-		// The client vanished before signalling end-of-stream. Canceled
-		// rather than Unavailable: the peer stopped, the transport did not
-		// fail, and a caller should not retry on the client's behalf.
-		return wireMessage{}, errorf(connect.CodeCanceled, "websocket closed before end-of-stream: %w", readerErr)
+		return wireMessage{}, u.endOfStreamError()
 	}
 	text := messageType == websocket.MessageText
 	if !text && messageType != websocket.MessageBinary {
@@ -374,6 +412,7 @@ func (u *websocketUnmarshaler) dispatch(wire wireMessage, message any) *connect.
 		// The last message from the client. If it carries a body, deliver it;
 		// mark EOF either way so the next Receive returns io.EOF.
 		u.eof = true
+		u.sawEndOfClientStream = true
 		u.discardAfterEndOfStream()
 		if len(wire.payload) == 0 {
 			return errorf(connect.CodeUnknown, "%w", io.EOF)
@@ -840,6 +879,9 @@ type websocketClientUnmarshaler struct {
 	// sawData gates the ordering rule on the response side: server metadata is
 	// "leading" only while no body has arrived.
 	sawData bool
+	// sawLeadingMetadata records the server's opening M, which must arrive
+	// exactly once and before anything else.
+	sawLeadingMetadata bool
 	// metadataConsumed reports that this frame was metadata, so Unmarshal reads
 	// again rather than returning a message it never decoded.
 	metadataConsumed bool
@@ -943,6 +985,16 @@ func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 		)
 	}
 
+	// Every response stream opens with exactly one M, so anything else first
+	// means the peer is not speaking this protocol and there is no partial
+	// state worth keeping.
+	if !u.sawLeadingMetadata && wire.marker != markerMetadata {
+		return u.fail(
+			FaultMetadata,
+			"server's first message must be M; got %s", markerName(wire.marker),
+		)
+	}
+
 	switch wire.marker {
 	case markerClientEndStream:
 		u.fault = FaultMarker
@@ -999,9 +1051,11 @@ func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 	}
 }
 
-// mergeLeadingMetadata folds a server M message into the response headers.
-// Later messages replace same-key values rather than appending, matching the
-// client-to-server direction.
+// mergeLeadingMetadata folds the server's M message into the response headers.
+//
+// Exactly one arrives, and it opens the response stream. A second would mean
+// the server is rewriting headers the application may already have read, which
+// is the same race the request side refuses.
 func (u *websocketClientUnmarshaler) mergeLeadingMetadata(payload []byte) *connect.Error {
 	if u.sawData {
 		return u.fail(
@@ -1009,6 +1063,13 @@ func (u *websocketClientUnmarshaler) mergeLeadingMetadata(payload []byte) *conne
 			"server sent M after a body; metadata is leading only before the first one",
 		)
 	}
+	if u.sawLeadingMetadata {
+		return u.fail(
+			FaultMetadata,
+			"server sent a second M message; a stream carries exactly one, and it opens the stream",
+		)
+	}
+	u.sawLeadingMetadata = true
 	if len(payload) == 0 {
 		u.fault = FaultMetadata
 		return errorf(connect.CodeInternal, "empty M message; an empty metadata object is {}")

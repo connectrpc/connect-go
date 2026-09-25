@@ -31,8 +31,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// The shape of a client-streaming RPC on the wire: several values, an
-// C message, one response message, one S message,
+// The shape of a client-streaming RPC on the wire: an M message, several
+// values, a C message; then the server's own M, one response message, one S,
 // and the server's close. Written as a reference trace, because a second
 // implementation has to reproduce it exactly.
 func TestClientStreamingWireSequence(t *testing.T) {
@@ -71,10 +71,15 @@ func TestClientStreamingWireSequence(t *testing.T) {
 				client.writeJSON(t, wireClientEndStream, nil)
 			}
 
-			// The response is two messages, not one: the body, then the
-			// end-of-stream message carrying the trailers. A client that stops
-			// after the first silently drops them.
+			// The response is three messages: the server's own opening M, the
+			// body, then the end-of-stream message carrying the trailers. A
+			// client that stops after the body silently drops them.
 			marker, payload, text := client.readMessage(t)
+			assert.Equal(t, marker, wireMetadata)
+			assert.True(t, text)                   // metadata is JSON
+			assert.Equal(t, string(payload), "{}") // this handler sets none
+
+			marker, payload, text = client.readMessage(t)
 			assert.Equal(t, marker, wireBody)
 			assert.False(t, text) // Protobuf body, binary frame
 			var response pingv1.SumResponse

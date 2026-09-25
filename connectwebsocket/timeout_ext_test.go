@@ -193,8 +193,7 @@ func TestServerReportsItsOwnExpiredDeadline(t *testing.T) {
 	sendJSONMessage(t, conn, wireMetadata, []byte("{}"))
 	sendProtoBody(t, conn, &pingv1.CountUpRequest{Number: 1})
 
-	_, data, err := conn.Read(t.Context())
-	assert.Nil(t, err)
+	data := readServerOpening(t, conn)
 	// An S message carrying the verdict, not a mute close.
 	assert.True(t, len(data) > 5)
 	assert.Equal(t, rune(data[0]), wireServerEndStream)
@@ -373,4 +372,19 @@ func TestGoClientOmitsTheParameterWithoutADeadline(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the client never sent a handshake")
 	}
+}
+
+// readServerOpening reads the server's M message, which opens every response
+// stream, and returns the message after it. A test asserting on the server's
+// first *interesting* message goes through here, so the opening M is checked
+// rather than skipped.
+func readServerOpening(tb testing.TB, conn *websocket.Conn) []byte {
+	tb.Helper()
+	_, opening, err := conn.Read(tb.Context())
+	assert.Nil(tb, err)
+	assert.True(tb, len(opening) > 0)
+	assert.Equal(tb, rune(opening[0]), wireMetadata)
+	_, data, err := conn.Read(tb.Context())
+	assert.Nil(tb, err)
+	return data
 }

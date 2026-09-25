@@ -16,6 +16,8 @@ package connectwebsocket_test
 
 import (
 	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"testing"
 	"time"
@@ -25,6 +27,7 @@ import (
 	"connectrpc.com/connect/v2/internal/assert"
 	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
+	"github.com/coder/websocket"
 )
 
 // openBlockedStream leaves a stream where the next Receive blocks: the client
@@ -162,4 +165,98 @@ func TestSendAfterCloseSendFails(t *testing.T) {
 	assert.NotNil(t, stream.Send(&pingv1.CumSumRequest{Number: 2}))
 	// CloseSend stays idempotent: only Send is affected.
 	assert.Nil(t, stream.CloseSend())
+}
+
+// endOfStreamReporter reports how its Receive loop ended: the code, and
+// whether the error reads as a clean end of stream.
+type endOfStreamReporter struct {
+	pingv1connect.UnimplementedPingServiceHandler
+
+	outcome chan endOfStreamOutcome
+}
+
+type endOfStreamOutcome struct {
+	code    connect.Code
+	sawEOF  bool
+	message string
+}
+
+func (s endOfStreamReporter) CumSum(
+	_ context.Context,
+	stream pingv1connect.PingServiceCumSumServerStream,
+) error {
+	for {
+		_, err := stream.Receive()
+		if err == nil {
+			continue
+		}
+		s.outcome <- endOfStreamOutcome{
+			code:    connect.CodeOf(err),
+			sawEOF:  errors.Is(err, io.EOF),
+			message: err.Error(),
+		}
+		return nil
+	}
+}
+
+// A client that finished and a client that died are different outcomes, and a
+// handler has to be able to tell them apart. Both stop the read at the same
+// call site, so only the record of a C message separates them.
+//
+// The io.EOF assertion is the load-bearing one: `errors.Is(err, io.EOF)` is
+// how every handler in this repo — and in connecthttp — learns that a stream
+// ended cleanly. A cancellation that wrapped the transport's own error would
+// satisfy it too, since a read on a closed connection reports io.EOF at the
+// bottom of its chain, and a truncated stream would look finished.
+func TestEndOfClientStreamIsDistinguishableFromADeadClient(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name     string
+		finish   func(testing.TB, *websocket.Conn)
+		wantCode connect.Code
+		wantEOF  bool
+	}{
+		{
+			name: "client sends C",
+			finish: func(tb testing.TB, conn *websocket.Conn) {
+				tb.Helper()
+				sendJSONMessage(tb, conn, wireClientEndStream, nil)
+			},
+			wantCode: connect.CodeUnknown,
+			wantEOF:  true,
+		},
+		{
+			name: "client closes cleanly without C",
+			finish: func(_ testing.TB, conn *websocket.Conn) {
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+			},
+			wantCode: connect.CodeCanceled,
+			wantEOF:  false,
+		},
+		{
+			name: "client vanishes without C",
+			finish: func(_ testing.TB, conn *websocket.Conn) {
+				_ = conn.CloseNow()
+			},
+			wantCode: connect.CodeCanceled,
+			wantEOF:  false,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			outcome := make(chan endOfStreamOutcome, 1)
+			httpServer := newHybridServer2(t, endOfStreamReporter{outcome: outcome})
+			conn := dialCumSum(t, httpServer, "")
+			sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+			test.finish(t, conn)
+
+			select {
+			case got := <-outcome:
+				assert.Equal(t, got.code, test.wantCode)
+				assert.Equal(t, got.sawEOF, test.wantEOF)
+			case <-time.After(5 * time.Second):
+				t.Fatal("the handler never finished its receive loop")
+			}
+		})
+	}
 }

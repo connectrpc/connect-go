@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Command client calls the ping service through a hybrid transport: streaming
-// RPCs travel over WebSocket, unary RPCs fall through to plain HTTP.
+// Command client sums ten numbers over a client-streaming RPC.
+//
+// Run with -abandon to drop the connection halfway instead of ending the
+// stream properly. The two look identical to the client's Send loop and
+// different to the server, which is the point: a handler that treats a dead
+// client as a finished one commits a total the client never asked for.
 package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 
@@ -28,6 +33,9 @@ import (
 )
 
 const serverURL = "http://localhost:8080"
+
+// abandon is set from the command line; see the package comment.
+var abandon *bool
 
 // transportInterceptor logs the wire protocol the transport resolved for each
 // call, which is how this example shows the routing actually happening.
@@ -42,6 +50,9 @@ func transportInterceptor(next connect.ClientFunc) connect.ClientFunc {
 }
 
 func main() {
+	abandon = flag.Bool("abandon", false,
+		"drop the connection mid-stream instead of sending end-of-stream")
+	flag.Parse()
 
 	// One transport, two wires: streaming RPCs go over WebSocket and everything
 	// else over the HTTP transport this builds for itself. Swap the routing
@@ -54,20 +65,43 @@ func main() {
 		connect.NewClient(transport, transportInterceptor),
 	)
 
-	ctx := context.Background()
+	// NewClientContext attaches the CallInfo the transport publishes response
+	// metadata onto; without it there is nowhere for the server's M message to
+	// land.
+	ctx, info := connect.NewClientContext(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	stream, err := pingClient.Sum(ctx)
 	if err != nil {
 		log.Fatalf("Sum: %v", err)
 	}
 	for i := range 10 {
-		err := stream.Send(&v1.SumRequest{Number: int64(i)})
-		if err != nil {
+		if err := stream.Send(&v1.SumRequest{Number: int64(i)}); err != nil {
 			log.Fatalf("Sum.Send: %v", err)
 		}
+		if *abandon && i == 4 {
+			// Walk away mid-stream, the way a crashed or disconnected client
+			// does: cancel and return without closing the stream. Nothing
+			// sends a C message, so the server learns the stream ended
+			// without learning that the client was finished.
+			//
+			// Deliberately not CloseAndReceive here. That sends a C, and
+			// whether the cancelled context stops it in time is a race — so
+			// the server would see a finished client on some runs and an
+			// abandoned one on others.
+			log.Println("abandoning the stream after 5 of 10 values")
+			cancel()
+			log.Println("check the server's log: it discarded the partial sum rather than answering")
+			return
+		}
 	}
-	resp, err := stream.CloseAndReceive()
+	response, err := stream.CloseAndReceive()
 	if err != nil {
-		log.Fatalf("Sum.CloseSend: %v", err)
+		log.Fatalf("Sum.CloseAndReceive: %v", err)
 	}
-	fmt.Println(resp.Sum)
+	// Response metadata the handler set, carried in the M message that opens
+	// every response stream. Over plain HTTP the same value would arrive in
+	// the response header block.
+	log.Printf("server counted %s values", info.ResponseHeader().Get("Acme-Values-Counted"))
+	fmt.Println(response.Sum)
 }

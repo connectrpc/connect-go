@@ -195,8 +195,7 @@ func TestStreamMustOpenWithLeadingMetadata(t *testing.T) {
 	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
 	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
-	_, data, err := conn.Read(t.Context())
-	assert.Nil(t, err)
+	data := readServerOpening(t, conn)
 	assert.Equal(t, rune(data[0]), wireServerEndStream) // S carries the verdict
 	assert.True(t, strings.Contains(string(data), "invalid_argument"))
 	assert.True(t, strings.Contains(string(data), "first message must be M"))

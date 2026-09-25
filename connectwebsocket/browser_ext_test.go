@@ -204,6 +204,11 @@ func TestBrowserLeadingMetadataMessage(t *testing.T) {
 	assert.Nil(t, err)
 	client.writeProto(t, request)
 
+	// Every response stream opens with the server's own M, even empty.
+	opening, _, openingText := client.readMessage(t)
+	assert.Equal(t, opening, wireMetadata)
+	assert.True(t, openingText) // metadata is JSON, so a text frame
+
 	marker, payload, text := client.readMessage(t)
 	assert.Equal(t, marker, wireBody)
 	assert.False(t, text) // a Protobuf body is a binary frame
@@ -225,6 +230,8 @@ func TestBrowserEndOfClientStreamMessage(t *testing.T) {
 	request, err := proto.Marshal(&pingv1.CumSumRequest{Number: 5})
 	assert.Nil(t, err)
 	client.writeProto(t, request)
+	opening, _, _ := client.readMessage(t)
+	assert.Equal(t, opening, wireMetadata)
 	marker, payload, _ := client.readMessage(t)
 	assert.Equal(t, marker, wireBody)
 	var response pingv1.CumSumResponse
@@ -254,7 +261,9 @@ func TestBrowserRejectsServerOnlyMarker(t *testing.T) {
 
 	client.writeJSON(t, wireServerEndStream, []byte("{}"))
 	// The server rejects it and terminates the RPC with an S message carrying
-	// the error.
+	// the error, behind its own opening M.
+	opening, _, _ := client.readMessage(t)
+	assert.Equal(t, opening, wireMetadata)
 	marker, payload, _ := client.readMessage(t)
 	assert.Equal(t, marker, wireServerEndStream)
 	var end map[string]any

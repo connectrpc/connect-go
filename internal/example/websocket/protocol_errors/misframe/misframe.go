@@ -54,6 +54,13 @@ func Handler(responseWriter http.ResponseWriter, request *http.Request) {
 	if err != nil {
 		return
 	}
+	// Every response stream opens with an M message. This one is well formed,
+	// so the client accepts the stream and then meets the lie below — without
+	// it the client would refuse the opening itself, and the fault reported
+	// would be about metadata rather than the marker.
+	if err := conn.Write(ctx, websocket.MessageText, []byte("M{}")); err != nil {
+		return
+	}
 	frame := append([]byte("Z"), payload...) // the lie
 	_ = conn.Write(ctx, websocket.MessageBinary, frame)
 }

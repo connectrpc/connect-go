@@ -110,8 +110,7 @@ func TestMetadataWireForm(t *testing.T) {
 	sendJSONMessage(t, conn, wireMetadata, []byte(`{}`))
 	sendJSONMessage(t, conn, wireClientEndStream, nil)
 
-	_, data, err := conn.Read(t.Context())
-	assert.Nil(t, err)
+	data := readServerOpening(t, conn)
 	assert.Equal(t, rune(data[0]), wireServerEndStream)
 
 	var end struct {
@@ -164,8 +163,7 @@ func TestUndecodableBinaryMetadataIsRejected(t *testing.T) {
 	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
 	sendJSONMessage(t, conn, wireMetadata, []byte(`{"acme-token-bin":["not!base64"]}`))
 
-	_, data, err := conn.Read(t.Context())
-	assert.Nil(t, err)
+	data := readServerOpening(t, conn)
 	assert.Equal(t, rune(data[0]), wireServerEndStream)
 	assert.True(t, strings.Contains(string(data), "invalid_argument"))
 	assert.True(t, strings.Contains(string(data), "base64"))
@@ -178,8 +176,7 @@ func TestBareMetadataMarkerIsRejected(t *testing.T) {
 	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
 	sendJSONMessage(t, conn, wireMetadata, nil)
 
-	_, data, err := conn.Read(t.Context())
-	assert.Nil(t, err)
+	data := readServerOpening(t, conn)
 	assert.Equal(t, rune(data[0]), wireServerEndStream)
 	assert.True(t, strings.Contains(string(data), "empty M message"))
 }

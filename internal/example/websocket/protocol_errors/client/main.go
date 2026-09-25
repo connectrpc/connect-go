@@ -28,6 +28,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -190,6 +191,13 @@ func exchange(
 	}
 	if err := send(ctx, conn); err != nil {
 		return "", err
+	}
+	// Every response stream opens with the server's own M message, which says
+	// nothing about the fault under test. Read past it to the verdict.
+	if _, opening, err := conn.Read(ctx); err != nil {
+		return "", err
+	} else if len(opening) == 0 || rune(opening[0]) != markerMetadata {
+		return "", fmt.Errorf("server opened with %q, want an M message", opening)
 	}
 	_, data, err := conn.Read(ctx)
 	if err != nil {

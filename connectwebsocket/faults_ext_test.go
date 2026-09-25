@@ -183,8 +183,7 @@ func TestProtocolErrorHandlerCannotSuppress(t *testing.T) {
 	assert.Nil(t, err)
 	writeRawFrame(conn, false, 'Z', message)
 
-	_, data, err := conn.Read(t.Context())
-	assert.Nil(t, err)
+	data := readServerOpening(t, conn)
 	// An S message carrying the error, exactly as without a handler.
 	assert.Equal(t, rune(data[0]), wireServerEndStream)
 	assert.True(t, strings.Contains(string(data), "invalid_argument"))
@@ -258,6 +257,11 @@ func misframingServer(tb testing.TB, write func(*websocket.Conn)) *httptest.Serv
 				return
 			}
 			defer func() { _ = conn.CloseNow() }()
+			// Every response stream opens with an M, so the malformed message
+			// has to come behind a well-formed one. Without this the client
+			// refuses the opening itself, and every case below would report
+			// the same metadata fault rather than the one it provokes.
+			_ = conn.Write(request.Context(), websocket.MessageText, []byte("M{}"))
 			write(conn)
 			// Stay up until the client is done. Closing straight after the
 			// write would race the client's own frames, and the test would see

@@ -23,6 +23,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectwebsocket"
@@ -36,17 +37,43 @@ type pingServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
 }
 
-func (pingServer) Sum(ctx context.Context, req pingv1connect.PingServiceSumServerStream) (*v1.SumResponse, error) {
+func (pingServer) Sum(ctx context.Context, stream pingv1connect.PingServiceSumServerStream) (*v1.SumResponse, error) {
 	var total int64
+	var count int
 	for {
-		req, err := req.Receive()
-		if errors.Is(err, io.EOF) {
+		request, err := stream.Receive()
+		switch {
+		case err == nil:
+			total += request.Number
+			count++
+			continue
+
+		case errors.Is(err, io.EOF):
+			// The client sent C: it is done and waiting for this answer. The
+			// total is complete, so committing it is safe.
+			log.Printf("client finished after %d values; answering with %d", count, total)
+			// Response metadata, which reaches the client as the M message
+			// that opens every response stream. Setting it here — after the
+			// last Receive, on the way out — works because this RPC's single
+			// response is sent once the handler returns, so nothing has gone
+			// out yet. A server-streaming handler would have to set it before
+			// its first Send, or lose it.
+			if info, ok := connect.CallInfoForServerContext(ctx); ok {
+				info.ResponseHeader().Set("Acme-Values-Counted", strconv.Itoa(count))
+			}
 			return &v1.SumResponse{Sum: total}, nil
-		}
-		if err != nil {
+
+		case connect.CodeOf(err) == connect.CodeCanceled:
+			// The connection ended without C. The client may have crashed
+			// mid-send, so these %d values are a prefix of an unknown whole —
+			// answering would invent a total nobody asked for, and committing
+			// one to a database would be worse.
+			log.Printf("client abandoned the stream after %d values; discarding %d", count, total)
+			return nil, err
+
+		default:
 			return nil, err
 		}
-		total += req.Number
 	}
 }
 

@@ -114,8 +114,15 @@ func pingOverRawFrames(tb testing.TB, text string, options ...connectwebsocket.S
 	// plain frames even once the extension is negotiated.
 	assert.Nil(tb, writeClientFrame(conn, bodyFor(tb, &pingv1.PingRequest{Text: text}), false, false))
 
+	// Past the server's opening M, which is tiny and says nothing about how
+	// the response body was framed.
+	_, opening := readServerFrame(tb, conn)
+	assert.Equal(tb, rune(opening[0]), wireMetadata)
+
 	compressed, payload := readServerFrame(tb, conn)
-	// The response must be the echoed message, not the terminal one.
+	// The response must be the echoed message, not the terminal one. Its
+	// marker is unreadable here when the frame is compressed, which is the
+	// case under test, so length is all this can check.
 	assert.True(tb, len(payload) > 0)
 	return compressed
 }
@@ -172,8 +179,7 @@ func TestWrongDirectionMarkerIsNamedAsSuch(t *testing.T) {
 			conn := dialCumSum(t, httpServer, "")
 			sendJSONMessage(t, conn, test.marker, []byte(`{}`))
 
-			_, data, err := conn.Read(t.Context())
-			assert.Nil(t, err)
+			data := readServerOpening(t, conn)
 			assert.True(t, strings.Contains(string(data), test.want))
 			assert.True(t, strings.Contains(string(data), "invalid_argument"))
 		})
