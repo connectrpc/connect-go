@@ -556,32 +556,37 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *con
 		cc.info.ResponseEncoding = encodingOrIdentity(compression)
 	}
 	if response.StatusCode != http.StatusOK {
-		unmarshaler := connectUnaryUnmarshaler{
-			ctx:             cc.unmarshaler.ctx,
-			reader:          response.Body,
-			compressionPool: cc.unmarshaler.compressionPool,
-		}
-		var wireErr connectWireError
-		jsonUnmarshaller := func(_ context.Context, src io.Reader, msg any) error {
-			return json.NewDecoder(src).Decode(msg)
-		}
-		if err := unmarshaler.UnmarshalFunc(&wireErr, jsonUnmarshaller); err != nil {
-			return connect.NewError(
-				httpToCode(response.StatusCode),
-				response.Status,
-			)
-		}
-		if wireErr.Code == 0 {
-			// code not set? default to one implied by HTTP status
-			wireErr.Code = httpToCode(response.StatusCode)
-		}
-		serverErr := wireErr.asError()
-		if serverErr == nil {
-			return nil
-		}
-		return serverErr
+		return cc.unmarshalResponseError(response)
 	}
 	return nil
+}
+
+// unmarshalResponseError reads the JSON error body of a non-200 response.
+func (cc *connectUnaryClientConn) unmarshalResponseError(response *http.Response) *connect.Error {
+	unmarshaler := connectUnaryUnmarshaler{
+		ctx:             cc.unmarshaler.ctx,
+		reader:          response.Body,
+		compressionPool: cc.unmarshaler.compressionPool,
+		readMaxBytes:    cc.unmarshaler.readMaxBytes,
+	}
+	var wireErr connectWireError
+	jsonUnmarshaller := func(_ context.Context, src io.Reader, msg any) error {
+		return json.NewDecoder(src).Decode(msg)
+	}
+	if err := unmarshaler.UnmarshalFunc(&wireErr, jsonUnmarshaller); err != nil {
+		if err.Code() == connect.CodeResourceExhausted {
+			return err // error body exceeds readMaxBytes
+		}
+		return connect.NewError(
+			httpToCode(response.StatusCode),
+			response.Status,
+		)
+	}
+	if wireErr.Code == 0 {
+		// code not set? default to one implied by HTTP status
+		wireErr.Code = httpToCode(response.StatusCode)
+	}
+	return wireErr.asError()
 }
 
 type connectStreamingClientConn struct {
