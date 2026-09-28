@@ -30,7 +30,7 @@ func run() error {
 }
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./handler_construction_group_split.go: grpchealth_register=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 import_ecosystem_v2=2 interceptor_validate_v2=1 read_limit_pinned=2 server_construction=1
+  ./handler_construction_group_split.go: grpchealth_register=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 import_ecosystem_v2=1 interceptor_validate_v2=1 read_limit_pinned=2 server_construction=1
 --- ./handler_construction_group_split.go
 +++ ./handler_construction_group_split.go
 @@ -3,10 +3,11 @@
@@ -38,13 +38,13 @@ Proposed rewrites (rerun with -w to apply):
  	"net/http"
  
 -	"connectrpc.com/connect"
+-	"example.com/app/gen/connect/ping/v1/pingv1connect"
+-	"connectrpc.com/grpchealth"
 +	"connectrpc.com/connect/v2"
 +	"connectrpc.com/connect/v2/connecthttp"
 +	"connectrpc.com/grpchealth/v2"
-+	"connectrpc.com/validate/v2"
- 	"example.com/app/gen/connect/ping/v1/pingv1connect"
--	"connectrpc.com/grpchealth"
--	"connectrpc.com/validate"
+ 	"connectrpc.com/validate"
++	"example.com/app/gen/connect/ping/v1/pingv1connect"
  )
  
  type PingServer struct {
@@ -76,10 +76,10 @@ The following issues require manual code changes:
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
 
-go.mod is missing the v2 modules. Pull them in and tidy:
+go.mod needs the connect v2 modules. Pull them in and tidy:
 
   go get -u \
-       connectrpc.com/grpchealth/v2 \
-       connectrpc.com/validate/v2
+       connectrpc.com/grpchealth/v2@main \
+       connectrpc.com/validate@main
   go mod tidy
 Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

@@ -17,38 +17,54 @@ package main
 import (
 	"go/ast"
 	"go/token"
+	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/ast/astutil"
 )
 
-// ecosystemImports maps v1 ecosystem import paths to their /v2 paths.
-// Subpackages need their own entry (rewrites match the exact path).
+// ecosystemVersionQuery is appended to each ecosystem module in the suggested
+// `go get`.
+//
+// TODO: switch to tagged releases once the ecosystem v2 modules are tagged.
+const ecosystemVersionQuery = "@main"
+
+// ecosystemImports maps each v1 ecosystem import the tool migrates to its v2
+// path. grpchealth and grpcreflect move to /v2 modules. validate and
+// otelconnect keep their paths, so only their call sites change. authn is left
+// out because its API is unchanged.
 var ecosystemImports = [...][2]string{
-	{"connectrpc.com/validate", "connectrpc.com/validate/v2"},
-	{"connectrpc.com/otelconnect", "connectrpc.com/otelconnect/v2"},
-	{"connectrpc.com/authn", "connectrpc.com/authn/v2"},
+	{"connectrpc.com/validate", "connectrpc.com/validate"},
+	{"connectrpc.com/otelconnect", "connectrpc.com/otelconnect"},
 	{"connectrpc.com/grpchealth", "connectrpc.com/grpchealth/v2"},
 	{"connectrpc.com/grpcreflect", "connectrpc.com/grpcreflect/v2"},
-	{"connectrpc.com/vanguard", "connectrpc.com/vanguard/v2"},
-	{"connectrpc.com/vanguard/vanguardgrpc", "connectrpc.com/vanguard/v2/vanguardgrpc"},
 }
 
-// ecosystemV2Module returns the v2 module path to `go get` for a v1 ecosystem
-// import, or "" if it's not one. It truncates at "/v2" so a subpackage import
-// resolves to its module root (vanguard/vanguardgrpc -> vanguard/v2).
-func ecosystemV2Module(importPath string) string {
+// manualEcosystemImports are ecosystem packages whose API changes too much to
+// rewrite, so the tool only warns.
+var manualEcosystemImports = [...]string{
+	"connectrpc.com/vanguard",
+	"connectrpc.com/vanguard/vanguardgrpc",
+}
+
+// ecosystemTarget returns the v2 path for a v1 ecosystem import.
+func ecosystemTarget(importPath string) (string, bool) {
 	for _, mod := range ecosystemImports {
-		if importPath != mod[0] {
-			continue
+		if importPath == mod[0] {
+			return mod[1], true
 		}
-		v2 := mod[1]
-		if index := strings.Index(v2, "/v2"); index >= 0 {
-			return v2[:index+len("/v2")]
-		}
-		return v2
 	}
-	return ""
+	return "", false
+}
+
+// isMovedEcosystemModule reports whether path is a new /v2 ecosystem module.
+func isMovedEcosystemModule(path string) bool {
+	for _, mod := range ecosystemImports {
+		if path == mod[1] && mod[0] != mod[1] {
+			return true
+		}
+	}
+	return false
 }
 
 // hasEcosystemImport reports whether the file imports any v1 ecosystem package,
@@ -56,36 +72,32 @@ func ecosystemV2Module(importPath string) string {
 func hasEcosystemImport(file *ast.File) bool {
 	for _, imp := range file.Imports {
 		importPath := strings.Trim(imp.Path.Value, `"`)
-		for _, mod := range ecosystemImports {
-			if importPath == mod[0] {
-				return true
-			}
+		if _, ok := ecosystemTarget(importPath); ok || slices.Contains(manualEcosystemImports[:], importPath) {
+			return true
 		}
 	}
 	return false
 }
 
-// firstEcosystemImportPos returns the position of the first v1 ecosystem import.
+// firstEcosystemImportPos returns the position of the first v1 ecosystem import
+// the tool migrates.
 func firstEcosystemImportPos(file *ast.File) token.Pos {
 	for _, imp := range file.Imports {
-		importPath := strings.Trim(imp.Path.Value, `"`)
-		for _, mod := range ecosystemImports {
-			if importPath == mod[0] {
-				return imp.Pos()
-			}
+		if _, ok := ecosystemTarget(strings.Trim(imp.Path.Value, `"`)); ok {
+			return imp.Pos()
 		}
 	}
 	return token.NoPos
 }
 
-// rewriteEcosystemImports flips every v1 ecosystem import to its /v2 module,
-// once the generated bindings are v2.
+// rewriteEcosystemImports flips grpchealth and grpcreflect imports to their /v2
+// modules once the generated bindings are v2.
 func rewriteEcosystemImports(fset *token.FileSet, file *ast.File, state *rewriteState, report *Report) {
 	if !state.stubsReady {
 		return
 	}
 	for _, mod := range ecosystemImports {
-		if astutil.RewriteImport(fset, file, mod[0], mod[1]) {
+		if mod[0] != mod[1] && astutil.RewriteImport(fset, file, mod[0], mod[1]) {
 			report.bump("import_ecosystem_v2")
 		}
 	}
@@ -95,6 +107,12 @@ func rewriteEcosystemImports(fset *token.FileSet, file *ast.File, state *rewrite
 // produce mechanically, naming the replacement.
 func warnEcosystemCalls(file *ast.File, report *Report) {
 	ectx := newEcosystemContext(file)
+	for _, imp := range file.Imports {
+		importPath := strings.Trim(imp.Path.Value, `"`)
+		if slices.Contains(manualEcosystemImports[:], importPath) {
+			report.warnAtf(imp.Pos(), ruleEcosystemMigration, "%s is not migrated automatically. Its v2 API changes substantially and needs new configuration: services register on a connect.Server and REST routes mount with vanguard.Mount. See docs/v2-migration.md", importPath)
+		}
+	}
 	walk(file, func(n ast.Node) {
 		call, isCall := n.(*ast.CallExpr)
 		if !isCall {
@@ -116,8 +134,8 @@ func warnEcosystemCalls(file *ast.File, report *Report) {
 		}
 		name := sel.Sel.Name
 		switch {
-		case pkg.Name == ectx.authnAlias && name == "NewMiddleware":
-			report.warnAtf(call.Pos(), ruleEcosystemMigration, "authn.NewMiddleware -> authn.NewServerInterceptor(authFunc) passed to connect.NewServer. AuthFunc takes (ctx, connect.Spec, *connect.Header). See docs/v2-migration.md")
+		case pkg.Name == ectx.reflectAlias && name == "WithRequestHeaders":
+			report.warnAtf(call.Pos(), ruleEcosystemMigration, "grpcreflect.WithRequestHeaders is removed in v2. Set headers on the context passed to NewStream with connect.NewClientContext(ctx) and info.RequestHeader().")
 		case pkg.Name == ectx.reflectAlias && (name == "NewHandlerV1" || name == "NewHandlerV1Alpha" || name == "NewStaticReflector" || name == "NewReflector"):
 			report.warnAtf(call.Pos(), ruleEcosystemMigration, "grpcreflect.%s -> grpcreflect.Register(server) serves v1 and v1alpha and lists the server's registered services by default. See docs/v2-migration.md", name)
 		case pkg.Name == ectx.vanguardAlias && (name == "NewTranscoder" || name == "NewService" || name == "NewServiceWithSchema"):
@@ -130,4 +148,71 @@ func warnEcosystemCalls(file *ast.File, report *Report) {
 			report.warnAtf(call.Pos(), ruleEcosystemMigration, "validate.NewInterceptor -> validate.NewServerInterceptor or validate.NewClientInterceptor, depending on use")
 		}
 	})
+}
+
+// rewriteReflectStreams adapts grpcreflect ClientStream call sites. Close
+// returns only an error in v2, and Spec, Peer and ResponseHeader are removed.
+func rewriteReflectStreams(file *ast.File, report *Report) {
+	if importLocalName(file, "connectrpc.com/grpcreflect") == "" {
+		return
+	}
+	streams := reflectStreamVars(file)
+	if len(streams) == 0 {
+		return
+	}
+	walk(file, func(n ast.Node) {
+		switch node := n.(type) {
+		case *ast.AssignStmt:
+			if len(node.Lhs) != 2 || len(node.Rhs) != 1 || !isStreamMethodCall(node.Rhs[0], streams, "Close") {
+				return
+			}
+			if blank, ok := node.Lhs[0].(*ast.Ident); ok && blank.Name == "_" {
+				node.Lhs = node.Lhs[1:]
+				report.bump("grpcreflect_stream_close")
+				return
+			}
+			report.warnAtf(node.Pos(), ruleEcosystemMigration, "grpcreflect ClientStream.Close returns only an error in v2. Read response headers from the connect.NewClientContext(ctx) info passed to NewStream.")
+		case *ast.CallExpr:
+			for _, name := range [...]string{"Spec", "Peer", "ResponseHeader"} {
+				if isStreamMethodCall(node, streams, name) {
+					report.warnAtf(node.Pos(), ruleEcosystemMigration, "grpcreflect ClientStream.%s is removed in v2. Read call metadata from the connect.NewClientContext(ctx) info passed to NewStream.", name)
+				}
+			}
+		}
+	})
+}
+
+// reflectStreamVars returns the names assigned from a NewStream call.
+func reflectStreamVars(file *ast.File) map[string]bool {
+	streams := map[string]bool{}
+	walk(file, func(n ast.Node) {
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
+			return
+		}
+		call, isCall := assign.Rhs[0].(*ast.CallExpr)
+		if !isCall {
+			return
+		}
+		sel, isSel := call.Fun.(*ast.SelectorExpr)
+		ident, isIdent := assign.Lhs[0].(*ast.Ident)
+		if isSel && isIdent && sel.Sel.Name == "NewStream" {
+			streams[ident.Name] = true
+		}
+	})
+	return streams
+}
+
+// isStreamMethodCall reports whether expr calls method on a stream variable.
+func isStreamMethodCall(expr ast.Expr, streams map[string]bool, method string) bool {
+	call, isCall := expr.(*ast.CallExpr)
+	if !isCall {
+		return false
+	}
+	sel, isSel := call.Fun.(*ast.SelectorExpr)
+	if !isSel || sel.Sel.Name != method {
+		return false
+	}
+	recv, isIdent := sel.X.(*ast.Ident)
+	return isIdent && streams[recv.Name]
 }

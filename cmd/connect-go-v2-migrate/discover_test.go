@@ -80,7 +80,7 @@ func TestIsConnectStubAST(t *testing.T) {
 	}
 }
 
-// TestIsBSRConnectModule covers which BSR modules get the @v2 advice: only the
+// TestIsBSRConnectModule covers which BSR modules get the BSR SDK advice: only the
 // connect-go plugin's output (.../connectrpc/go), not other plugins under the
 // same gen/go prefix, and not non-BSR modules. Self-hosted BSR instances use
 // the same path layout under a different host, so they match too.
@@ -224,7 +224,7 @@ func TestUnderDir(t *testing.T) {
 }
 
 // TestCategorizeV1Stub covers the regenerate advice each kind of v1 stub package
-// drives. The main module is local. A BSR connect SDK is a `go get @v2`. Another
+// drives. The main module is local. A BSR connect SDK is generated locally. Another
 // dependency is an external update. A package with no module attribution is local
 // only when it lives inside the main module tree, not lumped in with the main
 // module (which would tell the user to regenerate code they do not own).

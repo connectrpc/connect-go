@@ -1,4 +1,5 @@
-# connectrpc.com/vanguard import flips to /v2 (golden-only: vanguard v2 unavailable).
+# connectrpc.com/vanguard is not rewritten: its v2 API changes too much, so the
+# import stays and the report asks for a manual migration.
 exec migrate
 cmp stdout out.txt
 -- ecosystem_vanguard.go --
@@ -22,30 +23,10 @@ func mount(mux *http.ServeMux, handler http.Handler) error {
 	return nil
 }
 -- out.txt --
-Proposed rewrites (rerun with -w to apply):
-  ./ecosystem_vanguard.go: import_ecosystem_v2=1
---- ./ecosystem_vanguard.go
-+++ ./ecosystem_vanguard.go
-@@ -3,7 +3,7 @@
- import (
- 	"net/http"
- 
--	"connectrpc.com/vanguard"
-+	"connectrpc.com/vanguard/v2"
- )
- 
- func mount(mux *http.ServeMux, handler http.Handler) error {
-
-
 The following issues require manual code changes:
+  ./ecosystem_vanguard.go:6:2: connectrpc.com/vanguard is not migrated automatically. Its v2 API changes substantially and needs new configuration: services register on a connect.Server and REST routes mount with vanguard.Mount. See docs/v2-migration.md
   ./ecosystem_vanguard.go:11:3: vanguard.NewService -> vanguard.Mount(mux, server) mounts REST routes for registered methods with google.api.http annotations. See docs/v2-migration.md
   ./ecosystem_vanguard.go:13:21: vanguard.NewTranscoder -> vanguard.Mount(mux, server) mounts REST routes for registered methods with google.api.http annotations. See docs/v2-migration.md
 
-Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
-
-go.mod is missing the v2 modules. Pull them in and tidy:
-
-  go get -u \
-       connectrpc.com/vanguard/v2
-  go mod tidy
+Scanned 1 Go file and 0 Buf templates. No automatic rewrites were applied.
 Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

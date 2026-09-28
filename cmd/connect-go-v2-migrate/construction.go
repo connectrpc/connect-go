@@ -322,7 +322,7 @@ func mapInterceptor(interceptor ast.Expr, report *Report, ictx ecosystemContext,
 		report.bump("interceptor_validate_v2")
 		return call
 	case pkg.Name == ictx.otelAlias && sel.Sel.Name == newInterceptorName:
-		report.warnAtf(interceptor.Pos(), ruleInterceptorMigration, "otelconnect.NewInterceptor stays in the connect.New%s(...) list unmigrated. v2 uses otelconnect.New%sInterceptor (connectrpc.com/otelconnect/v2), which returns an error and is assigned before the constructor.", side, side)
+		report.warnAtf(interceptor.Pos(), ruleInterceptorMigration, "otelconnect.NewInterceptor stays in the connect.New%s(...) list unmigrated. v2 uses otelconnect.New%sInterceptor, which returns an error and is assigned before the constructor.", side, side)
 		return call
 	default:
 		return warnCustom()
@@ -347,11 +347,15 @@ func rewriteClientConstruction(file *ast.File, state *rewriteState, report *Repo
 		if !isSel {
 			return
 		}
-		// grpcreflect.NewClient shares the v1 (httpClient, baseURL, opts...) shape.
+		// grpchealth and grpcreflect NewClient share the v1 (httpClient, baseURL,
+		// opts...) shape.
 		counter := "client_construction"
-		if isReflectClientSelector(sel, ictx) {
+		switch {
+		case isEcosystemClientSelector(sel, ictx.reflectAlias):
 			counter = "grpcreflect_client"
-		} else if !isClientConstructorSelector(sel, stubs) {
+		case isEcosystemClientSelector(sel, ictx.healthAlias):
+			counter = "grpchealth_client"
+		case !isClientConstructorSelector(sel, stubs):
 			return
 		}
 		interceptors, otherOpts := splitHandlerOptions(call.Args[2:], state, interceptorVars)
@@ -380,9 +384,10 @@ func rewriteClientConstruction(file *ast.File, state *rewriteState, report *Repo
 	})
 }
 
-func isReflectClientSelector(sel *ast.SelectorExpr, ictx ecosystemContext) bool {
+// isEcosystemClientSelector reports whether sel is alias.NewClient.
+func isEcosystemClientSelector(sel *ast.SelectorExpr, alias string) bool {
 	pkg, ok := sel.X.(*ast.Ident)
-	return ok && ictx.reflectAlias != "" && pkg.Name == ictx.reflectAlias && sel.Sel.Name == "NewClient"
+	return ok && alias != "" && pkg.Name == alias && sel.Sel.Name == "NewClient"
 }
 
 // connectStubAliases returns the local names bound to imported generated connect
@@ -498,7 +503,6 @@ const newInterceptorName = "NewInterceptor"
 type ecosystemContext struct {
 	validateAlias     string
 	otelAlias         string
-	authnAlias        string
 	healthAlias       string
 	reflectAlias      string
 	vanguardAlias     string
@@ -509,7 +513,6 @@ func newEcosystemContext(file *ast.File) ecosystemContext {
 	return ecosystemContext{
 		validateAlias:     importLocalName(file, "connectrpc.com/validate"),
 		otelAlias:         importLocalName(file, "connectrpc.com/otelconnect"),
-		authnAlias:        importLocalName(file, "connectrpc.com/authn"),
 		healthAlias:       importLocalName(file, "connectrpc.com/grpchealth"),
 		reflectAlias:      importLocalName(file, "connectrpc.com/grpcreflect"),
 		vanguardAlias:     importLocalName(file, "connectrpc.com/vanguard"),

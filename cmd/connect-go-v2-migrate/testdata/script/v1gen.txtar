@@ -66,7 +66,7 @@ First, move the dependencies and generated code to v2:
   1. connect-go-v2-migrate -w  (applies the Buf template update above)
   2. go get -u \
        connectrpc.com/connect/v2
-     (pulls the v2 core, generated SDKs, and ecosystem modules into go.mod)
+     (pulls the v2 core and ecosystem modules into go.mod)
   3. go install connectrpc.com/connect/v2/cmd/protoc-gen-connect-go@latest
      (./buf.gen.yaml runs the local protoc-gen-connect-go binary. v1 and v2
      share the binary name, so reinstalling from the /v2 module switches

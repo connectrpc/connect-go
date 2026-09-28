@@ -253,7 +253,7 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 			report.deferAtf(pos, ruleAwaitingV2Bindings, "stub-dependent rewrite (handler/client signatures, .Msg, NewRequest/NewResponse, streams, construction)")
 		}
 		if pos := firstEcosystemImportPos(file); pos.IsValid() {
-			report.deferAtf(pos, ruleAwaitingV2Bindings, "ecosystem package rewrite (/v2 import paths, construction)")
+			report.deferAtf(pos, ruleAwaitingV2Bindings, "ecosystem package rewrite (import paths, construction, interceptors)")
 		}
 		rewriteStubIndependent(file, state, &report)
 		return finishRewrite(filename, src, fset, file, state, &report)
@@ -327,6 +327,7 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 	// Warn on ecosystem call sites the construction passes didn't reshape. Runs
 	// after them so already-renamed interceptors aren't re-flagged.
 	warnEcosystemCalls(file, &report)
+	rewriteReflectStreams(file, &report)
 
 	rewriteStubIndependent(file, state, &report)
 	return finishRewrite(filename, src, fset, file, state, &report)
