@@ -23,19 +23,17 @@ import (
 	"golang.org/x/tools/go/ast/astutil"
 )
 
-// ecosystemVersionQuery is appended to each ecosystem module in the suggested
-// `go get`.
-//
 // TODO: switch to tagged releases once the ecosystem v2 modules are tagged.
 const ecosystemVersionQuery = "@main"
 
-// ecosystemImports maps each v1 ecosystem import the tool migrates to its v2
-// path. grpchealth and grpcreflect move to /v2 modules. validate and
-// otelconnect keep their paths, so only their call sites change. authn is left
-// out because its API is unchanged.
-var ecosystemImports = [...][2]string{
-	{"connectrpc.com/validate", "connectrpc.com/validate"},
-	{"connectrpc.com/otelconnect", "connectrpc.com/otelconnect"},
+// ecosystemImports keep their paths, so only their call sites change. authn is
+// left out because its API is unchanged.
+var ecosystemImports = [...]string{
+	"connectrpc.com/validate",
+	"connectrpc.com/otelconnect",
+}
+
+var movedEcosystemImports = [...][2]string{
 	{"connectrpc.com/grpchealth", "connectrpc.com/grpchealth/v2"},
 	{"connectrpc.com/grpcreflect", "connectrpc.com/grpcreflect/v2"},
 }
@@ -47,9 +45,13 @@ var manualEcosystemImports = [...]string{
 	"connectrpc.com/vanguard/vanguardgrpc",
 }
 
-// ecosystemTarget returns the v2 path for a v1 ecosystem import.
-func ecosystemTarget(importPath string) (string, bool) {
-	for _, mod := range ecosystemImports {
+func isEcosystemImport(importPath string) bool {
+	_, moved := movedEcosystemTarget(importPath)
+	return moved || slices.Contains(ecosystemImports[:], importPath)
+}
+
+func movedEcosystemTarget(importPath string) (string, bool) {
+	for _, mod := range movedEcosystemImports {
 		if importPath == mod[0] {
 			return mod[1], true
 		}
@@ -57,10 +59,9 @@ func ecosystemTarget(importPath string) (string, bool) {
 	return "", false
 }
 
-// isMovedEcosystemModule reports whether path is a new /v2 ecosystem module.
 func isMovedEcosystemModule(path string) bool {
-	for _, mod := range ecosystemImports {
-		if path == mod[1] && mod[0] != mod[1] {
+	for _, mod := range movedEcosystemImports {
+		if path == mod[1] {
 			return true
 		}
 	}
@@ -72,32 +73,29 @@ func isMovedEcosystemModule(path string) bool {
 func hasEcosystemImport(file *ast.File) bool {
 	for _, imp := range file.Imports {
 		importPath := strings.Trim(imp.Path.Value, `"`)
-		if _, ok := ecosystemTarget(importPath); ok || slices.Contains(manualEcosystemImports[:], importPath) {
+		if isEcosystemImport(importPath) || slices.Contains(manualEcosystemImports[:], importPath) {
 			return true
 		}
 	}
 	return false
 }
 
-// firstEcosystemImportPos returns the position of the first v1 ecosystem import
-// the tool migrates.
+// firstEcosystemImportPos returns the position of the first migrated import.
 func firstEcosystemImportPos(file *ast.File) token.Pos {
 	for _, imp := range file.Imports {
-		if _, ok := ecosystemTarget(strings.Trim(imp.Path.Value, `"`)); ok {
+		if isEcosystemImport(strings.Trim(imp.Path.Value, `"`)) {
 			return imp.Pos()
 		}
 	}
 	return token.NoPos
 }
 
-// rewriteEcosystemImports flips grpchealth and grpcreflect imports to their /v2
-// modules once the generated bindings are v2.
 func rewriteEcosystemImports(fset *token.FileSet, file *ast.File, state *rewriteState, report *Report) {
 	if !state.stubsReady {
 		return
 	}
-	for _, mod := range ecosystemImports {
-		if mod[0] != mod[1] && astutil.RewriteImport(fset, file, mod[0], mod[1]) {
+	for _, mod := range movedEcosystemImports {
+		if astutil.RewriteImport(fset, file, mod[0], mod[1]) {
 			report.bump("import_ecosystem_v2")
 		}
 	}
@@ -150,8 +148,8 @@ func warnEcosystemCalls(file *ast.File, report *Report) {
 	})
 }
 
-// rewriteReflectStreams adapts grpcreflect ClientStream call sites. Close
-// returns only an error in v2, and Spec, Peer and ResponseHeader are removed.
+// rewriteReflectStreams handles the v2 ClientStream, where Close returns only an
+// error and Spec, Peer and ResponseHeader are removed.
 func rewriteReflectStreams(file *ast.File, report *Report) {
 	if importLocalName(file, "connectrpc.com/grpcreflect") == "" {
 		return
@@ -182,7 +180,8 @@ func rewriteReflectStreams(file *ast.File, report *Report) {
 	})
 }
 
-// reflectStreamVars returns the names assigned from a NewStream call.
+// reflectStreamVars matches by name because the per-file rewrite has no type
+// info.
 func reflectStreamVars(file *ast.File) map[string]bool {
 	streams := map[string]bool{}
 	walk(file, func(n ast.Node) {
@@ -203,7 +202,6 @@ func reflectStreamVars(file *ast.File) map[string]bool {
 	return streams
 }
 
-// isStreamMethodCall reports whether expr calls method on a stream variable.
 func isStreamMethodCall(expr ast.Expr, streams map[string]bool, method string) bool {
 	call, isCall := expr.(*ast.CallExpr)
 	if !isCall {

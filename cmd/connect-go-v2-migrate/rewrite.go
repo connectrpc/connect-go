@@ -61,6 +61,7 @@ const (
 	ruleBufgenReinstall         = "bufgen_reinstall_plugin"
 	ruleBufgenGoMod             = "bufgen_update_go_mod"
 	ruleBufgenRemoteUnpublished = "bufgen_remote_unpublished"
+	ruleBufgenManualEdit        = "bufgen_manual_edit"
 	ruleReadLimitDefault        = "read_limit_default"
 )
 

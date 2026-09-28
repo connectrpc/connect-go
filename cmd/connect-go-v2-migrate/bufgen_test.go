@@ -142,6 +142,178 @@ plugins:
 			wantChanged: true,
 		},
 		{
+			// The plugin key need not be the item's first key.
+			name: "remote_plugin_key_not_first",
+			in: `version: v2
+plugins:
+  - out: gen
+    remote: buf.build/connectrpc/go:v1.18.1
+    opt: simple=true
+`,
+			want: `version: v2
+plugins:
+  - out: gen
+    local: protoc-gen-connect-go
+`,
+			wantChanged: true,
+			wantWarn:    "has no v2 release yet",
+		},
+		{
+			name: "v1_plugin_key_not_first",
+			in: `version: v1
+plugins:
+  - out: gen
+    plugin: buf.build/connectrpc/go:v1.18.1
+`,
+			want: `version: v1
+plugins:
+  - out: gen
+    plugin: connect-go
+`,
+			wantChanged: true,
+		},
+		{
+			name: "local_plugin_key_not_first_strips_simple",
+			in: `version: v2
+plugins:
+  - out: gen
+    opt: simple=true
+    local: protoc-gen-connect-go
+`,
+			want: `version: v2
+plugins:
+  - out: gen
+    local: protoc-gen-connect-go
+`,
+			wantChanged: true,
+			wantWarn:    "reinstall the generator",
+		},
+		{
+			// Removing a key on the dash line moves the next key up.
+			name: "opt_first_hoists_next_key",
+			in: `version: v2
+plugins:
+  - opt: simple=true
+    local: protoc-gen-connect-go
+`,
+			want: `version: v2
+plugins:
+  - local: protoc-gen-connect-go
+`,
+			wantChanged: true,
+			wantWarn:    "reinstall the generator",
+		},
+		{
+			name: "revision_first_hoists_next_key",
+			in: `version: v2
+plugins:
+  - revision: 1
+    remote: buf.build/connectrpc/go:v1.18.1
+    out: gen
+`,
+			want: `version: v2
+plugins:
+  - local: protoc-gen-connect-go
+    out: gen
+`,
+			wantChanged: true,
+		},
+		{
+			name: "opt_list_first_hoists_next_key",
+			in: `version: v2
+plugins:
+  - opt:
+      - simple=true
+    out: gen
+    local: protoc-gen-connect-go
+`,
+			want: `version: v2
+plugins:
+  - out: gen
+    local: protoc-gen-connect-go
+`,
+			wantChanged: true,
+		},
+		{
+			name: "opt_list_first_keeps_other_options",
+			in: `version: v2
+plugins:
+  - opt:
+      - paths=source_relative
+      - simple=true
+    local: protoc-gen-connect-go
+`,
+			want: `version: v2
+plugins:
+  - opt:
+      - paths=source_relative
+    local: protoc-gen-connect-go
+`,
+			wantChanged: true,
+		},
+		{
+			name: "flow_mapping_localized",
+			in: `version: v2
+plugins:
+  - {remote: buf.build/connectrpc/go:v1.18.1, out: gen}
+`,
+			want: `version: v2
+plugins:
+  - {local: protoc-gen-connect-go, out: gen}
+`,
+			wantChanged: true,
+		},
+		{
+			name: "quoted_and_commented_ref_localized",
+			in: `version: v2
+plugins:
+  - remote: "buf.build/connectrpc/go:v1.18.1" # pinned
+    out: gen
+`,
+			want: `version: v2
+plugins:
+  - local: "protoc-gen-connect-go" # pinned
+    out: gen
+`,
+			wantChanged: true,
+		},
+		{
+			// A flow opt list can't lose an item line by line.
+			name: "flow_opt_list_with_simple_warns",
+			in: `version: v2
+plugins:
+  - local: protoc-gen-connect-go
+    opt: [paths=source_relative, simple=true]
+`,
+			want:        "",
+			wantChanged: false,
+			wantWarn:    "remove the v1 `simple` option by hand",
+		},
+		{
+			name: "invalid_yaml_warns",
+			in: `version: v2
+plugins:
+  - local: protoc-gen-connect-go
+   out: [
+`,
+			want:        "",
+			wantChanged: false,
+			wantWarn:    "could not parse the template",
+		},
+		{
+			// A key nested deeper than the item's own keys is not the plugin.
+			name: "nested_key_ignored",
+			in: `version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: gen
+    opt:
+      - remote: buf.build/connectrpc/go:v1.18.1
+`,
+			want:        "",
+			wantChanged: false,
+		},
+		{
 			name: "remote_plugin_already_v2_is_noop",
 			in: `version: v2
 plugins:
@@ -506,22 +678,5 @@ plugins:
 				t.Errorf("not idempotent; second pass changed output\n--- first ---\n%s\n--- second ---\n%s", string(got), string(got2))
 			}
 		})
-	}
-}
-
-func TestYamlScalar(t *testing.T) {
-	t.Parallel()
-	tests := []struct{ in, want string }{
-		{"simple=true", "simple=true"},
-		{"paths=source_relative # note", "paths=source_relative"},
-		{`"a #b"`, "a #b"},
-		{`'a #b'`, "a #b"},
-		{`"quoted"`, "quoted"},
-		{"  spaced  ", "spaced"},
-	}
-	for _, test := range tests {
-		if got := yamlScalar(test.in); got != test.want {
-			t.Errorf("yamlScalar(%q) = %q, want %q", test.in, got, test.want)
-		}
 	}
 }

@@ -436,8 +436,7 @@ func printPhase1Text(run *results, proj *project, write, color bool) {
 			fmt.Printf("  %s\n", displayPath(dir))
 		}
 	}
-	// BSR-generated SDK dependencies have no v2 build yet, so they are generated
-	// locally.
+	// v2 SDKs are not on the BSR yet, so these are generated locally.
 	if len(proj.sdkModules) > 0 {
 		fmt.Print("\nGenerated v1 Connect SDKs (generate these locally, v2 SDKs are not on the BSR yet):\n")
 		for _, mod := range proj.sdkModules {
@@ -515,8 +514,7 @@ type step struct {
 	note string
 }
 
-// phase1Steps builds the move-to-v2 instructions, a `go get -u` plus local
-// generation steps when the project generates code or depends on BSR SDKs.
+// phase1Steps builds the steps that move dependencies and generated code to v2.
 func phase1Steps(run *results, proj *project, write bool) []step {
 	var steps []step
 	if !write && len(run.rewrites) > 0 {
@@ -543,8 +541,7 @@ func phase1Steps(run *results, proj *project, write bool) []step {
 	return steps
 }
 
-// goGetModules is the module set to `go get -u`, the connect core and the
-// ecosystem modules. BSR SDKs are generated locally until v2 SDKs are published.
+// goGetModules leaves out BSR SDKs until v2 SDKs are published.
 func goGetModules(proj *project) []string {
 	mods := make([]string, 0, 1+len(proj.ecosystemModules))
 	mods = append(mods, connectV2Module)
@@ -554,8 +551,7 @@ func goGetModules(proj *project) []string {
 	return mods
 }
 
-// missingV2Modules returns the modules that still need a `go get`. Reports
-// nothing when no go.mod was parsed.
+// missingV2Modules reports nothing without a parsed go.mod rather than guessing.
 func missingV2Modules(proj *project) []string {
 	if proj.goModRequires == nil {
 		return nil

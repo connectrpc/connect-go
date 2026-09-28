@@ -347,8 +347,7 @@ func rewriteClientConstruction(file *ast.File, state *rewriteState, report *Repo
 		if !isSel {
 			return
 		}
-		// grpchealth and grpcreflect NewClient share the v1 (httpClient, baseURL,
-		// opts...) shape.
+		// grpchealth and grpcreflect clients took the same v1 arguments.
 		counter := "client_construction"
 		switch {
 		case isEcosystemClientSelector(sel, ictx.reflectAlias):
@@ -384,7 +383,6 @@ func rewriteClientConstruction(file *ast.File, state *rewriteState, report *Repo
 	})
 }
 
-// isEcosystemClientSelector reports whether sel is alias.NewClient.
 func isEcosystemClientSelector(sel *ast.SelectorExpr, alias string) bool {
 	pkg, ok := sel.X.(*ast.Ident)
 	return ok && alias != "" && pkg.Name == alias && sel.Sel.Name == "NewClient"
