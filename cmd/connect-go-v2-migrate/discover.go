@@ -26,9 +26,9 @@ import (
 	"strconv"
 	"strings"
 
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/tools/go/packages"
-	"gopkg.in/yaml.v3"
 )
 
 const (
