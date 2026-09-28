@@ -5,7 +5,7 @@ go 1.26.7
 require (
 	connectrpc.com/conformance v1.0.5
 	connectrpc.com/connect/v2 v2.0.0-00010101000000-000000000000
-	github.com/quic-go/quic-go v0.62.0
+	github.com/quic-go/quic-go v0.63.0
 	github.com/rs/cors v1.11.1
 	golang.org/x/sync v0.23.0
 	google.golang.org/protobuf v1.36.12
