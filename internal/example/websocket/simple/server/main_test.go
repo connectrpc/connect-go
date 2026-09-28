@@ -23,7 +23,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connectwebsocket"
+	"connectrpc.com/connect/v2/connecthttp"
 	v1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	pingv1connect "connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
 )
@@ -36,17 +36,15 @@ func newTestClient(tb testing.TB, protocol *string) pingv1connect.PingServiceCli
 	server := connect.NewServer()
 	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
 	mux := http.NewServeMux()
-	connectwebsocket.Mount(mux, server)
+	connecthttp.Mount(mux, server)
 	httpServer := httptest.NewServer(mux)
 	tb.Cleanup(httpServer.Close)
 
-	transport, err := connectwebsocket.NewTransport(
+	transport := connecthttp.NewTransport(
+		httpServer.Client(),
 		httpServer.URL,
-		connectwebsocket.WithHTTPClient(httpServer.Client()),
+		connecthttp.WithWebSocket(connecthttp.SelectStreaming),
 	)
-	if err != nil {
-		tb.Fatalf("websocket transport: %v", err)
-	}
 	record := func(next connect.ClientFunc) connect.ClientFunc {
 		return func(ctx context.Context, spec connect.Spec) (connect.ClientStream, error) {
 			stream, err := next(ctx, spec)
@@ -103,7 +101,7 @@ func TestCumSumOverWebSocket(t *testing.T) {
 	if err := stream.Close(); err != nil {
 		t.Fatalf("CumSum.Close: %v", err)
 	}
-	if protocol != connectwebsocket.ProtocolConnectWebSocket {
-		t.Errorf("CumSum used %q; want %q", protocol, connectwebsocket.ProtocolConnectWebSocket)
+	if protocol != connecthttp.ProtocolNameConnectWebSocket {
+		t.Errorf("CumSum used %q; want %q", protocol, connecthttp.ProtocolNameConnectWebSocket)
 	}
 }

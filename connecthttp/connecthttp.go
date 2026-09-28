@@ -31,6 +31,7 @@ import (
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectgzip"
 	"connectrpc.com/connect/v2/connectproto"
+	"connectrpc.com/connect/v2/internal/wstransport"
 )
 
 // HTTPClient is the HTTP client surface the transport drives. The
@@ -199,11 +200,31 @@ func NewTransport(httpClient HTTPClient, baseURL string, options ...Option) conn
 	for _, opt := range options {
 		opt.apply(&opts)
 	}
-	return &transport{
+	httpTransport := &transport{
 		httpClient: httpClient,
 		baseURLPtr: parsed,
 		baseURLErr: err,
 		options:    opts,
+	}
+	if opts.websocketSelector == nil {
+		return httpTransport
+	}
+	clientOptions := opts.websocketClientOpts(httpClient)
+	if opts.websocketFallbackOnErr {
+		clientOptions = append(clientOptions, wstransport.WithEagerDial())
+	}
+	websocketTransport, wsErr := wstransport.NewTransport(baseURL, clientOptions...)
+	if wsErr != nil {
+		// The URL or codec set is unusable for WebSocket. Reporting it from
+		// every RPC beats returning an HTTP-only transport that silently
+		// ignores the selector the caller supplied.
+		return &brokenTransport{err: wsErr}
+	}
+	return &hybridTransport{
+		websocket:       websocketTransport,
+		fallback:        httpTransport,
+		selector:        opts.websocketSelector,
+		fallbackOnError: opts.websocketFallbackOnErr,
 	}
 }
 
@@ -242,16 +263,28 @@ func Mount(mux ServeMux, server *connect.Server, options ...Option) {
 	for _, opt := range options {
 		opt.apply(&opts)
 	}
+	target := mux
+	if !opts.websocketDisabled {
+		// Both transports on every path, because which one carries an RPC is
+		// the client's choice: a server serving only HTTP would reject a
+		// client that upgraded. WithWebSocketPrefix splits them instead.
+		target = &websocketMux{
+			mux:     mux,
+			server:  server,
+			options: opts.websocketServerOpts(),
+			prefix:  opts.websocketPrefix,
+		}
+	}
 	services := make(map[string]struct{})
 	for spec := range server.Specs() {
-		mux.Handle(spec.Procedure, newProcedureHandler(server, spec, &opts))
+		target.Handle(spec.Procedure, newProcedureHandler(server, spec, &opts))
 		// "/package.Service/Method" -> subtree pattern "/package.Service/".
 		if idx := strings.LastIndexByte(spec.Procedure, '/'); idx > 0 {
 			services[spec.Procedure[:idx+1]] = struct{}{}
 		}
 	}
 	for service := range services {
-		mux.Handle(service, newUnknownMethodHandler(server, &opts))
+		target.Handle(service, newUnknownMethodHandler(server, &opts))
 	}
 }
 
@@ -384,6 +417,15 @@ type options struct {
 
 	// Server-only ([NewTransport] ignores these).
 	requireConnectProtocolHeader bool
+	websocketDisabled            bool
+	websocketPrefix              string
+
+	// Client-only, and the switch that turns WebSocket on there: a nil
+	// selector means every RPC goes over HTTP.
+	websocketSelector      Selector
+	websocketFallbackOnErr bool
+	websocketClientOptions []wstransport.ClientOption
+	websocketServerOptions []wstransport.ServerOption
 
 	// conditional holds per-procedure option functions registered with
 	// WithConditionalOptions. They are evaluated against each spec by forSpec.

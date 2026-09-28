@@ -25,7 +25,7 @@ import (
 	"net/http"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connectwebsocket"
+	"connectrpc.com/connect/v2/connecthttp"
 	v1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	pingv1connect "connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
 )
@@ -80,7 +80,7 @@ func main() {
 	// no server-side selector: which transport carries an RPC is the client's
 	// decision, and a server that served only one would reject a client that
 	// chose the other.
-	connectwebsocket.Mount(mux, server)
+	connecthttp.Mount(mux, server)
 
 	protocols := new(http.Protocols)
 	// HTTP/1.1 only: a WebSocket upgrade needs a hijackable connection, which

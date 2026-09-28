@@ -14,8 +14,9 @@
 
 // Command client runs the same server stream four times against one server,
 // choosing a different transport each time. Nothing about the server changes
-// between runs: the Selector is a client-side decision, and the server accepts
-// whichever wire the client picked.
+// between runs: the Selector passed to connecthttp.WithWebSocket is a
+// client-side decision, and the server accepts whichever wire the client
+// picked.
 //
 // Run the transport_choice server first, then:
 //
@@ -28,9 +29,10 @@ import (
 	"flag"
 	"io"
 	"log"
+	"net/http"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connectwebsocket"
+	"connectrpc.com/connect/v2/connecthttp"
 	v1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	pingv1connect "connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
 )
@@ -39,7 +41,7 @@ import (
 // runs them.
 var choices = []struct {
 	name     string
-	selector connectwebsocket.Selector
+	selector connecthttp.Selector
 	explain  string
 }{
 	{
@@ -49,12 +51,12 @@ var choices = []struct {
 	},
 	{
 		name:     "all",
-		selector: connectwebsocket.SelectAll,
+		selector: connecthttp.SelectAll,
 		explain:  "everything over WebSocket, including unary",
 	},
 	{
 		name:     "bidi only",
-		selector: connectwebsocket.SelectBidi,
+		selector: connecthttp.SelectBidi,
 		explain:  "only full-duplex RPCs upgrade; a server stream is plain HTTP",
 	},
 	{
@@ -70,14 +72,15 @@ func main() {
 	flag.Parse()
 
 	for _, choice := range choices {
-		var options []connectwebsocket.ClientOption
-		if choice.selector != nil {
-			options = append(options, connectwebsocket.WithSelector(choice.selector))
+		selector := choice.selector
+		if selector == nil {
+			selector = connecthttp.SelectStreaming
 		}
-		transport, err := connectwebsocket.NewTransport(*serverURL, options...)
-		if err != nil {
-			log.Fatalf("%s: websocket transport: %v", choice.name, err)
-		}
+		transport := connecthttp.NewTransport(
+			http.DefaultClient,
+			*serverURL,
+			connecthttp.WithWebSocket(selector),
+		)
 
 		var protocol string
 		client := pingv1connect.NewPingServiceClient(

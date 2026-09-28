@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connectwebsocket"
+	"connectrpc.com/connect/v2/connecthttp"
 	v1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	pingv1connect "connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
 )
@@ -34,7 +34,7 @@ func newServer(tb testing.TB) *httptest.Server {
 	server := connect.NewServer()
 	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
 	mux := http.NewServeMux()
-	connectwebsocket.Mount(mux, server)
+	connecthttp.Mount(mux, server)
 	httpServer := httptest.NewServer(mux)
 	tb.Cleanup(httpServer.Close)
 	return httpServer
@@ -59,25 +59,24 @@ func TestClientChoosesTheTransport(t *testing.T) {
 
 	for _, test := range []struct {
 		name     string
-		selector connectwebsocket.Selector
+		selector connecthttp.Selector
 		want     string
 	}{
-		{"default", nil, connectwebsocket.ProtocolConnectWebSocket},
-		{"all", connectwebsocket.SelectAll, connectwebsocket.ProtocolConnectWebSocket},
-		{"bidi only", connectwebsocket.SelectBidi, connect.ProtocolNameConnect},
+		{"default", nil, connecthttp.ProtocolNameConnectWebSocket},
+		{"all", connecthttp.SelectAll, connecthttp.ProtocolNameConnectWebSocket},
+		{"bidi only", connecthttp.SelectBidi, connect.ProtocolNameConnect},
 		{"never", func(connect.Spec) bool { return false }, connect.ProtocolNameConnect},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			options := []connectwebsocket.ClientOption{
-				connectwebsocket.WithHTTPClient(httpServer.Client()),
+			selector := test.selector
+			if selector == nil {
+				selector = connecthttp.SelectStreaming
 			}
-			if test.selector != nil {
-				options = append(options, connectwebsocket.WithSelector(test.selector))
-			}
-			transport, err := connectwebsocket.NewTransport(httpServer.URL, options...)
-			if err != nil {
-				t.Fatalf("websocket transport: %v", err)
-			}
+			transport := connecthttp.NewTransport(
+				httpServer.Client(),
+				httpServer.URL,
+				connecthttp.WithWebSocket(selector),
+			)
 			var protocol string
 			client := pingv1connect.NewPingServiceClient(
 				connect.NewClient(transport, recordProtocol(&protocol)),
@@ -115,23 +114,22 @@ func TestUnaryFollowsTheSameRule(t *testing.T) {
 
 	for _, test := range []struct {
 		name     string
-		selector connectwebsocket.Selector
+		selector connecthttp.Selector
 		want     string
 	}{
 		{"default leaves unary on HTTP", nil, connect.ProtocolNameConnect},
-		{"SelectAll upgrades unary too", connectwebsocket.SelectAll, connectwebsocket.ProtocolConnectWebSocket},
+		{"SelectAll upgrades unary too", connecthttp.SelectAll, connecthttp.ProtocolNameConnectWebSocket},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			options := []connectwebsocket.ClientOption{
-				connectwebsocket.WithHTTPClient(httpServer.Client()),
+			selector := test.selector
+			if selector == nil {
+				selector = connecthttp.SelectStreaming
 			}
-			if test.selector != nil {
-				options = append(options, connectwebsocket.WithSelector(test.selector))
-			}
-			transport, err := connectwebsocket.NewTransport(httpServer.URL, options...)
-			if err != nil {
-				t.Fatalf("websocket transport: %v", err)
-			}
+			transport := connecthttp.NewTransport(
+				httpServer.Client(),
+				httpServer.URL,
+				connecthttp.WithWebSocket(selector),
+			)
 			var protocol string
 			client := pingv1connect.NewPingServiceClient(
 				connect.NewClient(transport, recordProtocol(&protocol)),

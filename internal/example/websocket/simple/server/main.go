@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connectwebsocket"
+	"connectrpc.com/connect/v2/connecthttp"
 	v1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	pingv1connect "connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
 )
@@ -87,10 +87,13 @@ func main() {
 
 	mux := http.NewServeMux()
 	// One call registers every procedure over both transports at the same
-	// paths: a WebSocket upgrade is served by connectwebsocket, and every
+	// paths: a WebSocket upgrade is served by the WebSocket transport, and every
 	// other request by the connecthttp handler underneath. The client picks
 	// which transport carries each RPC; the server accepts either.
-	connectwebsocket.Mount(mux, server)
+	//
+	// WebSocket is on by default. connecthttp.WithoutWebSocket() turns it off,
+	// and connecthttp.WithWebSocketPrefix("/ws") moves it to its own paths.
+	connecthttp.Mount(mux, server)
 
 	protocols := new(http.Protocols)
 	// HTTP/1.1 only: a WebSocket upgrade needs a hijackable connection, which

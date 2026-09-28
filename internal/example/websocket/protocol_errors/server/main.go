@@ -18,13 +18,13 @@
 // message, which means it is a *successful* outcome from the server's point of
 // view: it never reaches the logger, and a Session wrapper sees a nil error. An
 // interceptor does see it, but only as InvalidArgument — the same code every
-// framing fault carries. WithServerProtocolErrorHandler is the hook that says
+// framing fault carries. WithWebSocketServerProtocolErrorHandler is the hook that says
 // which kind of mistake it was and who made it.
 //
 // Run this, then the matching client, which misframes on purpose.
 //
 // The client watches for the opposite fault — a server that misframes its
-// responses — with WithClientProtocolErrorHandler. To make that half fire,
+// responses — with WithWebSocketClientProtocolErrorHandler. To make that half fire,
 // start this server with -misframe, which answers with malformed frames
 // instead of mounting the real service.
 package main
@@ -40,7 +40,7 @@ import (
 	"sync"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connectwebsocket"
+	"connectrpc.com/connect/v2/connecthttp"
 	"connectrpc.com/connect/v2/internal/example/websocket/protocol_errors/misframe"
 	v1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	pingv1connect "connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
@@ -72,11 +72,11 @@ func (pingServer) CumSum(_ context.Context, stream pingv1connect.PingServiceCumS
 // markers stands out from one that trips over a frame type once.
 type faultMonitor struct {
 	mu     sync.Mutex
-	counts map[string]map[connectwebsocket.ProtocolFault]int
+	counts map[string]map[connecthttp.ProtocolFault]int
 }
 
 func newFaultMonitor() *faultMonitor {
-	return &faultMonitor{counts: make(map[string]map[connectwebsocket.ProtocolFault]int)}
+	return &faultMonitor{counts: make(map[string]map[connecthttp.ProtocolFault]int)}
 }
 
 // observe is the ProtocolErrorHandler. It returns nothing: the error reaches
@@ -86,16 +86,17 @@ func newFaultMonitor() *faultMonitor {
 // It runs on the connection's read path, so it must not block. Counting under
 // a mutex is fine; exporting to a metrics backend should be asynchronous.
 func (m *faultMonitor) observe(
-	info connectwebsocket.SessionInfo,
-	fault connectwebsocket.ProtocolFault,
+	peerAddr string,
+	request *http.Request,
+	fault connecthttp.ProtocolFault,
 	err *connect.Error,
 ) {
 	// Keyed on the host, not on PeerAddr: that carries the ephemeral port, so
 	// counting by it would start over on every connection — and one connection
 	// carries one RPC, so a repeat offender would never register. A deployment
-	// with authenticated clients should key on the account instead, which
-	// info.Request makes reachable.
-	client := info.PeerAddr
+	// with authenticated clients should key on the account instead, which the
+	// upgrade request makes reachable.
+	client := peerAddr
 	if host, _, splitErr := net.SplitHostPort(client); splitErr == nil {
 		client = host
 	}
@@ -103,7 +104,7 @@ func (m *faultMonitor) observe(
 	m.mu.Lock()
 	byFault, ok := m.counts[client]
 	if !ok {
-		byFault = make(map[connectwebsocket.ProtocolFault]int)
+		byFault = make(map[connecthttp.ProtocolFault]int)
 		m.counts[client] = byFault
 	}
 	byFault[fault]++
@@ -111,7 +112,7 @@ func (m *faultMonitor) observe(
 	m.mu.Unlock()
 
 	log.Printf("protocol fault from %s on %s: %s (#%d for this client) — %v",
-		client, info.Request.URL.Path, fault, total, err)
+		client, request.URL.Path, fault, total, err)
 }
 
 func main() {
@@ -129,8 +130,8 @@ func main() {
 		log.Println("misframing mode: responses are deliberately malformed")
 		mux.Handle(pingv1connect.PingServiceCumSumProcedure, http.HandlerFunc(misframe.Handler))
 	} else {
-		connectwebsocket.Mount(mux, server,
-			connectwebsocket.WithServerProtocolErrorHandler(monitor.observe),
+		connecthttp.Mount(mux, server,
+			connecthttp.WithWebSocketServerProtocolErrorHandler(monitor.observe),
 		)
 	}
 

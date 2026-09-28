@@ -27,7 +27,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connectwebsocket"
+	"connectrpc.com/connect/v2/connecthttp"
 	v1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	pingv1connect "connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
 	"github.com/coder/websocket"
@@ -42,8 +42,8 @@ func newMonitoredServer(tb testing.TB) (*httptest.Server, *faultMonitor) {
 	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
 	monitor := newFaultMonitor()
 	mux := http.NewServeMux()
-	connectwebsocket.Mount(mux, server,
-		connectwebsocket.WithServerProtocolErrorHandler(monitor.observe),
+	connecthttp.Mount(mux, server,
+		connecthttp.WithWebSocketServerProtocolErrorHandler(monitor.observe),
 	)
 	httpServer := httptest.NewServer(mux)
 	tb.Cleanup(httpServer.Close)
@@ -105,10 +105,10 @@ func TestMonitorCountsRepeatOffenders(t *testing.T) {
 		t.Fatalf("got %d clients; want 1 (all faults came from one host)", len(monitor.counts))
 	}
 	for client, byFault := range monitor.counts {
-		if got := byFault[connectwebsocket.FaultMarker]; got != 2 {
+		if got := byFault[connecthttp.FaultMarker]; got != 2 {
 			t.Errorf("%s: got %d marker faults; want 2", client, got)
 		}
-		if got := byFault[connectwebsocket.FaultFrameType]; got != 1 {
+		if got := byFault[connecthttp.FaultFrameType]; got != 1 {
 			t.Errorf("%s: got %d frame_type faults; want 1", client, got)
 		}
 	}
@@ -118,13 +118,11 @@ func TestMonitorCountsRepeatOffenders(t *testing.T) {
 // traffic.
 func TestMonitorSilentOnCleanTraffic(t *testing.T) {
 	httpServer, monitor := newMonitoredServer(t)
-	transport, err := connectwebsocket.NewTransport(
+	transport := connecthttp.NewTransport(
+		httpServer.Client(),
 		httpServer.URL,
-		connectwebsocket.WithHTTPClient(httpServer.Client()),
+		connecthttp.WithWebSocket(connecthttp.SelectStreaming),
 	)
-	if err != nil {
-		t.Fatalf("websocket transport: %v", err)
-	}
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
 	stream, err := client.CumSum(t.Context())
 	if err != nil {

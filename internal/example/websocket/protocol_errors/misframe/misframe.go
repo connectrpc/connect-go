@@ -31,7 +31,7 @@ import (
 )
 
 // Handler answers an upgrade with a response carrying a marker nobody has
-// defined — the mistake a client reports as connectwebsocket.FaultMarker.
+// defined — the mistake a client reports as connecthttp.FaultMarker.
 //
 // It speaks the wire format by hand rather than going through
 // connectwebsocket, because that transport frames correctly and no option

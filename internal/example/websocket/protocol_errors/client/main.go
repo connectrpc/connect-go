@@ -15,7 +15,7 @@
 // Command client misframes on purpose, to show what the server's protocol
 // error handler sees.
 //
-// It speaks the wire format by hand rather than through connectwebsocket,
+// It speaks the wire format by hand rather than through the transport,
 // because the Go client cannot produce these mistakes: the transport frames
 // correctly. The clients a monitor actually catches are hand-written ones —
 // a browser implementation, or another language's — which is exactly what this
@@ -30,11 +30,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connectwebsocket"
+	"connectrpc.com/connect/v2/connecthttp"
 	v1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	pingv1connect "connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
 	"github.com/coder/websocket"
@@ -121,7 +122,7 @@ func main() {
 	}
 	log.Println("check the server's log: every fault above was reported to its handler")
 
-	// The mirror image: an ordinary client, talking through connectwebsocket,
+	// The mirror image: an ordinary client, upgrading through connecthttp,
 	// watching for a *server* that frames its responses wrongly. Against the
 	// server above this stays silent; against one started with -misframe it
 	// reports what arrived. Run both ways to see each half.
@@ -133,18 +134,17 @@ func main() {
 // error handler registered, which is the only way a client learns that a
 // server misframed rather than simply failed.
 func watchForServerFaults(serverURL string) {
-	transport, err := connectwebsocket.NewTransport(
+	transport := connecthttp.NewTransport(
+		http.DefaultClient,
 		serverURL,
-		connectwebsocket.WithClientProtocolErrorHandler(
-			func(spec connect.Spec, fault connectwebsocket.ProtocolFault, err *connect.Error) {
+		connecthttp.WithWebSocket(connecthttp.SelectStreaming),
+		connecthttp.WithWebSocketClientProtocolErrorHandler(
+			func(spec connect.Spec, fault connecthttp.ProtocolFault, err *connect.Error) {
 				log.Printf("the server misframed a response to %s: %s — %v",
 					spec.Procedure, fault, err)
 			},
 		),
 	)
-	if err != nil {
-		log.Fatalf("websocket transport: %v", err)
-	}
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

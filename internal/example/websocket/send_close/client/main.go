@@ -25,9 +25,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connectwebsocket"
+	"connectrpc.com/connect/v2/connecthttp"
 	v1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	pingv1connect "connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
 )
@@ -54,13 +55,15 @@ func main() {
 		"drop the connection mid-stream instead of sending end-of-stream")
 	flag.Parse()
 
-	// One transport, two wires: streaming RPCs go over WebSocket and everything
-	// else over the HTTP transport this builds for itself. Swap the routing
-	// rule with connectwebsocket.WithSelector.
-	transport, err := connectwebsocket.NewTransport(serverURL)
-	if err != nil {
-		log.Fatalf("websocket transport: %v", err)
-	}
+	// One transport, two wires: connecthttp carries every RPC, and the selector
+	// says which ones upgrade. SelectStreaming sends the streaming RPCs over
+	// WebSocket and leaves unary on HTTP, where a handshake would buy nothing.
+	// Without WithWebSocket, everything stays on HTTP.
+	transport := connecthttp.NewTransport(
+		http.DefaultClient,
+		serverURL,
+		connecthttp.WithWebSocket(connecthttp.SelectStreaming),
+	)
 	pingClient := pingv1connect.NewPingServiceClient(
 		connect.NewClient(transport, transportInterceptor),
 	)

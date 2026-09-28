@@ -20,7 +20,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connectwebsocket"
+	"connectrpc.com/connect/v2/connecthttp"
 	"connectrpc.com/connect/v2/internal/example/websocket/protocol_errors/misframe"
 	v1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	pingv1connect "connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
@@ -36,24 +36,22 @@ func TestClientHandlerSeesAMisframingServer(t *testing.T) {
 	t.Cleanup(httpServer.Close)
 
 	var (
-		gotFault     connectwebsocket.ProtocolFault
+		gotFault     connecthttp.ProtocolFault
 		gotProcedure string
 		calls        int
 	)
-	transport, err := connectwebsocket.NewTransport(
+	transport := connecthttp.NewTransport(
+		httpServer.Client(),
 		httpServer.URL,
-		connectwebsocket.WithHTTPClient(httpServer.Client()),
-		connectwebsocket.WithClientProtocolErrorHandler(
-			func(spec connect.Spec, fault connectwebsocket.ProtocolFault, _ *connect.Error) {
+		connecthttp.WithWebSocket(connecthttp.SelectStreaming),
+		connecthttp.WithWebSocketClientProtocolErrorHandler(
+			func(spec connect.Spec, fault connecthttp.ProtocolFault, _ *connect.Error) {
 				calls++
 				gotFault = fault
 				gotProcedure = spec.Procedure
 			},
 		),
 	)
-	if err != nil {
-		t.Fatalf("websocket transport: %v", err)
-	}
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
 	stream, err := client.CumSum(t.Context())
 	if err != nil {
@@ -70,8 +68,8 @@ func TestClientHandlerSeesAMisframingServer(t *testing.T) {
 	if calls != 1 {
 		t.Errorf("handler called %d times; want 1", calls)
 	}
-	if gotFault != connectwebsocket.FaultMarker {
-		t.Errorf("got fault %s; want %s", gotFault, connectwebsocket.FaultMarker)
+	if gotFault != connecthttp.FaultMarker {
+		t.Errorf("got fault %s; want %s", gotFault, connecthttp.FaultMarker)
 	}
 	if gotProcedure != pingv1connect.PingServiceCumSumProcedure {
 		t.Errorf("got procedure %q; want %q", gotProcedure, pingv1connect.PingServiceCumSumProcedure)

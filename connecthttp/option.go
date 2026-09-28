@@ -18,6 +18,7 @@ import (
 	"slices"
 
 	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/internal/wstransport"
 )
 
 // Option configures [NewTransport], [Mount], and [NewErrorWriter]. A single
@@ -280,4 +281,97 @@ func (o conditionalOption) apply(opts *options) {
 		return
 	}
 	opts.conditional = append(opts.conditional, o.conditional)
+}
+
+// WithoutWebSocket stops [Mount] registering the WebSocket transport, leaving
+// each route serving plain HTTP only.
+//
+// Mount registers both by default because which transport carries an RPC is
+// the client's choice: a server that offered only HTTP would reject a client
+// that chose to upgrade. Turn it off when nothing will upgrade, or when a
+// WebSocket endpoint is something the deployment does not want exposed.
+//
+// [NewTransport] ignores this option; a client enables WebSocket by supplying
+// a selector to [WithWebSocket].
+func WithoutWebSocket() Option {
+	return withoutWebSocketOption{}
+}
+
+type withoutWebSocketOption struct{}
+
+func (withoutWebSocketOption) apply(o *options) { o.websocketDisabled = true }
+
+// WithWebSocketPrefix serves the WebSocket transport under prefix instead of
+// alongside HTTP on the same paths, so an upgrade is distinguishable from an
+// ordinary RPC by URL alone. Some load balancers need that to route WebSocket
+// traffic differently: sticky backends, longer idle timeouts, upgrade support
+// enabled.
+//
+// The bare procedure paths then stop accepting upgrades, and the prefixed ones
+// accept nothing else — a plain request to one is answered 426 Upgrade
+// Required. Both peers must agree on the value; a client passes the same
+// prefix to [NewTransport].
+func WithWebSocketPrefix(prefix string) Option {
+	return webSocketPrefixOption(prefix)
+}
+
+type webSocketPrefixOption string
+
+func (o webSocketPrefixOption) apply(opts *options) {
+	// Normalized here as well as in connectwebsocket: this package routes on
+	// the prefix and passes it there, so a difference in spelling would split
+	// the mux at one path and dial another.
+	opts.websocketPrefix = wstransport.NormalizePathPrefix(string(o))
+}
+
+// WithWebSocket routes the RPCs selector picks over WebSocket, and everything
+// else over HTTP. Without it a transport is HTTP-only.
+//
+// [SelectStreaming] is the usual choice: streaming RPCs upgrade, unary RPCs
+// stay on HTTP, where they cost no handshake. [SelectAll] and [SelectBidi] are
+// the broader and narrower alternatives.
+//
+// One set of options configures both wires, so a codec or a size limit set
+// here applies whichever way an RPC travels. [Mount] ignores this option;
+// a server accepts whatever a client chooses.
+func WithWebSocket(selector Selector) Option {
+	return webSocketOption{selector: selector}
+}
+
+type webSocketOption struct{ selector Selector }
+
+func (o webSocketOption) apply(opts *options) { opts.websocketSelector = o.selector }
+
+// WithFallbackOnUpgradeError retries an RPC over HTTP when the WebSocket
+// handshake fails, so a client reaches a server that does not speak WebSocket
+// at all — an older deployment, or a proxy that refuses upgrades.
+//
+// It costs a round trip on every stream: the handshake has to complete before
+// [connect.Client] returns a stream, because once it has, an upgrade failure
+// surfaces from Send and there is no longer anywhere to fall back to. Without
+// this option the handshake happens lazily, on first use.
+//
+// A canceled or expired call is not retried: that is the caller's doing, not a
+// peer that lacks WebSocket support.
+func WithFallbackOnUpgradeError() Option {
+	return fallbackOnUpgradeErrorOption{}
+}
+
+type fallbackOnUpgradeErrorOption struct{}
+
+func (fallbackOnUpgradeErrorOption) apply(o *options) { o.websocketFallbackOnErr = true }
+
+// webSocketServerOptionsOption carries server-side settings to the internal
+// transport. The named WithWebSocket* options are the public way in.
+type webSocketServerOptionsOption []wstransport.ServerOption
+
+func (o webSocketServerOptionsOption) apply(opts *options) {
+	opts.websocketServerOptions = append(opts.websocketServerOptions, o...)
+}
+
+// webSocketClientOptionsOption is the client-side twin.
+type webSocketClientOptionsOption []wstransport.ClientOption
+
+func (o webSocketClientOptionsOption) apply(opts *options) {
+	opts.websocketClientOptions = append(opts.websocketClientOptions, o...)
 }
