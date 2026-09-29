@@ -264,8 +264,8 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 	// into each closure (minus names it shadows), so `req.Msg` referenced from a
 	// callback is still unwrapped.
 	processed := map[*ast.FuncLit]bool{}
-	var processFunc func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs map[string]bool)
-	processFunc = func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs map[string]bool) {
+	var processFunc func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs, outerStreams map[string]bool)
+	processFunc = func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs, outerStreams map[string]bool) {
 		// serverReqs are *connect.Request[T] params; their .Header()/.Spec() map
 		// to the server CallInfo. Client response holders also lose .Msg but read
 		// response metadata, so the two sets stay apart.
@@ -285,7 +285,7 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 		mergedMsg := mergeUnwrappedScopes(outerMsg, funcType, msgHolders)
 		mergedServerReqs := mergeUnwrappedScopes(outerServerReqs, funcType, serverReqs)
 		rewriteFuncBody(body, state, &report, mergedMsg, mergedServerReqs, clientRequests, clientResponses, contextParamName(funcType))
-		rewriteStreams(funcType, body, state, &report, methodName, recvName)
+		streams := rewriteStreams(funcType, body, state, &report, methodName, recvName, outerStreams)
 		// Recurse into nested closures with the merged sets as their outer scope,
 		// marking them processed so the file-level walk skips them.
 		walkFuncBody(body, func(n ast.Node) {
@@ -294,18 +294,18 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 				return
 			}
 			processed[lit] = true
-			processFunc(lit.Type, lit.Body, "", "", mergedMsg, mergedServerReqs)
+			processFunc(lit.Type, lit.Body, "", "", mergedMsg, mergedServerReqs, streams)
 		})
 	}
 	walk(file, func(n ast.Node) {
 		switch node := n.(type) {
 		case *ast.FuncDecl:
-			processFunc(node.Type, node.Body, node.Name.Name, receiverTypeName(node.Recv), nil, nil)
+			processFunc(node.Type, node.Body, node.Name.Name, receiverTypeName(node.Recv), nil, nil, nil)
 		case *ast.FuncLit:
 			if processed[node] {
 				return
 			}
-			processFunc(node.Type, node.Body, "", "", nil, nil)
+			processFunc(node.Type, node.Body, "", "", nil, nil, nil)
 		case *ast.InterfaceType:
 			// Interface methods have a signature but no body.
 			for _, field := range node.Methods.List {
