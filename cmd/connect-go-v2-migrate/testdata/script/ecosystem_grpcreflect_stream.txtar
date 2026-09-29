@@ -1,0 +1,72 @@
+# grpcreflect ClientStream.Close returns only an error in v2, so a blank header
+# result is dropped. A kept header, Spec, Peer, ResponseHeader, and
+# WithRequestHeaders are warned.
+exec migrate
+cmp stdout out.txt
+stdout 'grpcreflect_stream_close=1'
+stdout 'ClientStream.Close returns only an error'
+stdout 'ClientStream.ResponseHeader is removed'
+stdout 'grpcreflect.WithRequestHeaders is removed'
+-- ecosystem_grpcreflect_stream.go --
+package example
+
+import (
+	"context"
+	"net/http"
+
+	"connectrpc.com/grpcreflect"
+)
+
+func listServices(ctx context.Context, client *grpcreflect.Client) error {
+	stream := client.NewStream(ctx, grpcreflect.WithRequestHeaders(http.Header{"X-Test": {"1"}}))
+	if _, err := stream.ListServices(); err != nil {
+		return err
+	}
+	_ = stream.ResponseHeader()
+	_, err := stream.Close()
+	return err
+}
+
+func closeWithHeader(ctx context.Context, client *grpcreflect.Client) (http.Header, error) {
+	stream := client.NewStream(ctx)
+	header, err := stream.Close()
+	return header, err
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./ecosystem_grpcreflect_stream.go: grpcreflect_stream_close=1 import_ecosystem_v2=1
+--- ./ecosystem_grpcreflect_stream.go
++++ ./ecosystem_grpcreflect_stream.go
+@@ -4,7 +4,7 @@
+ 	"context"
+ 	"net/http"
+ 
+-	"connectrpc.com/grpcreflect"
++	"connectrpc.com/grpcreflect/v2"
+ )
+ 
+ func listServices(ctx context.Context, client *grpcreflect.Client) error {
+@@ -13,7 +13,7 @@
+ 		return err
+ 	}
+ 	_ = stream.ResponseHeader()
+-	_, err := stream.Close()
++	err := stream.Close()
+ 	return err
+ }
+ 
+
+
+The following issues require manual code changes:
+  ./ecosystem_grpcreflect_stream.go:11:34: grpcreflect.WithRequestHeaders is removed in v2. Set headers on the context passed to NewStream with connect.NewClientContext(ctx) and info.RequestHeader().
+  ./ecosystem_grpcreflect_stream.go:15:6: grpcreflect ClientStream.ResponseHeader is removed in v2. Read call metadata from the connect.NewClientContext(ctx) info passed to NewStream.
+  ./ecosystem_grpcreflect_stream.go:22:2: grpcreflect ClientStream.Close returns only an error in v2. Read response headers from the connect.NewClientContext(ctx) info passed to NewStream.
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+
+go.mod needs the connect v2 modules. Pull them in and tidy:
+
+  go get -u \
+       connectrpc.com/grpcreflect/v2@main
+  go mod tidy
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

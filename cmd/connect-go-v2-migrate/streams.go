@@ -137,14 +137,16 @@ var streamMethodNames = map[string]bool{
 }
 
 // rewriteStreams applies every streaming rewrite to one function body.
-// methodName is the enclosing function's name (or "" for a closure).
-func rewriteStreams(funcType *ast.FuncType, body *ast.BlockStmt, state *rewriteState, report *Report, methodName, recvName string) {
+// methodName is the enclosing function's name (or "" for a closure). It returns
+// the stream variables in scope, which nested closures inherit.
+func rewriteStreams(funcType *ast.FuncType, body *ast.BlockStmt, state *rewriteState, report *Report, methodName, recvName string, outerStreams map[string]bool) map[string]bool {
 	if body == nil {
-		return
+		return nil
 	}
-	streamVars, params := collectStreamVars(funcType, body, state.connectAlias)
+	localVars, params := collectStreamVars(funcType, body, state.connectAlias)
+	streamVars := mergeUnwrappedScopes(outerStreams, funcType, localVars)
 	if len(streamVars) == 0 {
-		return
+		return nil
 	}
 	for name, param := range params {
 		migrated, ambiguous := migrateHandlerStreamParam(param, methodName, recvName, state, report)
@@ -162,6 +164,7 @@ func rewriteStreams(funcType *ast.FuncType, body *ast.BlockStmt, state *rewriteS
 	dropMsgForHolders(body, holders, report)
 	threadStreamMethods(body, streamVars, report)
 	rewriteStreamMetadata(body, streamVars, params, state, report, contextParamName(funcType))
+	return streamVars
 }
 
 func isStreamMetadataMethod(name string) bool {
@@ -284,8 +287,10 @@ func collectStreamVars(funcType *ast.FuncType, body *ast.BlockStmt, connectAlias
 	for name := range params {
 		vars[name] = true
 	}
+	// Include nested closures, since a stream is often created here but only
+	// used from a goroutine or errgroup closure.
 	called := map[string]bool{}
-	walkFuncBody(body, func(n ast.Node) {
+	walk(body, func(n ast.Node) {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return

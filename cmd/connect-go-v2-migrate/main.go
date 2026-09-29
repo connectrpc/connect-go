@@ -142,6 +142,10 @@ func runMain(args []string) int {
 		stripDanglingMsgPass(roots, *write, &run)
 	}
 
+	if *write {
+		remapToOutput(&run)
+	}
+
 	// Sort warnings so the reported diagnostics are deterministic.
 	slices.SortStableFunc(run.diagnostics, func(left, right Diagnostic) int {
 		return cmp.Or(
@@ -296,6 +300,21 @@ func mergeMsgEdit(run *results, path string, edit msgEdit) {
 	})
 }
 
+// remapToOutput moves diagnostics in written files to their position in the
+// rewritten code. Warnings are recorded against the original parse.
+func remapToOutput(run *results) {
+	mappers := make(map[string]*positionMapper, len(run.rewrites))
+	for _, rewrite := range run.rewrites {
+		mappers[displayPath(rewrite.path)] = newPositionMapper(rewrite.src, rewrite.out)
+	}
+	for index := range run.diagnostics {
+		diagnostic := &run.diagnostics[index]
+		if mapper, ok := mappers[diagnostic.File]; ok && diagnostic.Line > 0 {
+			diagnostic.Line, diagnostic.Column = mapper.remap(diagnostic.Line, diagnostic.Column)
+		}
+	}
+}
+
 // toDiagnostic converts a Warning into a Diagnostic, falling back to the
 // processed file when the warning is position-less.
 func toDiagnostic(fallback string, warning Warning) Diagnostic {
@@ -410,7 +429,7 @@ func printText(run *results, proj *project, write, migrated, color bool) {
 
 	// The migrated code needs the v2 modules in go.mod; prompt for any missing.
 	if missing := missingV2ModulesAdvice(run, proj); len(missing) > 0 {
-		fmt.Print("\ngo.mod is missing the v2 modules. Pull them in and tidy:\n\n")
+		fmt.Print("\ngo.mod needs the connect v2 modules. Pull them in and tidy:\n\n")
 		fmt.Printf("  %s\n", goGetCommand(missing))
 		fmt.Print("  go mod tidy\n")
 	}
@@ -436,9 +455,9 @@ func printPhase1Text(run *results, proj *project, write, color bool) {
 			fmt.Printf("  %s\n", displayPath(dir))
 		}
 	}
-	// BSR-generated SDK dependencies are updated through go get, not regenerated.
+	// v2 SDKs are not on the BSR yet, so these are generated locally.
 	if len(proj.sdkModules) > 0 {
-		fmt.Print("\nGenerated v1 Connect SDKs (the go get @v2 below updates these):\n")
+		fmt.Print("\nGenerated v1 Connect SDKs (generate these locally, v2 SDKs are not on the BSR yet):\n")
 		for _, mod := range proj.sdkModules {
 			fmt.Printf("  %s\n", mod)
 		}
@@ -514,9 +533,7 @@ type step struct {
 	note string
 }
 
-// phase1Steps builds the move-to-v2 instructions: a `go get -u` for the v2 core,
-// SDK dependencies (@v2), and ecosystem modules, plus local regeneration steps
-// when the main module generates its own connect code.
+// phase1Steps builds the steps that move dependencies and generated code to v2.
 func phase1Steps(run *results, proj *project, write bool) []step {
 	var steps []step
 	if !write && len(run.rewrites) > 0 {
@@ -524,39 +541,49 @@ func phase1Steps(run *results, proj *project, write bool) []step {
 	}
 	steps = append(steps, step{
 		cmd:  goGetCommand(goGetModules(proj)),
-		note: "pulls the v2 core, generated SDKs, and ecosystem modules into go.mod",
+		note: "pulls the v2 core and ecosystem modules into go.mod",
 	})
 	if len(proj.v1GenDirs) > 0 {
 		steps = append(steps, localGenSteps(run)...)
 	}
+	// TODO: switch back to `go get <sdk>@v2` once connect-go v2.0.0 ships and
+	// the remote plugin is on the BSR.
+	if len(proj.sdkModules) > 0 {
+		install := step{
+			cmd:  fmt.Sprintf("go install %s/cmd/%s@latest", connectV2Module, connectLocalPlugin),
+			note: "connect-go v2 SDKs are not on the BSR yet. Generate the connect code for the SDKs listed above locally with the v2 plugin and import it in place of the SDK",
+		}
+		if !slices.ContainsFunc(steps, func(existing step) bool { return existing.cmd == install.cmd }) {
+			steps = append(steps, install)
+		}
+	}
 	return steps
 }
 
-// goGetModules is the v2 module set to `go get -u`: the connect core, every SDK
-// dependency at @v2, and the ecosystem modules.
+// goGetModules leaves out BSR SDKs until v2 SDKs are published.
 func goGetModules(proj *project) []string {
-	mods := make([]string, 0, 1+len(proj.sdkModules)+len(proj.ecosystemModules))
+	mods := make([]string, 0, 1+len(proj.ecosystemModules))
 	mods = append(mods, connectV2Module)
-	for _, mod := range proj.sdkModules {
-		mods = append(mods, mod+"@v2")
+	for _, mod := range proj.ecosystemModules {
+		mods = append(mods, mod+ecosystemVersionQuery)
 	}
-	return append(mods, proj.ecosystemModules...)
+	return mods
 }
 
-// missingV2Modules returns the v2 modules from goGetModules that the main
-// module's go.mod does not require yet. Reports nothing when no go.mod was
-// parsed rather than guessing.
+// missingV2Modules reports nothing without a parsed go.mod rather than guessing.
 func missingV2Modules(proj *project) []string {
 	if proj.goModRequires == nil {
 		return nil
 	}
 	var missing []string
-	for _, mod := range goGetModules(proj) {
-		path, isSDK := strings.CutSuffix(mod, "@v2")
-		version, ok := proj.goModRequires[path]
-		if !ok || (isSDK && !strings.HasPrefix(version, "v2.")) {
-			missing = append(missing, mod)
+	if _, ok := proj.goModRequires[connectV2Module]; !ok {
+		missing = append(missing, connectV2Module)
+	}
+	for _, mod := range proj.ecosystemModules {
+		if _, ok := proj.goModRequires[mod]; ok && isMovedEcosystemModule(mod) {
+			continue
 		}
+		missing = append(missing, mod+ecosystemVersionQuery)
 	}
 	return missing
 }

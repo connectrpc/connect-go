@@ -51,7 +51,8 @@ The sections below show each change. Changes are marked:
 The v2 generator keeps the plugin name `protoc-gen-connect-go`. The required
 change depends on how `buf.gen.yaml` declares the plugin.
 
-For remote plugins, the reference is pinned to the v2 release:
+The v2 remote plugin is not published on the BSR until v2.0.0 is released,
+so remote plugins switch to the local plugin for now:
 
 ```diff
 version: v2
@@ -60,18 +61,18 @@ plugins:
     out: gen
     opt: paths=source_relative
 - - remote: buf.build/connectrpc/go:v1.18.1
-+ - remote: buf.build/connectrpc/go:v2.0.0
++ - local: protoc-gen-connect-go
     out: gen
     opt: paths=source_relative
 ```
 
 ✅ `connect-go-v2-migrate` handles this. It also replaces
 `buf.build/connectrpc/gosimple`, since v2 makes the simple API the default
-generator.
+generator. Install the local plugin as shown below, and switch back to the
+remote plugin once v2.0.0 is released.
 
-> **Before v2.0.0 is released**, `buf.build/connectrpc/go:v2.0.0` is not
-> published, so `buf generate` will fail against it. Use the local plugin until
-> the release lands. The migration tool warns when it rewrites a remote entry.
+BSR generated SDKs (`buf.build/gen/go/.../connectrpc/go`) have no v2 build
+yet either. Generate their Connect code locally with the v2 plugin instead.
 
 For local plugins (`local: protoc-gen-connect-go`), the `buf.gen.yaml` entry
 stays the same because the v1 and v2 plugins share the binary name.
@@ -129,21 +130,27 @@ the final tool run, resolve the new modules:
 go mod tidy
 ```
 
-The core module and the ecosystem packages move to `/v2` module paths:
+The core module and grpchealth and grpcreflect move to `/v2` module paths.
+validate and otelconnect keep their paths:
 
 | v1 | v2 |
 | --- | --- |
 | `connectrpc.com/connect` | `connectrpc.com/connect/v2` |
-| `connectrpc.com/validate` | `connectrpc.com/validate/v2` |
-| `connectrpc.com/otelconnect` | `connectrpc.com/otelconnect/v2` |
-| `connectrpc.com/authn` | `connectrpc.com/authn/v2` |
-| `connectrpc.com/grpcreflect` | `connectrpc.com/grpcreflect/v2` |
 | `connectrpc.com/grpchealth` | `connectrpc.com/grpchealth/v2` |
-| `connectrpc.com/vanguard` | `connectrpc.com/vanguard/v2` |
+| `connectrpc.com/grpcreflect` | `connectrpc.com/grpcreflect/v2` |
+| `connectrpc.com/validate` | `connectrpc.com/validate` |
+| `connectrpc.com/otelconnect` | `connectrpc.com/otelconnect` |
 
-The ecosystem modules release separately, following the core module. If
-`go mod tidy` can't resolve a `/v2` module yet, check the package's
-repository for its v2 release status. The API changes in each package are
+Until the ecosystem packages are tagged, use the `main` branch:
+
+```sh
+go get connectrpc.com/grpchealth/v2@main connectrpc.com/grpcreflect/v2@main \
+  connectrpc.com/validate@main connectrpc.com/otelconnect@main
+```
+
+The tool prints this command for the packages you import.
+`connectrpc.com/authn` keeps working on v1, so it can stay as is. The API
+changes in each package are
 covered in [Ecosystem packages](#ecosystem-packages).
 
 v2 also splits the runtime into subpackages of the same module. The core
@@ -576,8 +583,8 @@ the v1 one, then switch call sites to it by hand.
 
 ## Ecosystem packages
 
-Each ecosystem package releases its own `/v2` module. Beyond the import path,
-most also reshape their API to register on a `*connect.Server`, so
+Each ecosystem package releases a connect-go v2 build. grpchealth and
+grpcreflect move to `/v2` module paths. Most reshape their API to register on a `*connect.Server`, so
 interceptors and alternative transports cover them. The sections below show
 each change.
 
@@ -619,30 +626,8 @@ assignment, so it warns and leaves the call for you to pick the right form.
 
 ### authn
 
-Authentication moves from HTTP middleware to a server interceptor, and
-`AuthFunc` no longer receives an `*http.Request`:
-
-```go
-// v1
-type AuthFunc func(ctx context.Context, req *http.Request) (any, error)
-
-handler := authn.NewMiddleware(authenticate).Wrap(mux)
-```
-
-```go
-// v2
-type AuthFunc func(ctx context.Context, spec connect.Spec, req *connect.Header) (any, error)
-
-server := connect.NewServer(authn.NewServerInterceptor(authenticate))
-```
-
-`authn.GetInfo` is unchanged. An `AuthFunc` that read headers from the
-request ports directly to `connect.Header`. HTTP-level details move to the
-transport: read TLS state and the peer address with
-`connecthttp.ServerInfoForContext(ctx)`.
-
-⚠️ Port the `AuthFunc` body and replace the middleware by hand. The tool
-warns at each `authn.NewMiddleware` call.
+authn stays on v1. It is plain `net/http` middleware, so it keeps working in
+front of a v2 server without changes. The tool leaves authn imports unchanged.
 
 ### grpchealth
 
@@ -663,8 +648,21 @@ handler registered alongside your services with the same options joins their
 server; with different options it gets its own server, keeping its v1
 interceptor behavior.
 
-v2 also adds `grpchealth.NewClient` for calling health checks; v1 had no
-client.
+The health client changes like the generated clients:
+
+```go
+// v1
+client := grpchealth.NewClient(http.DefaultClient, "http://localhost:8080")
+```
+
+```go
+// v2
+client := grpchealth.NewClient(connect.NewClient(
+	connecthttp.NewTransport(http.DefaultClient, "http://localhost:8080"),
+))
+```
+
+✅ `connect-go-v2-migrate` handles this.
 
 ### grpcreflect
 
@@ -706,6 +704,29 @@ client := grpcreflect.NewClient(connect.NewClient(
 
 ✅ `connect-go-v2-migrate` handles this.
 
+`ClientStream.Close` returns only an error. `WithRequestHeaders` and the
+stream's `Spec`, `Peer`, and `ResponseHeader` methods are removed. Set and read
+metadata through the context passed to `NewStream`:
+
+```go
+// v1
+stream := client.NewStream(ctx, grpcreflect.WithRequestHeaders(header))
+_, err := stream.Close()
+```
+
+```go
+// v2
+ctx, info := connect.NewClientContext(ctx)
+info.RequestHeader().Set("X-Test", "1")
+stream := client.NewStream(ctx)
+err := stream.Close()
+```
+
+✅ `connect-go-v2-migrate` drops the unused header result of `Close`.
+
+⚠️ The tool warns at `WithRequestHeaders`, at a `Close` whose header is used,
+and at `Spec`, `Peer`, and `ResponseHeader` calls.
+
 ### vanguard
 
 REST transcoding mounts the server's REST routes directly; the
@@ -730,7 +751,9 @@ For gRPC servers, `vanguardgrpc.NewTranscoder(grpcServer)` becomes
 `vanguardgrpc.NewServiceRegistrar(server)`, which registers gRPC service
 implementations on a `*connect.Server`.
 
-⚠️ Update vanguard by hand. The tool warns at each v1 call site.
+⚠️ Update vanguard by hand. The v2 API changes substantially and needs new
+configuration, so the tool leaves the import unchanged and warns at the import
+and each v1 call site.
 
 ## Testing with the in-process transport
 

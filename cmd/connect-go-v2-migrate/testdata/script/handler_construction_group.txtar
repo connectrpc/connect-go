@@ -57,13 +57,13 @@ Proposed rewrites (rerun with -w to apply):
 
 
 The following issues require manual code changes:
-  ./handler_construction_group.go:17:13: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
+  ./handler_construction_group.go:17:2: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
 
-go.mod is missing the v2 modules. Pull them in and tidy:
+go.mod needs the connect v2 modules. Pull them in and tidy:
 
   go get -u \
-       connectrpc.com/grpchealth/v2
+       connectrpc.com/grpchealth/v2@main
   go mod tidy
 Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

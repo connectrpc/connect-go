@@ -70,6 +70,78 @@ func TestUnifiedDiffColor(t *testing.T) {
 	}
 }
 
+// TestPositionMapper checks that positions in the original file land on the
+// same code in the rewritten one.
+func TestPositionMapper(t *testing.T) {
+	t.Parallel()
+	original := strings.Join([]string{
+		"import (",
+		`	"net/http"`,
+		")",
+		"",
+		"func run() {",
+		"	mux.Handle(grpchealth.NewHandler(checker))",
+		"	return client.Call(ctx)",
+		"	keep()",
+		"	dropped()",
+		"}",
+	}, "\n")
+	rewritten := strings.Join([]string{
+		"import (",
+		`	"net/http"`,
+		"",
+		`	"connectrpc.com/connect/v2"`,
+		")",
+		"",
+		"func run() {",
+		"	server := connect.NewServer()",
+		"	grpchealth.Register(server, demux)",
+		"	connecthttp.Mount(mux, server)",
+		"	return client.Call(ctx, nil)",
+		"	keep()",
+		"}",
+	}, "\n")
+	mapper := newPositionMapper([]byte(original), []byte(rewritten))
+	tests := []struct {
+		name              string
+		line, col         int
+		wantLine, wantCol int
+	}{
+		{name: "unchanged_line_shifts", line: 5, col: 1, wantLine: 7, wantCol: 1},
+		{name: "split_line_follows_identifier", line: 6, col: 13, wantLine: 9, wantCol: 2},
+		{name: "changed_line_keeps_column", line: 7, col: 9, wantLine: 11, wantCol: 9},
+		{name: "identifier_matches_whole_word", line: 6, col: 2, wantLine: 10, wantCol: 20},
+		{name: "deleted_line_moves_to_next", line: 9, col: 2, wantLine: 13, wantCol: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			line, col := mapper.remap(test.line, test.col)
+			if line != test.wantLine || col != test.wantCol {
+				t.Errorf("remap(%d, %d) = (%d, %d), want (%d, %d)", test.line, test.col, line, col, test.wantLine, test.wantCol)
+			}
+		})
+	}
+}
+
+func TestIndexIdentifier(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		text, token string
+		want        int
+	}{
+		{text: "demux(mux)", token: "mux", want: 6},
+		{text: `log("mux", mux)`, token: "mux", want: 11},
+		{text: "grpchealth.NewClient(client)", token: "grpchealth", want: 0},
+		{text: "server := connect.NewServer()", token: "mux", want: -1},
+	}
+	for _, test := range tests {
+		if got := indexIdentifier(test.text, test.token); got != test.want {
+			t.Errorf("indexIdentifier(%q, %q) = %d, want %d", test.text, test.token, got, test.want)
+		}
+	}
+}
+
 // TestWantColor covers the NO_COLOR opt-out. The TTY branch depends on the
 // environment (tests run with a non-terminal stdout), so both paths here
 // resolve to no color; the assertion pins the NO_COLOR contract.

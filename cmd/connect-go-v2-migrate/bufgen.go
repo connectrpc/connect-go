@@ -15,21 +15,23 @@
 package main
 
 import (
+	"bytes"
 	"path"
 	"regexp"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 )
 
 const (
-	connectV2Module            = "connectrpc.com/connect/v2"
-	connectLocalPlugin         = "protoc-gen-connect-go"
-	connectRemotePluginVersion = "v2.0.0"
+	connectV2Module    = "connectrpc.com/connect/v2"
+	connectLocalPlugin = "protoc-gen-connect-go"
 )
 
 // connectRemotePluginRef matches connect-go remotes plugins.
 var connectRemotePluginRef = regexp.MustCompile(`^(` + bsrHostPattern + `)/connectrpc/(go|gosimple)(?::(\S+))?$`)
 
-// Plugin entry kinds returned by connectPluginItem.
+// Plugin entry kinds returned by findConnectPlugin.
 const (
 	kindLocal  = "local"  // a local binary on $PATH
 	kindGotool = "gotool" // a `go tool`/`go run` command resolved through go.mod
@@ -45,131 +47,168 @@ func isBufGenFile(base string) bool {
 	return base == "buf.gen.yaml" || base == "buf.gen.yml" || strings.HasPrefix(base, "buf.gen.")
 }
 
-// RewriteBufGen applies the v1->v2 buf.gen.yaml migration: strip the v1
-// `simple` option from any connect-go plugin entry, pin a remote plugin to the
-// v2 release, and warn when a local plugin needs reinstalling from /v2. Other
-// lines are left untouched; the returned error is always nil.
+// RewriteBufGen migrates a buf.gen.yaml to the v2 plugin. It edits the original
+// lines instead of re-encoding the YAML, so formatting and comments are kept.
 func RewriteBufGen(filename string, src []byte) ([]byte, Report, error) {
 	report := Report{}
-	// Edits are keyed by line index and applied in one final pass, so block
-	// boundaries stay valid throughout the scan; `lines` is never mutated.
 	lines := strings.Split(string(src), "\n")
-	edits := lineEdits{replace: map[int]string{}, delete: map[int]bool{}}
-
-	for index := 0; index < len(lines); index++ {
-		kind, ref, ok := connectPluginItem(lines[index])
+	entries, err := parsePluginEntries(src)
+	if err != nil {
+		report.warnAtLinef(filename, 1, ruleBufgenManualEdit, "could not parse the template, so it was not migrated: %v", err)
+		return src, report, nil
+	}
+	edits := &lineEdits{lines: lines, replace: map[int]string{}, delete: map[int]bool{}}
+	for _, entry := range entries {
+		plugin, ok := findConnectPlugin(entry)
 		if !ok {
 			continue
 		}
-		// The block runs until a sibling item or a dedent to the dash's indent.
-		dashIndent := indentOf(lines[index])
-		end := index + 1
-		for end < len(lines) {
-			if line := lines[end]; strings.TrimSpace(line) != "" && indentOf(line) <= dashIndent {
-				break
-			}
-			end++
-		}
-		stripSimpleOpt(lines, index+1, end, &edits, &report)
-		if kind == kindLocal {
-			// A v1 `path:` override can reroute through `go run`/`go tool`.
-			if pathKind, pathRef, ok := pathOverride(lines, index+1, end); ok {
-				kind, ref = pathKind, pathRef
-			}
-		}
-		switch kind {
+		stripSimpleOpt(filename, plugin, edits, &report)
+		line := plugin.key().Line
+		switch plugin.kind {
 		case kindLocal:
-			report.warnAtLinef(filename, index+1, ruleBufgenReinstall, "reinstall the generator with `go install %s/cmd/%s@latest`. The v1 and v2 plugins share the binary name %q, so reinstalling from the /v2 module switches generation to v2.", connectV2Module, connectLocalPlugin, connectLocalPlugin)
+			report.warnAtLinef(filename, line, ruleBufgenReinstall, "reinstall the generator with `go install %s/cmd/%s@latest`. The v1 and v2 plugins share the binary name %q, so reinstalling from the /v2 module switches generation to v2.", connectV2Module, connectLocalPlugin, connectLocalPlugin)
 		case kindGotool:
-			report.warnAtLinef(filename, index+1, ruleBufgenGoMod, "the plugin runs via go.mod (%s). Update the tool dependency to the v2 module with `go get -tool %s/cmd/%s` then `go mod tidy`. The buf.gen.yaml entry stays the same.", ref, connectV2Module, connectLocalPlugin)
+			report.warnAtLinef(filename, line, ruleBufgenGoMod, "the plugin runs via go.mod (%s). Update the tool dependency to the v2 module with `go get -tool %s/cmd/%s` then `go mod tidy`. The buf.gen.yaml entry stays the same.", plugin.ref, connectV2Module, connectLocalPlugin)
 		case kindRemote:
-			pinRemotePluginV2(filename, lines, index, ref, &edits, &report)
+			localizeRemotePlugin(filename, plugin, edits, &report)
 		}
-		index = end - 1
 	}
-
 	if !report.Changed {
 		return src, report, nil
 	}
-	return []byte(strings.Join(edits.apply(lines), "\n")), report, nil
+	return []byte(strings.Join(edits.apply(), "\n")), report, nil
 }
 
-// pinRemotePluginV2 pins a v1 remote plugin reference (versioned or not) to the
-// v2 release. References already at v2 are left alone.
-func pinRemotePluginV2(filename string, lines []string, index int, ref string, edits *lineEdits, report *Report) {
-	match := connectRemotePluginRef.FindStringSubmatch(ref)
-	if match == nil {
-		return
-	}
-	host, simple, version := match[1], match[2] == "gosimple", match[3]
-	if !simple && strings.HasPrefix(version, "v2") {
-		return
-	}
-	pinned := host + "/connectrpc/go:" + connectRemotePluginVersion
-	edits.replace[index] = strings.Replace(lines[index], ref, pinned, 1)
-	if simple {
-		report.bump("bufgen_replace_gosimple")
-	} else {
-		report.bump("bufgen_pin_remote_v2")
-	}
-	// TODO: drop once connect-go v2.0.0 ships and the plugin is on the BSR.
-	report.warnAtLinef(filename, index+1, ruleBufgenRemoteUnpublished, "%s is not published yet. Until connect-go %s is released, generate with the local plugin instead: `go install %s/cmd/%s@latest` and a `local: %s` entry.", pinned, connectRemotePluginVersion, connectV2Module, connectLocalPlugin, connectLocalPlugin)
+type pluginEntry struct {
+	node *yaml.Node
+	end  int // exclusive 0-based line index
 }
 
-// lineEdits records pending line replacements or deletions keyed by line index.
-type lineEdits struct {
-	replace map[int]string
-	delete  map[int]bool
+// value also returns the key's index among the keys, not among Content.
+func (e pluginEntry) value(key string) (*yaml.Node, int, bool) {
+	for index := 0; index+1 < len(e.node.Content); index += 2 {
+		if e.node.Content[index].Value == key {
+			return e.node.Content[index+1], index / 2, true
+		}
+	}
+	return nil, 0, false
 }
 
-// apply produces the edited line slice: deletions dropped, replacements
-// substituted, the rest copied verbatim.
-func (e lineEdits) apply(lines []string) []string {
-	out := make([]string, 0, len(lines))
-	for index, line := range lines {
-		if e.delete[index] {
+func parsePluginEntries(src []byte) ([]pluginEntry, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(src, &doc); err != nil {
+		return nil, err
+	}
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, nil
+	}
+	root := doc.Content[0].Content
+	for index := 0; index+1 < len(root); index += 2 {
+		if root[index].Value != "plugins" || root[index+1].Kind != yaml.SequenceNode {
 			continue
 		}
-		if replacement, ok := e.replace[index]; ok {
-			out = append(out, replacement)
-			continue
+		end := bytes.Count(src, []byte("\n")) + 1
+		if index+2 < len(root) {
+			end = root[index+2].Line - 1
 		}
-		out = append(out, line)
+		items := root[index+1].Content
+		entries := make([]pluginEntry, 0, len(items))
+		for itemIndex, item := range items {
+			if item.Kind != yaml.MappingNode {
+				continue
+			}
+			itemEnd := end
+			if itemIndex+1 < len(items) {
+				itemEnd = items[itemIndex+1].Line - 1
+			}
+			entries = append(entries, pluginEntry{node: item, end: itemEnd})
+		}
+		return entries, nil
 	}
-	return out
+	return nil, nil
 }
 
-// connectPluginItem reports whether line is a plugins sequence item naming the
-// connect-go generator, returning its kind and raw reference. It recognises the
-// v2 (`local:`/`remote:`) and v1 (`name:`/`plugin:`) syntaxes; a `local:` flow
-// sequence routed through `go run`/`go tool` is reported as kindGotool.
-func connectPluginItem(line string) (kind, ref string, ok bool) {
-	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, "- ") {
-		return "", "", false
+type connectPlugin struct {
+	entry    pluginEntry
+	keyIndex int // among the keys, not among Content
+	kind     string
+	ref      string
+}
+
+func (p connectPlugin) key() *yaml.Node   { return p.entry.node.Content[2*p.keyIndex] }
+func (p connectPlugin) value() *yaml.Node { return p.entry.node.Content[2*p.keyIndex+1] }
+
+// findConnectPlugin accepts the plugin key in any position. A v1 `path` can
+// reroute a local plugin through go.mod.
+func findConnectPlugin(entry pluginEntry) (connectPlugin, bool) {
+	for index := 0; index+1 < len(entry.node.Content); index += 2 {
+		key, value := entry.node.Content[index], entry.node.Content[index+1]
+		kind, ref, ok := classifyPluginKey(key.Value, value)
+		if !ok {
+			continue
+		}
+		plugin := connectPlugin{entry: entry, keyIndex: index / 2, kind: kind, ref: ref}
+		if kind == kindLocal {
+			if pathValue, _, hasPath := entry.value("path"); hasPath {
+				if pathKind, pathRef, ok := classifyLocalPlugin(pathValue); ok {
+					plugin.kind, plugin.ref = pathKind, pathRef
+				}
+			}
+		}
+		return plugin, true
 	}
-	rest := strings.TrimSpace(trimmed[len("- "):])
-	switch {
-	case strings.HasPrefix(rest, "local:"):
-		return classifyLocalPlugin(yamlScalar(rest[len("local:"):]))
-	case strings.HasPrefix(rest, "remote:"):
-		if value := yamlScalar(rest[len("remote:"):]); isConnectRemoteRef(value) {
-			return kindRemote, value, true
+	return connectPlugin{}, false
+}
+
+func classifyPluginKey(key string, value *yaml.Node) (kind, ref string, ok bool) {
+	switch key {
+	case "local":
+		return classifyLocalPlugin(value)
+	case "remote":
+		if value.Kind == yaml.ScalarNode && isConnectRemoteRef(value.Value) {
+			return kindRemote, value.Value, true
 		}
-	case strings.HasPrefix(rest, "name:"): // v1 syntax
-		if value := yamlScalar(rest[len("name:"):]); value == "connect-go" {
-			return kindLocal, value, true
+	case "name": // v1 syntax
+		if value.Kind == yaml.ScalarNode && value.Value == "connect-go" {
+			return kindLocal, value.Value, true
 		}
-	case strings.HasPrefix(rest, "plugin:"): // v1 syntax: local name or remote ref
-		value := yamlScalar(rest[len("plugin:"):])
+	case "plugin": // v1 syntax
+		if value.Kind != yaml.ScalarNode {
+			return "", "", false
+		}
 		switch {
-		case isConnectRemoteRef(value):
-			return kindRemote, value, true
-		case value == "connect-go" || value == connectLocalPlugin:
-			return kindLocal, value, true
+		case isConnectRemoteRef(value.Value):
+			return kindRemote, value.Value, true
+		case value.Value == "connect-go" || value.Value == connectLocalPlugin:
+			return kindLocal, value.Value, true
 		}
 	}
 	return "", "", false
+}
+
+func classifyLocalPlugin(value *yaml.Node) (kind, ref string, ok bool) {
+	if value.Kind == yaml.ScalarNode {
+		if value.Value == connectLocalPlugin {
+			return kindLocal, value.Value, true
+		}
+		return "", "", false
+	}
+	if value.Kind != yaml.SequenceNode || len(value.Content) == 0 {
+		return "", "", false
+	}
+	command := make([]string, 0, len(value.Content))
+	for _, element := range value.Content {
+		command = append(command, element.Value)
+	}
+	if path.Base(command[len(command)-1]) != connectLocalPlugin {
+		return "", "", false
+	}
+	ref = "[" + strings.Join(command, ", ") + "]"
+	if len(command) >= 2 && command[0] == "go" && (command[1] == "tool" || command[1] == "run") {
+		return kindGotool, ref, true
+	}
+	return kindLocal, ref, true
 }
 
 // isConnectRemoteRef reports whether value references either connect-go remote
@@ -178,142 +217,86 @@ func isConnectRemoteRef(value string) bool {
 	return connectRemotePluginRef.MatchString(value)
 }
 
-// pathOverride scans a v1 plugin block for a `path:` whose value is a command
-// (YAML flow sequence) naming the connect-go generator. A plain string path
-// keeps the entry a local binary.
-func pathOverride(lines []string, start, end int) (kind, ref string, ok bool) {
-	for index := start; index < end; index++ {
-		trimmed := strings.TrimSpace(lines[index])
-		if !strings.HasPrefix(trimmed, "path:") {
-			continue
-		}
-		return classifyLocalPlugin(yamlScalar(trimmed[len("path:"):]))
+// localizeRemotePlugin switches to the local plugin because the v2 remote plugin
+// is not on the BSR until connect-go v2.0.0 ships.
+//
+// TODO: pin to the v2 remote plugin once connect-go v2.0.0 is released.
+func localizeRemotePlugin(filename string, plugin connectPlugin, edits *lineEdits, report *Report) {
+	match := connectRemotePluginRef.FindStringSubmatch(plugin.ref)
+	if match == nil {
+		return
 	}
-	return "", "", false
+	if simple, version := match[2] == "gosimple", match[3]; !simple && strings.HasPrefix(version, "v2") {
+		return
+	}
+	line := plugin.key().Line
+	// Edit the value before the key, so the key's column stays valid.
+	var edited bool
+	if plugin.key().Value == "remote" {
+		edited = edits.replaceScalar(plugin.value(), connectLocalPlugin) && edits.replaceScalar(plugin.key(), "local")
+	} else {
+		// v1 `plugin` names a local plugin without the protoc-gen- prefix.
+		edited = edits.replaceScalar(plugin.value(), "connect-go")
+	}
+	if !edited {
+		report.warnAtLinef(filename, line, ruleBufgenManualEdit, "switch %s to the local plugin `%s` by hand.", plugin.ref, connectLocalPlugin)
+		return
+	}
+	// `revision` only applies to remote plugins.
+	if revision, index, ok := plugin.entry.value("revision"); ok && !edits.deleteKey(plugin.entry, index) {
+		report.warnAtLinef(filename, revision.Line, ruleBufgenManualEdit, "remove `revision`, it only applies to remote plugins.")
+	}
+	report.bump("bufgen_remote_to_local")
+	report.warnAtLinef(filename, line, ruleBufgenRemoteUnpublished, "%s has no v2 release yet, so this entry now runs the local plugin. Install it with `go install %s/cmd/%s@latest`, and switch back to the remote plugin once connect-go v2.0.0 is released.", plugin.ref, connectV2Module, connectLocalPlugin)
+	// Feeds the regenerate steps, which install the local plugin.
+	report.warnAtLinef(filename, line, ruleBufgenReinstall, "install the generator with `go install %s/cmd/%s@latest`.", connectV2Module, connectLocalPlugin)
 }
 
-// classifyLocalPlugin classifies a `local:` value (bare binary name or a flow
-// sequence command) as the connect-go plugin. A `go tool`/`go run` indirection
-// is reported as kindGotool.
-func classifyLocalPlugin(value string) (kind, ref string, ok bool) {
-	value = strings.TrimSpace(value)
-	if value == connectLocalPlugin {
-		return kindLocal, value, true
+func stripSimpleOpt(filename string, plugin connectPlugin, edits *lineEdits, report *Report) {
+	opt, optIndex, ok := plugin.entry.value("opt")
+	if !ok {
+		return
 	}
-	if !strings.HasPrefix(value, "[") || !strings.HasSuffix(value, "]") {
-		return "", "", false
-	}
-	command := splitFlowSequence(value)
-	if len(command) == 0 || path.Base(command[len(command)-1]) != connectLocalPlugin {
-		return "", "", false
-	}
-	if len(command) >= 2 && command[0] == "go" && (command[1] == "tool" || command[1] == "run") {
-		return kindGotool, value, true
-	}
-	return kindLocal, value, true
-}
-
-// splitFlowSequence parses a YAML flow sequence ("[a, b, c]") into trimmed,
-// unquoted elements.
-func splitFlowSequence(value string) []string {
-	inner := strings.TrimSuffix(strings.TrimPrefix(value, "["), "]")
-	var elements []string
-	for part := range strings.SplitSeq(inner, ",") {
-		if trimmed := yamlScalar(part); trimmed != "" {
-			elements = append(elements, trimmed)
+	var edited bool
+	switch opt.Kind {
+	case yaml.ScalarNode:
+		var kept []string
+		for token := range strings.SplitSeq(opt.Value, ",") {
+			if !isSimpleToken(token) {
+				kept = append(kept, strings.TrimSpace(token))
+			}
 		}
-	}
-	return elements
-}
-
-// stripSimpleOpt removes the v1 `simple` option from the plugin block in
-// [start, end), handling both the inline (opt: a,simple=true) and list (opt:
-// with `- simple=true` items) forms.
-func stripSimpleOpt(lines []string, start, end int, edits *lineEdits, report *Report) {
-	for index := start; index < end; index++ {
-		optIndent, value, isOpt := optLine(lines[index])
-		if !isOpt {
-			continue
-		}
-		if value != "" {
-			stripInlineSimple(index, optIndent, value, edits, report)
+		if len(kept) == len(strings.Split(opt.Value, ",")) {
 			return
 		}
-		stripListSimple(lines, index, optIndent, end, edits, report)
+		if len(kept) == 0 {
+			edited = edits.deleteKey(plugin.entry, optIndex)
+		} else {
+			edited = edits.replaceScalar(opt, strings.Join(kept, ","))
+		}
+	case yaml.SequenceNode:
+		var simple []*yaml.Node
+		for _, item := range opt.Content {
+			if isSimpleToken(item.Value) {
+				simple = append(simple, item)
+			}
+		}
+		if len(simple) == 0 {
+			return
+		}
+		if len(simple) == len(opt.Content) {
+			edited = edits.deleteKey(plugin.entry, optIndex)
+		} else {
+			edited = edits.deleteSequenceItems(opt, simple)
+		}
+	case yaml.DocumentNode, yaml.MappingNode, yaml.AliasNode:
 		return
 	}
-}
-
-// stripInlineSimple rewrites `opt: a,simple=x,b` to `opt: a,b`, or deletes the
-// whole line when `simple` was the only option.
-func stripInlineSimple(index, indent int, value string, edits *lineEdits, report *Report) {
-	kept := make([]string, 0)
-	dropped := false
-	for token := range strings.SplitSeq(value, ",") {
-		if isSimpleToken(token) {
-			dropped = true
-			continue
-		}
-		kept = append(kept, strings.TrimSpace(token))
-	}
-	if !dropped {
-		return
-	}
-	report.bump("bufgen_remove_simple")
-	if len(kept) == 0 {
-		edits.delete[index] = true
-		return
-	}
-	edits.replace[index] = strings.Repeat(" ", indent) + "opt: " + strings.Join(kept, ",")
-}
-
-// stripListSimple removes `- simple=x` entries from an opt list and, if that
-// empties the list, the `opt:` header too.
-func stripListSimple(lines []string, optIndex, optIndent, end int, edits *lineEdits, report *Report) {
-	var itemCount, simpleCount int
-	simpleLines := make([]int, 0)
-	for index := optIndex + 1; index < end; index++ {
-		line := lines[index]
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		if indentOf(line) <= optIndent {
-			break // dedented out of the opt list
-		}
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		if !strings.HasPrefix(trimmed, "- ") {
-			break // not a list item, opt block ended
-		}
-		itemCount++
-		if isSimpleToken(yamlScalar(trimmed[len("- "):])) {
-			simpleCount++
-			simpleLines = append(simpleLines, index)
-		}
-	}
-	if simpleCount == 0 {
+	if !edited {
+		report.warnAtLinef(filename, opt.Line, ruleBufgenManualEdit, "remove the v1 `simple` option by hand. v2 always generates the simple API and rejects the option.")
 		return
 	}
 	report.bump("bufgen_remove_simple")
-	for _, index := range simpleLines {
-		edits.delete[index] = true
-	}
-	if simpleCount == itemCount {
-		// Every option was `simple`. Drop the now-empty `opt:` header too.
-		edits.delete[optIndex] = true
-	}
-}
-
-// optLine reports whether line is an `opt:` key. It returns the key's
-// indentation and the inline value (empty for the list form `opt:`).
-func optLine(line string) (indent int, value string, ok bool) {
-	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, "opt:") {
-		return 0, "", false
-	}
-	return indentOf(line), yamlScalar(trimmed[len("opt:"):]), true
 }
 
 // isSimpleToken reports whether a single opt token is the v1 `simple` flag,
@@ -323,24 +306,121 @@ func isSimpleToken(token string) bool {
 	return token == "simple" || strings.HasPrefix(token, "simple=")
 }
 
-// yamlScalar trims whitespace, surrounding quotes, and any trailing line
-// comment from a scalar value. A quoted value is returned verbatim so a "#"
-// inside the quotes is not mistaken for a comment.
-func yamlScalar(value string) string {
-	value = strings.TrimSpace(value)
-	if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') {
-		if end := strings.IndexByte(value[1:], value[0]); end >= 0 {
-			return value[1 : 1+end]
-		}
-	}
-	if hash := strings.Index(value, " #"); hash >= 0 {
-		value = strings.TrimSpace(value[:hash])
-	}
-	return value
+// lineEdits applies every edit in one pass, so parsed line numbers stay valid.
+type lineEdits struct {
+	lines   []string
+	replace map[int]string
+	delete  map[int]bool
 }
 
-// indentOf counts leading spaces. YAML forbids tabs for indentation, so a tab
-// stops the count, which is fine for our purposes.
+func (e *lineEdits) current(index int) string {
+	if line, ok := e.replace[index]; ok {
+		return line
+	}
+	return e.lines[index]
+}
+
+// replaceScalar reports false if the source doesn't match the node.
+func (e *lineEdits) replaceScalar(node *yaml.Node, value string) bool {
+	index, column := node.Line-1, node.Column-1
+	raw, ok := quoteLike(node, node.Value)
+	if !ok || index < 0 || index >= len(e.lines) {
+		return false
+	}
+	line := e.current(index)
+	if column < 0 || !strings.HasPrefix(line[min(column, len(line)):], raw) {
+		return false
+	}
+	replacement, _ := quoteLike(node, value)
+	e.replace[index] = line[:column] + replacement + line[column+len(raw):]
+	return true
+}
+
+// quoteLike reports false for styles or values it can't reproduce exactly.
+func quoteLike(node *yaml.Node, value string) (string, bool) {
+	switch {
+	case node.Style == 0:
+		return value, true
+	case node.Style&yaml.DoubleQuotedStyle != 0 && !strings.ContainsAny(value, `"\`):
+		return `"` + value + `"`, true
+	case node.Style&yaml.SingleQuotedStyle != 0 && !strings.Contains(value, "'"):
+		return "'" + value + "'", true
+	}
+	return "", false
+}
+
+// deleteKey replaces a key on the entry's first line with the next key, so the
+// sequence dash stays.
+func (e *lineEdits) deleteKey(entry pluginEntry, keyIndex int) bool {
+	if entry.node.Style&yaml.FlowStyle != 0 {
+		return false
+	}
+	keys := len(entry.node.Content) / 2
+	start := entry.node.Content[2*keyIndex].Line - 1
+	end := entry.end
+	if keyIndex+1 < keys {
+		end = entry.node.Content[2*(keyIndex+1)].Line - 1
+	}
+	// Keep trailing blank and comment lines with whatever follows.
+	for end > start+1 && isBlankOrComment(e.lines[end-1]) {
+		end--
+	}
+	if start != entry.node.Line-1 {
+		for index := start; index < end; index++ {
+			e.delete[index] = true
+		}
+		return true
+	}
+	if keyIndex+1 >= keys {
+		return false
+	}
+	// The next key is at the same column, so its nested value stays valid.
+	next := entry.node.Content[2*(keyIndex+1)].Line - 1
+	column := entry.node.Content[2*keyIndex].Column - 1
+	if indentOf(e.current(next)) != column {
+		return false
+	}
+	e.replace[start] = e.current(start)[:column] + e.current(next)[column:]
+	for index := start + 1; index < end; index++ {
+		e.delete[index] = true
+	}
+	e.delete[next] = true
+	return true
+}
+
+func (e *lineEdits) deleteSequenceItems(sequence *yaml.Node, items []*yaml.Node) bool {
+	if sequence.Style&yaml.FlowStyle != 0 {
+		return false
+	}
+	for _, item := range items {
+		index := item.Line - 1
+		raw, ok := quoteLike(item, item.Value)
+		if !ok || strings.TrimPrefix(strings.TrimSpace(e.lines[index]), "- ") != raw {
+			return false
+		}
+	}
+	for _, item := range items {
+		e.delete[item.Line-1] = true
+	}
+	return true
+}
+
+func (e *lineEdits) apply() []string {
+	out := make([]string, 0, len(e.lines))
+	for index := range e.lines {
+		if e.delete[index] {
+			continue
+		}
+		out = append(out, e.current(index))
+	}
+	return out
+}
+
+func isBlankOrComment(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return trimmed == "" || strings.HasPrefix(trimmed, "#")
+}
+
 func indentOf(line string) int {
 	count := 0
 	for count < len(line) && line[count] == ' ' {

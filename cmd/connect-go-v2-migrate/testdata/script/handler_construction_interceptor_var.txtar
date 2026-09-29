@@ -60,7 +60,7 @@ Proposed rewrites (rerun with -w to apply):
 
 The following issues require manual code changes:
   ./handler_construction_interceptor_var.go:19:9: connect.WithInterceptors -> interceptors pass to connect.NewServer(...) or connect.NewClient(...). The v2 type is connect.ServerInterceptor or connect.ClientInterceptor.
-  ./handler_construction_interceptor_var.go:21:13: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
+  ./handler_construction_interceptor_var.go:21:2: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
   ./handler_construction_interceptor_var.go:21:64: interceptor opt stays in the connect.NewServer(...) list unmigrated. Its v2 type is connect.ServerInterceptor.
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).

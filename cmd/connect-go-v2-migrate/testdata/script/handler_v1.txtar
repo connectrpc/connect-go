@@ -80,7 +80,7 @@ First, move the dependencies and generated code to v2:
 
   1. go get -u \
        connectrpc.com/connect/v2
-     (pulls the v2 core, generated SDKs, and ecosystem modules into go.mod)
+     (pulls the v2 core and ecosystem modules into go.mod)
   2. go install connectrpc.com/connect/v2/cmd/protoc-gen-connect-go@latest
      (see docs/v2-migration.md if you generate with a remote plugin or a
      go.mod tool)
