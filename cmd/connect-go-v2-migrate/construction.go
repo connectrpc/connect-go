@@ -179,7 +179,7 @@ func buildConstructionReplacement(block *ast.BlockStmt, run []constructionMatch,
 	mountOpts := first.otherOpts
 	if presence := findReadLimit(mountOpts, first.optsSpread, state, readLimitVars); presence != readLimitSet {
 		mountOpts = injectReadLimit(mountOpts, state)
-		reportReadLimit(report, presence, first.pos)
+		reportReadLimit(report, presence, first.mux.Pos())
 		report.bump("read_limit_pinned")
 	}
 	mountArgs := append([]ast.Expr{first.mux, ast.NewIdent(serverName)}, mountOpts...)

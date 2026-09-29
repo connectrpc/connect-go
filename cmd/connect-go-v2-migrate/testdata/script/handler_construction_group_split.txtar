@@ -70,9 +70,9 @@ Proposed rewrites (rerun with -w to apply):
 
 
 The following issues require manual code changes:
-  ./handler_construction_group_split.go:19:13: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
+  ./handler_construction_group_split.go:19:2: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
   ./handler_construction_group_split.go:23:2: handlers on mux have differing options, so each group gets its own *connect.Server. v2 interceptors apply per server.
-  ./handler_construction_group_split.go:23:13: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
+  ./handler_construction_group_split.go:23:2: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
 

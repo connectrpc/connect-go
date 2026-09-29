@@ -44,7 +44,7 @@ Proposed rewrites (rerun with -w to apply):
 
 
 The following issues require manual code changes:
-  ./ecosystem_grpchealth.go:12:13: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
+  ./ecosystem_grpchealth.go:12:2: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
 

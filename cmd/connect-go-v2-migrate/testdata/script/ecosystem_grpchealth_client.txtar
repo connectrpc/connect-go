@@ -1,7 +1,12 @@
-# grpchealth.NewClient takes a *connect.Client in v2, like grpcreflect.
+# grpchealth.NewClient takes a *connect.Client in v2, like grpcreflect. With -w
+# the diagnostic points into the rewritten file, past the two added imports.
 exec migrate
 cmp stdout out.txt
 stdout 'grpchealth_client=1'
+stdout 'ecosystem_grpchealth_client.go:10:9: v2 limits reads'
+exec migrate -w
+stdout 'ecosystem_grpchealth_client.go:12:9: v2 limits reads'
+grep 'return grpchealth.NewClient' ecosystem_grpchealth_client.go
 -- ecosystem_grpchealth_client.go --
 package example
 

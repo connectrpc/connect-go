@@ -142,6 +142,10 @@ func runMain(args []string) int {
 		stripDanglingMsgPass(roots, *write, &run)
 	}
 
+	if *write {
+		remapToOutput(&run)
+	}
+
 	// Sort warnings so the reported diagnostics are deterministic.
 	slices.SortStableFunc(run.diagnostics, func(left, right Diagnostic) int {
 		return cmp.Or(
@@ -294,6 +298,21 @@ func mergeMsgEdit(run *results, path string, edit msgEdit) {
 		path: path, src: edit.base, out: edit.content,
 		summary: fmt.Sprintf("strip_dangling_msg=%d", edit.count),
 	})
+}
+
+// remapToOutput moves diagnostics in written files to their position in the
+// rewritten code. Warnings are recorded against the original parse.
+func remapToOutput(run *results) {
+	mappers := make(map[string]*positionMapper, len(run.rewrites))
+	for _, rewrite := range run.rewrites {
+		mappers[displayPath(rewrite.path)] = newPositionMapper(rewrite.src, rewrite.out)
+	}
+	for index := range run.diagnostics {
+		diagnostic := &run.diagnostics[index]
+		if mapper, ok := mappers[diagnostic.File]; ok && diagnostic.Line > 0 {
+			diagnostic.Line, diagnostic.Column = mapper.remap(diagnostic.Line, diagnostic.Column)
+		}
+	}
 }
 
 // toDiagnostic converts a Warning into a Diagnostic, falling back to the
