@@ -626,8 +626,8 @@ assignment, so it warns and leaves the call for you to pick the right form.
 
 ### authn
 
-authn has no v2 release, so keep `connectrpc.com/authn`. Its HTTP middleware
-wraps the mux as before. The tool leaves authn imports unchanged.
+authn stays on v1. It is plain `net/http` middleware, so it keeps working in
+front of a v2 server without changes. The tool leaves authn imports unchanged.
 
 ### grpchealth
 
