@@ -15,8 +15,10 @@
 package wstransport_test
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -139,6 +141,35 @@ func TestPathPrefixRemovesUpgradeFromBarePaths(t *testing.T) {
 
 	_, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 1})
 	assert.NotNil(t, err)
+}
+
+// The refusal must say the handshake was wrong. Falling through to the Connect
+// handler answers the upgrade's GET with 505 Version Not Supported, which reads
+// as an HTTP-version problem and sends an operator somewhere else entirely.
+func TestPathPrefixRefusesBarePathUpgradeWithBadRequest(t *testing.T) {
+	t.Parallel()
+	httpServer, _ := newWSPrefixServer(t)
+
+	request, err := http.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		httpServer.URL+pingv1connect.PingServiceCumSumProcedure,
+		nil,
+	)
+	assert.Nil(t, err)
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+	request.Header.Set("Sec-WebSocket-Version", "13")
+	request.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	request.Header.Set("Sec-WebSocket-Protocol", "connectrpc.1+proto")
+
+	response, err := httpServer.Client().Do(request)
+	assert.Nil(t, err)
+	t.Cleanup(func() { _ = response.Body.Close() })
+	assert.Equal(t, response.StatusCode, http.StatusBadRequest)
+	body, readErr := io.ReadAll(response.Body)
+	assert.Nil(t, readErr)
+	assert.True(t, strings.Contains(string(body), "path prefix"))
 }
 
 // Plain HTTP still works at the bare paths, prefix or no prefix.

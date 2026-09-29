@@ -142,7 +142,7 @@ func (c *browserClient) writeProto(tb testing.TB, payload []byte) {
 // it arrived in a text frame.
 func (c *browserClient) readMessage(tb testing.TB) (byte, []byte, bool) {
 	tb.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := readContext(tb)
 	defer cancel()
 	messageType, data, err := c.conn.Read(ctx)
 	if err != nil {

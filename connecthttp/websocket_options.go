@@ -179,6 +179,27 @@ func WithoutWebSocketCompression() Option {
 	return webSocketBothOption{wstransport.WithoutCompression()}
 }
 
+// WithWebSocketFaultCloseCode sends a peer that breaks the framing the close
+// code the protocol assigns its fault, instead of hanging up on it.
+//
+// The protocol asks for that code, and it is the only part of a verdict a
+// browser script can read: the WebSocket API hands a script the close code and
+// never the message body. It is off by default all the same, because sending it
+// means completing the closing handshake, and that handshake reads until the
+// peer's own close frame arrives — bounded at five seconds, but by no number of
+// bytes. A peer that just overran the read limit has bytes queued to spend them
+// on: a rejected compression bomb was measured draining 128MiB inside the
+// window, against 96KiB for hanging up. Nothing is decompressed or kept, so the
+// cost is socket time rather than memory, and the connection is held for the
+// duration either way.
+//
+// The end-of-stream message carrying the verdict is sent regardless; only the
+// close code is given up. Turn this on where peers are browsers, or otherwise
+// trusted enough that their diagnostics are worth the window.
+func WithWebSocketFaultCloseCode() Option {
+	return webSocketBothOption{wstransport.WithFaultCloseCode()}
+}
+
 // webSocketBothOption carries a setting that applies to whichever side is
 // being configured.
 type webSocketBothOption [1]wstransport.Option

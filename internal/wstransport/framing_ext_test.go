@@ -45,6 +45,7 @@ const (
 	opcodeContinuation = 0x00
 	opcodeText         = 0x01
 	opcodeBinary       = 0x02
+	opcodeClose        = 0x08
 )
 
 // readServerFrame reads one frame from the server and reports whether RSV1 is
@@ -183,6 +184,95 @@ func TestWrongDirectionMarkerIsNamedAsSuch(t *testing.T) {
 			assert.True(t, strings.Contains(string(data), "invalid_argument"))
 		})
 	}
+}
+
+// §13 assigns each fault a close code, and it is the only part of a verdict a
+// browser script can read: the WebSocket API hands a script the code, never the
+// message body. A more specific code wins over the generic protocol error.
+func TestFaultCloseCodeNamesTheFault(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		send func(testing.TB, *websocket.Conn)
+		want websocket.StatusCode
+	}{
+		{
+			name: "unknown marker is a protocol error",
+			send: func(tb testing.TB, conn *websocket.Conn) {
+				tb.Helper()
+				sendJSONMessage(tb, conn, 'Z', []byte(`{}`))
+			},
+			want: websocket.StatusProtocolError, // 1002
+		},
+		{
+			name: "an empty text body is the wrong frame type",
+			send: func(tb testing.TB, conn *websocket.Conn) {
+				tb.Helper()
+				sendJSONMessage(tb, conn, wireBody, nil)
+			},
+			want: websocket.StatusUnsupportedData, // 1003
+		},
+		{
+			name: "an oversized message is too big",
+			send: func(tb testing.TB, conn *websocket.Conn) {
+				tb.Helper()
+				sendWireMessage(tb, conn, false, wireBody, make([]byte, 8192))
+			},
+			want: websocket.StatusMessageTooBig, // 1009
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			server := connect.NewServer()
+			pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+			mux := http.NewServeMux()
+			connecthttp.Mount(mux, server,
+				connecthttp.WithReadMaxBytes(1024),
+				connecthttp.WithWebSocketFaultCloseCode(),
+			)
+			httpServer := httptest.NewServer(mux)
+			t.Cleanup(httpServer.Close)
+
+			conn := dialCumSum(t, httpServer, "")
+			test.send(t, conn)
+
+			// The verdict comes first; the code only says which kind it was.
+			data := readServerOpening(t, conn)
+			assert.Equal(t, data[0], wireServerEndStream)
+
+			readCtx, cancelRead := readContext(t)
+			defer cancelRead()
+			_, _, err := conn.Read(readCtx)
+			assert.Equal(t, websocket.CloseStatus(err), test.want)
+		})
+	}
+}
+
+// By default there is no close frame at all, so no code: that is what the
+// option buys, and what a deployment gives up to bound the drain.
+func TestFaultedPeerIsHungUpOnByDefault(t *testing.T) {
+	t.Parallel()
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, server)
+	httpServer := httptest.NewServer(mux)
+	t.Cleanup(httpServer.Close)
+
+	conn := dialCumSum(t, httpServer, "")
+	sendJSONMessage(t, conn, 'Z', []byte(`{}`))
+
+	// The S message still arrives: only the close frame is given up.
+	data := readServerOpening(t, conn)
+	assert.Equal(t, data[0], wireServerEndStream)
+	assert.True(t, strings.Contains(string(data), "unknown marker Z"))
+
+	readCtx, cancelRead := readContext(t)
+	defer cancelRead()
+	_, _, err := conn.Read(readCtx)
+	assert.NotNil(t, err)
+	// No close frame, so no status: an abnormal closure rather than 1002.
+	assert.Equal(t, websocket.CloseStatus(err), websocket.StatusCode(-1))
 }
 
 // A server that negotiates permessage-deflate without no-context-takeover is

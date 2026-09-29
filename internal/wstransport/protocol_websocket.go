@@ -27,6 +27,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/internal/connectwire"
@@ -58,7 +59,6 @@ const (
 	// Connect protocol on the [connect.CallInfo].Protocol field.
 	ProtocolConnectWebSocket = "connect+ws"
 
-	wsSubprotocolBase  = "connectrpc.1"
 	wsSubprotocolProto = "connectrpc.1+proto"
 	wsSubprotocolJSON  = "connectrpc.1+json"
 
@@ -79,6 +79,9 @@ const (
 type websocketHandlerConn struct {
 	request *http.Request
 	wsConn  *websocket.Conn
+	// faultCloseCode sends the close frame §13 owes a peer that broke the
+	// framing, instead of hanging up on it.
+	faultCloseCode bool
 
 	marshaler   messageWriter
 	unmarshaler websocketUnmarshaler
@@ -180,16 +183,79 @@ func peerFault(err *connect.Error) bool {
 	return code == connect.CodeResourceExhausted || code == connect.CodeInvalidArgument
 }
 
-// closeReason truncates to the 125 bytes a WebSocket close frame allows.
+// Close codes this binding assigns a client, from §13. A browser script may
+// only pass 1000 or 3000-4999 to close(), so a client cannot send the 10xx code
+// a server would; its codes live in the 31xx range instead, and a receiver
+// folds them onto the 10xx code with the same last two digits.
+const (
+	wsStatusClientProtocolError   = websocket.StatusCode(3102)
+	wsStatusClientUnsupportedData = websocket.StatusCode(3103)
+	wsStatusClientMessageTooBig   = websocket.StatusCode(3109)
+	wsStatusClientCompression     = websocket.StatusCode(3110)
+)
+
+// normalizeCloseStatus folds a 31xx code onto the 10xx code with the same last
+// two digits, so that the rest of this package can interpret one set (§13).
+func normalizeCloseStatus(status websocket.StatusCode) websocket.StatusCode {
+	if status >= 3100 && status <= 3199 {
+		return status - 2100
+	}
+	return status
+}
+
+// serverCloseCode is the code §13 assigns each framing fault. A more specific
+// one wins over the generic protocol error.
+func serverCloseCode(fault ProtocolFault) websocket.StatusCode {
+	switch fault {
+	case FaultFrameType:
+		return websocket.StatusUnsupportedData
+	case FaultSizeLimit:
+		return websocket.StatusMessageTooBig
+	case FaultMarker, FaultMetadata, FaultMessageEncoding, FaultUnknown:
+		return websocket.StatusProtocolError
+	}
+	return websocket.StatusProtocolError
+}
+
+// clientCloseCode is the 31xx counterpart of serverCloseCode.
+func clientCloseCode(fault ProtocolFault) websocket.StatusCode {
+	switch fault {
+	case FaultFrameType:
+		return wsStatusClientUnsupportedData
+	case FaultSizeLimit:
+		return wsStatusClientMessageTooBig
+	case FaultMarker, FaultMetadata, FaultMessageEncoding, FaultUnknown:
+		return wsStatusClientProtocolError
+	}
+	return wsStatusClientProtocolError
+}
+
+// closeReason truncates to the 123 bytes a WebSocket close frame allows: RFC
+// 6455 caps a control payload at 125, and the status code takes two of them. An
+// over-long reason is not truncated by the WebSocket library but rejected, so
+// getting this wrong sends no close frame at all.
 func closeReason(reason string) string {
-	const maxCloseReasonBytes = 125
+	const maxCloseReasonBytes = 123
 	if len(reason) <= maxCloseReasonBytes {
 		return reason
 	}
-	return reason[:maxCloseReasonBytes]
+	truncated := reason[:maxCloseReasonBytes]
+	// A close reason must be valid UTF-8, so back off a cut that landed inside
+	// a multi-byte rune. At most three bytes go.
+	for len(truncated) > 0 && !utf8.ValidString(truncated) {
+		truncated = truncated[:len(truncated)-1]
+	}
+	return truncated
 }
 
 func (c *websocketHandlerConn) Close(err error) error {
+	// A message after C is the RPC's outcome whatever the handler concluded:
+	// the peer broke the framing, and §8 makes that a protocol error.
+	if afterC := c.unmarshaler.afterEndOfStream.Load(); afterC != nil {
+		err = afterC
+		c.unmarshaler.peerFaulted = true
+		c.unmarshaler.fault = FaultMarker
+	}
 	// A deadline that fired is what produced most of the errors reaching here,
 	// and writing under the expired context would fail — leaving the peer with
 	// a closed connection and no verdict, which it can only report as
@@ -206,19 +272,30 @@ func (c *websocketHandlerConn) Close(err error) error {
 	marshalErr = c.terminalWriteError(marshalErr)
 	closeCode := websocket.StatusNormalClosure
 	var closeMessage string
-	if marshalErr != nil {
+	switch {
+	case marshalErr != nil:
 		closeCode = websocket.StatusInternalError
 		closeMessage = marshalErr.Message()
+	case c.unmarshaler.peerFaulted:
+		// The S message carries the verdict; the code says which kind of
+		// mistake it was to a peer that reads codes and not JSON — which is
+		// every browser script.
+		closeCode = serverCloseCode(c.unmarshaler.fault)
+		if connectErr, ok := errors.AsType[*connect.Error](err); ok {
+			closeMessage = connectErr.Message()
+		}
 	}
-	// The peer already has the verdict from the S message above, so
-	// the close frame is courtesy. Extend it only to peers that behaved.
+	// A peer that behaved gets the closing handshake. One that broke the
+	// framing is hung up on, which §13 does not ask for: it assigns that peer
+	// 1002, 1003 or 1009 here.
 	//
-	// The closing handshake reads until the peer's close frame arrives, which
-	// means draining whatever it has queued. A peer that just overran the read
-	// limit can exploit that: measured, a bomb rejected after 96KiB of reading
-	// still cost 6.4MiB once the handshake drained the rest. CloseNow skips the
-	// handshake and hangs up.
-	if c.unmarshaler.peerFaulted {
+	// The handshake reads until the peer's own close frame arrives, bounded at
+	// five seconds but by no number of bytes, and a peer that just overran the
+	// read limit has bytes queued to spend them on — measured, a rejected 8MiB
+	// bomb was drained in full, where hanging up stopped at 96KiB. The S
+	// message above already carries the verdict; the code is what is given up,
+	// and WithFaultCloseCode sends it where that matters more.
+	if c.unmarshaler.peerFaulted && !c.faultCloseCode {
 		_ = c.wsConn.CloseNow()
 	} else {
 		_ = c.wsConn.Close(closeCode, closeReason(closeMessage))
@@ -274,6 +351,9 @@ type websocketUnmarshaler struct {
 	callInfo     *connect.CallInfo
 	codecs       codecPair
 	readMaxBytes int
+	// bodyIsText is the frame type the subprotocol negotiated. A body in the
+	// other one is a protocol error even when this end holds both codecs.
+	bodyIsText bool
 	// infrastructureHeaders names what this deployment's own proxies set, and
 	// so what a client may not send in an M message.
 	infrastructureHeaders []string
@@ -291,6 +371,9 @@ type websocketUnmarshaler struct {
 	peerFaulted          bool
 	// discardOnce guards the post-C drain, which must not be started twice.
 	discardOnce sync.Once
+	// afterEndOfStream carries a post-C protocol error from the drain
+	// goroutine to Close, which is the only place it can still be reported.
+	afterEndOfStream atomic.Pointer[connect.Error]
 }
 
 // Unmarshal records whether a failure was the peer's doing, which decides how
@@ -451,6 +534,14 @@ func (u *websocketUnmarshaler) discardAfterEndOfStream() {
 				if _, _, err := readBoundedMessage(u.ctx, u.wsConn, limit); err != nil {
 					return
 				}
+				// §8: after C the only frames left are Close, Ping and Pong, so
+				// a message is a protocol error. Reading goes on regardless, so
+				// the peer reaches the verdict rather than stalling on a full
+				// buffer before it can read one.
+				u.afterEndOfStream.CompareAndSwap(nil, errorf(
+					connect.CodeInvalidArgument,
+					"client sent a message after its C message",
+				))
 			}
 		}()
 	})
@@ -492,6 +583,17 @@ func (u *websocketUnmarshaler) drainLeadingMetadata() *connect.Error {
 
 // decodeBody decodes a body payload with the codec its frame type names.
 func (u *websocketUnmarshaler) decodeBody(wire wireMessage, message any) *connect.Error {
+	if wire.text != u.bodyIsText {
+		// The subprotocol named one encoding and the frame names another. This
+		// end may well hold a codec for what arrived, which is exactly why it
+		// has to be refused rather than decoded: accepting it would let a peer
+		// choose an encoding the handshake did not agree on (§6.1).
+		return u.fail(
+			FaultFrameType,
+			"client sent a %s body on a %s connection",
+			encodingForFrame(wire.text), encodingForFrame(u.bodyIsText),
+		)
+	}
 	if len(wire.payload) == 0 {
 		if wire.text {
 			// An empty JSON body is "{}", never zero bytes, so a text frame
@@ -520,6 +622,10 @@ func (u *websocketUnmarshaler) mergeLeadingMetadata(payload []byte) *connect.Err
 	// bare marker is not one.
 	if len(payload) == 0 {
 		return u.fail(FaultMetadata, "empty M message; an empty metadata object is {}")
+	}
+	if dupErr := duplicateMetadataKey(payload); dupErr != nil {
+		u.fault = FaultMetadata
+		return dupErr
 	}
 	var wire map[string][]string
 	if err := json.Unmarshal(payload, &wire); err != nil {
@@ -619,7 +725,7 @@ func readBoundedMessage(
 // Only this side's limit is reported as a number. A peer's is its own
 // business, and its close reason is the only account of it there is.
 func readLimitError(err error, readMaxBytes int) *connect.Error {
-	if websocket.CloseStatus(err) == websocket.StatusMessageTooBig {
+	if normalizeCloseStatus(websocket.CloseStatus(err)) == websocket.StatusMessageTooBig {
 		return errorf(connect.CodeResourceExhausted, "peer rejected message as too big: %w", err)
 	}
 	if errors.Is(err, websocket.ErrMessageTooBig) {
@@ -642,6 +748,7 @@ func isCleanWebSocketClose(err error) bool {
 	// Not a switch: the repo's exhaustive linter wants every StatusCode listed,
 	// and enumerating thirteen irrelevant close codes would obscure the rule.
 	status := websocket.CloseStatus(err)
+	status = normalizeCloseStatus(status)
 	return status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway
 }
 
@@ -670,6 +777,9 @@ type wsClientCall struct {
 	handshakeTimeout time.Duration
 
 	readLimit int64
+	// faultCloseCode spends the closing handshake to hand the server a close
+	// code; see websocketHandlerConn.Close for what that costs.
+	faultCloseCode bool
 
 	dialOnce sync.Once
 	dialDone chan struct{}
@@ -714,7 +824,16 @@ func (c *wsClientCall) ensureDialed() *connect.Error {
 			return
 		}
 		if takeoverErr := checkNoContextTakeover(response); takeoverErr != nil {
-			_ = conn.CloseNow()
+			// §10 assigns this 3110, and sending it means completing a closing
+			// handshake that a server which just failed the handshake's terms
+			// has no reason to answer — five seconds of dial latency for a
+			// connection that is already lost. Same trade as a mid-stream
+			// fault, so the same option decides it.
+			if c.faultCloseCode {
+				_ = conn.Close(wsStatusClientCompression, "no-context-takeover required")
+			} else {
+				_ = conn.CloseNow()
+			}
 			c.dialErr = takeoverErr
 			return
 		}
@@ -739,6 +858,8 @@ func (c *wsClientCall) send(text bool, data []byte) (int64, error) {
 type websocketClientConn struct {
 	call   *wsClientCall
 	codecs codecPair
+	// faultCloseCode mirrors the server's; see websocketHandlerConn.
+	faultCloseCode bool
 
 	marshaler messageWriter
 	// openOnce writes the M message that must precede every other message on
@@ -793,8 +914,10 @@ func (c *websocketClientConn) CloseRequest() error {
 	}
 	c.sendCloseOnce.Do(func() {
 		defer c.sendClosed.Store(true)
-		// A bare C message: no payload, so a text frame per the framing rule.
-		c.sendCloseErr = c.marshaler.send(markerClientEndStream, true, nil)
+		// A bare C carries no payload to encode, so its frame type is the one
+		// the subprotocol negotiated (§6.1) rather than the text a JSON payload
+		// would have implied.
+		c.sendCloseErr = c.marshaler.send(markerClientEndStream, c.marshaler.bodyIsText, nil)
 	})
 	if c.sendCloseErr != nil {
 		return c.sendCloseErr
@@ -859,7 +982,12 @@ func (c *websocketClientConn) CloseResponse() error {
 	// extending it would mean draining whatever that server has queued. See the
 	// note in websocketHandlerConn.Close.
 	if c.unmarshaler.peerFaulted {
-		return c.call.wsConn.CloseNow()
+		// A client cannot send the 10xx code a server would: §13 puts its codes
+		// in the 31xx range, the only one a browser script may use.
+		if !c.faultCloseCode {
+			return c.call.wsConn.CloseNow()
+		}
+		return c.call.wsConn.Close(clientCloseCode(c.unmarshaler.fault), "")
 	}
 	// Best-effort clean close. Sending 1000 Normal Closure is correct even if
 	// Receive has not yet observed the EndStream: the server's completion path
@@ -875,6 +1003,8 @@ type websocketClientUnmarshaler struct {
 	call         *wsClientCall
 	codecs       codecPair
 	readMaxBytes int
+	// bodyIsText mirrors the server's; see websocketUnmarshaler.
+	bodyIsText bool
 	// spec and onProtocolError identify and report a server that frames its
 	// responses wrongly; see WithClientProtocolErrorHandler.
 	spec            connect.Spec
@@ -1038,6 +1168,14 @@ func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 		return errorf(connect.CodeUnknown, "%w", io.EOF)
 	case markerBody:
 		u.sawData = true
+		if wire.text != u.bodyIsText {
+			// The mirror of the server's check; see websocketUnmarshaler.
+			return u.fail(
+				FaultFrameType,
+				"server sent a %s body on a %s connection",
+				encodingForFrame(wire.text), encodingForFrame(u.bodyIsText),
+			)
+		}
 		if len(wire.payload) == 0 {
 			if wire.text {
 				return u.fail(FaultFrameType, "empty body in a text frame; an empty JSON message is {}")
@@ -1083,6 +1221,10 @@ func (u *websocketClientUnmarshaler) mergeLeadingMetadata(payload []byte) *conne
 	if len(payload) == 0 {
 		u.fault = FaultMetadata
 		return errorf(connect.CodeInternal, "empty M message; an empty metadata object is {}")
+	}
+	if dupErr := duplicateMetadataKey(payload); dupErr != nil {
+		u.fault = FaultMetadata
+		return dupErr
 	}
 	var wire map[string][]string
 	if err := json.Unmarshal(payload, &wire); err != nil {

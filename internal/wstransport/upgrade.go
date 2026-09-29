@@ -16,12 +16,13 @@ package wstransport
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
 	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/internal/connectwire"
 	"github.com/coder/websocket"
 )
 
@@ -64,6 +65,10 @@ type SessionInfo struct {
 	// proxies set, which a client may therefore not send in a Leading-Metadata
 	// message. A trailing "*" matches any suffix. See WithInfrastructureHeaders.
 	InfrastructureHeaders []string
+	// FaultCloseCode sends a peer that broke the framing the close code §13
+	// assigns its fault, rather than hanging up on it. See
+	// connecthttp.WithWebSocketFaultCloseCode.
+	FaultCloseCode bool
 }
 
 // Session serves RPCs on an upgraded WebSocket connection. Serve reads
@@ -127,6 +132,19 @@ type upgradeHandler struct {
 }
 
 func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
+	// Ahead of the IsUpgrade gate, which only recognizes GET: an Extended
+	// CONNECT would otherwise fall through to the HTTP handler and be answered
+	// as an ordinary RPC. RFC 8441 carries WebSocket over HTTP/2 and this
+	// binding does not adopt it (§4.1), so the request is refused instead.
+	if request.Method == http.MethodConnect {
+		http.Error(
+			responseWriter,
+			"this server does not support Extended CONNECT (RFC 8441); "+
+				"upgrade over HTTP/1.1 instead",
+			http.StatusNotImplemented,
+		)
+		return
+	}
 	if !IsUpgrade(request) || h.session == nil {
 		if h.next == nil {
 			http.NotFound(responseWriter, request)
@@ -161,14 +179,13 @@ func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *
 		)
 		return
 	case negotiationUnsupportedCodec:
-		http.Error(
-			responseWriter,
-			fmt.Sprintf(
-				"no message encoding in common: this server speaks %v",
-				h.servedCodecNames(),
-			),
-			http.StatusUnsupportedMediaType,
-		)
+		// A browser cannot read a status code, and this client is speaking the
+		// protocol — so the upgrade completes and the verdict travels in band.
+		h.rejectInBand(responseWriter, request, subprotocol, errorf(
+			connect.CodeUnimplemented,
+			"no message encoding in common: this server speaks %v",
+			h.servedCodecNames(),
+		))
 		return
 	case negotiationOK:
 	}
@@ -205,6 +222,7 @@ func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *
 		SendMaxBytes:          h.opts.sendMaxBytes,
 		InfrastructureHeaders: h.opts.infrastructureHeaders,
 		OnProtocolError:       h.opts.onProtocolError,
+		FaultCloseCode:        h.opts.faultCloseCode,
 	}
 	if err := h.session.Serve(request.Context(), h.server, conn, info); err != nil {
 		h.opts.logger.Error(
@@ -262,6 +280,50 @@ func requestedSubprotocols(request *http.Request) []string {
 	return protocols
 }
 
+// rejectInBand completes the handshake and reports rpcErr as the RPC's own
+// outcome. §4.5 keeps this distinct from a handshake failure: a status code is
+// invisible to a browser script, and a client that offered a Connect token is
+// speaking this protocol — it needs to be told which codec to offer instead,
+// not that it dialed the wrong thing.
+//
+// M and S are JSON under both subprotocols, so a server can send them for a
+// codec it does not have.
+func (h *upgradeHandler) rejectInBand(
+	responseWriter http.ResponseWriter,
+	request *http.Request,
+	subprotocol string,
+	rpcErr *connect.Error,
+) {
+	conn, upgradeErr := websocket.Accept(responseWriter, request, &websocket.AcceptOptions{
+		Subprotocols:         []string{subprotocol},
+		InsecureSkipVerify:   h.opts.checkOrigin != nil,
+		CompressionMode:      h.opts.compressionMode(),
+		CompressionThreshold: h.opts.compressionThreshold(),
+	})
+	if upgradeErr != nil {
+		return // Accept has already written the error response.
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), wsCloseWriteTimeout)
+	defer cancel()
+	if _, err := writeFrame(ctx, conn, true, []byte{markerMetadata, '{', '}'}); err != nil {
+		_ = conn.CloseNow()
+		return
+	}
+	payload, marshalErr := json.Marshal(&connectwire.EndStreamMessage{
+		Error: connectwire.NewWireError(rpcErr),
+	})
+	if marshalErr != nil {
+		_ = conn.Close(websocket.StatusInternalError, closeReason(marshalErr.Error()))
+		return
+	}
+	if _, err := writeFrame(ctx, conn, true, append([]byte{markerServerEndStream}, payload...)); err != nil {
+		_ = conn.CloseNow()
+		return
+	}
+	// The RPC reached a verdict, so the connection ends normally.
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+}
+
 // negotiationOutcome distinguishes a client that is not speaking this protocol
 // from one that is but offered an encoding this server does not have. The
 // remedies differ, and so do the HTTP statuses.
@@ -279,7 +341,7 @@ func codecForSubprotocol(name string) string {
 	switch name {
 	case wsSubprotocolProto:
 		return connect.CodecNameProto
-	case wsSubprotocolJSON, wsSubprotocolBase:
+	case wsSubprotocolJSON:
 		return connect.CodecNameJSON
 	}
 	return ""
@@ -295,19 +357,23 @@ func negotiateSubprotocol(
 	requested []string,
 	supported func(string) bool,
 ) (subprotocol, codecName string, outcome negotiationOutcome) {
-	recognized := false
+	recognized := ""
 	for _, name := range requested {
 		codec := codecForSubprotocol(name)
 		if codec == "" {
 			continue
 		}
-		recognized = true
+		if recognized == "" {
+			recognized = name
+		}
 		if supported(codec) {
 			return name, codec, negotiationOK
 		}
 	}
-	if recognized {
-		return "", "", negotiationUnsupportedCodec
+	if recognized != "" {
+		// Echoed on the way to an in-band error: the client is speaking this
+		// protocol, so it gets a WebSocket and a verdict it can read.
+		return recognized, "", negotiationUnsupportedCodec
 	}
 	return "", "", negotiationUnrecognized
 }

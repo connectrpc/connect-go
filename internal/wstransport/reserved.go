@@ -60,8 +60,33 @@ func isFetchForbidden(lower string) bool {
 
 // isProtocolControlled reports whether this binding owns the name itself. The
 // sec- prefix above already covers the WebSocket handshake's own headers.
+//
+// The encoding names are here because the frame type and the subprotocol carry
+// that decision; a client resetting them would describe a body it is not
+// sending.
 func isProtocolControlled(lower string) bool {
-	return lower == "connect-protocol-version"
+	switch lower {
+	case "connect-protocol-version",
+		"connect-timeout-ms",
+		"content-type",
+		"content-encoding",
+		"connect-content-encoding",
+		"connect-accept-encoding":
+		return true
+	}
+	return false
+}
+
+// isStrippedHandshakeHeader reports whether a handshake header must be kept out
+// of the effective headers. This binding carries both elsewhere — the version
+// in the subprotocol, the deadline in the query string — so one arriving as a
+// header is a non-browser client duplicating a channel it does not own.
+func isStrippedHandshakeHeader(key string) bool {
+	switch strings.ToLower(key) {
+	case "connect-protocol-version", "connect-timeout-ms":
+		return true
+	}
+	return false
 }
 
 // defaultInfrastructureHeaders is what a proxy in front of the server sets and

@@ -248,7 +248,9 @@ func TestLeadingMetadataReplacesHandshakeHeaders(t *testing.T) {
 	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
 	assert.Equal(t, <-observations, "from-the-message")
-	_, _, err = conn.Read(t.Context())
+	readCtx, cancelRead := readContext(t)
+	defer cancelRead()
+	_, _, err = conn.Read(readCtx)
 	assert.Nil(t, err)
 	assert.Equal(t, <-observations, "from-the-message")
 }
@@ -269,6 +271,13 @@ func TestReservedHeadersEndTheRPC(t *testing.T) {
 		{name: "proxy- prefix", key: "proxy-authorization", reason: "Fetch standard"},
 		{name: "method override", key: "x-http-method-override", reason: "Fetch standard"},
 		{name: "this protocol controls it", key: "connect-protocol-version", reason: "controlled by this protocol"},
+		{name: "the deadline has its own channel", key: "connect-timeout-ms", reason: "controlled by this protocol"},
+		{name: "the frame type says the encoding", key: "content-type", reason: "controlled by this protocol"},
+		{name: "content encoding", key: "content-encoding", reason: "controlled by this protocol"},
+		{name: "connect content encoding", key: "connect-content-encoding", reason: "controlled by this protocol"},
+		{name: "connect accept encoding", key: "connect-accept-encoding", reason: "controlled by this protocol"},
+		// Matching is case-insensitive, so casing is not a way past the list.
+		{name: "mixed case is the same name", key: "Connect-Timeout-Ms", reason: "controlled by this protocol"},
 		{name: "infrastructure sets it", key: "x-forwarded-for", reason: "infrastructure deny list"},
 		{name: "infrastructure, exact name", key: "x-real-ip", reason: "infrastructure deny list"},
 	} {
@@ -285,6 +294,37 @@ func TestReservedHeadersEndTheRPC(t *testing.T) {
 			// The key as the client spelled it, not an internal form of it.
 			assert.True(t, strings.Contains(string(data), test.key))
 			assert.True(t, strings.Contains(string(data), test.reason))
+		})
+	}
+}
+
+// A non-browser client can put these on the handshake, where no Leading-Metadata
+// check reaches them. They name channels this binding carries elsewhere, so the
+// server drops them rather than letting one masquerade as application metadata.
+func TestProtocolHandshakeHeadersAreStripped(t *testing.T) {
+	t.Parallel()
+	for _, key := range []string{"Connect-Protocol-Version", "Connect-Timeout-Ms"} {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+			seen := make(chan http.Header, 1)
+			httpServer := newMetadataServer(t, seen)
+			url := "ws" + strings.TrimPrefix(httpServer.URL, "http") +
+				pingv1connect.PingServiceCumSumProcedure
+			conn, response, err := websocket.Dial(t.Context(), url, &websocket.DialOptions{
+				HTTPClient:   httpServer.Client(),
+				Subprotocols: []string{"connectrpc.1+proto"},
+				HTTPHeader:   map[string][]string{key: {"9000"}},
+			})
+			if response != nil && response.Body != nil {
+				_ = response.Body.Close()
+			}
+			assert.Nil(t, err)
+			t.Cleanup(func() { _ = conn.CloseNow() })
+			sendJSONMessage(t, conn, wireMetadata, []byte("{}"))
+			sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+
+			header := <-seen
+			assert.Equal(t, header.Get(key), "")
 		})
 	}
 }

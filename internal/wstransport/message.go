@@ -268,19 +268,42 @@ func encodeMetadata(header http.Header) map[string][]string {
 // case-insensitivity the protocol requires is theirs.
 func decodeMetadata(wire map[string][]string) (http.Header, *connect.Error) {
 	header := make(http.Header, len(wire))
+	// Keys that differ only in case are one key, so two of them collide here.
+	// Left to the map, which of the two survived would depend on iteration
+	// order, and neither peer could tell which.
+	spelling := make(map[string]string, len(wire))
 	for key, values := range wire {
 		canonical := http.CanonicalHeaderKey(key)
+		if first, duplicate := spelling[canonical]; duplicate {
+			return nil, duplicateMetadataKeyError(first, key)
+		}
+		spelling[canonical] = key
+		if !validHeaderFieldName(key) {
+			return nil, errorf(
+				connect.CodeInvalidArgument,
+				"metadata key %q is not a valid HTTP field name", key,
+			)
+		}
 		if !strings.HasSuffix(strings.ToLower(key), metadataBinarySuffix) {
+			for _, value := range values {
+				if !validHeaderFieldValue(value) {
+					return nil, errorf(
+						connect.CodeInvalidArgument,
+						"metadata %q has a value that is not a valid HTTP field value", key,
+					)
+				}
+			}
 			header[canonical] = values
 			continue
 		}
 		decoded := make([]string, len(values))
 		for index, value := range values {
-			raw, err := base64.RawStdEncoding.DecodeString(value)
+			// Senders must not pad, but receivers accept both forms.
+			raw, err := connect.DecodeBinaryHeader(value)
 			if err != nil {
 				return nil, errorf(
 					connect.CodeInvalidArgument,
-					"metadata %q is not unpadded base64: %w", key, err,
+					"metadata %q is not base64: %w", key, err,
 				)
 			}
 			decoded[index] = string(raw)
@@ -288,4 +311,96 @@ func decodeMetadata(wire map[string][]string) (http.Header, *connect.Error) {
 		header[canonical] = decoded
 	}
 	return header, nil
+}
+
+// validHeaderFieldName reports whether key is an RFC 9110 token. Metadata
+// stands in for HTTP headers and may be forwarded as one, so a key that is not
+// a field name has no way to survive the journey.
+func validHeaderFieldName(key string) bool {
+	if key == "" {
+		return false
+	}
+	for index := range len(key) {
+		if !isTokenByte(key[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isTokenByte(char byte) bool {
+	switch {
+	case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
+		return true
+	}
+	return strings.IndexByte("!#$%&'*+-.^_`|~", char) >= 0
+}
+
+// validHeaderFieldValue rejects the bytes that would end or split a header
+// line downstream. A value carrying CR or LF is a header injection wherever
+// this metadata is forwarded as HTTP; NUL truncates it.
+func validHeaderFieldValue(value string) bool {
+	for index := range len(value) {
+		switch char := value[index]; char {
+		case '\r', '\n', 0:
+			return false
+		}
+	}
+	return true
+}
+
+// duplicateMetadataKeyError names both spellings in a stable order, so the
+// message does not depend on which one was reached first.
+func duplicateMetadataKeyError(one, other string) *connect.Error {
+	if one > other {
+		one, other = other, one
+	}
+	return errorf(
+		connect.CodeInvalidArgument,
+		"metadata keys %q and %q are the same key; a key carries all its values in one array",
+		one, other,
+	)
+}
+
+// metadataObjectKeys lists an M object's keys in the order they were sent,
+// which a map cannot preserve. It stops at anything it cannot walk and returns
+// what it has: why a payload is malformed is the unmarshal's to report, and
+// with a better message than a half-finished scan could.
+func metadataObjectKeys(payload []byte) []string {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	opening, _ := decoder.Token()
+	if opening != json.Delim('{') {
+		return nil
+	}
+	var keys []string
+	for decoder.More() {
+		token, _ := decoder.Token()
+		key, isString := token.(string)
+		if !isString {
+			break
+		}
+		// Consumes exactly one value, whatever its shape, leaving the decoder
+		// on the next key.
+		var value json.RawMessage
+		if decoder.Decode(&value) != nil {
+			break
+		}
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// duplicateMetadataKey reports a key that appears twice in an M object.
+// json.Unmarshal keeps the last of two identical keys and both of two that
+// differ only in case, so neither reaches decodeMetadata as a duplicate.
+func duplicateMetadataKey(payload []byte) *connect.Error {
+	spelling := make(map[string]string)
+	for _, key := range metadataObjectKeys(payload) {
+		canonical := http.CanonicalHeaderKey(key)
+		if first, duplicate := spelling[canonical]; duplicate {
+			return duplicateMetadataKeyError(first, key)
+		}
+		spelling[canonical] = key
+	}
+	return nil
 }

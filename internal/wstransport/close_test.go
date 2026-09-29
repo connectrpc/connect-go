@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectproto"
@@ -29,6 +30,11 @@ import (
 	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	"github.com/coder/websocket"
 )
+
+// wsTestReadTimeout bounds a raw-wire read: a backstop against a hang, not a
+// latency assertion. The external test package has its own; the two packages
+// cannot share one.
+const wsTestReadTimeout = 10 * time.Second
 
 // deadSender fails every write, standing in for a socket whose peer has gone.
 // A real disconnect cannot be provoked reliably — whether a write lands in a
@@ -138,7 +144,11 @@ func TestCloseReportsAFailedVerdictToAPresentPeer(t *testing.T) {
 	closed := make(chan error, 1)
 	go func() { closed <- conn.Close(nil) }()
 
-	_, _, readErr := clientConn.Read(t.Context())
+	// Bounded: an unbounded read here would wait out the package's own timeout
+	// if the close frame never arrived, rather than failing this one test.
+	readCtx, cancelRead := context.WithTimeout(t.Context(), wsTestReadTimeout)
+	defer cancelRead()
+	_, _, readErr := clientConn.Read(readCtx)
 	assert.NotNil(t, readErr)
 	assert.Equal(t, websocket.CloseStatus(readErr), websocket.StatusInternalError)
 	var closeErr websocket.CloseError
@@ -150,27 +160,45 @@ func TestCloseReportsAFailedVerdictToAPresentPeer(t *testing.T) {
 	assert.True(t, strings.Contains(returned.Error(), "broken pipe"))
 }
 
-// A close reason is whatever the failure said, and a WebSocket close frame
-// holds 125 bytes. Truncation keeps the frame legal; without it the close
-// itself fails and the peer learns nothing at all.
+// A close reason is whatever the failure said, and RFC 6455 caps a control
+// payload at 125 bytes with two spent on the status code. The library rejects
+// an over-long reason rather than trimming it, so a reason that does not fit
+// means no close frame at all — the peer learns nothing.
 func TestCloseReasonFitsTheFrame(t *testing.T) {
 	t.Parallel()
-	const limit = 125
+	const limit = 123
 	for _, test := range []struct {
-		name string
-		size int
+		name   string
+		reason string
+		want   int
 	}{
-		{name: "short", size: 1},
-		{name: "at the limit", size: limit},
-		{name: "one past the limit", size: limit + 1},
-		{name: "far past the limit", size: 4096},
+		{name: "short", reason: strings.Repeat("x", 1), want: 1},
+		{name: "at the limit", reason: strings.Repeat("x", limit), want: limit},
+		{name: "one past the limit", reason: strings.Repeat("x", limit+1), want: limit},
+		{name: "far past the limit", reason: strings.Repeat("x", 4096), want: limit},
+		{
+			// The cut lands one byte into a three-byte rune, so it has to back
+			// off past the whole rune: a close reason must be valid UTF-8.
+			name:   "cut inside a multi-byte rune",
+			reason: strings.Repeat("x", limit-1) + "\u2603",
+			want:   limit - 1,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			reason := strings.Repeat("x", test.size)
-			got := closeReason(reason)
-			assert.Equal(t, len(got), min(test.size, limit))
-			assert.True(t, strings.HasPrefix(reason, got))
+			got := closeReason(test.reason)
+			assert.Equal(t, len(got), test.want)
+			assert.True(t, strings.HasPrefix(test.reason, got))
+			assert.True(t, utf8.ValidString(got))
+
+			// The contract is the library's, not arithmetic: a reason it
+			// refuses to marshal is a close frame that never goes out.
+			serverConn, clientConn := connPair(t)
+			// Answer the close frame, so the closing handshake finishes
+			// instead of waiting out its timeout.
+			go func() { _, _, _ = clientConn.Read(context.Background()) }()
+			err := serverConn.Close(websocket.StatusInternalError, got)
+			assert.True(t, err == nil || !strings.Contains(err.Error(), "reason string max"))
 		})
 	}
 }

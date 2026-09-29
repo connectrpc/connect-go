@@ -42,7 +42,11 @@ import (
 const (
 	bombReadMaxBytes = 64 * 1024       // what the server will accept
 	bombCompressed   = 8 * 1024 * 1024 // what the attacker sends
-	bombWireCeiling  = 1024 * 1024     // generous: unbounded reading would blow past this
+	// Frame headers and the handshake remainder, which ride alongside the bomb.
+	bombFramingSlack = 64 * 1024
+	// What a server that hangs up on a faulted peer will read: its own limit,
+	// plus the library's buffering. Also the line the close-code option crosses.
+	bombInflateCeiling = 1024 * 1024
 )
 
 // countingListener reports how many bytes reached the server, which is the
@@ -193,47 +197,72 @@ func rawHandshake(tb testing.TB, conn net.Conn, addr, procedure string) string {
 //
 // This guards a dependency, so it is the test that should fail first if a
 // WebSocket library upgrade changes the behavior.
-func TestCompressionBombIsBoundedOnTheWire(t *testing.T) {
-	t.Parallel()
+// bombAgainstServer sends one zero-output bomb and reports how many bytes the
+// server was willing to read.
+func bombAgainstServer(tb testing.TB, options ...wstransport.ServerOption) int64 {
+	tb.Helper()
 	server := connect.NewServer()
 	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
 	mux := http.NewServeMux()
-	options := []wstransport.ServerOption{wstransport.WithReadMaxBytes(bombReadMaxBytes)}
-	mountBoth(mux, server, options...)
+	mountBoth(mux, server, append(
+		[]wstransport.ServerOption{wstransport.WithReadMaxBytes(bombReadMaxBytes)},
+		options...,
+	)...)
 
 	httpServer := httptest.NewUnstartedServer(mux)
 	listener := &countingListener{Listener: httpServer.Listener}
 	httpServer.Listener = listener
 	httpServer.Start()
-	t.Cleanup(httpServer.Close)
+	tb.Cleanup(httpServer.Close)
 
 	addr := httpServer.Listener.Addr().String()
 	dialer := &net.Dialer{}
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(tb.Context(), 30*time.Second)
 	defer cancel()
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
-	assert.Nil(t, err)
-	t.Cleanup(func() { _ = conn.Close() })
+	assert.Nil(tb, err)
+	tb.Cleanup(func() { _ = conn.Close() })
 
 	// Without permessage-deflate the payload below is not treated as compressed
 	// and the test would prove nothing.
-	assert.True(t, strings.Contains(rawHandshake(t, conn, addr, pingProcedure), "permessage-deflate"))
+	assert.True(tb, strings.Contains(rawHandshake(tb, conn, addr, pingProcedure), "permessage-deflate"))
 	handshakeBytes := listener.read.Load()
 
-	// A partial write is the expected outcome: the server stops reading and
-	// tears the connection down well before 8MiB has been sent.
-	assert.Nil(t, conn.SetWriteDeadline(time.Now().Add(20*time.Second)))
+	assert.Nil(tb, conn.SetWriteDeadline(time.Now().Add(20*time.Second)))
 	_ = writeClientFrame(conn, zeroOutputDeflate(bombCompressed), true, false)
+	// A close frame queued behind the bomb. A server that completes the closing
+	// handshake has to read past the bomb to reach it, so the measurement is
+	// the same as waiting the handshake out — without waiting five seconds for
+	// it. A server that hangs up never reads either, and the write just fails.
+	_ = writeClientFragment(conn, []byte{0x03, 0xE8}, true, opcodeClose)
 
 	// Drain until the server closes, so the measurement covers everything it
 	// was willing to read.
-	assert.Nil(t, conn.SetReadDeadline(time.Now().Add(20*time.Second)))
+	assert.Nil(tb, conn.SetReadDeadline(time.Now().Add(20*time.Second)))
 	_, _ = io.Copy(io.Discard, conn)
 
-	bombBytes := listener.read.Load() - handshakeBytes
-	t.Logf("server consumed %d KiB of an %d KiB bomb (limit %d KiB)",
-		bombBytes/1024, bombCompressed/1024, bombReadMaxBytes/1024)
-	assert.True(t, bombBytes < bombWireCeiling)
+	consumed := listener.read.Load() - handshakeBytes
+	tb.Logf("server consumed %d KiB of an %d KiB bomb (limit %d KiB)",
+		consumed/1024, bombCompressed/1024, bombReadMaxBytes/1024)
+	return consumed
+}
+
+// A server that hangs up on a faulted peer stops at its own read limit, so a
+// bomb costs the attacker's bandwidth rather than the server's.
+func TestCompressionBombIsBoundedOnTheWire(t *testing.T) {
+	t.Parallel()
+	assert.True(t, bombAgainstServer(t) < bombInflateCeiling)
+}
+
+// WithFaultCloseCode buys the peer its close code by completing the closing
+// handshake, and the handshake drains whatever that peer still has queued. The
+// read is bounded either way — nothing here is inflated or kept — so what this
+// pins is that the bytes are not, which is the whole cost of the option.
+func TestFaultCloseCodeUnboundsTheBombOnTheWire(t *testing.T) {
+	t.Parallel()
+	consumed := bombAgainstServer(t, wstransport.WithFaultCloseCode())
+	assert.True(t, consumed > bombInflateCeiling)
+	assert.True(t, consumed <= bombCompressed+bombFramingSlack)
 }
 
 // hostileServer completes a WebSocket handshake by hand and then sends the
@@ -316,5 +345,5 @@ func TestCompressionBombFromServerIsBoundedOnTheWire(t *testing.T) {
 	consumed := clientRead.Load()
 	t.Logf("client consumed %d KiB of an %d KiB bomb (limit %d KiB)",
 		consumed/1024, bombCompressed/1024, bombReadMaxBytes/1024)
-	assert.True(t, consumed < bombWireCeiling)
+	assert.True(t, consumed < bombInflateCeiling)
 }

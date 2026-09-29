@@ -133,7 +133,8 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 	}
 
 	call := &wsClientCall{
-		ctx: ctx,
+		ctx:            ctx,
+		faultCloseCode: t.opts.faultCloseCode,
 		dialOptions: &websocket.DialOptions{
 			HTTPClient: t.httpClient,
 			// The subprotocol names both the transport and the codec, so it
@@ -153,8 +154,9 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 		readLimit:        messageReadLimit(t.opts.readMaxBytes),
 	}
 	conn := &websocketClientConn{
-		call:   call,
-		codecs: t.codecs,
+		call:           call,
+		codecs:         t.codecs,
+		faultCloseCode: t.opts.faultCloseCode,
 		marshaler: messageWriter{
 			// No compression here: permessage-deflate compresses whole messages
 			// below this layer.
@@ -167,6 +169,7 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 		unmarshaler: websocketClientUnmarshaler{
 			call:            call,
 			codecs:          t.codecs,
+			bodyIsText:      t.opts.sendCodec == connect.CodecNameJSON,
 			readMaxBytes:    t.opts.readMaxBytes,
 			spec:            spec,
 			onProtocolError: t.opts.onClientProtocolError,

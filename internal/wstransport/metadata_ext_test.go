@@ -216,7 +216,9 @@ func TestLateLeadingMetadataIsRejected(t *testing.T) {
 	assert.Equal(t, reply[0], wireBody)
 
 	sendJSONMessage(t, conn, wireMetadata, []byte(`{"Acme-Late":["nope"]}`))
-	_, data, err := conn.Read(t.Context())
+	readCtx, cancelRead := readContext(t)
+	defer cancelRead()
+	_, data, err := conn.Read(readCtx)
 	assert.Nil(t, err)
 	assert.True(t, strings.Contains(string(data), "invalid_argument"))
 	assert.True(t, strings.Contains(string(data), "second M message"))
@@ -232,7 +234,9 @@ func TestServerAlwaysOpensWithLeadingMetadata(t *testing.T) {
 	conn := dialCumSum(t, httpServer, "")
 	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
-	messageType, opening, err := conn.Read(t.Context())
+	readCtx, cancelRead := readContext(t)
+	defer cancelRead()
+	messageType, opening, err := conn.Read(readCtx)
 	assert.Nil(t, err)
 	assert.Equal(t, messageType, websocket.MessageText) // JSON, so a text frame
 	assert.Equal(t, string(opening), "M{}")             // empty, but present

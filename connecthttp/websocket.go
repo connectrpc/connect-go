@@ -119,6 +119,24 @@ func upgradeRequiredHandler() http.Handler {
 	})
 }
 
+// rejectUpgrade answers an upgrade that arrived at a bare procedure path while
+// a prefix is configured. Left to fall through, it reaches the plain Connect
+// handler, which answers the handshake's GET with 505 Version Not Supported and
+// points whoever reads it at the wrong problem entirely.
+func rejectUpgrade(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		if wstransport.IsUpgrade(request) {
+			http.Error(
+				responseWriter,
+				"this path serves Connect over HTTP; WebSocket is served under the configured path prefix",
+				http.StatusBadRequest,
+			)
+			return
+		}
+		next.ServeHTTP(responseWriter, request)
+	})
+}
+
 // websocketMux wraps every handler registered on mux with the WebSocket
 // upgrade, so each route serves both transports.
 type websocketMux struct {
@@ -137,7 +155,7 @@ func (m *websocketMux) Handle(pattern string, handler http.Handler) {
 	}
 	// Split, so a load balancer can tell the two apart by URL. The bare path
 	// stops accepting upgrades; the prefixed one accepts nothing else.
-	m.mux.Handle(pattern, handler)
+	m.mux.Handle(pattern, rejectUpgrade(handler))
 	m.mux.Handle(m.prefix+pattern, http.StripPrefix(
 		m.prefix,
 		wstransport.Upgrade(m.server, upgradeRequiredHandler(), m.options...),

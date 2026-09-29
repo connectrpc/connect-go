@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
@@ -29,6 +30,7 @@ import (
 	"connectrpc.com/connect/v2/internal/assert"
 	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
+	"github.com/coder/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -47,8 +49,6 @@ func TestCodecSelectsWireFormat(t *testing.T) {
 	}{
 		{name: "proto", token: "connectrpc.1+proto"},
 		{name: "json", token: "connectrpc.1+json", json: true},
-		// The bare token is defined to mean JSON.
-		{name: "base token", token: "connectrpc.1", json: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -125,6 +125,85 @@ func assertProtoJSON(tb testing.TB, body []byte, sum int64) {
 	assert.Equal(tb, response.Sum, sum)
 }
 
+// A bare C has no payload to encode, so nothing about it implies text. §6.1
+// gives it the negotiated frame type, which is the only thing left to say what
+// the connection agreed on.
+func TestBareEndOfClientStreamFollowsTheNegotiatedFrameType(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		codec    string
+		wantText bool
+	}{
+		{codec: connect.CodecNameProto},
+		{codec: connect.CodecNameJSON, wantText: true},
+	} {
+		t.Run(test.codec, func(t *testing.T) {
+			t.Parallel()
+			frames := make(chan bool, 4)
+			httpServer := frameTypeRecordingServer(t, frames)
+
+			transport := connecthttp.NewTransport(
+				httpServer.Client(),
+				httpServer.URL,
+				connecthttp.WithWebSocket(connecthttp.SelectAll),
+				connecthttp.WithSendCodec(test.codec),
+			)
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+			stream, err := client.Sum(t.Context())
+			assert.Nil(t, err)
+			// This server never answers, so the call would block; the frames it
+			// has already sent are what the test reads.
+			go func() { _, _ = stream.CloseAndReceive() }()
+
+			assert.Equal(t, readFrameType(t, frames), true)          // opening M is JSON
+			assert.Equal(t, readFrameType(t, frames), test.wantText) // bare C is negotiated
+		})
+	}
+}
+
+// readFrameType takes the next observed frame type, failing rather than
+// blocking if the client never sent one.
+func readFrameType(tb testing.TB, frames <-chan bool) bool {
+	tb.Helper()
+	select {
+	case text := <-frames:
+		return text
+	case <-time.After(10 * time.Second):
+		tb.Fatal("the client sent no further message")
+		return false
+	}
+}
+
+// frameTypeRecordingServer accepts an upgrade by hand and reports whether each
+// client message arrived as text, which is the only way to see a frame type
+// from outside.
+func frameTypeRecordingServer(tb testing.TB, frames chan<- bool) *httptest.Server {
+	tb.Helper()
+	httpServer := httptest.NewServer(http.HandlerFunc(
+		func(responseWriter http.ResponseWriter, request *http.Request) {
+			conn, err := websocket.Accept(responseWriter, request, &websocket.AcceptOptions{
+				Subprotocols: []string{request.Header.Get("Sec-WebSocket-Protocol")},
+			})
+			if err != nil {
+				return
+			}
+			defer func() { _ = conn.CloseNow() }()
+			for {
+				messageType, _, readErr := conn.Read(request.Context())
+				if readErr != nil {
+					return
+				}
+				select {
+				case frames <- messageType == websocket.MessageText:
+				default:
+				}
+			}
+		},
+	))
+	tb.Cleanup(httpServer.Close)
+	return httpServer
+}
+
 // A server configured with one codec is a supported configuration, not a
 // broken one. It must negotiate what it has and refuse what it does not,
 // rather than upgrading into a connection it cannot decode.
@@ -148,25 +227,12 @@ func TestPartialCodecSetNegotiates(t *testing.T) {
 			echoed: "connectrpc.1+proto",
 		},
 		{
-			name:    "proto-only server refuses a JSON-only client",
-			codecs:  []connect.Codec{connectproto.NewBinaryCodec()},
-			offer:   "connectrpc.1+json",
-			status:  http.StatusUnsupportedMediaType,
-			mention: "proto",
-		},
-		{
-			name:    "JSON-only server refuses a proto-only client",
-			codecs:  []connect.Codec{connectproto.NewJSONCodec()},
-			offer:   "connectrpc.1+proto",
-			status:  http.StatusUnsupportedMediaType,
-			mention: "json",
-		},
-		{
-			name:   "JSON-only server serves the base token",
+			// The bare token names no codec, so it is not one of this
+			// binding's tokens at all.
+			name:   "the bare token is not a Connect subprotocol",
 			codecs: []connect.Codec{connectproto.NewJSONCodec()},
 			offer:  "connectrpc.1",
-			status: http.StatusSwitchingProtocols,
-			echoed: "connectrpc.1",
+			status: http.StatusBadRequest,
 		},
 		{
 			name:   "an unrecognized token is not an encoding problem",
@@ -200,6 +266,76 @@ func TestPartialCodecSetNegotiates(t *testing.T) {
 	}
 }
 
+// A client that offered a Connect token is speaking this protocol; it just
+// named a codec this server lacks. That is an RPC failure, not a connection
+// failure, so the upgrade completes and the verdict travels in band — the only
+// channel a browser script can read.
+func TestUnsupportedCodecIsReportedInBand(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		codecs []connect.Codec
+		offer  string
+		speaks string
+	}{
+		{
+			name:   "proto-only server, JSON-only client",
+			codecs: []connect.Codec{connectproto.NewBinaryCodec()},
+			offer:  "connectrpc.1+json",
+			speaks: "proto",
+		},
+		{
+			name:   "JSON-only server, proto-only client",
+			codecs: []connect.Codec{connectproto.NewJSONCodec()},
+			offer:  "connectrpc.1+proto",
+			speaks: "json",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			server := connect.NewServer()
+			pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+			mux := http.NewServeMux()
+			connecthttp.Mount(mux, server, connecthttp.WithCodecs(test.codecs...))
+			httpServer := httptest.NewServer(mux)
+			t.Cleanup(httpServer.Close)
+
+			url := "ws" + strings.TrimPrefix(httpServer.URL, "http") +
+				pingv1connect.PingServiceCumSumProcedure
+			conn, response, err := websocket.Dial(t.Context(), url, &websocket.DialOptions{
+				HTTPClient:   httpServer.Client(),
+				Subprotocols: []string{test.offer},
+			})
+			if response != nil && response.Body != nil {
+				_ = response.Body.Close()
+			}
+			// The handshake succeeds, and the token comes back as offered.
+			assert.Nil(t, err)
+			t.Cleanup(func() { _ = conn.CloseNow() })
+			assert.Equal(t, response.StatusCode, http.StatusSwitchingProtocols)
+			assert.Equal(t, response.Header.Get("Sec-WebSocket-Protocol"), test.offer)
+
+			// Every response stream opens with M, even this one.
+			readCtx, cancelRead := readContext(t)
+			defer cancelRead()
+			_, opening, err := conn.Read(readCtx)
+			assert.Nil(t, err)
+			assert.Equal(t, string(opening), "M{}")
+
+			_, data, err := conn.Read(readCtx)
+			assert.Nil(t, err)
+			assert.Equal(t, data[0], wireServerEndStream)
+			assert.True(t, strings.Contains(string(data), "unimplemented"))
+			// The message names what to offer instead.
+			assert.True(t, strings.Contains(string(data), test.speaks))
+
+			// The RPC reached a verdict, so the close is ordinary.
+			_, _, err = conn.Read(readCtx)
+			assert.Equal(t, websocket.CloseStatus(err), websocket.StatusNormalClosure)
+		})
+	}
+}
+
 // offerSubprotocol sends one handshake with the given Sec-WebSocket-Protocol
 // offer. A successful upgrade's body is the hijacked socket, so a caller that
 // asserts on the status must not read it.
@@ -219,26 +355,50 @@ func offerSubprotocol(tb testing.TB, server *httptest.Server, offer string) *htt
 	return response
 }
 
-// Negotiation never hands a peer a codec this end lacks, but nothing on the
-// wire stops it from sending one anyway. That must be a protocol error naming
-// the encoding, not a nil codec dereferenced inside the read path.
-func TestBodyInAnUnsupportedEncodingIsRejected(t *testing.T) {
+// The subprotocol names the encoding, and nothing on the wire stops a peer
+// from sending the other one. A receiver that decoded it anyway would let the
+// peer pick an encoding the handshake did not agree on — so this is refused
+// whether or not the receiver holds a codec for what arrived.
+func TestBodyInTheWrongEncodingIsRejected(t *testing.T) {
 	t.Parallel()
-	server := connect.NewServer()
-	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
-	mux := http.NewServeMux()
-	connecthttp.Mount(mux, server, connecthttp.WithCodecs(connectproto.NewBinaryCodec()))
-	httpServer := httptest.NewServer(mux)
-	t.Cleanup(httpServer.Close)
+	for _, test := range []struct {
+		name   string
+		codecs []connect.Codec
+	}{
+		{
+			// The hole worth closing: the server has a JSON codec and could
+			// decode this, but the connection negotiated proto.
+			name:   "receiver holds the codec anyway",
+			codecs: nil, // the default pair
+		},
+		{
+			name:   "receiver does not hold the codec",
+			codecs: []connect.Codec{connectproto.NewBinaryCodec()},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			server := connect.NewServer()
+			pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+			mux := http.NewServeMux()
+			var options []connecthttp.Option
+			if test.codecs != nil {
+				options = append(options, connecthttp.WithCodecs(test.codecs...))
+			}
+			connecthttp.Mount(mux, server, options...)
+			httpServer := httptest.NewServer(mux)
+			t.Cleanup(httpServer.Close)
 
-	// dialCumSum has already sent the opening M message.
-	conn := dialCumSum(t, httpServer, "")
-	// A JSON body against a server that holds no JSON codec.
-	sendJSONMessage(t, conn, wireBody, []byte(`{"number":"1"}`))
+			// dialCumSum negotiates +proto and has sent the opening M.
+			conn := dialCumSum(t, httpServer, "")
+			// A JSON body in a text frame, on a Protobuf connection.
+			sendJSONMessage(t, conn, wireBody, []byte(`{"number":"1"}`))
 
-	data := readServerOpening(t, conn)
-	assert.Equal(t, data[0], wireServerEndStream)
-	assert.True(t, strings.Contains(string(data), "invalid_argument"))
-	assert.True(t, strings.Contains(string(data), "not configured to decode"))
-	assert.True(t, strings.Contains(string(data), "json"))
+			data := readServerOpening(t, conn)
+			assert.Equal(t, data[0], wireServerEndStream)
+			assert.True(t, strings.Contains(string(data), "invalid_argument"))
+			// Names both encodings: which arrived, and which was agreed.
+			assert.True(t, strings.Contains(string(data), "json body on a proto connection"))
+		})
+	}
 }

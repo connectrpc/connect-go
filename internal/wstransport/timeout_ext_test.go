@@ -372,17 +372,40 @@ func TestGoClientOmitsTheParameterWithoutADeadline(t *testing.T) {
 	}
 }
 
+// wsTestReadTimeout bounds a raw-wire read. It is a backstop against a hang,
+// not a latency assertion, so it is far longer than any exchange here needs.
+const wsTestReadTimeout = 10 * time.Second
+
+// readContext bounds one read. tb.Context() alone is cancelled when the test
+// ends, which a test blocked in a read cannot reach: it would wait out the
+// whole package's timeout and take every other test down with it.
+func readContext(tb testing.TB) (context.Context, context.CancelFunc) {
+	tb.Helper()
+	return context.WithTimeout(tb.Context(), wsTestReadTimeout)
+}
+
 // readServerOpening reads the server's M message, which opens every response
 // stream, and returns the message after it. A test asserting on the server's
 // first *interesting* message goes through here, so the opening M is checked
 // rather than skipped.
+//
+// A failed read is fatal: everything after it reads a message that was never
+// received, and the assert helpers here do not stop the test.
 func readServerOpening(tb testing.TB, conn *websocket.Conn) []byte {
 	tb.Helper()
-	_, opening, err := conn.Read(tb.Context())
-	assert.Nil(tb, err)
-	assert.True(tb, len(opening) > 0)
+	ctx, cancel := readContext(tb)
+	defer cancel()
+	_, opening, err := conn.Read(ctx)
+	if err != nil {
+		tb.Fatalf("read the server's opening M: %v", err)
+	}
+	if len(opening) == 0 {
+		tb.Fatal("opening message carries no marker")
+	}
 	assert.Equal(tb, opening[0], wireMetadata)
-	_, data, err := conn.Read(tb.Context())
-	assert.Nil(tb, err)
+	_, data, err := conn.Read(ctx)
+	if err != nil {
+		tb.Fatalf("read the message after the opening M: %v", err)
+	}
 	return data
 }

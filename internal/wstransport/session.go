@@ -83,6 +83,9 @@ func (s *session) Serve(
 		ResponseEncoding: connect.CompressionNameIdentity,
 	}
 	for key, values := range info.Request.Header {
+		if isStrippedHandshakeHeader(key) {
+			continue
+		}
 		callInfo.RequestHeader().SetValues(key, values)
 	}
 
@@ -91,8 +94,9 @@ func (s *session) Serve(
 	closeCtx, closeCancel := context.WithTimeout(context.WithoutCancel(ctx), wsCloseWriteTimeout)
 	defer closeCancel()
 	handlerConn := &websocketHandlerConn{
-		request: info.Request,
-		wsConn:  conn,
+		request:        info.Request,
+		wsConn:         conn,
+		faultCloseCode: info.FaultCloseCode,
 		marshaler: messageWriter{
 			// No compression here: the WebSocket transport compresses whole
 			// messages itself, so a second pass would deflate gzip.
@@ -108,6 +112,7 @@ func (s *session) Serve(
 			wsConn:                conn,
 			callInfo:              callInfo,
 			codecs:                info.Codecs,
+			bodyIsText:            info.Codec.Name() == connect.CodecNameJSON,
 			readMaxBytes:          info.ReadMaxBytes,
 			infrastructureHeaders: info.InfrastructureHeaders,
 			info:                  info,

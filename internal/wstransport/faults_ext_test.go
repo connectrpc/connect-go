@@ -162,7 +162,9 @@ func TestProtocolFaultsAreClassified(t *testing.T) {
 
 			// Read the server's verdict, which is what makes the fault
 			// observable to the peer as well as to the monitor.
-			_, _, readErr := conn.Read(t.Context())
+			readCtx, cancelRead := readContext(t)
+			_, _, readErr := conn.Read(readCtx)
+			cancelRead()
 			_ = readErr
 
 			faults, peers := recorder.seen()

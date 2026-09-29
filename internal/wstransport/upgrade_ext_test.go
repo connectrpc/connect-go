@@ -30,7 +30,6 @@ import (
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
-	"connectrpc.com/connect/v2/connectproto"
 	"connectrpc.com/connect/v2/internal/assert"
 	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
@@ -84,7 +83,7 @@ func upgradeRequest(tb testing.TB, subprotocol string) *http.Request {
 func TestUpgradeRejectsUnhijackableListener(t *testing.T) {
 	t.Parallel()
 	recorder := httptest.NewRecorder()
-	newUpgradeHandler(t).ServeHTTP(recorder, upgradeRequest(t, "connectrpc.1"))
+	newUpgradeHandler(t).ServeHTTP(recorder, upgradeRequest(t, "connectrpc.1+proto"))
 	assert.Equal(t, recorder.Code, http.StatusInternalServerError)
 	// The message must name h2c: an operator who sees a bare 500 looks in the
 	// wrong place.
@@ -98,7 +97,7 @@ func TestUpgradeRejectsDisallowedOrigin(t *testing.T) {
 		func(*http.Request) bool { return false },
 	))
 	recorder := newHijackableRecorder()
-	handler.ServeHTTP(recorder, upgradeRequest(t, "connectrpc.1"))
+	handler.ServeHTTP(recorder, upgradeRequest(t, "connectrpc.1+proto"))
 	assert.Equal(t, recorder.Code, http.StatusForbidden)
 }
 
@@ -117,15 +116,21 @@ func TestUpgradeRejectsUnknownSubprotocol(t *testing.T) {
 	assert.Equal(t, recorder.Code, http.StatusBadRequest)
 }
 
-// A subprotocol naming a codec the server does not have must fail before the
-// handshake, not after.
-func TestUpgradeRejectsUnsupportedCodec(t *testing.T) {
+// RFC 8441's Extended CONNECT carries WebSocket over HTTP/2, which this binding
+// does not adopt. Left to fall through it reaches the HTTP handler, which would
+// run the procedure the client meant to reach over a WebSocket it never got.
+func TestUpgradeRefusesExtendedConnect(t *testing.T) {
 	t.Parallel()
-	// Only the JSON codec is registered, so the +proto token has no codec.
-	handler := newUpgradeHandler(t, wstransport.WithCodecs(connectproto.NewJSONCodec()))
 	recorder := newHijackableRecorder()
-	handler.ServeHTTP(recorder, upgradeRequest(t, "connectrpc.1+proto"))
-	assert.Equal(t, recorder.Code, http.StatusUnsupportedMediaType)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodConnect, pingProcedure, nil)
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+	request.Header.Set("Sec-WebSocket-Version", "13")
+	request.Header.Set("Sec-WebSocket-Protocol", "connectrpc.1+proto")
+
+	newUpgradeHandler(t).ServeHTTP(recorder, request)
+	assert.Equal(t, recorder.Code, http.StatusNotImplemented)
+	assert.True(t, strings.Contains(recorder.Body.String(), "Extended CONNECT"))
 }
 
 // A request that is not an upgrade must fall through, not be rejected.
@@ -356,6 +361,8 @@ var (
 	_ wstransport.ServerOption = wstransport.WithCodecs()
 	_ wstransport.ClientOption = wstransport.WithoutCompression()
 	_ wstransport.ServerOption = wstransport.WithoutCompression()
+	_ wstransport.ClientOption = wstransport.WithFaultCloseCode()
+	_ wstransport.ServerOption = wstransport.WithFaultCloseCode()
 	_ wstransport.ClientOption = wstransport.WithCompressMinBytes(0)
 	_ wstransport.ServerOption = wstransport.WithCompressMinBytes(0)
 

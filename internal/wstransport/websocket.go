@@ -314,6 +314,12 @@ func WithoutCompression() Option {
 	return optionFunc(func(o *options) { o.compressionDisabled = true })
 }
 
+// WithFaultCloseCode sends a misbehaving peer the close code §13 assigns its
+// fault, instead of hanging up. See connecthttp.WithWebSocketFaultCloseCode.
+func WithFaultCloseCode() Option {
+	return optionFunc(func(o *options) { o.faultCloseCode = true })
+}
+
 // WithCompressMinBytes sets the size below which messages are sent
 // uncompressed, since compressing a small payload usually makes it bigger. It
 // applies to both halves: permessage-deflate's threshold on WebSocket, and the
@@ -386,6 +392,7 @@ type options struct {
 	sendCompression       string
 	compressMinBytes      int
 	compressionDisabled   bool
+	faultCloseCode        bool
 	readMaxBytes          int
 	sendMaxBytes          int
 	infrastructureHeaders []string

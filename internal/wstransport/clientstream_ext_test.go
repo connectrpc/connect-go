@@ -94,7 +94,9 @@ func TestClientStreamingWireSequence(t *testing.T) {
 
 			// Nothing follows but the close, which the server sends itself: the
 			// RPC is over, and one connection carries only the one RPC.
-			_, _, err = client.conn.Read(t.Context())
+			readCtx, cancelRead := readContext(t)
+			defer cancelRead()
+			_, _, err = client.conn.Read(readCtx)
 			assert.NotNil(t, err)
 			assert.Equal(t, websocket.CloseStatus(err), websocket.StatusNormalClosure)
 		})
@@ -162,6 +164,33 @@ func TestMessagesAfterEndOfClientStreamAreDiscarded(t *testing.T) {
 		t.Fatal("writes after C outlasted the handler, so nothing was draining them")
 	default:
 	}
+}
+
+// §8: after C the only frames left are Close, Ping and Pong, so a message is a
+// protocol error. It cannot end the read — the peer would stall on a full
+// buffer before it could read the verdict — so it is recorded and reported in
+// the S message instead.
+func TestMessageAfterEndOfClientStreamIsAProtocolError(t *testing.T) {
+	t.Parallel()
+	// The drain runs alongside the handler, so the handler has to still be in
+	// flight when the illegal message lands: a server that had already sent its
+	// S would have nothing left to report it in.
+	httpServer := newHybridServer2(t, lingeringServer{
+		linger: 300 * time.Millisecond,
+		done:   make(chan struct{}),
+	})
+	conn := dialCumSum(t, httpServer, "")
+	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+	sendJSONMessage(t, conn, wireClientEndStream, nil)
+	// The illegal message: the client already said it was done.
+	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 2})
+
+	// lingeringServer sends no bodies, so the message after the opening M is
+	// the terminal one.
+	data := readServerOpening(t, conn)
+	assert.Equal(t, data[0], wireServerEndStream)
+	assert.True(t, strings.Contains(string(data), "invalid_argument"))
+	assert.True(t, strings.Contains(string(data), "after its C message"))
 }
 
 // lingeringServer reads to EOF and then stays in the handler, holding the
