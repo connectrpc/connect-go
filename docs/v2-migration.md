@@ -339,11 +339,13 @@ return nil, connect.NewError(connect.CodeInternal, err)
 
 ```go
 // v2
-return nil, connect.NewError(connect.CodeInternal, err.Error())
+return nil, connect.NewError(connect.CodeInternal, err.Error()).WithCause(err)
 ```
 
 v1 sent the error's full string to the client, so the tool rewrites to
-`err.Error()` to preserve what callers see today. Common argument shapes
+`err.Error()` to preserve what callers see today, and attaches `err` with
+`WithCause` so `errors.Is` and `errors.As` still match. A call such as `f()`
+gets no cause, since it would be evaluated twice. Common argument shapes
 collapse to simpler forms with the same wire message:
 
 ```go
@@ -374,7 +376,7 @@ if detail, derr := connect.NewErrorDetail(info); derr == nil {
 
 ```go
 // v2
-cErr := connect.NewError(connect.CodeInternal, err.Error())
+cErr := connect.NewError(connect.CodeInternal, err.Error()).WithCause(err)
 if detail, derr := connectproto.NewErrorDetail(info); derr == nil {
 	cErr = cErr.WithDetail(detail)
 }

@@ -1,4 +1,4 @@
-# A bare error argument to NewError gains .Error() and WithCause.
+# A variable or field error argument becomes the cause; a call gets no cause.
 stubs v2
 exec migrate
 cmp stdout out.txt
@@ -19,17 +19,19 @@ import (
 
 type pingServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
+
+	state struct{ err error }
 }
 
 func (s *pingServer) Fail(ctx context.Context, req *connect.Request[pingv1.FailRequest]) (*connect.Response[pingv1.FailResponse], error) {
-	if err := ctx.Err(); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	if s.state.err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, s.state.err)
 	}
-	return connect.NewResponse(&pingv1.FailResponse{}), nil
+	return nil, connect.NewError(connect.CodeInternal, context.Cause(ctx))
 }
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./service.go: convert_code_const=1 convert_new_error=1 flip_residual_connect=1 import_add_connectv2=1 import_drop_v1=1 param_unwrap_request=1 result_unwrap_response=1 strip_new_response=1
+  ./service.go: convert_code_const=2 convert_new_error=2 flip_residual_connect=2 import_add_connectv2=1 import_drop_v1=1 param_unwrap_request=1 result_unwrap_response=1
 --- ./service.go
 +++ ./service.go
 @@ -3,7 +3,7 @@
@@ -41,18 +43,18 @@ Proposed rewrites (rerun with -w to apply):
  	pingv1 "example.com/app/gen/connect/ping/v1"
  	"example.com/app/gen/connect/ping/v1/pingv1connect"
  )
-@@ -12,10 +12,10 @@
- 	pingv1connect.UnimplementedPingServiceHandler
+@@ -14,10 +14,10 @@
+ 	state struct{ err error }
  }
  
 -func (s *pingServer) Fail(ctx context.Context, req *connect.Request[pingv1.FailRequest]) (*connect.Response[pingv1.FailResponse], error) {
 +func (s *pingServer) Fail(ctx context.Context, req *pingv1.FailRequest) (*pingv1.FailResponse, error) {
- 	if err := ctx.Err(); err != nil {
--		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-+		return nil, connect.NewError(connect.CodeInvalidArgument, err.Error()).WithCause(err)
+ 	if s.state.err != nil {
+-		return nil, connect.NewError(connect.CodeUnavailable, s.state.err)
++		return nil, connect.NewError(connect.CodeUnavailable, s.state.err.Error()).WithCause(s.state.err)
  	}
--	return connect.NewResponse(&pingv1.FailResponse{}), nil
-+	return &pingv1.FailResponse{}, nil
+-	return nil, connect.NewError(connect.CodeInternal, context.Cause(ctx))
++	return nil, connect.NewError(connect.CodeInternal, context.Cause(ctx).Error())
  }
  
 

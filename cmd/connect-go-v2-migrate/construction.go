@@ -364,6 +364,8 @@ func rewriteClientConstruction(file *ast.File, state *rewriteState, report *Repo
 		}
 		if presence := findReadLimit(otherOpts, call.Ellipsis.IsValid(), state, readLimitVars); presence != readLimitSet {
 			otherOpts = injectReadLimit(otherOpts, state)
+			// Anchor to the base URL so later comments stay put.
+			anchorPositions(otherOpts[0], skipTrailingComments(state, call.Args[1].End()))
 			reportReadLimit(report, presence, call.Pos())
 			report.bump("read_limit_pinned")
 		}
@@ -376,6 +378,11 @@ func rewriteClientConstruction(file *ast.File, state *rewriteState, report *Repo
 			call.Ellipsis = token.NoPos
 		}
 		newClient := callExpr(state.connectV2Alias, "NewClient", append([]ast.Expr{transport}, mapped...)...)
+		// Reuse the original parens so comments between arguments stay put.
+		for _, wrapper := range []*ast.CallExpr{newClient, transport} {
+			anchorPositions(wrapper.Fun, call.Lparen)
+			wrapper.Lparen, wrapper.Rparen = call.Lparen, call.Rparen
+		}
 		call.Args = []ast.Expr{newClient}
 		state.usedV2 = true
 		state.usedConnectHTTP = true
