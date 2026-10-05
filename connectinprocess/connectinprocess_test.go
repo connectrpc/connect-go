@@ -433,6 +433,74 @@ func TestUnaryHandlerTypedNilError(t *testing.T) {
 	}
 }
 
+// TestUnaryReceiveBeforeSend verifies Receive waits for a concurrent Send.
+func TestUnaryReceiveBeforeSend(t *testing.T) {
+	t.Parallel()
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+	client := connect.NewClient(connectinprocess.New(server))
+
+	stream, err := client.CallClientStream(t.Context(), connect.Spec{
+		Procedure:  pingv1connect.PingServicePingProcedure,
+		StreamType: connect.StreamTypeUnary,
+	})
+	if err != nil {
+		t.Fatalf("CallClientStream: %v", err)
+	}
+	defer stream.Close()
+	res := &pingv1.PingResponse{}
+	errc := make(chan error, 1)
+	go func() { errc <- stream.Receive(res) }()
+	select {
+	case err := <-errc:
+		t.Fatalf("Receive returned %v before Send", err)
+	case <-time.After(10 * time.Millisecond):
+	}
+	if err := stream.Send(&pingv1.PingRequest{Number: 42}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if err := stream.CloseSend(); err != nil {
+		t.Fatalf("CloseSend: %v", err)
+	}
+	if err := <-errc; err != nil {
+		t.Fatalf("Receive: %v", err)
+	}
+	if got, want := res.GetNumber(), int64(42); got != want {
+		t.Errorf("Number = %d, want %d", got, want)
+	}
+}
+
+// TestUnaryCloseUnblocksWaitingReceive verifies Close unblocks a Receive
+// waiting for Send.
+func TestUnaryCloseUnblocksWaitingReceive(t *testing.T) {
+	t.Parallel()
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+	client := connect.NewClient(connectinprocess.New(server))
+
+	stream, err := client.CallClientStream(t.Context(), connect.Spec{
+		Procedure:  pingv1connect.PingServicePingProcedure,
+		StreamType: connect.StreamTypeUnary,
+	})
+	if err != nil {
+		t.Fatalf("CallClientStream: %v", err)
+	}
+	errc := make(chan error, 1)
+	go func() { errc <- stream.Receive(&pingv1.PingResponse{}) }()
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case err := <-errc:
+		// Close may land before Receive starts, which reports io.EOF.
+		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+			t.Errorf("Receive = %v, want io.EOF or context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Receive was not unblocked by Close")
+	}
+}
+
 // TestClientStreamCloseAbortsServer verifies Close cancels the stream
 // context, so a handler streaming indefinitely returns.
 func TestClientStreamCloseAbortsServer(t *testing.T) {
