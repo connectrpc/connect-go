@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"connectrpc.com/connect/v2"
@@ -431,6 +432,74 @@ func TestUnaryHandlerTypedNilError(t *testing.T) {
 	if got := ce.Code(); got != connect.CodeUnknown {
 		t.Fatalf("code = %s, want CodeUnknown", got)
 	}
+}
+
+// TestUnaryReceiveBeforeSend verifies Receive waits for a concurrent Send.
+func TestUnaryReceiveBeforeSend(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		server := connect.NewServer()
+		pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+		client := connect.NewClient(connectinprocess.New(server))
+
+		stream, err := client.CallClientStream(t.Context(), connect.Spec{
+			Procedure:  pingv1connect.PingServicePingProcedure,
+			StreamType: connect.StreamTypeUnary,
+		})
+		if err != nil {
+			t.Fatalf("CallClientStream: %v", err)
+		}
+		defer stream.Close()
+		res := &pingv1.PingResponse{}
+		errc := make(chan error, 1)
+		go func() { errc <- stream.Receive(res) }()
+		synctest.Wait()
+		select {
+		case err := <-errc:
+			t.Fatalf("Receive returned %v before Send", err)
+		default:
+		}
+		if err := stream.Send(&pingv1.PingRequest{Number: 42}); err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+		if err := stream.CloseSend(); err != nil {
+			t.Fatalf("CloseSend: %v", err)
+		}
+		if err := <-errc; err != nil {
+			t.Fatalf("Receive: %v", err)
+		}
+		if got, want := res.GetNumber(), int64(42); got != want {
+			t.Errorf("Number = %d, want %d", got, want)
+		}
+	})
+}
+
+// TestUnaryCloseUnblocksWaitingReceive verifies Close unblocks a Receive
+// waiting for Send.
+func TestUnaryCloseUnblocksWaitingReceive(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		server := connect.NewServer()
+		pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+		client := connect.NewClient(connectinprocess.New(server))
+
+		stream, err := client.CallClientStream(t.Context(), connect.Spec{
+			Procedure:  pingv1connect.PingServicePingProcedure,
+			StreamType: connect.StreamTypeUnary,
+		})
+		if err != nil {
+			t.Fatalf("CallClientStream: %v", err)
+		}
+		errc := make(chan error, 1)
+		go func() { errc <- stream.Receive(&pingv1.PingResponse{}) }()
+		synctest.Wait()
+		if err := stream.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if err := <-errc; !errors.Is(err, context.Canceled) {
+			t.Errorf("Receive = %v, want context.Canceled", err)
+		}
+	})
 }
 
 // TestClientStreamCloseAbortsServer verifies Close cancels the stream

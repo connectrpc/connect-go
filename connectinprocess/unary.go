@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 
 	"connectrpc.com/connect/v2"
 )
@@ -27,10 +28,13 @@ import (
 // Instead of spawning a separate goroutine, the server logic executes
 // synchronously during the client's first Receive call. The flow is:
 //  1. The client calls Send, capturing the request into a local slot.
-//  2. The client calls Receive, triggering the server dispatch.
+//  2. The client calls Receive, which waits for the request and then
+//     triggers the server dispatch.
 //  3. The server's Receive consumes the captured request slot.
 //  4. The server's Send writes the response into a local response slot.
 //  5. The client's Receive copies that response into the caller's dst.
+//
+// Send and Receive may run on separate goroutines. mu guards the handoff.
 //
 // Streaming RPCs cannot use this layout because the server must run an
 // indefinite loop that interleaves with the user's Send and Receive calls
@@ -41,6 +45,11 @@ type unaryClientStream struct {
 	ctx        context.Context //nolint:containedctx // the lazy dispatch in Receive runs the server on the call context
 	clientInfo *connect.CallInfo
 	serverInfo *connect.CallInfo
+
+	mu       sync.Mutex
+	sendDone bool          // set by Send, CloseSend, or Close
+	closed   bool          // set by Close
+	waiter   chan struct{} // set while Receive waits for sendDone
 
 	requestMsg  any
 	responseMsg any
@@ -77,16 +86,19 @@ func (s *unaryClientStream) Send(msg any) error {
 	}
 	s.sentOnce = true
 	s.requestMsg = msg
+	// A unary request has one message, so Send completes the send side.
+	s.finishSend(false)
 	return nil
 }
 
 func (s *unaryClientStream) CloseSend() error {
 	s.sendClosed = true
+	s.finishSend(false)
 	return nil
 }
 
 func (s *unaryClientStream) Close() error {
-	s.rxEnd = true
+	s.finishSend(true)
 	return nil
 }
 
@@ -94,20 +106,60 @@ func (s *unaryClientStream) Receive(dst any) error {
 	if s.rxEnd {
 		return io.EOF
 	}
+	// Every path from here ends the receive side.
+	s.rxEnd = true
+	if err := s.waitSend(); err != nil {
+		return err
+	}
 	if err := s.dispatch(s.ctx); err != nil {
-		s.rxEnd = true
 		return asClientErr(err)
 	}
 	if s.responseMsg == nil {
-		s.rxEnd = true
 		return connect.Errorf(connect.CodeUnimplemented, "unary stream has no message")
 	}
 	if err := s.t.copy(dst, s.responseMsg); err != nil {
-		s.rxEnd = true
 		return err
 	}
 	s.responseMsg = nil
-	s.rxEnd = true
+	return nil
+}
+
+// finishSend completes the send side and wakes a waiting Receive.
+func (s *unaryClientStream) finishSend(closing bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sendDone = true
+	s.closed = s.closed || closing
+	if s.waiter != nil {
+		close(s.waiter)
+		s.waiter = nil
+	}
+}
+
+// waitSend blocks until the send side completes or the stream is closed.
+func (s *unaryClientStream) waitSend() error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return io.EOF
+	}
+	if s.sendDone {
+		s.mu.Unlock()
+		return nil
+	}
+	waiter := make(chan struct{})
+	s.waiter = waiter
+	s.mu.Unlock()
+	select {
+	case <-waiter:
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return context.Canceled
+	}
 	return nil
 }
 
