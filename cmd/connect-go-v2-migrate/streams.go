@@ -238,8 +238,7 @@ func rewriteClientStreamMetadata(body *ast.BlockStmt, streamVars map[string]bool
 		return
 	}
 	infoName := uniqueIdent(body, "info", "callInfo")
-	seed := newClientContextSeed(state, ctxName, infoName)
-	body.List = append(body.List[:insertAt], append([]ast.Stmt{seed}, body.List[insertAt:]...)...)
+	insertStmt(state, body, insertAt, newClientContextSeed(state, ctxName, infoName))
 	report.bump("client_context_insert")
 	walkFuncBody(body, func(n ast.Node) {
 		call, ok := n.(*ast.CallExpr)
