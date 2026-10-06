@@ -138,7 +138,10 @@ func TestProtocolFaultsAreClassified(t *testing.T) {
 			want:    connecthttp.FaultMessageEncoding,
 		},
 		{
-			name:   "empty body in a text frame",
+			// A text frame on a connection that negotiated Protobuf. Caught by
+			// the encoding check, ahead of the separate rule that an empty
+			// text body is not the empty JSON message.
+			name:   "a body in the encoding the handshake did not agree on",
 			marker: wireBody,
 			text:   true,
 			want:   connecthttp.FaultFrameType,
@@ -331,7 +334,9 @@ func TestClientProtocolFaultsAreClassified(t *testing.T) {
 			want: connecthttp.FaultMetadata,
 		},
 		{
-			name: "empty body in a text frame",
+			// The client's twin of the server case above: a text body where the
+			// subprotocol named Protobuf.
+			name: "a body in the encoding the handshake did not agree on",
 			write: func(conn *websocket.Conn) {
 				writeRawFrame(conn, true, wireBody, nil)
 			},

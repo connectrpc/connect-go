@@ -208,6 +208,68 @@ func (s endOfStreamReporter) CumSum(
 // ended cleanly. A cancellation that wrapped the transport's own error would
 // satisfy it too, since a read on a closed connection reports io.EOF at the
 // bottom of its chain, and a truncated stream would look finished.
+// watchingServer reads to EOF, then waits on the call's own context and
+// reports what ended it.
+type watchingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+
+	ended chan error
+}
+
+func (s watchingServer) CumSum(
+	ctx context.Context,
+	stream pingv1connect.PingServiceCumSumServerStream,
+) error {
+	for {
+		request, err := stream.Receive()
+		if err != nil {
+			break // io.EOF once C has arrived
+		}
+		// Answered, so the test can tell that the handler is past its reads and
+		// into the wait below.
+		if sendErr := stream.Send(&pingv1.CumSumResponse{Sum: request.Number}); sendErr != nil {
+			s.ended <- sendErr
+			return sendErr
+		}
+	}
+	select {
+	case <-ctx.Done():
+		s.ended <- ctx.Err()
+	case <-time.After(20 * time.Second):
+		s.ended <- nil
+	}
+	return ctx.Err()
+}
+
+// §8: the RPC is canceled once the connection ends before S, whether or not C
+// arrived. A handler that has had its io.EOF is no longer reading, so without
+// the drain reporting the connection's end it would compute a whole response
+// for a peer that left — and the server would then try to send it, which §8
+// forbids.
+func TestConnectionEndingAfterEndOfClientStreamCancelsTheCall(t *testing.T) {
+	t.Parallel()
+	ended := make(chan error, 1)
+	httpServer := newHybridServer2(t, watchingServer{ended: ended})
+	conn := dialCumSum(t, httpServer, "")
+	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+	sendJSONMessage(t, conn, wireClientEndStream, nil)
+
+	// Read the reply, so the handler is past its Receive loop and waiting.
+	reply := readServerOpening(t, conn)
+	assert.Equal(t, reply[0], wireBody)
+
+	// Now vanish, without a closing handshake.
+	assert.Nil(t, conn.CloseNow())
+
+	select {
+	case err := <-ended:
+		assert.NotNil(t, err)
+		assert.True(t, errors.Is(err, context.Canceled))
+	case <-time.After(20 * time.Second):
+		t.Fatal("the handler never learned the connection had ended")
+	}
+}
+
 func TestEndOfClientStreamIsDistinguishableFromADeadClient(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {

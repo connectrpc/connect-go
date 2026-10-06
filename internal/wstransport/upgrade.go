@@ -69,6 +69,9 @@ type SessionInfo struct {
 	// assigns its fault, rather than hanging up on it. See
 	// connecthttp.WithWebSocketFaultCloseCode.
 	FaultCloseCode bool
+	// KeepAliveInterval is how often the session pings the client; see
+	// [WithKeepAlive]. Zero sends no Pings.
+	KeepAliveInterval time.Duration
 }
 
 // Session serves RPCs on an upgraded WebSocket connection. Serve reads
@@ -223,6 +226,7 @@ func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *
 		InfrastructureHeaders: h.opts.infrastructureHeaders,
 		OnProtocolError:       h.opts.onProtocolError,
 		FaultCloseCode:        h.opts.faultCloseCode,
+		KeepAliveInterval:     h.opts.keepAliveInterval,
 	}
 	if err := h.session.Serve(request.Context(), h.server, conn, info); err != nil {
 		h.opts.logger.Error(

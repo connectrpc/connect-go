@@ -589,6 +589,7 @@ After a server sends the `S` message, it SHOULD send a Close frame and then stop
 | Compression parameters not acceptable | — | 3110 | §10 |
 | Server could not marshal its `S` message | 1011 | — | §13 |
 | Internal Client error | - | 3111 | §13 |
+| Peer silent past the keep-alive timeout | 1011 | 3111 | §13.2 |
 | Peer terminated without a closing handshake | (none) | (none) | §12 |
 
 A browser surfaces an absent close message as code `1006`. A client MUST NOT
@@ -625,6 +626,29 @@ A client MUST specify a valid close code when closing a connection. If this is d
 
 A server MUST NOT require `C` after it has sent `S` to complete an RPC, and MUST NOT report
 its absence as an error once it has sent `S`.
+
+### 13.2 Keep-alive
+
+Many proxies and load balancers close a WebSocket that carries no traffic for
+30 to 60 seconds. An endpoint MAY send Ping frames on an interval to keep such
+an intermediary from closing a quiet stream. RFC 6455 already requires the
+peer to answer each Ping with a Pong. A browser does this without involving the
+script, and cannot send Pings of its own, so a browser client relies on the
+server's Pings to keep its stream open.
+
+An endpoint that sends Pings MAY close a connection whose peer has sent
+nothing for a period of its choosing. Any frame counts: a message, a Pong, or
+a Ping. A server closes such a connection with 1011, and a client with 3111.
+Neither sends a terminal message, because the peer is presumed unable to read
+it, so the RPC fails as described in §13.1.
+
+An endpoint MUST NOT count time during which it has stopped reading the
+connection itself, for example because its application has not taken a
+message it already received. The peer's Pongs wait unread during that time,
+and the silence is this endpoint's, not the peer's.
+
+This period is not the deadline and does not replace it (§11.1). It measures
+whether the peer is still there, not how long the RPC has run.
 
 ### 14. IANA Considerations
 

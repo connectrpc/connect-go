@@ -161,6 +161,92 @@ func TestBareEndOfClientStreamFollowsTheNegotiatedFrameType(t *testing.T) {
 	}
 }
 
+// closeCodeRecordingServer accepts an upgrade by hand and reports the close
+// code the client eventually sends, which is the only way to see one.
+func closeCodeRecordingServer(tb testing.TB, codes chan<- websocket.StatusCode) *httptest.Server {
+	tb.Helper()
+	httpServer := httptest.NewServer(http.HandlerFunc(
+		func(responseWriter http.ResponseWriter, request *http.Request) {
+			conn, err := websocket.Accept(responseWriter, request, &websocket.AcceptOptions{
+				Subprotocols: []string{request.Header.Get("Sec-WebSocket-Protocol")},
+			})
+			if err != nil {
+				return
+			}
+			defer func() { _ = conn.CloseNow() }()
+			for {
+				if _, _, readErr := conn.Read(request.Context()); readErr != nil {
+					select {
+					case codes <- websocket.CloseStatus(readErr):
+					default:
+					}
+					return
+				}
+			}
+		},
+	))
+	tb.Cleanup(httpServer.Close)
+	return httpServer
+}
+
+// §13.1: a client that ends an RPC on its own unexpected condition says so with
+// 3111, rather than the 1000 that would tell the server the stream finished
+// normally. The server behaved here — only this end failed.
+func TestClientClosesWithInternalErrorCode(t *testing.T) {
+	t.Parallel()
+	codes := make(chan websocket.StatusCode, 1)
+	httpServer := closeCodeRecordingServer(t, codes)
+
+	transport := connecthttp.NewTransport(
+		httpServer.Client(),
+		httpServer.URL,
+		connecthttp.WithWebSocket(connecthttp.SelectAll),
+		// Small enough that the message below cannot be encoded for the wire.
+		connecthttp.WithSendMaxBytes(16),
+	)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+
+	// Far past the limit, so the encode step refuses it before the wire.
+	_, callErr := client.Ping(t.Context(), &pingv1.PingRequest{
+		Text: strings.Repeat("x", 4096),
+	})
+	assert.NotNil(t, callErr)
+	assert.Equal(t, connect.CodeOf(callErr), connect.CodeResourceExhausted)
+
+	select {
+	case code := <-codes:
+		assert.Equal(t, code, websocket.StatusCode(3111))
+	case <-time.After(10 * time.Second):
+		t.Fatal("the client never closed")
+	}
+}
+
+// A stream that ends with nothing wrong closes 1000, so the code above cannot
+// be what this client always sends.
+func TestCleanStreamClosesNormally(t *testing.T) {
+	t.Parallel()
+	codes := make(chan websocket.StatusCode, 1)
+	httpServer := closeCodeRecordingServer(t, codes)
+
+	transport := connecthttp.NewTransport(
+		httpServer.Client(),
+		httpServer.URL,
+		connecthttp.WithWebSocket(connecthttp.SelectAll),
+	)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+	stream, err := client.CumSum(t.Context())
+	assert.Nil(t, err)
+	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+	assert.Nil(t, stream.Close())
+
+	select {
+	case code := <-codes:
+		assert.Equal(t, code, websocket.StatusNormalClosure)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the client never closed")
+	}
+}
+
 // readFrameType takes the next observed frame type, failing rather than
 // blocking if the client never sent one.
 func readFrameType(tb testing.TB, frames <-chan bool) bool {

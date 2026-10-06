@@ -57,6 +57,10 @@ const defaultReadMaxBytes = 1024 * 1024 * 4 // 4MiB
 // the better answer for both.
 const defaultCompressMinBytes = 512
 
+// defaultKeepAliveInterval sits at the low end of the 30-60 second idle
+// timeout common among proxies and load balancers.
+const defaultKeepAliveInterval = 30 * time.Second
+
 // ClientOption configures [NewTransport].
 type ClientOption interface {
 	applyToClient(*options)
@@ -350,6 +354,21 @@ func WithInfrastructureHeaders(names ...string) ServerOption {
 	})
 }
 
+// WithKeepAlive sends a WebSocket Ping every interval for as long as the
+// connection is open. Many proxies drop a WebSocket that carries no traffic
+// for 30 to 60 seconds, so a stream that can go quiet for longer needs an
+// interval below that. The default is 30 seconds; zero or less sends no Pings.
+// See connecthttp.WithWebSocketKeepAlive.
+//
+// A peer heard nothing from for two intervals is hung up on: 1011 from a
+// server, 3111 from a client (§13.2). The RPC fails as Unavailable on the
+// client and Canceled on the server.
+//
+// Pongs are sent regardless of this setting. Either side may enable it alone.
+func WithKeepAlive(interval time.Duration) Option {
+	return optionFunc(func(o *options) { o.keepAliveInterval = interval })
+}
+
 // WithReadMaxBytes bounds the size of a message this side will accept. Zero
 // means no limit.
 func WithReadMaxBytes(maxBytes int) Option {
@@ -395,6 +414,7 @@ type options struct {
 	faultCloseCode        bool
 	readMaxBytes          int
 	sendMaxBytes          int
+	keepAliveInterval     time.Duration
 	infrastructureHeaders []string
 	httpClient            *http.Client
 }
@@ -412,11 +432,12 @@ func defaultOptions() options {
 			connectproto.NewBinaryCodec(),
 			connectproto.NewJSONCodec(),
 		},
-		compressors:      []connect.Compressor{connectgzip.New()},
-		sendCodec:        connect.CodecNameProto,
-		readMaxBytes:     defaultReadMaxBytes,
-		compressMinBytes: defaultCompressMinBytes,
-		httpClient:       http.DefaultClient,
+		compressors:       []connect.Compressor{connectgzip.New()},
+		sendCodec:         connect.CodecNameProto,
+		readMaxBytes:      defaultReadMaxBytes,
+		compressMinBytes:  defaultCompressMinBytes,
+		keepAliveInterval: defaultKeepAliveInterval,
+		httpClient:        http.DefaultClient,
 	}
 }
 

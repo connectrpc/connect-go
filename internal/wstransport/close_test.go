@@ -252,6 +252,8 @@ func TestReadFailureAtTheDeadlineIsDeadlineExceeded(t *testing.T) {
 	}
 	close(call.dialDone)
 	call.dialOnce.Do(func() {}) // consume it, so ensureDialed will not dial
+	call.reader = newFrameReader(call.ctx, clientConn.Read)
+	t.Cleanup(call.reader.close)
 
 	unmarshaler := &websocketClientUnmarshaler{call: call}
 	err := unmarshaler.unmarshal(&pingv1.CumSumResponse{})

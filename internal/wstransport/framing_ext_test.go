@@ -186,6 +186,57 @@ func TestWrongDirectionMarkerIsNamedAsSuch(t *testing.T) {
 	}
 }
 
+// RFC 6455 §8.1 requires every text message to be valid UTF-8, and §6.1 makes a
+// violation a protocol error. Nothing below this layer checks: a browser peer
+// would sever the connection itself, so a server that passed the bytes to a
+// codec would only ever see the bug in production.
+func TestInvalidUTF8InATextMessageIsRejected(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		frame []byte
+	}{
+		// A lone continuation byte, which can never begin a sequence.
+		{name: "bare continuation byte", frame: []byte{wireMetadata, '{', 0x80, '}'}},
+		// A truncated three-byte sequence: 0xE2 0x98 wants a third byte.
+		{name: "truncated sequence", frame: []byte{wireMetadata, 0xE2, 0x98}},
+		// 0xFF never appears in UTF-8 at all.
+		{name: "impossible byte", frame: []byte{wireBody, 0xFF}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			recorder := &faultRecorder{}
+			httpServer := newFaultServer(t, recorder)
+			conn := dialCumSum(t, httpServer, "")
+			assert.Nil(t, conn.Write(t.Context(), websocket.MessageText, test.frame))
+
+			data := readServerOpening(t, conn)
+			assert.Equal(t, data[0], wireServerEndStream)
+			assert.True(t, strings.Contains(string(data), "invalid_argument"))
+			assert.True(t, strings.Contains(string(data), "not valid UTF-8"))
+
+			// An encoding fault, so §13 gives it 1002 rather than 1003.
+			faults, _ := recorder.seen()
+			assert.Equal(t, len(faults), 1)
+			assert.Equal(t, faults[0], connecthttp.FaultMessageEncoding)
+		})
+	}
+}
+
+// A text message that is valid UTF-8 passes, so the check above cannot be
+// rejecting every text frame.
+func TestValidUTF8InATextMessageIsAccepted(t *testing.T) {
+	t.Parallel()
+	observations := make(chan string, 4)
+	httpServer := newObservationServer(t, observations)
+	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
+	// Multi-byte runes throughout: a snowman and an accented vowel.
+	sendJSONMessage(t, conn, wireMetadata, []byte(`{"acme-tenant":["\u2603 caf\u00e9"]}`))
+	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+
+	assert.Equal(t, <-observations, "☃ café")
+}
+
 // §13 assigns each fault a close code, and it is the only part of a verdict a
 // browser script can read: the WebSocket API hands a script the code, never the
 // message body. A more specific code wins over the generic protocol error.

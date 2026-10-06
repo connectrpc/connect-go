@@ -21,6 +21,7 @@ import (
 	"errors"
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -165,8 +166,23 @@ func (c *websocketHandlerConn) terminalWriteError(marshalErr *connect.Error) *co
 // peerGone reports that the read path already saw this connection end without
 // the client's C message. Anything written afterwards is written to nobody.
 func (c *websocketHandlerConn) peerGone() bool {
-	return c.unmarshaler.eof && !c.unmarshaler.sawEndOfClientStream
+	// Two ways to lose a peer: it never sent C and stopped reading, or it sent
+	// C and then went away while the handler was still working. §8 makes no
+	// distinction — either way the connection ended before S.
+	if c.unmarshaler.leftAfterEndOfStream.Load() {
+		return true
+	}
+	if c.unmarshaler.eof && !c.unmarshaler.sawEndOfClientStream {
+		return true
+	}
+	// The reader runs ahead of the handler and of the post-C drain, so it can
+	// see the connection end before either has read the failure.
+	return c.unmarshaler.reader.connectionEnded(peerGoneGrace)
 }
+
+// peerGoneGrace bounds how long a failed write waits for the reader to notice
+// the connection it failed on is gone, which takes microseconds when it is.
+const peerGoneGrace = 100 * time.Millisecond
 
 // peerFault reports whether err says the peer sent something malformed or
 // oversized, rather than reporting its own RPC failure.
@@ -192,6 +208,7 @@ const (
 	wsStatusClientUnsupportedData = websocket.StatusCode(3103)
 	wsStatusClientMessageTooBig   = websocket.StatusCode(3109)
 	wsStatusClientCompression     = websocket.StatusCode(3110)
+	wsStatusClientInternal        = websocket.StatusCode(3111)
 )
 
 // normalizeCloseStatus folds a 31xx code onto the 10xx code with the same last
@@ -262,6 +279,14 @@ func (c *websocketHandlerConn) Close(err error) error {
 	// Unavailable. Detach for the final write.
 	if c.closeCtx != nil {
 		c.marshaler = c.terminalMarshaler()
+	}
+	// §8: a connection that ended before S means the caller can no longer
+	// receive one, so none is attempted. Gated on the drain's own signal, not
+	// on peerGone: eof is set by any failed read, including an oversized
+	// message this end refused while its sender waits for the verdict.
+	if c.unmarshaler.leftAfterEndOfStream.Load() {
+		_ = c.wsConn.CloseNow()
+		return nil
 	}
 	// Leading metadata precedes the S message even when no body was
 	// sent, so headers stay headers rather than folding into the trailers.
@@ -344,7 +369,10 @@ func writeFrame(
 // No read state carries between frames: the frame is the message boundary.
 type websocketUnmarshaler struct {
 	ctx    context.Context //nolint:containedctx
-	wsConn *websocket.Conn
+	reader *frameReader
+	// keeper is consulted only to say why the connection ended. Nil when
+	// keep-alive is off.
+	keeper *keepAlive
 	// callInfo receives M messages. They arrive after the
 	// handshake, so this is the only way a browser's metadata reaches the
 	// handler.
@@ -371,6 +399,13 @@ type websocketUnmarshaler struct {
 	peerFaulted          bool
 	// discardOnce guards the post-C drain, which must not be started twice.
 	discardOnce sync.Once
+	// leftAfterEndOfStream is set by that drain when the connection ends. The
+	// handler has had its io.EOF and is not reading, so nothing else can tell
+	// it the caller is gone.
+	leftAfterEndOfStream atomic.Bool
+	// cancelCall ends the RPC when that happens, which is how §8.1 says the end
+	// of the connection reaches a handler.
+	cancelCall context.CancelFunc
 	// afterEndOfStream carries a post-C protocol error from the drain
 	// goroutine to Close, which is the only place it can still be reported.
 	afterEndOfStream atomic.Pointer[connect.Error]
@@ -444,6 +479,12 @@ func (u *websocketUnmarshaler) endOfStreamError() *connect.Error {
 	if u.sawEndOfClientStream {
 		return errorf(connect.CodeUnknown, "%w", io.EOF)
 	}
+	if u.keeper.timedOut() {
+		return errorf(
+			connect.CodeCanceled,
+			"client sent nothing for %v, not even a Pong (keep-alive timeout)", u.keeper.timeout(),
+		)
+	}
 	// Canceled rather than Unavailable: the peer stopped, the transport did
 	// not fail, and a caller should not retry on the client's behalf.
 	return errorf(connect.CodeCanceled, "websocket closed before end-of-stream")
@@ -451,7 +492,7 @@ func (u *websocketUnmarshaler) endOfStreamError() *connect.Error {
 
 // nextMessage reads one frame and returns the message it carries.
 func (u *websocketUnmarshaler) nextMessage() (wireMessage, *connect.Error) {
-	messageType, frame, readerErr := readBoundedMessage(u.ctx, u.wsConn, messageReadLimit(u.readMaxBytes))
+	messageType, frame, readerErr := u.reader.next(u.ctx)
 	if readerErr != nil {
 		u.eof = true
 		if errors.Is(readerErr, errMessageTooBig) {
@@ -472,6 +513,10 @@ func (u *websocketUnmarshaler) nextMessage() (wireMessage, *connect.Error) {
 	if decodeErr != nil {
 		u.fault = FaultMarker
 		return wireMessage{}, decodeErr
+	}
+	if utf8Err := textEncodingError(frame, text); utf8Err != nil {
+		u.fault = FaultMessageEncoding
+		return wireMessage{}, utf8Err
 	}
 	if len(wire.payload) > u.readMaxBytes && u.readMaxBytes > 0 {
 		u.fault = FaultSizeLimit
@@ -529,9 +574,21 @@ func (u *websocketUnmarshaler) dispatch(wire wireMessage, message any) *connect.
 func (u *websocketUnmarshaler) discardAfterEndOfStream() {
 	u.discardOnce.Do(func() {
 		go func() {
-			limit := messageReadLimit(u.readMaxBytes)
 			for {
-				if _, _, err := readBoundedMessage(u.ctx, u.wsConn, limit); err != nil {
+				if _, _, err := u.reader.next(u.ctx); err != nil {
+					// §8: the RPC is canceled once the connection ends, whether
+					// or not C arrived — the handler is otherwise computing a
+					// response for a peer that cannot receive it.
+					//
+					// Only when this end had not already given up: a read that
+					// failed because the deadline passed says nothing about the
+					// peer, and the server still owes it that verdict.
+					if u.ctx.Err() == nil {
+						u.leftAfterEndOfStream.Store(true)
+						if u.cancelCall != nil {
+							u.cancelCall()
+						}
+					}
 					return
 				}
 				// §8: after C the only frames left are Close, Ping and Pong, so
@@ -780,10 +837,14 @@ type wsClientCall struct {
 	// faultCloseCode spends the closing handshake to hand the server a close
 	// code; see websocketHandlerConn.Close for what that costs.
 	faultCloseCode bool
+	// keepAliveInterval is how often to ping once dialed; see WithKeepAlive.
+	keepAliveInterval time.Duration
 
 	dialOnce sync.Once
 	dialDone chan struct{}
 	wsConn   *websocket.Conn
+	reader   *frameReader
+	keeper   *keepAlive
 	response *http.Response
 	dialErr  *connect.Error
 }
@@ -841,6 +902,8 @@ func (c *wsClientCall) ensureDialed() *connect.Error {
 		// note in session.Serve.
 		conn.SetReadLimit(c.readLimit)
 		c.wsConn = conn
+		c.reader = newFrameReader(c.ctx, conn.Read)
+		c.keeper = startKeepAlive(c.ctx, conn, c.reader, c.keepAliveInterval, wsStatusClientInternal)
 	})
 	<-c.dialDone
 	return c.dialErr
@@ -860,6 +923,9 @@ type websocketClientConn struct {
 	codecs codecPair
 	// faultCloseCode mirrors the server's; see websocketHandlerConn.
 	faultCloseCode bool
+	// localFault records a failure this end produced rather than read off the
+	// wire, which §13.1 closes with 3111.
+	localFault atomic.Bool
 
 	marshaler messageWriter
 	// openOnce writes the M message that must precede every other message on
@@ -902,6 +968,7 @@ func (c *websocketClientConn) Send(msg any) error {
 		return err
 	}
 	if err := c.marshaler.writeBody(msg); err != nil {
+		c.noteLocalFault(err)
 		return err
 	}
 	return nil // literal nil; a nil *Error is a non-nil error
@@ -973,21 +1040,58 @@ func (c *websocketClientConn) ResponseTrailer() http.Header {
 	return c.responseTrailer
 }
 
+// noteLocalFault records an error this end produced while encoding, as opposed
+// to one the wire reported. A failed write is not one: it says the connection
+// or the peer went, which §13 has its own codes for.
+func (c *websocketClientConn) noteLocalFault(err *connect.Error) {
+	if err == nil {
+		return
+	}
+	// Internal is a codec that is missing or refused the message; the send
+	// path's ResourceExhausted is sendMaxBytes, which only this end imposes and
+	// only on its own writes. A failed write reports neither.
+	if err.Code() == connect.CodeInternal || err.Code() == connect.CodeResourceExhausted {
+		c.localFault.Store(true)
+	}
+}
+
 func (c *websocketClientConn) CloseResponse() error {
 	if c.call.wsConn == nil {
 		return nil
 	}
+	c.call.keeper.stop()
+	// Deferred so it runs once the close below has ended the read in flight.
+	defer c.call.reader.close()
+	closeErr := c.closeConn()
+	// The background reader answers the server's close frame and closes the
+	// connection itself, so an already-closed connection is a completed
+	// handshake rather than a failure.
+	if errors.Is(closeErr, net.ErrClosed) {
+		return nil
+	}
+	return closeErr
+}
+
+func (c *websocketClientConn) closeConn() error {
 	// A server that malformed or oversized its side of the stream gets hung up
 	// on: the closing handshake reads until the peer's close frame arrives, so
 	// extending it would mean draining whatever that server has queued. See the
 	// note in websocketHandlerConn.Close.
 	if c.unmarshaler.peerFaulted {
 		// A client cannot send the 10xx code a server would: §13 puts its codes
-		// in the 31xx range, the only one a browser script may use.
+		// in the 31xx range, the only one a browser script may use. A peer fault
+		// is the more specific condition, so it wins over 3111 below.
 		if !c.faultCloseCode {
 			return c.call.wsConn.CloseNow()
 		}
 		return c.call.wsConn.Close(clientCloseCode(c.unmarshaler.fault), "")
+	}
+	if c.localFault.Load() {
+		// §13.1: the RPC ended on an unexpected condition at this end, not on
+		// anything the server did. Sent unconditionally — the peer behaved, so
+		// the closing handshake has nothing queued to drain, and the ordinary
+		// 1000 below costs the same handshake anyway.
+		return c.call.wsConn.Close(wsStatusClientInternal, "")
 	}
 	// Best-effort clean close. Sending 1000 Normal Closure is correct even if
 	// Receive has not yet observed the EndStream: the server's completion path
@@ -1060,6 +1164,53 @@ func (u *websocketClientUnmarshaler) fail(
 	return errorf(connect.CodeInvalidArgument, format, args...)
 }
 
+// readFailure turns a failed read into the RPC's error. Every failure ends the
+// response stream.
+func (u *websocketClientUnmarshaler) readFailure(readerErr error) *connect.Error {
+	u.endStreamSeen = true
+	if u.call.keeper.timedOut() {
+		u.endStreamError = errorf(
+			connect.CodeUnavailable,
+			"server sent nothing for %v, not even a Pong (keep-alive timeout)", u.call.keeper.timeout(),
+		)
+		return u.endStreamError
+	}
+	// A read that failed while the context was done is cancellation, not a
+	// transport fault. Report ctx.Err so callers see Canceled or
+	// DeadlineExceeded rather than whatever the socket happened to say.
+	if ctxErr := u.call.ctx.Err(); ctxErr != nil {
+		u.endStreamError = wsContextError(ctxErr)
+		return u.endStreamError
+	}
+	// The socket's read deadline and the context's timer are separate
+	// clocks, so the read can fail a moment before ctx.Err is set. A read
+	// that failed at or past the deadline is the deadline whichever fired
+	// first; calling it Unavailable would invite a retry that has no time
+	// left to run.
+	if deadline, ok := u.call.ctx.Deadline(); ok && !time.Now().Before(deadline) {
+		u.endStreamError = errorf(connect.CodeDeadlineExceeded, "%w", context.DeadlineExceeded)
+		return u.endStreamError
+	}
+	if isCleanWebSocketClose(readerErr) {
+		// A clean close with no EndStreamMessage means the RPC never reached
+		// a verdict. Unavailable, not EOF: the caller has no result, and
+		// retrying is reasonable.
+		u.endStreamError = errorf(
+			connect.CodeUnavailable,
+			"server closed WebSocket without EndStreamMessage",
+		)
+		return u.endStreamError
+	}
+	if limitErr := readLimitError(readerErr, u.readMaxBytes); limitErr != nil {
+		// Classified like any other peer fault: a server sending more than
+		// this client agreed to read is the server's mistake, and the
+		// monitor should see it under the same name the server uses.
+		u.fault = FaultSizeLimit
+		return limitErr
+	}
+	return errorf(connect.CodeUnavailable, "read websocket message: %w", readerErr)
+}
+
 func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 	if err := u.call.ensureDialed(); err != nil {
 		u.endStreamSeen = true
@@ -1070,43 +1221,9 @@ func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 		return errorf(connect.CodeUnknown, "%w", io.EOF)
 	}
 
-	messageType, frame, readerErr := u.call.wsConn.Read(u.call.ctx)
+	messageType, frame, readerErr := u.call.reader.next(u.call.ctx)
 	if readerErr != nil {
-		u.endStreamSeen = true
-		// A read that failed while the context was done is cancellation, not a
-		// transport fault. Report ctx.Err so callers see Canceled or
-		// DeadlineExceeded rather than whatever the socket happened to say.
-		if ctxErr := u.call.ctx.Err(); ctxErr != nil {
-			u.endStreamError = wsContextError(ctxErr)
-			return u.endStreamError
-		}
-		// The socket's read deadline and the context's timer are separate
-		// clocks, so the read can fail a moment before ctx.Err is set. A read
-		// that failed at or past the deadline is the deadline whichever fired
-		// first; calling it Unavailable would invite a retry that has no time
-		// left to run.
-		if deadline, ok := u.call.ctx.Deadline(); ok && !time.Now().Before(deadline) {
-			u.endStreamError = errorf(connect.CodeDeadlineExceeded, "%w", context.DeadlineExceeded)
-			return u.endStreamError
-		}
-		if isCleanWebSocketClose(readerErr) {
-			// A clean close with no EndStreamMessage means the RPC never reached
-			// a verdict. Unavailable, not EOF: the caller has no result, and
-			// retrying is reasonable.
-			u.endStreamError = errorf(
-				connect.CodeUnavailable,
-				"server closed WebSocket without EndStreamMessage",
-			)
-			return u.endStreamError
-		}
-		if limitErr := readLimitError(readerErr, u.readMaxBytes); limitErr != nil {
-			// Classified like any other peer fault: a server sending more than
-			// this client agreed to read is the server's mistake, and the
-			// monitor should see it under the same name the server uses.
-			u.fault = FaultSizeLimit
-			return limitErr
-		}
-		return errorf(connect.CodeUnavailable, "read websocket message: %w", readerErr)
+		return u.readFailure(readerErr)
 	}
 	text := messageType == websocket.MessageText
 	if !text && messageType != websocket.MessageBinary {
@@ -1116,6 +1233,10 @@ func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 	if decodeErr != nil {
 		u.fault = FaultMarker
 		return decodeErr
+	}
+	if utf8Err := textEncodingError(frame, text); utf8Err != nil {
+		u.fault = FaultMessageEncoding
+		return utf8Err
 	}
 	if u.readMaxBytes > 0 && len(wire.payload) > u.readMaxBytes {
 		u.fault = FaultSizeLimit

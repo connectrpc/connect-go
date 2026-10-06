@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/internal/bufferpool"
@@ -102,6 +103,23 @@ func decodeMessage(frame []byte, text bool) (wireMessage, *connect.Error) {
 		)
 	}
 	return wireMessage{marker: frame[0], payload: frame[1:], text: text}, nil
+}
+
+// textEncodingError reports a text message that is not valid UTF-8, which
+// RFC 6455 §8.1 forbids and §6.1 makes a protocol error.
+//
+// Neither this package's WebSocket library nor the layers under it check this,
+// so a peer that emits invalid UTF-8 would otherwise have its bytes handed to
+// a codec here while a browser on the same wire severs the connection — the
+// encoding bug reproducing everywhere except in these tests.
+func textEncodingError(frame []byte, text bool) *connect.Error {
+	if !text || utf8.Valid(frame) {
+		return nil
+	}
+	return errorf(
+		connect.CodeInvalidArgument,
+		"protocol error: text message is not valid UTF-8",
+	)
 }
 
 // messageSender writes one encoded message as one WebSocket frame. text says

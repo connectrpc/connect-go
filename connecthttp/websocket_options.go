@@ -200,6 +200,18 @@ func WithWebSocketFaultCloseCode() Option {
 	return webSocketBothOption{wstransport.WithFaultCloseCode()}
 }
 
+// WithWebSocketKeepAlive sets how often each side sends a WebSocket Ping, so
+// that a proxy which drops idle connections sees traffic on a quiet stream.
+// The default is 30 seconds; zero or less turns keep-alive off.
+//
+// A peer heard nothing from for two intervals, neither a message nor a Pong,
+// is hung up on with close code 1011 from a server or 3111 from a client, and
+// the RPC fails. That includes a peer whose application has stopped taking
+// messages, since it then stops reading its connection too.
+func WithWebSocketKeepAlive(interval time.Duration) Option {
+	return webSocketBothOption{wstransport.WithKeepAlive(interval)}
+}
+
 // webSocketBothOption carries a setting that applies to whichever side is
 // being configured.
 type webSocketBothOption [1]wstransport.Option

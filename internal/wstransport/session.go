@@ -65,6 +65,11 @@ func (s *session) Serve(
 	if cancel != nil {
 		defer cancel()
 	}
+	// Cancelable in its own right, so that the post-C drain can end the call
+	// when the connection dies under it (§8.1). timeoutFromRequest returns no
+	// cancel of its own when neither side set a deadline.
+	ctx, cancelCall := context.WithCancel(ctx)
+	defer cancelCall()
 	procedure := info.Request.URL.Path
 	callInfo := &connect.CallInfo{
 		Spec: connect.Spec{
@@ -93,6 +98,19 @@ func (s *session) Serve(
 	// so that an unresponsive peer cannot hold the session open.
 	closeCtx, closeCancel := context.WithTimeout(context.WithoutCancel(ctx), wsCloseWriteTimeout)
 	defer closeCancel()
+	// Every return below has closed conn by the time these run, which is what
+	// lets the reader's read in flight return.
+	//
+	// The reader is detached from the RPC's deadline: the WebSocket library
+	// closes the connection when a read's context expires, which would leave
+	// no connection to send the deadline's S message on.
+	readLimit := messageReadLimit(info.ReadMaxBytes)
+	reader := newFrameReader(context.WithoutCancel(ctx), func(readCtx context.Context) (websocket.MessageType, []byte, error) {
+		return readBoundedMessage(readCtx, conn, readLimit)
+	})
+	defer reader.close()
+	keeper := startKeepAlive(ctx, conn, reader, info.KeepAliveInterval, websocket.StatusInternalError)
+	defer keeper.stop()
 	handlerConn := &websocketHandlerConn{
 		request:        info.Request,
 		wsConn:         conn,
@@ -109,10 +127,12 @@ func (s *session) Serve(
 		},
 		unmarshaler: websocketUnmarshaler{
 			ctx:                   ctx,
-			wsConn:                conn,
+			reader:                reader,
+			keeper:                keeper,
 			callInfo:              callInfo,
 			codecs:                info.Codecs,
 			bodyIsText:            info.Codec.Name() == connect.CodecNameJSON,
+			cancelCall:            cancelCall,
 			readMaxBytes:          info.ReadMaxBytes,
 			infrastructureHeaders: info.InfrastructureHeaders,
 			info:                  info,

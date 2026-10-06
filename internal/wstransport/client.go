@@ -133,8 +133,9 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 	}
 
 	call := &wsClientCall{
-		ctx:            ctx,
-		faultCloseCode: t.opts.faultCloseCode,
+		ctx:               ctx,
+		faultCloseCode:    t.opts.faultCloseCode,
+		keepAliveInterval: t.opts.keepAliveInterval,
 		dialOptions: &websocket.DialOptions{
 			HTTPClient: t.httpClient,
 			// The subprotocol names both the transport and the codec, so it
