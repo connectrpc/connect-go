@@ -26,7 +26,10 @@ import (
 	"connectrpc.com/connect/v2"
 )
 
-var _ connect.Compressor = (*Compressor)(nil)
+var (
+	_ connect.Compressor         = (*Compressor)(nil)
+	_ interface{ Flush() error } = (*compressWriter)(nil)
+)
 
 // errClosed is returned when a recycled writer or reader is used after
 // Close.
@@ -65,6 +68,7 @@ func (c *Compressor) Name() string { return connect.CompressionNameGzip }
 
 // Compress returns a pooled writer that gzip-encodes everything written
 // to it onto dst. Close flushes the gzip stream and recycles the writer.
+// The writer also implements Flush() error, like [gzip.Writer.Flush].
 func (c *Compressor) Compress(dst io.Writer) (io.WriteCloser, error) {
 	if pooled, ok := c.writers.Get().(*compressWriter); ok {
 		pooled.writer.Reset(dst)
@@ -121,6 +125,16 @@ func (w *compressWriter) Write(p []byte) (int, error) {
 		return n, fmt.Errorf("connectgzip: compress: %w", err)
 	}
 	return n, nil
+}
+
+func (w *compressWriter) Flush() error {
+	if w.closed {
+		return errClosed
+	}
+	if err := w.writer.Flush(); err != nil {
+		return fmt.Errorf("connectgzip: flush: %w", err)
+	}
+	return nil
 }
 
 func (w *compressWriter) Close() error {
