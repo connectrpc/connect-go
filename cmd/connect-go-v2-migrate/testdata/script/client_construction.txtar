@@ -26,7 +26,7 @@ Proposed rewrites (rerun with -w to apply):
   ./client_construction.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 read_limit_pinned=1
 --- ./client_construction.go
 +++ ./client_construction.go
-@@ -3,13 +3,15 @@
+@@ -3,13 +3,16 @@
  import (
  	"net/http"
  
@@ -39,9 +39,9 @@ Proposed rewrites (rerun with -w to apply):
 -	return pingv1connect.NewPingServiceClient(
 +	return pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
  		http.DefaultClient,
--		"http://localhost:8080/",
+ 		"http://localhost:8080/",
 -	)
-+		"http://localhost:8080/", connecthttp.WithReadMaxBytes(0),
++		connecthttp.WithReadMaxBytes(0),
 +	)))
  }
  

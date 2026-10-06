@@ -344,9 +344,12 @@ return nil, connect.NewError(connect.CodeInternal, err.Error()).WithCause(err)
 
 v1 sent the error's full string to the client, so the tool rewrites to
 `err.Error()` to preserve what callers see today, and attaches `err` with
-`WithCause` so `errors.Is` and `errors.As` still match. A call such as `f()`
-gets no cause, since it would be evaluated twice. Common argument shapes
-collapse to simpler forms with the same wire message:
+`WithCause` so `errors.Is` and `errors.As` still match. When the argument is
+a function call no `WithCause` is added, since repeating the call would
+evaluate it twice. Assign it to a variable first if you need `errors.Is` or
+`errors.As` to match.
+
+Common argument shapes collapse to simpler forms with the same wire message:
 
 ```go
 connect.NewError(code, errors.New("nope"))     // -> connect.NewError(code, "nope")

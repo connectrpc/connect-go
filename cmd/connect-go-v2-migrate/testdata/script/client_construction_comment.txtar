@@ -1,4 +1,5 @@
-# Comments between client constructor arguments stay with their arguments.
+# Comments between client constructor arguments stay with their arguments, and
+# the read-limit pin goes on its own line.
 stubs v2
 exec migrate
 cmp stdout out.txt
@@ -26,12 +27,20 @@ func newClient(httpClient *http.Client) pingv1connect.PingServiceClient {
 		connect.WithSendGzip(), // compress requests
 	)
 }
+
+func newGRPCClient(httpClient *http.Client) pingv1connect.PingServiceClient {
+	return pingv1connect.NewPingServiceClient(
+		httpClient,
+		"https://example.com/",
+		connect.WithGRPC(),
+	)
+}
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./client.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 option_protocol=1 option_to_connecthttp=1 read_limit_pinned=1
+  ./client.go: client_construction=2 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 option_protocol=2 option_to_connecthttp=1 read_limit_pinned=2
 --- ./client.go
 +++ ./client.go
-@@ -3,18 +3,20 @@
+@@ -3,26 +3,29 @@
  import (
  	"net/http"
  
@@ -57,10 +66,23 @@ Proposed rewrites (rerun with -w to apply):
 +	)))
  }
  
+ func newGRPCClient(httpClient *http.Client) pingv1connect.PingServiceClient {
+-	return pingv1connect.NewPingServiceClient(
++	return pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
+ 		httpClient,
+ 		"https://example.com/",
+-		connect.WithGRPC(),
+-	)
++		connecthttp.WithReadMaxBytes(0),
++		connecthttp.WithGRPC(),
++	)))
+ }
+ 
 
 
 The following issues require manual code changes:
   ./client.go:11:9: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
+  ./client.go:22:9: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
 Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

@@ -405,6 +405,7 @@ func finishRewrite(filename string, src []byte, fset *token.FileSet, file *ast.F
 
 	// Repair the vertical gap a position-cleared closure body leaves above it.
 	normalizeReshapedClosures(file)
+	applyLineBreaks(fset, file, state.lineBreaks)
 
 	var buf bytes.Buffer
 	printerConfig := printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}
@@ -483,6 +484,8 @@ type rewriteState struct {
 	imports map[string]string
 	fset    *token.FileSet
 	file    *ast.File
+	// lineBreaks are source offsets that start a new line when printing.
+	lineBreaks []int
 }
 
 // addImport records that path (named pkg) must be imported.
@@ -1042,6 +1045,40 @@ func insertStmt(state *rewriteState, body *ast.BlockStmt, index int, stmt ast.St
 	}
 	anchorPositions(stmt, skipTrailingComments(state, pos))
 	body.List = slices.Insert(body.List, index, stmt)
+}
+
+// anchorOnNewLine anchors node after pos, on its own line when the next token
+// (a comment, or next) is on a later line.
+func anchorOnNewLine(state *rewriteState, node ast.Node, pos, next token.Pos) {
+	pos = skipTrailingComments(state, pos)
+	for _, group := range state.file.Comments {
+		if group.Pos() >= pos {
+			next = min(next, group.Pos())
+			break
+		}
+	}
+	tokFile := state.fset.File(pos)
+	nextLine := tokFile.Line(next)
+	lineStart := tokFile.LineStart(nextLine)
+	if tokFile.Line(pos) == nextLine || lineStart == next {
+		anchorPositions(node, pos)
+		return
+	}
+	// Split the next token's line: node takes its indentation, the token moves
+	// down. Applied at print time so reported positions are unaffected.
+	anchorPositions(node, lineStart)
+	state.lineBreaks = append(state.lineBreaks, tokFile.Offset(next))
+}
+
+// applyLineBreaks adds the line starts recorded by anchorOnNewLine.
+func applyLineBreaks(fset *token.FileSet, file *ast.File, offsets []int) {
+	if len(offsets) == 0 {
+		return
+	}
+	tokFile := fset.File(file.Pos())
+	lines := append(tokFile.Lines(), offsets...)
+	slices.Sort(lines)
+	tokFile.SetLines(slices.Compact(lines))
 }
 
 // skipTrailingComments returns the end of any comment trailing pos on its

@@ -364,8 +364,11 @@ func rewriteClientConstruction(file *ast.File, state *rewriteState, report *Repo
 		}
 		if presence := findReadLimit(otherOpts, call.Ellipsis.IsValid(), state, readLimitVars); presence != readLimitSet {
 			otherOpts = injectReadLimit(otherOpts, state)
-			// Anchor to the base URL so later comments stay put.
-			anchorPositions(otherOpts[0], skipTrailingComments(state, call.Args[1].End()))
+			next := call.Rparen
+			if len(call.Args) > 2 {
+				next = call.Args[2].Pos()
+			}
+			anchorOnNewLine(state, otherOpts[0], call.Args[1].End(), next)
 			reportReadLimit(report, presence, call.Pos())
 			report.bump("read_limit_pinned")
 		}
