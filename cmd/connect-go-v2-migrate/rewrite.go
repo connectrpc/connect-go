@@ -224,6 +224,16 @@ func withHandlerStreams(resolver *handlerStreamResolver) rewriteOption {
 	return func(state *rewriteState) { state.handlerStreams = resolver }
 }
 
+// withStubUse marks a file that calls stubs without importing connect.
+func withStubUse(position token.Position) rewriteOption {
+	return func(state *rewriteState) {
+		tokenFile := state.fset.File(state.file.Pos())
+		if position.IsValid() && tokenFile != nil && position.Offset < tokenFile.Size() {
+			state.stubUse = tokenFile.Pos(position.Offset)
+		}
+	}
+}
+
 // Rewrite applies the v1->v2 mechanical rewrites to src, returning the output
 // and a [Report]. Errors are syntax errors only; type mismatches surface as
 // warnings. When stubsReady is false (generated bindings are still v1),
@@ -244,17 +254,23 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 	}
 	// Nothing to do unless the file uses connect directly, via a generated
 	// stub, or via an ecosystem package.
-	if !state.hasConnectV1Import() && !usesConnectStub(file) && !hasEcosystemImport(file) {
+	if !state.hasConnectV1Import() && !usesConnectStub(file) && !hasEcosystemImport(file) && !state.stubUse.IsValid() {
 		return src, report, nil
 	}
 
 	// Stub-dependent rewrites wait for v2 bindings; flag the file meanwhile.
 	if !state.stubsReady {
-		if pos, ok := firstStubDependentPos(file, state.connectAlias); ok {
-			report.deferAtf(pos, ruleAwaitingV2Bindings, "stub-dependent rewrite (handler/client signatures, .Msg, NewRequest/NewResponse, streams, construction)")
+		pos, stubDependent := firstStubDependentPos(file, state.connectAlias)
+		if !stubDependent && state.stubUse.IsValid() {
+			pos, stubDependent = state.stubUse, true
 		}
-		if pos := firstEcosystemImportPos(file); pos.IsValid() {
-			report.deferAtf(pos, ruleAwaitingV2Bindings, "ecosystem package rewrite (import paths, construction, interceptors)")
+		if ecosystemPos := firstEcosystemImportPos(file); ecosystemPos.IsValid() {
+			report.deferAtf(ecosystemPos, ruleAwaitingV2Bindings, "ecosystem package rewrite (import paths, construction, interceptors)")
+		}
+		// A partial rewrite would switch the import to v2 under v1 stub types.
+		if stubDependent {
+			report.deferAtf(pos, ruleAwaitingV2Bindings, "stub-dependent rewrite (handler/client signatures, .Msg, NewRequest/NewResponse, streams, construction)")
+			return src, report, nil
 		}
 		rewriteStubIndependent(file, state, &report)
 		return finishRewrite(filename, src, fset, file, state, &report)
@@ -479,6 +495,7 @@ type rewriteState struct {
 	// handlerStreams resolves a handler RPC name to its v2 stream type; nil on
 	// the AST-only path, where the stream parameter is warned instead.
 	handlerStreams *handlerStreamResolver
+	stubUse        token.Pos
 	// imports maps path->package name for imports a rewrite introduces;
 	// finishRewrite adds them before formatting.
 	imports map[string]string

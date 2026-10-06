@@ -17,7 +17,9 @@ package main
 import (
 	"go/ast"
 	"go/token"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/go/ast/astutil"
@@ -27,8 +29,21 @@ import (
 type handlerStreamType struct {
 	pkgPath  string
 	pkgName  string
-	name     string   // <Service><RPC>ServerStream
-	messages []string // sorted base names of the request/response messages
+	name     string        // <Service><RPC>ServerStream
+	messages []messageType // sorted by name
+}
+
+// messageType is a message carried by a generated stream type.
+type messageType struct {
+	name    string
+	pkgPath string
+	pkgName string
+}
+
+// messageRef is a message type argument of a v1 stream parameter.
+type messageRef struct {
+	name      string
+	qualifier string
 }
 
 // handlerStreamResolver resolves a handler's RPC name to its v2 stream type,
@@ -39,19 +54,30 @@ type handlerStreamResolver struct {
 }
 
 // lookup returns the v2 handler stream type for an RPC name and its message
-// types. recvType disambiguates when several services share an RPC name and
-// messages; unresolved matches are returned as ambiguous for the caller's warning.
-func (r *handlerStreamResolver) lookup(method, recvType string, messages []string) (match handlerStreamType, ambiguous []handlerStreamType, ok bool) {
+// types. Ties prefer messages from the packages file imports, then recvType;
+// unresolved matches are returned as ambiguous.
+func (r *handlerStreamResolver) lookup(method, recvType string, messages []messageRef, file *ast.File) (match handlerStreamType, ambiguous []handlerStreamType, ok bool) {
 	if r == nil || method == "" || len(messages) == 0 {
 		return handlerStreamType{}, nil, false
 	}
 	suffix := method + "ServerStream"
-	want := sortedStrings(messages)
-	var matches []handlerStreamType
+	want := make([]string, 0, len(messages))
+	for _, message := range messages {
+		want = append(want, message.name)
+	}
+	want = sortedStrings(want)
+	var matches, inPackage []handlerStreamType
 	for _, candidate := range r.types {
-		if strings.HasSuffix(candidate.name, suffix) && equalStrings(candidate.messages, want) {
-			matches = append(matches, candidate)
+		if !strings.HasSuffix(candidate.name, suffix) || !equalStrings(messageNames(candidate.messages), want) {
+			continue
 		}
+		matches = append(matches, candidate)
+		if file != nil && messagesInPackages(candidate, messages, file) {
+			inPackage = append(inPackage, candidate)
+		}
+	}
+	if len(matches) > 1 && len(inPackage) > 0 {
+		matches = inPackage
 	}
 	switch len(matches) {
 	case 0:
@@ -98,6 +124,14 @@ func candidateNames(types []handlerStreamType) []string {
 		names = append(names, qualified)
 	}
 	sort.Strings(names)
+	return names
+}
+
+func messageNames(messages []messageType) []string {
+	names := make([]string, 0, len(messages))
+	for _, message := range messages {
+		names = append(names, message.name)
+	}
 	return names
 }
 
@@ -261,14 +295,14 @@ type streamParam struct {
 	typeName string
 	pos      token.Pos
 	field    *ast.Field
-	messages []string
+	messages []messageRef
 }
 
 // migrateHandlerStreamParam rewrites a handler's v1 stream parameter to the
 // generated v2 handler stream type and records the import. It returns false when
 // the RPC doesn't resolve, with any ambiguous matches for the caller's warning.
 func migrateHandlerStreamParam(param streamParam, methodName, recvName string, state *rewriteState, report *Report) (bool, []handlerStreamType) {
-	resolved, ambiguous, ok := state.handlerStreams.lookup(methodName, recvName, param.messages)
+	resolved, ambiguous, ok := state.handlerStreams.lookup(methodName, recvName, param.messages, state.file)
 	if !ok {
 		return false, ambiguous
 	}
@@ -276,6 +310,36 @@ func migrateHandlerStreamParam(param streamParam, methodName, recvName string, s
 	state.addImport(resolved.pkgPath, resolved.pkgName)
 	report.bump("stream_handler_param")
 	return true, nil
+}
+
+// messagesInPackages reports whether each qualified message resolves to one
+// of candidate's messages through file's imports.
+func messagesInPackages(candidate handlerStreamType, messages []messageRef, file *ast.File) bool {
+	for _, ref := range messages {
+		if ref.qualifier == "" {
+			continue
+		}
+		if !slices.ContainsFunc(candidate.messages, func(message messageType) bool {
+			return message.name == ref.name && importedAs(file, message.pkgPath, message.pkgName) == ref.qualifier
+		}) {
+			return false
+		}
+	}
+	return true
+}
+
+// importedAs returns the name file imports pkgPath under, or "" if it doesn't.
+func importedAs(file *ast.File, pkgPath, pkgName string) string {
+	for _, spec := range file.Imports {
+		if path, err := strconv.Unquote(spec.Path.Value); err != nil || path != pkgPath {
+			continue
+		}
+		if spec.Name != nil {
+			return spec.Name.Name
+		}
+		return pkgName
+	}
+	return ""
 }
 
 // collectStreamVars returns every stream variable name in the function, plus
@@ -329,9 +393,8 @@ func collectStreamParams(funcType *ast.FuncType, connectAlias string) map[string
 	return out
 }
 
-// streamTypeArgNames returns the base names of a *connect.XxxStream[...] type's
-// message type arguments, e.g. ["CumSumRequest", "CumSumResponse"].
-func streamTypeArgNames(typ ast.Expr) []string {
+// streamTypeArgNames returns the message type arguments of *connect.XxxStream[...].
+func streamTypeArgNames(typ ast.Expr) []messageRef {
 	star, isStar := typ.(*ast.StarExpr)
 	if !isStar {
 		return nil
@@ -345,16 +408,20 @@ func streamTypeArgNames(typ ast.Expr) []string {
 	default:
 		return nil
 	}
-	var names []string
+	var refs []messageRef
 	for _, arg := range args {
 		switch typeArg := arg.(type) {
 		case *ast.SelectorExpr:
-			names = append(names, typeArg.Sel.Name)
+			ref := messageRef{name: typeArg.Sel.Name}
+			if pkg, ok := typeArg.X.(*ast.Ident); ok {
+				ref.qualifier = pkg.Name
+			}
+			refs = append(refs, ref)
 		case *ast.Ident:
-			names = append(names, typeArg.Name)
+			refs = append(refs, messageRef{name: typeArg.Name})
 		}
 	}
-	return names
+	return refs
 }
 
 // streamGenericName reports the v1 stream type name for a
