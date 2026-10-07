@@ -128,9 +128,9 @@ func runMain(args []string) int {
 	// Pure regenerate-first (v1 stubs, nothing migratable yet) skips the sources.
 	if anyReady || !proj.hasV1Gen {
 		for _, source := range proj.sources {
-			ready := source.ready
+			ready, stubUse := source.ready, source.stubUse
 			rewrite := func(path string, content []byte) ([]byte, Report, error) {
-				return Rewrite(path, content, ready, withHandlerStreams(proj.handlerStreams))
+				return Rewrite(path, content, ready, withHandlerStreams(proj.handlerStreams), withStubUse(stubUse))
 			}
 			processFile(source, rewrite, *write, &run)
 		}

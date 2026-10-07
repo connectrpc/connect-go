@@ -1,0 +1,132 @@
+# A file that gets its stub client only from a helper's return value imports
+# neither connect nor the stub package, but its receive loop still migrates.
+# While the stubs are v1 it is deferred, not skipped.
+stubs v1simple
+exec migrate
+stdout '^  ./cmd/count.go:13:14: stub-dependent rewrite'
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+-- errors.go --
+package app
+
+import "connectrpc.com/connect"
+
+func notFound() error {
+	return connect.NewError(connect.CodeNotFound, nil)
+}
+-- flags/flags.go --
+package flags
+
+import (
+	"net/http"
+
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func NewPingClient() pingv1connect.PingServiceClient {
+	return pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localhost")
+}
+-- cmd/count.go --
+package cmd
+
+import (
+	"context"
+	"fmt"
+
+	"example.com/app/flags"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+)
+
+func countUp(ctx context.Context) error {
+	pingClient := flags.NewPingClient()
+	res, err := pingClient.CountUp(ctx, &pingv1.CountUpRequest{Number: 3})
+	if err != nil {
+		return err
+	}
+	for res.Receive() {
+		fmt.Println(res.Msg().Number)
+	}
+	return res.Err()
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./cmd/count.go: stream_err_after_loop=1 stream_recv_loop=1
+--- ./cmd/count.go
++++ ./cmd/count.go
+@@ -2,7 +2,9 @@
+ 
+ import (
+ 	"context"
++	"errors"
+ 	"fmt"
++	"io"
+ 
+ 	"example.com/app/flags"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+@@ -14,9 +16,18 @@
+ 	if err != nil {
+ 		return err
+ 	}
+-	for res.Receive() {
+-		fmt.Println(res.Msg().Number)
++	var streamErr error
++	for {
++		msg, err := res.Receive()
++		if err != nil {
++			streamErr = err
++			break
++		}
++		fmt.Println(msg.Number)
+ 	}
+-	return res.Err()
++	if errors.Is(streamErr, io.EOF) {
++		streamErr = nil
++	}
++	return streamErr
+ }
+ 
+
+  ./errors.go: convert_code_const=1 convert_new_error=1 flip_residual_connect=1 import_add_connectv2=1 import_drop_v1=1
+--- ./errors.go
++++ ./errors.go
+@@ -1,8 +1,10 @@
+ package app
+ 
+-import "connectrpc.com/connect"
++import (
++	"connectrpc.com/connect/v2"
++)
+ 
+ func notFound() error {
+-	return connect.NewError(connect.CodeNotFound, nil)
++	return connect.NewError(connect.CodeNotFound, "")
+ }
+ 
+
+  ./flags/flags.go: client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 read_limit_pinned=1
+--- ./flags/flags.go
++++ ./flags/flags.go
+@@ -3,10 +3,12 @@
+ import (
+ 	"net/http"
+ 
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+ func NewPingClient() pingv1connect.PingServiceClient {
+-	return pingv1connect.NewPingServiceClient(http.DefaultClient, "http://localhost")
++	return pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, "http://localhost", connecthttp.WithReadMaxBytes(0))))
+ }
+ 
+
+
+The following issues require manual code changes:
+  ./flags/flags.go:10:9: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
+
+Scanned 3 Go files and 0 Buf templates. 3 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

@@ -18,6 +18,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -55,6 +56,8 @@ type fileContent struct {
 	path    string
 	content []byte
 	ready   bool
+	// stubUse is the first stub call in a file that imports no connect package.
+	stubUse token.Position
 }
 
 // project is the result of discovering what to migrate.
@@ -132,6 +135,7 @@ func discover(roots []string) (project, error) {
 	// the regenerate advice fits.
 	mainDir := mainModuleDir(pkgs)
 	stubPkgs := map[string]bool{}
+	genPkgs := map[string]bool{connectV1Path: true, connectV2Module: true}
 	v1StubPkgs := map[string]bool{}
 	mockV1Pkgs := map[string]bool{}
 	localGenDirs := map[string]bool{}
@@ -142,6 +146,9 @@ func discover(roots []string) (project, error) {
 			stubPkgs[pkg.PkgPath] = true
 		}
 		for index, file := range pkg.Syntax {
+			if isConnectStubAST(file) {
+				genPkgs[pkg.PkgPath] = true
+			}
 			if !fileImports(file, connectV1Path) {
 				continue
 			}
@@ -181,8 +188,14 @@ func discover(roots []string) (project, error) {
 			// A file is a rewrite candidate if it uses connect or imports a
 			// connectrpc.com ecosystem module (grpchealth, vanguard, ...): the
 			// ecosystem reshape must reach files that import only a satellite.
+			ready := !importsV1Stub(file, v1StubPkgs)
+			var stubUse token.Position
 			if !fileUsesConnect(file, stubPkgs) && !hasEcosystemImport(file) {
-				continue
+				pos, usesV1, ok := firstStubValueUse(file, pkg.TypesInfo, genPkgs, v1StubPkgs)
+				if !ok {
+					continue
+				}
+				stubUse, ready = pkg.Fset.Position(pos), !usesV1
 			}
 			content, readErr := os.ReadFile(path)
 			if readErr != nil {
@@ -192,7 +205,8 @@ func discover(roots []string) (project, error) {
 			proj.sources = append(proj.sources, fileContent{
 				path:    path,
 				content: content,
-				ready:   !importsV1Stub(file, v1StubPkgs),
+				ready:   ready,
+				stubUse: stubUse,
 			})
 		}
 	}
@@ -381,7 +395,7 @@ func buildHandlerStreamResolver(pkgs []*packages.Package) *handlerStreamResolver
 				pkgPath:  pkg.PkgPath,
 				pkgName:  pkg.Types.Name(),
 				name:     name,
-				messages: streamMessageNames(named),
+				messages: streamMessageTypes(named),
 			})
 		}
 		return true
@@ -389,11 +403,10 @@ func buildHandlerStreamResolver(pkgs []*packages.Package) *handlerStreamResolver
 	return resolver
 }
 
-// streamMessageNames returns the sorted base names of the proto message types a
-// generated stream type carries, read from the pointer params/results of its
-// Send/Receive methods.
-func streamMessageNames(named *types.Named) []string {
-	set := map[string]bool{}
+// streamMessageTypes returns the messages of a stream type's Send and Receive
+// methods, sorted by name.
+func streamMessageTypes(named *types.Named) []messageType {
+	set := map[string]messageType{}
 	for method := range named.Methods() {
 		if method.Name() != "Send" && method.Name() != "Receive" {
 			continue
@@ -404,20 +417,25 @@ func streamMessageNames(named *types.Named) []string {
 		}
 		for _, tuple := range []*types.Tuple{sig.Params(), sig.Results()} {
 			for variable := range tuple.Variables() {
-				if ptr, ok := variable.Type().(*types.Pointer); ok {
-					if elem, ok := ptr.Elem().(*types.Named); ok {
-						set[elem.Obj().Name()] = true
-					}
+				ptr, ok := variable.Type().(*types.Pointer)
+				if !ok {
+					continue
 				}
+				elem, ok := ptr.Elem().(*types.Named)
+				if !ok {
+					continue
+				}
+				message := messageType{name: elem.Obj().Name()}
+				if pkg := elem.Obj().Pkg(); pkg != nil {
+					message.pkgPath, message.pkgName = pkg.Path(), pkg.Name()
+				}
+				set[message.name] = message
 			}
 		}
 	}
-	names := make([]string, 0, len(set))
-	for name := range set {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return slices.SortedFunc(maps.Values(set), func(left, right messageType) int {
+		return strings.Compare(left.name, right.name)
+	})
 }
 
 // findModuleDirs returns the directories holding go.mod files under the roots,
@@ -552,6 +570,39 @@ func fileImports(file *ast.File, importPath string) bool {
 		}
 	}
 	return false
+}
+
+// firstStubValueUse returns the first selection in file into a genPkgs
+// package, and whether any selection is into a v1 package.
+func firstStubValueUse(file *ast.File, info *types.Info, genPkgs, v1StubPkgs map[string]bool) (first token.Pos, usesV1, ok bool) {
+	if info == nil {
+		return token.NoPos, false, false
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		if usesV1 {
+			return false
+		}
+		sel, isSel := node.(*ast.SelectorExpr)
+		if !isSel {
+			return true
+		}
+		selection := info.Selections[sel]
+		if selection == nil || selection.Obj().Pkg() == nil {
+			return true
+		}
+		path := selection.Obj().Pkg().Path()
+		if !genPkgs[path] {
+			return true
+		}
+		if !first.IsValid() {
+			first = sel.Pos()
+		}
+		if path == connectV1Path || v1StubPkgs[path] {
+			usesV1 = true
+		}
+		return !usesV1
+	})
+	return first, usesV1, first.IsValid()
 }
 
 // importsV1Stub reports whether the file imports a connect stub still on v1.
