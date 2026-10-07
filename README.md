@@ -2,7 +2,7 @@ Connect
 =======
 
 [![Build](https://github.com/connectrpc/connect-go/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/connectrpc/connect-go/actions/workflows/ci.yaml)
-[![GoDoc](https://pkg.go.dev/badge/connectrpc.com/connect.svg)](https://pkg.go.dev/connectrpc.com/connect)
+[![GoDoc](https://pkg.go.dev/badge/connectrpc.com/connect/v2.svg)](https://pkg.go.dev/connectrpc.com/connect/v2)
 [![Slack](https://img.shields.io/badge/slack-buf-%23e01563)][slack]
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/8972/badge)](https://www.bestpractices.dev/projects/8972)
 
@@ -155,20 +155,16 @@ the module `connectrpc.com/connect/v2`.
 * [Buf Studio]: web UI for ad-hoc RPCs
 * [conformance]: Connect, gRPC, and gRPC-Web interoperability tests
 
-## Status
+## Status: Stable
 
-This module, `connectrpc.com/connect/v2`, is in beta.
-The `v2` module will be published on the `main` branch of the repository when released.
-
-## Support and versioning
-
-`connect-go` supports:
+This module, `connectrpc.com/connect/v2`, is stable. It supports:
 
 * The two most recent major releases of Go (the same versions of Go that continue
   to [receive security patches][go-support-policy]).
 * [APIv2] of Protocol Buffers in Go (`google.golang.org/protobuf`).
 
-Within those parameters, `connect-go` follows semantic versioning.
+Within those parameters, `connect` follows semantic versioning. We will
+_not_ make breaking changes in the 2.x series of releases.
 
 Module `connectrpc.com/connect` is the `v1` module. It remains stable and
 supported indefinitely. The `v1` module lives on the `v1` branch.
