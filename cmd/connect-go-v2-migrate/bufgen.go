@@ -24,8 +24,9 @@ import (
 )
 
 const (
-	connectV2Module    = "connectrpc.com/connect/v2"
-	connectLocalPlugin = "protoc-gen-connect-go"
+	connectV2Module            = "connectrpc.com/connect/v2"
+	connectLocalPlugin         = "protoc-gen-connect-go"
+	connectRemotePluginVersion = "v2.0.0"
 )
 
 // connectRemotePluginRef matches connect-go remotes plugins.
@@ -71,7 +72,7 @@ func RewriteBufGen(filename string, src []byte) ([]byte, Report, error) {
 		case kindGotool:
 			report.warnAtLinef(filename, line, ruleBufgenGoMod, "the plugin runs via go.mod (%s). Update the tool dependency to the v2 module with `go get -tool %s/cmd/%s` then `go mod tidy`. The buf.gen.yaml entry stays the same.", plugin.ref, connectV2Module, connectLocalPlugin)
 		case kindRemote:
-			localizeRemotePlugin(filename, plugin, edits, &report)
+			pinRemotePlugin(filename, plugin, edits, &report)
 		}
 	}
 	if !report.Changed {
@@ -217,39 +218,31 @@ func isConnectRemoteRef(value string) bool {
 	return connectRemotePluginRef.MatchString(value)
 }
 
-// localizeRemotePlugin switches to the local plugin because the v2 remote plugin
-// is not on the BSR until connect-go v2.0.0 ships.
-//
-// TODO: pin to the v2 remote plugin once connect-go v2.0.0 is released.
-func localizeRemotePlugin(filename string, plugin connectPlugin, edits *lineEdits, report *Report) {
+// pinRemotePlugin pins a v1 remote plugin to the v2 release. References
+// already at v2 are left alone.
+func pinRemotePlugin(filename string, plugin connectPlugin, edits *lineEdits, report *Report) {
 	match := connectRemotePluginRef.FindStringSubmatch(plugin.ref)
 	if match == nil {
 		return
 	}
-	if simple, version := match[2] == "gosimple", match[3]; !simple && strings.HasPrefix(version, "v2") {
+	host, simple, version := match[1], match[2] == "gosimple", match[3]
+	if !simple && strings.HasPrefix(version, "v2") {
 		return
 	}
-	line := plugin.key().Line
-	// Edit the value before the key, so the key's column stays valid.
-	var edited bool
-	if plugin.key().Value == "remote" {
-		edited = edits.replaceScalar(plugin.value(), connectLocalPlugin) && edits.replaceScalar(plugin.key(), "local")
-	} else {
-		// v1 `plugin` names a local plugin without the protoc-gen- prefix.
-		edited = edits.replaceScalar(plugin.value(), "connect-go")
-	}
-	if !edited {
-		report.warnAtLinef(filename, line, ruleBufgenManualEdit, "switch %s to the local plugin `%s` by hand.", plugin.ref, connectLocalPlugin)
+	pinned := host + "/connectrpc/go:" + connectRemotePluginVersion
+	if !edits.replaceScalar(plugin.value(), pinned) {
+		report.warnAtLinef(filename, plugin.key().Line, ruleBufgenManualEdit, "change %s to %s by hand.", plugin.ref, pinned)
 		return
 	}
-	// `revision` only applies to remote plugins.
+	// A revision belongs to the old plugin version.
 	if revision, index, ok := plugin.entry.value("revision"); ok && !edits.deleteKey(plugin.entry, index) {
-		report.warnAtLinef(filename, revision.Line, ruleBufgenManualEdit, "remove `revision`, it only applies to remote plugins.")
+		report.warnAtLinef(filename, revision.Line, ruleBufgenManualEdit, "remove `revision`, it belongs to the old plugin version.")
 	}
-	report.bump("bufgen_remote_to_local")
-	report.warnAtLinef(filename, line, ruleBufgenRemoteUnpublished, "%s has no v2 release yet, so this entry now runs the local plugin. Install it with `go install %s/cmd/%s@latest`, and switch back to the remote plugin once connect-go v2.0.0 is released.", plugin.ref, connectV2Module, connectLocalPlugin)
-	// Feeds the regenerate steps, which install the local plugin.
-	report.warnAtLinef(filename, line, ruleBufgenReinstall, "install the generator with `go install %s/cmd/%s@latest`.", connectV2Module, connectLocalPlugin)
+	if simple {
+		report.bump("bufgen_replace_gosimple")
+	} else {
+		report.bump("bufgen_pin_remote_v2")
+	}
 }
 
 func stripSimpleOpt(filename string, plugin connectPlugin, edits *lineEdits, report *Report) {

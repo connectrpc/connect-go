@@ -47,22 +47,21 @@ const (
 
 // Diagnostic rule identifiers, surfaced as stable handles in JSON output.
 const (
-	ruleAwaitingV2Bindings      = "awaiting_v2_bindings"
-	ruleRemoveV1Import          = "remove_v1_import"
-	ruleRequestMetadata         = "request_metadata_migration"
-	ruleHandlerConstruction     = "handler_construction"
-	ruleConnectHTTPOption       = "connecthttp_option_migration"
-	ruleErrorAPI                = "error_api_migration"
-	ruleServerInterceptor       = "server_interceptor_migration"
-	ruleInterceptorMigration    = "interceptor_migration"
-	ruleStreamParamType         = "stream_param_type"
-	ruleStreamParamAmbiguous    = "stream_param_ambiguous"
-	ruleEcosystemMigration      = "ecosystem_migration"
-	ruleBufgenReinstall         = "bufgen_reinstall_plugin"
-	ruleBufgenGoMod             = "bufgen_update_go_mod"
-	ruleBufgenRemoteUnpublished = "bufgen_remote_unpublished"
-	ruleBufgenManualEdit        = "bufgen_manual_edit"
-	ruleReadLimitDefault        = "read_limit_default"
+	ruleAwaitingV2Bindings   = "awaiting_v2_bindings"
+	ruleRemoveV1Import       = "remove_v1_import"
+	ruleRequestMetadata      = "request_metadata_migration"
+	ruleHandlerConstruction  = "handler_construction"
+	ruleConnectHTTPOption    = "connecthttp_option_migration"
+	ruleErrorAPI             = "error_api_migration"
+	ruleServerInterceptor    = "server_interceptor_migration"
+	ruleInterceptorMigration = "interceptor_migration"
+	ruleStreamParamType      = "stream_param_type"
+	ruleStreamParamAmbiguous = "stream_param_ambiguous"
+	ruleEcosystemMigration   = "ecosystem_migration"
+	ruleBufgenReinstall      = "bufgen_reinstall_plugin"
+	ruleBufgenGoMod          = "bufgen_update_go_mod"
+	ruleBufgenManualEdit     = "bufgen_manual_edit"
+	ruleReadLimitDefault     = "read_limit_default"
 )
 
 var (
@@ -257,6 +256,8 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 	if !state.hasConnectV1Import() && !usesConnectStub(file) && !hasEcosystemImport(file) && !state.stubUse.IsValid() {
 		return src, report, nil
 	}
+
+	rewriteSDKImports(fset, file, state.sdkModules, &report)
 
 	// Stub-dependent rewrites wait for v2 bindings; flag the file meanwhile.
 	if !state.stubsReady {
@@ -496,6 +497,8 @@ type rewriteState struct {
 	// the AST-only path, where the stream parameter is warned instead.
 	handlerStreams *handlerStreamResolver
 	stubUse        token.Pos
+	// sdkModules are v1 BSR connect SDKs whose imports move to v2.
+	sdkModules []string
 	// imports maps path->package name for imports a rewrite introduces;
 	// finishRewrite adds them before formatting.
 	imports map[string]string

@@ -4,7 +4,7 @@
 stubs v1generic
 exec migrate
 cmp stdout out.txt
-stdout 'Proposed Buf template updates'
+stdout 'Proposed updates'
 stdout 'no Go source changes are proposed yet'
 exec migrate --json
 cmp stdout report.json
@@ -48,7 +48,7 @@ v1, so no Go source changes are proposed yet.
 Generated v1 Connect code:
   ./gen/connect/ping/v1/pingv1connect
 
-Proposed Buf template updates (rerun with -w to apply):
+Proposed updates (rerun with -w to apply):
   ./buf.gen.yaml: bufgen_remove_simple=1
 --- ./buf.gen.yaml
 +++ ./buf.gen.yaml
@@ -63,10 +63,10 @@ Proposed Buf template updates (rerun with -w to apply):
 
 First, move the dependencies and generated code to v2:
 
-  1. connect-go-v2-migrate -w  (applies the Buf template update above)
+  1. connect-go-v2-migrate -w  (applies the updates above)
   2. go get -u \
        connectrpc.com/connect/v2
-     (pulls the v2 core and ecosystem modules into go.mod)
+     (pulls the v2 modules into go.mod)
   3. go install connectrpc.com/connect/v2/cmd/protoc-gen-connect-go@latest
      (./buf.gen.yaml runs the local protoc-gen-connect-go binary. v1 and v2
      share the binary name, so reinstalling from the /v2 module switches
@@ -93,7 +93,7 @@ Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2
     "./gen/connect/ping/v1/pingv1connect"
   ],
   "next_steps": [
-    "connect-go-v2-migrate -w  (applies the Buf template update above)",
+    "connect-go-v2-migrate -w  (applies the updates above)",
     "go get -u \\\n       connectrpc.com/connect/v2",
     "go install connectrpc.com/connect/v2/cmd/protoc-gen-connect-go@latest",
     "buf generate",

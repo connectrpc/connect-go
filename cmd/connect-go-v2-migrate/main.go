@@ -125,14 +125,19 @@ func runMain(args []string) int {
 			break
 		}
 	}
-	// Pure regenerate-first (v1 stubs, nothing migratable yet) skips the sources.
+	// Pure regenerate-first (v1 stubs, nothing migratable yet) only moves SDK
+	// imports to v2, the Go equivalent of regenerating.
 	if anyReady || !proj.hasV1Gen {
 		for _, source := range proj.sources {
 			ready, stubUse := source.ready, source.stubUse
 			rewrite := func(path string, content []byte) ([]byte, Report, error) {
-				return Rewrite(path, content, ready, withHandlerStreams(proj.handlerStreams), withStubUse(stubUse))
+				return Rewrite(path, content, ready, withHandlerStreams(proj.handlerStreams), withStubUse(stubUse), withSDKModules(proj.sdkModules))
 			}
 			processFile(source, rewrite, *write, &run)
+		}
+	} else if len(proj.sdkModules) > 0 {
+		for _, source := range proj.sources {
+			processFile(source, RewriteSDKImports(proj.sdkModules), *write, &run)
 		}
 	}
 	if anyReady && run.flippedResult {
@@ -440,10 +445,13 @@ func printText(run *results, proj *project, write, migrated, color bool) {
 }
 
 // printPhase1Text renders the regenerate-first report: while the generated code
-// targets v1, the only edits are Buf template updates, and the report walks the
-// user through switching generation to v2 and re-running.
+// targets v1, the only edits are Buf template updates and SDK imports, and the
+// report walks the user through switching generation to v2 and re-running.
 func printPhase1Text(run *results, proj *project, write, color bool) {
 	summary := scanCounts(proj) + " The generated Connect code still targets v1, so no Go source changes are proposed yet."
+	if len(proj.sdkModules) > 0 {
+		summary = scanCounts(proj) + " The generated Connect code still targets v1, so only SDK imports change in Go sources for now."
+	}
 	for _, line := range wrapLines(summary, 78) {
 		fmt.Println(line)
 	}
@@ -455,9 +463,9 @@ func printPhase1Text(run *results, proj *project, write, color bool) {
 			fmt.Printf("  %s\n", displayPath(dir))
 		}
 	}
-	// v2 SDKs are not on the BSR yet, so these are generated locally.
+	// BSR SDKs move to their /v2 modules through the imports and go get.
 	if len(proj.sdkModules) > 0 {
-		fmt.Print("\nGenerated v1 Connect SDKs (generate these locally, v2 SDKs are not on the BSR yet):\n")
+		fmt.Print("\nGenerated v1 Connect SDKs (their imports and the go get below move them to /v2):\n")
 		for _, mod := range proj.sdkModules {
 			fmt.Printf("  %s\n", mod)
 		}
@@ -471,9 +479,9 @@ func printPhase1Text(run *results, proj *project, write, color bool) {
 	}
 
 	if len(run.rewrites) > 0 {
-		lead := "Proposed Buf template updates (rerun with -w to apply):"
+		lead := "Proposed updates (rerun with -w to apply):"
 		if write {
-			lead = "Applied Buf template updates:"
+			lead = "Applied updates:"
 		}
 		fmt.Printf("\n%s\n", lead)
 		for _, rewrite := range run.rewrites {
@@ -484,8 +492,8 @@ func printPhase1Text(run *results, proj *project, write, color bool) {
 		}
 	}
 
-	// Sources are skipped in this phase, so any manual diagnostic here belongs to
-	// a Buf template. Show it before the steps: it can change how they are run.
+	// Sources only move SDK imports in this phase, so any manual diagnostic here
+	// belongs to a Buf template. Show it before the steps: it can change how they are run.
 	if manual := byCategory(run.diagnostics, categoryManual); len(manual) > 0 {
 		fmt.Print("\nThe following issues require a manual update:\n")
 		for _, diag := range manual {
@@ -537,33 +545,28 @@ type step struct {
 func phase1Steps(run *results, proj *project, write bool) []step {
 	var steps []step
 	if !write && len(run.rewrites) > 0 {
-		steps = append(steps, step{cmd: "connect-go-v2-migrate -w  (applies the Buf template update above)"})
+		steps = append(steps, step{cmd: "connect-go-v2-migrate -w  (applies the updates above)"})
 	}
 	steps = append(steps, step{
 		cmd:  goGetCommand(goGetModules(proj)),
-		note: "pulls the v2 core and ecosystem modules into go.mod",
+		note: "pulls the v2 modules into go.mod",
 	})
 	if len(proj.v1GenDirs) > 0 {
 		steps = append(steps, localGenSteps(run)...)
 	}
-	// TODO: switch back to `go get <sdk>@v2` once connect-go v2.0.0 ships and
-	// the remote plugin is on the BSR.
-	if len(proj.sdkModules) > 0 {
-		install := step{
-			cmd:  fmt.Sprintf("go install %s/cmd/%s@latest", connectV2Module, connectLocalPlugin),
-			note: "connect-go v2 SDKs are not on the BSR yet. Generate the connect code for the SDKs listed above locally with the v2 plugin and import it in place of the SDK",
-		}
-		if !slices.ContainsFunc(steps, func(existing step) bool { return existing.cmd == install.cmd }) {
-			steps = append(steps, install)
-		}
-	}
 	return steps
 }
 
-// goGetModules leaves out BSR SDKs until v2 SDKs are published.
+// goGetModules is the v2 module set to `go get -u`: the connect core, each SDK's
+// /v2 module, and the ecosystem modules.
 func goGetModules(proj *project) []string {
-	mods := make([]string, 0, 1+len(proj.ecosystemModules))
+	mods := make([]string, 0, 1+len(proj.sdkModules)+len(proj.ecosystemModules))
 	mods = append(mods, connectV2Module)
+	for _, mod := range proj.sdkModules {
+		if v2 := sdkV2Module(mod); !slices.Contains(mods, v2) {
+			mods = append(mods, v2)
+		}
+	}
 	for _, mod := range proj.ecosystemModules {
 		mods = append(mods, mod+ecosystemVersionQuery)
 	}
@@ -578,6 +581,12 @@ func missingV2Modules(proj *project) []string {
 	var missing []string
 	if _, ok := proj.goModRequires[connectV2Module]; !ok {
 		missing = append(missing, connectV2Module)
+	}
+	for _, mod := range proj.sdkModules {
+		v2 := sdkV2Module(mod)
+		if _, ok := proj.goModRequires[v2]; !ok && !slices.Contains(missing, v2) {
+			missing = append(missing, v2)
+		}
 	}
 	for _, mod := range proj.ecosystemModules {
 		if _, ok := proj.goModRequires[mod]; ok && isMovedEcosystemModule(mod) {
