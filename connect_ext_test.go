@@ -34,6 +34,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -1763,6 +1764,65 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 		client := pingv1connect.NewPingServiceClient(serverCompressed.Client(), serverCompressed.URL(), connect.WithReadMaxBytes(readMaxBytes), connect.WithGRPCWeb())
 		readMaxBytesMatrix(t, client, true)
 	})
+}
+
+func TestClientWithReadMaxBytesFullDuplex(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(&pluggablePingServer{
+		cumSum: func(_ context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+			var sum int64
+			for {
+				req, err := stream.Receive()
+				if errors.Is(err, io.EOF) {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				sum += req.GetNumber()
+				if err := stream.Send(&pingv1.CumSumResponse{Sum: sum}); err != nil {
+					return err
+				}
+			}
+		},
+	}))
+	testCases := []struct {
+		name string
+		opts []connect.ClientOption
+	}{
+		{name: "connect"},
+		{name: "grpc", opts: []connect.ClientOption{connect.WithGRPC()}},
+		{name: "grpcweb", opts: []connect.ClientOption{connect.WithGRPCWeb()}},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				server := memhttptest.NewServer(t, mux)
+				opts := append([]connect.ClientOption{connect.WithReadMaxBytes(1)}, testCase.opts...)
+				client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), opts...)
+				stream := client.CumSum(t.Context())
+				assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1000}))
+				errs := make(chan error, 1)
+				go func() {
+					_, err := stream.Receive()
+					errs <- err
+				}()
+				// The server waits for the next request after each response, so
+				// Receive must return the error before every goroutine blocks.
+				synctest.Wait()
+				select {
+				case err := <-errs:
+					assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+				default:
+					t.Error("Receive blocked after a response exceeded the read limit")
+				}
+				assert.Nil(t, stream.CloseRequest())
+				assert.Nil(t, stream.CloseResponse())
+			})
+		})
+	}
 }
 
 func TestHandlerWithSendMaxBytes(t *testing.T) {
