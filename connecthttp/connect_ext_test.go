@@ -2600,36 +2600,39 @@ func TestBidiStreamServerSendsFirstMessage(t *testing.T) {
 	t.Parallel()
 	run := func(t *testing.T, opts ...connecthttp.Option) {
 		t.Helper()
-		headersSent := make(chan struct{})
-		pingServer := &pluggablePingServer{
-			cumSum: func(_ context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
-				close(headersSent)
-				return nil
-			},
-		}
-		mux := http.NewServeMux()
-		srv := connect.NewServer()
-		pingv1connect.RegisterPingServiceHandler(srv, pingServer)
-		connecthttp.Mount(mux, srv)
-		server := memhttptest.NewServer(t, mux)
-		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(),
-			server.URL(),
-			opts...), assertPeerInterceptor(t)),
-		)
-		stream, err := client.CumSum(t.Context())
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			assert.Nil(t, stream.CloseSend())
-			assert.Nil(t, stream.Close())
+		synctest.Test(t, func(t *testing.T) {
+			headersSent := make(chan struct{})
+			pingServer := &pluggablePingServer{
+				cumSum: func(_ context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
+					close(headersSent)
+					return nil
+				},
+			}
+			mux := http.NewServeMux()
+			srv := connect.NewServer()
+			pingv1connect.RegisterPingServiceHandler(srv, pingServer)
+			connecthttp.Mount(mux, srv)
+			server := memhttptest.NewServer(t, mux)
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(),
+				server.URL(),
+				opts...), assertPeerInterceptor(t)),
+			)
+			stream, err := client.CumSum(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				assert.Nil(t, stream.CloseSend())
+				assert.Nil(t, stream.Close())
+			})
+			assert.Nil(t, stream.SendHeaders())
+			synctest.Wait()
+			select {
+			case <-headersSent:
+			default:
+				t.Error("server did not receive request headers")
+			}
 		})
-		assert.Nil(t, stream.SendHeaders())
-		select {
-		case <-time.After(time.Second):
-			t.Error("timed out to get request headers")
-		case <-headersSent:
-		}
 	}
 	t.Run("connect", func(t *testing.T) {
 		t.Parallel()
