@@ -1,10 +1,10 @@
 name: ci
 on:
   push:
-    branches: [main, v2]
+    branches: [v1]
     tags: ['v*']
   pull_request:
-    branches: [main, v2]
+    branches: [v1]
   schedule:
     - cron: '15 22 * * *'
   workflow_dispatch: {} # support manual runs
