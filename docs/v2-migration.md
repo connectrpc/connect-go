@@ -146,11 +146,12 @@ validate and otelconnect keep their paths:
 | `connectrpc.com/validate` | `connectrpc.com/validate` |
 | `connectrpc.com/otelconnect` | `connectrpc.com/otelconnect` |
 
-Until the ecosystem packages are tagged, use the `main` branch:
+validate v0.8.0 and otelconnect v0.11.0 are the first releases built for
+connect v2. Update to the latest releases:
 
 ```sh
-go get connectrpc.com/grpchealth/v2@main connectrpc.com/grpcreflect/v2@main \
-  connectrpc.com/validate@main connectrpc.com/otelconnect@main
+go get connectrpc.com/grpchealth/v2@latest connectrpc.com/grpcreflect/v2@latest \
+  connectrpc.com/validate@latest connectrpc.com/otelconnect@latest
 ```
 
 The tool prints this command for the packages you import.

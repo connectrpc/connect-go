@@ -23,8 +23,9 @@ import (
 	"golang.org/x/tools/go/ast/astutil"
 )
 
-// TODO: switch to tagged releases once the ecosystem v2 modules are tagged.
-const ecosystemVersionQuery = "@main"
+// ecosystemVersionQuery selects the latest release, which builds against
+// connect v2.
+const ecosystemVersionQuery = "@latest"
 
 // ecosystemImports keep their paths, so only their call sites change. authn is
 // left out because its API is unchanged.
