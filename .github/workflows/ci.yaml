@@ -2,11 +2,11 @@ name: ci
 on:
   push:
     branches: [v1]
-    tags: ["v*"]
+    tags: ['v*']
   pull_request:
     branches: [v1]
   schedule:
-    - cron: "15 22 * * *"
+    - cron: '15 22 * * *'
   workflow_dispatch: {} # support manual runs
 permissions:
   contents: read
@@ -17,10 +17,10 @@ jobs:
     strategy:
       matrix:
         go-version:
-          - name: latest
-            version: 1.27.x
-          - name: previous
-            version: 1.26.x
+        - name: latest
+          version: 1.27.x
+        - name: previous
+          version: 1.26.x
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -52,10 +52,10 @@ jobs:
     strategy:
       matrix:
         go-version:
-          - name: latest
-            version: 1.27.x
-          - name: previous
-            version: 1.26.x
+        - name: latest
+          version: 1.27.x
+        - name: previous
+          version: 1.26.x
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
