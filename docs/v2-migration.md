@@ -51,8 +51,7 @@ The sections below show each change. Changes are marked:
 The v2 generator keeps the plugin name `protoc-gen-connect-go`. The required
 change depends on how `buf.gen.yaml` declares the plugin.
 
-The v2 remote plugin is not published on the BSR until v2.0.0 is released,
-so remote plugins switch to the local plugin for now:
+For remote plugins, the reference is pinned to the v2 release:
 
 ```diff
 version: v2
@@ -61,18 +60,24 @@ plugins:
     out: gen
     opt: paths=source_relative
 - - remote: buf.build/connectrpc/go:v1.18.1
-+ - local: protoc-gen-connect-go
++ - remote: buf.build/connectrpc/go:v2.0.0
     out: gen
     opt: paths=source_relative
 ```
 
 ✅ `connect-go-v2-migrate` handles this. It also replaces
 `buf.build/connectrpc/gosimple`, since v2 makes the simple API the default
-generator. Install the local plugin as shown below, and switch back to the
-remote plugin once v2.0.0 is released.
+generator.
 
-BSR generated SDKs (`buf.build/gen/go/.../connectrpc/go`) have no v2 build
-yet either. Generate their Connect code locally with the v2 plugin instead.
+BSR generated SDKs move to a `/v2` module, so their import paths change:
+
+```diff
+-import "buf.build/gen/go/acme/user/connectrpc/go/acme/user/v1/userv1connect"
++import "buf.build/gen/go/acme/user/connectrpc/go/v2/acme/user/v1/userv1connect"
+```
+
+✅ `connect-go-v2-migrate` handles this in the first pass and adds the `/v2`
+module to the `go get` command it prints.
 
 For local plugins (`local: protoc-gen-connect-go`), the `buf.gen.yaml` entry
 stays the same because the v1 and v2 plugins share the binary name.
@@ -141,11 +146,12 @@ validate and otelconnect keep their paths:
 | `connectrpc.com/validate` | `connectrpc.com/validate` |
 | `connectrpc.com/otelconnect` | `connectrpc.com/otelconnect` |
 
-Until the ecosystem packages are tagged, use the `main` branch:
+validate v0.8.0 and otelconnect v0.11.0 are the first releases built for
+connect v2. Update to the latest releases:
 
 ```sh
-go get connectrpc.com/grpchealth/v2@main connectrpc.com/grpcreflect/v2@main \
-  connectrpc.com/validate@main connectrpc.com/otelconnect@main
+go get connectrpc.com/grpchealth/v2@latest connectrpc.com/grpcreflect/v2@latest \
+  connectrpc.com/validate@latest connectrpc.com/otelconnect@latest
 ```
 
 The tool prints this command for the packages you import.

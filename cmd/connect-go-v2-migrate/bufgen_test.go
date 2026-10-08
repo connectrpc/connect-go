@@ -99,7 +99,7 @@ plugins:
 			wantChanged: true,
 		},
 		{
-			name: "remote_plugin_localized_and_strips",
+			name: "remote_plugin_pinned_and_strips",
 			in: `version: v2
 plugins:
   - remote: buf.build/connectrpc/go:v1.18.1
@@ -107,12 +107,12 @@ plugins:
 `,
 			want: `version: v2
 plugins:
-  - local: protoc-gen-connect-go
+  - remote: buf.build/connectrpc/go:v2.0.0
 `,
 			wantChanged: true,
 		},
 		{
-			name: "remote_plugin_unversioned_localized",
+			name: "remote_plugin_unversioned_pinned",
 			in: `version: v2
 plugins:
   - remote: buf.build/connectrpc/go
@@ -120,7 +120,7 @@ plugins:
 `,
 			want: `version: v2
 plugins:
-  - local: protoc-gen-connect-go
+  - remote: buf.build/connectrpc/go:v2.0.0
     out: gen
 `,
 			wantChanged: true,
@@ -136,7 +136,7 @@ plugins:
 `,
 			want: `version: v2
 plugins:
-  - local: protoc-gen-connect-go
+  - remote: buf.build/connectrpc/go:v2.0.0
     out: gen
 `,
 			wantChanged: true,
@@ -153,10 +153,9 @@ plugins:
 			want: `version: v2
 plugins:
   - out: gen
-    local: protoc-gen-connect-go
+    remote: buf.build/connectrpc/go:v2.0.0
 `,
 			wantChanged: true,
-			wantWarn:    "has no v2 release yet",
 		},
 		{
 			name: "v1_plugin_key_not_first",
@@ -168,7 +167,7 @@ plugins:
 			want: `version: v1
 plugins:
   - out: gen
-    plugin: connect-go
+    plugin: buf.build/connectrpc/go:v2.0.0
 `,
 			wantChanged: true,
 		},
@@ -213,7 +212,7 @@ plugins:
 `,
 			want: `version: v2
 plugins:
-  - local: protoc-gen-connect-go
+  - remote: buf.build/connectrpc/go:v2.0.0
     out: gen
 `,
 			wantChanged: true,
@@ -252,19 +251,19 @@ plugins:
 			wantChanged: true,
 		},
 		{
-			name: "flow_mapping_localized",
+			name: "flow_mapping_pinned",
 			in: `version: v2
 plugins:
   - {remote: buf.build/connectrpc/go:v1.18.1, out: gen}
 `,
 			want: `version: v2
 plugins:
-  - {local: protoc-gen-connect-go, out: gen}
+  - {remote: buf.build/connectrpc/go:v2.0.0, out: gen}
 `,
 			wantChanged: true,
 		},
 		{
-			name: "quoted_and_commented_ref_localized",
+			name: "quoted_and_commented_ref_pinned",
 			in: `version: v2
 plugins:
   - remote: "buf.build/connectrpc/go:v1.18.1" # pinned
@@ -272,7 +271,7 @@ plugins:
 `,
 			want: `version: v2
 plugins:
-  - local: "protoc-gen-connect-go" # pinned
+  - remote: "buf.build/connectrpc/go:v2.0.0" # pinned
     out: gen
 `,
 			wantChanged: true,
@@ -326,7 +325,7 @@ plugins:
 		{
 			// v2 folds the simple API into the default generator, so the
 			// gosimple plugin migrates onto the same local plugin.
-			name: "remote_gosimple_localized",
+			name: "remote_gosimple_pinned",
 			in: `version: v2
 plugins:
   - remote: buf.build/connectrpc/gosimple:v1.18.1
@@ -334,13 +333,13 @@ plugins:
 `,
 			want: `version: v2
 plugins:
-  - local: protoc-gen-connect-go
+  - remote: buf.build/connectrpc/go:v2.0.0
     out: gen
 `,
 			wantChanged: true,
 		},
 		{
-			name: "remote_gosimple_unversioned_localized",
+			name: "remote_gosimple_unversioned_pinned",
 			in: `version: v2
 plugins:
   - remote: buf.build/connectrpc/gosimple
@@ -348,13 +347,13 @@ plugins:
 `,
 			want: `version: v2
 plugins:
-  - local: protoc-gen-connect-go
+  - remote: buf.build/connectrpc/go:v2.0.0
     out: gen
 `,
 			wantChanged: true,
 		},
 		{
-			name: "v1_plugin_gosimple_localized",
+			name: "v1_plugin_gosimple_pinned",
 			in: `version: v1
 plugins:
   - plugin: buf.build/connectrpc/gosimple:v1.18.1
@@ -362,15 +361,15 @@ plugins:
 `,
 			want: `version: v1
 plugins:
-  - plugin: connect-go
+  - plugin: buf.build/connectrpc/go:v2.0.0
     out: gen
 `,
 			wantChanged: true,
 		},
 		{
 			// Private BSR instances use the same plugin path under another host,
-			// and are localized too.
-			name: "remote_private_host_localized",
+			// and are pinned too.
+			name: "remote_private_host_pinned",
 			in: `version: v2
 plugins:
   - remote: buf.example.com/connectrpc/go:v1.18.1
@@ -378,13 +377,13 @@ plugins:
 `,
 			want: `version: v2
 plugins:
-  - local: protoc-gen-connect-go
+  - remote: buf.example.com/connectrpc/go:v2.0.0
     out: gen
 `,
 			wantChanged: true,
 		},
 		{
-			name: "remote_private_host_gosimple_localized",
+			name: "remote_private_host_gosimple_pinned",
 			in: `version: v2
 plugins:
   - remote: bsr.internal.acme.dev/connectrpc/gosimple:v1.18.1
@@ -392,7 +391,7 @@ plugins:
 `,
 			want: `version: v2
 plugins:
-  - local: protoc-gen-connect-go
+  - remote: bsr.internal.acme.dev/connectrpc/go:v2.0.0
     out: gen
 `,
 			wantChanged: true,
@@ -419,7 +418,7 @@ plugins:
 			wantChanged: false,
 		},
 		{
-			name: "remote_localize_warns_plugin_not_published",
+			name: "remote_plugin_pinned",
 			in: `version: v2
 plugins:
   - remote: buf.build/connectrpc/go:v1.18.1
@@ -427,11 +426,10 @@ plugins:
 `,
 			want: `version: v2
 plugins:
-  - local: protoc-gen-connect-go
+  - remote: buf.build/connectrpc/go:v2.0.0
     out: gen
 `,
 			wantChanged: true,
-			wantWarn:    "has no v2 release yet",
 		},
 		{
 			name: "gotool_warns_about_gomod_and_strips",
@@ -544,7 +542,7 @@ plugins:
 			wantWarn:    "reinstall the generator",
 		},
 		{
-			name: "v1_plugin_remote_localized_and_strips",
+			name: "v1_plugin_remote_pinned_and_strips",
 			in: `version: v1
 plugins:
   - plugin: buf.build/connectrpc/go:v1.18.1
@@ -553,13 +551,13 @@ plugins:
 `,
 			want: `version: v1
 plugins:
-  - plugin: connect-go
+  - plugin: buf.build/connectrpc/go:v2.0.0
     out: gen
 `,
 			wantChanged: true,
 		},
 		{
-			name: "v1_plugin_remote_unversioned_localized",
+			name: "v1_plugin_remote_unversioned_pinned",
 			in: `version: v1
 plugins:
   - plugin: buf.build/connectrpc/go
@@ -567,7 +565,7 @@ plugins:
 `,
 			want: `version: v1
 plugins:
-  - plugin: connect-go
+  - plugin: buf.build/connectrpc/go:v2.0.0
     out: gen
 `,
 			wantChanged: true,

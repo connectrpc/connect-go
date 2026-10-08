@@ -47,22 +47,21 @@ const (
 
 // Diagnostic rule identifiers, surfaced as stable handles in JSON output.
 const (
-	ruleAwaitingV2Bindings      = "awaiting_v2_bindings"
-	ruleRemoveV1Import          = "remove_v1_import"
-	ruleRequestMetadata         = "request_metadata_migration"
-	ruleHandlerConstruction     = "handler_construction"
-	ruleConnectHTTPOption       = "connecthttp_option_migration"
-	ruleErrorAPI                = "error_api_migration"
-	ruleServerInterceptor       = "server_interceptor_migration"
-	ruleInterceptorMigration    = "interceptor_migration"
-	ruleStreamParamType         = "stream_param_type"
-	ruleStreamParamAmbiguous    = "stream_param_ambiguous"
-	ruleEcosystemMigration      = "ecosystem_migration"
-	ruleBufgenReinstall         = "bufgen_reinstall_plugin"
-	ruleBufgenGoMod             = "bufgen_update_go_mod"
-	ruleBufgenRemoteUnpublished = "bufgen_remote_unpublished"
-	ruleBufgenManualEdit        = "bufgen_manual_edit"
-	ruleReadLimitDefault        = "read_limit_default"
+	ruleAwaitingV2Bindings   = "awaiting_v2_bindings"
+	ruleRemoveV1Import       = "remove_v1_import"
+	ruleRequestMetadata      = "request_metadata_migration"
+	ruleHandlerConstruction  = "handler_construction"
+	ruleConnectHTTPOption    = "connecthttp_option_migration"
+	ruleErrorAPI             = "error_api_migration"
+	ruleServerInterceptor    = "server_interceptor_migration"
+	ruleInterceptorMigration = "interceptor_migration"
+	ruleStreamParamType      = "stream_param_type"
+	ruleStreamParamAmbiguous = "stream_param_ambiguous"
+	ruleEcosystemMigration   = "ecosystem_migration"
+	ruleBufgenReinstall      = "bufgen_reinstall_plugin"
+	ruleBufgenGoMod          = "bufgen_update_go_mod"
+	ruleBufgenManualEdit     = "bufgen_manual_edit"
+	ruleReadLimitDefault     = "read_limit_default"
 )
 
 var (
@@ -224,6 +223,16 @@ func withHandlerStreams(resolver *handlerStreamResolver) rewriteOption {
 	return func(state *rewriteState) { state.handlerStreams = resolver }
 }
 
+// withStubUse marks a file that calls stubs without importing connect.
+func withStubUse(position token.Position) rewriteOption {
+	return func(state *rewriteState) {
+		tokenFile := state.fset.File(state.file.Pos())
+		if position.IsValid() && tokenFile != nil && position.Offset < tokenFile.Size() {
+			state.stubUse = tokenFile.Pos(position.Offset)
+		}
+	}
+}
+
 // Rewrite applies the v1->v2 mechanical rewrites to src, returning the output
 // and a [Report]. Errors are syntax errors only; type mismatches surface as
 // warnings. When stubsReady is false (generated bindings are still v1),
@@ -244,17 +253,25 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 	}
 	// Nothing to do unless the file uses connect directly, via a generated
 	// stub, or via an ecosystem package.
-	if !state.hasConnectV1Import() && !usesConnectStub(file) && !hasEcosystemImport(file) {
+	if !state.hasConnectV1Import() && !usesConnectStub(file) && !hasEcosystemImport(file) && !state.stubUse.IsValid() {
 		return src, report, nil
 	}
 
+	rewriteSDKImports(fset, file, state.sdkModules, &report)
+
 	// Stub-dependent rewrites wait for v2 bindings; flag the file meanwhile.
 	if !state.stubsReady {
-		if pos, ok := firstStubDependentPos(file, state.connectAlias); ok {
-			report.deferAtf(pos, ruleAwaitingV2Bindings, "stub-dependent rewrite (handler/client signatures, .Msg, NewRequest/NewResponse, streams, construction)")
+		pos, stubDependent := firstStubDependentPos(file, state.connectAlias)
+		if !stubDependent && state.stubUse.IsValid() {
+			pos, stubDependent = state.stubUse, true
 		}
-		if pos := firstEcosystemImportPos(file); pos.IsValid() {
-			report.deferAtf(pos, ruleAwaitingV2Bindings, "ecosystem package rewrite (import paths, construction, interceptors)")
+		if ecosystemPos := firstEcosystemImportPos(file); ecosystemPos.IsValid() {
+			report.deferAtf(ecosystemPos, ruleAwaitingV2Bindings, "ecosystem package rewrite (import paths, construction, interceptors)")
+		}
+		// A partial rewrite would switch the import to v2 under v1 stub types.
+		if stubDependent {
+			report.deferAtf(pos, ruleAwaitingV2Bindings, "stub-dependent rewrite (handler/client signatures, .Msg, NewRequest/NewResponse, streams, construction)")
+			return src, report, nil
 		}
 		rewriteStubIndependent(file, state, &report)
 		return finishRewrite(filename, src, fset, file, state, &report)
@@ -405,7 +422,7 @@ func finishRewrite(filename string, src []byte, fset *token.FileSet, file *ast.F
 
 	// Repair the vertical gap a position-cleared closure body leaves above it.
 	normalizeReshapedClosures(file)
-	applyLineBreaks(fset, file, state.lineBreaks)
+	applyLineBreaks(fset, file, state.lineBreaks, state.lineJoins)
 
 	var buf bytes.Buffer
 	printerConfig := printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}
@@ -479,6 +496,9 @@ type rewriteState struct {
 	// handlerStreams resolves a handler RPC name to its v2 stream type; nil on
 	// the AST-only path, where the stream parameter is warned instead.
 	handlerStreams *handlerStreamResolver
+	stubUse        token.Pos
+	// sdkModules are v1 BSR connect SDKs whose imports move to v2.
+	sdkModules []string
 	// imports maps path->package name for imports a rewrite introduces;
 	// finishRewrite adds them before formatting.
 	imports map[string]string
@@ -486,6 +506,8 @@ type rewriteState struct {
 	file    *ast.File
 	// lineBreaks are source offsets that start a new line when printing.
 	lineBreaks []int
+	// lineJoins are source offset spans printed on one line.
+	lineJoins [][2]int
 }
 
 // addImport records that path (named pkg) must be imported.
@@ -1070,15 +1092,20 @@ func anchorOnNewLine(state *rewriteState, node ast.Node, pos, next token.Pos) {
 	state.lineBreaks = append(state.lineBreaks, tokFile.Offset(next))
 }
 
-// applyLineBreaks adds the line starts recorded by anchorOnNewLine.
-func applyLineBreaks(fset *token.FileSet, file *ast.File, offsets []int) {
-	if len(offsets) == 0 {
+// applyLineBreaks adds the recorded line breaks and joins.
+func applyLineBreaks(fset *token.FileSet, file *ast.File, offsets []int, joins [][2]int) {
+	if len(offsets) == 0 && len(joins) == 0 {
 		return
 	}
 	tokFile := fset.File(file.Pos())
 	lines := append(tokFile.Lines(), offsets...)
 	slices.Sort(lines)
-	tokFile.SetLines(slices.Compact(lines))
+	lines = slices.DeleteFunc(slices.Compact(lines), func(line int) bool {
+		return slices.ContainsFunc(joins, func(span [2]int) bool {
+			return span[0] < line && line <= span[1]
+		})
+	})
+	tokFile.SetLines(lines)
 }
 
 // skipTrailingComments returns the end of any comment trailing pos on its
@@ -1355,12 +1382,12 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 	// message). Stub-dependent, so gated on stubsReady.
 	if call, ok := expr.(*ast.CallExpr); ok && state.stubsReady && len(call.Args) == 1 {
 		if isConnectSelector(call.Fun, state.connectAlias, "NewResponse") {
-			*exprPtr = call.Args[0]
+			*exprPtr = unwrapInPlace(state, call, call.Args[0])
 			report.bump("strip_new_response")
 			return
 		}
 		if isConnectSelector(call.Fun, state.connectAlias, "NewRequest") {
-			*exprPtr = call.Args[0]
+			*exprPtr = unwrapInPlace(state, call, call.Args[0])
 			report.bump("strip_new_request")
 			return
 		}
@@ -1369,7 +1396,7 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 	// Struct-literal wrapper form: &connect.Response[T]{Msg: x} -> x. Stub-dependent.
 	if state.stubsReady {
 		if msg, rule, ok := unwrapConnectMessageLiteral(expr, state.connectAlias); ok {
-			*exprPtr = msg
+			*exprPtr = unwrapInPlace(state, expr, msg)
 			report.bump(rule)
 			return
 		}
@@ -1604,6 +1631,25 @@ func unwrapConnectMessageLiteral(expr ast.Expr, connectAlias string) (msg ast.Ex
 	// No Msg field (&connect.Response[T]{}): flip the wrapper type to give &T{}.
 	lit.Type = index.Index
 	return expr, rule, true
+}
+
+// unwrapInPlace returns inner, joining the wrapper's lines around it so the
+// printer leaves no gap.
+func unwrapInPlace(state *rewriteState, wrapper, inner ast.Expr) ast.Expr {
+	tokFile := state.fset.File(wrapper.Pos())
+	for _, span := range [][2]token.Pos{{wrapper.Pos(), inner.Pos()}, {inner.End(), wrapper.End()}} {
+		if !hasComment(state.file, span[0], span[1]) {
+			state.lineJoins = append(state.lineJoins, [2]int{tokFile.Offset(span[0]), tokFile.Offset(span[1])})
+		}
+	}
+	return inner
+}
+
+// hasComment reports whether a comment overlaps [start, end).
+func hasComment(file *ast.File, start, end token.Pos) bool {
+	return slices.ContainsFunc(file.Comments, func(group *ast.CommentGroup) bool {
+		return group.Pos() < end && group.End() > start
+	})
 }
 
 func isConnectSelector(fun ast.Expr, connectAlias, name string) bool {
