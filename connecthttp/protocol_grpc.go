@@ -395,6 +395,14 @@ func (cc *grpcClientConn) Receive(msg any) error {
 	if err == nil {
 		return nil
 	}
+	if !cc.unmarshaler.web && !cc.duplexCall.responseBodyDone {
+		// The response body is still open, so the client rejected a message it
+		// read in full, such as one larger than the read limit. Reading the
+		// trailers would wait for the server to end the stream, which in a
+		// full-duplex stream may be waiting on the client's next message.
+		_ = cc.duplexCall.CloseWrite()
+		return err
+	}
 	mergeHeaders(
 		cc.responseTrailer,
 		cc.readTrailers(&cc.unmarshaler, cc.duplexCall),

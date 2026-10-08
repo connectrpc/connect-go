@@ -54,6 +54,11 @@ type duplexHTTPCall struct {
 	responseReady chan struct{}
 	response      *http.Response
 	responseErr   error
+
+	// responseBodyDone is set once a read of the response body returns an
+	// error, including io.EOF. Only the receiving goroutine reads the body, so
+	// it needs no synchronisation.
+	responseBodyDone bool
 }
 
 func newDuplexHTTPCall(
@@ -239,12 +244,15 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 	if err := d.ctx.Err(); err != nil {
 		return 0, wrapIfContextError(err)
 	}
-	n, err := d.response.Body.Read(data)
+	bytesRead, err := d.response.Body.Read(data)
+	if err != nil {
+		d.responseBodyDone = true
+	}
 	if err != nil && !errors.Is(err, io.EOF) {
 		err = wrapIfContextDone(d.ctx, err)
 		err = wrapIfRSTError(d.ctx, err)
 	}
-	return n, err
+	return bytesRead, err
 }
 
 func (d *duplexHTTPCall) CloseRead() error {
