@@ -128,7 +128,7 @@ First, move the dependencies and generated code to v2:
   2. go get -u \
        connectrpc.com/connect/v2 \
        buf.build/gen/go/example/test/connectrpc/go/v2 \
-       connectrpc.com/otelconnect@main
+       connectrpc.com/otelconnect@latest
      (pulls the v2 modules into go.mod)
 
 Then re-run connect-go-v2-migrate to work through the Go source changes: it

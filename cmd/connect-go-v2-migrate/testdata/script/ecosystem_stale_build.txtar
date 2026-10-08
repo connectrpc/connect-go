@@ -1,12 +1,12 @@
 # The go get advice names only ecosystem modules that still need an upgrade.
 # grpchealth/v2 is already required, and validate keeps its path but already
 # resolves to a connect v2 build, so both are left out. otelconnect keeps its
-# path and still imports connect v1, so it is suggested at @main.
+# path and still imports connect v1, so it is suggested at @latest.
 exec migrate
 cmp stdout out.txt
-stdout 'connectrpc.com/otelconnect@main'
-! stdout 'connectrpc.com/validate@main'
-! stdout 'connectrpc.com/grpchealth/v2@main'
+stdout 'connectrpc.com/otelconnect@latest'
+! stdout 'connectrpc.com/validate@latest'
+! stdout 'connectrpc.com/grpchealth/v2@latest'
 exec go build ./...
 -- go.mod --
 module example.com/app
@@ -112,5 +112,5 @@ Scanned 1 Go file and 0 Buf templates. No automatic rewrites were applied.
 go.mod needs the connect v2 modules. Pull them in and tidy:
 
   go get -u \
-       connectrpc.com/otelconnect@main
+       connectrpc.com/otelconnect@latest
   go mod tidy
