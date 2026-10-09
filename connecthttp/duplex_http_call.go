@@ -457,9 +457,8 @@ func cloneURL(oldURL *url.URL) *url.URL {
 // call Release after the response is received to ensure the payload is safe for
 // reuse.
 type payloadCloser struct {
-	mu       sync.Mutex
-	payload  messagePayload
-	released bool
+	mu      sync.Mutex
+	payload messagePayload
 }
 
 func newPayloadCloser(payload messagePayload) *payloadCloser {
@@ -487,31 +486,25 @@ func (p *payloadCloser) Close() error {
 	return nil
 }
 
-// Rewind rewinds the payload to the beginning. It returns false after
-// Release.
+// Rewind rewinds the payload to the beginning. It must not be called after
+// Release, which is only called once the request is no longer retried.
 func (p *payloadCloser) Rewind() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.released {
-		return false
-	}
-	if _, err := p.payload.Seek(0, io.SeekStart); err != nil {
-		return false
-	}
-	return true
+	_, err := p.payload.Seek(0, io.SeekStart)
+	return err == nil
 }
 
 // Release detaches the payload so the caller's buffer is safe to reuse. The
 // transport may still be sending it if the server responded early, so unread
-// bytes are copied rather than dropped. After Release, the payload cannot be
-// rewound.
+// bytes are copied rather than dropped.
 func (p *payloadCloser) Release() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.released {
+	if p.payload.Len() == 0 {
+		p.payload = nopPayload{}
 		return
 	}
-	p.released = true
 	unread := make([]byte, p.payload.Len())
 	n, _ := io.ReadFull(p.payload, unread)
 	p.payload = bytes.NewReader(unread[:n])
