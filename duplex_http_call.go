@@ -15,6 +15,7 @@
 package connect
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -440,7 +441,7 @@ func cloneURL(oldURL *url.URL) *url.URL {
 // reuse.
 type payloadCloser struct {
 	mu      sync.Mutex
-	payload messagePayload // nil after Release
+	payload messagePayload
 }
 
 func newPayloadCloser(payload messagePayload) *payloadCloser {
@@ -453,9 +454,6 @@ func newPayloadCloser(payload messagePayload) *payloadCloser {
 func (p *payloadCloser) Read(dst []byte) (readN int, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.payload == nil {
-		return 0, io.EOF
-	}
 	return p.payload.Read(dst)
 }
 
@@ -463,9 +461,6 @@ func (p *payloadCloser) Read(dst []byte) (readN int, err error) {
 func (p *payloadCloser) WriteTo(dst io.Writer) (int64, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.payload == nil {
-		return 0, nil
-	}
 	return p.payload.WriteTo(dst)
 }
 
@@ -474,24 +469,26 @@ func (p *payloadCloser) Close() error {
 	return nil
 }
 
-// Rewind rewinds the payload to the beginning. It returns false if the
-// payload has been discarded from a previous call to Release.
+// Rewind rewinds the payload to the beginning. It must not be called after
+// Release, which is only called once the request is no longer retried.
 func (p *payloadCloser) Rewind() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.payload == nil {
-		return false
-	}
-	if _, err := p.payload.Seek(0, io.SeekStart); err != nil {
-		return false
-	}
-	return true
+	_, err := p.payload.Seek(0, io.SeekStart)
+	return err == nil
 }
 
-// Release discards the payload. After Release is called, the payload cannot be
-// rewound and the payload is safe to reuse.
+// Release detaches the payload so the caller's buffer is safe to reuse. The
+// transport may still be sending it if the server responded early, so unread
+// bytes are copied rather than dropped.
 func (p *payloadCloser) Release() {
 	p.mu.Lock()
-	p.payload = nil
-	p.mu.Unlock()
+	defer p.mu.Unlock()
+	if p.payload.Len() == 0 {
+		p.payload = nopPayload{}
+		return
+	}
+	unread := make([]byte, p.payload.Len())
+	n, _ := io.ReadFull(p.payload, unread)
+	p.payload = bytes.NewReader(unread[:n])
 }

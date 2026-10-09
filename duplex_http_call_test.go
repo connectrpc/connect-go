@@ -133,6 +133,48 @@ func TestHTTPCallGetBody(t *testing.T) {
 	wg.Wait()
 }
 
+// TestUnaryRequestBodyAfterEarlyResponse tests that a unary request body is
+// sent in full when the server responds before reading it. Send returns once
+// the response headers arrive, while net/http may still be writing the body.
+func TestUnaryRequestBodyAfterEarlyResponse(t *testing.T) {
+	t.Parallel()
+	// Large enough that the body doesn't fit in socket buffers, so the
+	// transport is still writing it when the response arrives.
+	const size = 32 << 20
+	sent := make(chan struct{})
+	received := make(chan int64, 1)
+	handler := http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		controller := http.NewResponseController(responseWriter)
+		assert.Nil(t, controller.EnableFullDuplex())
+		_, _ = responseWriter.Write([]byte("early"))
+		assert.Nil(t, controller.Flush())
+		<-sent
+		n, _ := io.Copy(io.Discard, request.Body)
+		received <- n
+	})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	serverURL, err := url.Parse(server.URL)
+	assert.Nil(t, err)
+
+	call := newDuplexHTTPCall(
+		t.Context(),
+		server.Client(),
+		serverURL,
+		Spec{StreamType: StreamTypeUnary},
+		http.Header{},
+	)
+	call.SetValidateResponse(func(*http.Response) *Error { return nil })
+	_, err = call.Send(bytes.NewReader(make([]byte, size)))
+	assert.Nil(t, err)
+	close(sent)
+	assert.Nil(t, call.CloseWrite())
+	body, err := io.ReadAll(call)
+	assert.Nil(t, err)
+	assert.Equal(t, string(body), "early")
+	assert.Equal(t, <-received, size)
+}
+
 // TestDuplexHTTPCallSendCloseWriteNoNilDeref is a regression test for a nil
 // pointer dereference in duplexHTTPCall when Send and CloseWrite are invoked
 // concurrently on a client-streaming call.
