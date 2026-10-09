@@ -12,7 +12,7 @@ export GOBIN := $(abspath $(BIN))
 COPYRIGHT_YEARS := 2021-2026
 LICENSE_IGNORE := --ignore .github/ --ignore ".*\.ya?ml"
 BUF_VERSION := 1.69.0
-GOLANGCI_LINT_VERSION ?= v2.13.1
+GOLANGCI_LINT_VERSION ?= v2.14.0
 GORELEASER_VERSION ?= v2.18.0
 
 .PHONY: help
