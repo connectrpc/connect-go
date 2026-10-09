@@ -545,6 +545,13 @@ func TestClientDeadlineHandling(t *testing.T) {
 	transport, ok := client.Transport.(*http.Transport)
 	assert.True(t, ok)
 	transport.Protocols = clientProtos
+	// Wait for a free stream slot rather than failing over to another
+	// connection. Cancelled streams hold a slot until the server acks the
+	// PING sent with their RST_STREAM, so this test can fill the server's
+	// stream limit. When that happens, net/http retries the request after
+	// closing its body, and the client-streaming request fails with
+	// "io: read/write on closed pipe" instead of a deadline error.
+	transport.HTTP2 = &http.HTTP2Config{StrictMaxConcurrentRequests: true}
 
 	// This case creates a new connection for each RPC to verify that timeouts during dialing
 	// won't cause issues. This is historically easier to reproduce, so it uses a smaller
