@@ -15,6 +15,7 @@
 package connecthttp
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -456,8 +457,9 @@ func cloneURL(oldURL *url.URL) *url.URL {
 // call Release after the response is received to ensure the payload is safe for
 // reuse.
 type payloadCloser struct {
-	mu      sync.Mutex
-	payload messagePayload // nil after Release
+	mu       sync.Mutex
+	payload  messagePayload
+	released bool
 }
 
 func newPayloadCloser(payload messagePayload) *payloadCloser {
@@ -470,9 +472,6 @@ func newPayloadCloser(payload messagePayload) *payloadCloser {
 func (p *payloadCloser) Read(dst []byte) (readN int, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.payload == nil {
-		return 0, io.EOF
-	}
 	return p.payload.Read(dst)
 }
 
@@ -480,9 +479,6 @@ func (p *payloadCloser) Read(dst []byte) (readN int, err error) {
 func (p *payloadCloser) WriteTo(dst io.Writer) (int64, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.payload == nil {
-		return 0, nil
-	}
 	return p.payload.WriteTo(dst)
 }
 
@@ -491,12 +487,12 @@ func (p *payloadCloser) Close() error {
 	return nil
 }
 
-// Rewind rewinds the payload to the beginning. It returns false if the
-// payload has been discarded from a previous call to Release.
+// Rewind rewinds the payload to the beginning. It returns false after
+// Release.
 func (p *payloadCloser) Rewind() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.payload == nil {
+	if p.released {
 		return false
 	}
 	if _, err := p.payload.Seek(0, io.SeekStart); err != nil {
@@ -505,10 +501,18 @@ func (p *payloadCloser) Rewind() bool {
 	return true
 }
 
-// Release discards the payload. After Release is called, the payload cannot be
-// rewound and the payload is safe to reuse.
+// Release detaches the payload so the caller's buffer is safe to reuse. The
+// transport may still be sending it if the server responded early, so unread
+// bytes are copied rather than dropped. After Release, the payload cannot be
+// rewound.
 func (p *payloadCloser) Release() {
 	p.mu.Lock()
-	p.payload = nil
-	p.mu.Unlock()
+	defer p.mu.Unlock()
+	if p.released {
+		return
+	}
+	p.released = true
+	unread := make([]byte, p.payload.Len())
+	n, _ := io.ReadFull(p.payload, unread)
+	p.payload = bytes.NewReader(unread[:n])
 }
