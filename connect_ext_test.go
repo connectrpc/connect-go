@@ -1489,6 +1489,47 @@ func TestClientUnaryAcceptEncoding(t *testing.T) {
 	}
 }
 
+func TestHandlerTypedNilError(t *testing.T) {
+	// A handler returning a nil *connect.Error as error boxes a typed nil.
+	t.Parallel()
+	var nilErr *connect.Error
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(&pluggablePingServer{
+		ping: func(context.Context, *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+			return nil, nilErr
+		},
+		cumSum: func(context.Context, *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+			return nilErr
+		},
+	}))
+	server := memhttptest.NewServer(t, mux)
+	protocols := map[string][]connect.ClientOption{
+		"connect":  nil,
+		"grpc":     {connect.WithGRPC()},
+		"grpc-web": {connect.WithGRPCWeb()},
+	}
+	for name, options := range protocols {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), options...)
+			t.Run("unary", func(t *testing.T) {
+				t.Parallel()
+				_, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{}))
+				assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+			})
+			t.Run("bidi", func(t *testing.T) {
+				t.Parallel()
+				stream := client.CumSum(t.Context())
+				assert.Nil(t, stream.Send(&pingv1.CumSumRequest{}))
+				assert.Nil(t, stream.CloseRequest())
+				_, err := stream.Receive()
+				assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
+				assert.Nil(t, stream.CloseResponse())
+			})
+		})
+	}
+}
+
 func TestInvalidHeaderTimeout(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
