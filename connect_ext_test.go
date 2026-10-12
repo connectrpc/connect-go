@@ -1820,6 +1820,31 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 	})
 }
 
+func TestClientWithReadMaxBytesUnaryError(t *testing.T) {
+	t.Parallel()
+	const readMaxBytes = 1024
+	mux := http.NewServeMux()
+	mux.Handle(pingv1connect.NewPingServiceHandler(&pluggablePingServer{
+		ping: func(_ context.Context, request *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New(request.Msg.GetText()))
+		},
+	}))
+	server := memhttptest.NewServer(t, mux)
+	client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), connect.WithReadMaxBytes(readMaxBytes))
+	t.Run("under_read_max", func(t *testing.T) {
+		t.Parallel()
+		_, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{Text: "small"}))
+		assert.Equal(t, connect.CodeOf(err), connect.CodeFailedPrecondition)
+		assert.Equal(t, err.Error(), "failed_precondition: small")
+	})
+	t.Run("over_read_max", func(t *testing.T) {
+		t.Parallel()
+		_, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{Text: strings.Repeat("a", readMaxBytes)}))
+		assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+		assert.True(t, strings.Contains(err.Error(), fmt.Sprintf("larger than configured max %d", readMaxBytes)))
+	})
+}
+
 func TestClientWithReadMaxBytesFullDuplex(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
