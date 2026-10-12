@@ -3209,11 +3209,12 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 	payload := []byte(`{"number": 42}`)
 	binary.BigEndian.PutUint32(head[1:], uint32(len(payload)))
 	testcases := []struct {
-		name       string
-		handler    http.HandlerFunc
-		options    []connecthttp.Option
-		expectCode connect.Code
-		expectMsg  string
+		name        string
+		handler     http.HandlerFunc
+		options     []connecthttp.Option
+		expectCode  connect.Code
+		expectMsg   string
+		expectCause error
 	}{{
 		name:    "connect_missing_end",
 		options: []connecthttp.Option{connecthttp.WithSendCodec(connect.CodecNameJSON)},
@@ -3302,8 +3303,9 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err = responseWriter.Write(payload[:len(payload)-1])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+		expectCode:  connect.CodeInternal,
+		expectMsg:   fmt.Sprintf("internal: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+		expectCause: io.ErrUnexpectedEOF,
 	}, {
 		name:    "grpc_partial_payload",
 		options: []connecthttp.Option{connecthttp.WithSendCodec(connect.CodecNameJSON), connecthttp.WithGRPC()},
@@ -3315,8 +3317,9 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err = responseWriter.Write(payload[:len(payload)-1])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+		expectCode:  connect.CodeInternal,
+		expectMsg:   fmt.Sprintf("internal: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+		expectCause: io.ErrUnexpectedEOF,
 	}, {
 		name:    "grpc-web_partial_payload",
 		options: []connecthttp.Option{connecthttp.WithSendCodec(connect.CodecNameJSON), connecthttp.WithGRPCWeb()},
@@ -3328,8 +3331,9 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err = responseWriter.Write(payload[:len(payload)-1])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+		expectCode:  connect.CodeInternal,
+		expectMsg:   fmt.Sprintf("internal: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+		expectCause: io.ErrUnexpectedEOF,
 	}, {
 		name:    "connect_partial_frame",
 		options: []connecthttp.Option{connecthttp.WithSendCodec(connect.CodecNameJSON)},
@@ -3339,8 +3343,9 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err := responseWriter.Write(head[:4])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
+		expectCode:  connect.CodeInternal,
+		expectMsg:   "internal: protocol error: incomplete envelope: unexpected EOF",
+		expectCause: io.ErrUnexpectedEOF,
 	}, {
 		name:    "grpc_partial_frame",
 		options: []connecthttp.Option{connecthttp.WithSendCodec(connect.CodecNameJSON), connecthttp.WithGRPC()},
@@ -3350,8 +3355,9 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err := responseWriter.Write(head[:4])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
+		expectCode:  connect.CodeInternal,
+		expectMsg:   "internal: protocol error: incomplete envelope: unexpected EOF",
+		expectCause: io.ErrUnexpectedEOF,
 	}, {
 		name:    "grpc-web_partial_frame",
 		options: []connecthttp.Option{connecthttp.WithSendCodec(connect.CodecNameJSON), connecthttp.WithGRPCWeb()},
@@ -3361,8 +3367,9 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err := responseWriter.Write(head[:4])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
+		expectCode:  connect.CodeInternal,
+		expectMsg:   "internal: protocol error: incomplete envelope: unexpected EOF",
+		expectCause: io.ErrUnexpectedEOF,
 	}, {
 		name:    "connect_excess_eof",
 		options: []connecthttp.Option{connecthttp.WithSendCodec(connect.CodecNameJSON)},
@@ -3442,6 +3449,9 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			assert.NotNil(t, streamErr)
 			assert.Equal(t, connect.CodeOf(streamErr), testcase.expectCode)
 			assert.Equal(t, streamErr.Error(), testcase.expectMsg)
+			if testcase.expectCause != nil {
+				assert.ErrorIs(t, streamErr, testcase.expectCause)
+			}
 		})
 	}
 }

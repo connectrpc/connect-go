@@ -333,7 +333,7 @@ func (r *envelopeReader) Read(env *envelope) *connect.Error {
 		}
 		// Something else has gone wrong - the stream didn't end cleanly.
 		return connect.Errorf(
-			connect.CodeInvalidArgument,
+			connect.CodeInternal,
 			"protocol error: incomplete envelope: %s", err,
 		).WithCause(err)
 	}
@@ -355,11 +355,11 @@ func (r *envelopeReader) Read(env *envelope) *connect.Error {
 		if errors.Is(err, io.EOF) {
 			// We've gotten fewer bytes than we expected, so the stream has ended
 			// unexpectedly.
-			return connect.Errorf(connect.CodeInvalidArgument,
+			return connect.Errorf(connect.CodeInternal,
 				"protocol error: promised %d bytes in enveloped message, got %d bytes",
 				size,
 				readN,
-			)
+			).WithCause(io.ErrUnexpectedEOF)
 		}
 		err = wrapIfMaxBytesError(err, "read %d byte message", size)
 		err = wrapIfContextDone(r.ctx, err)
