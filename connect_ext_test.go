@@ -1439,6 +1439,56 @@ func TestClientWithoutGzipSupport(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), "unknown compression"))
 }
 
+func TestClientUnaryAcceptEncoding(t *testing.T) {
+	// Assert Accept-Encoding is correctly set for unary clients. It must be
+	// explicit to avoid net/http defaults.
+	t.Parallel()
+	deflateDecompressor := func() connect.Decompressor {
+		return newDeflateReader(strings.NewReader(""))
+	}
+	deflateCompressor := func() connect.Compressor {
+		w, err := flate.NewWriter(&strings.Builder{}, flate.DefaultCompression)
+		if err != nil {
+			t.Fatalf("failed to create flate writer: %v", err)
+		}
+		return w
+	}
+	tests := []struct {
+		name    string
+		options []connect.ClientOption
+		want    string
+	}{{
+		name: "default gzip",
+		want: "gzip",
+	}, {
+		name:    "no compressors sends identity",
+		options: []connect.ClientOption{connect.WithAcceptCompression("gzip", nil, nil)},
+		want:    "identity",
+	}, {
+		name:    "custom order preserved",
+		options: []connect.ClientOption{connect.WithAcceptCompression("deflate", deflateDecompressor, deflateCompressor)},
+		want:    "deflate,gzip",
+	}}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			mux := http.NewServeMux()
+			mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+			// Record the header exactly as the server receives it on the wire.
+			var got string
+			recorder := http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+				got = request.Header.Get("Accept-Encoding")
+				mux.ServeHTTP(responseWriter, request)
+			})
+			server := memhttptest.NewServer(t, recorder)
+			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), test.options...)
+			_, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{Text: "hello"}))
+			assert.Nil(t, err)
+			assert.Equal(t, got, test.want)
+		})
+	}
+}
+
 func TestInvalidHeaderTimeout(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
