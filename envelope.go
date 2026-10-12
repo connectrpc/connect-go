@@ -334,7 +334,7 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 		}
 		// Something else has gone wrong - the stream didn't end cleanly.
 		return errorf(
-			CodeInvalidArgument,
+			CodeInternal,
 			"protocol error: incomplete envelope: %w", err,
 		)
 	}
@@ -357,10 +357,11 @@ func (r *envelopeReader) Read(env *envelope) *Error {
 			// We've gotten fewer bytes than we expected, so the stream has ended
 			// unexpectedly.
 			return errorf(
-				CodeInvalidArgument,
-				"protocol error: promised %d bytes in enveloped message, got %d bytes",
+				CodeInternal,
+				"protocol error: promised %d bytes in enveloped message, got %d bytes: %w",
 				size,
 				readN,
+				io.ErrUnexpectedEOF,
 			)
 		}
 		err = wrapIfMaxBytesError(err, "read %d byte message", size)
