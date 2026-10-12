@@ -350,13 +350,9 @@ func (c *connectClient) NewConn(
 	header http.Header,
 ) streamingClientConn {
 	if deadline, ok := ctx.Deadline(); ok {
-		millis := int64(time.Until(deadline) / time.Millisecond)
-		if millis > 0 {
-			encoded := strconv.FormatInt(millis, 10 /* base */)
-			if len(encoded) <= 10 {
-				header[connectHeaderTimeout] = []string{encoded}
-			} // else effectively unbounded
-		}
+		if encoded := connectEncodeTimeout(time.Until(deadline)); encoded != "" {
+			header[connectHeaderTimeout] = []string{encoded}
+		} // else effectively unbounded
 	}
 	duplexCall := newDuplexHTTPCall(ctx, c.HTTPClient, c.URL, spec, header)
 	var conn streamingClientConn
@@ -1315,6 +1311,17 @@ func connectCodeToHTTP(code Code) int {
 	default:
 		return 500 // same as CodeUnknown
 	}
+}
+
+// connectEncodeTimeout encodes timeout as a positive number of milliseconds.
+// Returns an empty string for timeouts over the protocol's ten-digit limit.
+func connectEncodeTimeout(timeout time.Duration) string {
+	millis := max(int64(timeout/time.Millisecond), 1)
+	encoded := strconv.FormatInt(millis, 10 /* base */)
+	if len(encoded) > 10 {
+		return ""
+	}
+	return encoded
 }
 
 func connectCodecForContentType(streamType StreamType, contentType string) string {
