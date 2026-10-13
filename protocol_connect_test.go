@@ -39,7 +39,7 @@ func TestConnectErrorDetailMarshaling(t *testing.T) {
 		{
 			name: "normal",
 			errorDetail: &descriptorpb.FieldOptions{
-				Deprecated: proto.Bool(true),
+				Deprecated: new(true),
 				Jstype:     descriptorpb.FieldOptions_JS_STRING.Enum(),
 			},
 			expectDebug: map[string]any{
