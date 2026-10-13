@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -31,6 +32,13 @@ import (
 const (
 	commonErrorsURL          = "https://connectrpc.com/docs/go/common-errors"
 	defaultAnyResolverPrefix = "type.googleapis.com/"
+)
+
+// Messages of the unexported net/http errors for a write to a stream the
+// client has abandoned.
+const (
+	clientDisconnectedMessage = "client disconnected"
+	streamClosedMessage       = "http2: stream closed"
 )
 
 var (
@@ -164,11 +172,8 @@ func NewWireError(c Code, underlying error) *Error {
 // leaking response headers. To propagate headers recreate the error as a
 // non-wire error.
 func IsWireError(err error) bool {
-	se := new(Error)
-	if !errors.As(err, &se) {
-		return false
-	}
-	return se.wireErr
+	connectErr, ok := asError(err)
+	return ok && connectErr.wireErr
 }
 
 // NewNotModifiedError indicates that the requested resource hasn't changed. It
@@ -190,17 +195,18 @@ func NewNotModifiedError(headers http.Header) *Error {
 }
 
 func (e *Error) Error() string {
+	code := e.Code()
 	message := e.Message()
 	if message == "" {
-		return e.code.String()
+		return code.String()
 	}
-	return e.code.String() + ": " + message
+	return code.String() + ": " + message
 }
 
 // Message returns the underlying error message. It may be empty if the
 // original error was created with a status code and a nil error.
 func (e *Error) Message() string {
-	if e.err != nil {
+	if e != nil && e.err != nil {
 		return e.err.Error()
 	}
 	return ""
@@ -208,11 +214,17 @@ func (e *Error) Message() string {
 
 // Unwrap allows [errors.Is] and [errors.As] access to the underlying error.
 func (e *Error) Unwrap() error {
+	if e == nil {
+		return nil
+	}
 	return e.err
 }
 
 // Code returns the error's status code.
 func (e *Error) Code() Code {
+	if e == nil {
+		return CodeUnknown
+	}
 	return e.code
 }
 
@@ -265,11 +277,11 @@ func errorf(c Code, template string, args ...any) *Error {
 	return NewError(c, fmt.Errorf(template, args...))
 }
 
-// asError uses errors.As to unwrap any error and look for a connect *Error.
+// asError uses errors.As to unwrap any error and look for a non-nil connect *Error.
 func asError(err error) (*Error, bool) {
 	var connectErr *Error
 	ok := errors.As(err, &connectErr)
-	return connectErr, ok
+	return connectErr, ok && connectErr != nil // Protect against typed nils (*Error)(nil).
 }
 
 // wrapIfUncoded ensures that all errors are wrapped. It leaves already-wrapped
@@ -309,7 +321,24 @@ func wrapIfContextError(err error) error {
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		return NewError(CodeDeadlineExceeded, err)
 	}
+	// The request context is cancelled from a different goroutine than the one
+	// failing the write, so a write can fail while ctx.Err() is still nil.
+	// https://github.com/golang/go/issues/52183
+	if isClientDisconnected(err) {
+		return NewError(CodeCanceled, err)
+	}
 	return err
+}
+
+// isClientDisconnected reports whether err is a write failure caused by the
+// client going away. HTTP/2 has its own errors for this, other transports
+// surface the connection's error.
+func isClientDisconnected(err error) bool {
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	msg := err.Error()
+	return msg == clientDisconnectedMessage || msg == streamClosedMessage
 }
 
 // wrapIfContextDone wraps errors with CodeCanceled or CodeDeadlineExceeded
