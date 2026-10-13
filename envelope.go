@@ -287,19 +287,18 @@ func (r *envelopeReader) Unmarshal(message any) *Error {
 		// Drain the rest of the stream to ensure there is no extra data.
 		numBytes, err := discard(r.reader)
 		r.bytesRead += numBytes
-		if numBytes > 0 {
-			return errorf(CodeInternal, "corrupt response: %d extra bytes after end of stream", numBytes)
-		}
-		// The end-stream message was read in full, so a read error here fails
-		// the call only if it already has a code, such as a canceled context.
-		// Any other read error is ignored. For example, over HTTP/1.1
-		// http.Transport closes the connection when a request write fails, so
-		// this read can fail after the server sent the whole response.
 		if err != nil {
 			err = wrapIfContextError(err)
 			if connErr, ok := asError(err); ok {
 				return connErr
 			}
+			// Ignore uncoded read errors if the complete end-stream message was
+			// already received. In HTTP/1.1, http.Transport closes the connection
+			// on request write failures, which can cause subsequent reads to fail
+			// despite having received the entire response.
+		}
+		if numBytes > 0 {
+			return errorf(CodeInternal, "corrupt response: %d extra bytes after end of stream", numBytes)
 		}
 		// One of the protocol-specific flags are set, so this is the end of the
 		// stream. Save the message for protocol-specific code to process and
