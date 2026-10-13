@@ -1520,8 +1520,7 @@ func TestHandlerTypedNilError(t *testing.T) {
 			t.Run("bidi", func(t *testing.T) {
 				t.Parallel()
 				stream := client.CumSum(t.Context())
-				assert.Nil(t, stream.Send(&pingv1.CumSumRequest{}))
-				assert.Nil(t, stream.CloseRequest())
+				assert.Nil(t, stream.Send(nil)) // Send headers only.
 				_, err := stream.Receive()
 				assert.Equal(t, connect.CodeOf(err), connect.CodeUnknown)
 				assert.Nil(t, stream.CloseResponse())
