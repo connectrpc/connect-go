@@ -1,6 +1,6 @@
 module connectrpc.com/connect/internal/example
 
-go 1.25.0
+go 1.26.0
 
 require (
 	connectrpc.com/connect v1.19.0
