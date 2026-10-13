@@ -748,7 +748,14 @@ func (hc *connectUnaryHandlerConn) Close(err error) error {
 	// In unary Connect, errors always use application/json.
 	setHeaderCanonical(hc.responseWriter.Header(), headerContentType, connectUnaryContentTypeJSON)
 	hc.responseWriter.WriteHeader(connectCodeToHTTP(CodeOf(err)))
-	data, marshalErr := json.Marshal(newConnectWireError(err))
+	wireErr := newConnectWireError(err)
+	data, marshalErr := json.Marshal(wireErr)
+	if marshalErr == nil && hc.marshaler.sendMaxBytes > 0 && len(data) > hc.marshaler.sendMaxBytes {
+		// The error exceeds sendMaxBytes. Rather than drop it, send only the
+		// code and message.
+		wireErr.Details = nil
+		data, marshalErr = json.Marshal(wireErr)
+	}
 	if marshalErr != nil {
 		_ = hc.request.Body.Close()
 		return errorf(CodeInternal, "marshal error: %w", err)
@@ -868,7 +875,27 @@ func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Hea
 	}
 	raw := bytes.NewBuffer(data)
 	defer m.bufferPool.Put(raw)
-	return m.Write(&envelope{
+	writeErr := m.Write(&envelope{
+		Data:  raw,
+		Flags: connectFlagEnvelopeEndStream,
+	})
+	if writeErr == nil || writeErr.Code() != CodeResourceExhausted {
+		return writeErr
+	}
+	// The end of stream exceeds sendMaxBytes. Rather than drop it, send only
+	// the error code and message, reporting the limit if there's no error.
+	if err == nil {
+		err = writeErr
+	}
+	end = &connectEndStreamMessage{Error: newConnectWireError(err)}
+	end.Error.Details = nil
+	data, marshalErr = json.Marshal(end)
+	if marshalErr != nil {
+		return errorf(CodeInternal, "marshal end stream: %w", marshalErr)
+	}
+	raw.Reset()
+	_, _ = raw.Write(data)
+	return m.write(&envelope{
 		Data:  raw,
 		Flags: connectFlagEnvelopeEndStream,
 	})
