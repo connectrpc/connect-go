@@ -24,11 +24,13 @@ import (
 	"net/url"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/internal/assert"
 	"connectrpc.com/connect/v2/internal/bufferpool"
+	"connectrpc.com/connect/v2/internal/memhttp/memhttptest"
 )
 
 // TestHTTPCallGetBody tests that the client is able to retry requests on
@@ -193,8 +195,7 @@ func TestUnaryRequestBodyAfterEarlyResponse(t *testing.T) {
 //
 // With the fix, requestBodyWriter is initialised in newDuplexHTTPCall for
 // client-streaming and bidi calls and is therefore never observable as nil.
-// This test provokes the bad ordering deterministically by delaying the
-// sender goroutine's first Send until after the main goroutine has called
+// This test provokes the bad ordering directly by calling Send after
 // CloseWrite.
 func TestDuplexHTTPCallSendCloseWriteNoNilDeref(t *testing.T) {
 	t.Parallel()
@@ -204,45 +205,26 @@ func TestDuplexHTTPCallSendCloseWriteNoNilDeref(t *testing.T) {
 		_ = request.Body.Close()
 		responseWriter.WriteHeader(http.StatusOK)
 	})
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-	serverURL, err := url.Parse(server.URL)
+	server := memhttptest.NewServer(t, handler)
+	serverURL, err := url.Parse(server.URL())
 	assert.Nil(t, err)
+	call := newDuplexHTTPCall(
+		t.Context(),
+		server.Client(),
+		serverURL,
+		connect.StreamTypeClient,
+		http.Header{},
+	)
+	call.SetValidateResponse(func(*http.Response) *connect.Error { return nil })
 
-	// A handful of iterations is enough: the bad ordering is forced
-	// deterministically below.
-	const iterations = 5
-	for range iterations {
-		call := newDuplexHTTPCall(
-			t.Context(),
-			server.Client(),
-			serverURL,
-			connect.StreamTypeClient,
-			http.Header{},
-		)
-		call.SetValidateResponse(func(*http.Response) *connect.Error { return nil })
-
-		// Start a goroutine that issues a Send after a short delay. The delay
-		// lets the main goroutine's CloseWrite win the CAS on requestSent
-		// first. The late Send then observes isFirst=false and - in the buggy
-		// implementation - reads requestBodyWriter==nil and nil-derefs.
-		sendDone := make(chan struct{})
-		go func() {
-			defer close(sendDone)
-			time.Sleep(50 * time.Millisecond)
-			// Ignore the error: with the bug present this panics before
-			// returning; with the fix it returns nil or io.EOF depending on
-			// whether CloseWrite has already completed.
-			_, _ = call.Send(bytes.NewReader([]byte{1}))
-		}()
-
-		assert.Nil(t, call.CloseWrite())
-
-		// Wait for the sender goroutine to finish. With the bug present it
-		// will have panicked already; with the fix it returns cleanly.
-		<-sendDone
-		_ = call.CloseRead()
-	}
+	// CloseWrite wins the CAS on requestSent, so the late Send observes
+	// isFirst=false and - in the buggy implementation - reads
+	// requestBodyWriter==nil and nil-derefs. With the fix, Send reports the
+	// closed request body as io.EOF.
+	assert.Nil(t, call.CloseWrite())
+	_, err = call.Send(bytes.NewReader([]byte{1}))
+	assert.ErrorIs(t, err, io.EOF)
+	_ = call.CloseRead()
 }
 
 // TestBlockUntilResponseReadyRespectsContext is a regression test for
@@ -252,80 +234,98 @@ func TestDuplexHTTPCallSendCloseWriteNoNilDeref(t *testing.T) {
 // happens, callers such as CloseAndReceive block indefinitely.
 func TestBlockUntilResponseReadyRespectsContext(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+		defer cancel()
 
-	serverURL, err := url.Parse("http://localhost:0")
-	assert.Nil(t, err)
+		serverURL, err := url.Parse("http://localhost:0")
+		assert.Nil(t, err)
 
-	call := newDuplexHTTPCall(
-		ctx,
-		&hangingHTTPClient{},
-		serverURL,
-		connect.StreamTypeClient,
-		http.Header{},
-	)
-	call.SetValidateResponse(func(*http.Response) *connect.Error { return nil })
+		call := newDuplexHTTPCall(
+			ctx,
+			newHangingHTTPClient(t),
+			serverURL,
+			connect.StreamTypeClient,
+			http.Header{},
+		)
+		call.SetValidateResponse(func(*http.Response) *connect.Error { return nil })
 
-	_, err = call.Send(bytes.NewReader([]byte("hello")))
-	assert.Nil(t, err)
-	assert.Nil(t, call.CloseWrite())
+		_, err = call.Send(bytes.NewReader([]byte("hello")))
+		assert.Nil(t, err)
+		assert.Nil(t, call.CloseWrite())
 
-	<-ctx.Done()
+		<-ctx.Done()
 
-	done := make(chan error, 1)
-	go func() {
-		_, err := call.blockUntilResponseReady()
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		assert.NotNil(t, err)
-		assert.Equal(t, connect.CodeDeadlineExceeded, connect.CodeOf(err))
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("BlockUntilResponseReady did not return after context expiry")
-	}
+		done := make(chan error, 1)
+		go func() {
+			_, err := call.blockUntilResponseReady()
+			done <- err
+		}()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			assert.NotNil(t, err)
+			assert.Equal(t, connect.CodeDeadlineExceeded, connect.CodeOf(err))
+		default:
+			t.Error("BlockUntilResponseReady did not return after context expiry")
+		}
+	})
 }
 
 func TestAwaitResponseRespectsContext(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	serverURL, err := url.Parse("http://localhost:0")
-	assert.Nil(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		serverURL, err := url.Parse("http://localhost:0")
+		assert.Nil(t, err)
 
-	call := newDuplexHTTPCall(
-		ctx,
-		&hangingHTTPClient{},
-		serverURL,
-		connect.StreamTypeClient,
-		http.Header{},
-	)
-	call.SetValidateResponse(func(*http.Response) *connect.Error { return nil })
+		call := newDuplexHTTPCall(
+			ctx,
+			newHangingHTTPClient(t),
+			serverURL,
+			connect.StreamTypeClient,
+			http.Header{},
+		)
+		call.SetValidateResponse(func(*http.Response) *connect.Error { return nil })
 
-	_, err = call.Send(bytes.NewReader([]byte("hello")))
-	assert.Nil(t, err)
-	assert.Nil(t, call.CloseWrite())
+		_, err = call.Send(bytes.NewReader([]byte("hello")))
+		assert.Nil(t, err)
+		assert.Nil(t, call.CloseWrite())
 
-	cancel()
+		cancel()
 
-	done := make(chan bool, 1)
-	go func() {
-		done <- call.awaitResponse()
-	}()
-	select {
-	case ready := <-done:
-		assert.False(t, ready)
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("awaitResponse did not return after context cancellation")
-	}
+		done := make(chan bool, 1)
+		go func() {
+			done <- call.awaitResponse()
+		}()
+		synctest.Wait()
+		select {
+		case ready := <-done:
+			assert.False(t, ready)
+		default:
+			t.Error("awaitResponse did not return after context cancellation")
+		}
+	})
 }
 
 // hangingHTTPClient simulates Do() not returning promptly after context
-// cancellation, as can happen with Go's HTTP/2 transport.
-type hangingHTTPClient struct{}
+// cancellation, as can happen with Go's HTTP/2 transport. Do returns only
+// when the test cleans up, so the goroutine doesn't outlive a synctest
+// bubble.
+type hangingHTTPClient struct {
+	release chan struct{}
+}
+
+func newHangingHTTPClient(t *testing.T) *hangingHTTPClient {
+	t.Helper()
+	client := &hangingHTTPClient{release: make(chan struct{})}
+	t.Cleanup(func() { close(client.release) })
+	return client
+}
 
 func (c *hangingHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	_, _ = io.Copy(io.Discard, req.Body)
-	select {} // block forever
+	<-c.release
+	return nil, errors.New("hangingHTTPClient released")
 }

@@ -22,6 +22,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"connectrpc.com/connect/v2/internal/assert"
@@ -76,17 +77,20 @@ func TestRegisterOnShutdown(t *testing.T) {
 	okay := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	server := memhttp.NewServer(okay)
-	done := make(chan struct{})
-	server.RegisterOnShutdown(func() {
-		close(done)
+	synctest.Test(t, func(t *testing.T) {
+		server := memhttp.NewServer(okay)
+		done := make(chan struct{})
+		server.RegisterOnShutdown(func() {
+			close(done)
+		})
+		assert.Nil(t, server.Shutdown(t.Context()))
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			t.Error("OnShutdown hook didn't fire")
+		}
 	})
-	assert.Nil(t, server.Shutdown(t.Context()))
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Error("OnShutdown hook didn't fire")
-	}
 }
 
 func Example() {

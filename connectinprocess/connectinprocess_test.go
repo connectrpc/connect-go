@@ -22,7 +22,6 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectinprocess"
@@ -216,32 +215,35 @@ func TestInProcessServerStreaming(t *testing.T) {
 // with Close, rather than reading to io.EOF, unblocks the handler.
 func TestInProcessServerStreamCloseReleasesHandler(t *testing.T) {
 	t.Parallel()
-	done := make(chan struct{})
-	handler := connect.NewServer()
-	pingv1connect.RegisterPingServiceHandler(handler, &closeSignalPingServer{done: done})
+	synctest.Test(t, func(t *testing.T) {
+		done := make(chan struct{})
+		handler := connect.NewServer()
+		pingv1connect.RegisterPingServiceHandler(handler, &closeSignalPingServer{done: done})
 
-	transport := connectinprocess.New(handler)
-	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+		transport := connectinprocess.New(handler)
+		client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
 
-	stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 1_000})
-	if err != nil {
-		t.Fatalf("CountUp: %v", err)
-	}
-	if _, err := stream.Receive(); err != nil {
-		t.Fatalf("Receive: %v", err)
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	// Close is idempotent.
-	if err := stream.Close(); err != nil {
-		t.Fatalf("second Close: %v", err)
-	}
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("handler goroutine did not return after Close")
-	}
+		stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 1_000})
+		if err != nil {
+			t.Fatalf("CountUp: %v", err)
+		}
+		if _, err := stream.Receive(); err != nil {
+			t.Fatalf("Receive: %v", err)
+		}
+		if err := stream.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		// Close is idempotent.
+		if err := stream.Close(); err != nil {
+			t.Fatalf("second Close: %v", err)
+		}
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			t.Error("handler goroutine did not return after Close")
+		}
+	})
 }
 func TestInProcessClientStreaming(t *testing.T) {
 	t.Parallel()
@@ -506,26 +508,29 @@ func TestUnaryCloseUnblocksWaitingReceive(t *testing.T) {
 // context, so a handler streaming indefinitely returns.
 func TestClientStreamCloseAbortsServer(t *testing.T) {
 	t.Parallel()
-	handlerDone := make(chan struct{})
-	server := connect.NewServer()
-	pingv1connect.RegisterPingServiceHandler(server, &infiniteCountUpServer{done: handlerDone})
-	client := pingv1connect.NewPingServiceClient(connect.NewClient(connectinprocess.New(server)))
+	synctest.Test(t, func(t *testing.T) {
+		handlerDone := make(chan struct{})
+		server := connect.NewServer()
+		pingv1connect.RegisterPingServiceHandler(server, &infiniteCountUpServer{done: handlerDone})
+		client := pingv1connect.NewPingServiceClient(connect.NewClient(connectinprocess.New(server)))
 
-	stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 1})
-	if err != nil {
-		t.Fatalf("CountUp: %v", err)
-	}
-	if _, err := stream.Receive(); err != nil {
-		t.Fatalf("Receive: %v", err)
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	select {
-	case <-handlerDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("server was not aborted by Close")
-	}
+		stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 1})
+		if err != nil {
+			t.Fatalf("CountUp: %v", err)
+		}
+		if _, err := stream.Receive(); err != nil {
+			t.Fatalf("Receive: %v", err)
+		}
+		if err := stream.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		synctest.Wait()
+		select {
+		case <-handlerDone:
+		default:
+			t.Error("server was not aborted by Close")
+		}
+	})
 }
 
 // TestClientStreamCloseWithoutUse verifies closing a stream that was never
@@ -533,27 +538,28 @@ func TestClientStreamCloseAbortsServer(t *testing.T) {
 //
 //nolint:paralleltest // counts goroutines, which parallel siblings would skew
 func TestClientStreamCloseWithoutUse(t *testing.T) {
-	server := connect.NewServer()
-	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
-	client := pingv1connect.NewPingServiceClient(connect.NewClient(connectinprocess.New(server)))
+	synctest.Test(t, func(t *testing.T) {
+		server := connect.NewServer()
+		pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+		client := pingv1connect.NewPingServiceClient(connect.NewClient(connectinprocess.New(server)))
 
-	before := runtime.NumGoroutine()
-	for range 100 {
-		stream, err := client.CumSum(t.Context())
-		if err != nil {
-			t.Fatalf("CumSum: %v", err)
+		before := runtime.NumGoroutine()
+		for range 100 {
+			stream, err := client.CumSum(t.Context())
+			if err != nil {
+				t.Fatalf("CumSum: %v", err)
+			}
+			if err := stream.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
 		}
-		if err := stream.Close(); err != nil {
-			t.Fatalf("Close: %v", err)
+		// Every goroutine that exits on Close has exited once the rest are
+		// blocked.
+		synctest.Wait()
+		if got := runtime.NumGoroutine(); got != before {
+			t.Fatalf("goroutines leaked: %d before, %d after", before, got)
 		}
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for runtime.NumGoroutine() > before+10 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if got := runtime.NumGoroutine(); got > before+10 {
-		t.Fatalf("goroutines leaked: %d before, %d after", before, got)
-	}
+	})
 }
 
 // TestSetUnknownHandler exercises the Server.Call fallback for procedures
