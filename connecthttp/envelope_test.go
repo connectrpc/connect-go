@@ -131,6 +131,7 @@ func TestEnvelopeUnmarshalEndStream(t *testing.T) {
 			input:   endStream,
 			readErr: net.ErrClosed,
 			check: func(t *testing.T, err *connect.Error, rdr *envelopeReader) {
+				t.Helper()
 				assert.ErrorIs(t, err, errSpecialEnvelope)
 				assert.Equal(t, rdr.last.Flags, uint8(connectFlagEnvelopeEndStream))
 				assert.Equal(t, endStreamMessage, rdr.last.Data.Bytes())
@@ -141,6 +142,7 @@ func TestEnvelopeUnmarshalEndStream(t *testing.T) {
 			input:   trailers,
 			readErr: net.ErrClosed,
 			check: func(t *testing.T, err *connect.Error, rdr *envelopeReader) {
+				t.Helper()
 				assert.ErrorIs(t, err, errSpecialEnvelope)
 				assert.Equal(t, rdr.last.Flags, uint8(grpcFlagEnvelopeTrailer))
 				assert.Equal(t, grpcWebTrailers, rdr.last.Data.Bytes())
@@ -151,6 +153,7 @@ func TestEnvelopeUnmarshalEndStream(t *testing.T) {
 			input:   append(endStream, extra...),
 			readErr: net.ErrClosed,
 			check: func(t *testing.T, err *connect.Error, _ *envelopeReader) {
+				t.Helper()
 				assert.Equal(t, connect.CodeInternal, err.Code())
 				assert.Equal(t,
 					fmt.Sprintf("internal: corrupt response: %d extra bytes after end of stream", len(extra)),
@@ -163,6 +166,7 @@ func TestEnvelopeUnmarshalEndStream(t *testing.T) {
 			input:   endStream,
 			readErr: fmt.Errorf("read: %w", context.Canceled),
 			check: func(t *testing.T, err *connect.Error, _ *envelopeReader) {
+				t.Helper()
 				assert.Equal(t, connect.CodeCanceled, err.Code())
 				assert.False(t, errors.Is(err, errSpecialEnvelope))
 			},
