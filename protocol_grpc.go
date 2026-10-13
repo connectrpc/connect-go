@@ -598,7 +598,28 @@ func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *Error {
 	if err := trailer.Write(raw); err != nil {
 		return errorf(CodeInternal, "format trailers: %w", err)
 	}
-	return m.Write(&envelope{
+	writeErr := m.Write(&envelope{
+		Data:  raw,
+		Flags: grpcFlagEnvelopeTrailer,
+	})
+	if writeErr == nil || writeErr.Code() != CodeResourceExhausted {
+		return writeErr
+	}
+	// The trailers exceed sendMaxBytes. Rather than drop them, send only the
+	// status and message, reporting the limit if there's no error.
+	status, message := strings.ToLower(grpcHeaderStatus), strings.ToLower(grpcHeaderMessage)
+	minimal := http.Header{status: trailer[status], message: trailer[message]}
+	if code := trailer[status]; len(code) == 0 || code[0] == "0" {
+		minimal = http.Header{
+			status:  {strconv.Itoa(int(writeErr.Code()))},
+			message: {grpcPercentEncode(writeErr.Message())},
+		}
+	}
+	raw.Reset()
+	if err := minimal.Write(raw); err != nil {
+		return errorf(CodeInternal, "format trailers: %w", err)
+	}
+	return m.write(&envelope{
 		Data:  raw,
 		Flags: grpcFlagEnvelopeTrailer,
 	})
