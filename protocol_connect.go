@@ -126,6 +126,9 @@ func (*connectHandler) SetTimeout(request *http.Request) (context.Context, conte
 	if err != nil {
 		return nil, nil, errorf(CodeInvalidArgument, "parse timeout: %w", err)
 	}
+	if millis < 0 {
+		return nil, nil, errorf(CodeInvalidArgument, "parse timeout: %q is negative", timeout)
+	}
 	ctx, cancel := context.WithTimeout(
 		request.Context(),
 		time.Duration(millis)*time.Millisecond,
@@ -324,12 +327,13 @@ func (c *connectClient) WriteRequestHeader(streamType StreamType, header http.He
 	header[headerContentType] = []string{
 		connectContentTypeForCodecName(streamType, c.Codec.Name()),
 	}
+	// Always set Accept-Encoding. If left unset, http.Client will set a default
+	// gzip and transparently decode the response. This applies to both unary and
+	// streaming RPCs. For streaming calls it stays "identity" as compression is
+	// applied per message.
+	header[connectUnaryHeaderAcceptCompression] = []string{compressionIdentity}
 	acceptCompressionHeader := connectUnaryHeaderAcceptCompression
 	if streamType != StreamTypeUnary {
-		// If we don't set Accept-Encoding, by default http.Client will ask the
-		// server to compress the whole stream. Since we're already compressing
-		// each message, this is a waste.
-		header[connectUnaryHeaderAcceptCompression] = []string{compressionIdentity}
 		acceptCompressionHeader = connectStreamingHeaderAcceptCompression
 		// We only write the request encoding header here for streaming calls,
 		// since the streaming envelope lets us choose whether to compress each

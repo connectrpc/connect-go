@@ -1439,6 +1439,56 @@ func TestClientWithoutGzipSupport(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), "unknown compression"))
 }
 
+func TestClientUnaryAcceptEncoding(t *testing.T) {
+	// Assert Accept-Encoding is correctly set for unary clients. It must be
+	// explicit to avoid net/http defaults.
+	t.Parallel()
+	deflateDecompressor := func() connect.Decompressor {
+		return newDeflateReader(strings.NewReader(""))
+	}
+	deflateCompressor := func() connect.Compressor {
+		w, err := flate.NewWriter(&strings.Builder{}, flate.DefaultCompression)
+		if err != nil {
+			t.Fatalf("failed to create flate writer: %v", err)
+		}
+		return w
+	}
+	tests := []struct {
+		name    string
+		options []connect.ClientOption
+		want    string
+	}{{
+		name: "default gzip",
+		want: "gzip",
+	}, {
+		name:    "no compressors sends identity",
+		options: []connect.ClientOption{connect.WithAcceptCompression("gzip", nil, nil)},
+		want:    "identity",
+	}, {
+		name:    "custom order preserved",
+		options: []connect.ClientOption{connect.WithAcceptCompression("deflate", deflateDecompressor, deflateCompressor)},
+		want:    "deflate,gzip",
+	}}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			mux := http.NewServeMux()
+			mux.Handle(pingv1connect.NewPingServiceHandler(pingServer{}))
+			// Record the header exactly as the server receives it on the wire.
+			var got string
+			recorder := http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+				got = request.Header.Get("Accept-Encoding")
+				mux.ServeHTTP(responseWriter, request)
+			})
+			server := memhttptest.NewServer(t, recorder)
+			client := pingv1connect.NewPingServiceClient(server.Client(), server.URL(), test.options...)
+			_, err := client.Ping(t.Context(), connect.NewRequest(&pingv1.PingRequest{Text: "hello"}))
+			assert.Nil(t, err)
+			assert.Equal(t, got, test.want)
+		})
+	}
+}
+
 func TestInvalidHeaderTimeout(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
@@ -1469,6 +1519,10 @@ func TestInvalidHeaderTimeout(t *testing.T) {
 	t.Run("timeout_out_of_range", func(t *testing.T) {
 		t.Parallel()
 		assert.Equal(t, getPingResponseWithTimeout(t, "12345678901").StatusCode, http.StatusBadRequest) //nolint:bodyclose
+	})
+	t.Run("timeout_negative", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, getPingResponseWithTimeout(t, "-1").StatusCode, http.StatusBadRequest) //nolint:bodyclose
 	})
 }
 
@@ -2702,11 +2756,12 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 	payload := []byte(`{"number": 42}`)
 	binary.BigEndian.PutUint32(head[1:], uint32(len(payload)))
 	testcases := []struct {
-		name       string
-		handler    http.HandlerFunc
-		options    []connect.ClientOption
-		expectCode connect.Code
-		expectMsg  string
+		name        string
+		handler     http.HandlerFunc
+		options     []connect.ClientOption
+		expectCode  connect.Code
+		expectMsg   string
+		expectCause error
 	}{{
 		name:    "connect_missing_end",
 		options: []connect.ClientOption{connect.WithProtoJSON()},
@@ -2795,8 +2850,9 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err = responseWriter.Write(payload[:len(payload)-1])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+		expectCode:  connect.CodeInternal,
+		expectMsg:   fmt.Sprintf("internal: protocol error: promised %d bytes in enveloped message, got %d bytes: unexpected EOF", len(payload), len(payload)-1),
+		expectCause: io.ErrUnexpectedEOF,
 	}, {
 		name:    "grpc_partial_payload",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPC()},
@@ -2808,8 +2864,9 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err = responseWriter.Write(payload[:len(payload)-1])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+		expectCode:  connect.CodeInternal,
+		expectMsg:   fmt.Sprintf("internal: protocol error: promised %d bytes in enveloped message, got %d bytes: unexpected EOF", len(payload), len(payload)-1),
+		expectCause: io.ErrUnexpectedEOF,
 	}, {
 		name:    "grpc-web_partial_payload",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
@@ -2821,8 +2878,9 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err = responseWriter.Write(payload[:len(payload)-1])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  fmt.Sprintf("invalid_argument: protocol error: promised %d bytes in enveloped message, got %d bytes", len(payload), len(payload)-1),
+		expectCode:  connect.CodeInternal,
+		expectMsg:   fmt.Sprintf("internal: protocol error: promised %d bytes in enveloped message, got %d bytes: unexpected EOF", len(payload), len(payload)-1),
+		expectCause: io.ErrUnexpectedEOF,
 	}, {
 		name:    "connect_partial_frame",
 		options: []connect.ClientOption{connect.WithProtoJSON()},
@@ -2832,8 +2890,9 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err := responseWriter.Write(head[:4])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
+		expectCode:  connect.CodeInternal,
+		expectMsg:   "internal: protocol error: incomplete envelope: unexpected EOF",
+		expectCause: io.ErrUnexpectedEOF,
 	}, {
 		name:    "grpc_partial_frame",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPC()},
@@ -2843,8 +2902,9 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err := responseWriter.Write(head[:4])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
+		expectCode:  connect.CodeInternal,
+		expectMsg:   "internal: protocol error: incomplete envelope: unexpected EOF",
+		expectCause: io.ErrUnexpectedEOF,
 	}, {
 		name:    "grpc-web_partial_frame",
 		options: []connect.ClientOption{connect.WithProtoJSON(), connect.WithGRPCWeb()},
@@ -2854,8 +2914,9 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			_, err := responseWriter.Write(head[:4])
 			assert.Nil(t, err)
 		},
-		expectCode: connect.CodeInvalidArgument,
-		expectMsg:  "invalid_argument: protocol error: incomplete envelope: unexpected EOF",
+		expectCode:  connect.CodeInternal,
+		expectMsg:   "internal: protocol error: incomplete envelope: unexpected EOF",
+		expectCause: io.ErrUnexpectedEOF,
 	}, {
 		name:    "connect_excess_eof",
 		options: []connect.ClientOption{connect.WithProtoJSON()},
@@ -2929,6 +2990,9 @@ func TestStreamUnexpectedEOF(t *testing.T) {
 			assert.NotNil(t, stream.Err())
 			assert.Equal(t, connect.CodeOf(stream.Err()), testcase.expectCode)
 			assert.Equal(t, stream.Err().Error(), testcase.expectMsg)
+			if testcase.expectCause != nil {
+				assert.ErrorIs(t, stream.Err(), testcase.expectCause)
+			}
 		})
 	}
 }
