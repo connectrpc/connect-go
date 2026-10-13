@@ -536,32 +536,41 @@ func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *Err
 	}
 	cc.unmarshaler.compressionPool = cc.compressionPools.Get(compression)
 	if response.StatusCode != http.StatusOK {
-		unmarshaler := connectUnaryUnmarshaler{
-			ctx:             cc.unmarshaler.ctx,
-			reader:          response.Body,
-			compressionPool: cc.unmarshaler.compressionPool,
-			bufferPool:      cc.bufferPool,
-		}
-		var wireErr connectWireError
-		if err := unmarshaler.UnmarshalFunc(&wireErr, json.Unmarshal); err != nil {
-			return NewError(
-				httpToCode(response.StatusCode),
-				errors.New(response.Status),
-			)
-		}
-		if wireErr.Code == 0 {
-			// code not set? default to one implied by HTTP status
-			wireErr.Code = httpToCode(response.StatusCode)
-		}
-		serverErr := wireErr.asError()
-		if serverErr == nil {
-			return nil
-		}
-		serverErr.meta = cc.responseHeader.Clone()
-		mergeHeaders(serverErr.meta, cc.responseTrailer)
-		return serverErr
+		return cc.unmarshalResponseError(response)
 	}
 	return nil
+}
+
+// unmarshalResponseError reads the JSON error body of a non-200 response.
+func (cc *connectUnaryClientConn) unmarshalResponseError(response *http.Response) *Error {
+	unmarshaler := connectUnaryUnmarshaler{
+		ctx:             cc.unmarshaler.ctx,
+		reader:          response.Body,
+		compressionPool: cc.unmarshaler.compressionPool,
+		bufferPool:      cc.bufferPool,
+		readMaxBytes:    cc.unmarshaler.readMaxBytes,
+	}
+	var wireErr connectWireError
+	if err := unmarshaler.UnmarshalFunc(&wireErr, json.Unmarshal); err != nil {
+		if err.Code() == CodeResourceExhausted {
+			return err // error body exceeds readMaxBytes
+		}
+		return NewError(
+			httpToCode(response.StatusCode),
+			errors.New(response.Status),
+		)
+	}
+	if wireErr.Code == 0 {
+		// code not set? default to one implied by HTTP status
+		wireErr.Code = httpToCode(response.StatusCode)
+	}
+	serverErr := wireErr.asError()
+	if serverErr == nil {
+		return nil
+	}
+	serverErr.meta = cc.responseHeader.Clone()
+	mergeHeaders(serverErr.meta, cc.responseTrailer)
+	return serverErr
 }
 
 type connectStreamingClientConn struct {
