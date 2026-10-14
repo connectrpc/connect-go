@@ -31,6 +31,11 @@ jobs:
         with:
           go-version: ${{ matrix.go-version.version }}
           check-latest: true
+          # Give this job its own cache key. It installs the lint and release
+          # tools that the other jobs skip.
+          cache-dependency-path: |
+            go.sum
+            Makefile
       - name: Unit Test
         run: make shorttest
       - name: Lint
