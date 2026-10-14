@@ -23,14 +23,13 @@ import (
 	"github.com/coder/websocket"
 )
 
-// keepAliveMisses is how many intervals of silence condemn a peer. One would
-// hang up on a peer whose Pong was merely slow; two is what SignalR and
-// Socket.IO settle on.
+// keepAliveMisses is the fewest intervals of silence that condemn a peer,
+// whatever the timeout. One would hang up on a peer whose Pong was merely slow.
 const keepAliveMisses = 2
 
 // keepAlive pings the peer on a fixed interval, so that a proxy which drops
 // idle connections sees traffic, and hangs up on a peer that has been silent
-// for keepAliveMisses intervals.
+// for the timeout.
 //
 // Silence is judged by the frameReader: any message or Pong is a sign of
 // life, and time spent holding a message this end has not yet taken does not
@@ -41,6 +40,7 @@ type keepAlive struct {
 	conn      *websocket.Conn
 	reader    *frameReader
 	interval  time.Duration
+	silentFor time.Duration
 	closeCode websocket.StatusCode
 	cancel    context.CancelFunc
 	done      chan struct{}
@@ -50,8 +50,9 @@ type keepAlive struct {
 	expired atomic.Bool
 }
 
-// startKeepAlive returns nil when interval is not positive. closeCode is what
-// this side sends a silent peer: 1011 from a server, 3111 from a client (§13).
+// startKeepAlive returns nil when interval is not positive. A timeout shorter
+// than keepAliveMisses intervals is raised to that. closeCode is what this side
+// sends a silent peer: 1011 from a server, 3111 from a client (§13).
 // The pinging ends when ctx is done, when stop is called, or when the
 // connection closes.
 func startKeepAlive(
@@ -59,16 +60,19 @@ func startKeepAlive(
 	conn *websocket.Conn,
 	reader *frameReader,
 	interval time.Duration,
+	timeout time.Duration,
 	closeCode websocket.StatusCode,
 ) *keepAlive {
 	if interval <= 0 {
 		return nil
 	}
+	timeout = max(timeout, keepAliveMisses*interval)
 	ctx, cancel := context.WithCancel(ctx)
 	keeper := &keepAlive{
 		conn:      conn,
 		reader:    reader,
 		interval:  interval,
+		silentFor: timeout,
 		closeCode: closeCode,
 		cancel:    cancel,
 		done:      make(chan struct{}),
@@ -94,7 +98,7 @@ func (k *keepAlive) timedOut() bool {
 
 // timeout is how long a peer may stay silent.
 func (k *keepAlive) timeout() time.Duration {
-	return keepAliveMisses * k.interval
+	return k.silentFor
 }
 
 func (k *keepAlive) run(ctx context.Context) {

@@ -47,6 +47,10 @@ const (
 	// sparedInterval leaves room for scheduling delays under -race, for tests
 	// that a peer must survive: a slow Pong there reads as a dead peer.
 	sparedInterval = 100 * time.Millisecond
+	// keepAliveTimeout and sparedTimeout are the shortest the transport allows,
+	// so the tests still catch a peer wrongly taken for dead.
+	keepAliveTimeout = 2 * keepAliveInterval
+	sparedTimeout    = 2 * sparedInterval
 
 	// noCloseFrame is what watchFrames reports when the connection ended, or
 	// its deadline passed, without a close frame.
@@ -145,11 +149,14 @@ func openRawCumSum(tb testing.TB, httpServer *httptest.Server) net.Conn {
 	return conn
 }
 
-// A client that goes silent is sent 1011 once two intervals pass with nothing
+// A client that goes silent is sent 1011 once the timeout passes with nothing
 // from it, the Pings in between notwithstanding.
 func TestServerHangsUpOnSilentClient(t *testing.T) {
 	t.Parallel()
-	httpServer := newKeepAliveServer(t, wstransport.WithKeepAlive(keepAliveInterval))
+	httpServer := newKeepAliveServer(t,
+		wstransport.WithKeepAlive(keepAliveInterval),
+		wstransport.WithKeepAliveTimeout(keepAliveTimeout),
+	)
 	conn := openRawCumSum(t, httpServer)
 
 	assert.Nil(t, conn.SetReadDeadline(time.Now().Add(10*time.Second)))
@@ -158,11 +165,30 @@ func TestServerHangsUpOnSilentClient(t *testing.T) {
 	assert.Equal(t, closeCode, 1011)
 }
 
+// The timeout is its own setting, not a count of intervals: a silent client is
+// pinged many times before it is hung up on.
+func TestServerWaitsOutKeepAliveTimeout(t *testing.T) {
+	t.Parallel()
+	httpServer := newKeepAliveServer(t,
+		wstransport.WithKeepAlive(keepAliveInterval),
+		wstransport.WithKeepAliveTimeout(10*keepAliveInterval),
+	)
+	conn := openRawCumSum(t, httpServer)
+
+	assert.Nil(t, conn.SetReadDeadline(time.Now().Add(10*time.Second)))
+	pings, closeCode := watchFrames(conn, nil)
+	assert.True(t, pings >= 5)
+	assert.Equal(t, closeCode, 1011)
+}
+
 // A Pong is a sign of life on its own: a client that sends no messages but
 // answers every Ping outlives many timeouts.
 func TestServerSparesClientThatAnswersPings(t *testing.T) {
 	t.Parallel()
-	httpServer := newKeepAliveServer(t, wstransport.WithKeepAlive(sparedInterval))
+	httpServer := newKeepAliveServer(t,
+		wstransport.WithKeepAlive(sparedInterval),
+		wstransport.WithKeepAliveTimeout(sparedTimeout),
+	)
 	conn := openRawCumSum(t, httpServer)
 
 	assert.Nil(t, conn.SetReadDeadline(time.Now().Add(6*sparedInterval)))
@@ -223,7 +249,10 @@ func silentServer(tb testing.TB) (string, <-chan *bufio.Reader) {
 func TestClientHangsUpOnSilentServer(t *testing.T) {
 	t.Parallel()
 	baseURL, accepted := silentServer(t)
-	transport, err := wstransport.NewTransport(baseURL, wstransport.WithKeepAlive(keepAliveInterval))
+	transport, err := wstransport.NewTransport(baseURL,
+		wstransport.WithKeepAlive(keepAliveInterval),
+		wstransport.WithKeepAliveTimeout(keepAliveTimeout),
+	)
 	assert.Nil(t, err)
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
@@ -246,8 +275,12 @@ func TestClientHangsUpOnSilentServer(t *testing.T) {
 // Pings whether or not its caller is receiving.
 func TestKeepAliveLeavesIdleStreamIntact(t *testing.T) {
 	t.Parallel()
-	httpServer := newKeepAliveServer(t, wstransport.WithKeepAlive(sparedInterval))
-	transport, err := wstransport.NewTransport(httpServer.URL, wstransport.WithKeepAlive(sparedInterval))
+	spared := []wstransport.Option{
+		wstransport.WithKeepAlive(sparedInterval),
+		wstransport.WithKeepAliveTimeout(sparedTimeout),
+	}
+	httpServer := newKeepAliveServer(t, spared[0], spared[1])
+	transport, err := wstransport.NewTransport(httpServer.URL, spared[0], spared[1])
 	assert.Nil(t, err)
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
@@ -273,7 +306,10 @@ func TestKeepAliveLeavesIdleStreamIntact(t *testing.T) {
 // hangs up once the timeout passes. Python's websockets makes the same call.
 func TestServerHangsUpOnClientThatStopsReceiving(t *testing.T) {
 	t.Parallel()
-	httpServer := newKeepAliveServer(t, wstransport.WithKeepAlive(keepAliveInterval))
+	httpServer := newKeepAliveServer(t,
+		wstransport.WithKeepAlive(keepAliveInterval),
+		wstransport.WithKeepAliveTimeout(keepAliveTimeout),
+	)
 	transport, err := wstransport.NewTransport(httpServer.URL, wstransport.WithKeepAlive(0))
 	assert.Nil(t, err)
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
@@ -293,22 +329,24 @@ func TestServerHangsUpOnClientThatStopsReceiving(t *testing.T) {
 	assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
 }
 
-// The public option reaches both halves: Mount's server and NewTransport's
-// client each ping at the interval it names.
+// The public options reach both halves: Mount's server and NewTransport's
+// client each ping at the interval named and hang up after the timeout.
 func TestConnectHTTPKeepAliveReachesBothSides(t *testing.T) {
 	t.Parallel()
 	keepAlive := connecthttp.WithWebSocketKeepAlive(keepAliveInterval)
+	timeout := connecthttp.WithWebSocketKeepAliveTimeout(keepAliveTimeout)
 
 	server := connect.NewServer()
 	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
 	mux := http.NewServeMux()
-	connecthttp.Mount(mux, server, keepAlive)
+	connecthttp.Mount(mux, server, keepAlive, timeout)
 	httpServer := httptest.NewServer(mux)
 	t.Cleanup(httpServer.Close)
 	conn := openRawCumSum(t, httpServer)
 	assert.Nil(t, conn.SetReadDeadline(time.Now().Add(10*time.Second)))
-	pings, _ := watchFrames(conn, nil)
+	pings, closeCode := watchFrames(conn, nil)
 	assert.True(t, pings >= 1)
+	assert.Equal(t, closeCode, 1011)
 
 	baseURL, accepted := silentServer(t)
 	transport := connecthttp.NewTransport(
@@ -316,6 +354,7 @@ func TestConnectHTTPKeepAliveReachesBothSides(t *testing.T) {
 		baseURL,
 		connecthttp.WithWebSocket(connecthttp.SelectStreaming),
 		keepAlive,
+		timeout,
 	)
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
@@ -324,6 +363,7 @@ func TestConnectHTTPKeepAliveReachesBothSides(t *testing.T) {
 	assert.Nil(t, err)
 	t.Cleanup(func() { _ = stream.Close() })
 	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
-	pings, _ = watchFrames(<-accepted, nil)
+	pings, closeCode = watchFrames(<-accepted, nil)
 	assert.True(t, pings >= 1)
+	assert.Equal(t, closeCode, 3111)
 }

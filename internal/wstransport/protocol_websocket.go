@@ -839,6 +839,9 @@ type wsClientCall struct {
 	faultCloseCode bool
 	// keepAliveInterval is how often to ping once dialed; see WithKeepAlive.
 	keepAliveInterval time.Duration
+	// keepAliveTimeout is how long the server may stay silent; see
+	// WithKeepAliveTimeout.
+	keepAliveTimeout time.Duration
 
 	dialOnce sync.Once
 	dialDone chan struct{}
@@ -903,7 +906,9 @@ func (c *wsClientCall) ensureDialed() *connect.Error {
 		conn.SetReadLimit(c.readLimit)
 		c.wsConn = conn
 		c.reader = newFrameReader(c.ctx, conn.Read)
-		c.keeper = startKeepAlive(c.ctx, conn, c.reader, c.keepAliveInterval, wsStatusClientInternal)
+		c.keeper = startKeepAlive(
+			c.ctx, conn, c.reader, c.keepAliveInterval, c.keepAliveTimeout, wsStatusClientInternal,
+		)
 	})
 	<-c.dialDone
 	return c.dialErr

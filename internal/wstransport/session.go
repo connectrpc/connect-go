@@ -109,7 +109,9 @@ func (s *session) Serve(
 		return readBoundedMessage(readCtx, conn, readLimit)
 	})
 	defer reader.close()
-	keeper := startKeepAlive(ctx, conn, reader, info.KeepAliveInterval, websocket.StatusInternalError)
+	keeper := startKeepAlive(
+		ctx, conn, reader, info.KeepAliveInterval, info.KeepAliveTimeout, websocket.StatusInternalError,
+	)
 	defer keeper.stop()
 	handlerConn := &websocketHandlerConn{
 		request:        info.Request,

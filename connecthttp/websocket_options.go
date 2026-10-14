@@ -202,14 +202,26 @@ func WithWebSocketFaultCloseCode() Option {
 
 // WithWebSocketKeepAlive sets how often each side sends a WebSocket Ping, so
 // that a proxy which drops idle connections sees traffic on a quiet stream.
-// The default is 30 seconds; zero or less turns keep-alive off.
+// The interval must be clearly shorter than the idle timeout of every proxy
+// and load balancer between client and server; an interval equal to it races
+// the proxy's timer. Common idle timeouts are 60 to 100 seconds. The default is
+// 30 seconds; zero or less turns keep-alive off.
 //
-// A peer heard nothing from for two intervals, neither a message nor a Pong,
-// is hung up on with close code 1011 from a server or 3111 from a client, and
-// the RPC fails. That includes a peer whose application has stopped taking
-// messages, since it then stops reading its connection too.
+// A peer heard nothing from for the keep-alive timeout, neither a message nor
+// a Pong, is hung up on with close code 1011 from a server or 3111 from a
+// client, and the RPC fails. See [WithWebSocketKeepAliveTimeout].
 func WithWebSocketKeepAlive(interval time.Duration) Option {
 	return webSocketBothOption{wstransport.WithKeepAlive(interval)}
+}
+
+// WithWebSocketKeepAliveTimeout sets how long each side lets a peer send
+// nothing before hanging up on it. The default is five minutes, and anything
+// shorter than two keep-alive intervals is raised to that.
+//
+// The timeout includes a peer whose application has stopped taking messages,
+// since it then stops reading its connection and answering Pings too.
+func WithWebSocketKeepAliveTimeout(timeout time.Duration) Option {
+	return webSocketBothOption{wstransport.WithKeepAliveTimeout(timeout)}
 }
 
 // webSocketBothOption carries a setting that applies to whichever side is

@@ -136,6 +136,7 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 		ctx:               ctx,
 		faultCloseCode:    t.opts.faultCloseCode,
 		keepAliveInterval: t.opts.keepAliveInterval,
+		keepAliveTimeout:  t.opts.keepAliveTimeout,
 		dialOptions: &websocket.DialOptions{
 			HTTPClient: t.httpClient,
 			// The subprotocol names both the transport and the codec, so it

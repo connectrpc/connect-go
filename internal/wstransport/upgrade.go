@@ -72,6 +72,9 @@ type SessionInfo struct {
 	// KeepAliveInterval is how often the session pings the client; see
 	// [WithKeepAlive]. Zero sends no Pings.
 	KeepAliveInterval time.Duration
+	// KeepAliveTimeout is how long the client may stay silent; see
+	// [WithKeepAliveTimeout].
+	KeepAliveTimeout time.Duration
 }
 
 // Session serves RPCs on an upgraded WebSocket connection. Serve reads
@@ -227,6 +230,7 @@ func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *
 		OnProtocolError:       h.opts.onProtocolError,
 		FaultCloseCode:        h.opts.faultCloseCode,
 		KeepAliveInterval:     h.opts.keepAliveInterval,
+		KeepAliveTimeout:      h.opts.keepAliveTimeout,
 	}
 	if err := h.session.Serve(request.Context(), h.server, conn, info); err != nil {
 		h.opts.logger.Error(

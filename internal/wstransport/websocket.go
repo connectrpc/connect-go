@@ -61,6 +61,10 @@ const defaultCompressMinBytes = 512
 // timeout common among proxies and load balancers.
 const defaultKeepAliveInterval = 30 * time.Second
 
+// defaultKeepAliveTimeout is long because a peer whose application stops taking
+// messages stops answering Pings too. It still beats TCP's ~15 minutes.
+const defaultKeepAliveTimeout = 5 * time.Minute
+
 // ClientOption configures [NewTransport].
 type ClientOption interface {
 	applyToClient(*options)
@@ -355,18 +359,32 @@ func WithInfrastructureHeaders(names ...string) ServerOption {
 }
 
 // WithKeepAlive sends a WebSocket Ping every interval for as long as the
-// connection is open. Many proxies drop a WebSocket that carries no traffic
-// for 30 to 60 seconds, so a stream that can go quiet for longer needs an
-// interval below that. The default is 30 seconds; zero or less sends no Pings.
+// connection is open. The interval must be clearly shorter than the idle
+// timeout of every proxy and load balancer in the path, or one of them will
+// drop a quiet stream; an interval equal to it races the proxy's timer. Common
+// idle timeouts are 60 to 100 seconds. The default is 30 seconds; zero or less
+// sends no Pings.
 // See connecthttp.WithWebSocketKeepAlive.
 //
-// A peer heard nothing from for two intervals is hung up on: 1011 from a
-// server, 3111 from a client (§13.2). The RPC fails as Unavailable on the
-// client and Canceled on the server.
+// A peer heard nothing from for the timeout set by [WithKeepAliveTimeout] is
+// hung up on: 1011 from a server, 3111 from a client (§13.2). The RPC fails as
+// Unavailable on the client and Canceled on the server.
 //
 // Pongs are sent regardless of this setting. Either side may enable it alone.
 func WithKeepAlive(interval time.Duration) Option {
 	return optionFunc(func(o *options) { o.keepAliveInterval = interval })
+}
+
+// WithKeepAliveTimeout sets how long a peer may send nothing, neither a message
+// nor a Pong, before this side hangs up on it. It applies only while
+// [WithKeepAlive] is on. The default is five minutes; a timeout shorter than
+// two intervals is raised to that, so a slow Pong is not taken for a dead peer.
+//
+// A peer whose application has stopped taking messages stops reading its
+// connection, and so stops answering Pings. The timeout is how long such a
+// stall may last.
+func WithKeepAliveTimeout(timeout time.Duration) Option {
+	return optionFunc(func(o *options) { o.keepAliveTimeout = timeout })
 }
 
 // WithReadMaxBytes bounds the size of a message this side will accept. Zero
@@ -415,6 +433,7 @@ type options struct {
 	readMaxBytes          int
 	sendMaxBytes          int
 	keepAliveInterval     time.Duration
+	keepAliveTimeout      time.Duration
 	infrastructureHeaders []string
 	httpClient            *http.Client
 }
@@ -437,6 +456,7 @@ func defaultOptions() options {
 		readMaxBytes:      defaultReadMaxBytes,
 		compressMinBytes:  defaultCompressMinBytes,
 		keepAliveInterval: defaultKeepAliveInterval,
+		keepAliveTimeout:  defaultKeepAliveTimeout,
 		httpClient:        http.DefaultClient,
 	}
 }

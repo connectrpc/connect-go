@@ -27,4 +27,5 @@ func TestKeepAliveIsOnByDefault(t *testing.T) {
 	t.Parallel()
 	opts := defaultOptions()
 	assert.Equal(t, opts.keepAliveInterval, 30*time.Second)
+	assert.Equal(t, opts.keepAliveTimeout, 5*time.Minute)
 }
