@@ -766,10 +766,7 @@ func grpcErrorForTrailer(ctx context.Context, protobuf connect.Codec, trailer ht
 	if err != nil {
 		return connect.Errorf(connect.CodeUnknown, "protocol error: invalid error code %q", codeHeader)
 	}
-	message, err := grpcPercentDecode(getHeaderCanonical(trailer, grpcHeaderMessage))
-	if err != nil {
-		return connect.Errorf(connect.CodeInternal, "protocol error: invalid error message %q", message)
-	}
+	message := grpcPercentDecode(getHeaderCanonical(trailer, grpcHeaderMessage))
 	retErr := connect.NewError(connect.Code(code), message).WithRemote()
 
 	detailsBinaryEncoded := getHeaderCanonical(trailer, grpcHeaderDetails)
@@ -1045,36 +1042,24 @@ func grpcPercentEncode(msg string) string {
 	return out.String()
 }
 
-func grpcPercentDecode(input string) (string, error) {
-	percentCount := 0
-	for i := 0; i < len(input); {
-		switch input[i] {
-		case '%':
-			percentCount++
-			if err := validateHex(input[i:]); err != nil {
-				return "", err
-			}
-			i += 3
-		default:
-			i++
-		}
+// grpcPercentDecode decodes a percent-encoded grpc-message value. The gRPC
+// spec forbids discarding a message that fails to decode, so invalid escapes
+// are kept as-is.
+func grpcPercentDecode(input string) string {
+	if strings.IndexByte(input, '%') < 0 {
+		return input
 	}
-	if percentCount == 0 {
-		return input, nil
-	}
-	// We need to unescape some characters, so we'll need to allocate a new string.
 	var out strings.Builder
-	out.Grow(len(input) - 2*percentCount)
+	out.Grow(len(input))
 	for i := 0; i < len(input); i++ {
-		switch input[i] {
-		case '%':
+		if input[i] == '%' && i+2 < len(input) && isHex(input[i+1]) && isHex(input[i+2]) {
 			out.WriteByte(unhex(input[i+1])<<4 | unhex(input[i+2]))
 			i += 2
-		default:
-			out.WriteByte(input[i])
+			continue
 		}
+		out.WriteByte(input[i])
 	}
-	return out.String(), nil
+	return out.String()
 }
 
 // Characters that need to be escaped are defined in gRPC's HTTP/2 spec.
@@ -1097,16 +1082,6 @@ func unhex(char byte) byte {
 
 func isHex(char byte) bool {
 	return ('0' <= char && char <= '9') || ('a' <= char && char <= 'f') || ('A' <= char && char <= 'F')
-}
-
-func validateHex(input string) error {
-	if len(input) < 3 || input[0] != '%' || !isHex(input[1]) || !isHex(input[2]) {
-		if len(input) > 3 {
-			input = input[:3]
-		}
-		return fmt.Errorf("invalid percent-encoded string %q", input)
-	}
-	return nil
 }
 
 func grpcValidateResponseContentType(web bool, requestCodecName string, responseContentType string) *connect.Error {
