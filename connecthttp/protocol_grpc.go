@@ -96,7 +96,7 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 	}
 	contentTypes := make(map[string]struct{})
 	for _, name := range params.Codecs.Names() {
-		contentTypes[canonicalizeContentType(prefix+name)] = struct{}{}
+		addContentTypes(contentTypes, prefix, name)
 	}
 	if params.Codecs.Get(connect.CodecNameProto) != nil {
 		contentTypes[bare] = struct{}{}
