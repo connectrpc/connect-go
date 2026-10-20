@@ -275,6 +275,7 @@ func (h *connectHandler) NewConn(
 				compressionPool: h.CompressionPools.Get(requestCompression),
 				readMaxBytes:    h.ReadMaxBytes,
 				stats:           receiveStats,
+				stopAtLimit:     true,
 			},
 			responseTrailer: make(http.Header),
 		}
@@ -1169,6 +1170,10 @@ type connectUnaryUnmarshaler struct {
 	alreadyRead     bool
 	readMaxBytes    int
 	stats           *connect.MessageStats
+	// stopAtLimit rejects an oversized message without reading past the
+	// limit. Clients read on, within a bound, so the connection can be
+	// reused; net/http does that for handlers after they return.
+	stopAtLimit bool
 }
 
 func (u *connectUnaryUnmarshaler) Unmarshal(message any) *connect.Error {
@@ -1197,12 +1202,10 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func(cont
 		return connect.Errorf(connect.CodeUnknown, "read message: %s", err).WithCause(err)
 	}
 	if u.readMaxBytes > 0 && bytesRead > int64(u.readMaxBytes) {
-		// Attempt to read to end in order to allow connection re-use
-		discardedBytes, err := io.Copy(io.Discard, u.reader)
-		if err != nil {
-			return connect.Errorf(connect.CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %s", u.readMaxBytes, err).WithCause(err)
+		if u.stopAtLimit {
+			return connect.Errorf(connect.CodeResourceExhausted, "message is larger than configured max %d", u.readMaxBytes)
 		}
-		return connect.Errorf(connect.CodeResourceExhausted, "message size %d is larger than configured max %d", bytesRead+discardedBytes, u.readMaxBytes)
+		return errMessageTooLarge(u.reader, bytesRead, int64(u.readMaxBytes))
 	}
 	compressedSize := 0
 	if data.Len() > 0 && u.compressionPool != nil {

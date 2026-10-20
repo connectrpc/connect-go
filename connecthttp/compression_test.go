@@ -15,6 +15,8 @@
 package connecthttp
 
 import (
+	"bytes"
+	"errors"
 	"io"
 	"testing"
 
@@ -84,3 +86,47 @@ func (identityCompressor) Decompress(src io.Reader) (io.ReadCloser, error) {
 type identityWriteCloser struct{ io.Writer }
 
 func (identityWriteCloser) Close() error { return nil }
+
+// TestDecompressBoundsOversizedRead verifies that rejecting a message that
+// decompresses past readMaxBytes reads at most discardLimit more.
+func TestDecompressBoundsOversizedRead(t *testing.T) {
+	t.Parallel()
+	const readMaxBytes = 1024
+	bomb := &countingReader{reader: io.LimitReader(zeroReader{}, 64<<20)}
+	pool := newCompressionPool(stubDecompressor{bomb})
+	err := pool.Decompress(&bytes.Buffer{}, &bytes.Buffer{}, readMaxBytes)
+	assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+	assert.True(t, bomb.n <= readMaxBytes+1+discardLimit, assert.Sprintf("read %d decompressed bytes", bomb.n))
+}
+
+// stubDecompressor is a test [connect.Compressor] whose Decompress returns
+// reader regardless of the source.
+type stubDecompressor struct{ reader io.Reader }
+
+func (stubDecompressor) Name() string { return connect.CompressionNameGzip }
+
+func (stubDecompressor) Compress(io.Writer) (io.WriteCloser, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (d stubDecompressor) Decompress(io.Reader) (io.ReadCloser, error) {
+	return io.NopCloser(d.reader), nil
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
+}
+
+type countingReader struct {
+	reader io.Reader
+	n      int64
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.n += int64(n)
+	return n, err
+}

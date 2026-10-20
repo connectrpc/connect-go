@@ -314,6 +314,21 @@ func discard(reader io.Reader) (int64, error) {
 	return io.Copy(io.Discard, lr)
 }
 
+// errMessageTooLarge discards the rest of a message that exceeded
+// readMaxBytes after bytesRead bytes, reading at most discardLimit more, and
+// returns the error reporting its size. A message that doesn't end within
+// discardLimit is reported without a total size.
+func errMessageTooLarge(reader io.Reader, bytesRead, readMaxBytes int64) *connect.Error {
+	discardedBytes, err := discard(reader)
+	if err != nil {
+		return connect.Errorf(connect.CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %s", readMaxBytes, err).WithCause(err)
+	}
+	if discardedBytes >= discardLimit {
+		return connect.Errorf(connect.CodeResourceExhausted, "message is larger than configured max %d - stopped reading after %d bytes", readMaxBytes, bytesRead+discardedBytes)
+	}
+	return connect.Errorf(connect.CodeResourceExhausted, "message size %d is larger than configured max %d", bytesRead+discardedBytes, readMaxBytes)
+}
+
 // negotiateCompression determines and validates the request compression and
 // response compression using the available compressors and protocol-specific
 // Content-Encoding and Accept-Encoding headers.

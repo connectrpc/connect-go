@@ -1893,7 +1893,7 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
 	connecthttp.Mount(mux, server, connecthttp.WithReadMaxBytes(readMaxBytes))
 
-	readMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, compressed bool) {
+	readMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, compressed, connectUnary bool) {
 		t.Helper()
 		t.Run("equal_read_max", func(t *testing.T) {
 			t.Parallel()
@@ -1915,7 +1915,13 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 			_, err := client.Ping(t.Context(), pingRequest)
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-			assert.True(t, strings.HasSuffix(err.Error(), fmt.Sprintf("message size %d is larger than configured max %d", proto.Size(pingRequest), readMaxBytes)))
+			want := fmt.Sprintf("message size %d is larger than configured max %d", proto.Size(pingRequest), readMaxBytes)
+			if connectUnary && !compressed {
+				// Connect unary messages have no length prefix, and handlers stop
+				// reading at the limit.
+				want = fmt.Sprintf("message is larger than configured max %d", readMaxBytes)
+			}
+			assert.True(t, strings.HasSuffix(err.Error(), want), assert.Sprintf("got %q, want suffix %q", err.Error(), want))
 		})
 		t.Run("read_max_large", func(t *testing.T) {
 			t.Parallel()
@@ -1933,7 +1939,13 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 			_, err := client.Ping(t.Context(), pingRequest)
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-			assert.Equal(t, err.Error(), fmt.Sprintf("resource_exhausted: message size %d is larger than configured max %d", expectedSize, readMaxBytes))
+			want := fmt.Sprintf("resource_exhausted: message size %d is larger than configured max %d", expectedSize, readMaxBytes)
+			if connectUnary {
+				// Connect unary messages have no length prefix, and handlers stop
+				// reading at the limit.
+				want = fmt.Sprintf("resource_exhausted: message is larger than configured max %d", readMaxBytes)
+			}
+			assert.Equal(t, err.Error(), want)
 		})
 	}
 	newHTTP2Server := func(t *testing.T) *memhttp.Server {
@@ -1945,37 +1957,37 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL())))
-		readMaxBytesMatrix(t, client, false)
+		readMaxBytesMatrix(t, client, false, true)
 	})
 	t.Run("connect_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithSendCompression("gzip"))))
-		readMaxBytesMatrix(t, client, true)
+		readMaxBytesMatrix(t, client, true, true)
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPC())))
-		readMaxBytesMatrix(t, client, false)
+		readMaxBytesMatrix(t, client, false, false)
 	})
 	t.Run("grpc_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPC(), connecthttp.WithSendCompression("gzip"))))
-		readMaxBytesMatrix(t, client, true)
+		readMaxBytesMatrix(t, client, true, false)
 	})
 	t.Run("grpcweb", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPCWeb())))
-		readMaxBytesMatrix(t, client, false)
+		readMaxBytesMatrix(t, client, false, false)
 	})
 	t.Run("grpcweb_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPCWeb(), connecthttp.WithSendCompression("gzip"))))
-		readMaxBytesMatrix(t, client, true)
+		readMaxBytesMatrix(t, client, true, false)
 	})
 }
 
@@ -2085,7 +2097,7 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 	serverUncompressed := createServer(t, false)
 	serverCompressed := createServer(t, true)
 	readMaxBytes := 1024
-	readMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, compressed bool) {
+	readMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, compressed, connectUnary bool) {
 		t.Helper()
 		t.Run("equal_read_max", func(t *testing.T) {
 			t.Parallel()
@@ -2122,38 +2134,44 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 			_, err := client.Ping(t.Context(), pingRequest)
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-			assert.Equal(t, err.Error(), fmt.Sprintf("resource_exhausted: message size %d is larger than configured max %d", expectedSize, readMaxBytes))
+			want := fmt.Sprintf("resource_exhausted: message size %d is larger than configured max %d", expectedSize, readMaxBytes)
+			if connectUnary && !compressed {
+				// Connect unary messages have no length prefix, and reading stops 4 MiB
+				// past the limit, before the end of this message.
+				want = fmt.Sprintf("resource_exhausted: message is larger than configured max %d - stopped reading after %d bytes", readMaxBytes, readMaxBytes+1+4*1024*1024)
+			}
+			assert.Equal(t, err.Error(), want)
 		})
 	}
 	t.Run("connect", func(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(serverUncompressed.Client(), serverUncompressed.URL(), connecthttp.WithReadMaxBytes(readMaxBytes))))
-		readMaxBytesMatrix(t, client, false)
+		readMaxBytesMatrix(t, client, false, true)
 	})
 	t.Run("connect_gzip", func(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(serverCompressed.Client(), serverCompressed.URL(), connecthttp.WithReadMaxBytes(readMaxBytes))))
-		readMaxBytesMatrix(t, client, true)
+		readMaxBytesMatrix(t, client, true, true)
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(serverUncompressed.Client(), serverUncompressed.URL(), connecthttp.WithReadMaxBytes(readMaxBytes), connecthttp.WithGRPC())))
-		readMaxBytesMatrix(t, client, false)
+		readMaxBytesMatrix(t, client, false, false)
 	})
 	t.Run("grpc_gzip", func(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(serverCompressed.Client(), serverCompressed.URL(), connecthttp.WithReadMaxBytes(readMaxBytes), connecthttp.WithGRPC())))
-		readMaxBytesMatrix(t, client, true)
+		readMaxBytesMatrix(t, client, true, false)
 	})
 	t.Run("grpcweb", func(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(serverUncompressed.Client(), serverUncompressed.URL(), connecthttp.WithReadMaxBytes(readMaxBytes), connecthttp.WithGRPCWeb())))
-		readMaxBytesMatrix(t, client, false)
+		readMaxBytesMatrix(t, client, false, false)
 	})
 	t.Run("grpcweb_gzip", func(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(serverCompressed.Client(), serverCompressed.URL(), connecthttp.WithReadMaxBytes(readMaxBytes), connecthttp.WithGRPCWeb())))
-		readMaxBytesMatrix(t, client, true)
+		readMaxBytesMatrix(t, client, true, false)
 	})
 }
 
@@ -4557,4 +4575,66 @@ func assertErrorResponseMetadata(t *testing.T, callInfo *connect.CallInfo) { //n
 	header = append(header, callInfo.ResponseTrailer().Values(handlerHeader)...)
 	assert.True(t, compareValues(header, expectedHeaderValues))
 	assert.True(t, compareValues(callInfo.ResponseTrailer().Values(handlerTrailer), expectedHeaderValues))
+}
+
+// TestHandlerOversizedUnaryEndlessBody verifies that a handler rejects a
+// Connect unary request over its read limit without reading the rest of a
+// body that never ends.
+func TestHandlerOversizedUnaryEndlessBody(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+	connecthttp.Mount(mux, server, connecthttp.WithReadMaxBytes(16))
+	httpServer := memhttptest.NewServer(t, mux)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, httpServer.URL()+pingv1connect.PingServicePingProcedure, endlessReader{})
+	assert.Nil(t, err)
+	request.Header.Set("Content-Type", "application/proto")
+	response, err := httpServer.Client().Do(request)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer response.Body.Close()
+	assert.Equal(t, response.StatusCode, http.StatusTooManyRequests)
+}
+
+// TestHandlerOversizedUnaryIdleBody verifies that a handler rejects a Connect
+// unary request over its read limit without waiting for the rest of a body
+// that stays open. Over HTTP/1.1, net/http itself reads up to 256 KiB of an
+// unread body before responding, so this runs over HTTP/2.
+func TestHandlerOversizedUnaryIdleBody(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+	connecthttp.Mount(mux, server, connecthttp.WithReadMaxBytes(16))
+	httpServer := memhttptest.NewServer(t, mux)
+
+	bodyReader, bodyWriter := io.Pipe()
+	t.Cleanup(func() { _ = bodyWriter.Close() })
+	go func() {
+		_, _ = bodyWriter.Write(make([]byte, 1024))
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, httpServer.URL()+pingv1connect.PingServicePingProcedure, bodyReader)
+	assert.Nil(t, err)
+	request.Header.Set("Content-Type", "application/proto")
+	response, err := httpServer.Client().Do(request)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer response.Body.Close()
+	assert.Equal(t, response.StatusCode, http.StatusTooManyRequests)
+}
+
+// endlessReader is an [io.Reader] that never reaches EOF.
+type endlessReader struct{}
+
+func (endlessReader) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
 }
