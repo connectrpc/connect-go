@@ -276,6 +276,15 @@ func sortedAcceptPostValue(handlers []protocolHandler) string {
 	return strings.Join(accept, ", ")
 }
 
+// addContentTypes adds the content type for codecName. JSON requests may
+// also send "; charset=utf-8", so that variant is advertised too.
+func addContentTypes(contentTypes map[string]struct{}, prefix, codecName string) {
+	contentTypes[canonicalizeContentType(prefix+codecName)] = struct{}{}
+	if codecName == connect.CodecNameJSON {
+		contentTypes[prefix+codecNameJSONCharsetUTF8] = struct{}{}
+	}
+}
+
 func sortedAllowMethodValue(handlers []protocolHandler) string {
 	methods := make(map[string]struct{})
 	for _, handler := range handlers {
