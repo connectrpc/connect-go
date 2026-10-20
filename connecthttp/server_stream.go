@@ -76,11 +76,10 @@ func (s *handlerStream) Receive(dst any) error {
 	return nil
 }
 
-// SendHeaders writes the response headers with an empty Send, which the
-// protocol conns treat as headers only. A unary response has nothing to open:
-// the Connect unary protocol writes its headers with the body, so they wait
-// for Send.
 func (s *handlerStream) SendHeaders() error {
+	// Unary responses defer headers to Send or handler return. The Connect
+	// unary protocol encodes errors in the HTTP status, so flushing now would
+	// commit a 200 and hide a later handler error.
 	if s.unary || s.headerFlushed {
 		return nil
 	}
