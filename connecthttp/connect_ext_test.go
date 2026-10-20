@@ -2596,6 +2596,77 @@ func TestClientWithSendMaxBytes(t *testing.T) {
 		sendMaxBytesMatrix(t, client, sendMaxBytes, true)
 	})
 }
+
+func TestServerStreamSendHeaders(t *testing.T) {
+	t.Parallel()
+	run := func(t *testing.T, opts ...connecthttp.Option) {
+		t.Helper()
+		synctest.Test(t, func(t *testing.T) {
+			release := make(chan struct{})
+			pingServer := &pluggablePingServer{
+				countUp: func(ctx context.Context, _ *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
+					info, _ := connect.CallInfoForServerContext(ctx)
+					info.ResponseHeader().Set("X-Test", "header")
+					if err := stream.SendHeaders(); err != nil {
+						return err
+					}
+					// SendHeaders is idempotent.
+					if err := stream.SendHeaders(); err != nil {
+						return err
+					}
+					<-release
+					return stream.Send(&pingv1.CountUpResponse{Number: 1})
+				},
+			}
+			mux := http.NewServeMux()
+			srv := connect.NewServer()
+			pingv1connect.RegisterPingServiceHandler(srv, pingServer)
+			connecthttp.Mount(mux, srv)
+			server := memhttptest.NewServer(t, mux)
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(),
+				server.URL(),
+				opts...)),
+			)
+			ctx, callInfo := connect.NewClientContext(t.Context())
+			opened := make(chan struct{})
+			var stream pingv1connect.PingServiceCountUpClientStream
+			var err error
+			go func() {
+				defer close(opened)
+				stream, err = client.CountUp(ctx, &pingv1.CountUpRequest{Number: 1})
+			}()
+			synctest.Wait()
+			select {
+			case <-opened:
+			default:
+				t.Error("client did not receive the response headers before the first message")
+			}
+			close(release)
+			<-opened
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stream.Close()
+			res, err := stream.Receive()
+			assert.Nil(t, err)
+			assert.Equal(t, res.GetNumber(), 1)
+			assert.Equal(t, callInfo.ResponseHeader().Get("X-Test"), "header")
+		})
+	}
+	t.Run("connect", func(t *testing.T) {
+		t.Parallel()
+		run(t)
+	})
+	t.Run("grpc", func(t *testing.T) {
+		t.Parallel()
+		run(t, connecthttp.WithGRPC())
+	})
+	t.Run("grpcweb", func(t *testing.T) {
+		t.Parallel()
+		run(t, connecthttp.WithGRPCWeb())
+	})
+}
+
 func TestBidiStreamServerSendsFirstMessage(t *testing.T) {
 	t.Parallel()
 	run := func(t *testing.T, opts ...connecthttp.Option) {
