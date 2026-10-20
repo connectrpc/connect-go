@@ -27,6 +27,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectgzip"
@@ -41,14 +42,11 @@ type HTTPClient interface {
 }
 
 // ClientInfo is the HTTP metadata for a client RPC, carried on
-// [connect.CallInfo.TransportInfo].
-//
-// Request-side accessors are safe to read once the first Send (or Receive)
-// returns, response-side accessors once the first Receive returns. Reading
-// them earlier on a streaming RPC races the transport's dispatch goroutine.
+// [connect.CallInfo.TransportInfo]. Its methods are safe for concurrent use.
+// They return zero values until the request is sent or the response arrives.
 type ClientInfo struct {
-	request  *http.Request
-	response *http.Response
+	request  atomic.Pointer[http.Request]
+	response atomic.Pointer[clientResponseInfo]
 }
 
 // ClientInfoForContext returns the [*ClientInfo] carried on the client-side
@@ -68,47 +66,66 @@ func ClientInfoForContext(ctx context.Context) (*ClientInfo, bool) {
 // HTTPMethod is the HTTP method of the dispatched request, "POST" by
 // default, "GET" when [WithHTTPGet] upgrades a side-effect-free unary call.
 func (c *ClientInfo) HTTPMethod() string {
-	if c == nil || c.request == nil {
+	request := c.loadRequest()
+	if request == nil {
 		return ""
 	}
-	return c.request.Method
+	return request.Method
 }
 
 // RequestURL is the URL the transport dispatched to. Returned by
 // value, so callers may inspect or modify their copy without
 // affecting the live request.
 func (c *ClientInfo) RequestURL() url.URL {
-	if c == nil || c.request == nil || c.request.URL == nil {
+	request := c.loadRequest()
+	if request == nil || request.URL == nil {
 		return url.URL{}
 	}
-	return *c.request.URL
+	return *request.URL
 }
 
 // ResponseStatus is the HTTP status code returned by the server. Zero
 // before the response arrives.
 func (c *ClientInfo) ResponseStatus() int {
-	if c == nil || c.response == nil {
+	response := c.loadResponse()
+	if response == nil {
 		return 0
 	}
-	return c.response.StatusCode
+	return response.status
 }
 
 // ResponseProto is the HTTP protocol version reported on the
 // response, e.g. "HTTP/2.0". Empty before the response arrives.
 func (c *ClientInfo) ResponseProto() string {
-	if c == nil || c.response == nil {
+	response := c.loadResponse()
+	if response == nil {
 		return ""
 	}
-	return c.response.Proto
+	return response.proto
 }
 
 // TLS is the TLS connection state for the response, or nil if the
 // transport was plain HTTP or the response has not yet arrived.
 func (c *ClientInfo) TLS() *tls.ConnectionState {
-	if c == nil || c.response == nil {
+	response := c.loadResponse()
+	if response == nil {
 		return nil
 	}
-	return c.response.TLS
+	return response.tls
+}
+
+func (c *ClientInfo) loadRequest() *http.Request {
+	if c == nil {
+		return nil
+	}
+	return c.request.Load()
+}
+
+func (c *ClientInfo) loadResponse() *clientResponseInfo {
+	if c == nil {
+		return nil
+	}
+	return c.response.Load()
 }
 
 // ServerInfo is the HTTP metadata for a server RPC, carried on
@@ -289,6 +306,14 @@ func newUnknownMethodHandler(server *connect.Server, opts *options) http.Handler
 	})
 }
 
+// clientResponseInfo is the subset of the [http.Response] that [ClientInfo]
+// exposes.
+type clientResponseInfo struct {
+	status int
+	proto  string
+	tls    *tls.ConnectionState
+}
+
 type transport struct {
 	httpClient HTTPClient
 	options    options
@@ -339,10 +364,14 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 	info.Codec = sendCodecName
 	info.RequestEncoding = encodingOrIdentity(opts.sendCompressor)
 	conn.onRequestSend(func(request *http.Request) {
-		clientInfo.request = request
+		clientInfo.request.Store(request)
 	})
 	conn.onResponseReceive(func(response *http.Response) {
-		clientInfo.response = response
+		clientInfo.response.Store(&clientResponseInfo{
+			status: response.StatusCode,
+			proto:  response.Proto,
+			tls:    response.TLS,
+		})
 	})
 	if spec.StreamType == connect.StreamTypeUnary {
 		return &connectUnaryClientStream{conn: conn, info: info, protoClient: protocolClient, streamType: spec.StreamType}, nil
