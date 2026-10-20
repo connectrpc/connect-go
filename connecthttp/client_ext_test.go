@@ -171,6 +171,38 @@ func TestClientPeer(t *testing.T) {
 	})
 }
 
+func TestClientInfoAfterCancel(t *testing.T) {
+	t.Parallel()
+	// The request is dispatched on a background goroutine. Receive returns as
+	// soon as the context is done, so ClientInfo must be safe to read while
+	// that goroutine is still running.
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	httpClient := httpClientFunc(func(*http.Request) (*http.Response, error) {
+		<-release
+		return nil, errors.New("released")
+	})
+	client := connect.NewClient(connecthttp.NewTransport(httpClient, "http://localhost"))
+	ctx, cancel := context.WithCancel(t.Context())
+	ctx, _ = connect.NewClientContext(ctx)
+	stream, err := client.CallClientStream(ctx, connect.Spec{
+		StreamType: connect.StreamTypeClient,
+		Procedure:  pingv1connect.PingServiceSumProcedure,
+	})
+	assert.Nil(t, err)
+	assert.Nil(t, stream.SendHeaders())
+	cancel()
+	err = stream.Receive(&pingv1.SumResponse{})
+	assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
+	clientInfo, ok := connecthttp.ClientInfoForContext(ctx)
+	assert.True(t, ok)
+	_ = clientInfo.HTTPMethod()
+	_ = clientInfo.RequestURL()
+	_ = clientInfo.ResponseStatus()
+	_ = clientInfo.ResponseProto()
+	_ = clientInfo.TLS()
+}
+
 func TestGetNotModified(t *testing.T) {
 	t.Parallel()
 
