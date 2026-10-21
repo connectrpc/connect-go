@@ -1197,12 +1197,7 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func(cont
 		return connect.Errorf(connect.CodeUnknown, "read message: %s", err).WithCause(err)
 	}
 	if u.readMaxBytes > 0 && bytesRead > int64(u.readMaxBytes) {
-		// Attempt to read to end in order to allow connection re-use
-		discardedBytes, err := io.Copy(io.Discard, u.reader)
-		if err != nil {
-			return connect.Errorf(connect.CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %s", u.readMaxBytes, err).WithCause(err)
-		}
-		return connect.Errorf(connect.CodeResourceExhausted, "message size %d is larger than configured max %d", bytesRead+discardedBytes, u.readMaxBytes)
+		return connect.Errorf(connect.CodeResourceExhausted, "message is larger than configured max %d", u.readMaxBytes)
 	}
 	compressedSize := 0
 	if data.Len() > 0 && u.compressionPool != nil {
