@@ -1,3 +1,5 @@
+connectrpc.com/connect/v2 v2.0.2-0.20261020190640-2d5a85724a69 h1:YQO5DA1nhvn5C9NOaXPlcitDoZHZrhP4sILkfcGEB1A=
+connectrpc.com/connect/v2 v2.0.2-0.20261020190640-2d5a85724a69/go.mod h1:N32OLrstcPUzkykFynnefFro3+xzSdOrZlK2jHmS/xo=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 google.golang.org/protobuf v1.36.11 h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBNVE=

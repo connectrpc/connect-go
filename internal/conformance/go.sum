@@ -10,6 +10,8 @@ cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMT
 cloud.google.com/go v0.34.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 connectrpc.com/conformance v1.0.5 h1:w5d+gBj0uUX/DAN+hInQMeUxYTmec5m1Vvi2s/6V56s=
 connectrpc.com/conformance v1.0.5/go.mod h1:kdJQQZIcltgF2XXxX5Oc3PIK7x21QTr5dH89OnVhdko=
+connectrpc.com/connect/v2 v2.0.2-0.20261020190640-2d5a85724a69 h1:YQO5DA1nhvn5C9NOaXPlcitDoZHZrhP4sILkfcGEB1A=
+connectrpc.com/connect/v2 v2.0.2-0.20261020190640-2d5a85724a69/go.mod h1:N32OLrstcPUzkykFynnefFro3+xzSdOrZlK2jHmS/xo=
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=

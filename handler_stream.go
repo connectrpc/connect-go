@@ -34,14 +34,10 @@ type ClientStream[Req any] struct {
 }
 
 // Spec returns the specification for the RPC.
-func (c *ClientStream[_]) Spec() Spec {
-	return c.conn.Spec()
-}
+func (c *ClientStream[_]) Spec() Spec { return c.conn.Spec() }
 
 // Peer describes the client for this RPC.
-func (c *ClientStream[_]) Peer() Peer {
-	return c.conn.Peer()
-}
+func (c *ClientStream[_]) Peer() Peer { return c.conn.Peer() }
 
 // RequestHeader returns the headers received from the client.
 func (c *ClientStream[Req]) RequestHeader() http.Header {
@@ -84,9 +80,7 @@ func (c *ClientStream[Req]) Err() error {
 
 // Conn exposes the underlying StreamingHandlerConn. This may be useful if
 // you'd prefer to wrap the connection in a different high-level API.
-func (c *ClientStream[Req]) Conn() StreamingHandlerConn {
-	return c.conn
-}
+func (c *ClientStream[Req]) Conn() StreamingHandlerConn { return c.conn }
 
 // ServerStream is the handler's view of a server streaming RPC.
 //
@@ -127,9 +121,7 @@ func (s *ServerStream[Res]) Send(msg *Res) error {
 
 // Conn exposes the underlying StreamingHandlerConn. This may be useful if
 // you'd prefer to wrap the connection in a different high-level API.
-func (s *ServerStream[Res]) Conn() StreamingHandlerConn {
-	return s.conn
-}
+func (s *ServerStream[Res]) Conn() StreamingHandlerConn { return s.conn }
 
 // BidiStream is the handler's view of a bidirectional streaming RPC.
 //
@@ -144,14 +136,10 @@ type BidiStream[Req, Res any] struct {
 }
 
 // Spec returns the specification for the RPC.
-func (b *BidiStream[_, _]) Spec() Spec {
-	return b.conn.Spec()
-}
+func (b *BidiStream[_, _]) Spec() Spec { return b.conn.Spec() }
 
 // Peer describes the client for this RPC.
-func (b *BidiStream[_, _]) Peer() Peer {
-	return b.conn.Peer()
-}
+func (b *BidiStream[_, _]) Peer() Peer { return b.conn.Peer() }
 
 // RequestHeader returns the headers received from the client.
 func (b *BidiStream[Req, Res]) RequestHeader() http.Header {
@@ -200,6 +188,4 @@ func (b *BidiStream[Req, Res]) Send(msg *Res) error {
 
 // Conn exposes the underlying StreamingHandlerConn. This may be useful if
 // you'd prefer to wrap the connection in a different high-level API.
-func (b *BidiStream[Req, Res]) Conn() StreamingHandlerConn {
-	return b.conn
-}
+func (b *BidiStream[Req, Res]) Conn() StreamingHandlerConn { return b.conn }

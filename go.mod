@@ -8,6 +8,7 @@ retract (
 )
 
 require (
+	connectrpc.com/connect/v2 v2.0.2-0.20261020190640-2d5a85724a69
 	github.com/google/go-cmp v0.7.0
 	google.golang.org/protobuf v1.36.11
 )

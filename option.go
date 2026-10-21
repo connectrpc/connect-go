@@ -19,14 +19,193 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"slices"
 )
 
 // A ClientOption configures a [Client].
 //
-// In addition to any options grouped in the documentation below, remember that
-// any [Option] is also a valid ClientOption.
+// In addition to any options grouped in the documentation below, remember
+// that any [Option] is also a valid ClientOption.
 type ClientOption interface {
 	applyToClient(*clientConfig)
+}
+
+// A HandlerOption configures a [Handler].
+//
+// In addition to any options grouped in the documentation below, remember
+// that any [Option] is also a HandlerOption.
+type HandlerOption interface {
+	applyToHandler(*handlerConfig)
+}
+
+// Option implements both [ClientOption] and [HandlerOption], so it can be
+// applied both client-side and server-side.
+type Option interface {
+	ClientOption
+	HandlerOption
+}
+
+// clientConfig is the v1 client configuration accumulated from options and
+// then projected into [connecthttp] and v1 runtime state when the [Client] is
+// built.
+type clientConfig struct {
+	procedure        string
+	schema           any
+	idempotencyLevel IdempotencyLevel
+
+	interceptors []Interceptor
+	initializer  maybeInitializer
+
+	protocol            string // "" connect, "grpc", "grpcweb"
+	enableGet           bool
+	getURLMaxBytes      int
+	getUseFallback      bool
+	sendCodec           Codec  // user-supplied via WithCodec
+	sendCompressionName string // user-supplied via WithSendCompression
+	codecOverrides      []Codec
+	compressors         map[string]*compressorEntry // by name, in order
+	compressorOrder     []string
+	compressMinBytes    int
+	readMaxBytes        int
+	sendMaxBytes        int
+}
+
+// handlerConfig mirrors clientConfig for the server side. The shim builds a
+// connecthttp-mounted v2 server from this state when [Handler] is created.
+type handlerConfig struct {
+	procedure        string
+	streamType       StreamType
+	schema           any
+	idempotencyLevel IdempotencyLevel
+
+	interceptors []Interceptor
+	initializer  maybeInitializer
+
+	codecOverrides         []Codec
+	compressors            map[string]*compressorEntry
+	compressorOrder        []string
+	compressMinBytes       int
+	readMaxBytes           int
+	sendMaxBytes           int
+	requireConnectProtocol bool
+	requestGates           []RequestGateFunc
+}
+
+// compressorEntry holds the factory pair for a named v1 compressor.
+type compressorEntry struct {
+	newDecompressor func() Decompressor
+	newCompressor   func() Compressor
+}
+
+// newClientConfig produces a clientConfig with the v1 defaults applied (proto
+// codec, gzip accept) plus the user's options.
+func newClientConfig(procedure string, options []ClientOption) *clientConfig {
+	cfg := &clientConfig{
+		procedure:   procedure,
+		compressors: make(map[string]*compressorEntry),
+	}
+	cfg.applyDefaultsClient()
+	for _, opt := range options {
+		opt.applyToClient(cfg)
+	}
+	return cfg
+}
+
+// newHandlerConfig produces a handlerConfig with v1 defaults applied (proto,
+// json codecs, gzip support) plus the user's options.
+func newHandlerConfig(procedure string, streamType StreamType, options []HandlerOption) *handlerConfig {
+	cfg := &handlerConfig{
+		procedure:   procedure,
+		streamType:  streamType,
+		compressors: make(map[string]*compressorEntry),
+	}
+	cfg.applyDefaultsHandler()
+	for _, opt := range options {
+		opt.applyToHandler(cfg)
+	}
+	return cfg
+}
+
+// applyDefaultsClient registers gzip in the accept list (matching v1 default
+// behavior). The proto codec is the v2 default codec.
+func (c *clientConfig) applyDefaultsClient() {
+	c.compressors[compressionGzip] = newGzipEntry()
+	c.compressorOrder = append(c.compressorOrder, compressionGzip)
+}
+
+// applyDefaultsHandler registers gzip and the default json/proto codecs.
+func (c *handlerConfig) applyDefaultsHandler() {
+	c.compressors[compressionGzip] = newGzipEntry()
+	c.compressorOrder = append(c.compressorOrder, compressionGzip)
+}
+
+// validate reports configuration errors that v1 surfaces when the client is
+// constructed rather than on each call.
+func (c *clientConfig) validate() *Error {
+	if c.sendCompressionName != "" && c.sendCompressionName != compressionIdentity {
+		if _, ok := c.compressors[c.sendCompressionName]; !ok {
+			return errorf(CodeUnknown, "unknown compression %q", c.sendCompressionName)
+		}
+	}
+	return nil
+}
+
+// newSpec returns the v1 [Spec] described by this client config. IsClient is
+// true.
+func (c *clientConfig) newSpec(t StreamType) Spec {
+	return Spec{
+		StreamType:       t,
+		Procedure:        c.procedure,
+		Schema:           c.schema,
+		IsClient:         true,
+		IdempotencyLevel: c.idempotencyLevel,
+	}
+}
+
+// newSpec returns the v1 [Spec] described by this handler config. IsClient is
+// false.
+func (c *handlerConfig) newSpec() Spec {
+	return Spec{
+		StreamType:       c.streamType,
+		Procedure:        c.procedure,
+		Schema:           c.schema,
+		IsClient:         false,
+		IdempotencyLevel: c.idempotencyLevel,
+	}
+}
+
+// chainInterceptor returns the composed interceptor or nil if none are
+// registered. The first interceptor in c.interceptors is the outermost
+// wrapper.
+func (c *clientConfig) chainInterceptor() Interceptor {
+	switch len(c.interceptors) {
+	case 0:
+		return nil
+	case 1:
+		return c.interceptors[0]
+	}
+	return newChain(c.interceptors)
+}
+
+// chainInterceptor returns the composed interceptor or nil if none are
+// registered.
+func (c *handlerConfig) chainInterceptor() Interceptor {
+	switch len(c.interceptors) {
+	case 0:
+		return nil
+	case 1:
+		return c.interceptors[0]
+	}
+	return newChain(c.interceptors)
+}
+
+// newGzipEntry returns the default gzip compressor pair, matching v1's
+// pre-shim behavior.
+func newGzipEntry() *compressorEntry {
+	return &compressorEntry{
+		newDecompressor: func() Decompressor { return &gzip.Reader{} },
+		newCompressor:   func() Compressor { return gzip.NewWriter(io.Discard) },
+	}
 }
 
 // WithAcceptCompression makes a compression algorithm available to a client.
@@ -51,61 +230,10 @@ func WithAcceptCompression(
 	newCompressor func() Compressor,
 ) ClientOption {
 	return &compressionOption{
-		Name:            name,
-		CompressionPool: newCompressionPool(newDecompressor, newCompressor),
+		name:            name,
+		newDecompressor: newDecompressor,
+		newCompressor:   newCompressor,
 	}
-}
-
-// WithClientOptions composes multiple ClientOptions into one.
-func WithClientOptions(options ...ClientOption) ClientOption {
-	return &clientOptionsOption{options}
-}
-
-// WithGRPC configures clients to use the HTTP/2 gRPC protocol.
-func WithGRPC() ClientOption {
-	return &grpcOption{web: false}
-}
-
-// WithGRPCWeb configures clients to use the gRPC-Web protocol.
-func WithGRPCWeb() ClientOption {
-	return &grpcOption{web: true}
-}
-
-// WithProtoJSON configures a client to send JSON-encoded data instead of
-// binary Protobuf. It uses the standard Protobuf JSON mapping as implemented
-// by [google.golang.org/protobuf/encoding/protojson]: fields are named using
-// lowerCamelCase, zero values are omitted, missing required fields are errors,
-// enums are emitted as strings, etc.
-func WithProtoJSON() ClientOption {
-	return WithCodec(&protoJSONCodec{codecNameJSON})
-}
-
-// WithSendCompression configures the client to use the specified algorithm to
-// compress request messages. If the algorithm has not been registered using
-// [WithAcceptCompression], the client will return errors at runtime.
-//
-// Because some servers don't support compression, clients default to sending
-// uncompressed requests.
-func WithSendCompression(name string) ClientOption {
-	return &sendCompressionOption{Name: name}
-}
-
-// WithSendGzip configures the client to gzip requests. Since clients have
-// access to a gzip compressor by default, WithSendGzip doesn't require
-// [WithSendCompression].
-//
-// Some servers don't support gzip, so clients default to sending uncompressed
-// requests.
-func WithSendGzip() ClientOption {
-	return WithSendCompression(compressionGzip)
-}
-
-// A HandlerOption configures a [Handler].
-//
-// In addition to any options grouped in the documentation below, remember that
-// any [Option] is also a HandlerOption.
-type HandlerOption interface {
-	applyToHandler(*handlerConfig)
 }
 
 // WithCompression configures handlers to support a compression algorithm.
@@ -126,15 +254,59 @@ func WithCompression(
 	newCompressor func() Compressor,
 ) HandlerOption {
 	return &compressionOption{
-		Name:            name,
-		CompressionPool: newCompressionPool(newDecompressor, newCompressor),
+		name:            name,
+		newDecompressor: newDecompressor,
+		newCompressor:   newCompressor,
 	}
+}
+
+// WithClientOptions composes multiple ClientOptions into one.
+func WithClientOptions(options ...ClientOption) ClientOption {
+	return &clientOptionsBundle{options: options}
 }
 
 // WithHandlerOptions composes multiple HandlerOptions into one.
 func WithHandlerOptions(options ...HandlerOption) HandlerOption {
-	return &handlerOptionsOption{options}
+	return &handlerOptionsBundle{options: options}
 }
+
+// WithOptions composes multiple Options into one.
+func WithOptions(options ...Option) Option {
+	return &optionsBundle{options: options}
+}
+
+// WithGRPC configures clients to use the HTTP/2 gRPC protocol.
+func WithGRPC() ClientOption { return &protocolClientOption{name: "grpc"} }
+
+// WithGRPCWeb configures clients to use the gRPC-Web protocol.
+func WithGRPCWeb() ClientOption { return &protocolClientOption{name: "grpcweb"} }
+
+// WithProtoJSON configures a client to send JSON-encoded data instead of
+// binary Protobuf. It uses the standard Protobuf JSON mapping as implemented
+// by [google.golang.org/protobuf/encoding/protojson]: fields are named using
+// lowerCamelCase, zero values are omitted, missing required fields are errors,
+// enums are emitted as strings, etc.
+func WithProtoJSON() ClientOption {
+	return WithCodec(&protoJSONCodec{name: codecNameJSON})
+}
+
+// WithSendCompression configures the client to use the specified algorithm to
+// compress request messages. If the algorithm has not been registered using
+// [WithAcceptCompression], the client will return errors at runtime.
+//
+// Because some servers don't support compression, clients default to sending
+// uncompressed requests.
+func WithSendCompression(name string) ClientOption {
+	return &sendCompressionOption{name: name}
+}
+
+// WithSendGzip configures the client to gzip requests. Since clients have
+// access to a gzip compressor by default, WithSendGzip doesn't require
+// [WithSendCompression].
+//
+// Some servers don't support gzip, so clients default to sending uncompressed
+// requests.
+func WithSendGzip() ClientOption { return WithSendCompression(compressionGzip) }
 
 // WithRecover adds an interceptor that recovers from panics. The supplied
 // function receives the context, [Spec], request headers, and the recovered
@@ -207,22 +379,13 @@ func WithConditionalHandlerOptions(conditional func(spec Spec) []HandlerOption) 
 	return &conditionalHandlerOptions{conditional: conditional}
 }
 
-// Option implements both [ClientOption] and [HandlerOption], so it can be
-// applied both client-side and server-side.
-type Option interface {
-	ClientOption
-	HandlerOption
-}
-
 // WithSchema provides a parsed representation of the schema for an RPC to a
 // client or handler. The supplied schema is exposed as [Spec].Schema. This
 // option is typically added by generated code.
 //
 // For services using protobuf schemas, the supplied schema should be a
 // [google.golang.org/protobuf/reflect/protoreflect.MethodDescriptor].
-func WithSchema(schema any) Option {
-	return &schemaOption{Schema: schema}
-}
+func WithSchema(schema any) Option { return &schemaOption{schema: schema} }
 
 // WithRequestInitializer provides a function that initializes a new message.
 // It may be used to dynamically construct request messages. It is called on
@@ -230,7 +393,7 @@ func WithSchema(schema any) Option {
 // will be a non nil pointer to the type created by the handler. Use the Schema
 // field of the [Spec] to determine the type of the message.
 func WithRequestInitializer(initializer func(spec Spec, message any) error) HandlerOption {
-	return &initializerOption{Initializer: initializer}
+	return &initializerHandlerOption{initializer: initializer}
 }
 
 // WithResponseInitializer provides a function that initializes a new message.
@@ -239,7 +402,7 @@ func WithRequestInitializer(initializer func(spec Spec, message any) error) Hand
 // will be a non nil pointer to the type created by the client. Use the Schema
 // field of the [Spec] to determine the type of the message.
 func WithResponseInitializer(initializer func(spec Spec, message any) error) ClientOption {
-	return &initializerOption{Initializer: initializer}
+	return &initializerClientOption{initializer: initializer}
 }
 
 // WithCodec registers a serialization method with a client or handler.
@@ -256,9 +419,7 @@ func WithResponseInitializer(initializer func(spec Spec, message any) error) Cli
 // necessary.
 //
 // Registering a codec with an empty name is a no-op.
-func WithCodec(codec Codec) Option {
-	return &codecOption{Codec: codec}
-}
+func WithCodec(codec Codec) Option { return &codecOption{codec: codec} }
 
 // WithCompressMinBytes sets a minimum size threshold for compression:
 // regardless of compressor configuration, messages smaller than the configured
@@ -268,7 +429,7 @@ func WithCodec(codec Codec) Option {
 // improve overall performance, because the CPU cost of compressing very small
 // messages usually isn't worth the small reduction in network I/O.
 func WithCompressMinBytes(minBytes int) Option {
-	return &compressMinBytesOption{Min: minBytes}
+	return &compressMinBytesOption{minBytes: minBytes}
 }
 
 // WithReadMaxBytes limits the performance impact of pathologically large
@@ -285,7 +446,7 @@ func WithCompressMinBytes(minBytes int) Option {
 // [http.MaxBytesError] specially, so clients still receive errors with the
 // appropriate error code and informative messages.
 func WithReadMaxBytes(maxBytes int) Option {
-	return &readMaxBytesOption{Max: maxBytes}
+	return &readMaxBytesOption{maxBytes: maxBytes}
 }
 
 // WithSendMaxBytes prevents sending messages too large for the client/handler
@@ -300,7 +461,7 @@ func WithReadMaxBytes(maxBytes int) Option {
 // Setting WithSendMaxBytes to zero allows any message size. Both clients and
 // handlers default to allowing any message size.
 func WithSendMaxBytes(maxBytes int) Option {
-	return &sendMaxBytesOption{Max: maxBytes}
+	return &sendMaxBytesOption{maxBytes: maxBytes}
 }
 
 // WithIdempotency declares the idempotency of the procedure. This can determine
@@ -329,8 +490,28 @@ func WithIdempotency(idempotencyLevel IdempotencyLevel) Option {
 // interceptors or by adding headers in individual procedure implementations.
 //
 // By default, all requests are made as HTTP POSTs.
-func WithHTTPGet() ClientOption {
-	return &enableGet{}
+func WithHTTPGet() ClientOption { return &enableGetOption{} }
+
+// WithHTTPGetMaxURLSize sets the maximum allowable URL length for GET requests
+// made using the Connect protocol. It has no effect on gRPC or gRPC-Web
+// clients, since those protocols are POST-only.
+//
+// Limiting the URL size is useful as most user agents, proxies, and servers
+// have limits on the allowable length of a URL. For example, Apache and Nginx
+// limit the size of a request line to around 8 KiB, meaning that maximum
+// length of a URL is a bit smaller than this. If you run into URL size
+// limitations imposed by your network infrastructure and don't know the
+// maximum allowable size, or if you'd prefer to be cautious from the start, a
+// 4096 byte (4 KiB) limit works with most common proxies and CDNs.
+//
+// If fallback is set to true and the URL would be longer than the configured
+// maximum value, the request will be sent as an HTTP POST instead. If fallback
+// is set to false, the request will fail with [CodeResourceExhausted].
+//
+// By default, Connect-protocol clients with GET requests enabled may send a
+// URL of any size.
+func WithHTTPGetMaxURLSize(bytes int, fallback bool) ClientOption {
+	return &getURLMaxBytesOption{maxBytes: bytes, fallback: fallback}
 }
 
 // WithInterceptors configures a client or handler's interceptor stack. Repeated
@@ -381,40 +562,160 @@ func WithHTTPGet() ClientOption {
 // on your interceptor's logic, you may need to wrap one method in clients and
 // the other in handlers.
 func WithInterceptors(interceptors ...Interceptor) Option {
-	return &interceptorsOption{interceptors}
+	return &interceptorsOption{interceptors: interceptors}
 }
 
-// WithOptions composes multiple Options into one.
-func WithOptions(options ...Option) Option {
-	return &optionsOption{options}
+// ---------------------------------------------------------------------------
+// option impls
+// ---------------------------------------------------------------------------
+
+type schemaOption struct{ schema any }
+
+func (o *schemaOption) applyToClient(c *clientConfig)   { c.schema = o.schema }
+func (o *schemaOption) applyToHandler(c *handlerConfig) { c.schema = o.schema }
+
+type idempotencyOption struct{ idempotencyLevel IdempotencyLevel }
+
+func (o *idempotencyOption) applyToClient(c *clientConfig)   { c.idempotencyLevel = o.idempotencyLevel }
+func (o *idempotencyOption) applyToHandler(c *handlerConfig) { c.idempotencyLevel = o.idempotencyLevel }
+
+type codecOption struct{ codec Codec }
+
+func (o *codecOption) applyToClient(c *clientConfig) {
+	if o.codec == nil || o.codec.Name() == "" {
+		return
+	}
+	c.sendCodec = o.codec
+	c.codecOverrides = append(c.codecOverrides, o.codec)
 }
 
-type schemaOption struct {
-	Schema any
+func (o *codecOption) applyToHandler(c *handlerConfig) {
+	if o.codec == nil || o.codec.Name() == "" {
+		return
+	}
+	c.codecOverrides = append(c.codecOverrides, o.codec)
 }
 
-func (o *schemaOption) applyToClient(config *clientConfig) {
-	config.Schema = o.Schema
+type compressionOption struct {
+	name            string
+	newDecompressor func() Decompressor
+	newCompressor   func() Compressor
 }
 
-func (o *schemaOption) applyToHandler(config *handlerConfig) {
-	config.Schema = o.Schema
+func (o *compressionOption) applyToClient(c *clientConfig) {
+	o.applyTo(&c.compressorOrder, c.compressors)
 }
 
-type initializerOption struct {
-	Initializer func(spec Spec, message any) error
+func (o *compressionOption) applyToHandler(c *handlerConfig) {
+	o.applyTo(&c.compressorOrder, c.compressors)
 }
 
-func (o *initializerOption) applyToHandler(config *handlerConfig) {
-	config.Initializer = maybeInitializer{initializer: o.Initializer}
+func (o *compressionOption) applyTo(order *[]string, pools map[string]*compressorEntry) {
+	if o.name == "" {
+		return
+	}
+	if o.newDecompressor == nil && o.newCompressor == nil {
+		delete(pools, o.name)
+		filtered := (*order)[:0]
+		for _, n := range *order {
+			if n != o.name {
+				filtered = append(filtered, n)
+			}
+		}
+		*order = filtered
+		return
+	}
+	// Re-registering a name moves it to the end, making it the most preferred.
+	*order = slices.DeleteFunc(*order, func(n string) bool { return n == o.name })
+	*order = append(*order, o.name)
+	pools[o.name] = &compressorEntry{
+		newDecompressor: o.newDecompressor,
+		newCompressor:   o.newCompressor,
+	}
 }
 
-func (o *initializerOption) applyToClient(config *clientConfig) {
-	config.Initializer = maybeInitializer{initializer: o.Initializer}
+type compressMinBytesOption struct{ minBytes int }
+
+func (o *compressMinBytesOption) applyToClient(c *clientConfig)   { c.compressMinBytes = o.minBytes }
+func (o *compressMinBytesOption) applyToHandler(c *handlerConfig) { c.compressMinBytes = o.minBytes }
+
+type readMaxBytesOption struct{ maxBytes int }
+
+func (o *readMaxBytesOption) applyToClient(c *clientConfig)   { c.readMaxBytes = o.maxBytes }
+func (o *readMaxBytesOption) applyToHandler(c *handlerConfig) { c.readMaxBytes = o.maxBytes }
+
+type sendMaxBytesOption struct{ maxBytes int }
+
+func (o *sendMaxBytesOption) applyToClient(c *clientConfig)   { c.sendMaxBytes = o.maxBytes }
+func (o *sendMaxBytesOption) applyToHandler(c *handlerConfig) { c.sendMaxBytes = o.maxBytes }
+
+type protocolClientOption struct{ name string }
+
+func (o *protocolClientOption) applyToClient(c *clientConfig) { c.protocol = o.name }
+
+type enableGetOption struct{}
+
+func (o *enableGetOption) applyToClient(c *clientConfig) { c.enableGet = true }
+
+type getURLMaxBytesOption struct {
+	maxBytes int
+	fallback bool
+}
+
+func (o *getURLMaxBytesOption) applyToClient(c *clientConfig) {
+	c.enableGet = true
+	c.getURLMaxBytes = o.maxBytes
+	c.getUseFallback = o.fallback
+}
+
+type requestGateOption struct {
+	gate RequestGateFunc
+}
+
+func (o *requestGateOption) applyToHandler(c *handlerConfig) {
+	c.requestGates = append(c.requestGates, o.gate)
+}
+
+type sendCompressionOption struct{ name string }
+
+func (o *sendCompressionOption) applyToClient(c *clientConfig) {
+	c.sendCompressionName = o.name
+}
+
+type requireConnectProtocolHeaderOption struct{}
+
+func (o *requireConnectProtocolHeaderOption) applyToHandler(c *handlerConfig) {
+	c.requireConnectProtocol = true
+}
+
+type interceptorsOption struct{ interceptors []Interceptor }
+
+func (o *interceptorsOption) applyToClient(c *clientConfig) {
+	c.interceptors = append(c.interceptors, o.interceptors...)
+}
+
+func (o *interceptorsOption) applyToHandler(c *handlerConfig) {
+	c.interceptors = append(c.interceptors, o.interceptors...)
+}
+
+type initializerClientOption struct {
+	initializer func(Spec, any) error
+}
+
+func (o *initializerClientOption) applyToClient(c *clientConfig) {
+	c.initializer = maybeInitializer{initializer: o.initializer}
+}
+
+type initializerHandlerOption struct {
+	initializer func(Spec, any) error
+}
+
+func (o *initializerHandlerOption) applyToHandler(c *handlerConfig) {
+	c.initializer = maybeInitializer{initializer: o.initializer}
 }
 
 type maybeInitializer struct {
-	initializer func(spec Spec, message any) error
+	initializer func(Spec, any) error
 }
 
 func (o maybeInitializer) maybe(spec Spec, message any) error {
@@ -424,265 +725,49 @@ func (o maybeInitializer) maybe(spec Spec, message any) error {
 	return nil
 }
 
-type clientOptionsOption struct {
-	options []ClientOption
-}
-
-func (o *clientOptionsOption) applyToClient(config *clientConfig) {
-	for _, option := range o.options {
-		option.applyToClient(config)
-	}
-}
-
-type codecOption struct {
-	Codec Codec
-}
-
-func (o *codecOption) applyToClient(config *clientConfig) {
-	if o.Codec == nil || o.Codec.Name() == "" {
-		return
-	}
-	config.Codec = o.Codec
-}
-
-func (o *codecOption) applyToHandler(config *handlerConfig) {
-	if o.Codec == nil || o.Codec.Name() == "" {
-		return
-	}
-	config.Codecs[o.Codec.Name()] = o.Codec
-}
-
-type compressionOption struct {
-	Name            string
-	CompressionPool *compressionPool
-}
-
-func (o *compressionOption) applyToClient(config *clientConfig) {
-	o.apply(&config.CompressionNames, config.CompressionPools)
-}
-
-func (o *compressionOption) applyToHandler(config *handlerConfig) {
-	o.apply(&config.CompressionNames, config.CompressionPools)
-}
-
-func (o *compressionOption) apply(configuredNames *[]string, configuredPools map[string]*compressionPool) {
-	if o.Name == "" {
-		return
-	}
-	if o.CompressionPool == nil {
-		delete(configuredPools, o.Name)
-		var names []string
-		for _, name := range *configuredNames {
-			if name == o.Name {
-				continue
-			}
-			names = append(names, name)
-		}
-		*configuredNames = names
-		return
-	}
-	configuredPools[o.Name] = o.CompressionPool
-	*configuredNames = append(*configuredNames, o.Name)
-}
-
-type compressMinBytesOption struct {
-	Min int
-}
-
-func (o *compressMinBytesOption) applyToClient(config *clientConfig) {
-	config.CompressMinBytes = o.Min
-}
-
-func (o *compressMinBytesOption) applyToHandler(config *handlerConfig) {
-	config.CompressMinBytes = o.Min
-}
-
-type readMaxBytesOption struct {
-	Max int
-}
-
-func (o *readMaxBytesOption) applyToClient(config *clientConfig) {
-	config.ReadMaxBytes = o.Max
-}
-
-func (o *readMaxBytesOption) applyToHandler(config *handlerConfig) {
-	config.ReadMaxBytes = o.Max
-}
-
-type sendMaxBytesOption struct {
-	Max int
-}
-
-func (o *sendMaxBytesOption) applyToClient(config *clientConfig) {
-	config.SendMaxBytes = o.Max
-}
-
-func (o *sendMaxBytesOption) applyToHandler(config *handlerConfig) {
-	config.SendMaxBytes = o.Max
-}
-
-type handlerOptionsOption struct {
-	options []HandlerOption
-}
-
-func (o *handlerOptionsOption) applyToHandler(config *handlerConfig) {
-	for _, option := range o.options {
-		option.applyToHandler(config)
-	}
-}
-
-type requestGateOption struct {
-	gate RequestGateFunc
-}
-
-func (o *requestGateOption) applyToHandler(config *handlerConfig) {
-	config.RequestGates = append(config.RequestGates, o.gate)
-}
-
-type requireConnectProtocolHeaderOption struct{}
-
-func (o *requireConnectProtocolHeaderOption) applyToHandler(config *handlerConfig) {
-	config.RequireConnectProtocolHeader = true
-}
-
-type idempotencyOption struct {
-	idempotencyLevel IdempotencyLevel
-}
-
-func (o *idempotencyOption) applyToClient(config *clientConfig) {
-	config.IdempotencyLevel = o.idempotencyLevel
-}
-
-func (o *idempotencyOption) applyToHandler(config *handlerConfig) {
-	config.IdempotencyLevel = o.idempotencyLevel
-}
-
-type grpcOption struct {
-	web bool
-}
-
-func (o *grpcOption) applyToClient(config *clientConfig) {
-	config.Protocol = &protocolGRPC{web: o.web}
-}
-
-type enableGet struct{}
-
-func (o *enableGet) applyToClient(config *clientConfig) {
-	config.EnableGet = true
-}
-
-// WithHTTPGetMaxURLSize sets the maximum allowable URL length for GET requests
-// made using the Connect protocol. It has no effect on gRPC or gRPC-Web
-// clients, since those protocols are POST-only.
-//
-// Limiting the URL size is useful as most user agents, proxies, and servers
-// have limits on the allowable length of a URL. For example, Apache and Nginx
-// limit the size of a request line to around 8 KiB, meaning that maximum
-// length of a URL is a bit smaller than this. If you run into URL size
-// limitations imposed by your network infrastructure and don't know the
-// maximum allowable size, or if you'd prefer to be cautious from the start, a
-// 4096 byte (4 KiB) limit works with most common proxies and CDNs.
-//
-// If fallback is set to true and the URL would be longer than the configured
-// maximum value, the request will be sent as an HTTP POST instead. If fallback
-// is set to false, the request will fail with [CodeResourceExhausted].
-//
-// By default, Connect-protocol clients with GET requests enabled may send a
-// URL of any size.
-func WithHTTPGetMaxURLSize(bytes int, fallback bool) ClientOption {
-	return &getURLMaxBytes{Max: bytes, Fallback: fallback}
-}
-
-type getURLMaxBytes struct {
-	Max      int
-	Fallback bool
-}
-
-func (o *getURLMaxBytes) applyToClient(config *clientConfig) {
-	config.GetURLMaxBytes = o.Max
-	config.GetUseFallback = o.Fallback
-}
-
-type interceptorsOption struct {
-	Interceptors []Interceptor
-}
-
-func (o *interceptorsOption) applyToClient(config *clientConfig) {
-	config.Interceptor = o.chainWith(config.Interceptor)
-}
-
-func (o *interceptorsOption) applyToHandler(config *handlerConfig) {
-	config.Interceptor = o.chainWith(config.Interceptor)
-}
-
-func (o *interceptorsOption) chainWith(current Interceptor) Interceptor {
-	if len(o.Interceptors) == 0 {
-		return current
-	}
-	if current == nil && len(o.Interceptors) == 1 {
-		return o.Interceptors[0]
-	}
-	if current == nil && len(o.Interceptors) > 1 {
-		return newChain(o.Interceptors)
-	}
-	return newChain(append([]Interceptor{current}, o.Interceptors...))
-}
-
-type optionsOption struct {
-	options []Option
-}
-
-func (o *optionsOption) applyToClient(config *clientConfig) {
-	for _, option := range o.options {
-		option.applyToClient(config)
-	}
-}
-
-func (o *optionsOption) applyToHandler(config *handlerConfig) {
-	for _, option := range o.options {
-		option.applyToHandler(config)
-	}
-}
-
-type sendCompressionOption struct {
-	Name string
-}
-
-func (o *sendCompressionOption) applyToClient(config *clientConfig) {
-	config.RequestCompressionName = o.Name
-}
-
-func withGzip() Option {
-	return &compressionOption{
-		Name: compressionGzip,
-		CompressionPool: newCompressionPool(
-			func() Decompressor { return &gzip.Reader{} },
-			func() Compressor { return gzip.NewWriter(io.Discard) },
-		),
-	}
-}
-
-func withProtoBinaryCodec() Option {
-	return WithCodec(&protoBinaryCodec{})
-}
-
-func withProtoJSONCodecs() HandlerOption {
-	return WithHandlerOptions(
-		WithCodec(&protoJSONCodec{codecNameJSON}),
-		WithCodec(&protoJSONCodec{codecNameJSONCharsetUTF8}),
-	)
-}
-
 type conditionalHandlerOptions struct {
 	conditional func(spec Spec) []HandlerOption
 }
 
-func (o *conditionalHandlerOptions) applyToHandler(config *handlerConfig) {
-	spec := config.newSpec()
-	if spec.Procedure == "" {
-		return // ignore empty specs
+func (o *conditionalHandlerOptions) applyToHandler(cfg *handlerConfig) {
+	if o.conditional == nil {
+		return
 	}
-	for _, option := range o.conditional(spec) {
-		option.applyToHandler(config)
+	spec := cfg.newSpec()
+	if spec.Procedure == "" {
+		return // matches v1's behavior of ignoring empty specs (e.g. ErrorWriter)
+	}
+	for _, sub := range o.conditional(spec) {
+		sub.applyToHandler(cfg)
+	}
+}
+
+type clientOptionsBundle struct{ options []ClientOption }
+
+func (o *clientOptionsBundle) applyToClient(c *clientConfig) {
+	for _, sub := range o.options {
+		sub.applyToClient(c)
+	}
+}
+
+type handlerOptionsBundle struct{ options []HandlerOption }
+
+func (o *handlerOptionsBundle) applyToHandler(c *handlerConfig) {
+	for _, sub := range o.options {
+		sub.applyToHandler(c)
+	}
+}
+
+type optionsBundle struct{ options []Option }
+
+func (o *optionsBundle) applyToClient(c *clientConfig) {
+	for _, sub := range o.options {
+		sub.applyToClient(c)
+	}
+}
+
+func (o *optionsBundle) applyToHandler(c *handlerConfig) {
+	for _, sub := range o.options {
+		sub.applyToHandler(c)
 	}
 }

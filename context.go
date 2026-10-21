@@ -17,6 +17,9 @@ package connect
 import (
 	"context"
 	"net/http"
+
+	connectv2 "connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
 )
 
 // CallInfo represents information relevant to an RPC call.
@@ -73,16 +76,108 @@ type CallInfo interface {
 // RequestHeader() are undefined if the context is used with concurrent RPCs.
 func NewClientContext(ctx context.Context) (context.Context, CallInfo) {
 	info := &clientCallInfo{}
-	return context.WithValue(ctx, clientCallInfoContextKey{}, info), info
+	ctx = context.WithValue(ctx, clientCallInfoContextKey{}, info)
+	return ctx, info
 }
 
-// CallInfoForHandlerContext returns the CallInfo for the given handler (i.e. incoming) context, if there is one.
+// CallInfoForHandlerContext returns the CallInfo for the given handler (i.e.
+// incoming) context, if there is one.
 func CallInfoForHandlerContext(ctx context.Context) (CallInfo, bool) {
 	value, ok := ctx.Value(handlerCallInfoContextKey{}).(CallInfo)
 	return value, ok
 }
 
-// handlerCallInfo is a CallInfo implementation used for unary handlers.
+// clientCallInfoContextKey is the key used to store client call info in context.
+type clientCallInfoContextKey struct{}
+
+// sentinelContextKey holds a snapshot of [clientCallInfoContextKey]'s value
+// at dispatch time. Each interceptor thunk compares the live value against
+// the snapshot; a divergence means an interceptor swapped in a freshly
+// minted CallInfo via [NewClientContext], which would silently strip any
+// chain-accumulated headers.
+type sentinelContextKey struct{}
+
+// installSentinel records the current CallInfo (creating one if necessary)
+// under [sentinelContextKey] so [checkClientContextSentinel] can detect
+// interceptors that introduce a new client context. It returns the augmented
+// context.
+func installSentinel(ctx context.Context) context.Context {
+	if _, ok := clientCallInfoFromContext(ctx); !ok {
+		ctx, _ = NewClientContext(ctx)
+	}
+	info, _ := clientCallInfoFromContext(ctx)
+	return context.WithValue(ctx, sentinelContextKey{}, info)
+}
+
+// checkClientContextSentinel reports whether the CallInfo in ctx matches the
+// one captured by [installSentinel]. A mismatch happens when an interceptor
+// re-wrapped ctx with [NewClientContext]; v1 surfaced this as an explicit
+// error rather than letting the chain silently lose state.
+func checkClientContextSentinel(ctx context.Context) error {
+	if ctx.Value(clientCallInfoContextKey{}) != ctx.Value(sentinelContextKey{}) {
+		return errNewClientContextProhibited
+	}
+	return nil
+}
+
+// handlerCallInfoContextKey is the key used to store handler call info in context.
+type handlerCallInfoContextKey struct{}
+
+// clientCallInfo is the v1-facing CallInfo implementation for clients.
+// It owns the request header and reads response/trailer state from the
+// underlying v2 [*connectv2.CallInfo] populated by the transport.
+type clientCallInfo struct {
+	spec   Spec
+	peer   Peer
+	method string
+
+	requestHeader http.Header
+
+	// v2Info, if non-nil, is the v2 call info attached on dispatch. We
+	// project its ResponseHeader and ResponseTrailer back into v1 headers
+	// on demand so the v1 API contract (live access to response headers/
+	// trailers) is preserved.
+	v2Info *connectv2.CallInfo
+	// httpInfo, if non-nil, is the connecthttp ClientInfo whose embedded
+	// CallInfo matches v2Info. It is used to surface the HTTP-level
+	// HTTPMethod once the transport has dispatched.
+	httpInfo *connecthttp.ClientInfo
+}
+
+func (c *clientCallInfo) Spec() Spec { return c.spec }
+func (c *clientCallInfo) Peer() Peer { return c.peer }
+func (c *clientCallInfo) RequestHeader() http.Header {
+	if c.requestHeader == nil {
+		c.requestHeader = make(http.Header)
+	}
+	return c.requestHeader
+}
+func (c *clientCallInfo) ResponseHeader() http.Header {
+	if c.v2Info == nil {
+		return nil
+	}
+	return metadataToHTTPHeader(c.v2Info.ResponseHeader())
+}
+func (c *clientCallInfo) ResponseTrailer() http.Header {
+	if c.v2Info == nil {
+		return nil
+	}
+	return metadataToHTTPHeader(c.v2Info.ResponseTrailer())
+}
+func (c *clientCallInfo) HTTPMethod() string {
+	if c.httpInfo != nil {
+		if m := c.httpInfo.HTTPMethod(); m != "" {
+			return m
+		}
+	}
+	return c.method
+}
+func (c *clientCallInfo) internalOnly() {}
+
+// handlerCallInfo is the v1-facing CallInfo for unary handlers. The request
+// header is captured once from the v2 [*connectv2.CallInfo] at handler entry;
+// response header and trailer are owned by the v1 handler so user code can
+// mutate them freely before the shim copies them into v2 metadata on send.
 type handlerCallInfo struct {
 	spec            Spec
 	peer            Peer
@@ -92,152 +187,105 @@ type handlerCallInfo struct {
 	responseTrailer http.Header
 }
 
-func (c *handlerCallInfo) Spec() Spec {
-	return c.spec
-}
-
-func (c *handlerCallInfo) Peer() Peer {
-	return c.peer
-}
-
+func (c *handlerCallInfo) Spec() Spec { return c.spec }
+func (c *handlerCallInfo) Peer() Peer { return c.peer }
 func (c *handlerCallInfo) RequestHeader() http.Header {
 	if c.requestHeader == nil {
 		c.requestHeader = make(http.Header)
 	}
 	return c.requestHeader
 }
-
 func (c *handlerCallInfo) ResponseHeader() http.Header {
 	if c.responseHeader == nil {
 		c.responseHeader = make(http.Header)
 	}
 	return c.responseHeader
 }
-
 func (c *handlerCallInfo) ResponseTrailer() http.Header {
 	if c.responseTrailer == nil {
 		c.responseTrailer = make(http.Header)
 	}
 	return c.responseTrailer
 }
-
 func (c *handlerCallInfo) HTTPMethod() string {
-	return c.method
+	if c.method != "" {
+		return c.method
+	}
+	return http.MethodPost
 }
-
-// internalOnly implements CallInfo.
 func (c *handlerCallInfo) internalOnly() {}
 
-// streamingHandlerCallInfo is a CallInfo implementation used for streaming RPC handlers.
+// streamingHandlerCallInfo is the v1-facing CallInfo for streaming handlers.
+// It delegates all accessors to the underlying conn so user code observing the
+// CallInfo sees the same state as user code holding the conn directly.
 type streamingHandlerCallInfo struct {
 	conn StreamingHandlerConn
 }
 
-func (c *streamingHandlerCallInfo) Spec() Spec {
-	return c.conn.Spec()
-}
-
-func (c *streamingHandlerCallInfo) Peer() Peer {
-	return c.conn.Peer()
-}
-
-func (c *streamingHandlerCallInfo) RequestHeader() http.Header {
-	return c.conn.RequestHeader()
-}
-
-func (c *streamingHandlerCallInfo) ResponseHeader() http.Header {
-	return c.conn.ResponseHeader()
-}
-
+func (c *streamingHandlerCallInfo) Spec() Spec                  { return c.conn.Spec() }
+func (c *streamingHandlerCallInfo) Peer() Peer                  { return c.conn.Peer() }
+func (c *streamingHandlerCallInfo) RequestHeader() http.Header  { return c.conn.RequestHeader() }
+func (c *streamingHandlerCallInfo) ResponseHeader() http.Header { return c.conn.ResponseHeader() }
 func (c *streamingHandlerCallInfo) ResponseTrailer() http.Header {
 	return c.conn.ResponseTrailer()
 }
+func (c *streamingHandlerCallInfo) HTTPMethod() string { return http.MethodPost }
+func (c *streamingHandlerCallInfo) internalOnly()      {}
 
-func (c *streamingHandlerCallInfo) HTTPMethod() string {
-	// All stream calls are POSTs
-	return http.MethodPost
+// clientCallInfoFromContext returns the v1 client CallInfo from ctx if one
+// is attached via [NewClientContext].
+func clientCallInfoFromContext(ctx context.Context) (*clientCallInfo, bool) {
+	v, ok := ctx.Value(clientCallInfoContextKey{}).(*clientCallInfo)
+	return v, ok
 }
 
-// internalOnly implements CallInfo.
-func (c *streamingHandlerCallInfo) internalOnly() {}
-
-// clientCallInfo is a CallInfo implementation used for clients.
-type clientCallInfo struct {
-	responseSource
-
-	spec          Spec
-	peer          Peer
-	method        string
-	requestHeader http.Header
-}
-
-func (c *clientCallInfo) Spec() Spec {
-	return c.spec
-}
-
-func (c *clientCallInfo) Peer() Peer {
-	return c.peer
-}
-
-func (c *clientCallInfo) RequestHeader() http.Header {
-	if c.requestHeader == nil {
-		c.requestHeader = make(http.Header)
-	}
-	return c.requestHeader
-}
-
-func (c *clientCallInfo) ResponseHeader() http.Header {
-	if c.responseSource == nil {
-		return nil
-	}
-	return c.responseSource.ResponseHeader()
-}
-
-func (c *clientCallInfo) ResponseTrailer() http.Header {
-	if c.responseSource == nil {
-		return nil
-	}
-	return c.responseSource.ResponseTrailer()
-}
-
-func (c *clientCallInfo) HTTPMethod() string {
-	return c.method
-}
-
-// internalOnly implements CallInfo.
-func (c *clientCallInfo) internalOnly() {}
-
-// clientCallInfoContextKey is the key used to store client call info in context.
-type clientCallInfoContextKey struct{}
-
-// sentinelContextKey is the key used to store a copy of client call info in context
-// when a request is made.
-// Each step in an interceptor chain compares the actual call info with the
-// sentinel call info. If the two values are different, the request will
-// return an error in the interceptor.
-// This protects against changing the call info in interceptors, which is prohibited
-// as it would allow users to modify call info mid-flight independent of the actual
-// request or response.
-// Users who wish to modify call info data such as headers and trailers should instead
-// use Connect [Request] and [Response] wrapper types.
-type sentinelContextKey struct{}
-
-// handlerCallInfoContextKey is the key used to store handler call info in context.
-type handlerCallInfoContextKey struct{}
-
-// responseSource indicates a type that manages response headers and trailers.
-type responseSource interface {
-	ResponseHeader() http.Header
-	ResponseTrailer() http.Header
-}
-
-// clientCallInfoForContext gets the call info from a client/outgoing context.
-func clientCallInfoForContext(ctx context.Context) (*clientCallInfo, bool) {
-	info, ok := ctx.Value(clientCallInfoContextKey{}).(*clientCallInfo)
-	return info, ok
-}
-
-// newHandlerContext creates a new handler/incoming context.
+// newHandlerContext returns ctx augmented with the given handler call info so
+// [CallInfoForHandlerContext] can find it.
 func newHandlerContext(ctx context.Context, info CallInfo) context.Context {
 	return context.WithValue(ctx, handlerCallInfoContextKey{}, info)
+}
+
+// metadataToHTTPHeader returns a live http.Header view onto m's keys. Mutations
+// to the returned header do not propagate back to m. Used wherever v1 code
+// expects an http.Header.
+func metadataToHTTPHeader(m *connectv2.Header) http.Header {
+	if m == nil {
+		return http.Header{}
+	}
+	h := make(http.Header, m.Len())
+	for k, vs := range m.All() {
+		h[k] = append([]string(nil), vs...)
+	}
+	return h
+}
+
+// copyHTTPHeaderIntoMetadata merges src into dst. Existing keys in dst are
+// overwritten; keys in src that already exist in dst preserve dst's previous
+// values for headers not in src. Used when the shim transfers the user's
+// http.Header onto v2's Metadata at the call boundary.
+func copyHTTPHeaderIntoMetadata(dst *connectv2.Header, src http.Header) {
+	if dst == nil {
+		return
+	}
+	for k, vs := range src {
+		if len(vs) == 0 {
+			continue
+		}
+		dst.SetValues(k, append([]string(nil), vs...))
+	}
+}
+
+// mergeMetadataWithHTTPHeader appends every value in src into dst. Unlike
+// [copyHTTPHeaderIntoMetadata], existing values in dst are preserved and src
+// values are added with [connectv2.Header.Add], so calling this twice with
+// different sources accumulates instead of overwriting.
+func mergeMetadataWithHTTPHeader(dst *connectv2.Header, src http.Header) {
+	if dst == nil {
+		return
+	}
+	for k, vs := range src {
+		for _, v := range vs {
+			dst.Add(k, v)
+		}
+	}
 }

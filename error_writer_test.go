@@ -22,6 +22,20 @@ import (
 	"connectrpc.com/connect/internal/assert"
 )
 
+// Wire protocol constants. The protocol implementation lives in v2.
+const (
+	connectHeaderProtocolVersion      = "Connect-Protocol-Version"
+	connectProtocolVersion            = "1"
+	connectUnaryContentTypePrefix     = "application/"
+	connectStreamingContentTypePrefix = "application/connect+"
+	connectUnaryConnectQueryParameter = "connect"
+	connectUnaryConnectQueryValue     = "v" + connectProtocolVersion
+	grpcContentTypeDefault            = "application/grpc"
+	grpcWebContentTypeDefault         = "application/grpc-web"
+	grpcContentTypePrefix             = grpcContentTypeDefault + "+"
+	grpcWebContentTypePrefix          = grpcWebContentTypeDefault + "+"
+)
+
 func TestErrorWriter(t *testing.T) {
 	t.Parallel()
 	t.Run("RequireConnectProtocolHeader", func(t *testing.T) {

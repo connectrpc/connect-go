@@ -30,13 +30,12 @@ func TestAcceptEncodingOrdering(t *testing.T) {
 		expect            = compressionGzip + "," + compressionBrotli
 	)
 
-	withFakeBrotli, ok := withGzip().(*compressionOption)
-	assert.True(t, ok)
-	withFakeBrotli.Name = compressionBrotli
+	gzip := newGzipEntry()
+	withFakeBrotli := WithAcceptCompression(compressionBrotli, gzip.newDecompressor, gzip.newCompressor)
 
 	var called bool
 	verify := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got := r.Header.Get(connectUnaryHeaderAcceptCompression)
+		got := r.Header.Get("Accept-Encoding")
 		assert.Equal(t, got, expect)
 		w.WriteHeader(http.StatusOK)
 		called = true
@@ -46,7 +45,7 @@ func TestAcceptEncodingOrdering(t *testing.T) {
 		server.Client(),
 		server.URL(),
 		withFakeBrotli,
-		withGzip(),
+		WithAcceptCompression(compressionGzip, gzip.newDecompressor, gzip.newCompressor),
 	)
 	_, _ = client.CallUnary(t.Context(), NewRequest(&emptypb.Empty{}))
 	assert.True(t, called)
@@ -54,14 +53,13 @@ func TestAcceptEncodingOrdering(t *testing.T) {
 
 func TestClientCompressionOptionTest(t *testing.T) {
 	t.Parallel()
-	const testURL = "http://foo.bar.com/service/method"
+	const testProc = "/service/method"
 
 	checkPools := func(t *testing.T, config *clientConfig) {
 		t.Helper()
-		assert.Equal(t, len(config.CompressionNames), len(config.CompressionPools))
-		for _, name := range config.CompressionNames {
-			pool := config.CompressionPools[name]
-			assert.NotNil(t, pool)
+		assert.Equal(t, len(config.compressorOrder), len(config.compressors))
+		for _, name := range config.compressorOrder {
+			assert.NotNil(t, config.compressors[name])
 		}
 	}
 	dummyDecompressCtor := func() Decompressor { return nil }
@@ -69,41 +67,36 @@ func TestClientCompressionOptionTest(t *testing.T) {
 
 	t.Run("defaults", func(t *testing.T) {
 		t.Parallel()
-		config, err := newClientConfig(testURL, nil)
-		assert.Nil(t, err)
-		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
+		config := newClientConfig(testProc, nil)
+		assert.Equal(t, config.compressorOrder, []string{compressionGzip})
 		checkPools(t, config)
 	})
 	t.Run("WithAcceptCompression", func(t *testing.T) {
 		t.Parallel()
 		opts := []ClientOption{WithAcceptCompression("foo", dummyDecompressCtor, dummyCompressCtor)}
-		config, err := newClientConfig(testURL, opts)
-		assert.Nil(t, err)
-		assert.Equal(t, config.CompressionNames, []string{compressionGzip, "foo"})
+		config := newClientConfig(testProc, opts)
+		assert.Equal(t, config.compressorOrder, []string{compressionGzip, "foo"})
 		checkPools(t, config)
 	})
 	t.Run("WithAcceptCompression-empty-name-noop", func(t *testing.T) {
 		t.Parallel()
 		opts := []ClientOption{WithAcceptCompression("", dummyDecompressCtor, dummyCompressCtor)}
-		config, err := newClientConfig(testURL, opts)
-		assert.Nil(t, err)
-		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
+		config := newClientConfig(testProc, opts)
+		assert.Equal(t, config.compressorOrder, []string{compressionGzip})
 		checkPools(t, config)
 	})
 	t.Run("WithAcceptCompression-nil-ctors-noop", func(t *testing.T) {
 		t.Parallel()
 		opts := []ClientOption{WithAcceptCompression("foo", nil, nil)}
-		config, err := newClientConfig(testURL, opts)
-		assert.Nil(t, err)
-		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
+		config := newClientConfig(testProc, opts)
+		assert.Equal(t, config.compressorOrder, []string{compressionGzip})
 		checkPools(t, config)
 	})
 	t.Run("WithAcceptCompression-nil-ctors-unregisters", func(t *testing.T) {
 		t.Parallel()
 		opts := []ClientOption{WithAcceptCompression("gzip", nil, nil)}
-		config, err := newClientConfig(testURL, opts)
-		assert.Nil(t, err)
-		assert.Equal(t, config.CompressionNames, nil)
+		config := newClientConfig(testProc, opts)
+		assert.Equal(t, len(config.compressorOrder), 0)
 		checkPools(t, config)
 	})
 }
@@ -114,10 +107,9 @@ func TestHandlerCompressionOptionTest(t *testing.T) {
 
 	checkPools := func(t *testing.T, config *handlerConfig) {
 		t.Helper()
-		assert.Equal(t, len(config.CompressionNames), len(config.CompressionPools))
-		for _, name := range config.CompressionNames {
-			pool := config.CompressionPools[name]
-			assert.NotNil(t, pool)
+		assert.Equal(t, len(config.compressorOrder), len(config.compressors))
+		for _, name := range config.compressorOrder {
+			assert.NotNil(t, config.compressors[name])
 		}
 	}
 	dummyDecompressCtor := func() Decompressor { return nil }
@@ -126,35 +118,35 @@ func TestHandlerCompressionOptionTest(t *testing.T) {
 	t.Run("defaults", func(t *testing.T) {
 		t.Parallel()
 		config := newHandlerConfig(testProc, StreamTypeUnary, nil)
-		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
+		assert.Equal(t, config.compressorOrder, []string{compressionGzip})
 		checkPools(t, config)
 	})
 	t.Run("WithCompression", func(t *testing.T) {
 		t.Parallel()
 		opts := []HandlerOption{WithCompression("foo", dummyDecompressCtor, dummyCompressCtor)}
 		config := newHandlerConfig(testProc, StreamTypeUnary, opts)
-		assert.Equal(t, config.CompressionNames, []string{compressionGzip, "foo"})
+		assert.Equal(t, config.compressorOrder, []string{compressionGzip, "foo"})
 		checkPools(t, config)
 	})
 	t.Run("WithCompression-empty-name-noop", func(t *testing.T) {
 		t.Parallel()
 		opts := []HandlerOption{WithCompression("", dummyDecompressCtor, dummyCompressCtor)}
 		config := newHandlerConfig(testProc, StreamTypeUnary, opts)
-		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
+		assert.Equal(t, config.compressorOrder, []string{compressionGzip})
 		checkPools(t, config)
 	})
 	t.Run("WithCompression-nil-ctors-noop", func(t *testing.T) {
 		t.Parallel()
 		opts := []HandlerOption{WithCompression("foo", nil, nil)}
 		config := newHandlerConfig(testProc, StreamTypeUnary, opts)
-		assert.Equal(t, config.CompressionNames, []string{compressionGzip})
+		assert.Equal(t, config.compressorOrder, []string{compressionGzip})
 		checkPools(t, config)
 	})
 	t.Run("WithCompression-nil-ctors-unregisters", func(t *testing.T) {
 		t.Parallel()
 		opts := []HandlerOption{WithCompression("gzip", nil, nil)}
 		config := newHandlerConfig(testProc, StreamTypeUnary, opts)
-		assert.Equal(t, config.CompressionNames, nil)
+		assert.Equal(t, len(config.compressorOrder), 0)
 		checkPools(t, config)
 	})
 }

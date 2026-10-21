@@ -15,127 +15,58 @@
 package connect
 
 import (
-	"encoding/base64"
+	"fmt"
 	"net/http"
+	"runtime"
+
+	connectv2 "connectrpc.com/connect/v2"
 )
 
-//nolint:gochecknoglobals
-var protocolHeaders = map[string]struct{}{
-	// HTTP headers.
-	headerContentType:     {},
-	headerContentLength:   {},
-	headerContentEncoding: {},
-	headerHost:            {},
-	headerUserAgent:       {},
-	headerTrailer:         {},
-	headerDate:            {},
-	// Connect headers.
-	connectUnaryHeaderAcceptCompression:     {},
-	connectUnaryTrailerPrefix:               {},
-	connectStreamingHeaderCompression:       {},
-	connectStreamingHeaderAcceptCompression: {},
-	connectHeaderTimeout:                    {},
-	connectHeaderProtocolVersion:            {},
-	// gRPC headers.
-	grpcHeaderCompression:       {},
-	grpcHeaderAcceptCompression: {},
-	grpcHeaderTimeout:           {},
-	grpcHeaderStatus:            {},
-	grpcHeaderMessage:           {},
-	grpcHeaderDetails:           {},
-}
+const (
+	headerUserAgent  = "User-Agent"
+	headerXUserAgent = "X-User-Agent"
+	grpcHeaderStatus = "Grpc-Status"
+)
+
+var (
+	// defaultConnectUserAgent returns a User-Agent string similar to those used in gRPC.
+	//
+	//nolint:gochecknoglobals
+	defaultConnectUserAgent = fmt.Sprintf("connect-go/%s (%s)", Version, runtime.Version())
+	// defaultGrpcUserAgent follows
+	// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents.
+	//
+	//nolint:gochecknoglobals
+	defaultGrpcUserAgent = fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())
+)
 
 // EncodeBinaryHeader base64-encodes the data. It always emits unpadded values.
 //
 // In the Connect, gRPC, and gRPC-Web protocols, binary headers must have keys
 // ending in "-Bin".
 func EncodeBinaryHeader(data []byte) string {
-	// gRPC specification says that implementations should emit unpadded values.
-	return base64.RawStdEncoding.EncodeToString(data)
+	return connectv2.EncodeBinaryHeader(data)
 }
 
-// DecodeBinaryHeader base64-decodes the data. It can decode padded or unpadded
-// values. Following usual HTTP semantics, multiple base64-encoded values may
-// be joined with a comma. When receiving such comma-separated values, split
-// them with [strings.Split] before calling DecodeBinaryHeader.
+// DecodeBinaryHeader base64-decodes the data. It can decode padded or
+// unpadded values. Following usual HTTP semantics, multiple base64-encoded
+// values may be joined with a comma. When receiving such comma-separated
+// values, split them with [strings.Split] before calling DecodeBinaryHeader.
 //
 // Binary headers sent using the Connect, gRPC, and gRPC-Web protocols have
 // keys ending in "-Bin".
 func DecodeBinaryHeader(data string) ([]byte, error) {
-	if len(data)%4 != 0 {
-		// Data definitely isn't padded.
-		return base64.RawStdEncoding.DecodeString(data)
-	}
-	// Either the data was padded, or padding wasn't necessary. In both cases,
-	// the padding-aware decoder works.
-	return base64.StdEncoding.DecodeString(data)
+	return connectv2.DecodeBinaryHeader(data)
 }
 
-func mergeHeaders(into, from http.Header) {
-	for key, vals := range from {
-		if len(vals) == 0 {
-			// For response trailers, net/http will pre-populate entries
-			// with nil values based on the "Trailer" header. But if there
-			// are no actual values for those keys, we skip them.
+// mergeHeaders copies entries from src into dst, appending values. Empty
+// value slices are skipped to match net/http's pre-population of trailer
+// headers.
+func mergeHeaders(dst, src http.Header) {
+	for k, vs := range src {
+		if len(vs) == 0 {
 			continue
 		}
-		into[key] = append(into[key], vals...)
+		dst[k] = append(dst[k], vs...)
 	}
-}
-
-// mergeNonProtocolHeaders merges headers excluding protocol headers defined in
-// protocolHeaders.
-func mergeNonProtocolHeaders(into, from http.Header) {
-	for key, vals := range from {
-		if len(vals) == 0 {
-			// For response trailers, net/http will pre-populate entries
-			// with nil values based on the "Trailer" header. But if there
-			// are no actual values for those keys, we skip them.
-			continue
-		}
-		if _, isProtocolHeader := protocolHeaders[key]; !isProtocolHeader {
-			into[key] = append(into[key], vals...)
-		}
-	}
-}
-
-// getHeaderCanonical is a shortcut for Header.Get() which
-// bypasses the CanonicalMIMEHeaderKey operation when we
-// know the key is already in canonical form.
-func getHeaderCanonical(h http.Header, key string) string {
-	if h == nil {
-		return ""
-	}
-	v := h[key]
-	if len(v) == 0 {
-		return ""
-	}
-	return v[0]
-}
-
-// setUserAgentIfAbsent sets the User-Agent header to the given value, but
-// only if the caller has not already provided one. We check for the key's
-// presence rather than comparing getHeaderCanonical(...) to "" so that a
-// caller can suppress the default entirely by explicitly setting a nil/empty
-// slice of values or an empty value.
-func setUserAgentIfAbsent(header http.Header, value string) {
-	// headerUserAgent is already in canonical form, so we can index the map
-	// directly and bypass the checks in Header.Get and Header.Set.
-	if _, ok := header[headerUserAgent]; !ok {
-		header[headerUserAgent] = []string{value}
-	}
-}
-
-// setHeaderCanonical is a shortcut for Header.Set() which
-// bypasses the CanonicalMIMEHeaderKey operation when we
-// know the key is already in canonical form.
-func setHeaderCanonical(h http.Header, key, value string) {
-	h[key] = []string{value}
-}
-
-// delHeaderCanonical is a shortcut for Header.Del() which
-// bypasses the CanonicalMIMEHeaderKey operation when we
-// know the key is already in canonical form.
-func delHeaderCanonical(h http.Header, key string) {
-	delete(h, key)
 }

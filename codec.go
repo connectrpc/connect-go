@@ -26,9 +26,8 @@ import (
 )
 
 const (
-	codecNameProto           = "proto"
-	codecNameJSON            = "json"
-	codecNameJSONCharsetUTF8 = codecNameJSON + "; charset=utf-8"
+	codecNameProto = "proto"
+	codecNameJSON  = "json"
 )
 
 // Codec marshals structs (typically generated from a schema) to and from bytes.
@@ -139,9 +138,7 @@ func (c *protoBinaryCodec) MarshalStable(message any) ([]byte, error) {
 	return options.Marshal(protoMessage)
 }
 
-func (c *protoBinaryCodec) IsBinary() bool {
-	return true
-}
+func (c *protoBinaryCodec) IsBinary() bool { return true }
 
 type protoJSONCodec struct {
 	name string
@@ -202,54 +199,7 @@ func (c *protoJSONCodec) MarshalStable(message any) ([]byte, error) {
 	return compactedJSON.Bytes(), nil
 }
 
-func (c *protoJSONCodec) IsBinary() bool {
-	return false
-}
-
-// readOnlyCodecs is a read-only interface to a map of named codecs.
-type readOnlyCodecs interface {
-	// Get gets the Codec with the given name.
-	Get(string) Codec
-	// Protobuf gets the user-supplied protobuf codec, falling back to the default
-	// implementation if necessary.
-	//
-	// This is helpful in the gRPC protocol, where the wire protocol requires
-	// marshaling protobuf structs to binary even if the RPC procedures were
-	// generated from a different IDL.
-	Protobuf() Codec
-	// Names returns a copy of the registered codec names. The returned slice is
-	// safe for the caller to mutate.
-	Names() []string
-}
-
-func newReadOnlyCodecs(nameToCodec map[string]Codec) readOnlyCodecs {
-	return &codecMap{
-		nameToCodec: nameToCodec,
-	}
-}
-
-type codecMap struct {
-	nameToCodec map[string]Codec
-}
-
-func (m *codecMap) Get(name string) Codec {
-	return m.nameToCodec[name]
-}
-
-func (m *codecMap) Protobuf() Codec {
-	if pb, ok := m.nameToCodec[codecNameProto]; ok {
-		return pb
-	}
-	return &protoBinaryCodec{}
-}
-
-func (m *codecMap) Names() []string {
-	names := make([]string, 0, len(m.nameToCodec))
-	for name := range m.nameToCodec {
-		names = append(names, name)
-	}
-	return names
-}
+func (c *protoJSONCodec) IsBinary() bool { return false }
 
 func errNotProto(message any) error {
 	if _, ok := message.(protoiface.MessageV1); ok {

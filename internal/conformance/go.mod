@@ -10,6 +10,7 @@ require (
 	buf.build/go/protoyaml v0.6.0 // indirect
 	cel.dev/expr v0.25.2 // indirect
 	connectrpc.com/connect v1.19.1 // indirect
+	connectrpc.com/connect/v2 v2.0.2-0.20261020190640-2d5a85724a69 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.1.1 // indirect
