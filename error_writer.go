@@ -15,7 +15,6 @@
 package connect
 
 import (
-	"errors"
 	"net/http"
 
 	"connectrpc.com/connect/v2/connecthttp"
@@ -36,7 +35,6 @@ type ErrorWriter struct {
 // [WithRequireConnectProtocolHeader] will assert that Connect protocol
 // requests include the version header allowing the error writer to correctly
 // classify the request.
-//
 // Options supplied via [WithConditionalHandlerOptions] are ignored.
 func NewErrorWriter(opts ...HandlerOption) *ErrorWriter {
 	cfg := newHandlerConfig("", StreamTypeUnary, opts)
@@ -57,36 +55,10 @@ func (w *ErrorWriter) IsSupported(request *http.Request) bool {
 //
 // Write does not read or close the request body.
 func (w *ErrorWriter) Write(response http.ResponseWriter, request *http.Request, err error) error {
-	// NewNotModifiedError signals a Connect-GET conditional response. v2's
-	// connecthttp.ErrorWriter has no 304 path, so emit it here: write the
-	// user's headers (Etag, Cache-Control, ...) and a bare 304, matching v1.
-	// Only Connect GET requests qualify; gRPC and gRPC-Web are POST-only and
-	// treat the sentinel as a CodeUnknown error, so they fall through.
-	if request.Method == http.MethodGet && errors.Is(err, errNotModified) {
-		if v1err, ok := asError(err); ok {
-			writeNonProtocolHeaders(response.Header(), v1err.meta)
-		}
-		response.WriteHeader(http.StatusNotModified)
-		return nil
+	if connectErr, ok := asError(err); ok && !connectErr.wireErr {
+		mergeNonProtocolHeaders(response.Header(), connectErr.meta)
 	}
-	v2err := errToConnectv2(err)
-	v1err, _ := asError(err)
-	if v1err != nil && !v1err.wireErr && len(v1err.meta) > 0 {
-		writeNonProtocolHeaders(response.Header(), v1err.meta)
-	}
-	return w.inner.Write(response, request, v2err)
-}
-
-// writeNonProtocolHeaders copies user-controlled headers from meta onto
-// dst, skipping HTTP- and protocol-reserved keys. Used by ErrorWriter to
-// surface a v1 [*Error.Meta] on the wire alongside the v2-encoded body.
-func writeNonProtocolHeaders(dst, meta http.Header) {
-	for key, vals := range meta {
-		if len(vals) == 0 || isProtocolReservedHeader(key) {
-			continue
-		}
-		dst[http.CanonicalHeaderKey(key)] = append([]string(nil), vals...)
-	}
+	return w.inner.Write(response, request, errToConnectv2(err))
 }
 
 // errToConnectv2 converts an arbitrary error to a v2 *connectv2.Error so

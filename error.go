@@ -57,9 +57,9 @@ var (
 // The [google.golang.org/genproto/googleapis/rpc/errdetails] package contains a
 // variety of Protobuf messages commonly used as error details.
 type ErrorDetail struct {
-	pbAny   *anypb.Any
-	pbInner proto.Message // if nil, must be extracted from pbAny
-	debug   string        // preserve human-readable JSON
+	pbAny    *anypb.Any
+	pbInner  proto.Message // if nil, must be extracted from pbAny
+	wireJSON string        // preserve human-readable JSON
 }
 
 // NewErrorDetail constructs a new error detail. If msg is an *[anypb.Any] then
@@ -219,10 +219,7 @@ func (e *Error) Unwrap() error {
 	return e.err
 }
 
-// Code returns the error's status code. A nil receiver returns
-// [CodeUnknown] to match v2's behavior; v1 historically panicked on nil
-// receivers but the shim now uses [CodeUnknown] so error-construction
-// boundaries never crash the program.
+// Code returns the error's status code.
 func (e *Error) Code() Code {
 	if e == nil {
 		return CodeUnknown
@@ -320,10 +317,6 @@ func isClientDisconnected(err error) bool {
 	return msg == clientDisconnectedMessage || msg == streamClosedMessage
 }
 
-func typeNameForURL(url string) string {
-	return url[strings.LastIndexByte(url, '/')+1:]
-}
-
 // toConnectv2 packs this v1 [*Error] into the matching [*connectv2.Error] for
 // dispatch through the v2 runtime. The local cause chain becomes
 // [connectv2.Error.WithCause] and details are forwarded as their underlying
@@ -349,7 +342,7 @@ func (e *Error) toConnectv2() *connectv2.Error {
 			v2err = v2err.WithDetail(&connectv2.ErrorDetail{
 				Type:  detail.Type(),
 				Value: detail.pbAny.GetValue(),
-				Debug: []byte(detail.debug),
+				Debug: []byte(detail.wireJSON),
 			})
 		}
 	}
@@ -394,8 +387,8 @@ func errorFromConnectv2(err error) *Error {
 	}
 	for _, detail := range v2err.Details() {
 		v1err.details = append(v1err.details, &ErrorDetail{
-			pbAny: connectproto.ErrorDetailToAny(detail),
-			debug: string(detail.Debug),
+			pbAny:    connectproto.ErrorDetailToAny(detail),
+			wireJSON: string(detail.Debug),
 		})
 	}
 	return v1err
@@ -412,3 +405,7 @@ type v2BoundaryError struct {
 
 func (e *v2BoundaryError) Error() string { return e.msg }
 func (e *v2BoundaryError) Unwrap() error { return e.cause }
+
+func typeNameForURL(url string) string {
+	return url[strings.LastIndexByte(url, '/')+1:]
+}

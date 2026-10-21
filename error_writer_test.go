@@ -22,20 +22,6 @@ import (
 	"connectrpc.com/connect/internal/assert"
 )
 
-// Wire protocol constants. The protocol implementation lives in v2.
-const (
-	connectHeaderProtocolVersion      = "Connect-Protocol-Version"
-	connectProtocolVersion            = "1"
-	connectUnaryContentTypePrefix     = "application/"
-	connectStreamingContentTypePrefix = "application/connect+"
-	connectUnaryConnectQueryParameter = "connect"
-	connectUnaryConnectQueryValue     = "v" + connectProtocolVersion
-	grpcContentTypeDefault            = "application/grpc"
-	grpcWebContentTypeDefault         = "application/grpc-web"
-	grpcContentTypePrefix             = grpcContentTypeDefault + "+"
-	grpcWebContentTypePrefix          = grpcWebContentTypeDefault + "+"
-)
-
 func TestErrorWriter(t *testing.T) {
 	t.Parallel()
 	t.Run("RequireConnectProtocolHeader", func(t *testing.T) {
@@ -44,9 +30,9 @@ func TestErrorWriter(t *testing.T) {
 		t.Run("Unary", func(t *testing.T) {
 			t.Parallel()
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost", nil)
-			req.Header.Set("Content-Type", connectUnaryContentTypePrefix+codecNameJSON)
+			req.Header.Set("Content-Type", "application/json")
 			assert.False(t, writer.IsSupported(req))
-			req.Header.Set(connectHeaderProtocolVersion, connectProtocolVersion)
+			req.Header.Set("Connect-Protocol-Version", "1")
 			assert.True(t, writer.IsSupported(req))
 		})
 		t.Run("UnaryGET", func(t *testing.T) {
@@ -54,16 +40,16 @@ func TestErrorWriter(t *testing.T) {
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
 			assert.False(t, writer.IsSupported(req))
 			query := req.URL.Query()
-			query.Set(connectUnaryConnectQueryParameter, connectUnaryConnectQueryValue)
+			query.Set("connect", "v1")
 			req.URL.RawQuery = query.Encode()
 			assert.True(t, writer.IsSupported(req))
 		})
 		t.Run("Stream", func(t *testing.T) {
 			t.Parallel()
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost", nil)
-			req.Header.Set("Content-Type", connectStreamingContentTypePrefix+codecNameJSON)
+			req.Header.Set("Content-Type", "application/connect+json")
 			assert.True(t, writer.IsSupported(req)) // ignores WithRequireConnectProtocolHeader
-			req.Header.Set(connectHeaderProtocolVersion, connectProtocolVersion)
+			req.Header.Set("Connect-Protocol-Version", "1")
 			assert.True(t, writer.IsSupported(req))
 		})
 	})
@@ -73,7 +59,7 @@ func TestErrorWriter(t *testing.T) {
 		t.Run("ConnectUnary", func(t *testing.T) {
 			t.Parallel()
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost", nil)
-			req.Header.Set("Content-Type", connectUnaryContentTypePrefix+codecNameJSON)
+			req.Header.Set("Content-Type", "application/json")
 			assert.True(t, writer.IsSupported(req))
 		})
 		t.Run("ConnectUnaryGET", func(t *testing.T) {
@@ -84,23 +70,23 @@ func TestErrorWriter(t *testing.T) {
 		t.Run("ConnectStream", func(t *testing.T) {
 			t.Parallel()
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost", nil)
-			req.Header.Set("Content-Type", connectStreamingContentTypePrefix+codecNameJSON)
+			req.Header.Set("Content-Type", "application/connect+json")
 			assert.True(t, writer.IsSupported(req))
 		})
 		t.Run("GRPC", func(t *testing.T) {
 			t.Parallel()
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost", nil)
-			req.Header.Set("Content-Type", grpcContentTypeDefault)
+			req.Header.Set("Content-Type", "application/grpc")
 			assert.True(t, writer.IsSupported(req))
-			req.Header.Set("Content-Type", grpcContentTypePrefix+"json")
+			req.Header.Set("Content-Type", "application/grpc+json")
 			assert.True(t, writer.IsSupported(req))
 		})
 		t.Run("GRPCWeb", func(t *testing.T) {
 			t.Parallel()
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost", nil)
-			req.Header.Set("Content-Type", grpcWebContentTypeDefault)
+			req.Header.Set("Content-Type", "application/grpc-web")
 			assert.True(t, writer.IsSupported(req))
-			req.Header.Set("Content-Type", grpcWebContentTypePrefix+"json")
+			req.Header.Set("Content-Type", "application/grpc-web+json")
 			assert.True(t, writer.IsSupported(req))
 		})
 	})
@@ -114,25 +100,25 @@ func TestErrorWriter(t *testing.T) {
 		t.Run("ConnectUnary", func(t *testing.T) {
 			t.Parallel()
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost", nil)
-			req.Header.Set("Content-Type", connectUnaryContentTypePrefix+unknownCodec)
+			req.Header.Set("Content-Type", "application/"+unknownCodec)
 			assert.True(t, writer.IsSupported(req))
 		})
 		t.Run("ConnectStream", func(t *testing.T) {
 			t.Parallel()
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost", nil)
-			req.Header.Set("Content-Type", connectStreamingContentTypePrefix+unknownCodec)
+			req.Header.Set("Content-Type", "application/connect+"+unknownCodec)
 			assert.True(t, writer.IsSupported(req))
 		})
 		t.Run("GRPC", func(t *testing.T) {
 			t.Parallel()
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost", nil)
-			req.Header.Set("Content-Type", grpcContentTypePrefix+unknownCodec)
+			req.Header.Set("Content-Type", "application/grpc+"+unknownCodec)
 			assert.True(t, writer.IsSupported(req))
 		})
 		t.Run("GRPCWeb", func(t *testing.T) {
 			t.Parallel()
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost", nil)
-			req.Header.Set("Content-Type", grpcWebContentTypePrefix+unknownCodec)
+			req.Header.Set("Content-Type", "application/grpc-web+"+unknownCodec)
 			assert.True(t, writer.IsSupported(req))
 		})
 	})

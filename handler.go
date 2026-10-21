@@ -216,7 +216,7 @@ func NewServerStreamHandler[Req, Res any](
 		Spec: spec.toConnectv2(),
 		Handler: func(ctx context.Context, _ connectv2.Spec, v2stream connectv2.ServerStream) error {
 			return runStreamingHandler(ctx, cfg, spec, v2stream, func(ctx context.Context, conn StreamingHandlerConn) error {
-				req, err := receiveUnaryHandlerRequest[Req](ctx, conn, cfg.initializer)
+				req, err := receiveUnaryRequest[Req](conn, cfg.initializer)
 				if err != nil {
 					return err
 				}
@@ -296,12 +296,6 @@ func (m *procedureMux) Handle(pattern string, handler http.Handler) {
 }
 
 // ServeHTTP implements [http.Handler].
-//
-// Bidirectional streaming RPCs require HTTP/2. When a bidi handler receives
-// an HTTP/1.x request, the handler closes the underlying TCP connection and
-// returns 505 HTTP Version Not Supported, matching v1's behavior. This check
-// runs before delegating to the v2 mux so HTTP/1.1 clients see a clear
-// failure mode instead of a hung connection.
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if (h.spec.StreamType&StreamTypeBidi) == StreamTypeBidi && request.ProtoMajor < 2 {
 		writer.Header().Set("Connection", "close")
@@ -538,25 +532,6 @@ func grpcEncodeTimeout(duration time.Duration) string {
 	return "99999999H"
 }
 
-// receiveUnaryHandlerRequest receives one request message and wraps it in a
-// v1 [*Request] for server-streaming handlers.
-func receiveUnaryHandlerRequest[Req any](_ context.Context, conn StreamingHandlerConn, init maybeInitializer) (*Request[Req], error) {
-	var msg Req
-	if err := init.maybe(conn.Spec(), &msg); err != nil {
-		return nil, err
-	}
-	if err := conn.Receive(&msg); err != nil {
-		return nil, err
-	}
-	return &Request[Req]{
-		Msg:    &msg,
-		spec:   conn.Spec(),
-		peer:   conn.Peer(),
-		header: conn.RequestHeader(),
-		method: http.MethodPost,
-	}, nil
-}
-
 // applyHandlerCallInfoOutbound projects the v1 handler's accumulated response
 // header / trailer state into the v2 CallInfo so the transport can encode
 // them on the wire.
@@ -571,11 +546,6 @@ func applyHandlerCallInfoOutbound(v2Info *connectv2.CallInfo, info *handlerCallI
 		copyHTTPHeaderIntoMetadata(v2Info.ResponseTrailer(), info.responseTrailer)
 	}
 }
-
-// connectUnaryTrailerPrefix is the Connect unary on-the-wire marker that
-// distinguishes a trailer from a header: user trailer "X" travels as the
-// response header "Trailer-X".
-const connectUnaryTrailerPrefix = "Trailer-"
 
 // mergeMetadataFromError merges any v1 *Error.Meta() into the v2 response
 // metadata so error headers reach the wire. v1 strips meta from wire-tagged
@@ -607,7 +577,7 @@ func mergeMetadataFromError(v2Info *connectv2.CallInfo, err error, asTrailers bo
 		if len(vals) == 0 {
 			continue
 		}
-		if isProtocolReservedHeader(key) {
+		if _, isProtocolHeader := protocolHeaders[key]; isProtocolHeader {
 			continue
 		}
 		dst := v2Info.ResponseHeader()
@@ -616,13 +586,13 @@ func mergeMetadataFromError(v2Info *connectv2.CallInfo, err error, asTrailers bo
 		case asTrailers:
 			// gRPC and gRPC-Web encode all unary error metadata as trailers.
 			dst = v2Info.ResponseTrailer()
-		case strings.HasPrefix(key, connectUnaryTrailerPrefix):
+		case strings.HasPrefix(key, "Trailer-"):
 			// Connect unary carries trailers as "Trailer-"-prefixed entries in
 			// the error metadata. Route them to the trailer side (de-prefixed)
 			// so the transport re-encodes them; otherwise v2 drops them as
 			// stray "Trailer-*" response headers.
 			dst = v2Info.ResponseTrailer()
-			name = key[len(connectUnaryTrailerPrefix):]
+			name = key[len("Trailer-"):]
 		}
 		for _, v := range vals {
 			dst.Add(name, v)
@@ -642,34 +612,6 @@ func isGRPCFamilyProtocol(ctx context.Context) bool {
 	}
 	switch info.Protocol {
 	case connectv2.ProtocolNameGRPC, connectv2.ProtocolNameGRPCWeb:
-		return true
-	}
-	return false
-}
-
-// isProtocolReservedHeader reports whether key is reserved by HTTP or by
-// the Connect/gRPC wire protocols. v1 historically blocked these from
-// flowing through error.Meta(). The set mirrors v2's protocolHeaders but
-// stays local so this package doesn't depend on connecthttp internals.
-func isProtocolReservedHeader(key string) bool {
-	switch http.CanonicalHeaderKey(key) {
-	case "Content-Type",
-		"Content-Length",
-		"Content-Encoding",
-		"Accept-Encoding",
-		"Host",
-		"Trailer",
-		"Date",
-		"Connect-Protocol-Version",
-		"Connect-Timeout-Ms",
-		"Connect-Content-Encoding",
-		"Connect-Accept-Encoding",
-		"Grpc-Encoding",
-		"Grpc-Accept-Encoding",
-		"Grpc-Timeout",
-		"Grpc-Status",
-		"Grpc-Message",
-		"Grpc-Status-Details-Bin":
 		return true
 	}
 	return false

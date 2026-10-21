@@ -25,6 +25,9 @@
 package connect
 
 import (
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -44,7 +47,8 @@ const (
 	IsAtLeastVersion1_13_0 = true
 )
 
-// Protocol names reported on [Peer.Protocol].
+// The names of the Connect, gRPC, and gRPC-Web protocols (as exposed by
+// [Peer].Protocol). Additional protocols may be added in the future.
 const (
 	ProtocolConnect = connectv2.ProtocolNameConnect
 	ProtocolGRPC    = connectv2.ProtocolNameGRPC
@@ -52,8 +56,7 @@ const (
 )
 
 // StreamType describes whether the client, server, neither, or both is
-// streaming. StreamType is a type alias for [connectv2.StreamType] so v1 and
-// v2 stream types are interchangeable.
+// streaming.
 type StreamType = connectv2.StreamType
 
 const (
@@ -167,18 +170,28 @@ type Request[T any] struct {
 
 // NewRequest wraps a generated request message.
 func NewRequest[T any](message *T) *Request[T] {
-	return &Request[T]{Msg: message}
+	return &Request[T]{
+		Msg: message,
+		// Initialized lazily so we don't allocate unnecessarily.
+		header: nil,
+	}
 }
 
 // Any returns the concrete request message as an empty interface, so that
 // *Request implements the [AnyRequest] interface.
-func (r *Request[_]) Any() any { return r.Msg }
+func (r *Request[_]) Any() any {
+	return r.Msg
+}
 
 // Spec returns a description of this RPC.
-func (r *Request[_]) Spec() Spec { return r.spec }
+func (r *Request[_]) Spec() Spec {
+	return r.spec
+}
 
 // Peer describes the other party for this RPC.
-func (r *Request[_]) Peer() Peer { return r.peer }
+func (r *Request[_]) Peer() Peer {
+	return r.peer
+}
 
 // Header returns the HTTP headers for this request. Headers beginning with
 // "Connect-" and "Grpc-" are reserved for use by the Connect and gRPC
@@ -200,10 +213,17 @@ func (r *Request[_]) Header() http.Header {
 // is even possible for this to return the empty string after such delegation,
 // if the request was never actually sent to the server (and thus no
 // determination ever made about the HTTP method).
-func (r *Request[_]) HTTPMethod() string { return r.method }
+func (r *Request[_]) HTTPMethod() string {
+	return r.method
+}
 
-func (r *Request[_]) internalOnly()             {}
-func (r *Request[_]) setRequestMethod(m string) { r.method = m }
+// internalOnly implements AnyRequest.
+func (r *Request[_]) internalOnly() {}
+
+// setRequestMethod sets the request method to the given value.
+func (r *Request[_]) setRequestMethod(method string) {
+	r.method = method
+}
 
 // AnyRequest is the common method set of every [Request], regardless of type
 // parameter. It's used in unary interceptors.
@@ -238,13 +258,23 @@ type Response[T any] struct {
 
 // NewResponse wraps a generated response message.
 func NewResponse[T any](message *T) *Response[T] {
-	return &Response[T]{Msg: message}
+	return &Response[T]{
+		Msg: message,
+		// Initialized lazily so we don't allocate unnecessarily.
+		header:  nil,
+		trailer: nil,
+	}
 }
 
-// Any returns the concrete response message as an empty interface.
-func (r *Response[_]) Any() any { return r.Msg }
+// Any returns the concrete response message as an empty interface, so that
+// *Response implements the [AnyResponse] interface.
+func (r *Response[_]) Any() any {
+	return r.Msg
+}
 
-// Header returns the HTTP headers for this response.
+// Header returns the HTTP headers for this response. Headers beginning with
+// "Connect-" and "Grpc-" are reserved for use by the Connect and gRPC
+// protocols: applications may read them but shouldn't write them.
 func (r *Response[_]) Header() http.Header {
 	if r.header == nil {
 		r.header = make(http.Header)
@@ -252,7 +282,13 @@ func (r *Response[_]) Header() http.Header {
 	return r.header
 }
 
-// Trailer returns the trailers for this response.
+// Trailer returns the trailers for this response. Depending on the underlying
+// RPC protocol, trailers may be sent as HTTP trailers or a protocol-specific
+// block of in-body metadata.
+//
+// Trailers beginning with "Connect-" and "Grpc-" are reserved for use by the
+// Connect and gRPC protocols: applications may read them but shouldn't write
+// them.
 func (r *Response[_]) Trailer() http.Header {
 	if r.trailer == nil {
 		r.trailer = make(http.Header)
@@ -260,10 +296,19 @@ func (r *Response[_]) Trailer() http.Header {
 	return r.trailer
 }
 
+// internalOnly implements AnyResponse.
 func (r *Response[_]) internalOnly() {}
 
 // AnyResponse is the common method set of every [Response], regardless of type
 // parameter. It's used in unary interceptors.
+//
+// Headers and trailers beginning with "Connect-" and "Grpc-" are reserved for
+// use by the gRPC and Connect protocols: applications may read them but
+// shouldn't write them.
+//
+// To preserve our ability to add methods to this interface without breaking
+// backward compatibility, only types defined in this package can implement
+// AnyResponse.
 type AnyResponse interface {
 	Any() any
 	Header() http.Header
@@ -277,16 +322,17 @@ type AnyResponse interface {
 type HTTPClient = connecthttp.HTTPClient
 
 // Spec is a description of a client call or a handler invocation.
+//
+// If you're using Protobuf, protoc-gen-connect-go generates a constant for the
+// fully-qualified Procedure corresponding to each RPC in your schema.
 type Spec struct {
 	StreamType       StreamType
-	Schema           any
-	Procedure        string
-	IsClient         bool
+	Schema           any    // for protobuf RPCs, a protoreflect.MethodDescriptor
+	Procedure        string // for example, "/acme.foo.v1.FooService/Bar"
+	IsClient         bool   // otherwise we're in a handler
 	IdempotencyLevel IdempotencyLevel
 }
 
-// toConnectv2 returns spec as the v2 [connectv2.Spec]. v2 has no IsClient field
-// (it is implicit from the call direction), so the conversion drops it.
 func (s Spec) toConnectv2() connectv2.Spec {
 	return connectv2.Spec{
 		StreamType:       s.StreamType,
@@ -297,8 +343,165 @@ func (s Spec) toConnectv2() connectv2.Spec {
 }
 
 // Peer describes the other party to an RPC.
+//
+// When accessed client-side, Addr contains the host or host:port from the
+// server's URL. When accessed server-side, Addr contains the client's address
+// in IP:port format.
+//
+// On both the client and the server, Protocol is the RPC protocol in use.
+// Currently, it's either [ProtocolConnect], [ProtocolGRPC], or
+// [ProtocolGRPCWeb], but additional protocols may be added in the future.
+//
+// Query contains the query parameters for the request. For the server, this
+// will reflect the actual query parameters sent. For the client, it is unset.
 type Peer struct {
 	Addr     string
 	Protocol string
 	Query    url.Values // server-only
+}
+
+func newPeerForURL(url *url.URL, protocol string) Peer {
+	return Peer{
+		Addr:     url.Host,
+		Protocol: protocol,
+	}
+}
+
+// receiveConn represents the shared methods of both StreamingClientConn and StreamingHandlerConn
+// that the below helper functions use for implementing the rules around a "unary" stream, that
+// is expected to have exactly one message (or zero messages followed by a non-EOF error).
+type receiveConn interface {
+	Spec() Spec
+	Receive(any) error
+}
+
+// hasHTTPMethod is implemented by streaming connections that support HTTP methods other than
+// POST.
+type hasHTTPMethod interface {
+	getHTTPMethod() string
+}
+
+// errStreamingClientConn is a sentinel error implementation of StreamingClientConn.
+type errStreamingClientConn struct {
+	err             error
+	requestHeader   http.Header
+	responseHeader  http.Header
+	responseTrailer http.Header
+}
+
+func newErrStreamingClientConn(err error) *errStreamingClientConn {
+	return &errStreamingClientConn{
+		err:             err,
+		requestHeader:   make(http.Header),
+		responseHeader:  make(http.Header),
+		responseTrailer: make(http.Header),
+	}
+}
+
+func (c *errStreamingClientConn) Receive(msg any) error {
+	return c.err
+}
+
+func (c *errStreamingClientConn) Spec() Spec {
+	return Spec{}
+}
+
+func (c *errStreamingClientConn) Peer() Peer {
+	return Peer{}
+}
+
+func (c *errStreamingClientConn) Send(msg any) error {
+	return c.err
+}
+
+func (c *errStreamingClientConn) CloseRequest() error {
+	return c.err
+}
+
+func (c *errStreamingClientConn) CloseResponse() error {
+	return c.err
+}
+
+func (c *errStreamingClientConn) RequestHeader() http.Header {
+	return c.requestHeader
+}
+
+func (c *errStreamingClientConn) ResponseHeader() http.Header {
+	return c.responseHeader
+}
+
+func (c *errStreamingClientConn) ResponseTrailer() http.Header {
+	return c.responseTrailer
+}
+
+// receiveUnaryResponse unmarshals a message from a StreamingClientConn, then
+// envelopes the message and attaches headers and trailers. It attempts to
+// consume the response stream and isn't appropriate when receiving multiple
+// messages.
+func receiveUnaryResponse[T any](conn StreamingClientConn, initializer maybeInitializer) (*Response[T], error) {
+	msg, err := receiveUnaryMessage[T](conn, initializer, "response")
+	if err != nil {
+		return nil, err
+	}
+	return &Response[T]{
+		Msg:     msg,
+		header:  conn.ResponseHeader(),
+		trailer: conn.ResponseTrailer(),
+	}, nil
+}
+
+// receiveUnaryRequest unmarshals a message from a StreamingClientConn, then
+// envelopes the message and attaches headers and other request properties. It
+// attempts to consume the request stream and isn't appropriate when receiving
+// multiple messages.
+func receiveUnaryRequest[T any](conn StreamingHandlerConn, initializer maybeInitializer) (*Request[T], error) {
+	msg, err := receiveUnaryMessage[T](conn, initializer, "request")
+	if err != nil {
+		return nil, err
+	}
+	method := http.MethodPost
+	if hasRequestMethod, ok := conn.(hasHTTPMethod); ok {
+		method = hasRequestMethod.getHTTPMethod()
+	}
+	return &Request[T]{
+		Msg:    msg,
+		spec:   conn.Spec(),
+		peer:   conn.Peer(),
+		header: conn.RequestHeader(),
+		method: method,
+	}, nil
+}
+
+func receiveUnaryMessage[T any](conn receiveConn, initializer maybeInitializer, what string) (*T, error) {
+	var msg T
+	if err := initializer.maybe(conn.Spec(), &msg); err != nil {
+		return nil, err
+	}
+	// Possibly counter-intuitive, but the gRPC specs about error codes state that both clients
+	// and servers should return "unimplemented" when they encounter a cardinality violation: where
+	// the number of messages in the stream is wrong. Search for "cardinality violation" in the
+	// following docs:
+	//    https://grpc.github.io/grpc/core/md_doc_statuscodes.html
+	if err := conn.Receive(&msg); err != nil {
+		if errors.Is(err, io.EOF) {
+			err = NewError(CodeUnimplemented, fmt.Errorf("unary %s has zero messages", what))
+		}
+		return nil, err
+	}
+	// In a well-formed stream, the one message must be the only content in the body.
+	// To verify that it is well-formed, try to read another message from the stream.
+	// TODO: optimize this second receive: ideally do it w/out allocation, w/out
+	//       fully reading next message (if one is present), and w/out trying to
+	//       actually unmarshal the bytes)
+	var msg2 T
+	if err := initializer.maybe(conn.Spec(), &msg2); err != nil {
+		return nil, err
+	}
+	if err := conn.Receive(&msg2); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = NewError(CodeUnimplemented, fmt.Errorf("unary %s has multiple messages", what))
+		}
+		return nil, err
+	}
+	return &msg, nil
 }

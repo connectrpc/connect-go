@@ -20,10 +20,11 @@ import (
 	"slices"
 )
 
-// errNewClientContextProhibited signals that an interceptor created a fresh
-// client context via [NewClientContext] in the middle of a call. The thunks
-// inserted between client-side interceptors fail with this error.
-var errNewClientContextProhibited = errors.New("creating a new context in an interceptor is prohibited")
+var (
+	// errNewClientContextProhibited signals that a new client context was created
+	// in an interceptor, which is prohibited.
+	errNewClientContextProhibited = errors.New("creating a new context in an interceptor is prohibited")
+)
 
 // UnaryFunc is the generic signature of a unary RPC. Interceptors may wrap
 // Funcs.
@@ -35,8 +36,8 @@ var errNewClientContextProhibited = errors.New("creating a new context in an int
 // On return, response is non-nil if and only if err is nil.
 type UnaryFunc func(context.Context, AnyRequest) (AnyResponse, error)
 
-// StreamingClientFunc is the generic signature of a streaming RPC from the
-// client's perspective. Interceptors may wrap StreamingClientFuncs.
+// StreamingClientFunc is the generic signature of a streaming RPC from the client's
+// perspective. Interceptors may wrap StreamingClientFuncs.
 type StreamingClientFunc func(context.Context, Spec) StreamingClientConn
 
 // StreamingHandlerFunc is the generic signature of a streaming RPC from the
@@ -72,7 +73,7 @@ func (f UnaryInterceptorFunc) WrapStreamingHandler(next StreamingHandlerFunc) St
 	return next
 }
 
-// chain composes multiple interceptors into one.
+// A chain composes multiple interceptors into one.
 type chain struct {
 	interceptors []Interceptor
 }
@@ -80,15 +81,15 @@ type chain struct {
 // newChain composes multiple interceptors into one.
 func newChain(interceptors []Interceptor) *chain {
 	// We usually wrap in reverse order to have the first interceptor from
-	// the slice act first. Rather than doing this dance repeatedly, reverse
-	// the interceptor order now.
-	var result chain
+	// the slice act first. Rather than doing this dance repeatedly, reverse the
+	// interceptor order now.
+	var chain chain
 	for _, interceptor := range slices.Backward(interceptors) {
 		if interceptor != nil {
-			result.interceptors = append(result.interceptors, interceptor)
+			chain.interceptors = append(chain.interceptors, interceptor)
 		}
 	}
-	return &result
+	return &chain
 }
 
 func (c *chain) WrapUnary(next UnaryFunc) UnaryFunc {
@@ -114,12 +115,9 @@ func (c *chain) WrapStreamingHandler(next StreamingHandlerFunc) StreamingHandler
 	return next
 }
 
-// unaryThunk runs the [checkClientContextSentinel] guard between client-side
-// interceptor calls so a fresh CallInfo installed by an outer interceptor
-// stops the chain before the next interceptor observes the swapped context.
 func unaryThunk(next UnaryFunc) UnaryFunc {
 	return func(ctx context.Context, req AnyRequest) (AnyResponse, error) {
-		if err := checkClientContextSentinel(ctx); err != nil {
+		if err := checkSentinel(ctx); err != nil {
 			return nil, err
 		}
 		return next(ctx, req)
@@ -128,9 +126,16 @@ func unaryThunk(next UnaryFunc) UnaryFunc {
 
 func streamingClientThunk(next StreamingClientFunc) StreamingClientFunc {
 	return func(ctx context.Context, spec Spec) StreamingClientConn {
-		if err := checkClientContextSentinel(ctx); err != nil {
-			return newErrClientConn(spec, Peer{}, err)
+		if err := checkSentinel(ctx); err != nil {
+			return newErrStreamingClientConn(err)
 		}
 		return next(ctx, spec)
 	}
+}
+
+func checkSentinel(ctx context.Context) error {
+	if ctx.Value(clientCallInfoContextKey{}) != ctx.Value(sentinelContextKey{}) {
+		return errNewClientContextProhibited
+	}
+	return nil
 }

@@ -29,12 +29,13 @@ import (
 // [Connect protocol specification]: https://connectrpc.com/docs/protocol
 type Code = connectv2.Code
 
-// The zero code in gRPC is OK, which indicates that the operation was a
-// success. We don't define a constant for it because it overlaps awkwardly
-// with Go's error semantics: what does it mean to have a non-nil error with
-// an OK status? (Also, the Connect protocol doesn't use a code for
-// successes.)
 const (
+	// The zero code in gRPC is OK, which indicates that the operation was a
+	// success. We don't define a constant for it because it overlaps awkwardly
+	// with Go's error semantics: what does it mean to have a non-nil error with
+	// an OK status? (Also, the Connect protocol doesn't use a code for
+	// successes.)
+
 	// CodeCanceled indicates that the operation was canceled, typically by the
 	// caller.
 	CodeCanceled = connectv2.CodeCanceled
@@ -99,9 +100,6 @@ const (
 	// CodeUnauthenticated indicates that the request does not have valid
 	// authentication credentials for the operation.
 	CodeUnauthenticated = connectv2.CodeUnauthenticated
-
-	minCode = CodeCanceled
-	maxCode = CodeUnauthenticated
 )
 
 // CodeOf returns the error's status code if it is or wraps an [*Error] and

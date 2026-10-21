@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -146,8 +147,9 @@ func (c *Client[Req, Res]) CallUnary(ctx context.Context, request *Request[Req])
 
 // CallClientStream calls a client streaming procedure.
 //
-// Request headers can be sent via the [ClientStreamForClient.RequestHeader]
-// method on the stream.
+// Request headers can be sent via the [ClientStreamForClient.RequestHeader] method on the stream. Note that the
+// request headers are not sent automatically when this method is invoked and instead require an explicit call to
+// [ClientStreamForClient.Send].
 func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamForClient[Req, Res] {
 	if c.err != nil {
 		return &ClientStreamForClient[Req, Res]{err: c.err}
@@ -159,6 +161,13 @@ func (c *Client[Req, Res]) CallClientStream(ctx context.Context) *ClientStreamFo
 }
 
 // CallClientStreamSimple calls a client streaming procedure.
+//
+// Request headers should be set in a [CallInfo] object inside the context using [NewClientContext]. These headers are
+// transmitted when this method is called and do not require an explicit call to [ClientStreamForClientSimple.Send].
+//
+// In addition, when calling [ClientStreamForClientSimple.CloseAndReceive] on the returned stream, the returned response
+// is the response type defined for the stream and _not_ a Connect [Response] wrapper type. As a result, any response
+// headers and trailers should be read from the [CallInfo] object in context.
 func (c *Client[Req, Res]) CallClientStreamSimple(ctx context.Context) (*ClientStreamForClientSimple[Req, Res], error) {
 	if c.err != nil {
 		return &ClientStreamForClientSimple[Req, Res]{
@@ -202,6 +211,10 @@ func (c *Client[Req, Res]) CallServerStream(ctx context.Context, request *Reques
 }
 
 // CallBidiStream calls a bidirectional streaming procedure.
+//
+// Request headers can be sent via the [BidiStreamForClient.RequestHeader] method. Note that the
+// request headers are not sent automatically when this method is invoked and instead require an explicit call to
+// [BidiStreamForClient.Send].
 func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForClient[Req, Res] {
 	if c.err != nil {
 		return &BidiStreamForClient[Req, Res]{err: c.err}
@@ -213,6 +226,11 @@ func (c *Client[Req, Res]) CallBidiStream(ctx context.Context) *BidiStreamForCli
 }
 
 // CallBidiStreamSimple calls a bidirectional streaming procedure.
+//
+// Request headers should be set in a [CallInfo] object inside the context using [NewClientContext]. These headers
+// are transmitted when this method is called and do not require an explicit call to [BidiStreamForClient.Send].
+//
+// Likewise, response headers and trailers should be read from the [CallInfo] object in context.
 func (c *Client[Req, Res]) CallBidiStreamSimple(ctx context.Context) (*BidiStreamForClientSimple[Req, Res], error) {
 	if c.err != nil {
 		return &BidiStreamForClientSimple[Req, Res]{
@@ -286,9 +304,9 @@ func (c *Client[Req, Res]) peer() Peer {
 	}
 	protocol := c.cfg.protocol
 	if protocol == "" {
-		protocol = "connect"
+		protocol = ProtocolConnect
 	}
-	return Peer{Addr: c.baseURL.Host, Protocol: protocol}
+	return newPeerForURL(c.baseURL, protocol)
 }
 
 // clientContentType returns the Content-Type the v1 client expects from the
@@ -313,6 +331,18 @@ func (c *Client[Req, Res]) clientContentType(streaming bool) string {
 	}
 }
 
+var (
+	// defaultConnectUserAgent returns a User-Agent string similar to those used in gRPC.
+	//
+	//nolint:gochecknoglobals
+	defaultConnectUserAgent = fmt.Sprintf("connect-go/%s (%s)", Version, runtime.Version())
+	// defaultGrpcUserAgent follows
+	// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents.
+	//
+	//nolint:gochecknoglobals
+	defaultGrpcUserAgent = fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())
+)
+
 // applyClientDefaultHeaders sets v1's default User-Agent and, for gRPC-Web,
 // X-User-Agent on the v2 request metadata. Like v1, a User-Agent key present
 // in any of the caller's headers suppresses the default, even with no values.
@@ -320,23 +350,23 @@ func applyClientDefaultHeaders(metadata *connectv2.Header, protocol string, sour
 	if metadata == nil {
 		return
 	}
-	if !metadata.Has(headerUserAgent) {
+	if !metadata.Has("User-Agent") {
 		userAgent := defaultConnectUserAgent
 		if protocol == ProtocolGRPC || protocol == ProtocolGRPCWeb {
 			userAgent = defaultGrpcUserAgent
 		}
 		for _, source := range sources {
-			if _, ok := source[headerUserAgent]; ok {
+			if _, ok := source["User-Agent"]; ok {
 				// An explicit empty value tells net/http to send no
 				// User-Agent at all.
 				userAgent = ""
 				break
 			}
 		}
-		metadata.Set(headerUserAgent, userAgent)
+		metadata.Set("User-Agent", userAgent)
 	}
-	if protocol == ProtocolGRPCWeb && metadata.Get(headerXUserAgent) == "" {
-		metadata.Set(headerXUserAgent, defaultGrpcUserAgent)
+	if protocol == ProtocolGRPCWeb && metadata.Get("X-User-Agent") == "" {
+		metadata.Set("X-User-Agent", defaultGrpcUserAgent)
 	}
 }
 
@@ -377,7 +407,7 @@ func mergeCallInfoMetaIntoError(v2Info *connectv2.CallInfo, v1err *Error) {
 	// A gRPC trailers-only response carries Grpc-Status in the headers. v2
 	// also copies those headers into the trailers, so like v1, use only the
 	// headers to avoid duplicating every value.
-	if _, trailersOnly := meta[grpcHeaderStatus]; !trailersOnly {
+	if _, trailersOnly := meta["Grpc-Status"]; !trailersOnly {
 		mergeHeaders(meta, metadataToHTTPHeader(v2Info.ResponseTrailer()))
 	}
 	if len(meta) == 0 {
@@ -487,10 +517,10 @@ func compressorsToConnectv2(order []string, entries map[string]*compressorEntry)
 // ensureClientInfo guarantees that ctx carries a v1 [clientCallInfo] and a v2
 // CallInfo, returning the augmented context and the v1 info.
 func ensureClientInfo(ctx context.Context) (context.Context, *clientCallInfo) {
-	info, ok := clientCallInfoFromContext(ctx)
+	info, ok := clientCallInfoForContext(ctx)
 	if !ok {
 		ctx, _ = NewClientContext(ctx)
-		info, _ = clientCallInfoFromContext(ctx)
+		info, _ = clientCallInfoForContext(ctx)
 	}
 	// v2Info holds per-RPC request, response, and trailer metadata. A v1
 	// NewClientContext may be reused across sequential calls (see the doc on
@@ -499,6 +529,7 @@ func ensureClientInfo(ctx context.Context) (context.Context, *clientCallInfo) {
 	// metadata and surface the previous call's stale response metadata.
 	newCtx, v2 := connectv2.NewClientContext(ctx)
 	info.v2Info = v2
+	info.responseSource = v2ResponseSource{info: v2}
 	return newCtx, info
 }
 
@@ -545,3 +576,14 @@ func (c *errClientConn) Receive(any) error            { return c.err }
 func (c *errClientConn) ResponseHeader() http.Header  { return c.responseHeader }
 func (c *errClientConn) ResponseTrailer() http.Header { return c.responseTrailer }
 func (c *errClientConn) CloseResponse() error         { return c.err }
+
+// installSentinel records the client call info (creating one if necessary)
+// under [sentinelContextKey], so [checkSentinel] detects interceptors that
+// replace the client context.
+func installSentinel(ctx context.Context) context.Context {
+	if _, ok := clientCallInfoForContext(ctx); !ok {
+		ctx, _ = NewClientContext(ctx)
+	}
+	info, _ := clientCallInfoForContext(ctx)
+	return context.WithValue(ctx, sentinelContextKey{}, info)
+}

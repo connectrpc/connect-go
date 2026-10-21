@@ -24,16 +24,16 @@ import (
 
 // A ClientOption configures a [Client].
 //
-// In addition to any options grouped in the documentation below, remember
-// that any [Option] is also a valid ClientOption.
+// In addition to any options grouped in the documentation below, remember that
+// any [Option] is also a valid ClientOption.
 type ClientOption interface {
 	applyToClient(*clientConfig)
 }
 
 // A HandlerOption configures a [Handler].
 //
-// In addition to any options grouped in the documentation below, remember
-// that any [Option] is also a HandlerOption.
+// In addition to any options grouped in the documentation below, remember that
+// any [Option] is also a HandlerOption.
 type HandlerOption interface {
 	applyToHandler(*handlerConfig)
 }

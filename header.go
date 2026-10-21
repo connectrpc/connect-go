@@ -15,30 +15,36 @@
 package connect
 
 import (
-	"fmt"
 	"net/http"
-	"runtime"
 
 	connectv2 "connectrpc.com/connect/v2"
 )
 
-const (
-	headerUserAgent  = "User-Agent"
-	headerXUserAgent = "X-User-Agent"
-	grpcHeaderStatus = "Grpc-Status"
-)
-
-var (
-	// defaultConnectUserAgent returns a User-Agent string similar to those used in gRPC.
-	//
-	//nolint:gochecknoglobals
-	defaultConnectUserAgent = fmt.Sprintf("connect-go/%s (%s)", Version, runtime.Version())
-	// defaultGrpcUserAgent follows
-	// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#user-agents.
-	//
-	//nolint:gochecknoglobals
-	defaultGrpcUserAgent = fmt.Sprintf("grpc-go-connect/%s (%s)", Version, runtime.Version())
-)
+// protocolHeaders are the HTTP and protocol headers an error's metadata may
+// not set.
+//
+//nolint:gochecknoglobals
+var protocolHeaders = map[string]struct{}{
+	"Content-Type":             {},
+	"Content-Length":           {},
+	"Content-Encoding":         {},
+	"Host":                     {},
+	"User-Agent":               {},
+	"Trailer":                  {},
+	"Date":                     {},
+	"Accept-Encoding":          {},
+	"Trailer-":                 {},
+	"Connect-Content-Encoding": {},
+	"Connect-Accept-Encoding":  {},
+	"Connect-Timeout-Ms":       {},
+	"Connect-Protocol-Version": {},
+	"Grpc-Encoding":            {},
+	"Grpc-Accept-Encoding":     {},
+	"Grpc-Timeout":             {},
+	"Grpc-Status":              {},
+	"Grpc-Message":             {},
+	"Grpc-Status-Details-Bin":  {},
+}
 
 // EncodeBinaryHeader base64-encodes the data. It always emits unpadded values.
 //
@@ -48,10 +54,10 @@ func EncodeBinaryHeader(data []byte) string {
 	return connectv2.EncodeBinaryHeader(data)
 }
 
-// DecodeBinaryHeader base64-decodes the data. It can decode padded or
-// unpadded values. Following usual HTTP semantics, multiple base64-encoded
-// values may be joined with a comma. When receiving such comma-separated
-// values, split them with [strings.Split] before calling DecodeBinaryHeader.
+// DecodeBinaryHeader base64-decodes the data. It can decode padded or unpadded
+// values. Following usual HTTP semantics, multiple base64-encoded values may
+// be joined with a comma. When receiving such comma-separated values, split
+// them with [strings.Split] before calling DecodeBinaryHeader.
 //
 // Binary headers sent using the Connect, gRPC, and gRPC-Web protocols have
 // keys ending in "-Bin".
@@ -59,14 +65,30 @@ func DecodeBinaryHeader(data string) ([]byte, error) {
 	return connectv2.DecodeBinaryHeader(data)
 }
 
-// mergeHeaders copies entries from src into dst, appending values. Empty
-// value slices are skipped to match net/http's pre-population of trailer
-// headers.
-func mergeHeaders(dst, src http.Header) {
-	for k, vs := range src {
-		if len(vs) == 0 {
+func mergeHeaders(into, from http.Header) {
+	for key, vals := range from {
+		if len(vals) == 0 {
+			// For response trailers, net/http will pre-populate entries
+			// with nil values based on the "Trailer" header. But if there
+			// are no actual values for those keys, we skip them.
 			continue
 		}
-		dst[k] = append(dst[k], vs...)
+		into[key] = append(into[key], vals...)
+	}
+}
+
+// mergeNonProtocolHeaders merges headers excluding protocol headers defined in
+// protocolHeaders.
+func mergeNonProtocolHeaders(into, from http.Header) {
+	for key, vals := range from {
+		if len(vals) == 0 {
+			// For response trailers, net/http will pre-populate entries
+			// with nil values based on the "Trailer" header. But if there
+			// are no actual values for those keys, we skip them.
+			continue
+		}
+		if _, isProtocolHeader := protocolHeaders[key]; !isProtocolHeader {
+			into[key] = append(into[key], vals...)
+		}
 	}
 }

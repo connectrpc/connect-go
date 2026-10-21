@@ -26,8 +26,9 @@ import (
 )
 
 const (
-	codecNameProto = "proto"
-	codecNameJSON  = "json"
+	codecNameProto           = "proto"
+	codecNameJSON            = "json"
+	codecNameJSONCharsetUTF8 = codecNameJSON + "; charset=utf-8"
 )
 
 // Codec marshals structs (typically generated from a schema) to and from bytes.
@@ -138,7 +139,9 @@ func (c *protoBinaryCodec) MarshalStable(message any) ([]byte, error) {
 	return options.Marshal(protoMessage)
 }
 
-func (c *protoBinaryCodec) IsBinary() bool { return true }
+func (c *protoBinaryCodec) IsBinary() bool {
+	return true
+}
 
 type protoJSONCodec struct {
 	name string
@@ -199,7 +202,9 @@ func (c *protoJSONCodec) MarshalStable(message any) ([]byte, error) {
 	return compactedJSON.Bytes(), nil
 }
 
-func (c *protoJSONCodec) IsBinary() bool { return false }
+func (c *protoJSONCodec) IsBinary() bool {
+	return false
+}
 
 func errNotProto(message any) error {
 	if _, ok := message.(protoiface.MessageV1); ok {

@@ -25,7 +25,7 @@ import (
 func TestCode(t *testing.T) {
 	t.Parallel()
 	var valid []Code
-	for code := minCode; code <= maxCode; code++ {
+	for code := CodeCanceled; code <= CodeUnauthenticated; code++ {
 		valid = append(valid, code)
 	}
 	// Ensures that we don't forget to update the mapping in the Stringer
@@ -48,7 +48,7 @@ func assertCodeRoundTrips(tb testing.TB, code Code) {
 	var decoded Code
 	assert.Nil(tb, decoded.UnmarshalText(encoded))
 	assert.Equal(tb, decoded, code)
-	if code >= minCode && code <= maxCode {
+	if code >= CodeCanceled && code <= CodeUnauthenticated {
 		var invalid Code
 		// For the known codes, we only accept the canonical string representation: "canceled", not "code_1".
 		assert.NotNil(tb, invalid.UnmarshalText([]byte("code_"+strconv.Itoa(int(code)))))
