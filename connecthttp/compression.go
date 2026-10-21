@@ -55,7 +55,7 @@ func (c *compressionPool) Decompress(dst *bytes.Buffer, src *bytes.Buffer, readM
 		return connect.Errorf(connect.CodeInvalidArgument, "decompress: %s", err).WithCause(err)
 	}
 	if readMaxBytes > 0 && bytesRead > readMaxBytes {
-		return errMessageTooLarge(decompressor, bytesRead, readMaxBytes)
+		return connect.Errorf(connect.CodeResourceExhausted, "message is larger than configured max %d", readMaxBytes)
 	}
 	return nil
 }

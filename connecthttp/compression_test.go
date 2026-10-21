@@ -88,7 +88,7 @@ type identityWriteCloser struct{ io.Writer }
 func (identityWriteCloser) Close() error { return nil }
 
 // TestDecompressBoundsOversizedRead verifies that rejecting a message that
-// decompresses past readMaxBytes reads at most discardLimit more.
+// decompresses past readMaxBytes stops decompressing at the limit.
 func TestDecompressBoundsOversizedRead(t *testing.T) {
 	t.Parallel()
 	const readMaxBytes = 1024
@@ -96,7 +96,7 @@ func TestDecompressBoundsOversizedRead(t *testing.T) {
 	pool := newCompressionPool(stubDecompressor{bomb})
 	err := pool.Decompress(&bytes.Buffer{}, &bytes.Buffer{}, readMaxBytes)
 	assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-	assert.True(t, bomb.n <= readMaxBytes+1+discardLimit, assert.Sprintf("read %d decompressed bytes", bomb.n))
+	assert.True(t, bomb.n <= readMaxBytes+1, assert.Sprintf("read %d decompressed bytes", bomb.n))
 }
 
 // stubDecompressor is a test [connect.Compressor] whose Decompress returns

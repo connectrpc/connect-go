@@ -1916,9 +1916,9 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
 			want := fmt.Sprintf("message size %d is larger than configured max %d", proto.Size(pingRequest), readMaxBytes)
-			if connectUnary && !compressed {
-				// Connect unary messages have no length prefix, and handlers stop
-				// reading at the limit.
+			if connectUnary || compressed {
+				// Only an envelope's length prefix gives the size, and reading
+				// stops at the limit.
 				want = fmt.Sprintf("message is larger than configured max %d", readMaxBytes)
 			}
 			assert.True(t, strings.HasSuffix(err.Error(), want), assert.Sprintf("got %q, want suffix %q", err.Error(), want))
@@ -1941,8 +1941,8 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
 			want := fmt.Sprintf("resource_exhausted: message size %d is larger than configured max %d", expectedSize, readMaxBytes)
 			if connectUnary {
-				// Connect unary messages have no length prefix, and handlers stop
-				// reading at the limit.
+				// Connect unary messages have no length prefix, and reading stops
+				// at the limit.
 				want = fmt.Sprintf("resource_exhausted: message is larger than configured max %d", readMaxBytes)
 			}
 			assert.Equal(t, err.Error(), want)
@@ -2115,7 +2115,13 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 			_, err := client.Ping(t.Context(), pingRequest)
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-			assert.True(t, strings.HasSuffix(err.Error(), fmt.Sprintf("message size %d is larger than configured max %d", proto.Size(pingRequest), readMaxBytes)))
+			want := fmt.Sprintf("message size %d is larger than configured max %d", proto.Size(pingRequest), readMaxBytes)
+			if connectUnary || compressed {
+				// Only an envelope's length prefix gives the size, and reading
+				// stops at the limit.
+				want = fmt.Sprintf("message is larger than configured max %d", readMaxBytes)
+			}
+			assert.True(t, strings.HasSuffix(err.Error(), want), assert.Sprintf("got %q, want suffix %q", err.Error(), want))
 		})
 		t.Run("read_max_large", func(t *testing.T) {
 			t.Parallel()
@@ -2135,10 +2141,10 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
 			want := fmt.Sprintf("resource_exhausted: message size %d is larger than configured max %d", expectedSize, readMaxBytes)
-			if connectUnary && !compressed {
-				// Connect unary messages have no length prefix, and reading stops 4 MiB
-				// past the limit, before the end of this message.
-				want = fmt.Sprintf("resource_exhausted: message is larger than configured max %d - stopped reading after %d bytes", readMaxBytes, readMaxBytes+1+4*1024*1024)
+			if connectUnary {
+				// Connect unary messages have no length prefix, and reading stops
+				// at the limit.
+				want = fmt.Sprintf("resource_exhausted: message is larger than configured max %d", readMaxBytes)
 			}
 			assert.Equal(t, err.Error(), want)
 		})
