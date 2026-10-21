@@ -32,6 +32,7 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -4643,4 +4644,111 @@ type endlessReader struct{}
 func (endlessReader) Read(p []byte) (int, error) {
 	clear(p)
 	return len(p), nil
+}
+
+// TestReceiveAfterOversizedMessage verifies that after rejecting a compressed
+// message that decompresses past the read limit, a stream doesn't parse any
+// of that message as a new one.
+func TestReceiveAfterOversizedMessage(t *testing.T) {
+	t.Parallel()
+	const readMaxBytes = 1024
+	// The middle message decompresses to 64 KiB, past readMaxBytes, while its
+	// envelope stays under it.
+	envelopes := func(t *testing.T, first, last proto.Message) []byte {
+		t.Helper()
+		var bomb bytes.Buffer
+		gzipWriter := gzip.NewWriter(&bomb)
+		_, err := gzipWriter.Write(make([]byte, 64*1024))
+		assert.Nil(t, err)
+		assert.Nil(t, gzipWriter.Close())
+		assert.True(t, bomb.Len() < readMaxBytes)
+		var body []byte
+		for _, message := range []proto.Message{first, nil, last} {
+			flags, payload := byte(0), bomb.Bytes()
+			if message != nil {
+				payload, err = proto.Marshal(message)
+				assert.Nil(t, err)
+			} else {
+				flags = 1 // compressed
+			}
+			body = append(body, flags)
+			body = binary.BigEndian.AppendUint32(body, uint32(len(payload)))
+			body = append(body, payload...)
+		}
+		return body
+	}
+	t.Run("handler", func(t *testing.T) {
+		t.Parallel()
+		body := envelopes(t, &pingv1.SumRequest{Number: 1}, &pingv1.SumRequest{Number: 2})
+		for _, protocol := range []struct {
+			name, contentType, encodingHeader string
+		}{
+			{"connect", "application/connect+proto", "Connect-Content-Encoding"},
+			{"grpc", "application/grpc", "Grpc-Encoding"},
+			{"grpcweb", "application/grpc-web+proto", "Grpc-Encoding"},
+		} {
+			t.Run(protocol.name, func(t *testing.T) {
+				t.Parallel()
+				received := make(chan []string, 1)
+				srv := connect.NewServer()
+				pingv1connect.RegisterPingServiceHandler(srv, &pluggablePingServer{
+					sum: func(_ context.Context, stream pingv1connect.PingServiceSumServerStream) (*pingv1.SumResponse, error) {
+						var got []string
+						for {
+							request, err := stream.Receive()
+							if errors.Is(err, io.EOF) {
+								break
+							}
+							if err != nil {
+								got = append(got, connect.CodeOf(err).String())
+								continue
+							}
+							got = append(got, strconv.FormatInt(request.GetNumber(), 10))
+						}
+						received <- got
+						return &pingv1.SumResponse{}, nil
+					},
+				})
+				mux := http.NewServeMux()
+				connecthttp.Mount(mux, srv, connecthttp.WithReadMaxBytes(readMaxBytes))
+				server := memhttptest.NewServer(t, mux)
+				request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL()+pingv1connect.PingServiceSumProcedure, bytes.NewReader(body))
+				assert.Nil(t, err)
+				request.Header.Set("Content-Type", protocol.contentType)
+				request.Header.Set(protocol.encodingHeader, "gzip")
+				response, err := server.Client().Do(request)
+				assert.Nil(t, err)
+				_, _ = io.Copy(io.Discard, response.Body)
+				assert.Nil(t, response.Body.Close())
+				assert.Equal(t, <-received, []string{"1", "resource_exhausted", "2"})
+			})
+		}
+	})
+	t.Run("client", func(t *testing.T) {
+		t.Parallel()
+		body := envelopes(t, &pingv1.CountUpResponse{Number: 1}, &pingv1.CountUpResponse{Number: 2})
+		server := memhttptest.NewServer(t, http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+			_, _ = io.Copy(io.Discard, request.Body)
+			responseWriter.Header().Set("Content-Type", "application/grpc")
+			responseWriter.Header().Set("Grpc-Encoding", "gzip")
+			responseWriter.Header().Set("Trailer", "Grpc-Status")
+			_, _ = responseWriter.Write(body)
+			responseWriter.Header().Set("Grpc-Status", "0")
+		}))
+		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
+			server.Client(), server.URL(), connecthttp.WithGRPC(), connecthttp.WithReadMaxBytes(readMaxBytes),
+		)))
+		stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 2})
+		assert.Nil(t, err)
+		defer stream.Close()
+		response, err := stream.Receive()
+		assert.Nil(t, err)
+		assert.Equal(t, response.GetNumber(), 1)
+		_, err = stream.Receive()
+		assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+		// The client stops reading the response after the error.
+		response, err = stream.Receive()
+		assert.NotNil(t, err)
+		assert.Nil(t, response)
+	})
 }
