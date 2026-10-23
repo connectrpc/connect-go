@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net/http"
 
 	"connectrpc.com/connect/v2"
 )
@@ -112,10 +111,10 @@ func newServerHandlerConfig(spec connect.Spec, opts *options) *handlerConfig {
 	}
 }
 
-// newProcedureHandler returns an [http.Handler] for a single procedure that
+// newProcedureHandler returns a [handler] for a single procedure, which
 // negotiates the wire protocol (reusing the v1 [Handler.ServeHTTP] skeleton)
 // and dispatches through [connect.Server.Call].
-func newProcedureHandler(server *connect.Server, spec connect.Spec, opts *options) http.Handler {
+func newProcedureHandler(server *connect.Server, spec connect.Spec, opts *options) *handler {
 	handlerCfg := newServerHandlerConfig(spec, opts.forSpec(spec))
 	protocolHandlers := handlerCfg.newProtocolHandlers()
 	unary := spec.StreamType == connect.StreamTypeUnary

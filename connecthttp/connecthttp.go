@@ -302,7 +302,11 @@ func newUnknownMethodHandler(server *connect.Server, opts *options) http.Handler
 		}
 		// Cold path: build the handler per request to reuse the
 		// registered-procedure machinery.
-		newProcedureHandler(server, spec, opts).ServeHTTP(responseWriter, request)
+		procedureHandler := newProcedureHandler(server, spec, opts)
+		// Bidi stands in for every stream type here, so HTTP/1.x requests
+		// are served rather than rejected as full-duplex.
+		procedureHandler.bidiOverHTTP1 = true
+		procedureHandler.ServeHTTP(responseWriter, request)
 	})
 }
 
