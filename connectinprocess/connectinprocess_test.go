@@ -245,6 +245,41 @@ func TestInProcessServerStreamCloseReleasesHandler(t *testing.T) {
 		}
 	})
 }
+
+// TestInProcessServerStreamRejectedBeforeReceive verifies a server-streaming
+// call reports the server's error when the server ends the RPC without
+// reading the request, rather than the io.EOF returned by the request Send.
+func TestInProcessServerStreamRejectedBeforeReceive(t *testing.T) {
+	t.Parallel()
+	reject := func(connect.ServerFunc) connect.ServerFunc {
+		return func(context.Context, connect.Spec, connect.ServerStream) error {
+			return connect.NewError(connect.CodeUnauthenticated, "missing credentials")
+		}
+	}
+	handler := connect.NewServer(reject)
+	pingv1connect.RegisterPingServiceHandler(handler, pingServer{})
+
+	transport := connectinprocess.New(handler)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+
+	stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 5})
+	if err != nil {
+		t.Fatalf("CountUp: %v", err)
+	}
+	defer stream.Close()
+	_, err = stream.Receive()
+	if got, want := connect.CodeOf(err), connect.CodeUnauthenticated; got != want {
+		t.Fatalf("Receive = %v, want code %v", err, want)
+	}
+	connectErr, ok := errors.AsType[*connect.Error](err)
+	if !ok {
+		t.Fatalf("Receive = %v, want a *connect.Error", err)
+	}
+	if got, want := connectErr.Message(), "missing credentials"; got != want {
+		t.Errorf("Message = %q, want %q", got, want)
+	}
+}
+
 func TestInProcessClientStreaming(t *testing.T) {
 	t.Parallel()
 	handler := connect.NewServer()
