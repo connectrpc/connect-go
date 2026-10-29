@@ -236,7 +236,9 @@ func (c *Client) CallUnary(ctx context.Context, spec Spec, req, res any) (err er
 	defer func() {
 		err = errors.Join(err, stream.Close())
 	}()
-	if err := stream.Send(req); err != nil {
+	// Send reports io.EOF when the server has already ended the RPC. Receive
+	// returns the server's error, so keep going instead of returning io.EOF.
+	if err := stream.Send(req); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	if err := stream.CloseSend(); err != nil {
@@ -272,7 +274,9 @@ func (c *Client) CallServerStream(ctx context.Context, spec Spec, req any) (Clie
 	if err != nil {
 		return nil, err
 	}
-	if err := stream.Send(req); err != nil {
+	// Send reports io.EOF when the server has already ended the RPC. Return the
+	// stream so the caller's Receive reports the server's error.
+	if err := stream.Send(req); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 	if err := stream.CloseSend(); err != nil {
@@ -437,7 +441,9 @@ type ClientStream interface {
 	// the server begin work, surface connection errors before the first
 	// message, or record timing. It is idempotent.
 	SendHeaders() error
-	// Send sends msg as the next request message.
+	// Send sends msg as the next request message. If the server has already
+	// ended the RPC, Send returns an error that matches io.EOF under
+	// errors.Is; call Receive to get the server's response or error.
 	Send(msg any) error
 	// CloseSend closes the request side of the stream. It is idempotent.
 	CloseSend() error
