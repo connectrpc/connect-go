@@ -1077,22 +1077,37 @@ func TestMountUnknownMethod(t *testing.T) {
 		}
 		assert.Equal(t, wireErr.Code, "unimplemented")
 	})
-	t.Run("connect_client", func(t *testing.T) {
+	httpClients := map[string]*http.Client{
+		"http2": server.Client(),
+		"http1": {Transport: server.TransportHTTP1()},
+	}
+	protocols := map[string][]connecthttp.Option{
+		"connect":  nil,
+		"grpc":     {connecthttp.WithGRPC()},
+		"grpc_web": {connecthttp.WithGRPCWeb()},
+	}
+	for httpName, httpClient := range httpClients {
+		for protocolName, options := range protocols {
+			t.Run(httpName+"/"+protocolName+"_client", func(t *testing.T) {
+				t.Parallel()
+				client := connect.NewClient(connecthttp.NewTransport(httpClient, server.URL(), options...))
+				err := client.CallUnary(t.Context(), unknownSpec, &pingv1.PingRequest{}, &pingv1.PingResponse{})
+				assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
+			})
+		}
+	}
+	// Unlike Connect unary, Connect streaming shares the fallback's bidi spec
+	// with gRPC and gRPC-Web.
+	t.Run("http1/connect_stream_client", func(t *testing.T) {
 		t.Parallel()
-		client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL()))
-		err := client.CallUnary(t.Context(), unknownSpec, &pingv1.PingRequest{}, &pingv1.PingResponse{})
-		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
-	})
-	t.Run("grpc_client", func(t *testing.T) {
-		t.Parallel()
-		client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPC()))
-		err := client.CallUnary(t.Context(), unknownSpec, &pingv1.PingRequest{}, &pingv1.PingResponse{})
-		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
-	})
-	t.Run("grpc_web_client", func(t *testing.T) {
-		t.Parallel()
-		client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPCWeb()))
-		err := client.CallUnary(t.Context(), unknownSpec, &pingv1.PingRequest{}, &pingv1.PingResponse{})
+		client := connect.NewClient(connecthttp.NewTransport(httpClients["http1"], server.URL()))
+		spec := connect.Spec{StreamType: connect.StreamTypeServer, Procedure: unknownProcedure}
+		stream, err := client.CallServerStream(t.Context(), spec, &pingv1.PingRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer stream.Close()
+		err = stream.Receive(&pingv1.PingResponse{})
 		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
 	})
 	t.Run("registered_method", func(t *testing.T) {
