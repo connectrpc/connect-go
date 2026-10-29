@@ -17,6 +17,7 @@ package connecthttp_test
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 
 	"connectrpc.com/connect/v2"
@@ -74,6 +75,47 @@ func Example_interceptors() {
 	// outer interceptor: after call
 }
 
+// This example shows how to give every call of a client an application-wide
+// User-Agent. The interceptor only sets the header when the call doesn't
+// already carry one, so a single request can still provide its own.
+func Example_clientUserAgent() {
+	logger := log.New(os.Stdout, "" /* prefix */, 0 /* flags */)
+	const appUserAgent = "my-app/1.2.3"
+	defaultUserAgent := func(next connect.ClientFunc) connect.ClientFunc {
+		return func(ctx context.Context, spec connect.Spec) (connect.ClientStream, error) {
+			if info, ok := connect.CallInfoForClientContext(ctx); ok {
+				if !info.RequestHeader().Has("User-Agent") {
+					info.RequestHeader().Set("User-Agent", appUserAgent)
+				}
+			}
+			return next(ctx, spec)
+		}
+	}
+	client := pingv1connect.NewPingServiceClient(
+		connect.NewClient(
+			connecthttp.NewTransport(&userAgentRecorder{HTTPClient: examplePingServer.Client(), logger: logger}, examplePingServer.URL()),
+			defaultUserAgent,
+		),
+	)
+
+	// The default is applied to the call...
+	if _, err := client.Ping(context.Background(), &pingv1.PingRequest{Number: 42}); err != nil {
+		logger.Println("error:", err)
+		return
+	}
+	// ...unless the request sets its own User-Agent.
+	ctx, info := connect.NewClientContext(context.Background())
+	info.RequestHeader().Set("User-Agent", "my-app/1.2.3 batch-job")
+	if _, err := client.Ping(ctx, &pingv1.PingRequest{Number: 42}); err != nil {
+		logger.Println("error:", err)
+		return
+	}
+
+	// Output:
+	// User-Agent: "my-app/1.2.3"
+	// User-Agent: "my-app/1.2.3 batch-job"
+}
+
 type loggingClientStream struct {
 	connect.ClientStream
 
@@ -85,4 +127,17 @@ func (s *loggingClientStream) Close() error {
 	err := s.ClientStream.Close()
 	s.logger.Printf("%s interceptor: after call", s.name)
 	return err
+}
+
+// userAgentRecorder wraps an HTTP client and logs the User-Agent header of
+// each request.
+type userAgentRecorder struct {
+	connecthttp.HTTPClient
+
+	logger *log.Logger
+}
+
+func (r *userAgentRecorder) Do(request *http.Request) (*http.Response, error) {
+	r.logger.Printf("User-Agent: %q", request.Header.Get("User-Agent"))
+	return r.HTTPClient.Do(request)
 }
