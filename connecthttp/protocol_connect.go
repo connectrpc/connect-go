@@ -474,6 +474,7 @@ func (cc *connectUnaryClientConn) Peer() peer {
 
 func (cc *connectUnaryClientConn) Send(msg any) error {
 	if err := cc.marshaler.Marshal(msg); err != nil {
+		cc.duplexCall.failSend(err)
 		return err
 	}
 	return nil // must be a literal nil: nil *connect.Error is a non-nil error
@@ -612,6 +613,7 @@ func (cc *connectStreamingClientConn) Peer() peer {
 
 func (cc *connectStreamingClientConn) Send(msg any) error {
 	if err := cc.marshaler.Marshal(msg); err != nil {
+		cc.duplexCall.failSend(err)
 		return err
 	}
 	return nil // must be a literal nil: nil *connect.Error is a non-nil error

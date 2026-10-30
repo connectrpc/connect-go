@@ -35,6 +35,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -2619,6 +2620,64 @@ func TestClientWithSendMaxBytes(t *testing.T) {
 		sendMaxBytes := 1024
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithSendMaxBytes(sendMaxBytes), connecthttp.WithGRPCWeb(), connecthttp.WithSendCompression("gzip"))))
 		sendMaxBytesMatrix(t, client, sendMaxBytes, true)
+	})
+}
+
+// TestClientFailedSendSkipsRequest verifies that when a unary or
+// server-streaming request message can't be sent, closing the stream doesn't
+// send the request with an empty body, which the server would handle as an
+// empty message.
+func TestClientFailedSendSkipsRequest(t *testing.T) {
+	t.Parallel()
+	run := func(t *testing.T, opts ...connecthttp.Option) {
+		t.Helper()
+		var requests atomic.Int32
+		mux := http.NewServeMux()
+		srv := connect.NewServer()
+		pingv1connect.RegisterPingServiceHandler(srv, pingServer{})
+		connecthttp.Mount(mux, srv)
+		server := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests.Add(1)
+			mux.ServeHTTP(w, r)
+		}))
+		const sendMaxBytes = 1
+		opts = append(opts, connecthttp.WithSendMaxBytes(sendMaxBytes))
+		transport := connecthttp.NewTransport(server.Client(), server.URL(), opts...)
+		t.Run("unary", func(t *testing.T) {
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+			_, err := client.Ping(t.Context(), &pingv1.PingRequest{Text: "too big"})
+			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+			assert.Equal(t, requests.Load(), 0)
+		})
+		t.Run("server_stream", func(t *testing.T) {
+			stream, err := transport.NewClientStream(t.Context(), connect.Spec{
+				StreamType: connect.StreamTypeServer,
+				Procedure:  pingv1connect.PingServiceCountUpProcedure,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = stream.Send(&pingv1.CountUpRequest{Number: 1000})
+			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+			assert.Nil(t, stream.CloseSend())
+			// Receive reports the Send error instead of waiting for a response.
+			err = stream.Receive(&pingv1.CountUpResponse{})
+			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+			assert.Nil(t, stream.Close())
+			assert.Equal(t, requests.Load(), 0)
+		})
+	}
+	t.Run("connect", func(t *testing.T) {
+		t.Parallel()
+		run(t)
+	})
+	t.Run("grpc", func(t *testing.T) {
+		t.Parallel()
+		run(t, connecthttp.WithGRPC())
+	})
+	t.Run("grpcweb", func(t *testing.T) {
+		t.Parallel()
+		run(t, connecthttp.WithGRPCWeb())
 	})
 }
 
