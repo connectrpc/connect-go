@@ -40,7 +40,7 @@ import (
 //
 // Clients read responseCh until [io.EOF] or call Close to cancel the stream.
 // A client-streaming RPC has a single response, so its first Receive reads to
-// the end of the stream (see clientStream.receiveUnaryResponse).
+// the end of the stream (see clientStream.receiveUnary).
 //
 // Note: Unary RPCs bypass this structure to use a synchronous fast path
 // (see unary.go).
@@ -157,71 +157,57 @@ func (s *clientStream) CloseSend() error {
 
 func (s *clientStream) Receive(dst any) error {
 	if s.p.spec.StreamType == connect.StreamTypeClient {
-		return s.receiveUnaryResponse(dst)
+		return s.receiveUnary(dst)
 	}
 	msg, ok, err := s.next()
 	if err != nil {
 		return err
 	}
 	if !ok {
-		// Server closed, release the stream context.
-		s.p.cancel()
-		if s.p.serverErr != nil {
-			return asClientErr(s.p.serverErr)
-		}
 		return io.EOF
 	}
 	return s.p.t.copy(dst, msg)
 }
 
-// receiveUnaryResponse reads the single response of a client-streaming RPC.
-// It then reads to the end of the stream, so it reports a missing or extra
-// response and the server's final error, and it releases the stream context.
-// This matches the HTTP transport, where the first Receive ends the stream and
-// later calls return [io.EOF].
-func (s *clientStream) receiveUnaryResponse(dst any) error {
+// receiveUnary reads the single response of a client stream, then reads to
+// the end of the stream to ensure the end of stream, as connecthttp does.
+func (s *clientStream) receiveUnary(dst any) error {
 	if s.rxEnd {
 		return io.EOF
 	}
 	s.rxEnd = true
-	// Release the stream context on every path. This also aborts a server
-	// still blocked sending an extra response.
 	defer s.p.cancel()
 	msg, ok, err := s.next()
 	if err != nil {
 		return err
 	}
 	if !ok {
-		if s.p.serverErr != nil {
-			return asClientErr(s.p.serverErr)
-		}
 		return connect.Errorf(connect.CodeUnimplemented, "unary stream has zero messages")
 	}
 	if err := s.p.t.copy(dst, msg); err != nil {
 		return err
 	}
-	_, more, err := s.next()
-	if err != nil {
+	if _, more, err := s.next(); err != nil || !more {
 		return err
 	}
-	if more {
-		return connect.Errorf(connect.CodeUnimplemented, "unary stream has multiple messages")
-	}
-	if s.p.serverErr != nil {
-		return asClientErr(s.p.serverErr)
-	}
-	return nil
+	return connect.Errorf(connect.CodeUnimplemented, "unary stream has multiple messages")
 }
 
 // next waits for the next response message. Its bool result is false once
-// the server has returned and responseCh is closed.
+// the server has returned and responseCh is closed, in which case the error
+// is the server's final error, if any.
 func (s *clientStream) next() (any, bool, error) {
 	s.p.dispatch()
 	select {
 	case <-s.p.ctx.Done():
 		return nil, false, s.p.ctx.Err()
 	case msg, ok := <-s.p.responseCh:
-		return msg, ok, nil
+		if !ok {
+			// Server closed, release the stream context.
+			s.p.cancel()
+			return nil, false, asClientErr(s.p.serverErr)
+		}
+		return msg, true, nil
 	}
 }
 
