@@ -36,7 +36,8 @@ type streamPair struct {
 	t          *transport
 	spec       connect.Spec
 	clientInfo *connect.CallInfo
-	serverInfo *connect.CallInfo
+	serverInfo connect.CallInfo
+	server     serverStream
 
 	// ctx is the stream context, derived from the call context. The server
 	// runs on it. Close cancels it via cancel.
@@ -62,23 +63,20 @@ type pipe struct {
 	closed bool  // no more messages
 }
 
-func newStreamPair(ctx context.Context, t *transport, spec connect.Spec) *streamPair {
-	ctx, cancel := context.WithCancel(ctx)
-	clientInfo, _ := connect.CallInfoForClientContext(ctx)
-	pair := &streamPair{
-		t:          t,
-		spec:       spec,
-		clientInfo: clientInfo,
-		serverInfo: &connect.CallInfo{Spec: spec},
-		ctx:        ctx,
-		cancel:     cancel,
+// init sets up p in place. The conds and the server half point back into p,
+// so p must not move afterwards.
+func (p *streamPair) init(ctx context.Context, t *transport, spec connect.Spec) {
+	p.ctx, p.cancel = context.WithCancel(ctx)
+	p.t = t
+	p.spec = spec
+	p.clientInfo, _ = connect.CallInfoForClientContext(ctx)
+	p.serverInfo.Spec = spec
+	p.server.p = p
+	p.request.cond.L = &p.mu
+	p.response.cond.L = &p.mu
+	if p.clientInfo != nil {
+		p.clientInfo.Spec = spec
 	}
-	pair.request.cond.L = &pair.mu
-	pair.response.cond.L = &pair.mu
-	if pair.clientInfo != nil {
-		pair.clientInfo.Spec = spec
-	}
-	return pair
 }
 
 // dispatch starts the server goroutine once.
@@ -116,8 +114,7 @@ func (p *streamPair) run() {
 		p.request.close()
 		p.response.close()
 	}()
-	hs := &serverStream{p: p}
-	p.serverErr = p.t.server.Call(p.ctx, p.spec.Procedure, p.serverInfo, hs)
+	p.serverErr = p.t.server.Call(p.ctx, p.spec.Procedure, &p.serverInfo, &p.server)
 }
 
 // flushHeaders copies the response headers to the client once, as the
@@ -194,7 +191,7 @@ func (pp *pipe) close() {
 
 // clientStream is the client-side half of a streamPair.
 type clientStream struct {
-	p *streamPair
+	streamPair
 
 	// end is the result of the Receive that ended the stream. Receive
 	// keeps returning it.
@@ -202,19 +199,19 @@ type clientStream struct {
 }
 
 func (s *clientStream) SendHeaders() error {
-	s.p.dispatch()
+	s.dispatch()
 	return nil
 }
 
 func (s *clientStream) Send(msg any) error {
-	s.p.dispatch()
-	return s.p.send(&s.p.request, msg)
+	s.dispatch()
+	return s.send(&s.request, msg)
 }
 
 func (s *clientStream) CloseSend() error {
-	s.p.mu.Lock()
-	defer s.p.mu.Unlock()
-	s.p.request.close()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.request.close()
 	return nil
 }
 
@@ -222,25 +219,25 @@ func (s *clientStream) Receive(dst any) error {
 	if s.end != nil {
 		return s.end
 	}
-	s.p.dispatch()
-	filled, err := s.p.receive(&s.p.response, dst)
+	s.dispatch()
+	filled, err := s.receive(&s.response, dst)
 	if filled {
 		return err
 	}
-	if errors.Is(err, io.EOF) && s.p.serverErr != nil {
-		err = asClientErr(s.p.serverErr)
+	if errors.Is(err, io.EOF) && s.serverErr != nil {
+		err = asClientErr(s.serverErr)
 	}
 	s.end = err
 	// Release the stream context.
-	s.p.stopWake()
-	s.p.cancel()
+	s.stopWake()
+	s.cancel()
 	return err
 }
 
 // Close cancels before closing the request side. Waiters woken by the close
 // then report the cancellation instead of a clean end.
 func (s *clientStream) Close() error {
-	s.p.cancel()
+	s.cancel()
 	return s.CloseSend()
 }
 

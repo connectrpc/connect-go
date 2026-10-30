@@ -86,11 +86,14 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 	if t.server == nil {
 		return nil, errors.New("connectinprocess: nil server")
 	}
-	stream := clientStream{p: newStreamPair(ctx, t, spec)}
 	if spec.StreamType == connect.StreamTypeUnary || spec.StreamType == connect.StreamTypeClient {
-		return &unaryClientStream{clientStream: stream}, nil
+		stream := &unaryClientStream{}
+		stream.init(ctx, t, spec)
+		return stream, nil
 	}
-	return &stream, nil
+	stream := &clientStream{}
+	stream.init(ctx, t, spec)
+	return stream, nil
 }
 
 type options struct {
