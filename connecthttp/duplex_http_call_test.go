@@ -338,6 +338,45 @@ func TestWriteSenderClientDisconnected(t *testing.T) {
 	})
 }
 
+func TestDuplexHTTPCallCloseRead(t *testing.T) {
+	t.Parallel()
+	serverURL, err := url.Parse("http://localhost:0")
+	assert.Nil(t, err)
+	t.Run("after EOF", func(t *testing.T) {
+		t.Parallel()
+		body := &closeErrBody{err: syscall.EPIPE}
+		call := newDuplexHTTPCall(
+			t.Context(),
+			http.DefaultClient,
+			serverURL,
+			connect.StreamTypeUnary,
+			http.Header{},
+		)
+		call.response = &http.Response{Body: body}
+		close(call.responseReady)
+		_, err := call.Read(make([]byte, 1))
+		assert.ErrorIs(t, err, io.EOF)
+		assert.Nil(t, call.CloseRead())
+		assert.True(t, body.closed)
+	})
+	t.Run("idempotent", func(t *testing.T) {
+		t.Parallel()
+		body := &closeErrBody{err: syscall.EPIPE}
+		call := newDuplexHTTPCall(
+			t.Context(),
+			http.DefaultClient,
+			serverURL,
+			connect.StreamTypeUnary,
+			http.Header{},
+		)
+		call.response = &http.Response{Body: body}
+		close(call.responseReady)
+		assert.Equal(t, connect.CodeOf(call.CloseRead()), connect.CodeUnavailable)
+		assert.Nil(t, call.CloseRead())
+		assert.True(t, body.closed)
+	})
+}
+
 // hangingHTTPClient simulates Do() not returning promptly after context
 // cancellation, as can happen with Go's HTTP/2 transport. Do returns only
 // when the test cleans up, so the goroutine doesn't outlive a synctest
@@ -365,4 +404,18 @@ type errWriter struct {
 
 func (w errWriter) Write([]byte) (int, error) {
 	return 0, w.err
+}
+
+type closeErrBody struct {
+	err    error
+	closed bool
+}
+
+func (b *closeErrBody) Read([]byte) (int, error) {
+	return 0, io.EOF
+}
+
+func (b *closeErrBody) Close() error {
+	b.closed = true
+	return b.err
 }

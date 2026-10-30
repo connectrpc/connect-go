@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -79,6 +80,69 @@ func TestCodeOf(t *testing.T) {
 	var nilErr *connect.Error
 	assert.Equal(t, connect.CodeOf(nilErr), connect.CodeUnknown)
 	assert.Equal(t, connect.CodeOf(fmt.Errorf("wrapped: %w", nilErr)), connect.CodeUnknown)
+}
+
+func TestWrapIfClientTransportError(t *testing.T) {
+	t.Parallel()
+	assert.Nil(t, wrapIfClientTransportError(nil))
+	tests := []struct {
+		name          string
+		err           error
+		wantCode      connect.Code
+		wantUnchanged bool
+	}{
+		{
+			name:          "generic",
+			err:           errors.New("boom"),
+			wantCode:      connect.CodeUnknown,
+			wantUnchanged: true,
+		},
+		{
+			name:          "non-reset syscall",
+			err:           fmt.Errorf("read: %w", syscall.ECONNREFUSED),
+			wantCode:      connect.CodeUnknown,
+			wantUnchanged: true,
+		},
+		{
+			name:          "already coded",
+			err:           connect.NewError(connect.CodeCanceled, "canceled"),
+			wantCode:      connect.CodeCanceled,
+			wantUnchanged: true,
+		},
+		{
+			name:     "EPIPE",
+			err:      fmt.Errorf("read: %w", syscall.EPIPE),
+			wantCode: connect.CodeUnavailable,
+		},
+		{
+			name:     "ECONNRESET",
+			err:      fmt.Errorf("read: %w", syscall.ECONNRESET),
+			wantCode: connect.CodeUnavailable,
+		},
+		{
+			name:     "client disconnected",
+			err:      errors.New(clientDisconnectedMessage),
+			wantCode: connect.CodeUnavailable,
+		},
+		{
+			name:     "stream closed",
+			err:      errors.New(streamClosedMessage),
+			wantCode: connect.CodeUnavailable,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got := wrapIfClientTransportError(test.err)
+			assert.Equal(t, connect.CodeOf(got), test.wantCode)
+			if test.wantUnchanged {
+				// The mapping must return non-reset and already-coded errors unchanged.
+				assert.True(t, got == test.err) //nolint:err113,errorlint
+				return
+			}
+			assert.True(t, errors.Is(got, test.err))
+		})
+	}
 }
 
 func TestErrorTypedNil(t *testing.T) {

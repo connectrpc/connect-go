@@ -385,7 +385,8 @@ func TestConnectionDropped(t *testing.T) {
 func TestConnectionReset(t *testing.T) {
 	t.Parallel()
 	// A reset observed by the client is a transport failure, not the caller
-	// canceling, so it must not be reported as CodeCanceled.
+	// canceling, so it must be CodeUnavailable. Retries remain the caller's
+	// responsibility and are safe only for idempotent RPCs.
 	resetErrs := map[string]error{
 		"ECONNRESET": &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.ECONNRESET)},
 		"EPIPE":      &net.OpError{Op: "write", Net: "tcp", Err: os.NewSyscallError("write", syscall.EPIPE)},
@@ -453,19 +454,19 @@ func TestConnectionReset(t *testing.T) {
 						return &resetBody{ReadCloser: body, readErr: resetErr}
 					}))
 					_, err := client.Ping(t.Context(), &pingv1.PingRequest{})
-					assert.NotEqual(t, connect.CodeOf(err), connect.CodeCanceled)
+					assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
 					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{})
 					if !assert.Nil(t, err) {
 						return
 					}
 					_, err = stream.Receive()
-					assert.NotEqual(t, connect.CodeOf(err), connect.CodeCanceled)
+					assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
 					assert.Nil(t, stream.Close())
 				})
 				t.Run("close", func(t *testing.T) {
 					t.Parallel()
 					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
-						return &resetBody{ReadCloser: body, closeErr: resetErr}
+						return &replayingCloseBody{ReadCloser: body, closeErr: resetErr}
 					}))
 					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{})
 					if !assert.Nil(t, err) {
@@ -475,7 +476,108 @@ func TestConnectionReset(t *testing.T) {
 						_, err = stream.Receive()
 					}
 					assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-					assert.NotEqual(t, connect.CodeOf(stream.Close()), connect.CodeCanceled)
+					assert.Nil(t, stream.Close())
+				})
+				t.Run("close_early", func(t *testing.T) {
+					t.Parallel()
+					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
+						return &resetBody{ReadCloser: body, closeErr: resetErr}
+					}))
+					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{})
+					if !assert.Nil(t, err) {
+						return
+					}
+					if _, err := stream.Receive(); !assert.Nil(t, err) {
+						return
+					}
+					assert.Equal(t, connect.CodeOf(stream.Close()), connect.CodeUnavailable)
+					assert.Nil(t, stream.Close())
+				})
+				t.Run("unary_close", func(t *testing.T) {
+					t.Parallel()
+					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
+						return &replayingCloseBody{ReadCloser: body, closeErr: resetErr}
+					}))
+					_, err := client.Ping(t.Context(), &pingv1.PingRequest{})
+					assert.Nil(t, err)
+				})
+				t.Run("read_canceled", func(t *testing.T) {
+					t.Parallel()
+					var body *blockingResetBody
+					client := newClient(withBody(func(reader io.ReadCloser) io.ReadCloser {
+						body = &blockingResetBody{
+							ReadCloser: reader,
+							started:    make(chan struct{}),
+							release:    make(chan struct{}),
+							err:        resetErr,
+						}
+						return body
+					}))
+					ctx, cancel := context.WithCancel(t.Context())
+					defer cancel()
+					stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{})
+					if !assert.Nil(t, err) {
+						return
+					}
+					if body == nil {
+						t.Fatal("response body was not wrapped")
+					}
+					errCh := make(chan error, 1)
+					go func() {
+						_, err := stream.Receive()
+						errCh <- err
+					}()
+					<-body.started
+					cancel()
+					close(body.release)
+					assert.Equal(t, connect.CodeOf(<-errCh), connect.CodeCanceled)
+				})
+				t.Run("read_deadline", func(t *testing.T) {
+					t.Parallel()
+					var body *blockingResetBody
+					client := newClient(withBody(func(reader io.ReadCloser) io.ReadCloser {
+						body = &blockingResetBody{
+							ReadCloser: reader,
+							started:    make(chan struct{}),
+							release:    make(chan struct{}),
+							err:        resetErr,
+						}
+						return body
+					}))
+					ctx := newDeadlineContext()
+					stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{})
+					if !assert.Nil(t, err) {
+						return
+					}
+					if body == nil {
+						t.Fatal("response body was not wrapped")
+					}
+					errCh := make(chan error, 1)
+					go func() {
+						_, err := stream.Receive()
+						errCh <- err
+					}()
+					<-body.started
+					ctx.expire()
+					close(body.release)
+					assert.Equal(t, connect.CodeOf(<-errCh), connect.CodeDeadlineExceeded)
+				})
+				t.Run("close_canceled", func(t *testing.T) {
+					t.Parallel()
+					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
+						return &resetBody{ReadCloser: body, closeErr: resetErr}
+					}))
+					ctx, cancel := context.WithCancel(t.Context())
+					defer cancel()
+					stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{})
+					if !assert.Nil(t, err) {
+						return
+					}
+					if _, err := stream.Receive(); !assert.Nil(t, err) {
+						return
+					}
+					cancel()
+					assert.Equal(t, connect.CodeOf(stream.Close()), connect.CodeCanceled)
 				})
 				if protocol == connect.ProtocolNameGRPC {
 					return // gRPC ends the stream with trailers, not an end-stream message.
@@ -483,7 +585,7 @@ func TestConnectionReset(t *testing.T) {
 				t.Run("drain", func(t *testing.T) {
 					t.Parallel()
 					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
-						return &resetBody{ReadCloser: body, eofErr: resetErr}
+						return &replayingCloseBody{ReadCloser: body, eofErr: resetErr, closeErr: resetErr}
 					}))
 					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{})
 					if !assert.Nil(t, err) {
@@ -1015,13 +1117,14 @@ func (fn httpClientFunc) Do(req *http.Request) (*http.Response, error) {
 }
 
 // resetBody simulates a connection reset on a response body. readErr fails
-// the first Read, eofErr replaces io.EOF, and closeErr fails Close.
+// the first Read, eofErr replaces io.EOF, and closeErr fails the first Close.
 type resetBody struct {
 	io.ReadCloser
 
 	readErr  error
 	eofErr   error
 	closeErr error
+	closed   atomic.Bool
 }
 
 func (b *resetBody) Read(data []byte) (int, error) {
@@ -1036,8 +1139,86 @@ func (b *resetBody) Read(data []byte) (int, error) {
 }
 
 func (b *resetBody) Close() error {
+	if b.closed.Swap(true) {
+		return nil
+	}
 	if err := b.ReadCloser.Close(); err != nil {
 		return err
 	}
 	return b.closeErr
+}
+
+// replayingCloseBody returns closeErr on every Close, simulating a custom
+// transport that does not make Close idempotent.
+type replayingCloseBody struct {
+	io.ReadCloser
+
+	eofErr   error
+	closeErr error
+}
+
+func (b *replayingCloseBody) Read(data []byte) (int, error) {
+	n, err := b.ReadCloser.Read(data)
+	if b.eofErr != nil && errors.Is(err, io.EOF) {
+		err = b.eofErr
+	}
+	return n, err
+}
+
+func (b *replayingCloseBody) Close() error {
+	_ = b.ReadCloser.Close()
+	return b.closeErr
+}
+
+// deadlineContext expires only when expire is called, so a test can make a
+// deadline race deterministic without a wall-clock timeout.
+type deadlineContext struct {
+	done chan struct{}
+	once sync.Once
+}
+
+func newDeadlineContext() *deadlineContext {
+	return &deadlineContext{done: make(chan struct{})}
+}
+
+func (c *deadlineContext) Deadline() (time.Time, bool) {
+	return time.Time{}, false
+}
+
+func (c *deadlineContext) Done() <-chan struct{} {
+	return c.done
+}
+
+func (c *deadlineContext) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+func (c *deadlineContext) Value(any) any {
+	return nil
+}
+
+func (c *deadlineContext) expire() {
+	c.once.Do(func() { close(c.done) })
+}
+
+// blockingResetBody blocks its first Read until release is closed, then
+// returns err. It lets a test cancel or expire the context mid-read.
+type blockingResetBody struct {
+	io.ReadCloser
+
+	started chan struct{}
+	release chan struct{}
+	err     error
+	once    sync.Once
+}
+
+func (b *blockingResetBody) Read([]byte) (int, error) {
+	b.once.Do(func() { close(b.started) })
+	<-b.release
+	return 0, b.err
 }
