@@ -215,7 +215,32 @@ func (s *clientStream) CloseSend() error {
 	return nil
 }
 
+// Receive reads the single response of a unary or client-streaming RPC and
+// then the end of the stream, as connecthttp does.
 func (s *clientStream) Receive(dst any) error {
+	if s.spec.StreamType != connect.StreamTypeUnary && s.spec.StreamType != connect.StreamTypeClient {
+		return s.next(dst)
+	}
+	if s.end != nil {
+		return io.EOF
+	}
+	err := s.next(dst)
+	switch {
+	case err == nil:
+		if drainErr := s.next(dst); drainErr == nil {
+			err = connect.Errorf(connect.CodeUnimplemented, "unary stream has multiple messages")
+			s.finish(io.EOF)
+		} else if !errors.Is(drainErr, io.EOF) {
+			err = drainErr
+		}
+	case errors.Is(err, io.EOF):
+		err = connect.Errorf(connect.CodeUnimplemented, "unary stream has zero messages")
+	}
+	return err
+}
+
+// next reads the next response. The error that ends the stream is sticky.
+func (s *clientStream) next(dst any) error {
 	if s.end != nil {
 		return s.end
 	}
@@ -227,11 +252,15 @@ func (s *clientStream) Receive(dst any) error {
 	if errors.Is(err, io.EOF) && s.serverErr != nil {
 		err = asClientErr(s.serverErr)
 	}
+	s.finish(err)
+	return err
+}
+
+// finish ends the stream with err and releases the stream context.
+func (s *clientStream) finish(err error) {
 	s.end = err
-	// Release the stream context.
 	s.stopWake()
 	s.cancel()
-	return err
 }
 
 // Close cancels before closing the request side. Waiters woken by the close
