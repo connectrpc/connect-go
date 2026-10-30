@@ -241,6 +241,7 @@ func TestGetNotModified(t *testing.T) {
 	assert.True(t, connecthttp.IsNotModifiedError(err))
 	var connectErr *connect.Error
 	assert.True(t, errors.As(err, &connectErr))
+	assert.True(t, connectErr.IsRemote())
 	condHTTPInfo, _ := condInfo.TransportInfo.(*connecthttp.ClientInfo)
 	assert.Equal(t, http.MethodGet, condHTTPInfo.HTTPMethod())
 }

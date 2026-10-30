@@ -711,7 +711,7 @@ func grpcValidateResponse(
 	codecName string,
 ) *connect.Error {
 	if response.StatusCode != http.StatusOK {
-		return connect.Errorf(httpToCode(response.StatusCode), "HTTP status %v", response.Status)
+		return connect.Errorf(httpToCode(response.StatusCode), "HTTP status %v", response.Status).WithRemote()
 	}
 	if err := grpcValidateResponseContentType(
 		web,

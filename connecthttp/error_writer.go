@@ -105,8 +105,14 @@ func (w *ErrorWriter) IsSupported(request *http.Request) bool {
 // of the ErrorWriter's supported RPC protocols. If the protocol is unknown,
 // Write will send the error as unprefixed, Connect-formatted JSON.
 //
+// Write scrubs err the same way handlers do. Only a locally authored
+// [*connect.Error] keeps its code, message and details. A remote error is
+// written as [connect.CodeInternal] and any other error as
+// [connect.CodeUnknown] with no message.
+//
 // Write does not read or close the request body.
 func (w *ErrorWriter) Write(response http.ResponseWriter, request *http.Request, err error) error {
+	err = scrubHandlerError(err)
 	ctx := request.Context()
 	ctype := canonicalizeContentType(getHeaderCanonical(request.Header, headerContentType))
 	switch protocolType := w.classifyRequest(request); protocolType {
