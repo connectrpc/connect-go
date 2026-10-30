@@ -452,7 +452,13 @@ type writeSender struct {
 var _ messageSender = writeSender{}
 
 func (w writeSender) Send(payload messagePayload) (int64, error) {
-	return payload.WriteTo(w.writer)
+	written, err := payload.WriteTo(w.writer)
+	// The request context is cancelled from a different goroutine than the one
+	// failing the write, so a write can fail while ctx.Err() is still nil.
+	if err != nil && isClientDisconnected(err) {
+		err = connect.NewError(connect.CodeCanceled, err.Error()).WithCause(err)
+	}
+	return written, err
 }
 
 // See: https://cs.opensource.google/go/go/+/refs/tags/go1.20.1:src/net/http/clone.go;l=22-33
