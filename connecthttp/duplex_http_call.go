@@ -34,6 +34,7 @@ import (
 // Be warned: we need to use some lesser-known APIs to do this with net/http.
 type duplexHTTPCall struct {
 	ctx               context.Context
+	cancel            context.CancelFunc // cancels the request, not ctx
 	httpClient        HTTPClient
 	streamType        connect.StreamType
 	onRequestSend     func(*http.Request)
@@ -68,6 +69,9 @@ func newDuplexHTTPCall(
 	// Request. This ensures if a transport out of our control wants
 	// to mutate the req.URL, we don't feel the effects of it.
 	url = cloneURL(url)
+	// The request gets its own ctx so CloseRead can abort it without
+	// canceling the caller's ctx, which is still used to classify errors.
+	requestCtx, cancel := context.WithCancel(ctx)
 
 	// This is mirroring what http.NewRequestContext did, but
 	// using an already parsed url.URL object, rather than a string
@@ -85,9 +89,10 @@ func newDuplexHTTPCall(
 		Body:       http.NoBody,
 		GetBody:    getNoBody,
 		Host:       url.Host,
-	}).WithContext(ctx)
+	}).WithContext(requestCtx)
 	duplex := &duplexHTTPCall{
 		ctx:           ctx,
+		cancel:        cancel,
 		httpClient:    httpClient,
 		streamType:    streamType,
 		request:       request,
@@ -265,7 +270,16 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 	return n, err
 }
 
+// CloseRead closes the response body. It cancels the request first, so it
+// doesn't wait for response headers the server hasn't sent, and a pending
+// Read returns. A request that hasn't been sent is never sent.
 func (d *duplexHTTPCall) CloseRead() error {
+	d.cancel()
+	if d.requestSent.CompareAndSwap(false, true) {
+		d.responseErr = wrapIfContextError(context.Canceled)
+		close(d.responseReady)
+		return nil
+	}
 	// Ignore the error: an error response still has a body that must be closed.
 	response, _ := d.blockUntilResponseReady()
 	if response == nil {

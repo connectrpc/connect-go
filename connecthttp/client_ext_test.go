@@ -32,6 +32,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"connectrpc.com/connect/v2"
@@ -204,6 +205,86 @@ func TestClientInfoAfterCancel(t *testing.T) {
 	_ = clientInfo.ResponseStatus()
 	_ = clientInfo.ResponseProto()
 	_ = clientInfo.TLS()
+}
+
+func TestClientStreamCloseBeforeResponseHeaders(t *testing.T) {
+	t.Parallel()
+	// The handler never sends response headers. Close must abort the call
+	// rather than wait for them, and unblock a pending Receive.
+	specs := []connect.Spec{
+		{StreamType: connect.StreamTypeClient, Procedure: pingv1connect.PingServiceSumProcedure},
+		{StreamType: connect.StreamTypeBidi, Procedure: pingv1connect.PingServiceCumSumProcedure},
+	}
+	protocols := map[string][]connecthttp.Option{
+		connect.ProtocolNameConnect: nil,
+		connect.ProtocolNameGRPC:    {connecthttp.WithGRPC()},
+		connect.ProtocolNameGRPCWeb: {connecthttp.WithGRPCWeb()},
+	}
+	for name, opts := range protocols {
+		for _, spec := range specs {
+			t.Run(name+"/"+spec.StreamType.String(), func(t *testing.T) {
+				t.Parallel()
+				synctest.Test(t, func(t *testing.T) {
+					srv := connect.NewServer()
+					srv.Register(connect.Method{
+						Spec: spec,
+						Handler: func(ctx context.Context, _ connect.Spec, _ connect.ServerStream) error {
+							<-ctx.Done()
+							return ctx.Err()
+						},
+					})
+					mux := http.NewServeMux()
+					connecthttp.Mount(mux, srv)
+					server := memhttptest.NewServer(t, mux)
+					client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), opts...))
+					stream, err := client.CallClientStream(t.Context(), spec)
+					assert.Nil(t, err)
+					assert.Nil(t, stream.SendHeaders())
+					receiveDone := make(chan error, 1)
+					go func() {
+						receiveDone <- stream.Receive(&pingv1.SumResponse{})
+					}()
+					// The handler and Receive are both waiting on each other.
+					synctest.Wait()
+					closeDone := make(chan error, 1)
+					go func() {
+						closeDone <- stream.Close()
+					}()
+					synctest.Wait()
+					select {
+					case <-closeDone:
+					default:
+						t.Error("Close blocked waiting for response headers")
+					}
+					select {
+					case err := <-receiveDone:
+						assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
+					default:
+						t.Error("Close didn't unblock a pending Receive")
+					}
+				})
+			})
+		}
+	}
+}
+
+func TestClientStreamCloseUnusedDoesNotDispatch(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	httpClient := httpClientFunc(func(*http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return nil, errors.New("unexpected request")
+	})
+	client := connect.NewClient(connecthttp.NewTransport(httpClient, "http://localhost"))
+	for _, spec := range []connect.Spec{
+		{StreamType: connect.StreamTypeClient, Procedure: pingv1connect.PingServiceSumProcedure},
+		{StreamType: connect.StreamTypeBidi, Procedure: pingv1connect.PingServiceCumSumProcedure},
+	} {
+		stream, err := client.CallClientStream(t.Context(), spec)
+		assert.Nil(t, err)
+		assert.Nil(t, stream.Close())
+	}
+	assert.Equal(t, calls.Load(), 0)
 }
 
 func TestGetNotModified(t *testing.T) {
