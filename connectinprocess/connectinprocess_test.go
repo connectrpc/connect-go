@@ -306,6 +306,130 @@ func TestInProcessClientStreaming(t *testing.T) {
 	}
 }
 
+// TestInProcessClientStreamResponseCardinality verifies a client-streaming
+// Receive enforces a single response and reports the server's final error,
+// as the HTTP transport does.
+func TestInProcessClientStreamResponseCardinality(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		handler  connect.ServerFunc
+		wantCode connect.Code
+	}{
+		{
+			name: "zero_messages",
+			handler: func(context.Context, connect.Spec, connect.ServerStream) error {
+				return nil
+			},
+			wantCode: connect.CodeUnimplemented,
+		},
+		{
+			name: "multiple_messages",
+			handler: func(_ context.Context, _ connect.Spec, stream connect.ServerStream) error {
+				if err := stream.Send(&pingv1.SumResponse{Sum: 1}); err != nil {
+					return err
+				}
+				return stream.Send(&pingv1.SumResponse{Sum: 2})
+			},
+			wantCode: connect.CodeUnimplemented,
+		},
+		{
+			name: "error_after_message",
+			handler: func(_ context.Context, _ connect.Spec, stream connect.ServerStream) error {
+				if err := stream.Send(&pingv1.SumResponse{Sum: 1}); err != nil {
+					return err
+				}
+				return connect.NewError(connect.CodeAborted, "aborted after response")
+			},
+			wantCode: connect.CodeAborted,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				handlerDone := make(chan struct{})
+				server := connect.NewServer()
+				server.Register(connect.Method{
+					Spec: connect.Spec{
+						StreamType: connect.StreamTypeClient,
+						Procedure:  pingv1connect.PingServiceSumProcedure,
+					},
+					Handler: func(ctx context.Context, spec connect.Spec, stream connect.ServerStream) error {
+						defer close(handlerDone)
+						return test.handler(ctx, spec, stream)
+					},
+				})
+				client := pingv1connect.NewPingServiceClient(connect.NewClient(connectinprocess.New(server)))
+
+				stream, err := client.Sum(t.Context())
+				if err != nil {
+					t.Fatalf("Sum: %v", err)
+				}
+				_, err = stream.CloseAndReceive()
+				if got := connect.CodeOf(err); got != test.wantCode {
+					t.Errorf("CloseAndReceive = %v, want code %v", err, test.wantCode)
+				}
+				// The server must not be left blocked once Receive returns.
+				synctest.Wait()
+				select {
+				case <-handlerDone:
+				default:
+					t.Error("handler still running after CloseAndReceive")
+				}
+			})
+		})
+	}
+}
+
+// TestInProcessClientStreamReceiveReleasesStream verifies the single
+// client-streaming Receive releases the stream, so later calls report io.EOF.
+func TestInProcessClientStreamReceiveReleasesStream(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		handlerCtxDone := make(chan struct{})
+		server := connect.NewServer()
+		server.Register(connect.Method{
+			Spec: connect.Spec{
+				StreamType: connect.StreamTypeClient,
+				Procedure:  pingv1connect.PingServiceSumProcedure,
+			},
+			Handler: func(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+				context.AfterFunc(ctx, func() { close(handlerCtxDone) })
+				return stream.Send(&pingv1.SumResponse{Sum: 1})
+			},
+		})
+		client := connect.NewClient(connectinprocess.New(server))
+
+		stream, err := client.CallClientStream(t.Context(), connect.Spec{
+			StreamType: connect.StreamTypeClient,
+			Procedure:  pingv1connect.PingServiceSumProcedure,
+		})
+		if err != nil {
+			t.Fatalf("CallClientStream: %v", err)
+		}
+		if err := stream.CloseSend(); err != nil {
+			t.Fatalf("CloseSend: %v", err)
+		}
+		var res pingv1.SumResponse
+		if err := stream.Receive(&res); err != nil {
+			t.Fatalf("Receive: %v", err)
+		}
+		if got, want := res.GetSum(), int64(1); got != want {
+			t.Errorf("Sum = %d, want %d", got, want)
+		}
+		synctest.Wait()
+		select {
+		case <-handlerCtxDone:
+		default:
+			t.Error("stream context not released after Receive")
+		}
+		if err := stream.Receive(&res); !errors.Is(err, io.EOF) {
+			t.Errorf("second Receive = %v, want io.EOF", err)
+		}
+	})
+}
+
 func TestInProcessBidiStreaming(t *testing.T) {
 	t.Parallel()
 	handler := connect.NewServer()
