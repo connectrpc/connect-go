@@ -54,7 +54,15 @@ type duplexHTTPCall struct {
 	// responseErr. There's always a response if responseErr is nil.
 	responseReady chan struct{}
 	response      *http.Response
-	responseErr   error
+	// responseEOF is set once Read returns io.EOF. CloseRead uses it to ignore
+	// close errors that arrive after the body is fully consumed.
+	responseEOF atomic.Bool
+	responseErr error
+
+	// closeOnce ensures the response body is closed once. Later CloseRead calls
+	// are no-ops, matching ClientStream.Close's idempotence.
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func newDuplexHTTPCall(
@@ -257,12 +265,17 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 	if err := d.ctx.Err(); err != nil {
 		return 0, wrapIfContextError(err)
 	}
-	n, err := d.response.Body.Read(data)
-	if err != nil && !errors.Is(err, io.EOF) {
-		err = wrapIfContextDone(d.ctx, err)
-		err = wrapIfRSTError(d.ctx, err)
+	bytesRead, err := d.response.Body.Read(data)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			d.responseEOF.Store(true)
+		} else {
+			err = wrapIfContextDone(d.ctx, err)
+			err = wrapIfRSTError(d.ctx, err)
+			err = wrapIfClientTransportError(err)
+		}
 	}
-	return n, err
+	return bytesRead, err
 }
 
 func (d *duplexHTTPCall) CloseRead() error {
@@ -271,9 +284,23 @@ func (d *duplexHTTPCall) CloseRead() error {
 	if response == nil {
 		return nil // No response, so nothing to close.
 	}
-	err := response.Body.Close()
+	var first bool
+	d.closeOnce.Do(func() {
+		first = true
+		d.closeErr = response.Body.Close()
+	})
+	if !first {
+		return nil
+	}
+	if d.responseEOF.Load() {
+		// The response body was fully consumed. A close error here is transport
+		// cleanup, not part of the RPC result.
+		return nil
+	}
+	err := d.closeErr
 	err = wrapIfContextDone(d.ctx, err)
-	return wrapIfRSTError(d.ctx, err)
+	err = wrapIfRSTError(d.ctx, err)
+	return wrapIfClientTransportError(err)
 }
 
 // ResponseStatusCode is the response's HTTP status code.
