@@ -17,11 +17,13 @@ package connectinprocess_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"runtime"
 	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectinprocess"
@@ -140,6 +142,106 @@ func TestStreamContextCancelAborts(t *testing.T) {
 	cancel()
 	if _, err := stream.Receive(); !errors.Is(err, context.Canceled) {
 		t.Errorf("Receive after cancel = %v, want context.Canceled", err)
+	}
+}
+
+// TestStreamReceiveAfterEndIsSticky verifies Receive keeps reporting the
+// stream's end. Ending the stream also releases its context. A later Receive
+// must not report that as a cancellation.
+func TestStreamReceiveAfterEndIsSticky(t *testing.T) {
+	t.Parallel()
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(connectinprocess.New(server)))
+
+	for range 50 {
+		stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 1})
+		if err != nil {
+			t.Fatalf("CountUp: %v", err)
+		}
+		if _, err := stream.Receive(); err != nil {
+			t.Fatalf("Receive: %v", err)
+		}
+		for range 2 {
+			if _, err := stream.Receive(); !errors.Is(err, io.EOF) {
+				t.Fatalf("Receive after end = %v, want io.EOF", err)
+			}
+		}
+	}
+}
+
+// TestStreamCloseReportsCanceled verifies Receive after Close reports
+// cancellation, even when the server returns in response to the Close.
+func TestStreamCloseReportsCanceled(t *testing.T) {
+	t.Parallel()
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(connectinprocess.New(server)))
+
+	for range 50 {
+		stream, err := client.CumSum(t.Context())
+		if err != nil {
+			t.Fatalf("CumSum: %v", err)
+		}
+		if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+		// Close half-closes the stream, so CumSum returns cleanly as Close
+		// cancels it.
+		if err := stream.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if _, err := stream.Receive(); !errors.Is(err, context.Canceled) {
+			t.Fatalf("Receive after Close = %v, want context.Canceled", err)
+		}
+	}
+}
+
+// TestServerStreamHeadersOnFirstMessage verifies response headers reach the
+// client with the first message, not when the server returns. Headers set
+// after the first Send are not sent.
+func TestServerStreamHeadersOnFirstMessage(t *testing.T) {
+	t.Parallel()
+	spec := connect.Spec{Procedure: "/test.Headers/Stream", StreamType: connect.StreamTypeServer}
+	release := make(chan struct{})
+	server := connect.NewServer()
+	server.Register(connect.Method{Spec: spec, Handler: func(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+		if err := stream.Receive(&pingv1.CountUpRequest{}); err != nil {
+			return err
+		}
+		info, _ := connect.CallInfoForServerContext(ctx)
+		info.ResponseHeader().Set("Early", "1")
+		if err := stream.Send(&pingv1.CountUpResponse{Number: 1}); err != nil {
+			return err
+		}
+		info.ResponseHeader().Set("Late", "1")
+		info.ResponseTrailer().Set("Trailer", "1")
+		<-release
+		return nil
+	}})
+	client := connect.NewClient(connectinprocess.New(server))
+
+	ctx, info := connect.NewClientContext(t.Context())
+	stream, err := client.CallServerStream(ctx, spec, &pingv1.CountUpRequest{})
+	if err != nil {
+		t.Fatalf("CallServerStream: %v", err)
+	}
+	defer stream.Close()
+	if err := stream.Receive(&pingv1.CountUpResponse{}); err != nil {
+		t.Fatalf("Receive: %v", err)
+	}
+	if got := info.ResponseHeader().Get("Early"); got != "1" {
+		t.Errorf("Early header after first message = %q, want %q", got, "1")
+	}
+	close(release)
+	if err := stream.Receive(&pingv1.CountUpResponse{}); !errors.Is(err, io.EOF) {
+		t.Fatalf("Receive = %v, want io.EOF", err)
+	}
+	if got := info.ResponseHeader().Get("Late"); got != "" {
+		t.Errorf("Late header = %q, want it dropped", got)
+	}
+	if got := info.ResponseTrailer().Get("Trailer"); got != "1" {
+		t.Errorf("Trailer = %q, want %q", got, "1")
 	}
 }
 
@@ -465,6 +567,117 @@ func TestInProcessBidiStreaming(t *testing.T) {
 	}
 }
 
+// TestSendDoesNotRetainMessage verifies the peer's copy is complete when Send
+// returns. Each sender overwrites its message right after Send, and a slow
+// CopyFunc lets that write win a race with a copy still in flight. The
+// messages are plain structs. Nothing here depends on Protobuf.
+func TestSendDoesNotRetainMessage(t *testing.T) {
+	t.Parallel()
+	t.Run("unary", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			stream := newNumberStream(t, connect.StreamTypeUnary, func(_ context.Context, _ connect.Spec, stream connect.ServerStream) error {
+				req := &number{}
+				if err := stream.Receive(req); err != nil {
+					return err
+				}
+				res := &number{N: req.N}
+				err := stream.Send(res)
+				res.N = -1
+				return err
+			})
+			req := &number{N: 42}
+			if err := stream.Send(req); err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+			req.N = -1
+			if err := stream.CloseSend(); err != nil {
+				t.Fatalf("CloseSend: %v", err)
+			}
+			res := &number{}
+			if err := stream.Receive(res); err != nil {
+				t.Fatalf("Receive: %v", err)
+			}
+			if got, want := res.N, 42; got != want {
+				t.Errorf("N = %d, want %d", got, want)
+			}
+		})
+	})
+	t.Run("server_stream", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			stream := newNumberStream(t, connect.StreamTypeServer, func(_ context.Context, _ connect.Spec, stream connect.ServerStream) error {
+				req := &number{}
+				if err := stream.Receive(req); err != nil {
+					return err
+				}
+				res := &number{}
+				for i := 1; i <= req.N; i++ {
+					res.N = i
+					if err := stream.Send(res); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			req := &number{N: 3}
+			if err := stream.Send(req); err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+			req.N = 0
+			if err := stream.CloseSend(); err != nil {
+				t.Fatalf("CloseSend: %v", err)
+			}
+			for want := 1; want <= 3; want++ {
+				res := &number{}
+				if err := stream.Receive(res); err != nil {
+					t.Fatalf("Receive: %v", err)
+				}
+				if res.N != want {
+					t.Errorf("N = %d, want %d", res.N, want)
+				}
+			}
+		})
+	})
+	t.Run("client_stream", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			stream := newNumberStream(t, connect.StreamTypeClient, func(_ context.Context, _ connect.Spec, stream connect.ServerStream) error {
+				var sum int
+				for {
+					req := &number{}
+					err := stream.Receive(req)
+					if errors.Is(err, io.EOF) {
+						return stream.Send(&number{N: sum})
+					}
+					if err != nil {
+						return err
+					}
+					sum += req.N
+				}
+			})
+			req := &number{}
+			for n := 1; n <= 3; n++ {
+				req.N = n
+				if err := stream.Send(req); err != nil {
+					t.Fatalf("Send: %v", err)
+				}
+			}
+			req.N = 0
+			if err := stream.CloseSend(); err != nil {
+				t.Fatalf("CloseSend: %v", err)
+			}
+			res := &number{}
+			if err := stream.Receive(res); err != nil {
+				t.Fatalf("Receive: %v", err)
+			}
+			if got, want := res.N, 6; got != want {
+				t.Errorf("N = %d, want %d", got, want)
+			}
+		})
+	})
+}
+
 func TestProtoCopyTypedToTyped(t *testing.T) {
 	t.Parallel()
 	src := &pingv1.PingRequest{Number: 42, Text: "hello"}
@@ -661,6 +874,50 @@ func TestUnaryCloseUnblocksWaitingReceive(t *testing.T) {
 			t.Errorf("Receive = %v, want context.Canceled", err)
 		}
 	})
+}
+
+// TestUnaryAbandonAfterSendReleasesServer verifies a server suspended in
+// Send is released when the client abandons the stream before Receive.
+func TestUnaryAbandonAfterSendReleasesServer(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name    string
+		abandon func(stream connect.ClientStream, cancel context.CancelFunc)
+	}{
+		{"close", func(stream connect.ClientStream, _ context.CancelFunc) { _ = stream.Close() }},
+		{"cancel", func(_ connect.ClientStream, cancel context.CancelFunc) { cancel() }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				sendErrs := make(chan error, 1)
+				server := connect.NewServer(func(next connect.ServerFunc) connect.ServerFunc {
+					return func(ctx context.Context, spec connect.Spec, stream connect.ServerStream) error {
+						return next(ctx, spec, sendErrStream{stream, sendErrs})
+					}
+				})
+				pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+				client := connect.NewClient(connectinprocess.New(server))
+
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				stream, err := client.CallClientStream(ctx, connect.Spec{
+					Procedure:  pingv1connect.PingServicePingProcedure,
+					StreamType: connect.StreamTypeUnary,
+				})
+				if err != nil {
+					t.Fatalf("CallClientStream: %v", err)
+				}
+				if err := stream.Send(&pingv1.PingRequest{Number: 42}); err != nil {
+					t.Fatalf("Send: %v", err)
+				}
+				tt.abandon(stream, cancel)
+				if err := <-sendErrs; err == nil {
+					t.Error("server Send = nil, want an error once the client abandons the stream")
+				}
+			})
+		})
+	}
 }
 
 // TestClientStreamCloseAbortsServer verifies Close cancels the stream
@@ -952,6 +1209,50 @@ type typedNilErrPingServer struct{ pingServer }
 func (typedNilErrPingServer) Ping(context.Context, *pingv1.PingRequest) (*pingv1.PingResponse, error) {
 	var err *connect.Error
 	return nil, err
+}
+
+// number is a plain, non-Protobuf message.
+type number struct{ N int }
+
+// newNumberStream opens a stream of the given type to handler over a
+// transport whose CopyFunc copies numbers slowly.
+func newNumberStream(t *testing.T, streamType connect.StreamType, handler connect.ServerFunc) connect.ClientStream {
+	t.Helper()
+	spec := connect.Spec{Procedure: "/test.Numbers/Call", StreamType: streamType}
+	server := connect.NewServer()
+	server.Register(connect.Method{Spec: spec, Handler: handler})
+	transport := connectinprocess.New(server, connectinprocess.WithCopyFunc(func(dst, src any) error {
+		dstNumber, ok := dst.(*number)
+		if !ok {
+			return fmt.Errorf("dst is %T, not *number", dst)
+		}
+		srcNumber, ok := src.(*number)
+		if !ok {
+			return fmt.Errorf("src is %T, not *number", src)
+		}
+		time.Sleep(time.Millisecond)
+		*dstNumber = *srcNumber
+		return nil
+	}))
+	stream, err := connect.NewClient(transport).CallClientStream(t.Context(), spec)
+	if err != nil {
+		t.Fatalf("CallClientStream: %v", err)
+	}
+	t.Cleanup(func() { _ = stream.Close() })
+	return stream
+}
+
+// sendErrStream reports the result of each Send on errs.
+type sendErrStream struct {
+	connect.ServerStream
+
+	errs chan<- error
+}
+
+func (s sendErrStream) Send(msg any) error {
+	err := s.ServerStream.Send(msg)
+	s.errs <- err
+	return err
 }
 
 type infiniteCountUpServer struct {

@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"sync"
 
 	"connectrpc.com/connect/v2"
@@ -27,9 +28,10 @@ import (
 // in-process RPC together.
 //
 // Messages flow through unbuffered channels, providing natural backpressure:
-// each Send blocks until the peer's Receive consumes the message. The server
-// runs on its own goroutine, which is started lazily upon the first call to
-// SendHeaders, Send, or Receive.
+// each Send blocks until the peer's Receive has copied the message. The sender
+// may reuse its message once Send returns. The server runs on its own
+// goroutine, which is started lazily upon the first call to SendHeaders, Send,
+// or Receive.
 //
 // Lifecycle channels:
 //   - closeSendCh: Closed by the client's CloseSend. The server's Receive
@@ -39,11 +41,6 @@ import (
 //     and trailers have safely synced into the client's CallInfo.
 //
 // Clients read responseCh until [io.EOF] or call Close to cancel the stream.
-// A client-streaming RPC has a single response, so its first Receive reads to
-// the end of the stream (see clientStream.receiveUnary).
-//
-// Note: Unary RPCs bypass this structure to use a synchronous fast path
-// (see unary.go).
 type streamPair struct {
 	t          *transport
 	spec       connect.Spec
@@ -56,11 +53,14 @@ type streamPair struct {
 	cancel context.CancelFunc
 
 	requestCh   chan any
+	requestAck  chan struct{}
 	responseCh  chan any
+	responseAck chan struct{}
 	closeSendCh chan struct{}
 	serverDone  chan struct{}
 
 	dispatchOnce sync.Once
+	headerOnce   sync.Once
 	serverErr    error
 
 	closeSendOnce sync.Once
@@ -77,7 +77,9 @@ func newStreamPair(ctx context.Context, t *transport, spec connect.Spec) *stream
 		ctx:         ctx,
 		cancel:      cancel,
 		requestCh:   make(chan any),
+		requestAck:  make(chan struct{}),
 		responseCh:  make(chan any),
+		responseAck: make(chan struct{}),
 		closeSendCh: make(chan struct{}),
 		serverDone:  make(chan struct{}),
 	}
@@ -108,8 +110,8 @@ func (p *streamPair) run() {
 		if r := recover(); r != nil {
 			p.serverErr = connect.Errorf(connect.CodeInternal, "panic in server: %v", r)
 		}
+		p.flushHeaders()
 		if p.clientInfo != nil {
-			syncHeader(p.clientInfo.ResponseHeader(), p.serverInfo.ResponseHeader())
 			syncHeader(p.clientInfo.ResponseTrailer(), p.serverInfo.ResponseTrailer())
 		}
 	}()
@@ -117,11 +119,34 @@ func (p *streamPair) run() {
 	p.serverErr = p.t.server.Call(p.ctx, p.spec.Procedure, p.serverInfo, hs)
 }
 
+// flushHeaders copies the response headers to the client once, as the
+// server's first Send or SendHeaders would put them on the wire. Later
+// changes to the server's headers are not sent. The client reads them only
+// after receiving a message or the end of the stream, which orders the copy
+// before the read.
+func (p *streamPair) flushHeaders() {
+	p.headerOnce.Do(func() {
+		if p.clientInfo != nil {
+			syncHeader(p.clientInfo.ResponseHeader(), p.serverInfo.ResponseHeader())
+		}
+	})
+}
+
+// copyAck copies a message taken from a channel into dst and then releases
+// the sender waiting on ack. The sender waits unconditionally. Every message
+// taken must be acked, even if the copy panics.
+func (p *streamPair) copyAck(dst, msg any, ack chan<- struct{}) error {
+	defer func() { ack <- struct{}{} }()
+	return p.t.copy(dst, msg)
+}
+
 // clientStream is the client-side half of a streamPair.
 type clientStream struct {
 	p *streamPair
 
-	rxEnd bool // set by the first Receive of a client-streaming RPC
+	// end is the result of the Receive that ended the stream. Receive
+	// keeps returning it.
+	end error
 }
 
 func (s *clientStream) SendHeaders() error {
@@ -144,6 +169,7 @@ func (s *clientStream) Send(msg any) error {
 	case <-s.p.ctx.Done():
 		return s.p.ctx.Err()
 	case s.p.requestCh <- msg:
+		<-s.p.requestAck
 		return nil
 	}
 }
@@ -156,58 +182,30 @@ func (s *clientStream) CloseSend() error {
 }
 
 func (s *clientStream) Receive(dst any) error {
-	if s.p.spec.StreamType == connect.StreamTypeClient {
-		return s.receiveUnary(dst)
+	if s.end != nil {
+		return s.end
 	}
-	msg, ok, err := s.next()
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return io.EOF
-	}
-	return s.p.t.copy(dst, msg)
-}
-
-// receiveUnary reads the single response of a client stream, then reads to
-// the end of the stream to ensure the end of stream, as connecthttp does.
-func (s *clientStream) receiveUnary(dst any) error {
-	if s.rxEnd {
-		return io.EOF
-	}
-	s.rxEnd = true
-	defer s.p.cancel()
-	msg, ok, err := s.next()
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return connect.Errorf(connect.CodeUnimplemented, "unary stream has zero messages")
-	}
-	if err := s.p.t.copy(dst, msg); err != nil {
-		return err
-	}
-	if _, more, err := s.next(); err != nil || !more {
-		return err
-	}
-	return connect.Errorf(connect.CodeUnimplemented, "unary stream has multiple messages")
-}
-
-// next waits for the next response message. Its bool result is false once
-// the server has returned and responseCh is closed, in which case the error
-// is the server's final error, if any.
-func (s *clientStream) next() (any, bool, error) {
 	s.p.dispatch()
 	select {
 	case <-s.p.ctx.Done():
-		return nil, false, s.p.ctx.Err()
+		s.end = s.p.ctx.Err()
+		return s.end
 	case msg, ok := <-s.p.responseCh:
-		if !ok {
-			// Server closed, release the stream context.
-			s.p.cancel()
-			return nil, false, asClientErr(s.p.serverErr)
+		if ok {
+			return s.p.copyAck(dst, msg, s.p.responseAck)
 		}
-		return msg, true, nil
+		// A cancellation takes precedence over a server that returned in
+		// response to it.
+		s.end = s.p.ctx.Err()
+		if s.end == nil {
+			s.end = io.EOF
+			if s.p.serverErr != nil {
+				s.end = asClientErr(s.p.serverErr)
+			}
+		}
+		// Release the stream context.
+		s.p.cancel()
+		return s.end
 	}
 }
 
@@ -222,8 +220,10 @@ type serverStream struct {
 	p *streamPair
 }
 
-// SendHeaders is a no-op for the in-process transport.
-func (s *serverStream) SendHeaders() error { return nil }
+func (s *serverStream) SendHeaders() error {
+	s.p.flushHeaders()
+	return nil
+}
 
 func (s *serverStream) Receive(dst any) error {
 	// An aborted RPC is a cancellation of the call context, so ctx.Done
@@ -233,11 +233,11 @@ func (s *serverStream) Receive(dst any) error {
 	case <-s.p.ctx.Done():
 		return s.p.ctx.Err()
 	case msg := <-s.p.requestCh:
-		return s.p.t.copy(dst, msg)
+		return s.p.copyAck(dst, msg, s.p.requestAck)
 	case <-s.p.closeSendCh:
 		select {
 		case msg := <-s.p.requestCh:
-			return s.p.t.copy(dst, msg)
+			return s.p.copyAck(dst, msg, s.p.requestAck)
 		default:
 			return io.EOF
 		}
@@ -245,10 +245,12 @@ func (s *serverStream) Receive(dst any) error {
 }
 
 func (s *serverStream) Send(msg any) error {
+	s.p.flushHeaders()
 	select {
 	case <-s.p.ctx.Done():
 		return s.p.ctx.Err()
 	case s.p.responseCh <- msg:
+		<-s.p.responseAck
 		return nil
 	}
 }
@@ -289,8 +291,10 @@ func asClientErr(err error) error {
 	return connect.NewError(code, "").WithCause(err).WithRemote()
 }
 
+// syncHeader copies src into dst. The values are cloned because the server
+// may keep changing src after the copy.
 func syncHeader(dst, src *connect.Header) {
 	for key, vals := range src.All() {
-		dst.SetValues(key, vals)
+		dst.SetValues(key, slices.Clone(vals))
 	}
 }
