@@ -23,7 +23,6 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectinprocess"
@@ -1211,8 +1210,8 @@ func newNumberStream(t *testing.T, streamType connect.StreamType, handler connec
 		if !ok {
 			return fmt.Errorf("src is %T, not *number", src)
 		}
-		// Give a sender time to overwrite its message mid copy.
-		time.Sleep(time.Millisecond)
+		// Let a sender overwrite its message mid copy.
+		synctest.Wait()
 		*dstNumber = *srcNumber
 		return nil
 	}))
