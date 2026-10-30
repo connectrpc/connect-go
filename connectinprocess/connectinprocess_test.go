@@ -663,6 +663,37 @@ func TestSendDoesNotRetainMessage(t *testing.T) {
 	})
 }
 
+func TestCopyPanicFailsReceive(t *testing.T) {
+	t.Parallel()
+	spec := connect.Spec{Procedure: "/test.Numbers/Call", StreamType: connect.StreamTypeClient}
+	receiveErrs := make(chan error, 1)
+	server := connect.NewServer()
+	server.Register(connect.Method{Spec: spec, Handler: func(_ context.Context, _ connect.Spec, stream connect.ServerStream) error {
+		err := stream.Receive(&number{})
+		receiveErrs <- err
+		return err
+	}})
+	transport := connectinprocess.New(server, connectinprocess.WithCopyFunc(func(any, any) error {
+		panic("copy failed") //nolint:forbidigo // exercises a panicking CopyFunc
+	}))
+	stream, err := connect.NewClient(transport).CallClientStream(t.Context(), spec)
+	if err != nil {
+		t.Fatalf("CallClientStream: %v", err)
+	}
+	defer stream.Close()
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("Send did not panic")
+			}
+		}()
+		_ = stream.Send(&number{N: 1})
+	}()
+	if err := <-receiveErrs; connect.CodeOf(err) != connect.CodeInternal {
+		t.Errorf("server Receive = %v, want CodeInternal", err)
+	}
+}
+
 func TestProtoCopyTypedToTyped(t *testing.T) {
 	t.Parallel()
 	src := &pingv1.PingRequest{Number: 42, Text: "hello"}

@@ -123,12 +123,18 @@ func (p *streamPair) send(slot *pipe, msg any) error {
 	}
 	dst := slot.dst
 	slot.dst = nil
-	// Wake the receiver even if the copy panics.
+	// Wake the receiver even if the copy panics. The receiver then fails
+	// instead of using a partial copy.
+	copied := false
 	defer func() {
+		if !copied {
+			slot.err = connect.Errorf(connect.CodeInternal, "connectinprocess: copy panicked")
+		}
 		slot.filled = true
 		slot.cond.Broadcast()
 	}()
 	slot.err = p.t.copy(dst, msg)
+	copied = true
 	return nil
 }
 
