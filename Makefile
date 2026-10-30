@@ -93,7 +93,6 @@ generate: $(BIN)/buf $(BIN)/protoc-gen-go $(BIN)/protoc-gen-connect-go $(BIN)/li
 	cd ./internal/conformance && go mod tidy
 	cd ./cmd/connect-go-v2-migrate && go mod tidy
 	buf generate
-	cd internal/conformance && buf generate --template buf.gen.yaml buf.build/connectrpc/conformance
 	cd ./cmd/protoc-gen-connect-go/internal && \
 		find ./testdata -maxdepth 1 -type d \( ! -name testdata \) | xargs -n 1 -I % bash -c "cd '%' && buf generate"
 	license-header \
