@@ -53,32 +53,6 @@ type streamPair struct {
 	serverErr  error
 }
 
-// pipe hands messages in one direction. The stream contract allows one sender
-// and one receiver at a time, so a single slot is enough.
-type pipe struct {
-	cond   sync.Cond
-	dst    any   // posted by a waiting Receive
-	filled bool  // set once Send has copied into dst
-	err    error // the copy result
-	closed bool  // no more messages
-}
-
-// init sets up p in place. The conds and the server half point back into p,
-// so p must not move afterwards.
-func (p *streamPair) init(ctx context.Context, t *transport, spec connect.Spec) {
-	p.ctx, p.cancel = context.WithCancel(ctx)
-	p.t = t
-	p.spec = spec
-	p.clientInfo, _ = connect.CallInfoForClientContext(ctx)
-	p.serverInfo.Spec = spec
-	p.server.p = p
-	p.request.cond.L = &p.mu
-	p.response.cond.L = &p.mu
-	if p.clientInfo != nil {
-		p.clientInfo.Spec = spec
-	}
-}
-
 // dispatch starts the server goroutine once.
 func (p *streamPair) dispatch() {
 	p.mu.Lock()
@@ -183,6 +157,16 @@ func (p *streamPair) receive(slot *pipe, dst any) (filled bool, err error) {
 	}
 }
 
+// pipe hands messages in one direction. The stream contract allows one sender
+// and one receiver at a time, so a single slot is enough.
+type pipe struct {
+	cond   sync.Cond
+	dst    any   // posted by a waiting Receive
+	filled bool  // set once Send has copied into dst
+	err    error // the copy result
+	closed bool  // no more messages
+}
+
 // close ends the pipe and wakes both sides. The caller must hold mu.
 func (pp *pipe) close() {
 	pp.closed = true
@@ -196,6 +180,22 @@ type clientStream struct {
 	// end is the result of the Receive that ended the stream. Receive
 	// keeps returning it.
 	end error
+}
+
+func newClientStream(ctx context.Context, t *transport, spec connect.Spec) *clientStream {
+	stream := &clientStream{}
+	stream.ctx, stream.cancel = context.WithCancel(ctx)
+	stream.t = t
+	stream.spec = spec
+	stream.clientInfo, _ = connect.CallInfoForClientContext(ctx)
+	stream.serverInfo.Spec = spec
+	stream.server.p = &stream.streamPair
+	stream.request.cond.L = &stream.mu
+	stream.response.cond.L = &stream.mu
+	if stream.clientInfo != nil {
+		stream.clientInfo.Spec = spec
+	}
+	return stream
 }
 
 func (s *clientStream) SendHeaders() error {
@@ -239,6 +239,13 @@ func (s *clientStream) Receive(dst any) error {
 	return err
 }
 
+// Close cancels before closing the request side. Waiters woken by the close
+// then report the cancellation instead of a clean end.
+func (s *clientStream) Close() error {
+	s.cancel()
+	return s.CloseSend()
+}
+
 // next reads the next response. The error that ends the stream is sticky.
 func (s *clientStream) next(dst any) error {
 	if s.end != nil {
@@ -261,13 +268,6 @@ func (s *clientStream) finish(err error) {
 	s.end = err
 	s.stopWake()
 	s.cancel()
-}
-
-// Close cancels before closing the request side. Waiters woken by the close
-// then report the cancellation instead of a clean end.
-func (s *clientStream) Close() error {
-	s.cancel()
-	return s.CloseSend()
 }
 
 // serverStream is the server-side half of a streamPair.

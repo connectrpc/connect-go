@@ -86,9 +86,7 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 	if t.server == nil {
 		return nil, errors.New("connectinprocess: nil server")
 	}
-	stream := &clientStream{}
-	stream.init(ctx, t, spec)
-	return stream, nil
+	return newClientStream(ctx, t, spec), nil
 }
 
 type options struct {
