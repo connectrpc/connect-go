@@ -18,203 +18,262 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"sync"
 
 	"connectrpc.com/connect/v2"
 )
 
-// streamPair wires the client- and server-side halves of a streaming
-// in-process RPC together.
+// streamPair wires the client and server halves of an in-process RPC
+// together. The server runs on its own goroutine, started by the client's
+// first SendHeaders, Send, or Receive.
 //
-// Messages flow through unbuffered channels, providing natural backpressure:
-// each Send blocks until the peer's Receive consumes the message. The server
-// runs on its own goroutine, which is started lazily upon the first call to
-// SendHeaders, Send, or Receive.
-//
-// Lifecycle channels:
-//   - closeSendCh: Closed by the client's CloseSend. The server's Receive
-//     subsequently returns [io.EOF] once requestCh has drained.
-//   - serverDone: Closed by the dispatch goroutine after the server returns.
-//     This carries the final server error and signals that response metadata
-//     and trailers have safely synced into the client's CallInfo.
-//
-// Clients read responseCh until [io.EOF] or call Close to cancel the stream.
-// A client-streaming RPC has a single response, so its first Receive reads to
-// the end of the stream (see clientStream.receiveUnary).
-//
-// Note: Unary RPCs bypass this structure to use a synchronous fast path
-// (see unary.go).
+// Each direction is a pipe guarded by mu. Receive posts its dst and waits.
+// Send copies its message straight into the posted dst. The sender may reuse
+// its message once Send returns. Every wait checks cancellation first, then a
+// delivered message, then the end of the pipe.
 type streamPair struct {
 	t          *transport
 	spec       connect.Spec
 	clientInfo *connect.CallInfo
-	serverInfo *connect.CallInfo
+	serverInfo connect.CallInfo
+	server     serverStream
 
 	// ctx is the stream context, derived from the call context. The server
 	// runs on it. Close cancels it via cancel.
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	requestCh   chan any
-	responseCh  chan any
-	closeSendCh chan struct{}
-	serverDone  chan struct{}
-
-	dispatchOnce sync.Once
-	serverErr    error
-
-	closeSendOnce sync.Once
+	mu         sync.Mutex
+	request    pipe
+	response   pipe
+	started    bool
+	stopWake   func() bool // releases the context.AfterFunc that wakes waiters
+	headerSent bool
+	serverErr  error
 }
 
-func newStreamPair(ctx context.Context, t *transport, spec connect.Spec) *streamPair {
-	ctx, cancel := context.WithCancel(ctx)
-	clientInfo, _ := connect.CallInfoForClientContext(ctx)
-	pair := &streamPair{
-		t:           t,
-		spec:        spec,
-		clientInfo:  clientInfo,
-		serverInfo:  &connect.CallInfo{Spec: spec},
-		ctx:         ctx,
-		cancel:      cancel,
-		requestCh:   make(chan any),
-		responseCh:  make(chan any),
-		closeSendCh: make(chan struct{}),
-		serverDone:  make(chan struct{}),
-	}
-	if pair.clientInfo != nil {
-		pair.clientInfo.Spec = spec
-	}
-	return pair
-}
-
-// dispatch lazily launches the server goroutine. Safe to call from
-// any Send/Receive entry point; subsequent calls are no-ops.
+// dispatch starts the server goroutine once.
 func (p *streamPair) dispatch() {
-	p.dispatchOnce.Do(func() {
-		if p.clientInfo != nil {
-			syncHeader(p.serverInfo.RequestHeader(), p.clientInfo.RequestHeader())
-		}
-		go p.run()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.started {
+		return
+	}
+	p.started = true
+	if p.clientInfo != nil {
+		syncHeader(p.serverInfo.RequestHeader(), p.clientInfo.RequestHeader())
+	}
+	p.stopWake = context.AfterFunc(p.ctx, func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		p.request.cond.Broadcast()
+		p.response.cond.Broadcast()
 	})
+	go p.run()
 }
 
-// run executes the server and finalises the stream. Closing responseCh
-// signals io.EOF to client.Receive. The defer order matters: metadata sync
-// must happen before either channel is closed.
+// run executes the server and then ends both pipes.
 func (p *streamPair) run() {
-	defer close(p.serverDone)
-	defer close(p.responseCh)
 	defer func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
 		if r := recover(); r != nil {
 			p.serverErr = connect.Errorf(connect.CodeInternal, "panic in server: %v", r)
 		}
+		p.flushHeaders()
 		if p.clientInfo != nil {
-			syncHeader(p.clientInfo.ResponseHeader(), p.serverInfo.ResponseHeader())
 			syncHeader(p.clientInfo.ResponseTrailer(), p.serverInfo.ResponseTrailer())
 		}
+		p.request.close()
+		p.response.close()
 	}()
-	hs := &serverStream{p: p}
-	p.serverErr = p.t.server.Call(p.ctx, p.spec.Procedure, p.serverInfo, hs)
+	p.serverErr = p.t.server.Call(p.ctx, p.spec.Procedure, &p.serverInfo, &p.server)
+}
+
+// flushHeaders copies the response headers to the client once, as the
+// server's first Send or SendHeaders puts them on the wire. Later changes to
+// the server's headers are not sent. The caller must hold mu.
+func (p *streamPair) flushHeaders() {
+	if p.headerSent {
+		return
+	}
+	p.headerSent = true
+	if p.clientInfo != nil {
+		syncHeader(p.clientInfo.ResponseHeader(), p.serverInfo.ResponseHeader())
+	}
+}
+
+// send waits for the receiver to post a dst and copies msg into it. It
+// returns io.EOF once the pipe has closed.
+func (p *streamPair) send(slot *pipe, msg any) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for {
+		if err := p.ctx.Err(); err != nil {
+			return err
+		}
+		if slot.closed {
+			return io.EOF
+		}
+		if slot.dst != nil {
+			break
+		}
+		slot.cond.Wait()
+	}
+	dst := slot.dst
+	slot.dst = nil
+	// Wake the receiver even if the copy panics. The receiver then fails
+	// instead of using a partial copy.
+	copied := false
+	defer func() {
+		if !copied {
+			slot.err = connect.Errorf(connect.CodeInternal, "connectinprocess: copy panicked")
+		}
+		slot.filled = true
+		slot.cond.Broadcast()
+	}()
+	slot.err = p.t.copy(dst, msg)
+	copied = true
+	return nil
+}
+
+// receive posts dst and waits for a sender to fill it. It reports whether
+// dst was filled. Otherwise err is the context error or io.EOF once the pipe
+// has closed.
+func (p *streamPair) receive(slot *pipe, dst any) (filled bool, err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	slot.dst = dst
+	slot.cond.Broadcast()
+	for {
+		if slot.filled {
+			slot.filled = false
+			return true, slot.err
+		}
+		if err := p.ctx.Err(); err != nil {
+			slot.dst = nil
+			return false, err
+		}
+		if slot.closed {
+			slot.dst = nil
+			return false, io.EOF
+		}
+		slot.cond.Wait()
+	}
+}
+
+// pipe hands messages in one direction. The stream contract allows one sender
+// and one receiver at a time, so a single slot is enough.
+type pipe struct {
+	cond   sync.Cond
+	dst    any   // posted by a waiting Receive
+	filled bool  // set once Send has copied into dst
+	err    error // the copy result
+	closed bool  // no more messages
+}
+
+// close ends the pipe and wakes both sides. The caller must hold mu.
+func (pp *pipe) close() {
+	pp.closed = true
+	pp.cond.Broadcast()
 }
 
 // clientStream is the client-side half of a streamPair.
 type clientStream struct {
-	p *streamPair
+	streamPair
 
-	rxEnd bool // set by the first Receive of a client-streaming RPC
+	// end is the result of the Receive that ended the stream. Receive
+	// keeps returning it.
+	end error
+}
+
+func newClientStream(ctx context.Context, t *transport, spec connect.Spec) *clientStream {
+	stream := &clientStream{}
+	stream.ctx, stream.cancel = context.WithCancel(ctx)
+	stream.t = t
+	stream.spec = spec
+	stream.clientInfo, _ = connect.CallInfoForClientContext(ctx)
+	stream.serverInfo.Spec = spec
+	stream.server.p = &stream.streamPair
+	stream.request.cond.L = &stream.mu
+	stream.response.cond.L = &stream.mu
+	if stream.clientInfo != nil {
+		stream.clientInfo.Spec = spec
+	}
+	return stream
 }
 
 func (s *clientStream) SendHeaders() error {
-	s.p.dispatch()
+	s.dispatch()
 	return nil
 }
 
 func (s *clientStream) Send(msg any) error {
-	select {
-	case <-s.p.closeSendCh:
-		return io.EOF
-	default:
-		s.p.dispatch()
-	}
-	select {
-	case <-s.p.closeSendCh:
-		return io.EOF
-	case <-s.p.serverDone:
-		return io.EOF
-	case <-s.p.ctx.Done():
-		return s.p.ctx.Err()
-	case s.p.requestCh <- msg:
-		return nil
-	}
+	s.dispatch()
+	return s.send(&s.request, msg)
 }
 
 func (s *clientStream) CloseSend() error {
-	s.p.closeSendOnce.Do(func() {
-		close(s.p.closeSendCh)
-	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.request.close()
 	return nil
 }
 
+// Receive reads the single response of a unary or client-streaming RPC and
+// then the end of the stream, as connecthttp does.
 func (s *clientStream) Receive(dst any) error {
-	if s.p.spec.StreamType == connect.StreamTypeClient {
-		return s.receiveUnary(dst)
+	if s.spec.StreamType != connect.StreamTypeUnary && s.spec.StreamType != connect.StreamTypeClient {
+		return s.next(dst)
 	}
-	msg, ok, err := s.next()
-	if err != nil {
-		return err
-	}
-	if !ok {
+	if s.end != nil {
 		return io.EOF
 	}
-	return s.p.t.copy(dst, msg)
-}
-
-// receiveUnary reads the single response of a client stream, then reads to
-// the end of the stream to ensure the end of stream, as connecthttp does.
-func (s *clientStream) receiveUnary(dst any) error {
-	if s.rxEnd {
-		return io.EOF
-	}
-	s.rxEnd = true
-	defer s.p.cancel()
-	msg, ok, err := s.next()
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return connect.Errorf(connect.CodeUnimplemented, "unary stream has zero messages")
-	}
-	if err := s.p.t.copy(dst, msg); err != nil {
-		return err
-	}
-	if _, more, err := s.next(); err != nil || !more {
-		return err
-	}
-	return connect.Errorf(connect.CodeUnimplemented, "unary stream has multiple messages")
-}
-
-// next waits for the next response message. Its bool result is false once
-// the server has returned and responseCh is closed, in which case the error
-// is the server's final error, if any.
-func (s *clientStream) next() (any, bool, error) {
-	s.p.dispatch()
-	select {
-	case <-s.p.ctx.Done():
-		return nil, false, s.p.ctx.Err()
-	case msg, ok := <-s.p.responseCh:
-		if !ok {
-			// Server closed, release the stream context.
-			s.p.cancel()
-			return nil, false, asClientErr(s.p.serverErr)
+	err := s.next(dst)
+	switch {
+	case err == nil:
+		if drainErr := s.next(dst); drainErr == nil {
+			err = connect.Errorf(connect.CodeUnimplemented, "unary stream has multiple messages")
+			s.finish(io.EOF)
+		} else if !errors.Is(drainErr, io.EOF) {
+			err = drainErr
 		}
-		return msg, true, nil
+	case errors.Is(err, io.EOF):
+		err = connect.Errorf(connect.CodeUnimplemented, "unary stream has zero messages")
 	}
+	return err
 }
 
+// Close cancels before closing the request side. Waiters woken by the close
+// then report the cancellation instead of a clean end.
 func (s *clientStream) Close() error {
-	err := s.CloseSend()
-	s.p.cancel()
+	s.cancel()
+	return s.CloseSend()
+}
+
+// next reads the next response. The error that ends the stream is sticky.
+func (s *clientStream) next(dst any) error {
+	if s.end != nil {
+		return s.end
+	}
+	s.dispatch()
+	filled, err := s.receive(&s.response, dst)
+	if filled {
+		return err
+	}
+	if errors.Is(err, io.EOF) && s.serverErr != nil {
+		err = asClientErr(s.serverErr)
+	}
+	s.finish(err)
 	return err
+}
+
+// finish ends the stream with err and releases the stream context.
+func (s *clientStream) finish(err error) {
+	s.end = err
+	s.stopWake()
+	s.cancel()
 }
 
 // serverStream is the server-side half of a streamPair.
@@ -222,35 +281,23 @@ type serverStream struct {
 	p *streamPair
 }
 
-// SendHeaders is a no-op for the in-process transport.
-func (s *serverStream) SendHeaders() error { return nil }
+func (s *serverStream) SendHeaders() error {
+	s.p.mu.Lock()
+	defer s.p.mu.Unlock()
+	s.p.flushHeaders()
+	return nil
+}
 
 func (s *serverStream) Receive(dst any) error {
-	// An aborted RPC is a cancellation of the call context, so ctx.Done
-	// reports it. closeSendCh is the clean half-close: report io.EOF once
-	// requestCh has drained, draining a request that raced with CloseSend.
-	select {
-	case <-s.p.ctx.Done():
-		return s.p.ctx.Err()
-	case msg := <-s.p.requestCh:
-		return s.p.t.copy(dst, msg)
-	case <-s.p.closeSendCh:
-		select {
-		case msg := <-s.p.requestCh:
-			return s.p.t.copy(dst, msg)
-		default:
-			return io.EOF
-		}
-	}
+	_, err := s.p.receive(&s.p.request, dst)
+	return err
 }
 
 func (s *serverStream) Send(msg any) error {
-	select {
-	case <-s.p.ctx.Done():
-		return s.p.ctx.Err()
-	case s.p.responseCh <- msg:
-		return nil
-	}
+	s.p.mu.Lock()
+	s.p.flushHeaders()
+	s.p.mu.Unlock()
+	return s.p.send(&s.p.response, msg)
 }
 
 // asClientErr converts a server's returned error into the verdict the
@@ -289,8 +336,10 @@ func asClientErr(err error) error {
 	return connect.NewError(code, "").WithCause(err).WithRemote()
 }
 
+// syncHeader copies src into dst. The values are cloned because the server
+// may keep changing src after the copy.
 func syncHeader(dst, src *connect.Header) {
 	for key, vals := range src.All() {
-		dst.SetValues(key, vals)
+		dst.SetValues(key, slices.Clone(vals))
 	}
 }
