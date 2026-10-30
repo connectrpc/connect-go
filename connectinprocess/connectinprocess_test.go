@@ -145,9 +145,6 @@ func TestStreamContextCancelAborts(t *testing.T) {
 	}
 }
 
-// TestStreamReceiveAfterEndIsSticky verifies Receive keeps reporting the
-// stream's end. Ending the stream also releases its context. A later Receive
-// must not report that as a cancellation.
 func TestStreamReceiveAfterEndIsSticky(t *testing.T) {
 	t.Parallel()
 	server := connect.NewServer()
@@ -170,8 +167,6 @@ func TestStreamReceiveAfterEndIsSticky(t *testing.T) {
 	}
 }
 
-// TestStreamCloseReportsCanceled verifies Receive after Close reports
-// cancellation, even when the server returns in response to the Close.
 func TestStreamCloseReportsCanceled(t *testing.T) {
 	t.Parallel()
 	server := connect.NewServer()
@@ -186,8 +181,6 @@ func TestStreamCloseReportsCanceled(t *testing.T) {
 		if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
 			t.Fatalf("Send: %v", err)
 		}
-		// Close half-closes the stream, so CumSum returns cleanly as Close
-		// cancels it.
 		if err := stream.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
@@ -197,9 +190,6 @@ func TestStreamCloseReportsCanceled(t *testing.T) {
 	}
 }
 
-// TestServerStreamHeadersOnFirstMessage verifies response headers reach the
-// client with the first message, not when the server returns. Headers set
-// after the first Send are not sent.
 func TestServerStreamHeadersOnFirstMessage(t *testing.T) {
 	t.Parallel()
 	spec := connect.Spec{Procedure: "/test.Headers/Stream", StreamType: connect.StreamTypeServer}
@@ -567,10 +557,6 @@ func TestInProcessBidiStreaming(t *testing.T) {
 	}
 }
 
-// TestSendDoesNotRetainMessage verifies the peer's copy is complete when Send
-// returns. Each sender overwrites its message right after Send, and a slow
-// CopyFunc lets that write win a race with a copy still in flight. The
-// messages are plain structs. Nothing here depends on Protobuf.
 func TestSendDoesNotRetainMessage(t *testing.T) {
 	t.Parallel()
 	t.Run("unary", func(t *testing.T) {
@@ -876,8 +862,6 @@ func TestUnaryCloseUnblocksWaitingReceive(t *testing.T) {
 	})
 }
 
-// TestUnaryAbandonAfterSendReleasesServer verifies a server suspended in
-// Send is released when the client abandons the stream before Receive.
 func TestUnaryAbandonAfterSendReleasesServer(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
@@ -1211,11 +1195,8 @@ func (typedNilErrPingServer) Ping(context.Context, *pingv1.PingRequest) (*pingv1
 	return nil, err
 }
 
-// number is a plain, non-Protobuf message.
 type number struct{ N int }
 
-// newNumberStream opens a stream of the given type to handler over a
-// transport whose CopyFunc copies numbers slowly.
 func newNumberStream(t *testing.T, streamType connect.StreamType, handler connect.ServerFunc) connect.ClientStream {
 	t.Helper()
 	spec := connect.Spec{Procedure: "/test.Numbers/Call", StreamType: streamType}
@@ -1230,6 +1211,7 @@ func newNumberStream(t *testing.T, streamType connect.StreamType, handler connec
 		if !ok {
 			return fmt.Errorf("src is %T, not *number", src)
 		}
+		// Give a sender time to overwrite its message mid copy.
 		time.Sleep(time.Millisecond)
 		*dstNumber = *srcNumber
 		return nil
@@ -1242,7 +1224,6 @@ func newNumberStream(t *testing.T, streamType connect.StreamType, handler connec
 	return stream
 }
 
-// sendErrStream reports the result of each Send on errs.
 type sendErrStream struct {
 	connect.ServerStream
 
