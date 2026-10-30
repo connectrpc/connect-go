@@ -22,12 +22,15 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -376,6 +379,126 @@ func TestConnectionDropped(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+func TestConnectionReset(t *testing.T) {
+	t.Parallel()
+	// A reset observed by the client is a transport failure, not the caller
+	// canceling, so it must not be reported as CodeCanceled.
+	resetErrs := map[string]error{
+		"ECONNRESET": &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.ECONNRESET)},
+		"EPIPE":      &net.OpError{Op: "write", Net: "tcp", Err: os.NewSyscallError("write", syscall.EPIPE)},
+	}
+	pingServer := &pluggablePingServer{
+		ping: func(context.Context, *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+			return &pingv1.PingResponse{}, nil
+		},
+		countUp: func(_ context.Context, _ *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
+			if err := stream.Send(&pingv1.CountUpResponse{}); err != nil {
+				return err
+			}
+			return connect.NewError(connect.CodeResourceExhausted, "server error")
+		},
+	}
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, pingServer)
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, srv)
+	server := memhttptest.NewServer(t, mux)
+	// withBody wraps each response body in a resetBody.
+	withBody := func(newBody func(io.ReadCloser) io.ReadCloser) httpClientFunc {
+		return func(req *http.Request) (*http.Response, error) {
+			res, err := server.Client().Do(req)
+			if err != nil {
+				return nil, err
+			}
+			res.Body = newBody(res.Body)
+			return res, nil
+		}
+	}
+	for _, protocol := range []string{connect.ProtocolNameConnect, connect.ProtocolNameGRPC, connect.ProtocolNameGRPCWeb} {
+		var opts []connecthttp.Option
+		switch protocol {
+		case connect.ProtocolNameGRPC:
+			opts = []connecthttp.Option{connecthttp.WithGRPC()}
+		case connect.ProtocolNameGRPCWeb:
+			opts = []connecthttp.Option{connecthttp.WithGRPCWeb()}
+		}
+		newClient := func(httpClient connecthttp.HTTPClient) pingv1connect.PingServiceClient {
+			return pingv1connect.NewPingServiceClient(connect.NewClient(
+				connecthttp.NewTransport(httpClient, server.URL(), opts...),
+			))
+		}
+		for name, resetErr := range resetErrs {
+			t.Run(protocol+"/"+name, func(t *testing.T) {
+				t.Parallel()
+				t.Run("do", func(t *testing.T) {
+					t.Parallel()
+					client := newClient(httpClientFunc(func(*http.Request) (*http.Response, error) {
+						return nil, resetErr
+					}))
+					_, err := client.Ping(t.Context(), &pingv1.PingRequest{})
+					assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
+					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{})
+					if err == nil {
+						_, err = stream.Receive()
+						assert.Nil(t, stream.Close())
+					}
+					assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
+				})
+				t.Run("read", func(t *testing.T) {
+					t.Parallel()
+					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
+						return &resetBody{ReadCloser: body, readErr: resetErr}
+					}))
+					_, err := client.Ping(t.Context(), &pingv1.PingRequest{})
+					assert.NotEqual(t, connect.CodeOf(err), connect.CodeCanceled)
+					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{})
+					if !assert.Nil(t, err) {
+						return
+					}
+					_, err = stream.Receive()
+					assert.NotEqual(t, connect.CodeOf(err), connect.CodeCanceled)
+					assert.Nil(t, stream.Close())
+				})
+				t.Run("close", func(t *testing.T) {
+					t.Parallel()
+					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
+						return &resetBody{ReadCloser: body, closeErr: resetErr}
+					}))
+					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{})
+					if !assert.Nil(t, err) {
+						return
+					}
+					for err == nil {
+						_, err = stream.Receive()
+					}
+					assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+					assert.NotEqual(t, connect.CodeOf(stream.Close()), connect.CodeCanceled)
+				})
+				if protocol == connect.ProtocolNameGRPC {
+					return // gRPC ends the stream with trailers, not an end-stream message.
+				}
+				t.Run("drain", func(t *testing.T) {
+					t.Parallel()
+					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
+						return &resetBody{ReadCloser: body, eofErr: resetErr}
+					}))
+					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{})
+					if !assert.Nil(t, err) {
+						return
+					}
+					for err == nil {
+						_, err = stream.Receive()
+					}
+					// The end-stream message arrived in full, so the server's
+					// error wins over the reset.
+					assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+					assert.Nil(t, stream.Close())
+				})
+			})
+		}
 	}
 }
 
@@ -889,4 +1012,32 @@ type httpClientFunc func(*http.Request) (*http.Response, error)
 
 func (fn httpClientFunc) Do(req *http.Request) (*http.Response, error) {
 	return fn(req)
+}
+
+// resetBody simulates a connection reset on a response body. readErr fails
+// the first Read, eofErr replaces io.EOF, and closeErr fails Close.
+type resetBody struct {
+	io.ReadCloser
+
+	readErr  error
+	eofErr   error
+	closeErr error
+}
+
+func (b *resetBody) Read(data []byte) (int, error) {
+	if b.readErr != nil {
+		return 0, b.readErr
+	}
+	n, err := b.ReadCloser.Read(data)
+	if b.eofErr != nil && errors.Is(err, io.EOF) {
+		err = b.eofErr
+	}
+	return n, err
+}
+
+func (b *resetBody) Close() error {
+	if err := b.ReadCloser.Close(); err != nil {
+		return err
+	}
+	return b.closeErr
 }

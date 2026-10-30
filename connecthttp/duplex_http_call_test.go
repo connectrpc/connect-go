@@ -22,7 +22,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"sync"
+	"syscall"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -309,6 +311,33 @@ func TestAwaitResponseRespectsContext(t *testing.T) {
 	})
 }
 
+func TestWriteSenderClientDisconnected(t *testing.T) {
+	t.Parallel()
+	for _, writeErr := range []error{
+		os.NewSyscallError("write", syscall.EPIPE),
+		os.NewSyscallError("write", syscall.ECONNRESET),
+		errors.New(clientDisconnectedMessage),
+		errors.New(streamClosedMessage),
+	} {
+		t.Run(writeErr.Error(), func(t *testing.T) {
+			t.Parallel()
+			sender := writeSender{writer: errWriter{writeErr}}
+			_, err := sender.Send(bytes.NewReader([]byte("payload")))
+			assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
+			assert.ErrorIs(t, err, writeErr)
+		})
+	}
+	t.Run("other", func(t *testing.T) {
+		t.Parallel()
+		writeErr := errors.New("other")
+		sender := writeSender{writer: errWriter{writeErr}}
+		_, err := sender.Send(bytes.NewReader([]byte("payload")))
+		_, ok := asError(err)
+		assert.False(t, ok)
+		assert.ErrorIs(t, err, writeErr)
+	})
+}
+
 // hangingHTTPClient simulates Do() not returning promptly after context
 // cancellation, as can happen with Go's HTTP/2 transport. Do returns only
 // when the test cleans up, so the goroutine doesn't outlive a synctest
@@ -328,4 +357,12 @@ func (c *hangingHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	_, _ = io.Copy(io.Discard, req.Body)
 	<-c.release
 	return nil, errors.New("hangingHTTPClient released")
+}
+
+type errWriter struct {
+	err error
+}
+
+func (w errWriter) Write([]byte) (int, error) {
+	return 0, w.err
 }
