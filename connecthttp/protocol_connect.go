@@ -474,6 +474,7 @@ func (cc *connectUnaryClientConn) Peer() peer {
 
 func (cc *connectUnaryClientConn) Send(msg any) error {
 	if err := cc.marshaler.Marshal(msg); err != nil {
+		cc.duplexCall.failSend(err)
 		return err
 	}
 	return nil // must be a literal nil: nil *connect.Error is a non-nil error
@@ -580,7 +581,7 @@ func (cc *connectUnaryClientConn) unmarshalResponseError(response *http.Response
 		return connect.NewError(
 			httpToCode(response.StatusCode),
 			response.Status,
-		)
+		).WithRemote()
 	}
 	if wireErr.Code == 0 {
 		// code not set? default to one implied by HTTP status
@@ -612,6 +613,7 @@ func (cc *connectStreamingClientConn) Peer() peer {
 
 func (cc *connectStreamingClientConn) Send(msg any) error {
 	if err := cc.marshaler.Marshal(msg); err != nil {
+		cc.duplexCall.failSend(err)
 		return err
 	}
 	return nil // must be a literal nil: nil *connect.Error is a non-nil error
@@ -684,7 +686,7 @@ func (cc *connectStreamingClientConn) onResponseReceive(fn func(*http.Response))
 
 func (cc *connectStreamingClientConn) validateResponse(response *http.Response) *connect.Error {
 	if response.StatusCode != http.StatusOK {
-		return connect.Errorf(httpToCode(response.StatusCode), "HTTP status %v", response.Status)
+		return connect.Errorf(httpToCode(response.StatusCode), "HTTP status %v", response.Status).WithRemote()
 	}
 	if err := connectValidateStreamResponseContentType(
 		cc.codec.Name(),
@@ -1431,7 +1433,7 @@ func connectValidateUnaryResponseContentType(
 ) *connect.Error {
 	if statusCode != http.StatusOK {
 		if statusCode == http.StatusNotModified && httpMethod == http.MethodGet {
-			return connect.Errorf(connect.CodeUnknown, "%s", errNotModifiedClient).WithCause(errNotModifiedClient)
+			return connect.Errorf(connect.CodeUnknown, "%s", errNotModifiedClient).WithCause(errNotModifiedClient).WithRemote()
 		}
 		// connect.Error responses must be JSON-encoded.
 		if responseContentType == connectUnaryContentTypePrefix+connect.CodecNameJSON ||
@@ -1441,7 +1443,7 @@ func connectValidateUnaryResponseContentType(
 		return connect.NewError(
 			httpToCode(statusCode),
 			statusMsg,
-		)
+		).WithRemote()
 	}
 	// Normal responses must have valid content-type that indicates same codec as the request.
 	if !strings.HasPrefix(responseContentType, connectUnaryContentTypePrefix) {

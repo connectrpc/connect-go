@@ -374,6 +374,7 @@ func (cc *grpcClientConn) Peer() peer {
 
 func (cc *grpcClientConn) Send(msg any) error {
 	if err := cc.marshaler.Marshal(msg); err != nil {
+		cc.duplexCall.failSend(err)
 		return err
 	}
 	return nil // must be a literal nil: nil *connect.Error is a non-nil error
@@ -711,7 +712,7 @@ func grpcValidateResponse(
 	codecName string,
 ) *connect.Error {
 	if response.StatusCode != http.StatusOK {
-		return connect.Errorf(httpToCode(response.StatusCode), "HTTP status %v", response.Status)
+		return connect.Errorf(httpToCode(response.StatusCode), "HTTP status %v", response.Status).WithRemote()
 	}
 	if err := grpcValidateResponseContentType(
 		web,

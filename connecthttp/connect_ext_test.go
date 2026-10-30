@@ -35,6 +35,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -2622,6 +2623,64 @@ func TestClientWithSendMaxBytes(t *testing.T) {
 	})
 }
 
+// TestClientFailedSendSkipsRequest verifies that when a unary or
+// server-streaming request message can't be sent, closing the stream doesn't
+// send the request with an empty body, which the server would handle as an
+// empty message.
+func TestClientFailedSendSkipsRequest(t *testing.T) {
+	t.Parallel()
+	run := func(t *testing.T, opts ...connecthttp.Option) {
+		t.Helper()
+		var requests atomic.Int32
+		mux := http.NewServeMux()
+		srv := connect.NewServer()
+		pingv1connect.RegisterPingServiceHandler(srv, pingServer{})
+		connecthttp.Mount(mux, srv)
+		server := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests.Add(1)
+			mux.ServeHTTP(w, r)
+		}))
+		const sendMaxBytes = 1
+		opts = append(opts, connecthttp.WithSendMaxBytes(sendMaxBytes))
+		transport := connecthttp.NewTransport(server.Client(), server.URL(), opts...)
+		t.Run("unary", func(t *testing.T) {
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+			_, err := client.Ping(t.Context(), &pingv1.PingRequest{Text: "too big"})
+			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+			assert.Equal(t, requests.Load(), 0)
+		})
+		t.Run("server_stream", func(t *testing.T) {
+			stream, err := transport.NewClientStream(t.Context(), connect.Spec{
+				StreamType: connect.StreamTypeServer,
+				Procedure:  pingv1connect.PingServiceCountUpProcedure,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = stream.Send(&pingv1.CountUpRequest{Number: 1000})
+			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+			assert.Nil(t, stream.CloseSend())
+			// Receive reports the Send error instead of waiting for a response.
+			err = stream.Receive(&pingv1.CountUpResponse{})
+			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+			assert.Nil(t, stream.Close())
+			assert.Equal(t, requests.Load(), 0)
+		})
+	}
+	t.Run("connect", func(t *testing.T) {
+		t.Parallel()
+		run(t)
+	})
+	t.Run("grpc", func(t *testing.T) {
+		t.Parallel()
+		run(t, connecthttp.WithGRPC())
+	})
+	t.Run("grpcweb", func(t *testing.T) {
+		t.Parallel()
+		run(t, connecthttp.WithGRPCWeb())
+	})
+}
+
 func TestServerStreamSendHeaders(t *testing.T) {
 	t.Parallel()
 	run := func(t *testing.T, opts ...connecthttp.Option) {
@@ -2860,6 +2919,88 @@ func TestStreamForServer(t *testing.T) {
 		assert.NotNil(t, res)
 		assert.Equal(t, res.GetSum(), int64(1))
 	})
+}
+
+func TestHTTPStatusErrorIsRemote(t *testing.T) {
+	t.Parallel()
+	// The peer answers with an HTTP error and no RPC error body, so the client
+	// derives the code from the HTTP status.
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		contentType := "text/plain"
+		if request.Header.Get("X-Error-Case") == "json" {
+			contentType = "application/json"
+		}
+		response.Header().Set("Content-Type", contentType)
+		response.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(response, "not an rpc error")
+	}))
+	newUpstreamClient := func(options ...connecthttp.Option) pingv1connect.PingServiceClient {
+		return pingv1connect.NewPingServiceClient(connect.NewClient(
+			connecthttp.NewTransport(upstream.Client(), upstream.URL(), options...),
+		))
+	}
+	callUnary := func(ctx context.Context, client pingv1connect.PingServiceClient) error {
+		_, err := client.Ping(ctx, &pingv1.PingRequest{})
+		return err
+	}
+	callStream := func(ctx context.Context, client pingv1connect.PingServiceClient) error {
+		stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 1})
+		if err != nil {
+			return err
+		}
+		defer stream.Close()
+		_, err = stream.Receive()
+		return err
+	}
+	testCases := []struct {
+		name    string
+		options []connecthttp.Option
+		header  string
+		call    func(context.Context, pingv1connect.PingServiceClient) error
+	}{
+		{name: "connect_unary", call: callUnary},
+		{name: "connect_unary_bad_json", header: "json", call: callUnary},
+		{name: "connect_stream", call: callStream},
+		{name: "grpc", options: []connecthttp.Option{connecthttp.WithGRPC()}, call: callUnary},
+		{name: "grpc_web", options: []connecthttp.Option{connecthttp.WithGRPCWeb()}, call: callUnary},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			upstreamClient := newUpstreamClient(testCase.options...)
+			newCtx := func(ctx context.Context) context.Context {
+				ctx, callInfo := connect.NewClientContext(ctx)
+				callInfo.RequestHeader().Set("X-Error-Case", testCase.header)
+				return ctx
+			}
+			err := testCase.call(newCtx(t.Context()), upstreamClient)
+			assert.Equal(t, connect.CodeOf(err), connect.CodeUnauthenticated)
+			var connectErr *connect.Error
+			if assert.True(t, errors.As(err, &connectErr)) {
+				assert.True(t, connectErr.IsRemote())
+			}
+
+			// A handler that returns the error must not forward the peer's
+			// verdict as its own.
+			srv := connect.NewServer()
+			pingv1connect.RegisterPingServiceHandler(srv, &pluggablePingServer{
+				ping: func(ctx context.Context, _ *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+					return nil, testCase.call(newCtx(ctx), upstreamClient)
+				},
+			})
+			mux := http.NewServeMux()
+			connecthttp.Mount(mux, srv)
+			proxy := memhttptest.NewServer(t, mux)
+			proxyClient := pingv1connect.NewPingServiceClient(connect.NewClient(
+				connecthttp.NewTransport(proxy.Client(), proxy.URL()),
+			))
+			_, err = proxyClient.Ping(t.Context(), &pingv1.PingRequest{})
+			assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
+			if assert.True(t, errors.As(err, &connectErr)) {
+				assert.Equal(t, connectErr.Message(), "")
+			}
+		})
+	}
 }
 
 func TestConnectHTTPErrorCodes(t *testing.T) {
