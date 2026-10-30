@@ -21,10 +21,9 @@ import (
 	"connectrpc.com/connect/v2"
 )
 
-// unaryClientStream runs a unary RPC on a streamPair. Receive reads the
-// single response and then waits for the server to return. Response headers
-// and trailers are complete when Receive returns, and a cardinality violation
-// maps to CodeUnimplemented as it does in connecthttp.
+// unaryClientStream runs a unary or client-streaming RPC on a streamPair.
+// Receive reads the single response and then waits for the server to return.
+// A cardinality violation maps to CodeUnimplemented as it does in connecthttp.
 type unaryClientStream struct {
 	clientStream
 
