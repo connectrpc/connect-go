@@ -466,7 +466,7 @@ func TestConnectionReset(t *testing.T) {
 				t.Run("close", func(t *testing.T) {
 					t.Parallel()
 					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
-						return &replayingCloseBody{ReadCloser: body, closeErr: resetErr}
+						return &resetBody{ReadCloser: body, closeErr: resetErr}
 					}))
 					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{})
 					if !assert.Nil(t, err) {
@@ -496,7 +496,7 @@ func TestConnectionReset(t *testing.T) {
 				t.Run("unary_close", func(t *testing.T) {
 					t.Parallel()
 					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
-						return &replayingCloseBody{ReadCloser: body, closeErr: resetErr}
+						return &resetBody{ReadCloser: body, closeErr: resetErr}
 					}))
 					_, err := client.Ping(t.Context(), &pingv1.PingRequest{})
 					assert.Nil(t, err)
@@ -585,7 +585,7 @@ func TestConnectionReset(t *testing.T) {
 				t.Run("drain", func(t *testing.T) {
 					t.Parallel()
 					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
-						return &replayingCloseBody{ReadCloser: body, eofErr: resetErr, closeErr: resetErr}
+						return &resetBody{ReadCloser: body, eofErr: resetErr, closeErr: resetErr}
 					}))
 					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{})
 					if !assert.Nil(t, err) {
@@ -1145,28 +1145,6 @@ func (b *resetBody) Close() error {
 	if err := b.ReadCloser.Close(); err != nil {
 		return err
 	}
-	return b.closeErr
-}
-
-// replayingCloseBody returns closeErr on every Close, simulating a custom
-// transport that does not make Close idempotent.
-type replayingCloseBody struct {
-	io.ReadCloser
-
-	eofErr   error
-	closeErr error
-}
-
-func (b *replayingCloseBody) Read(data []byte) (int, error) {
-	n, err := b.ReadCloser.Read(data)
-	if b.eofErr != nil && errors.Is(err, io.EOF) {
-		err = b.eofErr
-	}
-	return n, err
-}
-
-func (b *replayingCloseBody) Close() error {
-	_ = b.ReadCloser.Close()
 	return b.closeErr
 }
 
