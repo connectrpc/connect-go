@@ -311,6 +311,9 @@ func (s *serverStream) Send(msg any) error {
 //   - Standard errors (non-[*Error]) are converted to [CodeUnknown],
 //     except for context cancellation and deadline expiry, which retain
 //     their respective codes.
+//   - A cause matching io.EOF is dropped, as a wire transport would drop
+//     it. Clients read io.EOF as the clean end of the stream, so the
+//     server's error must not match it.
 //   - The resulting error is marked as remote, mimicking a client-side
 //     decoded error.
 //
@@ -322,7 +325,10 @@ func asClientErr(err error) error {
 	}
 	if cerr, ok := errors.AsType[*connect.Error](err); ok && cerr != nil {
 		if cerr.IsRemote() {
-			return connect.NewError(connect.CodeInternal, "").WithCause(err).WithRemote()
+			return connect.NewError(connect.CodeInternal, "").WithCause(clientCause(err)).WithRemote()
+		}
+		if errors.Is(cerr, io.EOF) {
+			cerr = withoutCause(cerr)
 		}
 		return cerr.WithRemote()
 	}
@@ -333,7 +339,26 @@ func asClientErr(err error) error {
 	case errors.Is(err, context.DeadlineExceeded):
 		code = connect.CodeDeadlineExceeded
 	}
-	return connect.NewError(code, "").WithCause(err).WithRemote()
+	return connect.NewError(code, "").WithCause(clientCause(err)).WithRemote()
+}
+
+// clientCause returns err to attach as the cause of the client's error, or
+// nil if err matches io.EOF.
+func clientCause(err error) error {
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	return err
+}
+
+// withoutCause returns a copy of err with its code, message, and details, but
+// not its cause.
+func withoutCause(err *connect.Error) *connect.Error {
+	clone := connect.NewError(err.Code(), err.Message())
+	for _, detail := range err.Details() {
+		clone = clone.WithDetail(detail)
+	}
+	return clone
 }
 
 // syncHeader copies src into dst. The values are cloned because the server

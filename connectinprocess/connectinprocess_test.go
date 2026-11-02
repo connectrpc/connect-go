@@ -26,6 +26,7 @@ import (
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectinprocess"
+	"connectrpc.com/connect/v2/connectproto"
 	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	pingv1connect "connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -821,6 +822,113 @@ func TestUnaryHandlerTypedNilError(t *testing.T) {
 	}
 	if got := ce.Code(); got != connect.CodeUnknown {
 		t.Fatalf("code = %s, want CodeUnknown", got)
+	}
+}
+
+// TestServerErrorMatchingEOF verifies a handler error that matches io.EOF
+// reaches the client with its code and doesn't read as the end of the
+// stream, as over the HTTP transport, which doesn't serialize causes.
+func TestServerErrorMatchingEOF(t *testing.T) {
+	t.Parallel()
+	detail, err := connectproto.NewErrorDetail(&pingv1.FailRequest{Code: 1})
+	if err != nil {
+		t.Fatalf("NewErrorDetail: %v", err)
+	}
+	tests := []struct {
+		name        string
+		err         error
+		wantCode    connect.Code
+		wantMessage string
+		wantDetails int
+	}{
+		{
+			name:     "wrapped_eof",
+			err:      fmt.Errorf("read config: %w", io.EOF),
+			wantCode: connect.CodeUnknown,
+		},
+		{
+			name:        "error_with_eof_cause",
+			err:         connect.NewError(connect.CodeDataLoss, "truncated").WithCause(io.EOF).WithDetail(detail),
+			wantCode:    connect.CodeDataLoss,
+			wantMessage: "truncated",
+			wantDetails: 1,
+		},
+		{
+			name:     "remote_error_with_eof_cause",
+			err:      connect.NewError(connect.CodeNotFound, "upstream").WithCause(io.EOF).WithRemote(),
+			wantCode: connect.CodeInternal,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			server := connect.NewServer()
+			server.Register(
+				connect.Method{
+					Spec: connect.Spec{
+						StreamType: connect.StreamTypeUnary,
+						Procedure:  pingv1connect.PingServicePingProcedure,
+					},
+					Handler: func(context.Context, connect.Spec, connect.ServerStream) error {
+						return test.err
+					},
+				},
+				connect.Method{
+					Spec: connect.Spec{
+						StreamType: connect.StreamTypeServer,
+						Procedure:  pingv1connect.PingServiceCountUpProcedure,
+					},
+					Handler: func(_ context.Context, _ connect.Spec, stream connect.ServerStream) error {
+						if err := stream.Receive(&pingv1.CountUpRequest{}); err != nil {
+							return err
+						}
+						if err := stream.Send(&pingv1.CountUpResponse{Number: 1}); err != nil {
+							return err
+						}
+						return test.err
+					},
+				},
+			)
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(connectinprocess.New(server)))
+			check := func(t *testing.T, err error) {
+				t.Helper()
+				if errors.Is(err, io.EOF) {
+					t.Errorf("error = %v, want an error that doesn't match io.EOF", err)
+				}
+				cerr, ok := errors.AsType[*connect.Error](err)
+				if !ok {
+					t.Fatalf("error = %v, want a *connect.Error", err)
+				}
+				if got := cerr.Code(); got != test.wantCode {
+					t.Errorf("code = %v, want %v", got, test.wantCode)
+				}
+				if got := cerr.Message(); got != test.wantMessage {
+					t.Errorf("message = %q, want %q", got, test.wantMessage)
+				}
+				if got := len(cerr.Details()); got != test.wantDetails {
+					t.Errorf("details = %d, want %d", got, test.wantDetails)
+				}
+			}
+
+			t.Run("unary", func(t *testing.T) {
+				t.Parallel()
+				_, err := client.Ping(t.Context(), &pingv1.PingRequest{})
+				check(t, err)
+			})
+			t.Run("server_stream", func(t *testing.T) {
+				t.Parallel()
+				stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 1})
+				if err != nil {
+					t.Fatalf("CountUp: %v", err)
+				}
+				defer stream.Close()
+				if _, err := stream.Receive(); err != nil {
+					t.Fatalf("first Receive: %v", err)
+				}
+				_, err = stream.Receive()
+				check(t, err)
+			})
+		})
 	}
 }
 
