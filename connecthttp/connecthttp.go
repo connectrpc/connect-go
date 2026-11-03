@@ -307,7 +307,7 @@ func newUnknownMethodHandler(server *connect.Server, opts *options) http.Handler
 		// are served rather than rejected, in full-duplex mode so a
 		// fallback can interleave receives and sends.
 		procedureHandler.bidiOverHTTP1 = true
-		if request.ProtoMajor < 2 {
+		if streamType == connect.StreamTypeBidi && request.ProtoMajor < 2 {
 			_ = http.NewResponseController(responseWriter).EnableFullDuplex()
 		}
 		procedureHandler.ServeHTTP(responseWriter, request)
