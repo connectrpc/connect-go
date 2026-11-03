@@ -172,6 +172,23 @@ func (d *duplexHTTPCall) sendUnary(payload messagePayload) (int64, error) {
 	return payloadLength, nil
 }
 
+// failSend records err as the outcome of a unary or server-streaming call
+// whose request message couldn't be sent. These calls send their only
+// message as the whole request body, so the request is dropped: a later
+// CloseWrite must not send it with an empty body, which the server would
+// handle as an empty message. Reads report err. It does nothing for
+// client-streaming and bidi calls, or once the request has been sent.
+func (d *duplexHTTPCall) failSend(err error) {
+	if d.streamType&connect.StreamTypeClient != 0 {
+		return
+	}
+	if !d.requestSent.CompareAndSwap(false, true) {
+		return
+	}
+	d.responseErr = err
+	close(d.responseReady)
+}
+
 // CloseWrite closes the request body. Callers *must* call CloseWrite before Read when
 // using HTTP/1.x.
 func (d *duplexHTTPCall) CloseWrite() error {
@@ -435,7 +452,13 @@ type writeSender struct {
 var _ messageSender = writeSender{}
 
 func (w writeSender) Send(payload messagePayload) (int64, error) {
-	return payload.WriteTo(w.writer)
+	written, err := payload.WriteTo(w.writer)
+	// The request context is cancelled from a different goroutine than the one
+	// failing the write, so a write can fail while ctx.Err() is still nil.
+	if err != nil && isClientDisconnected(err) {
+		err = connect.NewError(connect.CodeCanceled, err.Error()).WithCause(err)
+	}
+	return written, err
 }
 
 // See: https://cs.opensource.google/go/go/+/refs/tags/go1.20.1:src/net/http/clone.go;l=22-33
