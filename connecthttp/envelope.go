@@ -284,13 +284,14 @@ func (r *envelopeReader) Unmarshal(message any) *connect.Error {
 		r.bytesRead += numBytes
 		if err != nil {
 			err = wrapIfContextError(err)
-			if connErr, ok := asError(err); ok {
+			if connErr, ok := asError(err); ok && connErr.Code() != connect.CodeUnavailable {
 				return connErr
 			}
-			// Ignore uncoded read errors if the complete end-stream message was
-			// already received. In HTTP/1.1, http.Transport closes the connection
-			// on request write failures, which can cause subsequent reads to fail
-			// despite having received the entire response.
+			// Ignore uncoded read errors and unavailable transport errors if the
+			// complete end-stream message was already received. In HTTP/1.1,
+			// http.Transport closes the connection on request write failures,
+			// which can cause subsequent reads to fail despite having received
+			// the entire response.
 		}
 		if numBytes > 0 {
 			return connect.Errorf(connect.CodeInternal, "corrupt response: %d extra bytes after end of stream", numBytes)
