@@ -825,10 +825,11 @@ func TestUnaryHandlerTypedNilError(t *testing.T) {
 	}
 }
 
-// TestServerErrorMatchingEOF verifies a handler error that matches io.EOF
-// reaches the client with its code and doesn't read as the end of the
-// stream, as over the HTTP transport, which doesn't serialize causes.
-func TestServerErrorMatchingEOF(t *testing.T) {
+// TestServerErrorDropsCause verifies a handler error reaches the client with
+// its code, message, and details but no cause, as over the HTTP transport,
+// which doesn't serialize causes. An io.EOF cause then can't read as the end
+// of the stream.
+func TestServerErrorDropsCause(t *testing.T) {
 	t.Parallel()
 	detail, err := connectproto.NewErrorDetail(&pingv1.FailRequest{Code: 1})
 	if err != nil {
@@ -845,6 +846,12 @@ func TestServerErrorMatchingEOF(t *testing.T) {
 			name:     "wrapped_eof",
 			err:      fmt.Errorf("read config: %w", io.EOF),
 			wantCode: connect.CodeUnknown,
+		},
+		{
+			name:        "error_with_cause",
+			err:         connect.NewError(connect.CodeNotFound, "missing").WithCause(errors.New("lookup failed")),
+			wantCode:    connect.CodeNotFound,
+			wantMessage: "missing",
 		},
 		{
 			name:        "error_with_eof_cause",
@@ -898,6 +905,9 @@ func TestServerErrorMatchingEOF(t *testing.T) {
 				cerr, ok := errors.AsType[*connect.Error](err)
 				if !ok {
 					t.Fatalf("error = %v, want a *connect.Error", err)
+				}
+				if cause := errors.Unwrap(cerr); cause != nil {
+					t.Errorf("cause = %v, want nil", cause)
 				}
 				if got := cerr.Code(); got != test.wantCode {
 					t.Errorf("code = %v, want %v", got, test.wantCode)
