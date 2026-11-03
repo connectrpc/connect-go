@@ -304,8 +304,12 @@ func newUnknownMethodHandler(server *connect.Server, opts *options) http.Handler
 		// registered-procedure machinery.
 		procedureHandler := newProcedureHandler(server, spec, opts)
 		// Bidi stands in for every stream type here, so HTTP/1.x requests
-		// are served rather than rejected as full-duplex.
+		// are served rather than rejected, in full-duplex mode so a
+		// fallback can interleave receives and sends.
 		procedureHandler.bidiOverHTTP1 = true
+		if request.ProtoMajor < 2 {
+			_ = http.NewResponseController(responseWriter).EnableFullDuplex()
+		}
 		procedureHandler.ServeHTTP(responseWriter, request)
 	})
 }
