@@ -37,7 +37,6 @@ type handler struct {
 	protocolHandlers map[string][]protocolHandler // Method to protocol handlers
 	allowMethod      string                       // Allow header
 	acceptPost       string                       // Accept-Post header
-	bidiOverHTTP1    bool                         // serve bidi specs over HTTP/1.x
 }
 
 // ServeHTTP implements [http.Handler].
@@ -46,16 +45,6 @@ func (h *handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	// EOF: the stream we construct later on already does that, and we only
 	// return early when dealing with misbehaving clients. In those cases, it's
 	// okay if we can't re-use the connection.
-	isBidi := (h.spec.StreamType & connect.StreamTypeBidi) == connect.StreamTypeBidi
-	if isBidi && !h.bidiOverHTTP1 && request.ProtoMajor < 2 {
-		// Clients coded to expect full-duplex connections may hang if they've
-		// mistakenly negotiated HTTP/1.1. To unblock them, we must close the
-		// underlying TCP connection.
-		responseWriter.Header().Set("Connection", "close")
-		responseWriter.WriteHeader(http.StatusHTTPVersionNotSupported)
-		return
-	}
-
 	protocolHandlers := h.protocolHandlers[request.Method]
 	if len(protocolHandlers) == 0 {
 		responseWriter.Header().Set("Allow", h.allowMethod)
