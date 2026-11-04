@@ -261,7 +261,11 @@ func Mount(mux ServeMux, server *connect.Server, options ...Option) {
 	}
 	services := make(map[string]struct{})
 	for spec := range server.Specs() {
-		mux.Handle(spec.Procedure, newProcedureHandler(server, spec, &opts))
+		procedureHandler := newProcedureHandler(server, spec, &opts)
+		if spec.StreamType == connect.StreamTypeBidi {
+			procedureHandler = requireHTTP2(procedureHandler)
+		}
+		mux.Handle(spec.Procedure, procedureHandler)
 		// "/package.Service/Method" -> subtree pattern "/package.Service/".
 		if idx := strings.LastIndexByte(spec.Procedure, '/'); idx > 0 {
 			services[spec.Procedure[:idx+1]] = struct{}{}
@@ -270,6 +274,21 @@ func Mount(mux ServeMux, server *connect.Server, options ...Option) {
 	for service := range services {
 		mux.Handle(service, newUnknownMethodHandler(server, &opts))
 	}
+}
+
+// requireHTTP2 wraps next to answer HTTP/1.x requests with 505 HTTP Version
+// Not Supported. Clients coded to expect full-duplex connections may hang if
+// they've mistakenly negotiated HTTP/1.1, so the response also closes the
+// underlying TCP connection to unblock them.
+func requireHTTP2(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		if request.ProtoMajor < 2 {
+			responseWriter.Header().Set("Connection", "close")
+			responseWriter.WriteHeader(http.StatusHTTPVersionNotSupported)
+			return
+		}
+		next.ServeHTTP(responseWriter, request)
+	})
 }
 
 // newUnknownMethodHandler routes RPC-shaped POST requests through
@@ -299,6 +318,12 @@ func newUnknownMethodHandler(server *connect.Server, opts *options) http.Handler
 		spec := connect.Spec{
 			StreamType: streamType,
 			Procedure:  request.URL.Path,
+		}
+		// Bidi stands in for every streaming type here, so HTTP/1.x
+		// requests run in full-duplex mode to let a fallback interleave
+		// receives and sends.
+		if streamType == connect.StreamTypeBidi && request.ProtoMajor < 2 {
+			_ = http.NewResponseController(responseWriter).EnableFullDuplex()
 		}
 		// Cold path: build the handler per request to reuse the
 		// registered-procedure machinery.

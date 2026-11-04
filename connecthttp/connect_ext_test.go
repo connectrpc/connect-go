@@ -1078,22 +1078,37 @@ func TestMountUnknownMethod(t *testing.T) {
 		}
 		assert.Equal(t, wireErr.Code, "unimplemented")
 	})
-	t.Run("connect_client", func(t *testing.T) {
+	httpClients := map[string]*http.Client{
+		"http2": server.Client(),
+		"http1": {Transport: server.TransportHTTP1()},
+	}
+	protocols := map[string][]connecthttp.Option{
+		"connect":  nil,
+		"grpc":     {connecthttp.WithGRPC()},
+		"grpc_web": {connecthttp.WithGRPCWeb()},
+	}
+	for httpName, httpClient := range httpClients {
+		for protocolName, options := range protocols {
+			t.Run(httpName+"/"+protocolName+"_client", func(t *testing.T) {
+				t.Parallel()
+				client := connect.NewClient(connecthttp.NewTransport(httpClient, server.URL(), options...))
+				err := client.CallUnary(t.Context(), unknownSpec, &pingv1.PingRequest{}, &pingv1.PingResponse{})
+				assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
+			})
+		}
+	}
+	// Unlike Connect unary, Connect streaming shares the fallback's bidi spec
+	// with gRPC and gRPC-Web.
+	t.Run("http1/connect_stream_client", func(t *testing.T) {
 		t.Parallel()
-		client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL()))
-		err := client.CallUnary(t.Context(), unknownSpec, &pingv1.PingRequest{}, &pingv1.PingResponse{})
-		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
-	})
-	t.Run("grpc_client", func(t *testing.T) {
-		t.Parallel()
-		client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPC()))
-		err := client.CallUnary(t.Context(), unknownSpec, &pingv1.PingRequest{}, &pingv1.PingResponse{})
-		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
-	})
-	t.Run("grpc_web_client", func(t *testing.T) {
-		t.Parallel()
-		client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPCWeb()))
-		err := client.CallUnary(t.Context(), unknownSpec, &pingv1.PingRequest{}, &pingv1.PingResponse{})
+		client := connect.NewClient(connecthttp.NewTransport(httpClients["http1"], server.URL()))
+		spec := connect.Spec{StreamType: connect.StreamTypeServer, Procedure: unknownProcedure}
+		stream, err := client.CallServerStream(t.Context(), spec, &pingv1.PingRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer stream.Close()
+		err = stream.Receive(&pingv1.PingResponse{})
 		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
 	})
 	t.Run("registered_method", func(t *testing.T) {
@@ -1136,11 +1151,17 @@ func TestMountUnknownHandler(t *testing.T) {
 	srv.SetUnknownHandler(func(ctx context.Context, spec connect.Spec, stream connect.ServerStream) error {
 		info, _ := connect.CallInfoForServerContext(ctx)
 		info.ResponseHeader().Set("Fallback-Procedure", spec.Procedure)
-		var req pingv1.PingRequest
-		if err := stream.Receive(&req); err != nil {
-			return err
+		for {
+			var req pingv1.PingRequest
+			if err := stream.Receive(&req); errors.Is(err, io.EOF) {
+				return nil
+			} else if err != nil {
+				return err
+			}
+			if err := stream.Send(&pingv1.PingResponse{Number: req.GetNumber(), Text: fallbackText}); err != nil {
+				return err
+			}
 		}
-		return stream.Send(&pingv1.PingResponse{Number: req.GetNumber(), Text: fallbackText})
 	})
 	server := memhttptest.NewServer(t, mux)
 
@@ -1203,6 +1224,64 @@ func TestMountUnknownHandler(t *testing.T) {
 		if err := stream.Receive(&res); !errors.Is(err, io.EOF) {
 			t.Errorf("second Receive = %v, want io.EOF", err)
 		}
+	})
+	t.Run("http1/grpc_web_raw_ping_pong", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		bodyReader, bodyWriter := io.Pipe()
+		defer bodyWriter.Close()
+		context.AfterFunc(ctx, func() { bodyWriter.CloseWithError(ctx.Err()) })
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL()+unknownProcedure, bodyReader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/grpc-web+proto")
+		writeFrame := func(number int64) {
+			payload, err := proto.Marshal(&pingv1.PingRequest{Number: number})
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			frame := make([]byte, 5, 5+len(payload))
+			binary.BigEndian.PutUint32(frame[1:], uint32(len(payload)))
+			if _, err := bodyWriter.Write(append(frame, payload...)); err != nil {
+				t.Errorf("write frame %d: %v", number, err)
+			}
+		}
+		go writeFrame(1)
+		// With keep-alives off, net/http never drains a half-duplex request
+		// body, so the exchange would pass without full duplex.
+		transport := server.TransportHTTP1()
+		transport.DisableKeepAlives = false
+		defer transport.CloseIdleConnections()
+		response, err := (&http.Client{Transport: transport}).Do(request)
+		if err != nil {
+			t.Fatalf("Do: %v", err)
+		}
+		defer response.Body.Close()
+		readFrame := func() *pingv1.PingResponse {
+			t.Helper()
+			header := make([]byte, 5)
+			if _, err := io.ReadFull(response.Body, header); err != nil {
+				t.Fatalf("read frame header: %v", err)
+			}
+			payload := make([]byte, binary.BigEndian.Uint32(header[1:]))
+			if _, err := io.ReadFull(response.Body, payload); err != nil {
+				t.Fatalf("read frame payload: %v", err)
+			}
+			if header[0] != 0 {
+				t.Fatalf("frame flags = %#x, payload %q", header[0], payload)
+			}
+			var res pingv1.PingResponse
+			if err := proto.Unmarshal(payload, &res); err != nil {
+				t.Fatal(err)
+			}
+			return &res
+		}
+		assert.Equal(t, readFrame().GetNumber(), int64(1))
+		writeFrame(2)
+		assert.Equal(t, readFrame().GetNumber(), int64(2))
 	})
 	t.Run("registered_method_unaffected", func(t *testing.T) {
 		t.Parallel()
