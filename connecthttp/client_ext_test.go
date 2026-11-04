@@ -32,6 +32,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"connectrpc.com/connect/v2"
@@ -204,6 +205,86 @@ func TestClientInfoAfterCancel(t *testing.T) {
 	_ = clientInfo.ResponseStatus()
 	_ = clientInfo.ResponseProto()
 	_ = clientInfo.TLS()
+}
+
+func TestClientStreamCloseBeforeResponseHeaders(t *testing.T) {
+	t.Parallel()
+	// The handler never sends response headers. Close must abort the call
+	// rather than wait for them, and unblock a pending Receive.
+	specs := []connect.Spec{
+		{StreamType: connect.StreamTypeClient, Procedure: pingv1connect.PingServiceSumProcedure},
+		{StreamType: connect.StreamTypeBidi, Procedure: pingv1connect.PingServiceCumSumProcedure},
+	}
+	protocols := map[string][]connecthttp.Option{
+		connect.ProtocolNameConnect: nil,
+		connect.ProtocolNameGRPC:    {connecthttp.WithGRPC()},
+		connect.ProtocolNameGRPCWeb: {connecthttp.WithGRPCWeb()},
+	}
+	for name, opts := range protocols {
+		for _, spec := range specs {
+			t.Run(name+"/"+spec.StreamType.String(), func(t *testing.T) {
+				t.Parallel()
+				synctest.Test(t, func(t *testing.T) {
+					srv := connect.NewServer()
+					srv.Register(connect.Method{
+						Spec: spec,
+						Handler: func(ctx context.Context, _ connect.Spec, _ connect.ServerStream) error {
+							<-ctx.Done()
+							return ctx.Err()
+						},
+					})
+					mux := http.NewServeMux()
+					connecthttp.Mount(mux, srv)
+					server := memhttptest.NewServer(t, mux)
+					client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), opts...))
+					stream, err := client.CallClientStream(t.Context(), spec)
+					assert.Nil(t, err)
+					assert.Nil(t, stream.SendHeaders())
+					receiveDone := make(chan error, 1)
+					go func() {
+						receiveDone <- stream.Receive(&pingv1.SumResponse{})
+					}()
+					// The handler and Receive are both waiting on each other.
+					synctest.Wait()
+					closeDone := make(chan error, 1)
+					go func() {
+						closeDone <- stream.Close()
+					}()
+					synctest.Wait()
+					select {
+					case <-closeDone:
+					default:
+						t.Error("Close blocked waiting for response headers")
+					}
+					select {
+					case err := <-receiveDone:
+						assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
+					default:
+						t.Error("Close didn't unblock a pending Receive")
+					}
+				})
+			})
+		}
+	}
+}
+
+func TestClientStreamCloseUnusedDoesNotDispatch(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	httpClient := httpClientFunc(func(*http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return nil, errors.New("unexpected request")
+	})
+	client := connect.NewClient(connecthttp.NewTransport(httpClient, "http://localhost"))
+	for _, spec := range []connect.Spec{
+		{StreamType: connect.StreamTypeClient, Procedure: pingv1connect.PingServiceSumProcedure},
+		{StreamType: connect.StreamTypeBidi, Procedure: pingv1connect.PingServiceCumSumProcedure},
+	} {
+		stream, err := client.CallClientStream(t.Context(), spec)
+		assert.Nil(t, err)
+		assert.Nil(t, stream.Close())
+	}
+	assert.Equal(t, calls.Load(), 0)
 }
 
 func TestGetNotModified(t *testing.T) {
@@ -386,7 +467,8 @@ func TestConnectionDropped(t *testing.T) {
 func TestConnectionReset(t *testing.T) {
 	t.Parallel()
 	// A reset observed by the client is a transport failure, not the caller
-	// canceling, so it must not be reported as CodeCanceled.
+	// canceling, so it must be CodeUnavailable. Retries remain the caller's
+	// responsibility and are safe only for idempotent RPCs.
 	resetErrs := map[string]error{
 		"ECONNRESET": &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.ECONNRESET)},
 		"EPIPE":      &net.OpError{Op: "write", Net: "tcp", Err: os.NewSyscallError("write", syscall.EPIPE)},
@@ -454,13 +536,13 @@ func TestConnectionReset(t *testing.T) {
 						return &resetBody{ReadCloser: body, readErr: resetErr}
 					}))
 					_, err := client.Ping(t.Context(), &pingv1.PingRequest{})
-					assert.NotEqual(t, connect.CodeOf(err), connect.CodeCanceled)
+					assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
 					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{})
 					if !assert.Nil(t, err) {
 						return
 					}
 					_, err = stream.Receive()
-					assert.NotEqual(t, connect.CodeOf(err), connect.CodeCanceled)
+					assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
 					assert.Nil(t, stream.Close())
 				})
 				t.Run("close", func(t *testing.T) {
@@ -476,7 +558,108 @@ func TestConnectionReset(t *testing.T) {
 						_, err = stream.Receive()
 					}
 					assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-					assert.NotEqual(t, connect.CodeOf(stream.Close()), connect.CodeCanceled)
+					assert.Nil(t, stream.Close())
+				})
+				t.Run("close_early", func(t *testing.T) {
+					t.Parallel()
+					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
+						return &resetBody{ReadCloser: body, closeErr: resetErr}
+					}))
+					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{})
+					if !assert.Nil(t, err) {
+						return
+					}
+					if _, err := stream.Receive(); !assert.Nil(t, err) {
+						return
+					}
+					assert.Equal(t, connect.CodeOf(stream.Close()), connect.CodeUnavailable)
+					assert.Nil(t, stream.Close())
+				})
+				t.Run("unary_close", func(t *testing.T) {
+					t.Parallel()
+					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
+						return &resetBody{ReadCloser: body, closeErr: resetErr}
+					}))
+					_, err := client.Ping(t.Context(), &pingv1.PingRequest{})
+					assert.Nil(t, err)
+				})
+				t.Run("read_canceled", func(t *testing.T) {
+					t.Parallel()
+					var body *blockingResetBody
+					client := newClient(withBody(func(reader io.ReadCloser) io.ReadCloser {
+						body = &blockingResetBody{
+							ReadCloser: reader,
+							started:    make(chan struct{}),
+							release:    make(chan struct{}),
+							err:        resetErr,
+						}
+						return body
+					}))
+					ctx, cancel := context.WithCancel(t.Context())
+					defer cancel()
+					stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{})
+					if !assert.Nil(t, err) {
+						return
+					}
+					if body == nil {
+						t.Fatal("response body was not wrapped")
+					}
+					errCh := make(chan error, 1)
+					go func() {
+						_, err := stream.Receive()
+						errCh <- err
+					}()
+					<-body.started
+					cancel()
+					close(body.release)
+					assert.Equal(t, connect.CodeOf(<-errCh), connect.CodeCanceled)
+				})
+				t.Run("read_deadline", func(t *testing.T) {
+					t.Parallel()
+					var body *blockingResetBody
+					client := newClient(withBody(func(reader io.ReadCloser) io.ReadCloser {
+						body = &blockingResetBody{
+							ReadCloser: reader,
+							started:    make(chan struct{}),
+							release:    make(chan struct{}),
+							err:        resetErr,
+						}
+						return body
+					}))
+					ctx := newDeadlineContext()
+					stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{})
+					if !assert.Nil(t, err) {
+						return
+					}
+					if body == nil {
+						t.Fatal("response body was not wrapped")
+					}
+					errCh := make(chan error, 1)
+					go func() {
+						_, err := stream.Receive()
+						errCh <- err
+					}()
+					<-body.started
+					ctx.expire()
+					close(body.release)
+					assert.Equal(t, connect.CodeOf(<-errCh), connect.CodeDeadlineExceeded)
+				})
+				t.Run("close_canceled", func(t *testing.T) {
+					t.Parallel()
+					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
+						return &resetBody{ReadCloser: body, closeErr: resetErr}
+					}))
+					ctx, cancel := context.WithCancel(t.Context())
+					defer cancel()
+					stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{})
+					if !assert.Nil(t, err) {
+						return
+					}
+					if _, err := stream.Receive(); !assert.Nil(t, err) {
+						return
+					}
+					cancel()
+					assert.Equal(t, connect.CodeOf(stream.Close()), connect.CodeCanceled)
 				})
 				if protocol == connect.ProtocolNameGRPC {
 					return // gRPC ends the stream with trailers, not an end-stream message.
@@ -484,7 +667,7 @@ func TestConnectionReset(t *testing.T) {
 				t.Run("drain", func(t *testing.T) {
 					t.Parallel()
 					client := newClient(withBody(func(body io.ReadCloser) io.ReadCloser {
-						return &resetBody{ReadCloser: body, eofErr: resetErr}
+						return &resetBody{ReadCloser: body, eofErr: resetErr, closeErr: resetErr}
 					}))
 					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{})
 					if !assert.Nil(t, err) {
@@ -1016,13 +1199,14 @@ func (fn httpClientFunc) Do(req *http.Request) (*http.Response, error) {
 }
 
 // resetBody simulates a connection reset on a response body. readErr fails
-// the first Read, eofErr replaces io.EOF, and closeErr fails Close.
+// the first Read, eofErr replaces io.EOF, and closeErr fails the first Close.
 type resetBody struct {
 	io.ReadCloser
 
 	readErr  error
 	eofErr   error
 	closeErr error
+	closed   atomic.Bool
 }
 
 func (b *resetBody) Read(data []byte) (int, error) {
@@ -1037,8 +1221,64 @@ func (b *resetBody) Read(data []byte) (int, error) {
 }
 
 func (b *resetBody) Close() error {
+	if b.closed.Swap(true) {
+		return nil
+	}
 	if err := b.ReadCloser.Close(); err != nil {
 		return err
 	}
 	return b.closeErr
+}
+
+// deadlineContext expires only when expire is called, so a test can make a
+// deadline race deterministic without a wall-clock timeout.
+type deadlineContext struct {
+	done chan struct{}
+	once sync.Once
+}
+
+func newDeadlineContext() *deadlineContext {
+	return &deadlineContext{done: make(chan struct{})}
+}
+
+func (c *deadlineContext) Deadline() (time.Time, bool) {
+	return time.Time{}, false
+}
+
+func (c *deadlineContext) Done() <-chan struct{} {
+	return c.done
+}
+
+func (c *deadlineContext) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+func (c *deadlineContext) Value(any) any {
+	return nil
+}
+
+func (c *deadlineContext) expire() {
+	c.once.Do(func() { close(c.done) })
+}
+
+// blockingResetBody blocks its first Read until release is closed, then
+// returns err. It lets a test cancel or expire the context mid-read.
+type blockingResetBody struct {
+	io.ReadCloser
+
+	started chan struct{}
+	release chan struct{}
+	err     error
+	once    sync.Once
+}
+
+func (b *blockingResetBody) Read([]byte) (int, error) {
+	b.once.Do(func() { close(b.started) })
+	<-b.release
+	return 0, b.err
 }
