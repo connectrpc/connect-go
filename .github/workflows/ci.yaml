@@ -31,6 +31,10 @@ jobs:
         with:
           go-version: ${{ matrix.go-version.version }}
           check-latest: true
+          # Separate cache for the lint and release tools.
+          cache-dependency-path: |
+            go.sum
+            Makefile
       - name: Unit Test
         run: make shorttest
       - name: Lint
