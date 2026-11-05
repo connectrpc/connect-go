@@ -136,17 +136,11 @@ func wrapIfContextError(err error) error {
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		return connect.NewError(connect.CodeDeadlineExceeded, err.Error()).WithCause(err)
 	}
-	// The request context is cancelled from a different goroutine than the one
-	// failing the write, so a write can fail while ctx.Err() is still nil.
-	// https://github.com/golang/go/issues/52183
-	if isClientDisconnected(err) {
-		return connect.NewError(connect.CodeCanceled, err.Error()).WithCause(err)
-	}
 	return err
 }
 
-// isClientDisconnected reports whether err is a write failure caused by the
-// client going away. HTTP/2 has its own errors for this, other transports
+// isClientDisconnected reports whether err is a connection failure caused by
+// the client going away. HTTP/2 has its own errors for this, other transports
 // surface the connection's error.
 func isClientDisconnected(err error) bool {
 	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
@@ -154,6 +148,22 @@ func isClientDisconnected(err error) bool {
 	}
 	msg := err.Error()
 	return msg == clientDisconnectedMessage || msg == streamClosedMessage
+}
+
+// wrapIfClientTransportError wraps client-side connection failures with
+// connect.CodeUnavailable. A reset observed while reading or closing a response
+// is a transient transport failure, not caller cancellation.
+func wrapIfClientTransportError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := asError(err); ok {
+		return err
+	}
+	if !isClientDisconnected(err) {
+		return err
+	}
+	return connect.NewError(connect.CodeUnavailable, err.Error()).WithCause(err)
 }
 
 // wrapIfContextDone wraps errors with connect.CodeCanceled or connect.CodeDeadlineExceeded

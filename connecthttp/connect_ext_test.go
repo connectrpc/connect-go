@@ -32,8 +32,10 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -1076,22 +1078,37 @@ func TestMountUnknownMethod(t *testing.T) {
 		}
 		assert.Equal(t, wireErr.Code, "unimplemented")
 	})
-	t.Run("connect_client", func(t *testing.T) {
+	httpClients := map[string]*http.Client{
+		"http2": server.Client(),
+		"http1": {Transport: server.TransportHTTP1()},
+	}
+	protocols := map[string][]connecthttp.Option{
+		"connect":  nil,
+		"grpc":     {connecthttp.WithGRPC()},
+		"grpc_web": {connecthttp.WithGRPCWeb()},
+	}
+	for httpName, httpClient := range httpClients {
+		for protocolName, options := range protocols {
+			t.Run(httpName+"/"+protocolName+"_client", func(t *testing.T) {
+				t.Parallel()
+				client := connect.NewClient(connecthttp.NewTransport(httpClient, server.URL(), options...))
+				err := client.CallUnary(t.Context(), unknownSpec, &pingv1.PingRequest{}, &pingv1.PingResponse{})
+				assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
+			})
+		}
+	}
+	// Unlike Connect unary, Connect streaming shares the fallback's bidi spec
+	// with gRPC and gRPC-Web.
+	t.Run("http1/connect_stream_client", func(t *testing.T) {
 		t.Parallel()
-		client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL()))
-		err := client.CallUnary(t.Context(), unknownSpec, &pingv1.PingRequest{}, &pingv1.PingResponse{})
-		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
-	})
-	t.Run("grpc_client", func(t *testing.T) {
-		t.Parallel()
-		client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPC()))
-		err := client.CallUnary(t.Context(), unknownSpec, &pingv1.PingRequest{}, &pingv1.PingResponse{})
-		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
-	})
-	t.Run("grpc_web_client", func(t *testing.T) {
-		t.Parallel()
-		client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPCWeb()))
-		err := client.CallUnary(t.Context(), unknownSpec, &pingv1.PingRequest{}, &pingv1.PingResponse{})
+		client := connect.NewClient(connecthttp.NewTransport(httpClients["http1"], server.URL()))
+		spec := connect.Spec{StreamType: connect.StreamTypeServer, Procedure: unknownProcedure}
+		stream, err := client.CallServerStream(t.Context(), spec, &pingv1.PingRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer stream.Close()
+		err = stream.Receive(&pingv1.PingResponse{})
 		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
 	})
 	t.Run("registered_method", func(t *testing.T) {
@@ -1134,11 +1151,17 @@ func TestMountUnknownHandler(t *testing.T) {
 	srv.SetUnknownHandler(func(ctx context.Context, spec connect.Spec, stream connect.ServerStream) error {
 		info, _ := connect.CallInfoForServerContext(ctx)
 		info.ResponseHeader().Set("Fallback-Procedure", spec.Procedure)
-		var req pingv1.PingRequest
-		if err := stream.Receive(&req); err != nil {
-			return err
+		for {
+			var req pingv1.PingRequest
+			if err := stream.Receive(&req); errors.Is(err, io.EOF) {
+				return nil
+			} else if err != nil {
+				return err
+			}
+			if err := stream.Send(&pingv1.PingResponse{Number: req.GetNumber(), Text: fallbackText}); err != nil {
+				return err
+			}
 		}
-		return stream.Send(&pingv1.PingResponse{Number: req.GetNumber(), Text: fallbackText})
 	})
 	server := memhttptest.NewServer(t, mux)
 
@@ -1201,6 +1224,64 @@ func TestMountUnknownHandler(t *testing.T) {
 		if err := stream.Receive(&res); !errors.Is(err, io.EOF) {
 			t.Errorf("second Receive = %v, want io.EOF", err)
 		}
+	})
+	t.Run("http1/grpc_web_raw_ping_pong", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		bodyReader, bodyWriter := io.Pipe()
+		defer bodyWriter.Close()
+		context.AfterFunc(ctx, func() { bodyWriter.CloseWithError(ctx.Err()) })
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL()+unknownProcedure, bodyReader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/grpc-web+proto")
+		writeFrame := func(number int64) {
+			payload, err := proto.Marshal(&pingv1.PingRequest{Number: number})
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			frame := make([]byte, 5, 5+len(payload))
+			binary.BigEndian.PutUint32(frame[1:], uint32(len(payload)))
+			if _, err := bodyWriter.Write(append(frame, payload...)); err != nil {
+				t.Errorf("write frame %d: %v", number, err)
+			}
+		}
+		go writeFrame(1)
+		// With keep-alives off, net/http never drains a half-duplex request
+		// body, so the exchange would pass without full duplex.
+		transport := server.TransportHTTP1()
+		transport.DisableKeepAlives = false
+		defer transport.CloseIdleConnections()
+		response, err := (&http.Client{Transport: transport}).Do(request)
+		if err != nil {
+			t.Fatalf("Do: %v", err)
+		}
+		defer response.Body.Close()
+		readFrame := func() *pingv1.PingResponse {
+			t.Helper()
+			header := make([]byte, 5)
+			if _, err := io.ReadFull(response.Body, header); err != nil {
+				t.Fatalf("read frame header: %v", err)
+			}
+			payload := make([]byte, binary.BigEndian.Uint32(header[1:]))
+			if _, err := io.ReadFull(response.Body, payload); err != nil {
+				t.Fatalf("read frame payload: %v", err)
+			}
+			if header[0] != 0 {
+				t.Fatalf("frame flags = %#x, payload %q", header[0], payload)
+			}
+			var res pingv1.PingResponse
+			if err := proto.Unmarshal(payload, &res); err != nil {
+				t.Fatal(err)
+			}
+			return &res
+		}
+		assert.Equal(t, readFrame().GetNumber(), int64(1))
+		writeFrame(2)
+		assert.Equal(t, readFrame().GetNumber(), int64(2))
 	})
 	t.Run("registered_method_unaffected", func(t *testing.T) {
 		t.Parallel()
@@ -1893,7 +1974,7 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
 	connecthttp.Mount(mux, server, connecthttp.WithReadMaxBytes(readMaxBytes))
 
-	readMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, compressed bool) {
+	readMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, compressed, connectUnary bool) {
 		t.Helper()
 		t.Run("equal_read_max", func(t *testing.T) {
 			t.Parallel()
@@ -1915,7 +1996,13 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 			_, err := client.Ping(t.Context(), pingRequest)
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-			assert.True(t, strings.HasSuffix(err.Error(), fmt.Sprintf("message size %d is larger than configured max %d", proto.Size(pingRequest), readMaxBytes)))
+			want := fmt.Sprintf("message size %d is larger than configured max %d", proto.Size(pingRequest), readMaxBytes)
+			if connectUnary || compressed {
+				// Only an envelope's length prefix gives the size, and reading
+				// stops at the limit.
+				want = fmt.Sprintf("message is larger than configured max %d", readMaxBytes)
+			}
+			assert.True(t, strings.HasSuffix(err.Error(), want), assert.Sprintf("got %q, want suffix %q", err.Error(), want))
 		})
 		t.Run("read_max_large", func(t *testing.T) {
 			t.Parallel()
@@ -1933,7 +2020,13 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 			_, err := client.Ping(t.Context(), pingRequest)
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-			assert.Equal(t, err.Error(), fmt.Sprintf("resource_exhausted: message size %d is larger than configured max %d", expectedSize, readMaxBytes))
+			want := fmt.Sprintf("resource_exhausted: message size %d is larger than configured max %d", expectedSize, readMaxBytes)
+			if connectUnary {
+				// Connect unary messages have no length prefix, and reading stops
+				// at the limit.
+				want = fmt.Sprintf("resource_exhausted: message is larger than configured max %d", readMaxBytes)
+			}
+			assert.Equal(t, err.Error(), want)
 		})
 	}
 	newHTTP2Server := func(t *testing.T) *memhttp.Server {
@@ -1945,37 +2038,37 @@ func TestHandlerWithReadMaxBytes(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL())))
-		readMaxBytesMatrix(t, client, false)
+		readMaxBytesMatrix(t, client, false, true)
 	})
 	t.Run("connect_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithSendCompression("gzip"))))
-		readMaxBytesMatrix(t, client, true)
+		readMaxBytesMatrix(t, client, true, true)
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPC())))
-		readMaxBytesMatrix(t, client, false)
+		readMaxBytesMatrix(t, client, false, false)
 	})
 	t.Run("grpc_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPC(), connecthttp.WithSendCompression("gzip"))))
-		readMaxBytesMatrix(t, client, true)
+		readMaxBytesMatrix(t, client, true, false)
 	})
 	t.Run("grpcweb", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPCWeb())))
-		readMaxBytesMatrix(t, client, false)
+		readMaxBytesMatrix(t, client, false, false)
 	})
 	t.Run("grpcweb_gzip", func(t *testing.T) {
 		t.Parallel()
 		server := newHTTP2Server(t)
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPCWeb(), connecthttp.WithSendCompression("gzip"))))
-		readMaxBytesMatrix(t, client, true)
+		readMaxBytesMatrix(t, client, true, false)
 	})
 }
 
@@ -2085,7 +2178,7 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 	serverUncompressed := createServer(t, false)
 	serverCompressed := createServer(t, true)
 	readMaxBytes := 1024
-	readMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, compressed bool) {
+	readMaxBytesMatrix := func(t *testing.T, client pingv1connect.PingServiceClient, compressed, connectUnary bool) {
 		t.Helper()
 		t.Run("equal_read_max", func(t *testing.T) {
 			t.Parallel()
@@ -2103,7 +2196,13 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 			_, err := client.Ping(t.Context(), pingRequest)
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-			assert.True(t, strings.HasSuffix(err.Error(), fmt.Sprintf("message size %d is larger than configured max %d", proto.Size(pingRequest), readMaxBytes)))
+			want := fmt.Sprintf("message size %d is larger than configured max %d", proto.Size(pingRequest), readMaxBytes)
+			if connectUnary || compressed {
+				// Only an envelope's length prefix gives the size, and reading
+				// stops at the limit.
+				want = fmt.Sprintf("message is larger than configured max %d", readMaxBytes)
+			}
+			assert.True(t, strings.HasSuffix(err.Error(), want), assert.Sprintf("got %q, want suffix %q", err.Error(), want))
 		})
 		t.Run("read_max_large", func(t *testing.T) {
 			t.Parallel()
@@ -2122,38 +2221,44 @@ func TestClientWithReadMaxBytes(t *testing.T) {
 			_, err := client.Ping(t.Context(), pingRequest)
 			assert.NotNil(t, err, assert.Sprintf("expected non-nil error for large message"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-			assert.Equal(t, err.Error(), fmt.Sprintf("resource_exhausted: message size %d is larger than configured max %d", expectedSize, readMaxBytes))
+			want := fmt.Sprintf("resource_exhausted: message size %d is larger than configured max %d", expectedSize, readMaxBytes)
+			if connectUnary {
+				// Connect unary messages have no length prefix, and reading stops
+				// at the limit.
+				want = fmt.Sprintf("resource_exhausted: message is larger than configured max %d", readMaxBytes)
+			}
+			assert.Equal(t, err.Error(), want)
 		})
 	}
 	t.Run("connect", func(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(serverUncompressed.Client(), serverUncompressed.URL(), connecthttp.WithReadMaxBytes(readMaxBytes))))
-		readMaxBytesMatrix(t, client, false)
+		readMaxBytesMatrix(t, client, false, true)
 	})
 	t.Run("connect_gzip", func(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(serverCompressed.Client(), serverCompressed.URL(), connecthttp.WithReadMaxBytes(readMaxBytes))))
-		readMaxBytesMatrix(t, client, true)
+		readMaxBytesMatrix(t, client, true, true)
 	})
 	t.Run("grpc", func(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(serverUncompressed.Client(), serverUncompressed.URL(), connecthttp.WithReadMaxBytes(readMaxBytes), connecthttp.WithGRPC())))
-		readMaxBytesMatrix(t, client, false)
+		readMaxBytesMatrix(t, client, false, false)
 	})
 	t.Run("grpc_gzip", func(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(serverCompressed.Client(), serverCompressed.URL(), connecthttp.WithReadMaxBytes(readMaxBytes), connecthttp.WithGRPC())))
-		readMaxBytesMatrix(t, client, true)
+		readMaxBytesMatrix(t, client, true, false)
 	})
 	t.Run("grpcweb", func(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(serverUncompressed.Client(), serverUncompressed.URL(), connecthttp.WithReadMaxBytes(readMaxBytes), connecthttp.WithGRPCWeb())))
-		readMaxBytesMatrix(t, client, false)
+		readMaxBytesMatrix(t, client, false, false)
 	})
 	t.Run("grpcweb_gzip", func(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(serverCompressed.Client(), serverCompressed.URL(), connecthttp.WithReadMaxBytes(readMaxBytes), connecthttp.WithGRPCWeb())))
-		readMaxBytesMatrix(t, client, true)
+		readMaxBytesMatrix(t, client, true, false)
 	})
 }
 
@@ -2596,6 +2701,135 @@ func TestClientWithSendMaxBytes(t *testing.T) {
 		sendMaxBytesMatrix(t, client, sendMaxBytes, true)
 	})
 }
+
+// TestClientFailedSendSkipsRequest verifies that when a unary or
+// server-streaming request message can't be sent, closing the stream doesn't
+// send the request with an empty body, which the server would handle as an
+// empty message.
+func TestClientFailedSendSkipsRequest(t *testing.T) {
+	t.Parallel()
+	run := func(t *testing.T, opts ...connecthttp.Option) {
+		t.Helper()
+		var requests atomic.Int32
+		mux := http.NewServeMux()
+		srv := connect.NewServer()
+		pingv1connect.RegisterPingServiceHandler(srv, pingServer{})
+		connecthttp.Mount(mux, srv)
+		server := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests.Add(1)
+			mux.ServeHTTP(w, r)
+		}))
+		const sendMaxBytes = 1
+		opts = append(opts, connecthttp.WithSendMaxBytes(sendMaxBytes))
+		transport := connecthttp.NewTransport(server.Client(), server.URL(), opts...)
+		t.Run("unary", func(t *testing.T) {
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+			_, err := client.Ping(t.Context(), &pingv1.PingRequest{Text: "too big"})
+			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+			assert.Equal(t, requests.Load(), 0)
+		})
+		t.Run("server_stream", func(t *testing.T) {
+			stream, err := transport.NewClientStream(t.Context(), connect.Spec{
+				StreamType: connect.StreamTypeServer,
+				Procedure:  pingv1connect.PingServiceCountUpProcedure,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = stream.Send(&pingv1.CountUpRequest{Number: 1000})
+			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+			assert.Nil(t, stream.CloseSend())
+			// Receive reports the Send error instead of waiting for a response.
+			err = stream.Receive(&pingv1.CountUpResponse{})
+			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+			assert.Nil(t, stream.Close())
+			assert.Equal(t, requests.Load(), 0)
+		})
+	}
+	t.Run("connect", func(t *testing.T) {
+		t.Parallel()
+		run(t)
+	})
+	t.Run("grpc", func(t *testing.T) {
+		t.Parallel()
+		run(t, connecthttp.WithGRPC())
+	})
+	t.Run("grpcweb", func(t *testing.T) {
+		t.Parallel()
+		run(t, connecthttp.WithGRPCWeb())
+	})
+}
+
+func TestServerStreamSendHeaders(t *testing.T) {
+	t.Parallel()
+	run := func(t *testing.T, opts ...connecthttp.Option) {
+		t.Helper()
+		synctest.Test(t, func(t *testing.T) {
+			release := make(chan struct{})
+			pingServer := &pluggablePingServer{
+				countUp: func(ctx context.Context, _ *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
+					info, _ := connect.CallInfoForServerContext(ctx)
+					info.ResponseHeader().Set("X-Test", "header")
+					if err := stream.SendHeaders(); err != nil {
+						return err
+					}
+					// SendHeaders is idempotent.
+					if err := stream.SendHeaders(); err != nil {
+						return err
+					}
+					<-release
+					return stream.Send(&pingv1.CountUpResponse{Number: 1})
+				},
+			}
+			mux := http.NewServeMux()
+			srv := connect.NewServer()
+			pingv1connect.RegisterPingServiceHandler(srv, pingServer)
+			connecthttp.Mount(mux, srv)
+			server := memhttptest.NewServer(t, mux)
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(),
+				server.URL(),
+				opts...)),
+			)
+			ctx, callInfo := connect.NewClientContext(t.Context())
+			opened := make(chan struct{})
+			var stream pingv1connect.PingServiceCountUpClientStream
+			var err error
+			go func() {
+				defer close(opened)
+				stream, err = client.CountUp(ctx, &pingv1.CountUpRequest{Number: 1})
+			}()
+			synctest.Wait()
+			select {
+			case <-opened:
+			default:
+				t.Error("client did not receive the response headers before the first message")
+			}
+			close(release)
+			<-opened
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stream.Close()
+			res, err := stream.Receive()
+			assert.Nil(t, err)
+			assert.Equal(t, res.GetNumber(), 1)
+			assert.Equal(t, callInfo.ResponseHeader().Get("X-Test"), "header")
+		})
+	}
+	t.Run("connect", func(t *testing.T) {
+		t.Parallel()
+		run(t)
+	})
+	t.Run("grpc", func(t *testing.T) {
+		t.Parallel()
+		run(t, connecthttp.WithGRPC())
+	})
+	t.Run("grpcweb", func(t *testing.T) {
+		t.Parallel()
+		run(t, connecthttp.WithGRPCWeb())
+	})
+}
+
 func TestBidiStreamServerSendsFirstMessage(t *testing.T) {
 	t.Parallel()
 	run := func(t *testing.T, opts ...connecthttp.Option) {
@@ -2764,6 +2998,88 @@ func TestStreamForServer(t *testing.T) {
 		assert.NotNil(t, res)
 		assert.Equal(t, res.GetSum(), int64(1))
 	})
+}
+
+func TestHTTPStatusErrorIsRemote(t *testing.T) {
+	t.Parallel()
+	// The peer answers with an HTTP error and no RPC error body, so the client
+	// derives the code from the HTTP status.
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		contentType := "text/plain"
+		if request.Header.Get("X-Error-Case") == "json" {
+			contentType = "application/json"
+		}
+		response.Header().Set("Content-Type", contentType)
+		response.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(response, "not an rpc error")
+	}))
+	newUpstreamClient := func(options ...connecthttp.Option) pingv1connect.PingServiceClient {
+		return pingv1connect.NewPingServiceClient(connect.NewClient(
+			connecthttp.NewTransport(upstream.Client(), upstream.URL(), options...),
+		))
+	}
+	callUnary := func(ctx context.Context, client pingv1connect.PingServiceClient) error {
+		_, err := client.Ping(ctx, &pingv1.PingRequest{})
+		return err
+	}
+	callStream := func(ctx context.Context, client pingv1connect.PingServiceClient) error {
+		stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 1})
+		if err != nil {
+			return err
+		}
+		defer stream.Close()
+		_, err = stream.Receive()
+		return err
+	}
+	testCases := []struct {
+		name    string
+		options []connecthttp.Option
+		header  string
+		call    func(context.Context, pingv1connect.PingServiceClient) error
+	}{
+		{name: "connect_unary", call: callUnary},
+		{name: "connect_unary_bad_json", header: "json", call: callUnary},
+		{name: "connect_stream", call: callStream},
+		{name: "grpc", options: []connecthttp.Option{connecthttp.WithGRPC()}, call: callUnary},
+		{name: "grpc_web", options: []connecthttp.Option{connecthttp.WithGRPCWeb()}, call: callUnary},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			upstreamClient := newUpstreamClient(testCase.options...)
+			newCtx := func(ctx context.Context) context.Context {
+				ctx, callInfo := connect.NewClientContext(ctx)
+				callInfo.RequestHeader().Set("X-Error-Case", testCase.header)
+				return ctx
+			}
+			err := testCase.call(newCtx(t.Context()), upstreamClient)
+			assert.Equal(t, connect.CodeOf(err), connect.CodeUnauthenticated)
+			var connectErr *connect.Error
+			if assert.True(t, errors.As(err, &connectErr)) {
+				assert.True(t, connectErr.IsRemote())
+			}
+
+			// A handler that returns the error must not forward the peer's
+			// verdict as its own.
+			srv := connect.NewServer()
+			pingv1connect.RegisterPingServiceHandler(srv, &pluggablePingServer{
+				ping: func(ctx context.Context, _ *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+					return nil, testCase.call(newCtx(ctx), upstreamClient)
+				},
+			})
+			mux := http.NewServeMux()
+			connecthttp.Mount(mux, srv)
+			proxy := memhttptest.NewServer(t, mux)
+			proxyClient := pingv1connect.NewPingServiceClient(connect.NewClient(
+				connecthttp.NewTransport(proxy.Client(), proxy.URL()),
+			))
+			_, err = proxyClient.Ping(t.Context(), &pingv1.PingRequest{})
+			assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
+			if assert.True(t, errors.As(err, &connectErr)) {
+				assert.Equal(t, connectErr.Message(), "")
+			}
+		})
+	}
 }
 
 func TestConnectHTTPErrorCodes(t *testing.T) {
@@ -4486,4 +4802,173 @@ func assertErrorResponseMetadata(t *testing.T, callInfo *connect.CallInfo) { //n
 	header = append(header, callInfo.ResponseTrailer().Values(handlerHeader)...)
 	assert.True(t, compareValues(header, expectedHeaderValues))
 	assert.True(t, compareValues(callInfo.ResponseTrailer().Values(handlerTrailer), expectedHeaderValues))
+}
+
+// TestHandlerOversizedUnaryEndlessBody verifies that a handler rejects a
+// Connect unary request over its read limit without reading the rest of a
+// body that never ends.
+func TestHandlerOversizedUnaryEndlessBody(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+	connecthttp.Mount(mux, server, connecthttp.WithReadMaxBytes(16))
+	httpServer := memhttptest.NewServer(t, mux)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, httpServer.URL()+pingv1connect.PingServicePingProcedure, endlessReader{})
+	assert.Nil(t, err)
+	request.Header.Set("Content-Type", "application/proto")
+	response, err := httpServer.Client().Do(request)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer response.Body.Close()
+	assert.Equal(t, response.StatusCode, http.StatusTooManyRequests)
+}
+
+// TestHandlerOversizedUnaryIdleBody verifies that a handler rejects a Connect
+// unary request over its read limit without waiting for the rest of a body
+// that stays open. Over HTTP/1.1, net/http itself reads up to 256 KiB of an
+// unread body before responding, so this runs over HTTP/2.
+func TestHandlerOversizedUnaryIdleBody(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+	connecthttp.Mount(mux, server, connecthttp.WithReadMaxBytes(16))
+	httpServer := memhttptest.NewServer(t, mux)
+
+	bodyReader, bodyWriter := io.Pipe()
+	t.Cleanup(func() { _ = bodyWriter.Close() })
+	go func() {
+		_, _ = bodyWriter.Write(make([]byte, 1024))
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, httpServer.URL()+pingv1connect.PingServicePingProcedure, bodyReader)
+	assert.Nil(t, err)
+	request.Header.Set("Content-Type", "application/proto")
+	response, err := httpServer.Client().Do(request)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer response.Body.Close()
+	assert.Equal(t, response.StatusCode, http.StatusTooManyRequests)
+}
+
+// endlessReader is an [io.Reader] that never reaches EOF.
+type endlessReader struct{}
+
+func (endlessReader) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
+}
+
+// TestReceiveAfterOversizedMessage verifies that after rejecting a compressed
+// message that decompresses past the read limit, a stream doesn't parse any
+// of that message as a new one.
+func TestReceiveAfterOversizedMessage(t *testing.T) {
+	t.Parallel()
+	const readMaxBytes = 1024
+	// The middle message decompresses to 64 KiB, past readMaxBytes, while its
+	// envelope stays under it.
+	envelopes := func(t *testing.T, first, last proto.Message) []byte {
+		t.Helper()
+		var bomb bytes.Buffer
+		gzipWriter := gzip.NewWriter(&bomb)
+		_, err := gzipWriter.Write(make([]byte, 64*1024))
+		assert.Nil(t, err)
+		assert.Nil(t, gzipWriter.Close())
+		assert.True(t, bomb.Len() < readMaxBytes)
+		var body []byte
+		for _, message := range []proto.Message{first, nil, last} {
+			flags, payload := byte(0), bomb.Bytes()
+			if message != nil {
+				payload, err = proto.Marshal(message)
+				assert.Nil(t, err)
+			} else {
+				flags = 1 // compressed
+			}
+			body = append(body, flags)
+			body = binary.BigEndian.AppendUint32(body, uint32(len(payload)))
+			body = append(body, payload...)
+		}
+		return body
+	}
+	t.Run("handler", func(t *testing.T) {
+		t.Parallel()
+		body := envelopes(t, &pingv1.SumRequest{Number: 1}, &pingv1.SumRequest{Number: 2})
+		for _, protocol := range []struct {
+			name, contentType, encodingHeader string
+		}{
+			{"connect", "application/connect+proto", "Connect-Content-Encoding"},
+			{"grpc", "application/grpc", "Grpc-Encoding"},
+			{"grpcweb", "application/grpc-web+proto", "Grpc-Encoding"},
+		} {
+			t.Run(protocol.name, func(t *testing.T) {
+				t.Parallel()
+				received := make(chan []string, 1)
+				srv := connect.NewServer()
+				pingv1connect.RegisterPingServiceHandler(srv, &pluggablePingServer{
+					sum: func(_ context.Context, stream pingv1connect.PingServiceSumServerStream) (*pingv1.SumResponse, error) {
+						var got []string
+						for {
+							request, err := stream.Receive()
+							if errors.Is(err, io.EOF) {
+								break
+							}
+							if err != nil {
+								got = append(got, connect.CodeOf(err).String())
+								continue
+							}
+							got = append(got, strconv.FormatInt(request.GetNumber(), 10))
+						}
+						received <- got
+						return &pingv1.SumResponse{}, nil
+					},
+				})
+				mux := http.NewServeMux()
+				connecthttp.Mount(mux, srv, connecthttp.WithReadMaxBytes(readMaxBytes))
+				server := memhttptest.NewServer(t, mux)
+				request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL()+pingv1connect.PingServiceSumProcedure, bytes.NewReader(body))
+				assert.Nil(t, err)
+				request.Header.Set("Content-Type", protocol.contentType)
+				request.Header.Set(protocol.encodingHeader, "gzip")
+				response, err := server.Client().Do(request)
+				assert.Nil(t, err)
+				_, _ = io.Copy(io.Discard, response.Body)
+				assert.Nil(t, response.Body.Close())
+				assert.Equal(t, <-received, []string{"1", "resource_exhausted", "2"})
+			})
+		}
+	})
+	t.Run("client", func(t *testing.T) {
+		t.Parallel()
+		body := envelopes(t, &pingv1.CountUpResponse{Number: 1}, &pingv1.CountUpResponse{Number: 2})
+		server := memhttptest.NewServer(t, http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+			_, _ = io.Copy(io.Discard, request.Body)
+			responseWriter.Header().Set("Content-Type", "application/grpc")
+			responseWriter.Header().Set("Grpc-Encoding", "gzip")
+			responseWriter.Header().Set("Trailer", "Grpc-Status")
+			_, _ = responseWriter.Write(body)
+			responseWriter.Header().Set("Grpc-Status", "0")
+		}))
+		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
+			server.Client(), server.URL(), connecthttp.WithGRPC(), connecthttp.WithReadMaxBytes(readMaxBytes),
+		)))
+		stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 2})
+		assert.Nil(t, err)
+		defer stream.Close()
+		response, err := stream.Receive()
+		assert.Nil(t, err)
+		assert.Equal(t, response.GetNumber(), 1)
+		_, err = stream.Receive()
+		assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+		// The client stops reading the response after the error.
+		response, err = stream.Receive()
+		assert.NotNil(t, err)
+		assert.Nil(t, response)
+	})
 }

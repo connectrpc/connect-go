@@ -34,6 +34,7 @@ import (
 // Be warned: we need to use some lesser-known APIs to do this with net/http.
 type duplexHTTPCall struct {
 	ctx               context.Context
+	cancel            context.CancelFunc // cancels the request, not ctx
 	httpClient        HTTPClient
 	streamType        connect.StreamType
 	onRequestSend     func(*http.Request)
@@ -68,6 +69,9 @@ func newDuplexHTTPCall(
 	// Request. This ensures if a transport out of our control wants
 	// to mutate the req.URL, we don't feel the effects of it.
 	url = cloneURL(url)
+	// The request gets its own ctx so CloseRead can abort it without
+	// canceling the caller's ctx, which is still used to classify errors.
+	requestCtx, cancel := context.WithCancel(ctx)
 
 	// This is mirroring what http.NewRequestContext did, but
 	// using an already parsed url.URL object, rather than a string
@@ -85,9 +89,10 @@ func newDuplexHTTPCall(
 		Body:       http.NoBody,
 		GetBody:    getNoBody,
 		Host:       url.Host,
-	}).WithContext(ctx)
+	}).WithContext(requestCtx)
 	duplex := &duplexHTTPCall{
 		ctx:           ctx,
+		cancel:        cancel,
 		httpClient:    httpClient,
 		streamType:    streamType,
 		request:       request,
@@ -172,6 +177,23 @@ func (d *duplexHTTPCall) sendUnary(payload messagePayload) (int64, error) {
 	return payloadLength, nil
 }
 
+// failSend records err as the outcome of a unary or server-streaming call
+// whose request message couldn't be sent. These calls send their only
+// message as the whole request body, so the request is dropped: a later
+// CloseWrite must not send it with an empty body, which the server would
+// handle as an empty message. Reads report err. It does nothing for
+// client-streaming and bidi calls, or once the request has been sent.
+func (d *duplexHTTPCall) failSend(err error) {
+	if d.streamType&connect.StreamTypeClient != 0 {
+		return
+	}
+	if !d.requestSent.CompareAndSwap(false, true) {
+		return
+	}
+	d.responseErr = err
+	close(d.responseReady)
+}
+
 // CloseWrite closes the request body. Callers *must* call CloseWrite before Read when
 // using HTTP/1.x.
 func (d *duplexHTTPCall) CloseWrite() error {
@@ -240,15 +262,25 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 	if err := d.ctx.Err(); err != nil {
 		return 0, wrapIfContextError(err)
 	}
-	n, err := d.response.Body.Read(data)
+	bytesRead, err := d.response.Body.Read(data)
 	if err != nil && !errors.Is(err, io.EOF) {
 		err = wrapIfContextDone(d.ctx, err)
 		err = wrapIfRSTError(d.ctx, err)
+		err = wrapIfClientTransportError(err)
 	}
-	return n, err
+	return bytesRead, err
 }
 
+// CloseRead closes the response body. It cancels the request first, so it
+// doesn't wait for response headers the server hasn't sent, and a pending
+// Read returns. A request that hasn't been sent is never sent.
 func (d *duplexHTTPCall) CloseRead() error {
+	d.cancel()
+	if d.requestSent.CompareAndSwap(false, true) {
+		d.responseErr = wrapIfContextError(context.Canceled)
+		close(d.responseReady)
+		return nil
+	}
 	// Ignore the error: an error response still has a body that must be closed.
 	response, _ := d.blockUntilResponseReady()
 	if response == nil {
@@ -256,7 +288,8 @@ func (d *duplexHTTPCall) CloseRead() error {
 	}
 	err := response.Body.Close()
 	err = wrapIfContextDone(d.ctx, err)
-	return wrapIfRSTError(d.ctx, err)
+	err = wrapIfRSTError(d.ctx, err)
+	return wrapIfClientTransportError(err)
 }
 
 // ResponseStatusCode is the response's HTTP status code.
@@ -435,7 +468,13 @@ type writeSender struct {
 var _ messageSender = writeSender{}
 
 func (w writeSender) Send(payload messagePayload) (int64, error) {
-	return payload.WriteTo(w.writer)
+	written, err := payload.WriteTo(w.writer)
+	// The request context is cancelled from a different goroutine than the one
+	// failing the write, so a write can fail while ctx.Err() is still nil.
+	if err != nil && isClientDisconnected(err) {
+		err = connect.NewError(connect.CodeCanceled, err.Error()).WithCause(err)
+	}
+	return written, err
 }
 
 // See: https://cs.opensource.google/go/go/+/refs/tags/go1.20.1:src/net/http/clone.go;l=22-33

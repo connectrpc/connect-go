@@ -76,13 +76,13 @@ func (*protocolConnect) NewHandler(params *protocolHandlerParams) protocolHandle
 		methods[http.MethodGet] = struct{}{}
 	}
 
+	prefix := connectStreamingContentTypePrefix
+	if params.spec.StreamType == connect.StreamTypeUnary {
+		prefix = connectUnaryContentTypePrefix
+	}
 	contentTypes := make(map[string]struct{})
 	for _, name := range params.Codecs.Names() {
-		if params.spec.StreamType == connect.StreamTypeUnary {
-			contentTypes[canonicalizeContentType(connectUnaryContentTypePrefix+name)] = struct{}{}
-			continue
-		}
-		contentTypes[canonicalizeContentType(connectStreamingContentTypePrefix+name)] = struct{}{}
+		addContentTypes(contentTypes, prefix, name)
 	}
 
 	return &connectHandler{
@@ -474,6 +474,7 @@ func (cc *connectUnaryClientConn) Peer() peer {
 
 func (cc *connectUnaryClientConn) Send(msg any) error {
 	if err := cc.marshaler.Marshal(msg); err != nil {
+		cc.duplexCall.failSend(err)
 		return err
 	}
 	return nil // must be a literal nil: nil *connect.Error is a non-nil error
@@ -580,7 +581,7 @@ func (cc *connectUnaryClientConn) unmarshalResponseError(response *http.Response
 		return connect.NewError(
 			httpToCode(response.StatusCode),
 			response.Status,
-		)
+		).WithRemote()
 	}
 	if wireErr.Code == 0 {
 		// code not set? default to one implied by HTTP status
@@ -612,6 +613,7 @@ func (cc *connectStreamingClientConn) Peer() peer {
 
 func (cc *connectStreamingClientConn) Send(msg any) error {
 	if err := cc.marshaler.Marshal(msg); err != nil {
+		cc.duplexCall.failSend(err)
 		return err
 	}
 	return nil // must be a literal nil: nil *connect.Error is a non-nil error
@@ -684,7 +686,7 @@ func (cc *connectStreamingClientConn) onResponseReceive(fn func(*http.Response))
 
 func (cc *connectStreamingClientConn) validateResponse(response *http.Response) *connect.Error {
 	if response.StatusCode != http.StatusOK {
-		return connect.Errorf(httpToCode(response.StatusCode), "HTTP status %v", response.Status)
+		return connect.Errorf(httpToCode(response.StatusCode), "HTTP status %v", response.Status).WithRemote()
 	}
 	if err := connectValidateStreamResponseContentType(
 		cc.codec.Name(),
@@ -1197,12 +1199,7 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func(cont
 		return connect.Errorf(connect.CodeUnknown, "read message: %s", err).WithCause(err)
 	}
 	if u.readMaxBytes > 0 && bytesRead > int64(u.readMaxBytes) {
-		// Attempt to read to end in order to allow connection re-use
-		discardedBytes, err := io.Copy(io.Discard, u.reader)
-		if err != nil {
-			return connect.Errorf(connect.CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %s", u.readMaxBytes, err).WithCause(err)
-		}
-		return connect.Errorf(connect.CodeResourceExhausted, "message size %d is larger than configured max %d", bytesRead+discardedBytes, u.readMaxBytes)
+		return connect.Errorf(connect.CodeResourceExhausted, "message is larger than configured max %d", u.readMaxBytes)
 	}
 	compressedSize := 0
 	if data.Len() > 0 && u.compressionPool != nil {
@@ -1436,7 +1433,7 @@ func connectValidateUnaryResponseContentType(
 ) *connect.Error {
 	if statusCode != http.StatusOK {
 		if statusCode == http.StatusNotModified && httpMethod == http.MethodGet {
-			return connect.Errorf(connect.CodeUnknown, "%s", errNotModifiedClient).WithCause(errNotModifiedClient)
+			return connect.Errorf(connect.CodeUnknown, "%s", errNotModifiedClient).WithCause(errNotModifiedClient).WithRemote()
 		}
 		// connect.Error responses must be JSON-encoded.
 		if responseContentType == connectUnaryContentTypePrefix+connect.CodecNameJSON ||
@@ -1446,7 +1443,7 @@ func connectValidateUnaryResponseContentType(
 		return connect.NewError(
 			httpToCode(statusCode),
 			statusMsg,
-		)
+		).WithRemote()
 	}
 	// Normal responses must have valid content-type that indicates same codec as the request.
 	if !strings.HasPrefix(responseContentType, connectUnaryContentTypePrefix) {

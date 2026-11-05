@@ -15,8 +15,11 @@
 package connecthttp
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"connectrpc.com/connect/v2"
@@ -122,5 +125,45 @@ func TestErrorWriter(t *testing.T) {
 			req.Header.Set("Content-Type", grpcWebContentTypePrefix+unknownCodec)
 			assert.True(t, writer.IsSupported(req))
 		})
+	})
+	t.Run("Scrub", func(t *testing.T) {
+		t.Parallel()
+		writer := NewErrorWriter()
+		testCases := []struct {
+			name        string
+			err         error
+			wantCode    connect.Code
+			wantMessage string
+		}{
+			{name: "local", err: connect.NewError(connect.CodePermissionDenied, "no"), wantCode: connect.CodePermissionDenied, wantMessage: "no"},
+			{name: "plain", err: errors.New("db password=hunter2"), wantCode: connect.CodeUnknown},
+			{name: "remote", err: connect.NewError(connect.CodePermissionDenied, "downstream").WithRemote(), wantCode: connect.CodeInternal},
+		}
+		for _, testCase := range testCases {
+			t.Run(testCase.name, func(t *testing.T) {
+				t.Parallel()
+				t.Run("ConnectUnary", func(t *testing.T) {
+					t.Parallel()
+					req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost", nil)
+					req.Header.Set("Content-Type", connectUnaryContentTypePrefix+connect.CodecNameJSON)
+					rec := httptest.NewRecorder()
+					assert.Nil(t, writer.Write(rec, req, testCase.err))
+					assert.Equal(t, rec.Code, connectCodeToHTTP(testCase.wantCode))
+					var wireErr connectWireError
+					assert.Nil(t, json.Unmarshal(rec.Body.Bytes(), &wireErr))
+					assert.Equal(t, wireErr.Code, testCase.wantCode)
+					assert.Equal(t, wireErr.Message, testCase.wantMessage)
+				})
+				t.Run("GRPC", func(t *testing.T) {
+					t.Parallel()
+					req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost", nil)
+					req.Header.Set("Content-Type", grpcContentTypeDefault)
+					rec := httptest.NewRecorder()
+					assert.Nil(t, writer.Write(rec, req, testCase.err))
+					assert.Equal(t, rec.Header().Get(grpcHeaderStatus), strconv.Itoa(int(testCase.wantCode)))
+					assert.Equal(t, rec.Header().Get(grpcHeaderMessage), testCase.wantMessage)
+				})
+			})
+		}
 	})
 }
