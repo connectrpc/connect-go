@@ -31,8 +31,7 @@ jobs:
         with:
           go-version: ${{ matrix.go-version.version }}
           check-latest: true
-          # Give this job its own cache key. It installs the lint and release
-          # tools that the other jobs skip.
+          # Separate cache for the lint and release tools.
           cache-dependency-path: |
             go.sum
             Makefile
