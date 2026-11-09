@@ -62,6 +62,7 @@ const (
 	ruleBufgenGoMod          = "bufgen_update_go_mod"
 	ruleBufgenManualEdit     = "bufgen_manual_edit"
 	ruleReadLimitDefault     = "read_limit_default"
+	ruleNewErrorCause        = "new_error_cause"
 )
 
 var (
@@ -1408,7 +1409,8 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 
 	// connect.NewError(c, err); see convertNewErrorInPlace for the cases.
 	if call, ok := expr.(*ast.CallExpr); ok && len(call.Args) == 2 && isConnectSelector(call.Fun, state.connectAlias, "NewError") {
-		converted, cause := convertNewErrorInPlace(call, state)
+		errArg := call.Args[1]
+		converted, cause, causeLost := convertNewErrorInPlace(call, state)
 		if !converted {
 			return
 		}
@@ -1416,6 +1418,9 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 		report.bump("convert_new_error")
 		if cause != nil {
 			*exprPtr = withCauseCall(call, cause)
+		}
+		if causeLost {
+			report.warnAtf(call.Pos(), ruleNewErrorCause, "connect.NewError keeps only the message of %s; errors.Is and errors.As no longer reach it. Assign it to a variable and attach it with WithCause.", exprString(errArg))
 		}
 		return
 	}
@@ -1453,16 +1458,18 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 //
 //   - errors.New("s")        -> connect.NewError(code, "s")
 //   - fmt.Errorf(f, args...) -> connect.Errorf(code, f, args...)
-//   - fmt.Errorf(... %w ...) -> connect.NewError(code, fmt.Errorf(...).Error())
+//   - fmt.Errorf(... %w ...) -> connect.NewError(code, fmt.Errorf(...).Error()).WithCause(wrapped)
 //   - nil                    -> connect.NewError(code, "")
 //   - other err expr         -> connect.NewError(code, err.Error()).WithCause(err)
 //
-// cause is set only when err is safe to evaluate twice. A string message arg
-// is left alone, so the rewrite is idempotent.
-func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) (converted bool, cause ast.Expr) {
+// cause is set only when it is safe to evaluate twice: err itself, or the
+// operand of the single %w in a fmt.Errorf. causeLost reports a converted call
+// whose error is reachable by errors.Is and errors.As in v1 but gets no cause.
+// A string message arg is left alone, so the rewrite is idempotent.
+func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) (converted bool, cause ast.Expr, causeLost bool) {
 	errArg := call.Args[1]
 	if isMessageStringExpr(errArg) {
-		return false, nil
+		return false, nil, false
 	}
 	// The remaining branches migrate a v1 argument, so flip the qualifier to v2.
 	if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
@@ -1474,10 +1481,15 @@ func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) (converted 
 		// v1 allowed a nil error for a code-only error; v2 needs a string.
 		pos := errArg.Pos()
 		call.Args[1] = &ast.BasicLit{ValuePos: pos, Kind: token.STRING, Value: `""`}
-		return true, nil
+		return true, nil, false
 	}
-	if inner, ok := errArg.(*ast.CallExpr); ok && rewriteNewErrorCallArg(call, inner) {
-		return true, nil
+	inner, isCall := errArg.(*ast.CallExpr)
+	if isCall && rewriteNewErrorCallArg(call, inner) {
+		return true, nil, false
+	}
+	cause = copyIdentChain(errArg)
+	if isCall && isFmtErrorf(inner.Fun) {
+		cause = wrappedOperand(inner)
 	}
 	// Fallback: connect.NewError(code, err.Error()), anchored to errArg's position.
 	pos := errArg.Pos()
@@ -1489,7 +1501,61 @@ func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) (converted 
 		Lparen: pos,
 		Rparen: pos,
 	}
-	return true, copyIdentChain(errArg)
+	return true, cause, cause == nil
+}
+
+// wrappedOperand returns a copy of the operand of the single %w in a
+// fmt.Errorf call with a literal format, when it is an identifier or selector
+// chain. Otherwise it returns nil.
+func wrappedOperand(call *ast.CallExpr) ast.Expr {
+	if len(call.Args) == 0 {
+		return nil
+	}
+	lit, isLit := call.Args[0].(*ast.BasicLit)
+	if !isLit || lit.Kind != token.STRING {
+		return nil
+	}
+	format, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		return nil
+	}
+	index, found := wrapVerbIndex(format)
+	if !found || 1+index >= len(call.Args) {
+		return nil
+	}
+	return copyIdentChain(call.Args[1+index])
+}
+
+// wrapVerbIndex returns the argument index of the only %w verb in format. It
+// fails for none, several, or a format whose verbs do not map to arguments in
+// order: an explicit argument index or a * width or precision.
+func wrapVerbIndex(format string) (int, bool) {
+	index, verbs := -1, 0
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			continue
+		}
+		i++
+		for i < len(format) && strings.IndexByte("+-# 0123456789.", format[i]) >= 0 {
+			i++
+		}
+		if i == len(format) {
+			return 0, false
+		}
+		switch format[i] {
+		case '%':
+			continue
+		case '[', '*':
+			return 0, false
+		case 'w':
+			if index >= 0 {
+				return 0, false
+			}
+			index = verbs
+		}
+		verbs++
+	}
+	return index, index >= 0
 }
 
 // withCauseCall builds `call.WithCause(cause)`.
