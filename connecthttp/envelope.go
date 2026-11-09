@@ -31,6 +31,10 @@ import (
 // same meaning in the gRPC-Web, gRPC-HTTP2, and Connect protocols.
 const flagEnvelopeCompressed = 0b00000001
 
+// envelopePrefixSize is the size of the flags and message length that precede
+// each message.
+const envelopePrefixSize = 5
+
 var errSpecialEnvelope = connect.Errorf(
 	connect.CodeUnknown,
 	"final message has protocol-specific flags: %s",
@@ -43,88 +47,15 @@ var errSpecialEnvelope = connect.Errorf(
 // Each message is preceded by a 5-byte prefix. The first byte is a uint8 used
 // as a set of bitwise flags, and the remainder is a uint32 indicating the
 // message length. gRPC and Connect interpret the bitwise flags differently, so
-// envelope leaves their interpretation up to the caller.
+// envelope leaves their interpretation up to the caller. Data holds the
+// message without the prefix.
 type envelope struct {
-	Data   *bytes.Buffer
-	Flags  uint8
-	offset int64
+	Data  *bytes.Buffer
+	Flags uint8
 }
-
-var _ messagePayload = (*envelope)(nil)
 
 func (e *envelope) IsSet(flag uint8) bool {
 	return e.Flags&flag == flag
-}
-
-// Read implements [io.Reader].
-func (e *envelope) Read(data []byte) (readN int, err error) {
-	if e.offset < 5 {
-		prefix, err := makeEnvelopePrefix(e.Flags, e.Data.Len())
-		if err != nil {
-			return 0, err
-		}
-		readN = copy(data, prefix[e.offset:])
-		e.offset += int64(readN)
-		if e.offset < 5 {
-			return readN, nil
-		}
-		data = data[readN:]
-	}
-	n := copy(data, e.Data.Bytes()[e.offset-5:])
-	e.offset += int64(n)
-	readN += n
-	if readN == 0 && e.offset == int64(e.Data.Len()+5) {
-		err = io.EOF
-	}
-	return readN, err
-}
-
-// WriteTo implements [io.WriterTo].
-func (e *envelope) WriteTo(dst io.Writer) (wroteN int64, err error) {
-	if e.offset < 5 {
-		prefix, err := makeEnvelopePrefix(e.Flags, e.Data.Len())
-		if err != nil {
-			return 0, err
-		}
-		prefixN, err := dst.Write(prefix[e.offset:])
-		e.offset += int64(prefixN)
-		wroteN += int64(prefixN)
-		if e.offset < 5 {
-			return wroteN, err
-		}
-	}
-	n, err := dst.Write(e.Data.Bytes()[e.offset-5:])
-	e.offset += int64(n)
-	wroteN += int64(n)
-	return wroteN, err
-}
-
-// Seek implements [io.Seeker]. Based on the implementation of [bytes.Reader].
-func (e *envelope) Seek(offset int64, whence int) (int64, error) {
-	var abs int64
-	switch whence {
-	case io.SeekStart:
-		abs = offset
-	case io.SeekCurrent:
-		abs = e.offset + offset
-	case io.SeekEnd:
-		abs = int64(e.Data.Len()) + offset
-	default:
-		return 0, errors.New("connect.envelope.Seek: invalid whence")
-	}
-	if abs < 0 {
-		return 0, errors.New("connect.envelope.Seek: negative position")
-	}
-	e.offset = abs
-	return abs, nil
-}
-
-// Len returns the number of bytes of the unread portion of the envelope.
-func (e *envelope) Len() int {
-	if length := int(int64(e.Data.Len()) + 5 - e.offset); length > 0 {
-		return length
-	}
-	return 0
 }
 
 type envelopeWriter struct {
@@ -135,6 +66,9 @@ type envelopeWriter struct {
 	compressionPool  *compressionPool
 	sendMaxBytes     int
 	stats            *connect.MessageStats
+	// frame is the payload handed to the sender, reused to avoid allocating
+	// one per message.
+	frame bytes.Reader
 }
 
 // recordStats records message byte counts, skipping protocol envelopes.
@@ -157,58 +91,79 @@ func (w *envelopeWriter) Marshal(message any) *connect.Error {
 		}
 		return nil
 	}
-	// Codec supports MarshalAppend; try to re-use a []byte from the pool.
-	buffer := bufferpool.Get()
-	defer bufferpool.Put(buffer)
-	if err := w.codec.MarshalWrite(w.ctx, buffer, message); err != nil {
+	// Marshal after room for the prefix so the message is sent with one write.
+	frame := newFrameBuffer()
+	defer bufferpool.Put(frame)
+	if err := w.codec.MarshalWrite(w.ctx, frame, message); err != nil {
 		return connect.Errorf(connect.CodeInternal, "marshal message: %s", err).WithCause(err)
 	}
-	envelope := &envelope{Data: buffer}
-	return w.Write(envelope)
+	return w.writeFrame(0, frame)
 }
 
 // Write writes the enveloped message, compressing as necessary. It doesn't
 // retain any references to the supplied envelope or its underlying data.
 func (w *envelopeWriter) Write(env *envelope) *connect.Error {
-	if env.IsSet(flagEnvelopeCompressed) ||
-		w.compressionPool == nil ||
-		env.Data.Len() < w.compressMinBytes {
-		if w.sendMaxBytes > 0 && env.Data.Len() > w.sendMaxBytes {
-			return connect.Errorf(connect.CodeResourceExhausted, "message size %d exceeds sendMaxBytes %d", env.Data.Len(), w.sendMaxBytes)
+	frame := frameEnvelope(env)
+	defer bufferpool.Put(frame)
+	return w.writeFrame(env.Flags, frame)
+}
+
+// writeFrame writes a message from a buffer holding room for the prefix
+// followed by the message, compressing as necessary.
+func (w *envelopeWriter) writeFrame(flags uint8, frame *bytes.Buffer) *connect.Error {
+	size := frame.Len() - envelopePrefixSize
+	isCompressed := flags&flagEnvelopeCompressed == flagEnvelopeCompressed
+	if isCompressed || w.compressionPool == nil || size < w.compressMinBytes {
+		if w.sendMaxBytes > 0 && size > w.sendMaxBytes {
+			return connect.Errorf(connect.CodeResourceExhausted, "message size %d exceeds sendMaxBytes %d", size, w.sendMaxBytes)
 		}
-		size, compressedSize := env.Data.Len(), 0
-		if env.IsSet(flagEnvelopeCompressed) {
+		compressedSize := 0
+		if isCompressed {
 			// Pre-compressed payload; uncompressed size unknown.
-			size, compressedSize = 0, env.Data.Len()
+			size, compressedSize = 0, size
 		}
-		if err := w.write(env); err != nil {
+		if err := w.sendFrame(flags, frame); err != nil {
 			return err
 		}
-		w.recordStats(env.Flags, size, compressedSize)
+		w.recordStats(flags, size, compressedSize)
 		return nil
 	}
-	size := env.Data.Len() // before Compress drains the buffer
-	data := bufferpool.Get()
-	defer bufferpool.Put(data)
-	if err := w.compressionPool.Compress(data, env.Data); err != nil {
+	compressed := newFrameBuffer()
+	defer bufferpool.Put(compressed)
+	frame.Next(envelopePrefixSize) // Compress reads only the message.
+	if err := w.compressionPool.Compress(compressed, frame); err != nil {
 		return err
 	}
-	if w.sendMaxBytes > 0 && data.Len() > w.sendMaxBytes {
-		return connect.Errorf(connect.CodeResourceExhausted, "compressed message size %d exceeds sendMaxBytes %d", data.Len(), w.sendMaxBytes)
+	compressedSize := compressed.Len() - envelopePrefixSize
+	if w.sendMaxBytes > 0 && compressedSize > w.sendMaxBytes {
+		return connect.Errorf(connect.CodeResourceExhausted, "compressed message size %d exceeds sendMaxBytes %d", compressedSize, w.sendMaxBytes)
 	}
-	compressedSize := data.Len() // before write drains the buffer
-	if err := w.write(&envelope{
-		Data:  data,
-		Flags: env.Flags | flagEnvelopeCompressed,
-	}); err != nil {
+	if err := w.sendFrame(flags|flagEnvelopeCompressed, compressed); err != nil {
 		return err
 	}
-	w.recordStats(env.Flags, size, compressedSize)
+	w.recordStats(flags, size, compressedSize)
 	return nil
 }
 
+// write sends the envelope as is, without compressing or checking its size.
 func (w *envelopeWriter) write(env *envelope) *connect.Error {
-	if _, err := w.sender.Send(env); err != nil {
+	frame := frameEnvelope(env)
+	defer bufferpool.Put(frame)
+	return w.sendFrame(env.Flags, frame)
+}
+
+// sendFrame fills in the prefix of a buffer holding room for the prefix
+// followed by the message, and sends it with a single write. The buffer must
+// not be reused until sendFrame returns.
+func (w *envelopeWriter) sendFrame(flags uint8, frame *bytes.Buffer) *connect.Error {
+	data := frame.Bytes()
+	prefix, err := makeEnvelopePrefix(flags, len(data)-envelopePrefixSize)
+	if err != nil {
+		return connect.Errorf(connect.CodeInternal, "%s", err).WithCause(err)
+	}
+	copy(data, prefix[:])
+	w.frame.Reset(data)
+	if _, err := w.sender.Send(&w.frame); err != nil {
 		err = wrapIfContextDone(w.ctx, err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
@@ -221,6 +176,8 @@ func (w *envelopeWriter) write(env *envelope) *connect.Error {
 type envelopeReader struct {
 	ctx             context.Context //nolint:containedctx
 	reader          io.Reader
+	prefix          [envelopePrefixSize]byte
+	limited         io.LimitedReader
 	bytesRead       int64 // detect trailers-only gRPC responses
 	codec           connect.Codec
 	last            envelope
@@ -319,10 +276,9 @@ func (r *envelopeReader) Unmarshal(message any) *connect.Error {
 }
 
 func (r *envelopeReader) Read(env *envelope) *connect.Error {
-	prefixes := [5]byte{}
 	// io.ReadFull reads the number of bytes requested, or returns an error.
 	// io.EOF will only be returned if no bytes were read.
-	n, err := io.ReadFull(r.reader, prefixes[:])
+	n, err := io.ReadFull(r.reader, r.prefix[:])
 	r.bytesRead += int64(n)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
@@ -342,7 +298,7 @@ func (r *envelopeReader) Read(env *envelope) *connect.Error {
 			"protocol error: incomplete envelope: %s", err,
 		).WithCause(err)
 	}
-	size := int64(binary.BigEndian.Uint32(prefixes[1:5]))
+	size := int64(binary.BigEndian.Uint32(r.prefix[1:5]))
 	if r.readMaxBytes > 0 && size > int64(r.readMaxBytes) {
 		n, err := io.CopyN(io.Discard, r.reader, size)
 		r.bytesRead += n
@@ -351,10 +307,13 @@ func (r *envelopeReader) Read(env *envelope) *connect.Error {
 		}
 		return connect.Errorf(connect.CodeResourceExhausted, "message size %d is larger than configured max %d", size, r.readMaxBytes)
 	}
-	// We've read the prefix, so we know how many bytes to expect.
-	// CopyN will return an error if it doesn't read the requested
-	// number of bytes.
-	readN, err := io.CopyN(env.Data, r.reader, size)
+	// We've read the prefix, so we know how many bytes to expect. Like
+	// io.CopyN, but without allocating a limited reader per message.
+	r.limited = io.LimitedReader{R: r.reader, N: size}
+	readN, err := env.Data.ReadFrom(&r.limited)
+	if err == nil && readN < size {
+		err = io.EOF
+	}
 	r.bytesRead += readN
 	if err != nil {
 		if errors.Is(err, io.EOF) {
@@ -373,17 +332,35 @@ func (r *envelopeReader) Read(env *envelope) *connect.Error {
 		}
 		return connect.Errorf(connect.CodeUnknown, "read enveloped message: %s", err).WithCause(err)
 	}
-	env.Flags = prefixes[0]
+	env.Flags = r.prefix[0]
 	return nil
 }
 
-func makeEnvelopePrefix(flags uint8, size int) ([5]byte, error) {
+// newFrameBuffer returns a pooled buffer holding room for the prefix. The
+// prefix is filled in once the message size is known. The caller must return
+// the buffer to the pool.
+func newFrameBuffer() *bytes.Buffer {
+	frame := bufferpool.Get()
+	var prefix [envelopePrefixSize]byte
+	_, _ = frame.Write(prefix[:])
+	return frame
+}
+
+// frameEnvelope copies the envelope into a pooled buffer with room for the
+// prefix at the front. The caller must return the buffer to the pool.
+func frameEnvelope(env *envelope) *bytes.Buffer {
+	frame := newFrameBuffer()
+	_, _ = frame.Write(env.Data.Bytes())
+	return frame
+}
+
+func makeEnvelopePrefix(flags uint8, size int) ([envelopePrefixSize]byte, error) {
 	// Cast as 64-bit to ensure comparison works on all architectures.
 	size64 := int64(size)
 	if size64 < 0 || size64 > math.MaxUint32 {
-		return [5]byte{}, fmt.Errorf("connect.makeEnvelopePrefix: size %d out of bounds", size)
+		return [envelopePrefixSize]byte{}, fmt.Errorf("connect.makeEnvelopePrefix: size %d out of bounds", size)
 	}
-	prefix := [5]byte{}
+	prefix := [envelopePrefixSize]byte{}
 	prefix[0] = flags
 	binary.BigEndian.PutUint32(prefix[1:5], uint32(size64))
 	return prefix, nil

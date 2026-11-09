@@ -423,7 +423,7 @@ func getNoBody() (io.ReadCloser, error) {
 }
 
 // messagePayload is a sized and seekable message payload. The interface is
-// implemented by [*bytes.Reader] and *envelope. Reads must be non-blocking.
+// implemented by [*bytes.Reader]. Reads must be non-blocking.
 type messagePayload interface {
 	io.Reader
 	io.WriterTo
