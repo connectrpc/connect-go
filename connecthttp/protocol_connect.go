@@ -139,8 +139,9 @@ func (*connectHandler) SetTimeout(request *http.Request) (context.Context, conte
 
 func (h *connectHandler) CanHandlePayload(request *http.Request, contentType string) bool {
 	if request.Method == http.MethodGet {
-		query := request.URL.Query()
-		codecName := query.Get(connectUnaryEncodingQueryParameter)
+		// ParseForm caches the parsed query on the request for NewConn.
+		_ = request.ParseForm()
+		codecName := request.Form.Get(connectUnaryEncodingQueryParameter)
 		contentType = connectContentTypeForCodecName(
 			h.spec.StreamType,
 			codecName,
@@ -159,7 +160,8 @@ func (h *connectHandler) NewConn(
 	// Only GET requests carry the message and options in the query.
 	var query url.Values
 	if request.Method == http.MethodGet {
-		query = request.URL.Query()
+		_ = request.ParseForm()
+		query = request.Form
 	}
 	// We need to parse metadata before entering the interceptor stack; we'll
 	// send the error to the client later on.
