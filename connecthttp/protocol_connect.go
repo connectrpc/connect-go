@@ -156,7 +156,11 @@ func (h *connectHandler) NewConn(
 	info *connect.CallInfo,
 ) (handlerConnCloser, bool) {
 	ctx := request.Context()
-	query := request.URL.Query()
+	// Only GET requests carry the message and options in the query.
+	var query url.Values
+	if request.Method == http.MethodGet {
+		query = request.URL.Query()
+	}
 	// We need to parse metadata before entering the interceptor stack; we'll
 	// send the error to the client later on.
 	var contentEncoding, acceptEncoding string
@@ -249,7 +253,6 @@ func (h *connectHandler) NewConn(
 	peer := peer{
 		Addr:     request.RemoteAddr,
 		Protocol: connect.ProtocolNameConnect,
-		Query:    query,
 	}
 	if h.spec.StreamType == connect.StreamTypeUnary {
 		conn = &connectUnaryHandlerConn{

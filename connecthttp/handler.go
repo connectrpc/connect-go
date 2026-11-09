@@ -96,9 +96,14 @@ func (h *handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 		defer cancel()
 	}
 	info := &connect.CallInfo{TransportInfo: &ServerInfo{request: request}}
+	// Copy the request only when the timeout changed the context.
+	connRequest := request
+	if ctx != request.Context() {
+		connRequest = request.WithContext(ctx)
+	}
 	connCloser, ok := protocolHandler.NewConn(
 		responseWriter,
-		request.WithContext(ctx),
+		connRequest,
 		info,
 	)
 	if !ok {
