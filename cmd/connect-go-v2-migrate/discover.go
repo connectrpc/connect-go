@@ -58,6 +58,9 @@ type fileContent struct {
 	ready   bool
 	// stubUse is the first stub call in a file that imports no connect package.
 	stubUse token.Position
+	// notStreams holds the offsets of receivers of stream-named method calls
+	// whose type is known and is not a connect or generated stub type.
+	notStreams map[int]bool
 }
 
 // project is the result of discovering what to migrate.
@@ -203,10 +206,11 @@ func discover(roots []string) (project, error) {
 			}
 			// Ready unless it binds a stub still on v1 (per stub package).
 			proj.sources = append(proj.sources, fileContent{
-				path:    path,
-				content: content,
-				ready:   ready,
-				stubUse: stubUse,
+				path:       path,
+				content:    content,
+				ready:      ready,
+				stubUse:    stubUse,
+				notStreams: nonStreamReceivers(file, pkg, genPkgs),
 			})
 		}
 	}
@@ -756,4 +760,55 @@ func dirContains(outer, inner string) bool {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// nonStreamReceivers returns the offsets of x in calls x.M() where M is a
+// stream method name and the type checker knows x is neither a connect stream
+// nor a generated stub type: a type of the user's own that only shares the
+// method names. Receivers of unknown type are left out, so the syntactic
+// stream detection still applies to them.
+func nonStreamReceivers(file *ast.File, pkg *packages.Package, genPkgs map[string]bool) map[int]bool {
+	if pkg.TypesInfo == nil {
+		return nil
+	}
+	var offsets map[int]bool
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, isCall := node.(*ast.CallExpr)
+		if !isCall {
+			return true
+		}
+		sel, isSel := call.Fun.(*ast.SelectorExpr)
+		if !isSel || !streamMethodNames[sel.Sel.Name] {
+			return true
+		}
+		receiver, isIdent := sel.X.(*ast.Ident)
+		if !isIdent || !knownNonConnectType(pkg.TypesInfo.TypeOf(receiver), genPkgs) {
+			return true
+		}
+		if offsets == nil {
+			offsets = map[int]bool{}
+		}
+		offsets[pkg.Fset.Position(receiver.Pos()).Offset] = true
+		return true
+	})
+	return offsets
+}
+
+// knownNonConnectType reports whether typ is a valid named type, or a pointer
+// to one, declared outside connect and the generated stub packages.
+func knownNonConnectType(typ types.Type, genPkgs map[string]bool) bool {
+	if typ == nil {
+		return false
+	}
+	if pointer, isPointer := typ.(*types.Pointer); isPointer {
+		typ = pointer.Elem()
+	}
+	named, isNamed := types.Unalias(typ).(*types.Named)
+	if !isNamed || named.Obj().Pkg() == nil {
+		return false
+	}
+	if basic, isBasic := named.Underlying().(*types.Basic); isBasic && basic.Kind() == types.Invalid {
+		return false
+	}
+	return !genPkgs[named.Obj().Pkg().Path()]
 }

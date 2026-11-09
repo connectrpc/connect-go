@@ -177,7 +177,7 @@ func rewriteStreams(funcType *ast.FuncType, body *ast.BlockStmt, state *rewriteS
 	if body == nil {
 		return nil
 	}
-	localVars, params := collectStreamVars(funcType, body, state.connectAlias)
+	localVars, params := collectStreamVars(funcType, body, state)
 	streamVars := mergeUnwrappedScopes(outerStreams, funcType, localVars)
 	if len(streamVars) == 0 {
 		return nil
@@ -343,16 +343,17 @@ func importedAs(file *ast.File, pkgPath, pkgName string) string {
 }
 
 // collectStreamVars returns every stream variable name in the function, plus
-// the subset that are server handler parameters.
-func collectStreamVars(funcType *ast.FuncType, body *ast.BlockStmt, connectAlias string) (map[string]bool, map[string]streamParam) {
-	params := collectStreamParams(funcType, connectAlias)
+// the subset that are server handler parameters. A name the type checker
+// knows is not a connect stream at any of its stream-named calls is left out.
+func collectStreamVars(funcType *ast.FuncType, body *ast.BlockStmt, state *rewriteState) (map[string]bool, map[string]streamParam) {
+	params := collectStreamParams(funcType, state.connectAlias)
 	vars := map[string]bool{}
 	for name := range params {
 		vars[name] = true
 	}
 	// Include nested closures, since a stream is often created here but only
 	// used from a goroutine or errgroup closure.
-	called := map[string]bool{}
+	called, notStreams := map[string]bool{}, map[string]bool{}
 	walk(body, func(n ast.Node) {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -364,10 +365,13 @@ func collectStreamVars(funcType *ast.FuncType, body *ast.BlockStmt, connectAlias
 		}
 		if id, ok := sel.X.(*ast.Ident); ok {
 			called[id.Name] = true
+			if state.notStreams[state.fset.Position(id.Pos()).Offset] {
+				notStreams[id.Name] = true
+			}
 		}
 	})
 	for name := range called {
-		if !vars[name] && assignedFromMethodCall(body, name) {
+		if !vars[name] && !notStreams[name] && assignedFromMethodCall(body, name) {
 			vars[name] = true
 		}
 	}

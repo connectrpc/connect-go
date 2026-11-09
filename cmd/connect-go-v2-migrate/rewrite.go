@@ -223,6 +223,12 @@ func withHandlerStreams(resolver *handlerStreamResolver) rewriteOption {
 	return func(state *rewriteState) { state.handlerStreams = resolver }
 }
 
+// withNotStreams supplies the receivers the type checker knows are not
+// connect streams.
+func withNotStreams(offsets map[int]bool) rewriteOption {
+	return func(state *rewriteState) { state.notStreams = offsets }
+}
+
 // withStubUse marks a file that calls stubs without importing connect.
 func withStubUse(position token.Position) rewriteOption {
 	return func(state *rewriteState) {
@@ -497,6 +503,9 @@ type rewriteState struct {
 	// the AST-only path, where the stream parameter is warned instead.
 	handlerStreams *handlerStreamResolver
 	stubUse        token.Pos
+	// notStreams holds the offsets of stream-named method receivers known not
+	// to be connect streams; see nonStreamReceivers.
+	notStreams map[int]bool
 	// sdkModules are v1 BSR connect SDKs whose imports move to v2.
 	sdkModules []string
 	// imports maps path->package name for imports a rewrite introduces;
