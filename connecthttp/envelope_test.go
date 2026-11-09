@@ -23,6 +23,7 @@ import (
 	"io"
 	"net"
 	"testing"
+	"testing/iotest"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectgzip"
@@ -103,6 +104,26 @@ func TestEnvelope(t *testing.T) {
 				len(payload), len(payload)-1,
 			))
 		})
+		t.Run("errorWithLastBytes", func(t *testing.T) {
+			t.Parallel()
+			// Like io.CopyN, a complete message ignores an error returned with
+			// its last bytes. The next read reports the error.
+			for _, readErr := range []error{
+				fmt.Errorf("wrapped: %w", io.EOF),
+				io.ErrUnexpectedEOF,
+				net.ErrClosed,
+			} {
+				data := &bytes.Buffer{}
+				rdr := envelopeReader{
+					ctx:    t.Context(),
+					reader: errorAfterBodyReader{reader: iotest.DataErrReader(bytes.NewReader(frame)), err: readErr},
+				}
+				gotFlags, err := rdr.Read(data)
+				assert.Nil(t, err)
+				assert.Equal(t, gotFlags, uint8(flags))
+				assert.Equal(t, payload, data.Bytes())
+			}
+		})
 		t.Run("hostileSize", func(t *testing.T) {
 			t.Parallel()
 			// A prefix claiming 4 GiB with no read limit must grow the buffer
@@ -166,6 +187,9 @@ func TestEnvelopeFraming(t *testing.T) { //nolint:paralleltest // AllocsPerRun p
 			assert.Nil(t, reader.Unmarshal(&got))
 			assert.Equal(t, got, payload)
 
+			if compress {
+				return // compressors allocate
+			}
 			// Warm the pools, then count allocations.
 			allocs := testing.AllocsPerRun(100, func() {
 				dst.reset()
@@ -173,9 +197,7 @@ func TestEnvelopeFraming(t *testing.T) { //nolint:paralleltest // AllocsPerRun p
 					t.Fatal(err)
 				}
 			})
-			if !compress {
-				assert.Equal(t, allocs, 0)
-			}
+			assert.Equal(t, allocs, 0)
 			frame := bytes.Clone(dst.buf.Bytes())
 			src := bytes.NewReader(frame)
 			reader.reader = src
@@ -185,9 +207,7 @@ func TestEnvelopeFraming(t *testing.T) { //nolint:paralleltest // AllocsPerRun p
 					t.Fatal(err)
 				}
 			})
-			if !compress {
-				assert.Equal(t, allocs, 0)
-			}
+			assert.Equal(t, allocs, 0)
 		})
 	}
 }

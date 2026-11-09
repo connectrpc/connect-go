@@ -112,7 +112,7 @@ func newDuplexHTTPCall(
 }
 
 // Send sends a message to the server. Empty data sends only the request
-// headers. Send doesn't retain data after it returns.
+// headers.
 func (d *duplexHTTPCall) Send(data []byte) error {
 	if d.streamType&connect.StreamTypeClient == 0 {
 		return d.sendUnary(data)

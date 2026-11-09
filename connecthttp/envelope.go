@@ -30,11 +30,8 @@ import (
 // same meaning in the gRPC-Web, gRPC-HTTP2, and Connect protocols.
 const flagEnvelopeCompressed = 0b00000001
 
-// envelopePrefixSize is the size of the prefix that precedes each message in
-// gRPC and Connect's framing protocol. The first byte is a uint8 used as a
-// set of bitwise flags, and the remainder is a big-endian uint32 holding the
-// message length. gRPC and Connect interpret the bitwise flags differently,
-// so the envelope code leaves their interpretation up to the caller.
+// envelopePrefixSize is the 5-byte prefix (1-byte flags + 4-byte big-endian
+// length) preceding each message in gRPC and Connect framing.
 const envelopePrefixSize = 5
 
 var errSpecialEnvelope = connect.Errorf(
@@ -278,7 +275,11 @@ func (r *envelopeReader) Read(data *bytes.Buffer) (uint8, error) {
 	// grows only as bytes arrive, since the size comes from the peer.
 	r.limited = io.LimitedReader{R: r.reader, N: size}
 	readN, err := data.ReadFrom(&r.limited)
-	if err == nil && readN < size {
+	if readN == size {
+		// Like io.CopyN, ignore an error returned with the last bytes. The
+		// next read reports it.
+		err = nil
+	} else if err == nil {
 		err = io.EOF
 	}
 	r.bytesRead += readN
