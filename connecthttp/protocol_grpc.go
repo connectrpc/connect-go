@@ -614,7 +614,7 @@ type grpcMarshaler struct {
 }
 
 func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *connect.Error {
-	raw := bufferpool.Get()
+	raw := newEnvelopeBuffer()
 	defer bufferpool.Put(raw)
 	for key, values := range trailer {
 		// Per the Go specification, keys inserted during iteration may be produced
@@ -630,10 +630,7 @@ func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *connect.Error {
 	if err := trailer.Write(raw); err != nil {
 		return connect.Errorf(connect.CodeInternal, "format trailers: %s", err).WithCause(err)
 	}
-	writeErr := m.Write(&envelope{
-		Data:  raw,
-		Flags: grpcFlagEnvelopeTrailer,
-	})
+	writeErr := m.Write(grpcFlagEnvelopeTrailer, raw)
 	if writeErr == nil || writeErr.Code() != connect.CodeResourceExhausted {
 		return writeErr
 	}
@@ -647,14 +644,11 @@ func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *connect.Error {
 			message: {grpcPercentEncode(writeErr.Message())},
 		}
 	}
-	raw.Reset()
+	resetEnvelopeBuffer(raw)
 	if err := minimal.Write(raw); err != nil {
 		return connect.Errorf(connect.CodeInternal, "format trailers: %s", err).WithCause(err)
 	}
-	return m.write(&envelope{
-		Data:  raw,
-		Flags: grpcFlagEnvelopeTrailer,
-	})
+	return m.write(grpcFlagEnvelopeTrailer, raw)
 }
 
 type grpcUnmarshaler struct {
@@ -672,12 +666,11 @@ func (u *grpcUnmarshaler) Unmarshal(message any) error {
 	if !errors.Is(err, errSpecialEnvelope) {
 		return err
 	}
-	env := u.last
-	data := env.Data
-	u.last.Data = nil // don't keep a reference to it
+	flags, data := u.lastFlags, u.lastData
+	u.lastData = nil // don't keep a reference to it
 	defer bufferpool.Put(data)
-	if !u.web || !env.IsSet(grpcFlagEnvelopeTrailer) {
-		return connect.Errorf(connect.CodeInternal, "protocol error: invalid envelope flags %d", env.Flags)
+	if !u.web || flags&grpcFlagEnvelopeTrailer == 0 {
+		return connect.Errorf(connect.CodeInternal, "protocol error: invalid envelope flags %d", flags)
 	}
 
 	// Per the gRPC-Web specification, trailers should be encoded as an HTTP/1

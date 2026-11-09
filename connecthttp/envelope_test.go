@@ -17,6 +17,7 @@ package connecthttp
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connectgzip"
 	"connectrpc.com/connect/v2/internal/assert"
 )
 
@@ -59,81 +61,194 @@ func TestCodeStreamEnd(t *testing.T) {
 func TestEnvelope(t *testing.T) {
 	t.Parallel()
 	payload := []byte(`{"number": 42}`)
-	head, err := makeEnvelopePrefix(0, len(payload))
-	assert.Nil(t, err)
-	buf := &bytes.Buffer{}
-	buf.Write(head[:])
-	buf.Write(payload)
+	const flags = connectFlagEnvelopeEndStream
+	frame := envelopeBytes(t, flags, payload)
 	t.Run("read", func(t *testing.T) {
 		t.Parallel()
 		t.Run("full", func(t *testing.T) {
 			t.Parallel()
-			env := &envelope{Data: &bytes.Buffer{}}
+			data := &bytes.Buffer{}
 			rdr := envelopeReader{
-				reader: bytes.NewReader(buf.Bytes()),
+				reader: bytes.NewReader(frame),
 			}
-			assert.Nil(t, rdr.Read(env))
-			assert.Equal(t, payload, env.Data.Bytes())
+			gotFlags, err := rdr.Read(data)
+			assert.Nil(t, err)
+			assert.Equal(t, gotFlags, uint8(flags))
+			assert.Equal(t, payload, data.Bytes())
 		})
 		t.Run("byteByByte", func(t *testing.T) {
 			t.Parallel()
-			env := &envelope{Data: &bytes.Buffer{}}
+			data := &bytes.Buffer{}
 			rdr := envelopeReader{
 				ctx: t.Context(),
 				reader: byteByByteReader{
-					reader: bytes.NewReader(buf.Bytes()),
+					reader: bytes.NewReader(frame),
 				},
 			}
-			assert.Nil(t, rdr.Read(env))
-			assert.Equal(t, payload, env.Data.Bytes())
+			gotFlags, err := rdr.Read(data)
+			assert.Nil(t, err)
+			assert.Equal(t, gotFlags, uint8(flags))
+			assert.Equal(t, payload, data.Bytes())
+		})
+		t.Run("short", func(t *testing.T) {
+			t.Parallel()
+			data := &bytes.Buffer{}
+			rdr := envelopeReader{
+				ctx:    t.Context(),
+				reader: bytes.NewReader(frame[:len(frame)-1]),
+			}
+			_, err := rdr.Read(data)
+			assert.Equal(t, err.Error(), fmt.Sprintf(
+				"internal: protocol error: promised %d bytes in enveloped message, got %d bytes",
+				len(payload), len(payload)-1,
+			))
+		})
+		t.Run("hostileSize", func(t *testing.T) {
+			t.Parallel()
+			// A prefix claiming 4 GiB with no read limit must not grow the
+			// buffer to the claimed size before the bytes arrive.
+			prefix := []byte{0, 0xff, 0xff, 0xff, 0xff}
+			data := &bytes.Buffer{}
+			rdr := envelopeReader{
+				ctx:    t.Context(),
+				reader: bytes.NewReader(append(prefix, payload...)),
+			}
+			_, err := rdr.Read(data)
+			assert.NotNil(t, err)
+			assert.True(t, data.Cap() <= 2*envelopeReadGrowMax)
 		})
 	})
 	t.Run("write", func(t *testing.T) {
 		t.Parallel()
-		t.Run("full", func(t *testing.T) {
-			t.Parallel()
-			dst := &bytes.Buffer{}
-			wtr := envelopeWriter{
-				sender: writeSender{writer: dst},
+		dst := &bytes.Buffer{}
+		wtr := envelopeWriter{
+			sender: writeSender{writer: dst},
+		}
+		data := newEnvelopeBuffer()
+		_, _ = data.Write(payload)
+		assert.Nil(t, wtr.Write(flags, data))
+		assert.Equal(t, frame, dst.Bytes())
+	})
+}
+
+// TestEnvelopeFraming round trips messages through envelopeWriter and
+// envelopeReader. Each message must be sent with one write, and sending and
+// receiving must not allocate.
+func TestEnvelopeFraming(t *testing.T) { //nolint:paralleltest // AllocsPerRun panics in parallel tests
+	payload := bytes.Repeat([]byte("framing "), 32)
+	for _, compress := range []bool{false, true} { //nolint:paralleltest
+		t.Run(fmt.Sprintf("compress=%t", compress), func(t *testing.T) {
+			var pool *compressionPool
+			if compress {
+				pool = newCompressionPool(connectgzip.New())
 			}
-			env := &envelope{Data: bytes.NewBuffer(payload)}
-			err := wtr.Write(env)
-			assert.Nil(t, err)
-			assert.Equal(t, buf.Bytes(), dst.Bytes())
+			var stats connect.MessageStats
+			dst := &countingWriter{}
+			writer := envelopeWriter{
+				ctx:             t.Context(),
+				sender:          writeSender{writer: dst},
+				codec:           rawCodec{},
+				compressionPool: pool,
+				stats:           &stats,
+			}
+			assert.Nil(t, writer.Marshal(&payload))
+			assert.Equal(t, dst.writes, 1)
+			assert.Equal(t, stats.Size, len(payload))
+			assert.Equal(t, stats.CompressedSize > 0, compress)
+
+			reader := envelopeReader{
+				ctx:             t.Context(),
+				reader:          bytes.NewReader(dst.buf.Bytes()),
+				codec:           rawCodec{},
+				compressionPool: pool,
+			}
+			var got []byte
+			assert.Nil(t, reader.Unmarshal(&got))
+			assert.Equal(t, got, payload)
+
+			// Warm the pools, then count allocations.
+			allocs := testing.AllocsPerRun(100, func() {
+				dst.reset()
+				if err := writer.Marshal(&payload); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if !compress {
+				assert.Equal(t, allocs, 0)
+			}
+			frame := bytes.Clone(dst.buf.Bytes())
+			src := bytes.NewReader(frame)
+			reader.reader = src
+			allocs = testing.AllocsPerRun(100, func() {
+				src.Reset(frame)
+				if err := reader.Unmarshal(&got); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if !compress {
+				assert.Equal(t, allocs, 0)
+			}
 		})
-		t.Run("partial", func(t *testing.T) {
-			t.Parallel()
-			dst := &bytes.Buffer{}
-			env := &envelope{Data: bytes.NewBuffer(payload)}
-			_, err := io.CopyN(dst, env, 2)
-			assert.Nil(t, err)
-			_, err = env.WriteTo(dst)
-			assert.Nil(t, err)
-			assert.Equal(t, buf.Bytes(), dst.Bytes())
-		})
-	})
-	t.Run("seek", func(t *testing.T) {
-		t.Parallel()
-		t.Run("start", func(t *testing.T) {
-			t.Parallel()
-			dst1 := &bytes.Buffer{}
-			dst2 := &bytes.Buffer{}
-			env := &envelope{Data: bytes.NewBuffer(payload)}
-			_, err := io.CopyN(dst1, env, 2)
-			assert.Nil(t, err)
-			assert.Equal(t, env.Len(), len(payload)+3)
-			_, err = env.Seek(0, io.SeekStart)
-			assert.Nil(t, err)
-			assert.Equal(t, env.Len(), len(payload)+5)
-			_, err = io.CopyN(dst2, env, 2)
-			assert.Nil(t, err)
-			assert.Equal(t, dst1.Bytes(), dst2.Bytes())
-			_, err = env.WriteTo(dst2)
-			assert.Nil(t, err)
-			assert.Equal(t, dst2.Bytes(), buf.Bytes())
-			assert.Equal(t, env.Len(), 0)
-		})
-	})
+	}
+}
+
+// TestEnvelopeSendMaxBytes checks that the prefix isn't counted against the
+// maximum message size.
+func TestEnvelopeSendMaxBytes(t *testing.T) {
+	t.Parallel()
+	payload := []byte("12345678")
+	dst := &countingWriter{}
+	writer := envelopeWriter{
+		ctx:          t.Context(),
+		sender:       writeSender{writer: dst},
+		codec:        rawCodec{},
+		sendMaxBytes: len(payload),
+	}
+	assert.Nil(t, writer.Marshal(&payload))
+	writer.sendMaxBytes = len(payload) - 1
+	err := writer.Marshal(&payload)
+	assert.NotNil(t, err)
+	assert.Equal(t, err.Code(), connect.CodeResourceExhausted)
+}
+
+// rawCodec is a codec for []byte messages.
+type rawCodec struct{}
+
+func (rawCodec) Name() string { return "raw" }
+
+func (rawCodec) MarshalWrite(_ context.Context, dst io.Writer, message any) error {
+	data, ok := message.(*[]byte)
+	if !ok {
+		return fmt.Errorf("not *[]byte: %T", message)
+	}
+	_, err := dst.Write(*data)
+	return err
+}
+
+func (rawCodec) UnmarshalRead(_ context.Context, src io.Reader, message any) error {
+	out, ok := message.(*[]byte)
+	buf, isBuf := src.(*bytes.Buffer)
+	if !ok || !isBuf {
+		return fmt.Errorf("unexpected types %T, %T", message, src)
+	}
+	*out = append((*out)[:0], buf.Bytes()...)
+	return nil
+}
+
+// countingWriter records the bytes written and the number of writes.
+type countingWriter struct {
+	buf    bytes.Buffer
+	writes int
+}
+
+func (w *countingWriter) Write(data []byte) (int, error) {
+	w.writes++
+	return w.buf.Write(data)
+}
+
+func (w *countingWriter) reset() {
+	w.buf.Reset()
+	w.writes = 0
 }
 
 // TestEnvelopeUnmarshalEndStream tests that envelopeReader.Unmarshal keeps the
@@ -162,8 +277,8 @@ func TestEnvelopeUnmarshalEndStream(t *testing.T) {
 			check: func(t *testing.T, err error, rdr *envelopeReader) {
 				t.Helper()
 				assert.ErrorIs(t, err, errSpecialEnvelope)
-				assert.Equal(t, rdr.last.Flags, uint8(connectFlagEnvelopeEndStream))
-				assert.Equal(t, endStreamMessage, rdr.last.Data.Bytes())
+				assert.Equal(t, rdr.lastFlags, uint8(connectFlagEnvelopeEndStream))
+				assert.Equal(t, endStreamMessage, rdr.lastData.Bytes())
 			},
 		},
 		{
@@ -173,8 +288,8 @@ func TestEnvelopeUnmarshalEndStream(t *testing.T) {
 			check: func(t *testing.T, err error, rdr *envelopeReader) {
 				t.Helper()
 				assert.ErrorIs(t, err, errSpecialEnvelope)
-				assert.Equal(t, rdr.last.Flags, uint8(grpcFlagEnvelopeTrailer))
-				assert.Equal(t, grpcWebTrailers, rdr.last.Data.Bytes())
+				assert.Equal(t, rdr.lastFlags, uint8(grpcFlagEnvelopeTrailer))
+				assert.Equal(t, grpcWebTrailers, rdr.lastData.Bytes())
 			},
 		},
 		{
@@ -221,9 +336,9 @@ func TestEnvelopeUnmarshalEndStream(t *testing.T) {
 // envelopeBytes frames a payload with the 5-byte envelope prefix.
 func envelopeBytes(t *testing.T, flags uint8, payload []byte) []byte {
 	t.Helper()
-	head, err := makeEnvelopePrefix(flags, len(payload))
-	assert.Nil(t, err)
-	return append(head[:], payload...)
+	frame := []byte{flags}
+	frame = binary.BigEndian.AppendUint32(frame, uint32(len(payload)))
+	return append(frame, payload...)
 }
 
 // errorAfterBodyReader is a test reader that returns the configured error
