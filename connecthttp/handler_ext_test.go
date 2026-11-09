@@ -22,6 +22,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -496,4 +498,51 @@ type successPingServer struct {
 
 func (successPingServer) Ping(context.Context, *pingv1.PingRequest) (*pingv1.PingResponse, error) {
 	return &pingv1.PingResponse{}, nil
+}
+
+func TestHandler_PostDoesNotParseQuery(t *testing.T) { //nolint:paralleltest // AllocsPerRun cannot run in parallel tests.
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, successPingServer{})
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, srv)
+
+	var longQuery strings.Builder
+	for i := range 32 {
+		if i > 0 {
+			longQuery.WriteByte('&')
+		}
+		longQuery.WriteString("key" + strconv.Itoa(i) + "=value")
+	}
+	allocsFor := func(target string) float64 {
+		return testing.AllocsPerRun(50, func() {
+			request := httptest.NewRequestWithContext(
+				t.Context(), http.MethodPost, target, strings.NewReader("{}"),
+			)
+			request.Header.Set("Content-Type", "application/json")
+			mux.ServeHTTP(httptest.NewRecorder(), request)
+		})
+	}
+	const procedure = pingv1connect.PingServicePingProcedure
+	plain := allocsFor(procedure)
+	withQuery := allocsFor(procedure + "?" + longQuery.String())
+	// Parsing the query allocates a map and a slice per parameter. The
+	// small slack covers the longer URL string only.
+	assert.True(t, withQuery-plain < 4)
+}
+
+func TestHandler_GetParsesQuery(t *testing.T) {
+	t.Parallel()
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, successPingServer{})
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, srv)
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		pingv1connect.PingServicePingProcedure+"?encoding=json&message=%7B%7D&connect=v1",
+		http.NoBody,
+	)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+	assert.Equal(t, recorder.Code, http.StatusOK)
 }

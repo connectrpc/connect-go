@@ -71,13 +71,9 @@ type streamingHandlerConn interface {
 // On both the client and the server, Protocol is the RPC protocol in use.
 // Currently, it's either [connect.ProtocolNameConnect], [connect.ProtocolNameGRPC],
 // or [connect.ProtocolNameGRPCWeb], but additional protocols may be added in the future.
-//
-// Query contains the query parameters for the request. For the server, this
-// will reflect the actual query parameters sent. For the client, it is unset.
 type peer struct {
 	Addr     string
 	Protocol string
-	Query    url.Values // server-only
 }
 
 func newPeerForURL(url *url.URL, protocol string) peer {
