@@ -182,7 +182,11 @@ func (hc *errorTranslatingHandlerConnCloser) Send(msg any) error {
 }
 
 func (hc *errorTranslatingHandlerConnCloser) Receive(msg any) error {
-	return hc.fromWire(hc.handlerConnCloser.Receive(msg))
+	err := hc.handlerConnCloser.Receive(msg)
+	if err == io.EOF { //nolint:errorlint // Bare io.EOF is passed through to avoid allocating.
+		return err
+	}
+	return hc.fromWire(err)
 }
 
 func (hc *errorTranslatingHandlerConnCloser) Close(err error) error {
@@ -212,7 +216,11 @@ func (cc *errorTranslatingClientConn) Send(msg any) error {
 }
 
 func (cc *errorTranslatingClientConn) Receive(msg any) error {
-	return cc.fromWire(cc.streamingClientConn.Receive(msg))
+	err := cc.streamingClientConn.Receive(msg)
+	if err == io.EOF { //nolint:errorlint // Bare io.EOF is passed through to avoid allocating.
+		return err
+	}
+	return cc.fromWire(err)
 }
 
 func (cc *errorTranslatingClientConn) CloseRequest() error {
@@ -229,6 +237,16 @@ func (cc *errorTranslatingClientConn) onRequestSend(fn func(*http.Request)) {
 
 func (cc *errorTranslatingClientConn) onResponseReceive(fn func(*http.Response)) {
 	cc.streamingClientConn.onResponseReceive(fn)
+}
+
+// codeStreamEnd converts a bare [io.EOF] from a streaming Receive into a coded
+// error wrapping it. Unary calls consume the bare io.EOF internally, so only
+// streams pay for this once at the end.
+func codeStreamEnd(err error) error {
+	if err == io.EOF { //nolint:errorlint // Only the bare sentinel needs coding.
+		return connect.Errorf(connect.CodeUnknown, "%s", err).WithCause(err)
+	}
+	return err
 }
 
 // wrapHandlerConnWithCodedErrors ensures that we (1) scrub handler errors

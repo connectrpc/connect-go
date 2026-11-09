@@ -180,7 +180,7 @@ func (s *connectStreamingClientStream) Receive(dst any) error {
 		}
 		_ = s.conn.CloseResponse()
 	}
-	return err
+	return codeStreamEnd(err)
 }
 
 func (s *connectStreamingClientStream) Close() error {

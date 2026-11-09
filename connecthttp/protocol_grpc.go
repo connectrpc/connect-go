@@ -664,7 +664,7 @@ type grpcUnmarshaler struct {
 	webTrailer http.Header
 }
 
-func (u *grpcUnmarshaler) Unmarshal(message any) *connect.Error {
+func (u *grpcUnmarshaler) Unmarshal(message any) error {
 	err := u.envelopeReader.Unmarshal(message)
 	if err == nil {
 		return nil

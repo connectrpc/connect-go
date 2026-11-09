@@ -575,8 +575,8 @@ func (cc *connectUnaryClientConn) unmarshalResponseError(response *http.Response
 		return json.NewDecoder(src).Decode(msg)
 	}
 	if err := unmarshaler.UnmarshalFunc(&wireErr, jsonUnmarshaller); err != nil {
-		if err.Code() == connect.CodeResourceExhausted {
-			return err // error body exceeds readMaxBytes
+		if connectErr, ok := asError(err); ok && connectErr.Code() == connect.CodeResourceExhausted {
+			return connectErr // error body exceeds readMaxBytes
 		}
 		return connect.NewError(
 			httpToCode(response.StatusCode),
@@ -927,7 +927,7 @@ type connectStreamingUnmarshaler struct {
 	trailer      http.Header
 }
 
-func (u *connectStreamingUnmarshaler) Unmarshal(message any) *connect.Error {
+func (u *connectStreamingUnmarshaler) Unmarshal(message any) error {
 	err := u.envelopeReader.Unmarshal(message)
 	if err == nil {
 		return nil
@@ -1173,13 +1173,14 @@ type connectUnaryUnmarshaler struct {
 	stats           *connect.MessageStats
 }
 
-func (u *connectUnaryUnmarshaler) Unmarshal(message any) *connect.Error {
+func (u *connectUnaryUnmarshaler) Unmarshal(message any) error {
 	return u.UnmarshalFunc(message, u.codec.UnmarshalRead)
 }
 
-func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func(context.Context, io.Reader, any) error) *connect.Error {
+// UnmarshalFunc reads the single message. Later calls return a bare [io.EOF].
+func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func(context.Context, io.Reader, any) error) error {
 	if u.alreadyRead {
-		return connect.Errorf(connect.CodeInternal, "%s", io.EOF).WithCause(io.EOF)
+		return io.EOF
 	}
 	u.alreadyRead = true
 	data := bufferpool.Get()

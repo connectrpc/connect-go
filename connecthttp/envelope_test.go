@@ -27,6 +27,35 @@ import (
 	"connectrpc.com/connect/v2/internal/assert"
 )
 
+//nolint:paralleltest // AllocsPerRun can't run in parallel tests
+func TestEnvelopeReaderEndOfStream(t *testing.T) {
+	// A clean end of stream is a bare io.EOF with no allocation, and it
+	// survives the error translation applied to public APIs.
+	source := bytes.NewReader(nil)
+	reader := envelopeReader{ctx: t.Context(), reader: source}
+	err := reader.Unmarshal(nil)
+	assert.True(t, err == io.EOF) //nolint:errorlint // want the exact sentinel
+	assert.ErrorIs(t, wrapIfUncoded(err), io.EOF)
+	allocs := testing.AllocsPerRun(10, func() {
+		_ = reader.Unmarshal(nil)
+	})
+	// The envelope read buffer is the only allocation.
+	assert.True(t, allocs <= 1)
+}
+
+func TestCodeStreamEnd(t *testing.T) {
+	t.Parallel()
+	err := codeStreamEnd(io.EOF)
+	assert.ErrorIs(t, err, io.EOF)
+	var connectErr *connect.Error
+	assert.True(t, errors.As(err, &connectErr))
+	assert.Equal(t, connect.CodeUnknown, connectErr.Code())
+	assert.False(t, connectErr.IsRemote())
+	other := errors.New("other")
+	assert.ErrorIs(t, codeStreamEnd(other), other)
+	assert.Nil(t, codeStreamEnd(nil))
+}
+
 func TestEnvelope(t *testing.T) {
 	t.Parallel()
 	payload := []byte(`{"number": 42}`)
@@ -124,13 +153,13 @@ func TestEnvelopeUnmarshalEndStream(t *testing.T) {
 		name    string
 		input   []byte
 		readErr error
-		check   func(*testing.T, *connect.Error, *envelopeReader)
+		check   func(*testing.T, error, *envelopeReader)
 	}{
 		{
 			name:    "connect_end_stream_uncoded_read_error",
 			input:   endStream,
 			readErr: net.ErrClosed,
-			check: func(t *testing.T, err *connect.Error, rdr *envelopeReader) {
+			check: func(t *testing.T, err error, rdr *envelopeReader) {
 				t.Helper()
 				assert.ErrorIs(t, err, errSpecialEnvelope)
 				assert.Equal(t, rdr.last.Flags, uint8(connectFlagEnvelopeEndStream))
@@ -141,7 +170,7 @@ func TestEnvelopeUnmarshalEndStream(t *testing.T) {
 			name:    "grpc_web_trailers_uncoded_read_error",
 			input:   trailers,
 			readErr: net.ErrClosed,
-			check: func(t *testing.T, err *connect.Error, rdr *envelopeReader) {
+			check: func(t *testing.T, err error, rdr *envelopeReader) {
 				t.Helper()
 				assert.ErrorIs(t, err, errSpecialEnvelope)
 				assert.Equal(t, rdr.last.Flags, uint8(grpcFlagEnvelopeTrailer))
@@ -152,9 +181,9 @@ func TestEnvelopeUnmarshalEndStream(t *testing.T) {
 			name:    "extra_bytes_after_end_stream_failed_read",
 			input:   append(endStream, extra...),
 			readErr: net.ErrClosed,
-			check: func(t *testing.T, err *connect.Error, _ *envelopeReader) {
+			check: func(t *testing.T, err error, _ *envelopeReader) {
 				t.Helper()
-				assert.Equal(t, connect.CodeInternal, err.Code())
+				assert.Equal(t, connect.CodeInternal, connect.CodeOf(err))
 				assert.Equal(t,
 					fmt.Sprintf("internal: corrupt response: %d extra bytes after end of stream", len(extra)),
 					err.Error(),
@@ -165,9 +194,9 @@ func TestEnvelopeUnmarshalEndStream(t *testing.T) {
 			name:    "coded_read_error_takes_precedence",
 			input:   endStream,
 			readErr: fmt.Errorf("read: %w", context.Canceled),
-			check: func(t *testing.T, err *connect.Error, _ *envelopeReader) {
+			check: func(t *testing.T, err error, _ *envelopeReader) {
 				t.Helper()
-				assert.Equal(t, connect.CodeCanceled, err.Code())
+				assert.Equal(t, connect.CodeCanceled, connect.CodeOf(err))
 				assert.False(t, errors.Is(err, errSpecialEnvelope))
 			},
 		},

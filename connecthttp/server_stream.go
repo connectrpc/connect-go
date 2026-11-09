@@ -56,7 +56,7 @@ func (s *handlerStream) flushTrailer() {
 
 func (s *handlerStream) Receive(dst any) error {
 	if !s.singleRequest {
-		return s.conn.Receive(dst)
+		return codeStreamEnd(s.conn.Receive(dst))
 	}
 	if s.rxEnd {
 		return io.EOF

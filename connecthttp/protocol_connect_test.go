@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -31,6 +32,24 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
+
+//nolint:paralleltest // AllocsPerRun can't run in parallel tests
+func TestConnectUnaryUnmarshalAlreadyRead(t *testing.T) {
+	// Unary calls read a second time to check for extra messages, so the
+	// expected io.EOF must not allocate.
+	unmarshaler := connectUnaryUnmarshaler{
+		ctx:    t.Context(),
+		reader: strings.NewReader(""),
+		codec:  connectproto.NewBinaryCodec(),
+	}
+	msg := &pingv1.PingRequest{}
+	assert.Nil(t, unmarshaler.Unmarshal(msg))
+	assert.ErrorIs(t, unmarshaler.Unmarshal(msg), io.EOF)
+	allocs := testing.AllocsPerRun(10, func() {
+		_ = unmarshaler.Unmarshal(msg)
+	})
+	assert.Equal(t, allocs, 0.0)
+}
 
 func TestConnectErrorDetailMarshaling(t *testing.T) {
 	t.Parallel()

@@ -229,7 +229,7 @@ type envelopeReader struct {
 	stats           *connect.MessageStats
 }
 
-func (r *envelopeReader) Unmarshal(message any) *connect.Error {
+func (r *envelopeReader) Unmarshal(message any) error {
 	buffer := bufferpool.Get()
 	var dontRelease *bytes.Buffer
 	defer func() {
@@ -318,7 +318,7 @@ func (r *envelopeReader) Unmarshal(message any) *connect.Error {
 	return nil
 }
 
-func (r *envelopeReader) Read(env *envelope) *connect.Error {
+func (r *envelopeReader) Read(env *envelope) error {
 	prefixes := [5]byte{}
 	// io.ReadFull reads the number of bytes requested, or returns an error.
 	// io.EOF will only be returned if no bytes were read.
@@ -329,7 +329,7 @@ func (r *envelopeReader) Read(env *envelope) *connect.Error {
 			// The stream ended cleanly. That's expected, but we need to propagate an EOF
 			// to the user so that they know that the stream has ended. We shouldn't
 			// add any alarming text about protocol errors, though.
-			return connect.Errorf(connect.CodeUnknown, "%s", err).WithCause(err)
+			return io.EOF // bare so the end of every stream doesn't allocate
 		}
 		err = wrapIfMaxBytesError(err, "read 5 byte message prefix")
 		err = wrapIfContextDone(r.ctx, err)
