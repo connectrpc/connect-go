@@ -1282,3 +1282,33 @@ func (b *blockingResetBody) Read([]byte) (int, error) {
 	<-b.release
 	return 0, b.err
 }
+
+func TestClientConditionalOptions(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, pingServer{})
+	connecthttp.Mount(mux, srv)
+	server := memhttptest.NewServer(t, mux)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
+		server.Client(),
+		server.URL(),
+		connecthttp.WithConditionalOptions(func(spec connect.Spec) []connecthttp.Option {
+			if spec.Procedure == pingv1connect.PingServicePingProcedure {
+				return []connecthttp.Option{connecthttp.WithReadMaxBytes(1)}
+			}
+			return nil
+		}),
+	)))
+	text := strings.Repeat(".", 32)
+	// Options resolve per procedure, so repeated calls keep their own limits.
+	for range 2 {
+		_, err := client.Ping(t.Context(), &pingv1.PingRequest{Text: text})
+		assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+		stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 1})
+		assert.Nil(t, err)
+		_, err = stream.Receive()
+		assert.Nil(t, err)
+		assert.Nil(t, stream.Close())
+	}
+}
