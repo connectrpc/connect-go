@@ -24,7 +24,6 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/url"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -347,7 +346,7 @@ type transport struct {
 	baseURLPtr *url.URL
 	baseURLErr error
 
-	clientStates sync.Map // connect.Spec -> *clientState
+	clientStates sync.Map // procedure string -> *clientState
 }
 
 // clientState is the per-call-invariant client state resolved from the options
@@ -396,19 +395,12 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 }
 
 // clientStateForSpec returns the client state for spec. It resolves on first
-// use. Without conditional options the state depends only on the procedure.
+// use and is keyed by procedure, because a procedure always has the same spec.
 func (t *transport) clientStateForSpec(spec connect.Spec) *clientState {
-	key := connect.Spec{Procedure: spec.Procedure}
-	if len(t.options.conditional) > 0 {
-		if spec.Schema != nil && !reflect.TypeOf(spec.Schema).Comparable() {
-			return t.newClientState(spec)
-		}
-		key = spec
-	}
-	if v, ok := t.clientStates.Load(key); ok {
+	if v, ok := t.clientStates.Load(spec.Procedure); ok {
 		return v.(*clientState) //nolint:errcheck,forcetypeassert // map only stores *clientState
 	}
-	actual, _ := t.clientStates.LoadOrStore(key, t.newClientState(spec))
+	actual, _ := t.clientStates.LoadOrStore(spec.Procedure, t.newClientState(spec))
 	return actual.(*clientState) //nolint:errcheck,forcetypeassert // map only stores *clientState
 }
 

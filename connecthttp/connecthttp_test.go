@@ -15,6 +15,7 @@
 package connecthttp
 
 import (
+	"errors"
 	"net/http"
 	"testing"
 
@@ -22,28 +23,39 @@ import (
 	"connectrpc.com/connect/v2/internal/assert"
 )
 
-func TestTransportReusesClientState(t *testing.T) {
+func TestTransportCachesClientState(t *testing.T) {
 	t.Parallel()
-	transport, ok := NewTransport(http.DefaultClient, "http://localhost").(*transport)
+	var calls int
+	transport, ok := NewTransport(
+		http.DefaultClient,
+		"http://localhost",
+		WithConditionalOptions(func(spec connect.Spec) []Option {
+			calls++
+			if spec.Procedure == "/svc/B" {
+				return []Option{WithReadMaxBytes(1)}
+			}
+			return nil
+		}),
+	).(*transport)
 	assert.True(t, ok)
-	stateFor := func(procedure string) *clientState {
-		t.Helper()
-		state := transport.clientStateForSpec(connect.Spec{Procedure: procedure})
-		assert.Nil(t, state.err)
-		return state
-	}
-	first := stateFor("/svc/A")
-	assert.True(t, first == stateFor("/svc/A"))
-	assert.False(t, first == stateFor("/svc/B"))
-	// Calls through NewClientStream share the cached protocol client.
-	stream, err := transport.NewClientStream(t.Context(), connect.Spec{
+	// The Schema type is comparable but its value can't be hashed.
+	specA := connect.Spec{
 		StreamType: connect.StreamTypeUnary,
 		Procedure:  "/svc/A",
-	})
+		Schema:     struct{ fields any }{[]string{"a"}},
+	}
+	stateA := transport.clientStateForSpec(specA)
+	assert.Nil(t, stateA.err)
+	assert.True(t, stateA == transport.clientStateForSpec(specA))
+	stateB := transport.clientStateForSpec(connect.Spec{Procedure: "/svc/B"})
+	assert.NotEqual(t, stateA.opts.readMaxBytes, 1)
+	assert.Equal(t, stateB.opts.readMaxBytes, 1)
+	stream, err := transport.NewClientStream(t.Context(), specA)
 	assert.Nil(t, err)
 	unary, ok := stream.(*connectUnaryClientStream)
 	assert.True(t, ok)
-	assert.True(t, unary.protoClient == first.client)
+	assert.True(t, unary.protoClient == stateA.client)
+	assert.Equal(t, calls, 2)
 }
 
 func TestTransportCachesClientStateErrors(t *testing.T) {
@@ -53,37 +65,5 @@ func TestTransportCachesClientStateErrors(t *testing.T) {
 	spec := connect.Spec{StreamType: connect.StreamTypeUnary, Procedure: "/svc/A"}
 	_, err := transport.NewClientStream(t.Context(), spec)
 	assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
-	first := transport.clientStateForSpec(spec)
-	assert.NotNil(t, first.err)
-	assert.True(t, first == transport.clientStateForSpec(spec))
-}
-
-func TestTransportConditionalOptionsKeyedBySpec(t *testing.T) {
-	t.Parallel()
-	var calls int
-	transport, ok := NewTransport(
-		http.DefaultClient,
-		"http://localhost",
-		WithConditionalOptions(func(spec connect.Spec) []Option {
-			calls++
-			if spec.StreamType == connect.StreamTypeServer {
-				return []Option{WithReadMaxBytes(1)}
-			}
-			return nil
-		}),
-	).(*transport)
-	assert.True(t, ok)
-	unarySpec := connect.Spec{StreamType: connect.StreamTypeUnary, Procedure: "/svc/A"}
-	serverSpec := connect.Spec{StreamType: connect.StreamTypeServer, Procedure: "/svc/A"}
-	for range 3 {
-		assert.NotEqual(t, transport.clientStateForSpec(unarySpec).opts.readMaxBytes, 1)
-		assert.Equal(t, transport.clientStateForSpec(serverSpec).opts.readMaxBytes, 1)
-	}
-	assert.Equal(t, calls, 2)
-	// A Schema that is not comparable cannot key the cache and still works.
-	spec := unarySpec
-	spec.Schema = []string{"schema"}
-	assert.Nil(t, transport.clientStateForSpec(spec).err)
-	assert.Nil(t, transport.clientStateForSpec(spec).err)
-	assert.Equal(t, calls, 4)
+	assert.True(t, errors.Is(err, transport.clientStateForSpec(spec).err))
 }
