@@ -105,8 +105,8 @@ func TestEnvelope(t *testing.T) {
 		})
 		t.Run("hostileSize", func(t *testing.T) {
 			t.Parallel()
-			// A prefix claiming 4 GiB with no read limit must not grow the
-			// buffer to the claimed size before the bytes arrive.
+			// A prefix claiming 4 GiB with no read limit must grow the buffer
+			// only for the bytes that arrive.
 			prefix := []byte{0, 0xff, 0xff, 0xff, 0xff}
 			data := &bytes.Buffer{}
 			rdr := envelopeReader{
@@ -115,7 +115,7 @@ func TestEnvelope(t *testing.T) {
 			}
 			_, err := rdr.Read(data)
 			assert.NotNil(t, err)
-			assert.True(t, data.Cap() <= 2*envelopeReadGrowMax)
+			assert.True(t, data.Cap() <= 1024)
 		})
 	})
 	t.Run("write", func(t *testing.T) {

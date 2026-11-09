@@ -37,10 +37,6 @@ const flagEnvelopeCompressed = 0b00000001
 // so the envelope code leaves their interpretation up to the caller.
 const envelopePrefixSize = 5
 
-// envelopeReadGrowMax caps how much a read grows its buffer before any of the
-// message arrives.
-const envelopeReadGrowMax = 1 << 20
-
 var errSpecialEnvelope = connect.Errorf(
 	connect.CodeUnknown,
 	"final message has protocol-specific flags: %s",
@@ -277,10 +273,9 @@ func (r *envelopeReader) Read(data *bytes.Buffer) (uint8, error) {
 		}
 		return 0, connect.Errorf(connect.CodeResourceExhausted, "message size %d is larger than configured max %d", size, r.readMaxBytes)
 	}
-	// We've read the prefix, so we know how many bytes to expect. Grow once up
-	// front, with room for ReadFrom's final read, but only up to
-	// envelopeReadGrowMax: the size comes from the peer and may be a lie.
-	data.Grow(int(min(size, envelopeReadGrowMax)) + bytes.MinRead)
+	// We've read the prefix, so we know how many bytes to expect. Like
+	// io.CopyN, but without allocating a limited reader per message. The buffer
+	// grows only as bytes arrive, since the size comes from the peer.
 	r.limited = io.LimitedReader{R: r.reader, N: size}
 	readN, err := data.ReadFrom(&r.limited)
 	if err == nil && readN < size {
