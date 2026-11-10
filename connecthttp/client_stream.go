@@ -184,8 +184,11 @@ func (s *connectStreamingClientStream) Receive(dst any) error {
 }
 
 func (s *connectStreamingClientStream) Close() error {
+	// Close the response first: it aborts the call, so closing the request
+	// after it doesn't send a request that was never started.
+	err := s.conn.CloseResponse()
 	_ = s.conn.CloseRequest()
-	return s.conn.CloseResponse()
+	return err
 }
 
 // newProtocolClient builds a v1 protocol client for spec from the transport's

@@ -1,0 +1,136 @@
+# Multi-line wrappers: stripping connect.NewRequest(\n msg,\n),
+# connect.NewResponse, or &connect.Response[T]{Msg: msg} must not leave a
+# blank line or a split line where the wrapper's lines were.
+stubs v2
+exec migrate -w
+cmp service.go want.txt
+exec go build ./...
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func build(text string) *pingv1.PingRequest {
+	return &pingv1.PingRequest{Text: text}
+}
+
+func call(ctx context.Context, c pingv1connect.PingServiceClient, req *pingv1.PingRequest) error {
+	resp, err := c.Ping(
+		ctx,
+		connect.NewRequest(
+			&pingv1.PingRequest{
+				Text: "hi", // greeting
+			},
+		),
+	)
+	if err != nil {
+		return err
+	}
+	_ = resp.Msg.Text
+	_, err = c.Ping(
+		ctx,
+		connect.NewRequest(
+			build(
+				"hi",
+			),
+		),
+	)
+	if err != nil {
+		return err
+	}
+	_, err = c.Ping(
+		ctx,
+		connect.NewRequest(
+			req,
+		),
+	)
+	return err
+}
+
+type server struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (server) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	return connect.NewResponse(
+		&pingv1.PingResponse{
+			Text: req.Msg.Text,
+		},
+	), nil
+}
+
+func (server) Fail(ctx context.Context, req *connect.Request[pingv1.FailRequest]) (*connect.Response[pingv1.FailResponse], error) {
+	res := &pingv1.FailResponse{}
+	if ctx.Err() != nil {
+		return connect.NewResponse(
+			res,
+		), nil
+	}
+	return &connect.Response[pingv1.FailResponse]{
+		Msg: res,
+	}, nil
+}
+-- want.txt --
+package app
+
+import (
+	"context"
+
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func build(text string) *pingv1.PingRequest {
+	return &pingv1.PingRequest{Text: text}
+}
+
+func call(ctx context.Context, c pingv1connect.PingServiceClient, req *pingv1.PingRequest) error {
+	resp, err := c.Ping(
+		ctx,
+		&pingv1.PingRequest{
+			Text: "hi", // greeting
+		},
+	)
+	if err != nil {
+		return err
+	}
+	_ = resp.Text
+	_, err = c.Ping(
+		ctx,
+		build(
+			"hi",
+		),
+	)
+	if err != nil {
+		return err
+	}
+	_, err = c.Ping(
+		ctx,
+		req,
+	)
+	return err
+}
+
+type server struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (server) Ping(ctx context.Context, req *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+	return &pingv1.PingResponse{
+		Text: req.Text,
+	}, nil
+}
+
+func (server) Fail(ctx context.Context, req *pingv1.FailRequest) (*pingv1.FailResponse, error) {
+	res := &pingv1.FailResponse{}
+	if ctx.Err() != nil {
+		return res, nil
+	}
+	return res, nil
+}

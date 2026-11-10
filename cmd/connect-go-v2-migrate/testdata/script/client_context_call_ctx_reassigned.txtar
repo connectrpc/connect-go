@@ -1,0 +1,52 @@
+# A context derived after the header write can't carry the seed, so the header
+# is left for a manual update (golden-only).
+stubs v2
+exec migrate
+cmp stdout out.txt
+-- client.go --
+package app
+
+import (
+	"context"
+	"time"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func sign(ctx context.Context, client pingv1connect.PingServiceClient, sig string) error {
+	req := connect.NewRequest(&pingv1.PingRequest{})
+	req.Header().Set("X-Signature", sig)
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_, err := client.Ping(callCtx, req)
+	return err
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./client.go: import_drop_v1=1 strip_new_request=1
+--- ./client.go
++++ ./client.go
+@@ -4,13 +4,12 @@
+ 	"context"
+ 	"time"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+ func sign(ctx context.Context, client pingv1connect.PingServiceClient, sig string) error {
+-	req := connect.NewRequest(&pingv1.PingRequest{})
++	req := &pingv1.PingRequest{}
+ 	req.Header().Set("X-Signature", sig)
+ 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+ 	defer cancel()
+
+
+The following issues require manual code changes:
+  ./client.go:14:2: req.Header() writes client request headers via connect.NewClientContext(ctx) and info.RequestHeader() in v2
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

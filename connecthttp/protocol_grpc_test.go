@@ -152,8 +152,7 @@ func TestGRPCPercentEncodingQuick(t *testing.T) {
 			return true
 		}
 		encoded := grpcPercentEncode(input)
-		decoded, err := grpcPercentDecode(encoded)
-		return err == nil && decoded == input
+		return grpcPercentDecode(encoded) == input
 	}
 	if err := quick.Check(roundtrip, nil /* config */); err != nil {
 		t.Error(err)
@@ -166,15 +165,27 @@ func TestGRPCPercentEncoding(t *testing.T) {
 		assert.True(t, utf8.ValidString(input), assert.Sprintf("input invalid UTF-8"))
 		encoded := grpcPercentEncode(input)
 		t.Logf("%q encoded as %q", input, encoded)
-		decoded, err := grpcPercentDecode(encoded)
-		assert.Nil(t, err)
-		assert.Equal(t, decoded, input)
+		assert.Equal(t, grpcPercentDecode(encoded), input)
 	}
 
 	roundtrip("foo")
 	roundtrip("foo bar")
 	roundtrip(`foo%bar`)
 	roundtrip("fiancée")
+}
+
+func TestGRPCPercentDecodingInvalid(t *testing.T) {
+	t.Parallel()
+	for input, want := range map[string]string{
+		"100%":                  "100%",
+		"100% full":             "100% full",
+		"%4":                    "%4",
+		"%zz":                   "%zz",
+		"50%25 done, 100% full": "50% done, 100% full",
+		"%E4%B8%96%":            "世%",
+	} {
+		assert.Equal(t, grpcPercentDecode(input), want, assert.Sprintf("input %q", input))
+	}
 }
 
 func TestGRPCWebTrailerMarshalling(t *testing.T) {
@@ -213,7 +224,7 @@ func BenchmarkGRPCPercentDecoding(b *testing.B) {
 	want := "Hello, 世界"
 	b.ReportAllocs()
 	for b.Loop() {
-		got, _ := grpcPercentDecode(input)
+		got := grpcPercentDecode(input)
 		if got != want {
 			b.Fatalf("grpcPercentDecode(%q) = %s, want %s", input, got, want)
 		}
@@ -408,4 +419,15 @@ func TestGRPCErrorToTrailerDetailRoundTrip(t *testing.T) {
 		assert.Equal(t, details[0].Type, detail.Type)
 		assert.Equal(t, details[0].Value, detail.Value)
 	}
+}
+
+func TestGRPCErrorForTrailerInvalidPercentEncoding(t *testing.T) {
+	t.Parallel()
+	trailer := make(http.Header)
+	trailer.Set(grpcHeaderStatus, strconv.Itoa(int(connect.CodeNotFound)))
+	trailer.Set(grpcHeaderMessage, "disk 50%25 full, then 100% full")
+	gotErr := grpcErrorForTrailer(t.Context(), &connectproto.BinaryCodec{}, trailer)
+	assert.NotNil(t, gotErr)
+	assert.Equal(t, gotErr.Code(), connect.CodeNotFound)
+	assert.Equal(t, gotErr.Message(), "disk 50% full, then 100% full")
 }

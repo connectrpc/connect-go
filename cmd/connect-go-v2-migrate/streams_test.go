@@ -65,7 +65,8 @@ func TestStreamWarnings(t *testing.T) {
 // unrecognized receiver leaves the parameter a warning rather than guessing.
 func TestHandlerStreamLookupDisambiguation(t *testing.T) {
 	t.Parallel()
-	msgs := []string{"MergeProfilesStacktracesRequest", "MergeProfilesStacktracesResponse"}
+	msgs := messageTypes("MergeProfilesStacktracesRequest", "MergeProfilesStacktracesResponse")
+	refs := messageRefs("MergeProfilesStacktracesRequest", "MergeProfilesStacktracesResponse")
 	resolver := &handlerStreamResolver{
 		types: []handlerStreamType{
 			{pkgName: "ingestv1connect", name: "IngesterServiceMergeProfilesStacktracesServerStream", messages: msgs},
@@ -74,7 +75,7 @@ func TestHandlerStreamLookupDisambiguation(t *testing.T) {
 	}
 	// No receiver hint: ambiguous. The lookup fails and returns both candidates
 	// so the caller can name them.
-	if _, ambiguous, ok := resolver.lookup("MergeProfilesStacktraces", "", msgs); ok {
+	if _, ambiguous, ok := resolver.lookup("MergeProfilesStacktraces", "", refs, nil); ok {
 		t.Errorf("expected ambiguous lookup to fail without a receiver hint")
 	} else if len(ambiguous) != 2 {
 		t.Errorf("expected 2 ambiguous candidates; got %d", len(ambiguous))
@@ -84,7 +85,7 @@ func TestHandlerStreamLookupDisambiguation(t *testing.T) {
 		"Ingester": "IngesterServiceMergeProfilesStacktracesServerStream",
 		"querier":  "QuerierServiceMergeProfilesStacktracesServerStream", // case-insensitive
 	} {
-		got, ambiguous, ok := resolver.lookup("MergeProfilesStacktraces", recv, msgs)
+		got, ambiguous, ok := resolver.lookup("MergeProfilesStacktraces", recv, refs, nil)
 		if !ok || got.name != want {
 			t.Errorf("receiver %q should resolve %q; got %q ok=%v", recv, want, got.name, ok)
 		}
@@ -93,16 +94,16 @@ func TestHandlerStreamLookupDisambiguation(t *testing.T) {
 		}
 	}
 	// An unrecognized receiver stays ambiguous.
-	if _, ambiguous, ok := resolver.lookup("MergeProfilesStacktraces", "Server", msgs); ok {
+	if _, ambiguous, ok := resolver.lookup("MergeProfilesStacktraces", "Server", refs, nil); ok {
 		t.Errorf("expected unrecognized receiver to remain ambiguous")
 	} else if len(ambiguous) != 2 {
 		t.Errorf("expected 2 ambiguous candidates for an unrecognized receiver; got %d", len(ambiguous))
 	}
 	// A unique match still resolves without any receiver hint.
 	single := &handlerStreamResolver{types: []handlerStreamType{
-		{name: "IngesterServicePushServerStream", messages: []string{"PushRequest", "PushResponse"}},
+		{name: "IngesterServicePushServerStream", messages: messageTypes("PushRequest", "PushResponse")},
 	}}
-	if _, _, ok := single.lookup("Push", "", []string{"PushRequest", "PushResponse"}); !ok {
+	if _, _, ok := single.lookup("Push", "", messageRefs("PushRequest", "PushResponse"), nil); !ok {
 		t.Errorf("unique match should resolve without a receiver hint")
 	}
 }
@@ -116,8 +117,8 @@ func TestStreamParamAmbiguousWarning(t *testing.T) {
 	t.Parallel()
 	resolver := &handlerStreamResolver{
 		types: []handlerStreamType{
-			{pkgPath: "x/ingestv1connect", pkgName: "ingestv1connect", name: "IngesterServicePushServerStream", messages: []string{"in", "out"}},
-			{pkgPath: "x/querierv1connect", pkgName: "querierv1connect", name: "QuerierServicePushServerStream", messages: []string{"in", "out"}},
+			{pkgPath: "x/ingestv1connect", pkgName: "ingestv1connect", name: "IngesterServicePushServerStream", messages: messageTypes("in", "out")},
+			{pkgPath: "x/querierv1connect", pkgName: "querierv1connect", name: "QuerierServicePushServerStream", messages: messageTypes("in", "out")},
 		},
 	}
 	src := `package p
@@ -159,4 +160,20 @@ func (s *store) Push(ctx context.Context, stream *connect.BidiStream[in, out]) e
 			t.Errorf("ambiguity warning missing %q; got %q", want, warning.Msg)
 		}
 	}
+}
+
+func messageTypes(names ...string) []messageType {
+	out := make([]messageType, 0, len(names))
+	for _, name := range names {
+		out = append(out, messageType{name: name})
+	}
+	return out
+}
+
+func messageRefs(names ...string) []messageRef {
+	out := make([]messageRef, 0, len(names))
+	for _, name := range names {
+		out = append(out, messageRef{name: name})
+	}
+	return out
 }

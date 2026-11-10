@@ -76,7 +76,16 @@ func (s *handlerStream) Receive(dst any) error {
 	return nil
 }
 
-func (s *handlerStream) SendHeaders() error { return nil }
+func (s *handlerStream) SendHeaders() error {
+	// Unary responses defer headers to Send or handler return. The Connect
+	// unary protocol encodes errors in the HTTP status, so flushing now would
+	// commit a 200 and hide a later handler error.
+	if s.unary || s.headerFlushed {
+		return nil
+	}
+	s.flushHeader()
+	return s.conn.Send(nil)
+}
 
 func (s *handlerStream) Send(msg any) error {
 	s.flushHeader()

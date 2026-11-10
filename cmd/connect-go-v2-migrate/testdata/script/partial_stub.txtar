@@ -178,7 +178,6 @@ Proposed rewrites (rerun with -w to apply):
 
 The following issues require manual code changes:
   ./consumer_a.go:15:12: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
-  ./consumer_b.go:7:2: connectrpc.com/connect (v1) import retained because it still uses connect.NewRequest.
 
 Deferred until their connect stubs are regenerated to v2:
   ./consumer_b.go:15:12: stub-dependent rewrite (handler/client signatures, .Msg, NewRequest/NewResponse, streams, construction)

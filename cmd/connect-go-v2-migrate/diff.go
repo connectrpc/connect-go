@@ -16,6 +16,8 @@ package main
 
 import (
 	"fmt"
+	"go/scanner"
+	"go/token"
 	"strings"
 )
 
@@ -178,5 +180,122 @@ func colorize(line diffLine, color bool) string {
 		return colorGreen + text + colorReset
 	default:
 		return text
+	}
+}
+
+// positionMapper moves positions in an original file to the rewritten one.
+type positionMapper struct {
+	aLines, bLines []string
+	script         []diffLine
+	scriptIndex    map[int]int // aNum -> index in script
+}
+
+func newPositionMapper(a, b []byte) *positionMapper {
+	mapper := &positionMapper{
+		aLines:      strings.Split(string(a), "\n"),
+		bLines:      strings.Split(string(b), "\n"),
+		scriptIndex: map[int]int{},
+	}
+	mapper.script = editScript(mapper.aLines, mapper.bLines)
+	for index, line := range mapper.script {
+		if line.aNum > 0 {
+			mapper.scriptIndex[line.aNum] = index
+		}
+	}
+	return mapper
+}
+
+func (m *positionMapper) remap(line, col int) (int, int) {
+	index, ok := m.scriptIndex[line]
+	if !ok {
+		return line, col
+	}
+	if m.script[index].tag == ' ' {
+		return m.script[index].bNum, col
+	}
+	start, end := index, index
+	for start > 0 && m.script[start-1].tag != ' ' {
+		start--
+	}
+	for end < len(m.script) && m.script[end].tag != ' ' {
+		end++
+	}
+	var removed, added []diffLine
+	for _, entry := range m.script[start:end] {
+		if entry.tag == '-' {
+			removed = append(removed, entry)
+		} else {
+			added = append(added, entry)
+		}
+	}
+	if len(added) == 0 {
+		if end < len(m.script) {
+			return m.script[end].bNum, 1
+		}
+		return max(1, len(m.bLines)), 1
+	}
+	candidates := added
+	if len(removed) == len(added) {
+		// A one-for-one swap tries the counterpart line first.
+		for position, entry := range removed {
+			if entry.aNum == line {
+				candidates = append([]diffLine{added[position]}, added...)
+				break
+			}
+		}
+	}
+	if token := identifierAt(m.aLines[line-1], col); token != "" {
+		for _, entry := range candidates {
+			if found := indexIdentifier(entry.text, token); found >= 0 {
+				return entry.bNum, found + 1
+			}
+		}
+	}
+	first := candidates[0]
+	return first.bNum, len(first.text) - len(strings.TrimLeft(first.text, " \t")) + 1
+}
+
+// identifierAt returns the identifier starting at the 1-based col. A qualified
+// name yields only its package, which survives rewrites of the selector.
+func identifierAt(line string, col int) string {
+	for _, ident := range scanIdentifiers(line) {
+		if ident.offset == col-1 {
+			return ident.name
+		}
+	}
+	return ""
+}
+
+// indexIdentifier finds token as a whole identifier, so `mux` doesn't match
+// inside `demux` or a string.
+func indexIdentifier(text, token string) int {
+	for _, ident := range scanIdentifiers(text) {
+		if ident.name == token {
+			return ident.offset
+		}
+	}
+	return -1
+}
+
+type identifier struct {
+	name   string
+	offset int
+}
+
+func scanIdentifiers(line string) []identifier {
+	src := []byte(line)
+	file := token.NewFileSet().AddFile("", -1, len(src))
+	var lineScanner scanner.Scanner
+	// A lone line may not be valid Go, so scan errors are ignored.
+	lineScanner.Init(file, src, nil, 0)
+	var identifiers []identifier
+	for {
+		pos, tok, lit := lineScanner.Scan()
+		if tok == token.EOF {
+			return identifiers
+		}
+		if tok == token.IDENT {
+			identifiers = append(identifiers, identifier{name: lit, offset: file.Offset(pos)})
+		}
 	}
 }

@@ -1,4 +1,4 @@
-# A bare error argument to NewError gains .Error().
+# A bare error argument to NewError gains .Error() and WithCause.
 stubs v2
 exec migrate
 cmp stdout out.txt
@@ -49,7 +49,7 @@ Proposed rewrites (rerun with -w to apply):
 +func (s *pingServer) Fail(ctx context.Context, req *pingv1.FailRequest) (*pingv1.FailResponse, error) {
  	if err := ctx.Err(); err != nil {
 -		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-+		return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
++		return nil, connect.NewError(connect.CodeInvalidArgument, err.Error()).WithCause(err)
  	}
 -	return connect.NewResponse(&pingv1.FailResponse{}), nil
 +	return &pingv1.FailResponse{}, nil

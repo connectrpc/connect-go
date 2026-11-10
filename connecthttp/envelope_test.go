@@ -16,9 +16,14 @@ package connecthttp
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"testing"
 
+	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/internal/assert"
 )
 
@@ -100,6 +105,112 @@ func TestEnvelope(t *testing.T) {
 			assert.Equal(t, env.Len(), 0)
 		})
 	})
+}
+
+// TestEnvelopeUnmarshalEndStream tests that envelopeReader.Unmarshal keeps the
+// end-stream message when the read draining the rest of the stream fails
+// without a code. Over HTTP/1.1, http.Transport closes the connection after a
+// failed request body write, so the drain read can return "use of closed
+// network connection" even though the client received the entire response.
+// See https://github.com/connectrpc/connect-go/issues/1013.
+func TestEnvelopeUnmarshalEndStream(t *testing.T) {
+	t.Parallel()
+	endStreamMessage := []byte(`{"error":{"code":"permission_denied","message":"denied"}}`)
+	grpcWebTrailers := []byte("grpc-status: 7\r\ngrpc-message: denied\r\n")
+	endStream := envelopeBytes(t, connectFlagEnvelopeEndStream, endStreamMessage)
+	trailers := envelopeBytes(t, grpcFlagEnvelopeTrailer, grpcWebTrailers)
+	extra := envelopeBytes(t, 0, []byte(`{"number": 42}`))
+	testcases := []struct {
+		name    string
+		input   []byte
+		readErr error
+		check   func(*testing.T, *connect.Error, *envelopeReader)
+	}{
+		{
+			name:    "connect_end_stream_uncoded_read_error",
+			input:   endStream,
+			readErr: net.ErrClosed,
+			check: func(t *testing.T, err *connect.Error, rdr *envelopeReader) {
+				t.Helper()
+				assert.ErrorIs(t, err, errSpecialEnvelope)
+				assert.Equal(t, rdr.last.Flags, uint8(connectFlagEnvelopeEndStream))
+				assert.Equal(t, endStreamMessage, rdr.last.Data.Bytes())
+			},
+		},
+		{
+			name:    "grpc_web_trailers_uncoded_read_error",
+			input:   trailers,
+			readErr: net.ErrClosed,
+			check: func(t *testing.T, err *connect.Error, rdr *envelopeReader) {
+				t.Helper()
+				assert.ErrorIs(t, err, errSpecialEnvelope)
+				assert.Equal(t, rdr.last.Flags, uint8(grpcFlagEnvelopeTrailer))
+				assert.Equal(t, grpcWebTrailers, rdr.last.Data.Bytes())
+			},
+		},
+		{
+			name:    "extra_bytes_after_end_stream_failed_read",
+			input:   append(endStream, extra...),
+			readErr: net.ErrClosed,
+			check: func(t *testing.T, err *connect.Error, _ *envelopeReader) {
+				t.Helper()
+				assert.Equal(t, connect.CodeInternal, err.Code())
+				assert.Equal(t,
+					fmt.Sprintf("internal: corrupt response: %d extra bytes after end of stream", len(extra)),
+					err.Error(),
+				)
+			},
+		},
+		{
+			name:    "coded_read_error_takes_precedence",
+			input:   endStream,
+			readErr: fmt.Errorf("read: %w", context.Canceled),
+			check: func(t *testing.T, err *connect.Error, _ *envelopeReader) {
+				t.Helper()
+				assert.Equal(t, connect.CodeCanceled, err.Code())
+				assert.False(t, errors.Is(err, errSpecialEnvelope))
+			},
+		},
+	}
+	for _, testcase := range testcases {
+		t.Run(testcase.name, func(t *testing.T) {
+			t.Parallel()
+			rdr := envelopeReader{
+				ctx: t.Context(),
+				reader: errorAfterBodyReader{
+					reader: bytes.NewReader(testcase.input),
+					err:    testcase.readErr,
+				},
+			}
+			// Unmarshal doesn't touch the message in the end-stream branch,
+			// so a nil message is fine here.
+			testcase.check(t, rdr.Unmarshal(nil), &rdr)
+		})
+	}
+}
+
+// envelopeBytes frames a payload with the 5-byte envelope prefix.
+func envelopeBytes(t *testing.T, flags uint8, payload []byte) []byte {
+	t.Helper()
+	head, err := makeEnvelopePrefix(flags, len(payload))
+	assert.Nil(t, err)
+	return append(head[:], payload...)
+}
+
+// errorAfterBodyReader is a test reader that returns the configured error
+// where the wrapped reader would return io.EOF, as if the connection were
+// closed right after the last byte of the body.
+type errorAfterBodyReader struct {
+	reader io.Reader
+	err    error
+}
+
+func (r errorAfterBodyReader) Read(data []byte) (int, error) {
+	n, err := r.reader.Read(data)
+	if errors.Is(err, io.EOF) {
+		return n, r.err
+	}
+	return n, err
 }
 
 // byteByByteReader is test reader that reads a single byte at a time.

@@ -40,7 +40,7 @@ Proposed rewrites (rerun with -w to apply):
 -	cErr := connect.NewError(connect.Code(code), err)
 -	if detail, detailErr := connect.NewErrorDetail(info); detailErr == nil {
 -		cErr.AddDetail(detail)
-+	cErr := connect.NewError(connect.Code(code), err.Error())
++	cErr := connect.NewError(connect.Code(code), err.Error()).WithCause(err)
 +	if detail, detailErr := connectproto.NewErrorDetail(info); detailErr == nil {
 +		cErr = cErr.WithDetail(detail)
  	}

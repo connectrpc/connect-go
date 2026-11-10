@@ -284,11 +284,16 @@ func (r *envelopeReader) Unmarshal(message any) *connect.Error {
 		r.bytesRead += numBytes
 		if err != nil {
 			err = wrapIfContextError(err)
-			if connErr, ok := asError(err); ok {
+			if connErr, ok := asError(err); ok && connErr.Code() != connect.CodeUnavailable {
 				return connErr
 			}
-			return connect.Errorf(connect.CodeInternal, "corrupt response: I/O error after end-stream message: %s", err).WithCause(err)
-		} else if numBytes > 0 {
+			// Ignore uncoded read errors and unavailable transport errors if the
+			// complete end-stream message was already received. In HTTP/1.1,
+			// http.Transport closes the connection on request write failures,
+			// which can cause subsequent reads to fail despite having received
+			// the entire response.
+		}
+		if numBytes > 0 {
 			return connect.Errorf(connect.CodeInternal, "corrupt response: %d extra bytes after end of stream", numBytes)
 		}
 		// One of the protocol-specific flags are set, so this is the end of the
@@ -333,7 +338,7 @@ func (r *envelopeReader) Read(env *envelope) *connect.Error {
 		}
 		// Something else has gone wrong - the stream didn't end cleanly.
 		return connect.Errorf(
-			connect.CodeInvalidArgument,
+			connect.CodeInternal,
 			"protocol error: incomplete envelope: %s", err,
 		).WithCause(err)
 	}
@@ -355,11 +360,11 @@ func (r *envelopeReader) Read(env *envelope) *connect.Error {
 		if errors.Is(err, io.EOF) {
 			// We've gotten fewer bytes than we expected, so the stream has ended
 			// unexpectedly.
-			return connect.Errorf(connect.CodeInvalidArgument,
+			return connect.Errorf(connect.CodeInternal,
 				"protocol error: promised %d bytes in enveloped message, got %d bytes",
 				size,
 				readN,
-			)
+			).WithCause(io.ErrUnexpectedEOF)
 		}
 		err = wrapIfMaxBytesError(err, "read %d byte message", size)
 		err = wrapIfContextDone(r.ctx, err)

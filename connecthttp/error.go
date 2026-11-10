@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"connectrpc.com/connect/v2"
@@ -29,6 +30,13 @@ import (
 )
 
 const commonErrorsURL = "https://connectrpc.com/docs/go/common-errors"
+
+// Messages of the unexported net/http errors for a write to a stream the
+// client has abandoned.
+const (
+	clientDisconnectedMessage = "client disconnected"
+	streamClosedMessage       = "http2: stream closed"
+)
 
 var (
 	// errNotModified signals Connect-protocol responses to GET requests to use the
@@ -61,9 +69,10 @@ func IsNotModifiedError(err error) bool {
 	return errors.Is(err, errNotModified)
 }
 
-// asError uses errors.As to unwrap any error and look for a connect *connect.Error.
+// asError unwraps any error and looks for a non-nil *connect.Error.
 func asError(err error) (*connect.Error, bool) {
-	return connecterr.AsError(err)
+	connectErr, ok := errors.AsType[*connect.Error](err)
+	return connectErr, ok && connectErr != nil // Protect against typed nils (*connect.Error)(nil).
 }
 
 // wrapIfUncoded ensures that all errors are wrapped. It leaves already-wrapped
@@ -111,6 +120,33 @@ func scrubHandlerError(err error) error {
 // haven't already been wrapped.
 func wrapIfContextError(err error) error {
 	return connecterr.WrapIfContextError(err)
+}
+
+// isClientDisconnected reports whether err is a connection failure caused by
+// the client going away. HTTP/2 has its own errors for this, other transports
+// surface the connection's error.
+func isClientDisconnected(err error) bool {
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	msg := err.Error()
+	return msg == clientDisconnectedMessage || msg == streamClosedMessage
+}
+
+// wrapIfClientTransportError wraps client-side connection failures with
+// connect.CodeUnavailable. A reset observed while reading or closing a response
+// is a transient transport failure, not caller cancellation.
+func wrapIfClientTransportError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := asError(err); ok {
+		return err
+	}
+	if !isClientDisconnected(err) {
+		return err
+	}
+	return connect.NewError(connect.CodeUnavailable, err.Error()).WithCause(err)
 }
 
 // wrapIfContextDone wraps errors with connect.CodeCanceled or connect.CodeDeadlineExceeded
@@ -189,7 +225,7 @@ func wrapIfRSTError(ctx context.Context, err error) error {
 	if _, ok := asError(err); ok {
 		return err
 	}
-	if urlErr := new(url.Error); errors.As(err, &urlErr) {
+	if urlErr, ok := errors.AsType[*url.Error](err); ok {
 		// If we get an RST_STREAM error from http.Client.Do, it's wrapped in a
 		// *url.Error.
 		err = urlErr.Unwrap()
@@ -240,5 +276,16 @@ func wrapIfRSTError(ctx context.Context, err error) error {
 // wrapIfMaxBytesError wraps errors returned reading from a http.MaxBytesHandler
 // whose limit has been exceeded.
 func wrapIfMaxBytesError(err error, tmpl string, args ...any) error {
-	return connecterr.WrapIfMaxBytesError(err, tmpl, args...)
+	if err == nil {
+		return nil
+	}
+	if _, ok := asError(err); ok {
+		return err
+	}
+	maxBytesErr, ok := errors.AsType[*http.MaxBytesError](err)
+	if !ok {
+		return err
+	}
+	prefix := fmt.Sprintf(tmpl, args...)
+	return connect.Errorf(connect.CodeResourceExhausted, "%s: exceeded %d byte http.MaxBytesReader limit", prefix, maxBytesErr.Limit)
 }

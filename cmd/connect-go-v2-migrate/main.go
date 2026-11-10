@@ -125,14 +125,19 @@ func runMain(args []string) int {
 			break
 		}
 	}
-	// Pure regenerate-first (v1 stubs, nothing migratable yet) skips the sources.
+	// Pure regenerate-first (v1 stubs, nothing migratable yet) only moves SDK
+	// imports to v2, the Go equivalent of regenerating.
 	if anyReady || !proj.hasV1Gen {
 		for _, source := range proj.sources {
-			ready := source.ready
+			ready, stubUse := source.ready, source.stubUse
 			rewrite := func(path string, content []byte) ([]byte, Report, error) {
-				return Rewrite(path, content, ready, withHandlerStreams(proj.handlerStreams))
+				return Rewrite(path, content, ready, withHandlerStreams(proj.handlerStreams), withStubUse(stubUse), withSDKModules(proj.sdkModules))
 			}
 			processFile(source, rewrite, *write, &run)
+		}
+	} else if len(proj.sdkModules) > 0 {
+		for _, source := range proj.sources {
+			processFile(source, RewriteSDKImports(proj.sdkModules), *write, &run)
 		}
 	}
 	if anyReady && run.flippedResult {
@@ -140,6 +145,10 @@ func runMain(args []string) int {
 		// selectors a return-type flip left dangling, including in _test.go files.
 		// Skipped when no return type flipped, since nothing can dangle then.
 		stripDanglingMsgPass(roots, *write, &run)
+	}
+
+	if *write {
+		remapToOutput(&run)
 	}
 
 	// Sort warnings so the reported diagnostics are deterministic.
@@ -296,6 +305,21 @@ func mergeMsgEdit(run *results, path string, edit msgEdit) {
 	})
 }
 
+// remapToOutput moves diagnostics in written files to their position in the
+// rewritten code. Warnings are recorded against the original parse.
+func remapToOutput(run *results) {
+	mappers := make(map[string]*positionMapper, len(run.rewrites))
+	for _, rewrite := range run.rewrites {
+		mappers[displayPath(rewrite.path)] = newPositionMapper(rewrite.src, rewrite.out)
+	}
+	for index := range run.diagnostics {
+		diagnostic := &run.diagnostics[index]
+		if mapper, ok := mappers[diagnostic.File]; ok && diagnostic.Line > 0 {
+			diagnostic.Line, diagnostic.Column = mapper.remap(diagnostic.Line, diagnostic.Column)
+		}
+	}
+}
+
 // toDiagnostic converts a Warning into a Diagnostic, falling back to the
 // processed file when the warning is position-less.
 func toDiagnostic(fallback string, warning Warning) Diagnostic {
@@ -410,7 +434,7 @@ func printText(run *results, proj *project, write, migrated, color bool) {
 
 	// The migrated code needs the v2 modules in go.mod; prompt for any missing.
 	if missing := missingV2ModulesAdvice(run, proj); len(missing) > 0 {
-		fmt.Print("\ngo.mod is missing the v2 modules. Pull them in and tidy:\n\n")
+		fmt.Print("\ngo.mod needs the connect v2 modules. Pull them in and tidy:\n\n")
 		fmt.Printf("  %s\n", goGetCommand(missing))
 		fmt.Print("  go mod tidy\n")
 	}
@@ -421,10 +445,13 @@ func printText(run *results, proj *project, write, migrated, color bool) {
 }
 
 // printPhase1Text renders the regenerate-first report: while the generated code
-// targets v1, the only edits are Buf template updates, and the report walks the
-// user through switching generation to v2 and re-running.
+// targets v1, the only edits are Buf template updates and SDK imports, and the
+// report walks the user through switching generation to v2 and re-running.
 func printPhase1Text(run *results, proj *project, write, color bool) {
 	summary := scanCounts(proj) + " The generated Connect code still targets v1, so no Go source changes are proposed yet."
+	if len(proj.sdkModules) > 0 {
+		summary = scanCounts(proj) + " The generated Connect code still targets v1, so only SDK imports change in Go sources for now."
+	}
 	for _, line := range wrapLines(summary, 78) {
 		fmt.Println(line)
 	}
@@ -436,9 +463,9 @@ func printPhase1Text(run *results, proj *project, write, color bool) {
 			fmt.Printf("  %s\n", displayPath(dir))
 		}
 	}
-	// BSR-generated SDK dependencies are updated through go get, not regenerated.
+	// BSR SDKs move to their /v2 modules through the imports and go get.
 	if len(proj.sdkModules) > 0 {
-		fmt.Print("\nGenerated v1 Connect SDKs (the go get @v2 below updates these):\n")
+		fmt.Print("\nGenerated v1 Connect SDKs (their imports and the go get below move them to /v2):\n")
 		for _, mod := range proj.sdkModules {
 			fmt.Printf("  %s\n", mod)
 		}
@@ -452,9 +479,9 @@ func printPhase1Text(run *results, proj *project, write, color bool) {
 	}
 
 	if len(run.rewrites) > 0 {
-		lead := "Proposed Buf template updates (rerun with -w to apply):"
+		lead := "Proposed updates (rerun with -w to apply):"
 		if write {
-			lead = "Applied Buf template updates:"
+			lead = "Applied updates:"
 		}
 		fmt.Printf("\n%s\n", lead)
 		for _, rewrite := range run.rewrites {
@@ -465,8 +492,8 @@ func printPhase1Text(run *results, proj *project, write, color bool) {
 		}
 	}
 
-	// Sources are skipped in this phase, so any manual diagnostic here belongs to
-	// a Buf template. Show it before the steps: it can change how they are run.
+	// Sources only move SDK imports in this phase, so any manual diagnostic here
+	// belongs to a Buf template. Show it before the steps: it can change how they are run.
 	if manual := byCategory(run.diagnostics, categoryManual); len(manual) > 0 {
 		fmt.Print("\nThe following issues require a manual update:\n")
 		for _, diag := range manual {
@@ -514,17 +541,15 @@ type step struct {
 	note string
 }
 
-// phase1Steps builds the move-to-v2 instructions: a `go get -u` for the v2 core,
-// SDK dependencies (@v2), and ecosystem modules, plus local regeneration steps
-// when the main module generates its own connect code.
+// phase1Steps builds the steps that move dependencies and generated code to v2.
 func phase1Steps(run *results, proj *project, write bool) []step {
 	var steps []step
 	if !write && len(run.rewrites) > 0 {
-		steps = append(steps, step{cmd: "connect-go-v2-migrate -w  (applies the Buf template update above)"})
+		steps = append(steps, step{cmd: "connect-go-v2-migrate -w  (applies the updates above)"})
 	}
 	steps = append(steps, step{
 		cmd:  goGetCommand(goGetModules(proj)),
-		note: "pulls the v2 core, generated SDKs, and ecosystem modules into go.mod",
+		note: "pulls the v2 modules into go.mod",
 	})
 	if len(proj.v1GenDirs) > 0 {
 		steps = append(steps, localGenSteps(run)...)
@@ -532,31 +557,42 @@ func phase1Steps(run *results, proj *project, write bool) []step {
 	return steps
 }
 
-// goGetModules is the v2 module set to `go get -u`: the connect core, every SDK
-// dependency at @v2, and the ecosystem modules.
+// goGetModules is the v2 module set to `go get -u`: the connect core, each SDK's
+// /v2 module, and the ecosystem modules.
 func goGetModules(proj *project) []string {
 	mods := make([]string, 0, 1+len(proj.sdkModules)+len(proj.ecosystemModules))
 	mods = append(mods, connectV2Module)
 	for _, mod := range proj.sdkModules {
-		mods = append(mods, mod+"@v2")
+		if v2 := sdkV2Module(mod); !slices.Contains(mods, v2) {
+			mods = append(mods, v2)
+		}
 	}
-	return append(mods, proj.ecosystemModules...)
+	for _, mod := range proj.ecosystemModules {
+		mods = append(mods, mod+ecosystemVersionQuery)
+	}
+	return mods
 }
 
-// missingV2Modules returns the v2 modules from goGetModules that the main
-// module's go.mod does not require yet. Reports nothing when no go.mod was
-// parsed rather than guessing.
+// missingV2Modules reports nothing without a parsed go.mod rather than guessing.
 func missingV2Modules(proj *project) []string {
 	if proj.goModRequires == nil {
 		return nil
 	}
 	var missing []string
-	for _, mod := range goGetModules(proj) {
-		path, isSDK := strings.CutSuffix(mod, "@v2")
-		version, ok := proj.goModRequires[path]
-		if !ok || (isSDK && !strings.HasPrefix(version, "v2.")) {
-			missing = append(missing, mod)
+	if _, ok := proj.goModRequires[connectV2Module]; !ok {
+		missing = append(missing, connectV2Module)
+	}
+	for _, mod := range proj.sdkModules {
+		v2 := sdkV2Module(mod)
+		if _, ok := proj.goModRequires[v2]; !ok && !slices.Contains(missing, v2) {
+			missing = append(missing, v2)
 		}
+	}
+	for _, mod := range proj.ecosystemModules {
+		if _, ok := proj.goModRequires[mod]; ok && isMovedEcosystemModule(mod) {
+			continue
+		}
+		missing = append(missing, mod+ecosystemVersionQuery)
 	}
 	return missing
 }
