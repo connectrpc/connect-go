@@ -80,9 +80,8 @@ const (
 type websocketHandlerConn struct {
 	request *http.Request
 	wsConn  *websocket.Conn
-	// faultCloseCode sends the close frame §13 owes a peer that broke the
-	// framing, instead of hanging up on it.
-	faultCloseCode bool
+	// drain caps what the closing handshake reads; see drainLimiter.
+	drain *drainLimiter
 
 	marshaler   messageWriter
 	unmarshaler websocketUnmarshaler
@@ -310,21 +309,10 @@ func (c *websocketHandlerConn) Close(err error) error {
 			closeMessage = connectErr.Message()
 		}
 	}
-	// A peer that behaved gets the closing handshake. One that broke the
-	// framing is hung up on, which §13 does not ask for: it assigns that peer
-	// 1002, 1003 or 1009 here.
-	//
-	// The handshake reads until the peer's own close frame arrives, bounded at
-	// five seconds but by no number of bytes, and a peer that just overran the
-	// read limit has bytes queued to spend them on — measured, a rejected 8MiB
-	// bomb was drained in full, where hanging up stopped at 96KiB. The S
-	// message above already carries the verdict; the code is what is given up,
-	// and WithFaultCloseCode sends it where that matters more.
-	if c.unmarshaler.peerFaulted && !c.faultCloseCode {
-		_ = c.wsConn.CloseNow()
-	} else {
-		_ = c.wsConn.Close(closeCode, closeReason(closeMessage))
-	}
+	// §13: a faulted peer gets the code for its fault too, since a browser
+	// script can read the code but not the S message. The drain is capped, so
+	// a peer with a bomb queued behind its fault cannot make this read it all.
+	_ = closeWithDrain(c.wsConn, c.drain, closeCode, closeReason(closeMessage))
 	if marshalErr != nil {
 		return marshalErr
 	}
@@ -834,9 +822,8 @@ type wsClientCall struct {
 	handshakeTimeout time.Duration
 
 	readLimit int64
-	// faultCloseCode spends the closing handshake to hand the server a close
-	// code; see websocketHandlerConn.Close for what that costs.
-	faultCloseCode bool
+	// drain caps what the closing handshake reads; see drainLimiter.
+	drain *drainLimiter
 	// keepAliveInterval is how often to ping once dialed; see WithKeepAlive.
 	keepAliveInterval time.Duration
 	// keepAliveTimeout is how long the server may stay silent; see
@@ -888,16 +875,8 @@ func (c *wsClientCall) ensureDialed() *connect.Error {
 			return
 		}
 		if takeoverErr := checkNoContextTakeover(response); takeoverErr != nil {
-			// §10 assigns this 3110, and sending it means completing a closing
-			// handshake that a server which just failed the handshake's terms
-			// has no reason to answer — five seconds of dial latency for a
-			// connection that is already lost. Same trade as a mid-stream
-			// fault, so the same option decides it.
-			if c.faultCloseCode {
-				_ = conn.Close(wsStatusClientCompression, "no-context-takeover required")
-			} else {
-				_ = conn.CloseNow()
-			}
+			// §10 assigns this 3110.
+			_ = closeWithDrain(conn, c.drain, wsStatusClientCompression, "no-context-takeover required")
 			c.dialErr = takeoverErr
 			return
 		}
@@ -926,8 +905,6 @@ func (c *wsClientCall) send(text bool, data []byte) (int64, error) {
 type websocketClientConn struct {
 	call   *wsClientCall
 	codecs codecPair
-	// faultCloseCode mirrors the server's; see websocketHandlerConn.
-	faultCloseCode bool
 	// localFault records a failure this end produced rather than read off the
 	// wire, which §13.1 closes with 3111.
 	localFault atomic.Bool
@@ -1078,31 +1055,25 @@ func (c *websocketClientConn) CloseResponse() error {
 }
 
 func (c *websocketClientConn) closeConn() error {
-	// A server that malformed or oversized its side of the stream gets hung up
-	// on: the closing handshake reads until the peer's close frame arrives, so
-	// extending it would mean draining whatever that server has queued. See the
-	// note in websocketHandlerConn.Close.
+	drain := c.call.drain
 	if c.unmarshaler.peerFaulted {
 		// A client cannot send the 10xx code a server would: §13 puts its codes
 		// in the 31xx range, the only one a browser script may use. A peer fault
 		// is the more specific condition, so it wins over 3111 below.
-		if !c.faultCloseCode {
-			return c.call.wsConn.CloseNow()
-		}
-		return c.call.wsConn.Close(clientCloseCode(c.unmarshaler.fault), "")
+		return closeWithDrain(c.call.wsConn, drain, clientCloseCode(c.unmarshaler.fault), "")
 	}
 	if c.localFault.Load() {
 		// §13.1: the RPC ended on an unexpected condition at this end, not on
 		// anything the server did. Sent unconditionally — the peer behaved, so
 		// the closing handshake has nothing queued to drain, and the ordinary
 		// 1000 below costs the same handshake anyway.
-		return c.call.wsConn.Close(wsStatusClientInternal, "")
+		return closeWithDrain(c.call.wsConn, drain, wsStatusClientInternal, "")
 	}
 	// Best-effort clean close. Sending 1000 Normal Closure is correct even if
 	// Receive has not yet observed the EndStream: the server's completion path
 	// has already sent its own close, and Close is a no-op once the handshake
 	// has happened.
-	return c.call.wsConn.Close(websocket.StatusNormalClosure, "")
+	return closeWithDrain(c.call.wsConn, drain, websocket.StatusNormalClosure, "")
 }
 
 // websocketClientUnmarshaler reads one message per WebSocket frame. It mirrors

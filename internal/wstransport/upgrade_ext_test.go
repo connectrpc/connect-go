@@ -361,8 +361,6 @@ var (
 	_ wstransport.ServerOption = wstransport.WithCodecs()
 	_ wstransport.ClientOption = wstransport.WithoutCompression()
 	_ wstransport.ServerOption = wstransport.WithoutCompression()
-	_ wstransport.ClientOption = wstransport.WithFaultCloseCode()
-	_ wstransport.ServerOption = wstransport.WithFaultCloseCode()
 	_ wstransport.ClientOption = wstransport.WithCompressMinBytes(0)
 	_ wstransport.ServerOption = wstransport.WithCompressMinBytes(0)
 
