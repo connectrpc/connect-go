@@ -17,6 +17,8 @@ package connecthttp
 import (
 	"errors"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"connectrpc.com/connect/v2"
@@ -25,12 +27,12 @@ import (
 
 func TestTransportCachesClientState(t *testing.T) {
 	t.Parallel()
-	var calls int
+	var calls atomic.Int32
 	transport, ok := NewTransport(
 		http.DefaultClient,
 		"http://localhost",
 		WithConditionalOptions(func(spec connect.Spec) []Option {
-			calls++
+			calls.Add(1)
 			if spec.Procedure == "/svc/B" {
 				return []Option{WithReadMaxBytes(1)}
 			}
@@ -38,16 +40,28 @@ func TestTransportCachesClientState(t *testing.T) {
 		}),
 	).(*transport)
 	assert.True(t, ok)
-	// The Schema type is comparable but its value can't be hashed.
+	// The cache keys by procedure. This Schema would panic as a map key.
 	specA := connect.Spec{
 		StreamType: connect.StreamTypeUnary,
 		Procedure:  "/svc/A",
 		Schema:     struct{ fields any }{[]string{"a"}},
 	}
+	specB := connect.Spec{StreamType: connect.StreamTypeUnary, Procedure: "/svc/B"}
+	// Concurrent first calls must resolve once.
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Go(func() {
+			<-start
+			transport.clientStateForSpec(specA)
+		})
+	}
+	close(start)
+	wg.Wait()
 	stateA := transport.clientStateForSpec(specA)
 	assert.Nil(t, stateA.err)
-	assert.True(t, stateA == transport.clientStateForSpec(specA))
-	stateB := transport.clientStateForSpec(connect.Spec{Procedure: "/svc/B"})
+	stateB := transport.clientStateForSpec(specB)
+	assert.Nil(t, stateB.err)
 	assert.NotEqual(t, stateA.opts.readMaxBytes, 1)
 	assert.Equal(t, stateB.opts.readMaxBytes, 1)
 	stream, err := transport.NewClientStream(t.Context(), specA)
@@ -55,7 +69,7 @@ func TestTransportCachesClientState(t *testing.T) {
 	unary, ok := stream.(*connectUnaryClientStream)
 	assert.True(t, ok)
 	assert.True(t, unary.protoClient == stateA.client)
-	assert.Equal(t, calls, 2)
+	assert.Equal(t, calls.Load(), 2)
 }
 
 func TestTransportCachesClientStateErrors(t *testing.T) {
@@ -66,4 +80,15 @@ func TestTransportCachesClientStateErrors(t *testing.T) {
 	_, err := transport.NewClientStream(t.Context(), spec)
 	assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
 	assert.True(t, errors.Is(err, transport.clientStateForSpec(spec).err))
+}
+
+func TestTransportCachedClientStateNoAllocs(t *testing.T) { //nolint:paralleltest // AllocsPerRun can't run in parallel
+	transport, ok := NewTransport(http.DefaultClient, "http://localhost").(*transport)
+	assert.True(t, ok)
+	spec := connect.Spec{StreamType: connect.StreamTypeUnary, Procedure: "/svc/A"}
+	transport.clientStateForSpec(spec)
+	allocs := testing.AllocsPerRun(100, func() {
+		transport.clientStateForSpec(spec)
+	})
+	assert.Equal(t, allocs, 0)
 }
