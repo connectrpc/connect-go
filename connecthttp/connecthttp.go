@@ -346,7 +346,7 @@ type transport struct {
 	baseURLPtr *url.URL
 	baseURLErr error
 
-	clientStates sync.Map // procedure string -> *clientState
+	clientStates sync.Map // procedure string -> func() *clientState
 }
 
 // clientState is the per-call-invariant client state resolved from the options
@@ -396,12 +396,15 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 
 // clientStateForSpec returns the client state for spec. It resolves on first
 // use and is keyed by procedure, because a procedure always has the same spec.
+// The resolver is only allocated on a miss, so cached calls don't allocate.
 func (t *transport) clientStateForSpec(spec connect.Spec) *clientState {
-	if v, ok := t.clientStates.Load(spec.Procedure); ok {
-		return v.(*clientState) //nolint:errcheck,forcetypeassert // map only stores *clientState
+	resolve, ok := t.clientStates.Load(spec.Procedure)
+	if !ok {
+		resolve, _ = t.clientStates.LoadOrStore(spec.Procedure, sync.OnceValue(func() *clientState {
+			return t.newClientState(spec)
+		}))
 	}
-	actual, _ := t.clientStates.LoadOrStore(spec.Procedure, t.newClientState(spec))
-	return actual.(*clientState) //nolint:errcheck,forcetypeassert // map only stores *clientState
+	return resolve.(func() *clientState)() //nolint:errcheck,forcetypeassert // map only stores func() *clientState
 }
 
 func (t *transport) newClientState(spec connect.Spec) *clientState {
