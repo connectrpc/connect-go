@@ -132,13 +132,15 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 		dialURL.RawQuery = query.Encode()
 	}
 
+	readLimit := messageReadLimit(t.opts.readMaxBytes)
+	drain := newDrainLimiter(readLimit)
 	call := &wsClientCall{
 		ctx:               ctx,
-		faultCloseCode:    t.opts.faultCloseCode,
+		drain:             drain,
 		keepAliveInterval: t.opts.keepAliveInterval,
 		keepAliveTimeout:  t.opts.keepAliveTimeout,
 		dialOptions: &websocket.DialOptions{
-			HTTPClient: t.httpClient,
+			HTTPClient: withDrainLimiter(t.httpClient, drain),
 			// The subprotocol names both the transport and the codec, so it
 			// has to follow WithSendCodec: offering the wrong token would have
 			// the server decode with a codec the client is not encoding with.
@@ -153,12 +155,11 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 		subprotocol:      subprotocolForCodec(t.opts.sendCodec),
 		handshakeTimeout: t.opts.handshakeTimeout,
 		dialDone:         make(chan struct{}),
-		readLimit:        messageReadLimit(t.opts.readMaxBytes),
+		readLimit:        readLimit,
 	}
 	conn := &websocketClientConn{
-		call:           call,
-		codecs:         t.codecs,
-		faultCloseCode: t.opts.faultCloseCode,
+		call:   call,
+		codecs: t.codecs,
 		marshaler: messageWriter{
 			// No compression here: permessage-deflate compresses whole messages
 			// below this layer.

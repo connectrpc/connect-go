@@ -42,10 +42,8 @@ import (
 const (
 	bombReadMaxBytes = 64 * 1024       // what the server will accept
 	bombCompressed   = 8 * 1024 * 1024 // what the attacker sends
-	// Frame headers and the handshake remainder, which ride alongside the bomb.
-	bombFramingSlack = 64 * 1024
-	// What a server that hangs up on a faulted peer will read: its own limit,
-	// plus the library's buffering. Also the line the close-code option crosses.
+	// What a side that rejects the bomb will read: its own limit, the closing
+	// drain's budget, which is the same limit again, and the library's buffering.
 	bombInflateCeiling = 1024 * 1024
 )
 
@@ -247,22 +245,12 @@ func bombAgainstServer(tb testing.TB, options ...wstransport.ServerOption) int64
 	return consumed
 }
 
-// A server that hangs up on a faulted peer stops at its own read limit, so a
-// bomb costs the attacker's bandwidth rather than the server's.
+// A server that rejects a bomb still sends its close code, but the closing
+// handshake stops reading at the drain's budget, so a bomb costs the
+// attacker's bandwidth rather than the server's.
 func TestCompressionBombIsBoundedOnTheWire(t *testing.T) {
 	t.Parallel()
 	assert.True(t, bombAgainstServer(t) < bombInflateCeiling)
-}
-
-// WithFaultCloseCode buys the peer its close code by completing the closing
-// handshake, and the handshake drains whatever that peer still has queued. The
-// read is bounded either way — nothing here is inflated or kept — so what this
-// pins is that the bytes are not, which is the whole cost of the option.
-func TestFaultCloseCodeUnboundsTheBombOnTheWire(t *testing.T) {
-	t.Parallel()
-	consumed := bombAgainstServer(t, wstransport.WithFaultCloseCode())
-	assert.True(t, consumed > bombInflateCeiling)
-	assert.True(t, consumed <= bombCompressed+bombFramingSlack)
 }
 
 // hostileServer completes a WebSocket handshake by hand and then sends the

@@ -212,7 +212,7 @@ func TestZeroKeepAliveSendsNoPings(t *testing.T) {
 // acceptRawUpgrade completes one WebSocket handshake by hand, so the test can
 // see the client's frames before any library interprets them. The returned
 // reader holds whatever the client sent after the request.
-func acceptRawUpgrade(tb testing.TB, listener net.Listener) *bufio.Reader {
+func acceptRawUpgrade(tb testing.TB, listener net.Listener) (net.Conn, *bufio.Reader) {
 	tb.Helper()
 	conn, err := listener.Accept()
 	assert.Nil(tb, err)
@@ -227,7 +227,7 @@ func acceptRawUpgrade(tb testing.TB, listener net.Listener) *bufio.Reader {
 		"Sec-WebSocket-Accept: " + base64.StdEncoding.EncodeToString(digest[:]) + "\r\n" +
 		"Sec-WebSocket-Protocol: connectrpc.1+proto\r\n\r\n"))
 	assert.Nil(tb, err)
-	return reader
+	return conn, reader
 }
 
 // silentServer accepts one upgrade and then never writes, so a client's
@@ -239,7 +239,10 @@ func silentServer(tb testing.TB) (string, <-chan *bufio.Reader) {
 	assert.Nil(tb, err)
 	tb.Cleanup(func() { _ = listener.Close() })
 	accepted := make(chan *bufio.Reader, 1)
-	go func() { accepted <- acceptRawUpgrade(tb, listener) }()
+	go func() {
+		_, reader := acceptRawUpgrade(tb, listener)
+		accepted <- reader
+	}()
 	return "http://" + listener.Addr().String(), accepted
 }
 

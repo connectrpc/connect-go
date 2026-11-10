@@ -65,16 +65,14 @@ type SessionInfo struct {
 	// proxies set, which a client may therefore not send in a Leading-Metadata
 	// message. A trailing "*" matches any suffix. See WithInfrastructureHeaders.
 	InfrastructureHeaders []string
-	// FaultCloseCode sends a peer that broke the framing the close code §13
-	// assigns its fault, rather than hanging up on it. See
-	// connecthttp.WithWebSocketFaultCloseCode.
-	FaultCloseCode bool
 	// KeepAliveInterval is how often the session pings the client; see
 	// [WithKeepAlive]. Zero sends no Pings.
 	KeepAliveInterval time.Duration
 	// KeepAliveTimeout is how long the client may stay silent; see
 	// [WithKeepAliveTimeout].
 	KeepAliveTimeout time.Duration
+	// drain caps what the closing handshake reads; see drainLimiter.
+	drain *drainLimiter
 }
 
 // Session serves RPCs on an upgraded WebSocket connection. Serve reads
@@ -196,8 +194,9 @@ func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *
 	case negotiationOK:
 	}
 	codec, _ := h.codecs.get(codecName)
+	drain := newDrainLimiter(messageReadLimit(h.opts.readMaxBytes))
 	// Accept echoes Sec-WebSocket-Protocol itself from the list it is given.
-	conn, upgradeErr := websocket.Accept(responseWriter, request, &websocket.AcceptOptions{
+	conn, upgradeErr := websocket.Accept(&drainResponseWriter{ResponseWriter: responseWriter, limiter: drain}, request, &websocket.AcceptOptions{
 		Subprotocols: []string{subprotocol},
 		// Only when WithCheckOrigin supplied a policy, which has already run.
 		InsecureSkipVerify: h.opts.checkOrigin != nil,
@@ -228,7 +227,7 @@ func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *
 		SendMaxBytes:          h.opts.sendMaxBytes,
 		InfrastructureHeaders: h.opts.infrastructureHeaders,
 		OnProtocolError:       h.opts.onProtocolError,
-		FaultCloseCode:        h.opts.faultCloseCode,
+		drain:                 drain,
 		KeepAliveInterval:     h.opts.keepAliveInterval,
 		KeepAliveTimeout:      h.opts.keepAliveTimeout,
 	}
@@ -302,7 +301,8 @@ func (h *upgradeHandler) rejectInBand(
 	subprotocol string,
 	rpcErr *connect.Error,
 ) {
-	conn, upgradeErr := websocket.Accept(responseWriter, request, &websocket.AcceptOptions{
+	drain := newDrainLimiter(messageReadLimit(h.opts.readMaxBytes))
+	conn, upgradeErr := websocket.Accept(&drainResponseWriter{ResponseWriter: responseWriter, limiter: drain}, request, &websocket.AcceptOptions{
 		Subprotocols:         []string{subprotocol},
 		InsecureSkipVerify:   h.opts.checkOrigin != nil,
 		CompressionMode:      h.opts.compressionMode(),
@@ -321,7 +321,7 @@ func (h *upgradeHandler) rejectInBand(
 		Error: connectwire.NewWireError(rpcErr),
 	})
 	if marshalErr != nil {
-		_ = conn.Close(websocket.StatusInternalError, closeReason(marshalErr.Error()))
+		_ = closeWithDrain(conn, drain, websocket.StatusInternalError, closeReason(marshalErr.Error()))
 		return
 	}
 	if _, err := writeFrame(ctx, conn, true, append([]byte{markerServerEndStream}, payload...)); err != nil {
@@ -329,7 +329,7 @@ func (h *upgradeHandler) rejectInBand(
 		return
 	}
 	// The RPC reached a verdict, so the connection ends normally.
-	_ = conn.Close(websocket.StatusNormalClosure, "")
+	_ = closeWithDrain(conn, drain, websocket.StatusNormalClosure, "")
 }
 
 // negotiationOutcome distinguishes a client that is not speaking this protocol

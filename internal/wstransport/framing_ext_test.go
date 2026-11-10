@@ -277,10 +277,7 @@ func TestFaultCloseCodeNamesTheFault(t *testing.T) {
 			server := connect.NewServer()
 			pingv1connect.RegisterPingServiceHandler(server, pingServer{})
 			mux := http.NewServeMux()
-			connecthttp.Mount(mux, server,
-				connecthttp.WithReadMaxBytes(1024),
-				connecthttp.WithWebSocketFaultCloseCode(),
-			)
+			connecthttp.Mount(mux, server, connecthttp.WithReadMaxBytes(1024))
 			httpServer := httptest.NewServer(mux)
 			t.Cleanup(httpServer.Close)
 
@@ -297,33 +294,6 @@ func TestFaultCloseCodeNamesTheFault(t *testing.T) {
 			assert.Equal(t, websocket.CloseStatus(err), test.want)
 		})
 	}
-}
-
-// By default there is no close frame at all, so no code: that is what the
-// option buys, and what a deployment gives up to bound the drain.
-func TestFaultedPeerIsHungUpOnByDefault(t *testing.T) {
-	t.Parallel()
-	server := connect.NewServer()
-	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
-	mux := http.NewServeMux()
-	connecthttp.Mount(mux, server)
-	httpServer := httptest.NewServer(mux)
-	t.Cleanup(httpServer.Close)
-
-	conn := dialCumSum(t, httpServer, "")
-	sendJSONMessage(t, conn, 'Z', []byte(`{}`))
-
-	// The S message still arrives: only the close frame is given up.
-	data := readServerOpening(t, conn)
-	assert.Equal(t, data[0], wireServerEndStream)
-	assert.True(t, strings.Contains(string(data), "unknown marker Z"))
-
-	readCtx, cancelRead := readContext(t)
-	defer cancelRead()
-	_, _, err := conn.Read(readCtx)
-	assert.NotNil(t, err)
-	// No close frame, so no status: an abnormal closure rather than 1002.
-	assert.Equal(t, websocket.CloseStatus(err), websocket.StatusCode(-1))
 }
 
 // A server that negotiates permessage-deflate without no-context-takeover is

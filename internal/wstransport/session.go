@@ -52,10 +52,10 @@ func (s *session) Serve(
 	// buffer. A stream of zero-output DEFLATE blocks, which never inflates to
 	// anything, is still cut off at about the limit.
 	//
-	// The bound only holds because a misbehaving peer is hung up on rather than
-	// closed politely: the closing handshake drains whatever the peer queued.
-	// See peerMisbehaved, and TestCompressionBombIsBoundedOnTheWire, which
-	// fails if either half regresses.
+	// The bound only holds because the closing handshake's drain is capped
+	// too: it would otherwise read whatever the peer queued. See drainLimiter,
+	// and TestCompressionBombIsBoundedOnTheWire, which fails if either half
+	// regresses.
 	//
 	// The limit is enforced in readBoundedMessage rather than here: coder's own
 	// SetReadLimit closes with 1009 the moment it trips, leaving nothing to
@@ -114,9 +114,9 @@ func (s *session) Serve(
 	)
 	defer keeper.stop()
 	handlerConn := &websocketHandlerConn{
-		request:        info.Request,
-		wsConn:         conn,
-		faultCloseCode: info.FaultCloseCode,
+		request: info.Request,
+		wsConn:  conn,
+		drain:   info.drain,
 		marshaler: messageWriter{
 			// No compression here: the WebSocket transport compresses whole
 			// messages itself, so a second pass would deflate gzip.
