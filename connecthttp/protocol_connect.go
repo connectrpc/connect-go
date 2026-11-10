@@ -587,7 +587,7 @@ func (cc *connectUnaryClientConn) unmarshalResponseError(response *http.Response
 		// code not set? default to one implied by HTTP status
 		wireErr.Code = httpToCode(response.StatusCode)
 	}
-	return wireErr.asError()
+	return wireErr.AsError()
 }
 
 type connectStreamingClientConn struct {
