@@ -32,12 +32,6 @@ func TestEcosystemWarnings(t *testing.T) {
 		wantWarn   string
 	}{
 		{
-			name:       "authn_middleware",
-			importPath: "connectrpc.com/authn",
-			body:       `var _ = authn.NewMiddleware(nil)`,
-			wantWarn:   "authn.NewServerInterceptor",
-		},
-		{
 			name:       "grpcreflect_handler_v1",
 			importPath: "connectrpc.com/grpcreflect",
 			body:       `var _, _ = grpcreflect.NewHandlerV1(nil)`,
@@ -66,6 +60,12 @@ func TestEcosystemWarnings(t *testing.T) {
 			importPath: "connectrpc.com/vanguard",
 			body:       `var _ = vanguard.NewService("acme.user.v1.UserService", nil)`,
 			wantWarn:   "vanguard.Mount",
+		},
+		{
+			name:       "vanguard_import_manual",
+			importPath: "connectrpc.com/vanguard",
+			body:       `var _ vanguard.Service`,
+			wantWarn:   "is not migrated automatically",
 		},
 		{
 			name:       "vanguardgrpc_transcoder",

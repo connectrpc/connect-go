@@ -1,0 +1,86 @@
+# The client context seed wraps the context the call sends, not the function's
+# ctx parameter.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- client.go --
+package app
+
+import (
+	"context"
+	"time"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func sign(ctx context.Context, client pingv1connect.PingServiceClient, sig string) error {
+	req := connect.NewRequest(&pingv1.PingRequest{})
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if sig != "" {
+		req.Header().Set("X-Signature", sig)
+	}
+	_, err := client.Ping(callCtx, req)
+	return err
+}
+
+func deliver(ctx context.Context, client pingv1connect.PingServiceClient) (string, error) {
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	res, err := client.Ping(callCtx, connect.NewRequest(&pingv1.PingRequest{}))
+	if err != nil {
+		return "", err
+	}
+	return res.GetText() + res.Header().Get("X-Delivery"), nil
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./client.go: client_context_insert=2 client_header_rewrite=1 client_response_metadata_rewrite=1 import_add_connectv2=1 import_drop_v1=1 strip_new_request=2
+--- ./client.go
++++ ./client.go
+@@ -4,17 +4,18 @@
+ 	"context"
+ 	"time"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+ func sign(ctx context.Context, client pingv1connect.PingServiceClient, sig string) error {
+-	req := connect.NewRequest(&pingv1.PingRequest{})
++	req := &pingv1.PingRequest{}
+ 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+ 	defer cancel()
++	callCtx, info := connect.NewClientContext(callCtx)
+ 	if sig != "" {
+-		req.Header().Set("X-Signature", sig)
++		info.RequestHeader().Set("X-Signature", sig)
+ 	}
+ 	_, err := client.Ping(callCtx, req)
+ 	return err
+@@ -23,10 +24,11 @@
+ func deliver(ctx context.Context, client pingv1connect.PingServiceClient) (string, error) {
+ 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+ 	defer cancel()
+-	res, err := client.Ping(callCtx, connect.NewRequest(&pingv1.PingRequest{}))
++	callCtx, info := connect.NewClientContext(callCtx)
++	res, err := client.Ping(callCtx, &pingv1.PingRequest{})
+ 	if err != nil {
+ 		return "", err
+ 	}
+-	return res.GetText() + res.Header().Get("X-Delivery"), nil
++	return res.GetText() + info.ResponseHeader().Get("X-Delivery"), nil
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

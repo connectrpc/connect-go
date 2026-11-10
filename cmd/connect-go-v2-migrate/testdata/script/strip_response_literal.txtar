@@ -27,7 +27,7 @@ Proposed rewrites (rerun with -w to apply):
   ./service.go: import_drop_v1=1 result_unwrap_response=1 strip_response_literal=1
 --- ./service.go
 +++ ./service.go
-@@ -1,16 +1,14 @@
+@@ -1,16 +1,13 @@
  package app
  
  import (
@@ -38,13 +38,14 @@ Proposed rewrites (rerun with -w to apply):
 -func reply(text string) (*connect.Response[pingv1.PingResponse], error) {
 -	return &connect.Response[pingv1.PingResponse]{
 -		Msg: &pingv1.PingResponse{
+-			// TODO: return the correct value.
+-			Text: text,
+-		},
 +func reply(text string) (*pingv1.PingResponse, error) {
 +	return &pingv1.PingResponse{
- 			// TODO: return the correct value.
- 			Text: text,
- 		},
--	}, nil
-+		nil
++		// TODO: return the correct value.
++		Text: text,
+ 	}, nil
  }
  
 

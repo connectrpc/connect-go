@@ -47,21 +47,21 @@ const (
 
 // Diagnostic rule identifiers, surfaced as stable handles in JSON output.
 const (
-	ruleAwaitingV2Bindings      = "awaiting_v2_bindings"
-	ruleRemoveV1Import          = "remove_v1_import"
-	ruleRequestMetadata         = "request_metadata_migration"
-	ruleHandlerConstruction     = "handler_construction"
-	ruleConnectHTTPOption       = "connecthttp_option_migration"
-	ruleErrorAPI                = "error_api_migration"
-	ruleServerInterceptor       = "server_interceptor_migration"
-	ruleInterceptorMigration    = "interceptor_migration"
-	ruleStreamParamType         = "stream_param_type"
-	ruleStreamParamAmbiguous    = "stream_param_ambiguous"
-	ruleEcosystemMigration      = "ecosystem_migration"
-	ruleBufgenReinstall         = "bufgen_reinstall_plugin"
-	ruleBufgenGoMod             = "bufgen_update_go_mod"
-	ruleBufgenRemoteUnpublished = "bufgen_remote_unpublished"
-	ruleReadLimitDefault        = "read_limit_default"
+	ruleAwaitingV2Bindings   = "awaiting_v2_bindings"
+	ruleRemoveV1Import       = "remove_v1_import"
+	ruleRequestMetadata      = "request_metadata_migration"
+	ruleHandlerConstruction  = "handler_construction"
+	ruleConnectHTTPOption    = "connecthttp_option_migration"
+	ruleErrorAPI             = "error_api_migration"
+	ruleServerInterceptor    = "server_interceptor_migration"
+	ruleInterceptorMigration = "interceptor_migration"
+	ruleStreamParamType      = "stream_param_type"
+	ruleStreamParamAmbiguous = "stream_param_ambiguous"
+	ruleEcosystemMigration   = "ecosystem_migration"
+	ruleBufgenReinstall      = "bufgen_reinstall_plugin"
+	ruleBufgenGoMod          = "bufgen_update_go_mod"
+	ruleBufgenManualEdit     = "bufgen_manual_edit"
+	ruleReadLimitDefault     = "read_limit_default"
 )
 
 var (
@@ -112,7 +112,7 @@ var (
 	// methods. They stay in core but changed shape, so the tool warns.
 	reshapedErrorAPI = map[string]string{
 		"NewErrorDetail": "connectproto.NewErrorDetail(msg), then attach with (*connect.Error).WithDetail(detail)",
-		"IsWireError":    "errors.As(err, &cerr) into a *connect.Error, then cerr.IsRemote()",
+		"IsWireError":    "cerr, ok := errors.AsType[*connect.Error](err), then cerr.IsRemote()",
 		"NewWireError":   "connect.NewError(code, msg).WithRemote()",
 	}
 
@@ -223,6 +223,16 @@ func withHandlerStreams(resolver *handlerStreamResolver) rewriteOption {
 	return func(state *rewriteState) { state.handlerStreams = resolver }
 }
 
+// withStubUse marks a file that calls stubs without importing connect.
+func withStubUse(position token.Position) rewriteOption {
+	return func(state *rewriteState) {
+		tokenFile := state.fset.File(state.file.Pos())
+		if position.IsValid() && tokenFile != nil && position.Offset < tokenFile.Size() {
+			state.stubUse = tokenFile.Pos(position.Offset)
+		}
+	}
+}
+
 // Rewrite applies the v1->v2 mechanical rewrites to src, returning the output
 // and a [Report]. Errors are syntax errors only; type mismatches surface as
 // warnings. When stubsReady is false (generated bindings are still v1),
@@ -236,24 +246,32 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 	}
 	report.fset = fset
 
-	state := newRewriteState(file)
+	state := newRewriteState(fset, file)
 	state.stubsReady = stubsReady
 	for _, opt := range opts {
 		opt(state)
 	}
 	// Nothing to do unless the file uses connect directly, via a generated
 	// stub, or via an ecosystem package.
-	if !state.hasConnectV1Import() && !usesConnectStub(file) && !hasEcosystemImport(file) {
+	if !state.hasConnectV1Import() && !usesConnectStub(file) && !hasEcosystemImport(file) && !state.stubUse.IsValid() {
 		return src, report, nil
 	}
 
+	rewriteSDKImports(fset, file, state.sdkModules, &report)
+
 	// Stub-dependent rewrites wait for v2 bindings; flag the file meanwhile.
 	if !state.stubsReady {
-		if pos, ok := firstStubDependentPos(file, state.connectAlias); ok {
-			report.deferAtf(pos, ruleAwaitingV2Bindings, "stub-dependent rewrite (handler/client signatures, .Msg, NewRequest/NewResponse, streams, construction)")
+		pos, stubDependent := firstStubDependentPos(file, state.connectAlias)
+		if !stubDependent && state.stubUse.IsValid() {
+			pos, stubDependent = state.stubUse, true
 		}
-		if pos := firstEcosystemImportPos(file); pos.IsValid() {
-			report.deferAtf(pos, ruleAwaitingV2Bindings, "ecosystem package rewrite (/v2 import paths, construction)")
+		if ecosystemPos := firstEcosystemImportPos(file); ecosystemPos.IsValid() {
+			report.deferAtf(ecosystemPos, ruleAwaitingV2Bindings, "ecosystem package rewrite (import paths, construction, interceptors)")
+		}
+		// A partial rewrite would switch the import to v2 under v1 stub types.
+		if stubDependent {
+			report.deferAtf(pos, ruleAwaitingV2Bindings, "stub-dependent rewrite (handler/client signatures, .Msg, NewRequest/NewResponse, streams, construction)")
+			return src, report, nil
 		}
 		rewriteStubIndependent(file, state, &report)
 		return finishRewrite(filename, src, fset, file, state, &report)
@@ -263,8 +281,8 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 	// into each closure (minus names it shadows), so `req.Msg` referenced from a
 	// callback is still unwrapped.
 	processed := map[*ast.FuncLit]bool{}
-	var processFunc func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs map[string]bool)
-	processFunc = func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs map[string]bool) {
+	var processFunc func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs, outerStreams map[string]bool)
+	processFunc = func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs, outerStreams map[string]bool) {
 		// serverReqs are *connect.Request[T] params; their .Header()/.Spec() map
 		// to the server CallInfo. Client response holders also lose .Msg but read
 		// response metadata, so the two sets stay apart.
@@ -284,7 +302,7 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 		mergedMsg := mergeUnwrappedScopes(outerMsg, funcType, msgHolders)
 		mergedServerReqs := mergeUnwrappedScopes(outerServerReqs, funcType, serverReqs)
 		rewriteFuncBody(body, state, &report, mergedMsg, mergedServerReqs, clientRequests, clientResponses, contextParamName(funcType))
-		rewriteStreams(funcType, body, state, &report, methodName, recvName)
+		streams := rewriteStreams(funcType, body, state, &report, methodName, recvName, outerStreams)
 		// Recurse into nested closures with the merged sets as their outer scope,
 		// marking them processed so the file-level walk skips them.
 		walkFuncBody(body, func(n ast.Node) {
@@ -293,18 +311,18 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 				return
 			}
 			processed[lit] = true
-			processFunc(lit.Type, lit.Body, "", "", mergedMsg, mergedServerReqs)
+			processFunc(lit.Type, lit.Body, "", "", mergedMsg, mergedServerReqs, streams)
 		})
 	}
 	walk(file, func(n ast.Node) {
 		switch node := n.(type) {
 		case *ast.FuncDecl:
-			processFunc(node.Type, node.Body, node.Name.Name, receiverTypeName(node.Recv), nil, nil)
+			processFunc(node.Type, node.Body, node.Name.Name, receiverTypeName(node.Recv), nil, nil, nil)
 		case *ast.FuncLit:
 			if processed[node] {
 				return
 			}
-			processFunc(node.Type, node.Body, "", "", nil, nil)
+			processFunc(node.Type, node.Body, "", "", nil, nil, nil)
 		case *ast.InterfaceType:
 			// Interface methods have a signature but no body.
 			for _, field := range node.Methods.List {
@@ -327,6 +345,7 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 	// Warn on ecosystem call sites the construction passes didn't reshape. Runs
 	// after them so already-renamed interceptors aren't re-flagged.
 	warnEcosystemCalls(file, &report)
+	rewriteReflectStreams(file, &report)
 
 	rewriteStubIndependent(file, state, &report)
 	return finishRewrite(filename, src, fset, file, state, &report)
@@ -403,6 +422,7 @@ func finishRewrite(filename string, src []byte, fset *token.FileSet, file *ast.F
 
 	// Repair the vertical gap a position-cleared closure body leaves above it.
 	normalizeReshapedClosures(file)
+	applyLineBreaks(fset, file, state.lineBreaks, state.lineJoins)
 
 	var buf bytes.Buffer
 	printerConfig := printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}
@@ -476,9 +496,18 @@ type rewriteState struct {
 	// handlerStreams resolves a handler RPC name to its v2 stream type; nil on
 	// the AST-only path, where the stream parameter is warned instead.
 	handlerStreams *handlerStreamResolver
+	stubUse        token.Pos
+	// sdkModules are v1 BSR connect SDKs whose imports move to v2.
+	sdkModules []string
 	// imports maps path->package name for imports a rewrite introduces;
 	// finishRewrite adds them before formatting.
 	imports map[string]string
+	fset    *token.FileSet
+	file    *ast.File
+	// lineBreaks are source offsets that start a new line when printing.
+	lineBreaks []int
+	// lineJoins are source offset spans printed on one line.
+	lineJoins [][2]int
 }
 
 // addImport records that path (named pkg) must be imported.
@@ -489,11 +518,13 @@ func (s *rewriteState) addImport(path, pkg string) {
 	s.imports[path] = pkg
 }
 
-func newRewriteState(file *ast.File) *rewriteState {
+func newRewriteState(fset *token.FileSet, file *ast.File) *rewriteState {
 	state := &rewriteState{
 		connectAlias:     "connect",
 		connectV2Alias:   "connect",
 		connectHTTPAlias: "connecthttp",
+		fset:             fset,
+		file:             file,
 	}
 	for _, imp := range file.Imports {
 		path := strings.Trim(imp.Path.Value, `"`)
@@ -646,10 +677,10 @@ func rewriteFuncBody(body *ast.BlockStmt, state *rewriteState, report *Report, m
 	// warns rather than inserting a second NewClientContext.
 	requestHeaderSet := false
 	if len(clientRequests) > 0 {
-		requestHeaderSet = rewriteClientRequestHeaders(body, state, report, clientRequests, ctxName)
+		requestHeaderSet = rewriteClientRequestHeaders(body, state, report, clientRequests)
 	}
 	if len(clientResponses) > 0 {
-		rewriteClientResponseMetadata(body, state, report, clientResponses, ctxName, requestHeaderSet)
+		rewriteClientResponseMetadata(body, state, report, clientResponses, requestHeaderSet)
 	}
 }
 
@@ -726,7 +757,7 @@ func ensureServerCallInfo(body *ast.BlockStmt, state *rewriteState, ctxName stri
 			Args: []ast.Expr{ast.NewIdent(ctxName)},
 		}},
 	}
-	body.List = append([]ast.Stmt{seed}, body.List...)
+	insertStmt(state, body, 0, seed)
 	return name
 }
 
@@ -813,7 +844,7 @@ func isContextType(expr ast.Expr) bool {
 // rewriteClientRequestHeaders moves a client's req.Header() writes to a
 // connect.NewClientContext info. It reports whether any request header is
 // mutated here, so the response pass can avoid seeding a second context.
-func rewriteClientRequestHeaders(body *ast.BlockStmt, state *rewriteState, report *Report, requestVars map[string]bool, ctxName string) bool {
+func rewriteClientRequestHeaders(body *ast.BlockStmt, state *rewriteState, report *Report, requestVars map[string]bool) bool {
 	// Only request holders whose headers are mutated need a client context.
 	withHeaders := map[string]bool{}
 	for name := range requestVars {
@@ -824,20 +855,28 @@ func rewriteClientRequestHeaders(body *ast.BlockStmt, state *rewriteState, repor
 	if len(withHeaders) == 0 {
 		return false
 	}
-	// Without a usable context, or with multiple header-mutating requests, one
-	// shared NewClientContext would conflate their metadata; warn instead.
-	if ctxName == "" || len(withHeaders) > 1 {
+	const warnMsg = "%s.Header() writes client request headers via connect.NewClientContext(ctx) and info.RequestHeader() in v2"
+	// One shared context would conflate several requests' metadata.
+	if len(withHeaders) > 1 {
 		for name := range withHeaders {
-			report.warnAtf(firstCallPos(body, name, identHeader), ruleRequestMetadata, "%s.Header() writes client request headers via connect.NewClientContext(ctx) and info.RequestHeader() in v2", name)
+			report.warnAtf(firstCallPos(body, name, identHeader), ruleRequestMetadata, warnMsg, name)
 		}
 		return true
 	}
-	infoName := uniqueIdent(body, "info", "callInfo")
-	if first := firstStmtWithRequestHeader(body, withHeaders); first >= 0 {
-		seed := newClientContextSeed(state, ctxName, infoName)
-		body.List = append(body.List[:first], append([]ast.Stmt{seed}, body.List[first:]...)...)
-		report.bump("client_context_insert")
+	var holder string
+	for name := range withHeaders {
+		holder = name
 	}
+	// Warn if the call's context is unnamed or reassigned after the seed.
+	first := firstStmtWithRequestHeader(body, withHeaders)
+	callIndex, callCtx := clientCallContext(body, holder)
+	if first < 0 || callIndex < first || callCtx == "" || assignsName(body.List[first:callIndex], callCtx) {
+		report.warnAtf(firstCallPos(body, holder, identHeader), ruleRequestMetadata, warnMsg, holder)
+		return true
+	}
+	infoName := uniqueIdent(body, "info", "callInfo")
+	insertStmt(state, body, first, newClientContextSeed(state, callCtx, infoName))
+	report.bump("client_context_insert")
 	walkFuncBody(body, func(n ast.Node) {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -862,10 +901,9 @@ func rewriteClientRequestHeaders(body *ast.BlockStmt, state *rewriteState, repor
 }
 
 // rewriteClientResponseMetadata moves a client's res.Header()/res.Trailer()
-// reads to a connect.NewClientContext info seeded before the call. A single
-// response holder with a usable context is rewritten; other shapes (no context,
-// several holders, or a request header already seeding a context) are warned.
-func rewriteClientResponseMetadata(body *ast.BlockStmt, state *rewriteState, report *Report, responseHolders map[string]bool, ctxName string, requestHeaderSet bool) {
+// reads to a connect.NewClientContext info seeded before the call. Other
+// shapes are warned.
+func rewriteClientResponseMetadata(body *ast.BlockStmt, state *rewriteState, report *Report, responseHolders map[string]bool, requestHeaderSet bool) {
 	const warnMsg = "%s response metadata reads via connect.NewClientContext(ctx) and info.ResponseHeader()/ResponseTrailer() in v2"
 	// withMeta maps each response holder that reads metadata to the position of
 	// its first .Header()/.Trailer() call.
@@ -878,9 +916,8 @@ func rewriteClientResponseMetadata(body *ast.BlockStmt, state *rewriteState, rep
 	if len(withMeta) == 0 {
 		return
 	}
-	// A usable context, a single holder, and no request seed are required to
-	// inject one NewClientContext without conflating metadata; warn otherwise.
-	if ctxName == "" || len(withMeta) > 1 || requestHeaderSet {
+	// One context can't serve several holders or an existing request seed.
+	if len(withMeta) > 1 || requestHeaderSet {
 		for name, pos := range withMeta {
 			report.warnAtf(pos, ruleRequestMetadata, warnMsg, name)
 		}
@@ -891,13 +928,16 @@ func rewriteClientResponseMetadata(body *ast.BlockStmt, state *rewriteState, rep
 		holder = name
 	}
 	insertAt := holderAssignIndex(body, holder)
-	if insertAt < 0 {
+	callCtx := ""
+	if insertAt >= 0 {
+		callCtx = assignedCallContext(body.List[insertAt])
+	}
+	if callCtx == "" {
 		report.warnAtf(withMeta[holder], ruleRequestMetadata, warnMsg, holder)
 		return
 	}
 	infoName := uniqueIdent(body, "info", "callInfo")
-	seed := newClientContextSeed(state, ctxName, infoName)
-	body.List = append(body.List[:insertAt], append([]ast.Stmt{seed}, body.List[insertAt:]...)...)
+	insertStmt(state, body, insertAt, newClientContextSeed(state, callCtx, infoName))
 	report.bump("client_context_insert")
 	walkFuncBody(body, func(n ast.Node) {
 		call, ok := n.(*ast.CallExpr)
@@ -957,6 +997,134 @@ func newClientContextSeed(state *rewriteState, ctxName, infoName string) *ast.As
 			Args: []ast.Expr{ast.NewIdent(ctxName)},
 		}},
 	}
+}
+
+// clientCallContext returns the index of the first top-level statement that
+// calls client.Method(ctx, holder), and that call's ctx identifier.
+func clientCallContext(body *ast.BlockStmt, holder string) (int, string) {
+	for index, stmt := range body.List {
+		callCtx, found := "", false
+		walkFuncBody(stmt, func(n ast.Node) {
+			call, ok := n.(*ast.CallExpr)
+			if found || !ok || len(call.Args) < 2 {
+				return
+			}
+			if id, ok := call.Args[1].(*ast.Ident); ok && id.Name == holder {
+				callCtx, _ = identName(call.Args[0])
+				found = true
+			}
+		})
+		if found {
+			return index, callCtx
+		}
+	}
+	return -1, ""
+}
+
+// assignedCallContext returns ctx in `res, err := client.Method(ctx, req)`.
+func assignedCallContext(stmt ast.Stmt) string {
+	assign, ok := stmt.(*ast.AssignStmt)
+	if !ok || len(assign.Rhs) != 1 {
+		return ""
+	}
+	call, ok := assign.Rhs[0].(*ast.CallExpr)
+	if !ok || len(call.Args) == 0 {
+		return ""
+	}
+	name, _ := identName(call.Args[0])
+	return name
+}
+
+// assignsName reports whether any of stmts assigns or declares name.
+func assignsName(stmts []ast.Stmt, name string) bool {
+	found := false
+	isName := func(expr ast.Expr) bool {
+		id, ok := expr.(*ast.Ident)
+		return ok && id.Name == name
+	}
+	for _, stmt := range stmts {
+		ast.Inspect(stmt, func(n ast.Node) bool {
+			switch node := n.(type) {
+			case *ast.AssignStmt:
+				found = found || slices.ContainsFunc(node.Lhs, isName)
+			case *ast.ValueSpec:
+				found = found || slices.ContainsFunc(node.Names, func(id *ast.Ident) bool { return id.Name == name })
+			}
+			return !found
+		})
+	}
+	return found
+}
+
+// insertStmt inserts stmt at index, anchored so nearby comments stay put.
+func insertStmt(state *rewriteState, body *ast.BlockStmt, index int, stmt ast.Stmt) {
+	pos := token.NoPos
+	switch {
+	case index > 0:
+		pos = body.List[index-1].End()
+	case body.Lbrace.IsValid():
+		pos = body.Lbrace + 1
+	}
+	anchorPositions(stmt, skipTrailingComments(state, pos))
+	body.List = slices.Insert(body.List, index, stmt)
+}
+
+// anchorOnNewLine anchors node after pos, on its own line when the next token
+// (a comment, or next) is on a later line.
+func anchorOnNewLine(state *rewriteState, node ast.Node, pos, next token.Pos) {
+	pos = skipTrailingComments(state, pos)
+	for _, group := range state.file.Comments {
+		if group.Pos() >= pos {
+			next = min(next, group.Pos())
+			break
+		}
+	}
+	tokFile := state.fset.File(pos)
+	nextLine := tokFile.Line(next)
+	lineStart := tokFile.LineStart(nextLine)
+	if tokFile.Line(pos) == nextLine || lineStart == next {
+		anchorPositions(node, pos)
+		return
+	}
+	// Split the next token's line: node takes its indentation, the token moves
+	// down. Applied at print time so reported positions are unaffected.
+	anchorPositions(node, lineStart)
+	state.lineBreaks = append(state.lineBreaks, tokFile.Offset(next))
+}
+
+// applyLineBreaks adds the recorded line breaks and joins.
+func applyLineBreaks(fset *token.FileSet, file *ast.File, offsets []int, joins [][2]int) {
+	if len(offsets) == 0 && len(joins) == 0 {
+		return
+	}
+	tokFile := fset.File(file.Pos())
+	lines := append(tokFile.Lines(), offsets...)
+	slices.Sort(lines)
+	lines = slices.DeleteFunc(slices.Compact(lines), func(line int) bool {
+		return slices.ContainsFunc(joins, func(span [2]int) bool {
+			return span[0] < line && line <= span[1]
+		})
+	})
+	tokFile.SetLines(lines)
+}
+
+// skipTrailingComments returns the end of any comment trailing pos on its
+// line, or pos.
+func skipTrailingComments(state *rewriteState, pos token.Pos) token.Pos {
+	if !pos.IsValid() {
+		return pos
+	}
+	line := state.fset.Position(pos).Line
+	for _, group := range state.file.Comments {
+		if group.Pos() < pos {
+			continue
+		}
+		if state.fset.Position(group.Pos()).Line != line {
+			break
+		}
+		pos = group.End()
+	}
+	return pos
 }
 
 // firstCallPos returns the position of the first name.<method>() call for one
@@ -1214,12 +1382,12 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 	// message). Stub-dependent, so gated on stubsReady.
 	if call, ok := expr.(*ast.CallExpr); ok && state.stubsReady && len(call.Args) == 1 {
 		if isConnectSelector(call.Fun, state.connectAlias, "NewResponse") {
-			*exprPtr = call.Args[0]
+			*exprPtr = unwrapInPlace(state, call, call.Args[0])
 			report.bump("strip_new_response")
 			return
 		}
 		if isConnectSelector(call.Fun, state.connectAlias, "NewRequest") {
-			*exprPtr = call.Args[0]
+			*exprPtr = unwrapInPlace(state, call, call.Args[0])
 			report.bump("strip_new_request")
 			return
 		}
@@ -1228,7 +1396,7 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 	// Struct-literal wrapper form: &connect.Response[T]{Msg: x} -> x. Stub-dependent.
 	if state.stubsReady {
 		if msg, rule, ok := unwrapConnectMessageLiteral(expr, state.connectAlias); ok {
-			*exprPtr = msg
+			*exprPtr = unwrapInPlace(state, expr, msg)
 			report.bump(rule)
 			return
 		}
@@ -1240,9 +1408,14 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 
 	// connect.NewError(c, err); see convertNewErrorInPlace for the cases.
 	if call, ok := expr.(*ast.CallExpr); ok && len(call.Args) == 2 && isConnectSelector(call.Fun, state.connectAlias, "NewError") {
-		if convertNewErrorInPlace(call, state) {
-			state.usedV2 = true
-			report.bump("convert_new_error")
+		converted, cause := convertNewErrorInPlace(call, state)
+		if !converted {
+			return
+		}
+		state.usedV2 = true
+		report.bump("convert_new_error")
+		if cause != nil {
+			*exprPtr = withCauseCall(call, cause)
 		}
 		return
 	}
@@ -1282,15 +1455,14 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 //   - fmt.Errorf(f, args...) -> connect.Errorf(code, f, args...)
 //   - fmt.Errorf(... %w ...) -> connect.NewError(code, fmt.Errorf(...).Error())
 //   - nil                    -> connect.NewError(code, "")
-//   - other err expr         -> connect.NewError(code, err.Error())
+//   - other err expr         -> connect.NewError(code, err.Error()).WithCause(err)
 //
-// %w and the fallback keep err.Error() on the wire (matching v1; WithCause would
-// hide it). An already-string message arg is left alone (false), so the rewrite
-// is idempotent.
-func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) bool {
+// cause is set only when err is safe to evaluate twice. A string message arg
+// is left alone, so the rewrite is idempotent.
+func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) (converted bool, cause ast.Expr) {
 	errArg := call.Args[1]
 	if isMessageStringExpr(errArg) {
-		return false
+		return false, nil
 	}
 	// The remaining branches migrate a v1 argument, so flip the qualifier to v2.
 	if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
@@ -1302,10 +1474,10 @@ func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) bool {
 		// v1 allowed a nil error for a code-only error; v2 needs a string.
 		pos := errArg.Pos()
 		call.Args[1] = &ast.BasicLit{ValuePos: pos, Kind: token.STRING, Value: `""`}
-		return true
+		return true, nil
 	}
 	if inner, ok := errArg.(*ast.CallExpr); ok && rewriteNewErrorCallArg(call, inner) {
-		return true
+		return true, nil
 	}
 	// Fallback: connect.NewError(code, err.Error()), anchored to errArg's position.
 	pos := errArg.Pos()
@@ -1317,7 +1489,34 @@ func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) bool {
 		Lparen: pos,
 		Rparen: pos,
 	}
-	return true
+	return true, copyIdentChain(errArg)
+}
+
+// withCauseCall builds `call.WithCause(cause)`.
+func withCauseCall(call *ast.CallExpr, cause ast.Expr) *ast.CallExpr {
+	return &ast.CallExpr{
+		Fun: &ast.SelectorExpr{
+			X:   call,
+			Sel: &ast.Ident{NamePos: call.End(), Name: "WithCause"},
+		},
+		Args: []ast.Expr{cause},
+	}
+}
+
+// copyIdentChain copies an identifier or selector chain such as s.err, or
+// returns nil.
+func copyIdentChain(expr ast.Expr) ast.Expr {
+	switch expr := expr.(type) {
+	case *ast.Ident:
+		return &ast.Ident{NamePos: expr.NamePos, Name: expr.Name}
+	case *ast.SelectorExpr:
+		x := copyIdentChain(expr.X)
+		if x == nil {
+			return nil
+		}
+		return &ast.SelectorExpr{X: x, Sel: &ast.Ident{NamePos: expr.Sel.NamePos, Name: expr.Sel.Name}}
+	}
+	return nil
 }
 
 // isMessageStringExpr reports whether expr is already a v2 message string: a
@@ -1432,6 +1631,25 @@ func unwrapConnectMessageLiteral(expr ast.Expr, connectAlias string) (msg ast.Ex
 	// No Msg field (&connect.Response[T]{}): flip the wrapper type to give &T{}.
 	lit.Type = index.Index
 	return expr, rule, true
+}
+
+// unwrapInPlace returns inner, joining the wrapper's lines around it so the
+// printer leaves no gap.
+func unwrapInPlace(state *rewriteState, wrapper, inner ast.Expr) ast.Expr {
+	tokFile := state.fset.File(wrapper.Pos())
+	for _, span := range [][2]token.Pos{{wrapper.Pos(), inner.Pos()}, {inner.End(), wrapper.End()}} {
+		if !hasComment(state.file, span[0], span[1]) {
+			state.lineJoins = append(state.lineJoins, [2]int{tokFile.Offset(span[0]), tokFile.Offset(span[1])})
+		}
+	}
+	return inner
+}
+
+// hasComment reports whether a comment overlaps [start, end).
+func hasComment(file *ast.File, start, end token.Pos) bool {
+	return slices.ContainsFunc(file.Comments, func(group *ast.CommentGroup) bool {
+		return group.Pos() < end && group.End() > start
+	})
 }
 
 func isConnectSelector(fun ast.Expr, connectAlias, name string) bool {

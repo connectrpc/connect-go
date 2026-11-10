@@ -126,6 +126,193 @@ plugins:
 			wantChanged: true,
 		},
 		{
+			// `revision` only applies to remote plugins, so it is dropped.
+			name: "remote_plugin_revision_dropped",
+			in: `version: v2
+plugins:
+  - remote: buf.build/connectrpc/go:v1.18.1
+    revision: 1
+    out: gen
+`,
+			want: `version: v2
+plugins:
+  - remote: buf.build/connectrpc/go:v2.0.0
+    out: gen
+`,
+			wantChanged: true,
+		},
+		{
+			// The plugin key need not be the item's first key.
+			name: "remote_plugin_key_not_first",
+			in: `version: v2
+plugins:
+  - out: gen
+    remote: buf.build/connectrpc/go:v1.18.1
+    opt: simple=true
+`,
+			want: `version: v2
+plugins:
+  - out: gen
+    remote: buf.build/connectrpc/go:v2.0.0
+`,
+			wantChanged: true,
+		},
+		{
+			name: "v1_plugin_key_not_first",
+			in: `version: v1
+plugins:
+  - out: gen
+    plugin: buf.build/connectrpc/go:v1.18.1
+`,
+			want: `version: v1
+plugins:
+  - out: gen
+    plugin: buf.build/connectrpc/go:v2.0.0
+`,
+			wantChanged: true,
+		},
+		{
+			name: "local_plugin_key_not_first_strips_simple",
+			in: `version: v2
+plugins:
+  - out: gen
+    opt: simple=true
+    local: protoc-gen-connect-go
+`,
+			want: `version: v2
+plugins:
+  - out: gen
+    local: protoc-gen-connect-go
+`,
+			wantChanged: true,
+			wantWarn:    "reinstall the generator",
+		},
+		{
+			// Removing a key on the dash line moves the next key up.
+			name: "opt_first_hoists_next_key",
+			in: `version: v2
+plugins:
+  - opt: simple=true
+    local: protoc-gen-connect-go
+`,
+			want: `version: v2
+plugins:
+  - local: protoc-gen-connect-go
+`,
+			wantChanged: true,
+			wantWarn:    "reinstall the generator",
+		},
+		{
+			name: "revision_first_hoists_next_key",
+			in: `version: v2
+plugins:
+  - revision: 1
+    remote: buf.build/connectrpc/go:v1.18.1
+    out: gen
+`,
+			want: `version: v2
+plugins:
+  - remote: buf.build/connectrpc/go:v2.0.0
+    out: gen
+`,
+			wantChanged: true,
+		},
+		{
+			name: "opt_list_first_hoists_next_key",
+			in: `version: v2
+plugins:
+  - opt:
+      - simple=true
+    out: gen
+    local: protoc-gen-connect-go
+`,
+			want: `version: v2
+plugins:
+  - out: gen
+    local: protoc-gen-connect-go
+`,
+			wantChanged: true,
+		},
+		{
+			name: "opt_list_first_keeps_other_options",
+			in: `version: v2
+plugins:
+  - opt:
+      - paths=source_relative
+      - simple=true
+    local: protoc-gen-connect-go
+`,
+			want: `version: v2
+plugins:
+  - opt:
+      - paths=source_relative
+    local: protoc-gen-connect-go
+`,
+			wantChanged: true,
+		},
+		{
+			name: "flow_mapping_pinned",
+			in: `version: v2
+plugins:
+  - {remote: buf.build/connectrpc/go:v1.18.1, out: gen}
+`,
+			want: `version: v2
+plugins:
+  - {remote: buf.build/connectrpc/go:v2.0.0, out: gen}
+`,
+			wantChanged: true,
+		},
+		{
+			name: "quoted_and_commented_ref_pinned",
+			in: `version: v2
+plugins:
+  - remote: "buf.build/connectrpc/go:v1.18.1" # pinned
+    out: gen
+`,
+			want: `version: v2
+plugins:
+  - remote: "buf.build/connectrpc/go:v2.0.0" # pinned
+    out: gen
+`,
+			wantChanged: true,
+		},
+		{
+			// A flow opt list can't lose an item line by line.
+			name: "flow_opt_list_with_simple_warns",
+			in: `version: v2
+plugins:
+  - local: protoc-gen-connect-go
+    opt: [paths=source_relative, simple=true]
+`,
+			want:        "",
+			wantChanged: false,
+			wantWarn:    "remove the v1 `simple` option by hand",
+		},
+		{
+			name: "invalid_yaml_warns",
+			in: `version: v2
+plugins:
+  - local: protoc-gen-connect-go
+   out: [
+`,
+			want:        "",
+			wantChanged: false,
+			wantWarn:    "could not parse the template",
+		},
+		{
+			// A key nested deeper than the item's own keys is not the plugin.
+			name: "nested_key_ignored",
+			in: `version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: gen
+    opt:
+      - remote: buf.build/connectrpc/go:v1.18.1
+`,
+			want:        "",
+			wantChanged: false,
+		},
+		{
 			name: "remote_plugin_already_v2_is_noop",
 			in: `version: v2
 plugins:
@@ -137,8 +324,8 @@ plugins:
 		},
 		{
 			// v2 folds the simple API into the default generator, so the
-			// gosimple plugin migrates onto connectrpc/go, not a gosimple v2.
-			name: "remote_gosimple_replaced_by_default_plugin",
+			// gosimple plugin migrates onto the same local plugin.
+			name: "remote_gosimple_pinned",
 			in: `version: v2
 plugins:
   - remote: buf.build/connectrpc/gosimple:v1.18.1
@@ -152,7 +339,7 @@ plugins:
 			wantChanged: true,
 		},
 		{
-			name: "remote_gosimple_unversioned_replaced",
+			name: "remote_gosimple_unversioned_pinned",
 			in: `version: v2
 plugins:
   - remote: buf.build/connectrpc/gosimple
@@ -166,7 +353,7 @@ plugins:
 			wantChanged: true,
 		},
 		{
-			name: "v1_plugin_gosimple_replaced",
+			name: "v1_plugin_gosimple_pinned",
 			in: `version: v1
 plugins:
   - plugin: buf.build/connectrpc/gosimple:v1.18.1
@@ -181,8 +368,8 @@ plugins:
 		},
 		{
 			// Private BSR instances use the same plugin path under another host,
-			// and the rewrite must keep that host rather than jump to buf.build.
-			name: "remote_private_host_keeps_host",
+			// and are pinned too.
+			name: "remote_private_host_pinned",
 			in: `version: v2
 plugins:
   - remote: buf.example.com/connectrpc/go:v1.18.1
@@ -196,7 +383,7 @@ plugins:
 			wantChanged: true,
 		},
 		{
-			name: "remote_private_host_gosimple_replaced",
+			name: "remote_private_host_gosimple_pinned",
 			in: `version: v2
 plugins:
   - remote: bsr.internal.acme.dev/connectrpc/gosimple:v1.18.1
@@ -231,7 +418,7 @@ plugins:
 			wantChanged: false,
 		},
 		{
-			name: "remote_pin_warns_plugin_not_published",
+			name: "remote_plugin_pinned",
 			in: `version: v2
 plugins:
   - remote: buf.build/connectrpc/go:v1.18.1
@@ -243,7 +430,6 @@ plugins:
     out: gen
 `,
 			wantChanged: true,
-			wantWarn:    "is not published yet",
 		},
 		{
 			name: "gotool_warns_about_gomod_and_strips",
@@ -490,22 +676,5 @@ plugins:
 				t.Errorf("not idempotent; second pass changed output\n--- first ---\n%s\n--- second ---\n%s", string(got), string(got2))
 			}
 		})
-	}
-}
-
-func TestYamlScalar(t *testing.T) {
-	t.Parallel()
-	tests := []struct{ in, want string }{
-		{"simple=true", "simple=true"},
-		{"paths=source_relative # note", "paths=source_relative"},
-		{`"a #b"`, "a #b"},
-		{`'a #b'`, "a #b"},
-		{`"quoted"`, "quoted"},
-		{"  spaced  ", "spaced"},
-	}
-	for _, test := range tests {
-		if got := yamlScalar(test.in); got != test.want {
-			t.Errorf("yamlScalar(%q) = %q, want %q", test.in, got, test.want)
-		}
 	}
 }

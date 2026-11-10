@@ -1,0 +1,86 @@
+# Two-phase flow: a ready file (no stub use) lets the first run edit sources
+# while the stubs are still v1. The handler file is deferred, then rewritten
+# once the stubs are regenerated to v2.
+stubs v1generic
+exec migrate -w
+cmp stdout out1.txt
+stubs v2
+exec migrate
+cmp stdout out2.txt
+exec migrate -w
+exec go build ./...
+-- errors.go --
+package app
+
+import "connectrpc.com/connect"
+
+func notFound() error {
+	return connect.NewError(connect.CodeNotFound, nil)
+}
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) CountUp(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+	for i := int64(1); i <= req.Msg.Number; i++ {
+		if err := stream.Send(&pingv1.CountUpResponse{Number: i}); err != nil {
+			return err
+		}
+	}
+	return connect.NewError(connect.CodeInternal, nil)
+}
+-- out1.txt --
+Applied rewrites:
+  ./errors.go: convert_code_const=1 convert_new_error=1 flip_residual_connect=1 import_add_connectv2=1 import_drop_v1=1
+
+Deferred until their connect stubs are regenerated to v2:
+  ./service.go:15:56: stub-dependent rewrite (handler/client signatures, .Msg, NewRequest/NewResponse, streams, construction)
+Regenerate those stubs (buf generate) and re-run connect-go-v2-migrate.
+
+Scanned 2 Go files and 0 Buf templates. 1 rewrite(s) applied.
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md
+-- out2.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: body_drop_msg=1 convert_code_const=1 convert_new_error=1 flip_residual_connect=1 import_add_connectv2=1 import_drop_v1=1 param_unwrap_request=1 stream_handler_param=1
+--- ./service.go
++++ ./service.go
+@@ -3,7 +3,7 @@
+ import (
+ 	"context"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -12,12 +12,12 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) CountUp(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+-	for i := int64(1); i <= req.Msg.Number; i++ {
++func (s *pingServer) CountUp(ctx context.Context, req *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
++	for i := int64(1); i <= req.Number; i++ {
+ 		if err := stream.Send(&pingv1.CountUpResponse{Number: i}); err != nil {
+ 			return err
+ 		}
+ 	}
+-	return connect.NewError(connect.CodeInternal, nil)
++	return connect.NewError(connect.CodeInternal, "")
+ }
+ 
+
+
+Scanned 2 Go files and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

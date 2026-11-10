@@ -2,7 +2,7 @@
 # prompt for the v2 modules that go.mod is missing.
 exec migrate
 cmp stdout out.txt
-stdout 'go.mod is missing the v2 modules'
+stdout 'go.mod needs the connect v2 modules'
 stdout 'connectrpc.com/connect/v2'
 ! stdout 'First, move the dependencies'
 -- go.mod --
@@ -73,7 +73,7 @@ Proposed rewrites (rerun with -w to apply):
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
 
-go.mod is missing the v2 modules. Pull them in and tidy:
+go.mod needs the connect v2 modules. Pull them in and tidy:
 
   go get -u \
        connectrpc.com/connect/v2

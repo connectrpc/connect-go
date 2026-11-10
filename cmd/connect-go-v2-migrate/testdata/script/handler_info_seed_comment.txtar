@@ -1,0 +1,84 @@
+# The seeded CallInfo goes above a comment on the handler's first statement,
+# leaving the comment with its statement.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	// Read the caller's token.
+	token := req.Header().Get("Authorization")
+	return connect.NewResponse(&pingv1.PingResponse{Text: token}), nil
+}
+
+func (s *pingServer) Sum(ctx context.Context, req *connect.Request[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+	// Validate first.
+	if req.Msg.GetNumber() < 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, nil)
+	}
+	// Then read metadata.
+	return connect.NewResponse(&pingv1.SumResponse{Sum: int64(len(req.Header().Get("X-Trace")))}), nil
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: body_drop_msg=1 convert_code_const=1 convert_new_error=1 flip_residual_connect=1 import_add_connectv2=1 import_drop_v1=1 param_unwrap_request=2 result_unwrap_response=2 server_header_rewrite=2 strip_new_response=2
+--- ./service.go
++++ ./service.go
+@@ -3,7 +3,7 @@
+ import (
+ 	"context"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -12,18 +12,20 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
++func (s *pingServer) Ping(ctx context.Context, req *pingv1.PingRequest) (*pingv1.PingResponse, error) {
++	info, _ := connect.CallInfoForServerContext(ctx)
+ 	// Read the caller's token.
+-	token := req.Header().Get("Authorization")
+-	return connect.NewResponse(&pingv1.PingResponse{Text: token}), nil
++	token := info.RequestHeader().Get("Authorization")
++	return &pingv1.PingResponse{Text: token}, nil
+ }
+ 
+-func (s *pingServer) Sum(ctx context.Context, req *connect.Request[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
++func (s *pingServer) Sum(ctx context.Context, req *pingv1.SumRequest) (*pingv1.SumResponse, error) {
++	info, _ := connect.CallInfoForServerContext(ctx)
+ 	// Validate first.
+-	if req.Msg.GetNumber() < 0 {
+-		return nil, connect.NewError(connect.CodeInvalidArgument, nil)
++	if req.GetNumber() < 0 {
++		return nil, connect.NewError(connect.CodeInvalidArgument, "")
+ 	}
+ 	// Then read metadata.
+-	return connect.NewResponse(&pingv1.SumResponse{Sum: int64(len(req.Header().Get("X-Trace")))}), nil
++	return &pingv1.SumResponse{Sum: int64(len(info.RequestHeader().Get("X-Trace")))}, nil
+ }
+ 
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

@@ -17,8 +17,10 @@ package memhttp
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"sync"
+	"syscall"
 )
 
 var errListenerClosed = errors.New("listener closed")
@@ -72,6 +74,11 @@ func (l *memoryListener) Addr() net.Addr {
 // DialContext is the type expected by http.Transport.DialContext.
 func (l *memoryListener) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	server, client := net.Pipe()
+	return l.handshake(ctx, &pipeConn{Conn: server, addr: l.addr}, &pipeConn{Conn: client, addr: l.addr})
+}
+
+// handshake hands the server end to Accept and returns the client end.
+func (l *memoryListener) handshake(ctx context.Context, server, client net.Conn) (net.Conn, error) {
 	select {
 	case <-ctx.Done():
 		return nil, &net.OpError{Op: "dial", Net: l.addr.Network(), Err: ctx.Err()}
@@ -90,3 +97,25 @@ func (memoryAddr) Network() string { return "memory" }
 // String implements io.Stringer, returning a value that matches the
 // certificates used by net/http/httptest.
 func (a memoryAddr) String() string { return string(a) }
+
+// pipeConn reports write failures the way a network connection does. net.Pipe
+// returns io.ErrClosedPipe, but a connection whose peer has gone away fails
+// with EPIPE.
+type pipeConn struct {
+	net.Conn
+
+	addr memoryAddr
+}
+
+func (c *pipeConn) Write(b []byte) (int, error) {
+	written, err := c.Conn.Write(b)
+	if errors.Is(err, io.ErrClosedPipe) {
+		return written, &net.OpError{
+			Op:   "write",
+			Net:  c.addr.Network(),
+			Addr: c.addr,
+			Err:  syscall.EPIPE,
+		}
+	}
+	return written, err
+}
