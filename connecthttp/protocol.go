@@ -401,22 +401,30 @@ func canonicalizeContentType(contentType string) string {
 }
 
 func canonicalizeContentTypeSlow(contentType string) string {
+	// A malformed Content-Type is returned unchanged so that it matches no
+	// protocol and is rejected.
 	base, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		return contentType
 	}
-	// According to RFC 9110 Section 8.3.2, the charset parameter value should be treated as case-insensitive.
-	// Connect payloads are always UTF-8, so a utf-8 charset is dropped to canonicalize to the bare
-	// content type; any other charset is retained (and rejected during codec negotiation).
-	// ref.) https://httpwg.org/specs/rfc9110.html#rfc.section.8.3.2
-	if charset, ok := params["charset"]; ok {
-		if strings.ToLower(charset) == "utf-8" {
-			delete(params, "charset")
-		} else {
-			params["charset"] = strings.ToLower(charset)
-		}
+	// Parameters are ignored, except that JSON payloads must be UTF-8. A JSON
+	// charset other than utf-8 is kept so that it matches no codec. Charset
+	// values are case-insensitive (RFC 9110 Section 8.3.2).
+	charset, ok := params["charset"]
+	if !ok || !isJSONMediaType(base) {
+		return base
 	}
-	return mime.FormatMediaType(base, params)
+	charset = strings.ToLower(charset)
+	if charset == "utf-8" {
+		return base
+	}
+	return mime.FormatMediaType(base, map[string]string{"charset": charset})
+}
+
+// isJSONMediaType reports whether base names the JSON codec, either directly
+// (application/json) or as a structured syntax suffix (application/connect+json).
+func isJSONMediaType(base string) bool {
+	return base == connectUnaryContentTypeJSON || strings.HasSuffix(base, "+"+connect.CodecNameJSON)
 }
 
 func httpToCode(httpCode int) connect.Code {
