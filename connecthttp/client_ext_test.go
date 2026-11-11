@@ -1282,3 +1282,170 @@ func (b *blockingResetBody) Read([]byte) (int, error) {
 	<-b.release
 	return 0, b.err
 }
+
+func TestClientResponseContentTypeParameters(t *testing.T) {
+	t.Parallel()
+	pingServer := &pluggablePingServer{
+		ping: func(_ context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+			if request.GetNumber() < 0 {
+				return nil, connect.NewError(connect.CodeFailedPrecondition, "negative")
+			}
+			return &pingv1.PingResponse{Number: request.GetNumber()}, nil
+		},
+		countUp: func(_ context.Context, request *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
+			for i := range request.GetNumber() {
+				if err := stream.Send(&pingv1.CountUpResponse{Number: i + 1}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, pingServer)
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, srv)
+	testCases := []struct {
+		name string
+		json bool
+		// rewrite maps the Content-Type the server chose to the one sent.
+		rewrite   func(string) string
+		expectErr connect.Code
+		// expectErrorBodyCode is the code for an RPC that fails with
+		// failed_precondition: it falls back to the HTTP status's code when
+		// the client must discard the JSON error body.
+		expectErrorBodyCode connect.Code
+	}{
+		{
+			name:                "proto_extra_parameter",
+			rewrite:             func(contentType string) string { return contentType + "; foo=bar" },
+			expectErrorBodyCode: connect.CodeFailedPrecondition,
+		},
+		{
+			name:                "proto_uppercase",
+			rewrite:             strings.ToUpper,
+			expectErrorBodyCode: connect.CodeFailedPrecondition,
+		},
+		{
+			name:                "proto_ignores_charset",
+			rewrite:             func(contentType string) string { return contentType + "; charset=latin1" },
+			expectErrorBodyCode: connect.CodeInternal,
+		},
+		{
+			name:                "json_utf8_charset_no_space",
+			json:                true,
+			rewrite:             func(contentType string) string { return contentType + ";charset=utf-8" },
+			expectErrorBodyCode: connect.CodeFailedPrecondition,
+		},
+		{
+			name:                "json_uppercase_charset_and_extra_parameter",
+			json:                true,
+			rewrite:             func(contentType string) string { return strings.ToUpper(contentType) + "; Charset=UTF-8; foo=bar" },
+			expectErrorBodyCode: connect.CodeFailedPrecondition,
+		},
+		{
+			name:                "json_last_utf8_charset",
+			json:                true,
+			rewrite:             func(contentType string) string { return contentType + "; a=1; b=2; charset=utf-8" },
+			expectErrorBodyCode: connect.CodeFailedPrecondition,
+		},
+		{
+			name:                "json_middle_non_utf8_charset",
+			json:                true,
+			rewrite:             func(contentType string) string { return contentType + "; a=1; charset=latin1; b=2" },
+			expectErr:           connect.CodeInternal,
+			expectErrorBodyCode: connect.CodeInternal,
+		},
+		{
+			name:                "json_non_utf8_charset",
+			json:                true,
+			rewrite:             func(contentType string) string { return contentType + "; charset=latin1" },
+			expectErr:           connect.CodeInternal,
+			expectErrorBodyCode: connect.CodeInternal,
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			server := memhttptest.NewServer(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				mux.ServeHTTP(&contentTypeRewriter{ResponseWriter: writer, rewrite: testCase.rewrite}, request)
+			}))
+			var options []connecthttp.Option
+			if testCase.json {
+				options = append(options, connecthttp.WithProtoJSON())
+			}
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(
+				connecthttp.NewTransport(server.Client(), server.URL(), options...),
+			))
+			t.Run("unary", func(t *testing.T) {
+				t.Parallel()
+				response, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 42})
+				if testCase.expectErr != 0 {
+					assert.Equal(t, connect.CodeOf(err), testCase.expectErr)
+					return
+				}
+				assert.Nil(t, err)
+				assert.Equal(t, response.GetNumber(), 42)
+			})
+			t.Run("unary_error", func(t *testing.T) {
+				t.Parallel()
+				_, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: -1})
+				assert.Equal(t, connect.CodeOf(err), testCase.expectErrorBodyCode)
+			})
+			t.Run("server_stream", func(t *testing.T) {
+				t.Parallel()
+				stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 3})
+				if err == nil {
+					var received []int64
+					var msg *pingv1.CountUpResponse
+					for msg, err = stream.Receive(); err == nil; msg, err = stream.Receive() {
+						received = append(received, msg.GetNumber())
+					}
+					if errors.Is(err, io.EOF) {
+						err = nil
+						assert.Equal(t, received, []int64{1, 2, 3})
+					}
+				}
+				if testCase.expectErr != 0 {
+					assert.Equal(t, connect.CodeOf(err), testCase.expectErr)
+					return
+				}
+				assert.Nil(t, err)
+			})
+		})
+	}
+}
+
+// contentTypeRewriter rewrites the response Content-Type just before the
+// headers are sent.
+type contentTypeRewriter struct {
+	http.ResponseWriter
+
+	rewrite     func(string) string
+	wroteHeader bool
+}
+
+func (w *contentTypeRewriter) WriteHeader(statusCode int) {
+	if !w.wroteHeader {
+		w.wroteHeader = true
+		header := w.Header()
+		header.Set("Content-Type", w.rewrite(header.Get("Content-Type")))
+	}
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *contentTypeRewriter) Write(data []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *contentTypeRewriter) Flush() {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
