@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net"
@@ -899,7 +900,14 @@ func (c *wsClientCall) send(text bool, data []byte) (int64, error) {
 	if err := c.ensureDialed(); err != nil {
 		return 0, err
 	}
-	return writeFrame(c.ctx, c.wsConn, text, data)
+	written, err := writeFrame(c.ctx, c.wsConn, text, data)
+	if err != nil && c.ctx.Err() == nil {
+		// A server may end the RPC before reading every request, so a failed
+		// write is how this end learns the stream is over. As over HTTP, it
+		// reads as io.EOF and the caller calls Receive for the server's verdict.
+		return written, fmt.Errorf("%w: %w", io.EOF, err)
+	}
+	return written, err
 }
 
 type websocketClientConn struct {
@@ -959,6 +967,10 @@ func (c *websocketClientConn) Send(msg any) error {
 func (c *websocketClientConn) CloseRequest() error {
 	// A stream that sent no message still has to open before it can end.
 	if err := c.open(); err != nil {
+		if c.requestSideEnded(err) {
+			c.sendClosed.Store(true)
+			return nil
+		}
 		return err
 	}
 	c.sendCloseOnce.Do(func() {
@@ -968,16 +980,24 @@ func (c *websocketClientConn) CloseRequest() error {
 		// would have implied.
 		c.sendCloseErr = c.marshaler.send(markerClientEndStream, c.marshaler.bodyIsText, nil)
 	})
-	if c.sendCloseErr != nil {
+	if c.sendCloseErr != nil && !c.requestSideEnded(c.sendCloseErr) {
 		return c.sendCloseErr
 	}
 	return nil
 }
 
+// requestSideEnded reports a failed write that leaves nothing for CloseRequest
+// to close: the server ended the stream, or the call's context did. Receive
+// reports why, as it does when connecthttp's CloseSend succeeds in either case.
+func (c *websocketClientConn) requestSideEnded(err error) bool {
+	return errors.Is(err, io.EOF) || c.call.ctx.Err() != nil
+}
+
 func (c *websocketClientConn) Receive(msg any) error {
 	// A stream that only receives still has to open: the server will not
-	// dispatch the handler until the opening metadata arrives.
-	if err := c.open(); err != nil {
+	// dispatch the handler until the opening metadata arrives. If the server
+	// has already ended the stream, its verdict is still there to read.
+	if err := c.open(); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	err := c.unmarshaler.Unmarshal(msg)
