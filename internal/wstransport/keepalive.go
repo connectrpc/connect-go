@@ -52,7 +52,7 @@ type keepAlive struct {
 
 // startKeepAlive returns nil when interval is not positive. A timeout shorter
 // than keepAliveMisses intervals is raised to that. closeCode is what this side
-// sends a silent peer: 1011 from a server, 3111 from a client (§13).
+// sends a silent peer: 1011 from a server, 3102 from a client (§13).
 // The pinging ends when ctx is done, when stop is called, or when the
 // connection closes.
 func startKeepAlive(

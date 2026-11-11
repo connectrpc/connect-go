@@ -102,12 +102,13 @@ func nextFrame(reader io.Reader) (opcode byte, payload []byte, err error) {
 
 // watchFrames reads until a close frame arrives or reading fails, counting
 // Pings and passing each to answer when it is non-nil. It reports the close
-// code, or noCloseFrame. The caller bounds it with a deadline on the conn.
-func watchFrames(reader io.Reader, answer func(payload []byte)) (pings, closeCode int) {
+// code and reason, or noCloseFrame. The caller bounds it with a deadline on the
+// conn.
+func watchFrames(reader io.Reader, answer func(payload []byte)) (pings, closeCode int, reason string) {
 	for {
 		opcode, payload, err := nextFrame(reader)
 		if err != nil {
-			return pings, noCloseFrame
+			return pings, noCloseFrame, ""
 		}
 		switch opcode {
 		case opcodePing:
@@ -117,9 +118,9 @@ func watchFrames(reader io.Reader, answer func(payload []byte)) (pings, closeCod
 			}
 		case opcodeClose:
 			if len(payload) < 2 {
-				return pings, noCloseFrame
+				return pings, noCloseFrame, ""
 			}
-			return pings, int(binary.BigEndian.Uint16(payload))
+			return pings, int(binary.BigEndian.Uint16(payload)), string(payload[2:])
 		}
 	}
 }
@@ -160,7 +161,7 @@ func TestServerHangsUpOnSilentClient(t *testing.T) {
 	conn := openRawCumSum(t, httpServer)
 
 	assert.Nil(t, conn.SetReadDeadline(time.Now().Add(10*time.Second)))
-	pings, closeCode := watchFrames(conn, nil)
+	pings, closeCode, _ := watchFrames(conn, nil)
 	assert.True(t, pings >= 1)
 	assert.Equal(t, closeCode, 1011)
 }
@@ -176,7 +177,7 @@ func TestServerWaitsOutKeepAliveTimeout(t *testing.T) {
 	conn := openRawCumSum(t, httpServer)
 
 	assert.Nil(t, conn.SetReadDeadline(time.Now().Add(10*time.Second)))
-	pings, closeCode := watchFrames(conn, nil)
+	pings, closeCode, _ := watchFrames(conn, nil)
 	assert.True(t, pings >= 5)
 	assert.Equal(t, closeCode, 1011)
 }
@@ -192,7 +193,7 @@ func TestServerSparesClientThatAnswersPings(t *testing.T) {
 	conn := openRawCumSum(t, httpServer)
 
 	assert.Nil(t, conn.SetReadDeadline(time.Now().Add(6*sparedInterval)))
-	pings, closeCode := watchFrames(conn, func(payload []byte) {
+	pings, closeCode, _ := watchFrames(conn, func(payload []byte) {
 		_ = writeClientFragment(conn, payload, true, opcodePong)
 	})
 	assert.Equal(t, closeCode, noCloseFrame)
@@ -246,8 +247,8 @@ func silentServer(tb testing.TB) (string, <-chan *bufio.Reader) {
 	return "http://" + listener.Addr().String(), accepted
 }
 
-// The client pings too, and hangs up on a silent server with 3111, the
-// client's counterpart of 1011 (§13). The RPC fails as Unavailable, which
+// The client pings too, and hangs up on a silent server with 3102, the only
+// error code a client has (§13), and a reason saying why. The RPC fails as Unavailable, which
 // invites the retry a dead connection deserves.
 func TestClientHangsUpOnSilentServer(t *testing.T) {
 	t.Parallel()
@@ -265,9 +266,10 @@ func TestClientHangsUpOnSilentServer(t *testing.T) {
 	t.Cleanup(func() { _ = stream.Close() })
 	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
 
-	pings, closeCode := watchFrames(<-accepted, nil)
+	pings, closeCode, reason := watchFrames(<-accepted, nil)
 	assert.True(t, pings >= 1)
-	assert.Equal(t, closeCode, 3111)
+	assert.Equal(t, closeCode, 3102)
+	assert.Equal(t, reason, "keep-alive timeout")
 	_, err = stream.Receive()
 	assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
 	assert.True(t, strings.Contains(err.Error(), "keep-alive timeout"))
@@ -347,7 +349,7 @@ func TestConnectHTTPKeepAliveReachesBothSides(t *testing.T) {
 	t.Cleanup(httpServer.Close)
 	conn := openRawCumSum(t, httpServer)
 	assert.Nil(t, conn.SetReadDeadline(time.Now().Add(10*time.Second)))
-	pings, closeCode := watchFrames(conn, nil)
+	pings, closeCode, _ := watchFrames(conn, nil)
 	assert.True(t, pings >= 1)
 	assert.Equal(t, closeCode, 1011)
 
@@ -366,7 +368,8 @@ func TestConnectHTTPKeepAliveReachesBothSides(t *testing.T) {
 	assert.Nil(t, err)
 	t.Cleanup(func() { _ = stream.Close() })
 	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
-	pings, closeCode = watchFrames(<-accepted, nil)
+	pings, closeCode, reason := watchFrames(<-accepted, nil)
 	assert.True(t, pings >= 1)
-	assert.Equal(t, closeCode, 3111)
+	assert.Equal(t, closeCode, 3102)
+	assert.Equal(t, reason, "keep-alive timeout")
 }

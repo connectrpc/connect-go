@@ -335,9 +335,10 @@ func TestClientRefusesSharedCompressionContext(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
+			closes := make(chan websocket.CloseError, 1)
 			httpServer := httptest.NewServer(http.HandlerFunc(
 				func(responseWriter http.ResponseWriter, request *http.Request) {
-					handshakeWithExtension(t, responseWriter, request, test.extension)
+					handshakeWithExtension(t, responseWriter, request, test.extension, closes)
 				},
 			))
 			t.Cleanup(httpServer.Close)
@@ -359,17 +360,27 @@ func TestClientRefusesSharedCompressionContext(t *testing.T) {
 			}
 			assert.NotNil(t, sendErr)
 			assert.True(t, strings.Contains(sendErr.Error(), "no-context-takeover"))
+			// §10: 3102, with the reason naming what the server left out.
+			select {
+			case closeErr := <-closes:
+				assert.Equal(t, closeErr.Code, websocket.StatusCode(3102))
+				assert.True(t, strings.Contains(closeErr.Reason, "no_context_takeover"))
+			case <-time.After(10 * time.Second):
+				t.Fatal("the client never closed")
+			}
 		})
 	}
 }
 
 // handshakeWithExtension completes an upgrade by hand, echoing an arbitrary
 // Sec-WebSocket-Extensions value that coder's own server would never produce.
+// It reports the client's close frame on closes.
 func handshakeWithExtension(
 	tb testing.TB,
 	responseWriter http.ResponseWriter,
 	request *http.Request,
 	extension string,
+	closes chan<- websocket.CloseError,
 ) {
 	tb.Helper()
 	hijacker, ok := responseWriter.(http.Hijacker)
@@ -393,12 +404,8 @@ func handshakeWithExtension(
 	}
 	// Hold the connection open so the client's own verdict is what the test
 	// observes, not a closed socket.
-	buffer := make([]byte, 1024)
-	for {
-		if _, err := conn.Read(buffer); err != nil {
-			return
-		}
-	}
+	_, code, reason := watchFrames(conn, nil)
+	closes <- websocket.CloseError{Code: websocket.StatusCode(code), Reason: reason}
 }
 
 // The high bit is reserved for a later revision of the protocol, so a first

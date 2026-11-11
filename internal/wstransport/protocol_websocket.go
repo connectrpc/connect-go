@@ -199,26 +199,10 @@ func peerFault(err *connect.Error) bool {
 	return code == connect.CodeResourceExhausted || code == connect.CodeInvalidArgument
 }
 
-// Close codes this binding assigns a client, from §13. A browser script may
-// only pass 1000 or 3000-4999 to close(), so a client cannot send the 10xx code
-// a server would; its codes live in the 31xx range instead, and a receiver
-// folds them onto the 10xx code with the same last two digits.
-const (
-	wsStatusClientProtocolError   = websocket.StatusCode(3102)
-	wsStatusClientUnsupportedData = websocket.StatusCode(3103)
-	wsStatusClientMessageTooBig   = websocket.StatusCode(3109)
-	wsStatusClientCompression     = websocket.StatusCode(3110)
-	wsStatusClientInternal        = websocket.StatusCode(3111)
-)
-
-// normalizeCloseStatus folds a 31xx code onto the 10xx code with the same last
-// two digits, so that the rest of this package can interpret one set (§13).
-func normalizeCloseStatus(status websocket.StatusCode) websocket.StatusCode {
-	if status >= 3100 && status <= 3199 {
-		return status - 2100
-	}
-	return status
-}
+// wsStatusClientProtocolError is the only error code §13 lets a client send. A
+// browser script may only pass 1000 or 3000-4999 to close(), so the reason, not
+// the code, says what went wrong.
+const wsStatusClientProtocolError = websocket.StatusCode(3102)
 
 // serverCloseCode is the code §13 assigns each framing fault. A more specific
 // one wins over the generic protocol error.
@@ -236,18 +220,10 @@ func serverCloseCode(fault ProtocolFault) websocket.StatusCode {
 	return websocket.StatusProtocolError
 }
 
-// clientCloseCode is the 31xx counterpart of serverCloseCode, except that §6.1
-// has a client report invalid UTF-8 as a protocol error, as a browser does.
-func clientCloseCode(fault ProtocolFault) websocket.StatusCode {
-	switch fault {
-	case FaultFrameType:
-		return wsStatusClientUnsupportedData
-	case FaultSizeLimit:
-		return wsStatusClientMessageTooBig
-	case FaultMarker, FaultMetadata, FaultMessageEncoding, FaultTextEncoding, FaultUnknown:
-		return wsStatusClientProtocolError
-	}
-	return wsStatusClientProtocolError
+// closeClientWithError ends a client's connection with 3102. The code alone
+// cannot tell a server what went wrong, so §13 requires the reason.
+func closeClientWithError(conn *websocket.Conn, limiter *drainLimiter, reason string) error {
+	return closeWithDrain(conn, limiter, wsStatusClientProtocolError, closeReason(reason))
 }
 
 // closeReason truncates to the 123 bytes a WebSocket close frame allows: RFC
@@ -491,7 +467,7 @@ func (u *websocketUnmarshaler) nextMessage() (wireMessage, *connect.Error) {
 			u.fault = FaultSizeLimit
 			return wireMessage{}, exceedsReadLimit(u.readMaxBytes)
 		}
-		if limitErr := readLimitError(readerErr, u.readMaxBytes); limitErr != nil {
+		if limitErr := peerRejectedAsTooBig(readerErr); limitErr != nil {
 			u.fault = FaultSizeLimit
 			return wireMessage{}, limitErr
 		}
@@ -767,18 +743,12 @@ func readBoundedMessage(
 	}
 }
 
-// readLimitError recognizes a message that blew a read limit, whether this
-// side enforced it or the peer closed the connection because of it. Both mean
-// the same thing to a caller, and neither is a transport failure.
-//
-// Only this side's limit is reported as a number. A peer's is its own
-// business, and its close reason is the only account of it there is.
-func readLimitError(err error, readMaxBytes int) *connect.Error {
-	if normalizeCloseStatus(websocket.CloseStatus(err)) == websocket.StatusMessageTooBig {
+// peerRejectedAsTooBig recognizes a peer that closed the connection because a
+// message from this side blew its read limit. The peer's limit is its own
+// business, so the close reason is the only account of it there is.
+func peerRejectedAsTooBig(err error) *connect.Error {
+	if websocket.CloseStatus(err) == websocket.StatusMessageTooBig {
 		return errorf(connect.CodeResourceExhausted, "peer rejected message as too big: %w", err)
-	}
-	if errors.Is(err, websocket.ErrMessageTooBig) {
-		return exceedsReadLimit(readMaxBytes)
 	}
 	return nil
 }
@@ -797,7 +767,6 @@ func isCleanWebSocketClose(err error) bool {
 	// Not a switch: the repo's exhaustive linter wants every StatusCode listed,
 	// and enumerating thirteen irrelevant close codes would obscure the rule.
 	status := websocket.CloseStatus(err)
-	status = normalizeCloseStatus(status)
 	return status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway
 }
 
@@ -879,18 +848,22 @@ func (c *wsClientCall) ensureDialed() *connect.Error {
 			return
 		}
 		if takeoverErr := checkNoContextTakeover(response); takeoverErr != nil {
-			// §10 assigns this 3110.
-			_ = closeWithDrain(conn, c.drain, wsStatusClientCompression, "no-context-takeover required")
+			_ = closeClientWithError(
+				conn, c.drain,
+				"permessage-deflate requires client_no_context_takeover and server_no_context_takeover",
+			)
 			c.dialErr = takeoverErr
 			return
 		}
-		// Bounds the inflated message and the compressed input both; see the
-		// note in session.Serve.
-		conn.SetReadLimit(c.readLimit)
+		// The limit is enforced in readBoundedMessage, as on the server: coder's
+		// SetReadLimit closes with 1009, a code §13 does not let a client send.
+		conn.SetReadLimit(-1)
 		c.wsConn = conn
-		c.reader = newFrameReader(c.ctx, conn.Read)
+		c.reader = newFrameReader(c.ctx, func(readCtx context.Context) (websocket.MessageType, []byte, error) {
+			return readBoundedMessage(readCtx, conn, c.readLimit)
+		})
 		c.keeper = startKeepAlive(
-			c.ctx, conn, c.reader, c.keepAliveInterval, c.keepAliveTimeout, wsStatusClientInternal,
+			c.ctx, conn, c.reader, c.keepAliveInterval, c.keepAliveTimeout, wsStatusClientProtocolError,
 		)
 	})
 	<-c.dialDone
@@ -916,9 +889,9 @@ func (c *wsClientCall) send(text bool, data []byte) (int64, error) {
 type websocketClientConn struct {
 	call   *wsClientCall
 	codecs codecPair
-	// localFault records a failure this end produced rather than read off the
-	// wire, which §13.1 closes with 3111.
-	localFault atomic.Bool
+	// localFault records the first failure this end produced rather than read
+	// off the wire; its message is the close reason.
+	localFault atomic.Pointer[connect.Error]
 
 	marshaler messageWriter
 	// openOnce writes the M message that must precede every other message on
@@ -1067,7 +1040,7 @@ func (c *websocketClientConn) noteLocalFault(err *connect.Error) {
 	// path's ResourceExhausted is sendMaxBytes, which only this end imposes and
 	// only on its own writes. A failed write reports neither.
 	if err.Code() == connect.CodeInternal || err.Code() == connect.CodeResourceExhausted {
-		c.localFault.Store(true)
+		c.localFault.CompareAndSwap(nil, err)
 	}
 }
 
@@ -1090,18 +1063,16 @@ func (c *websocketClientConn) CloseResponse() error {
 
 func (c *websocketClientConn) closeConn() error {
 	drain := c.call.drain
-	if c.unmarshaler.peerFaulted {
-		// A client cannot send the 10xx code a server would: §13 puts its codes
-		// in the 31xx range, the only one a browser script may use. A peer fault
-		// is the more specific condition, so it wins over 3111 below.
-		return closeWithDrain(c.call.wsConn, drain, clientCloseCode(c.unmarshaler.fault), "")
+	// A peer fault wins over a local one: it is what the server can act on.
+	if peerErr := c.unmarshaler.peerFaultErr; peerErr != nil {
+		return closeClientWithError(c.call.wsConn, drain, peerErr.Message())
 	}
-	if c.localFault.Load() {
+	if localErr := c.localFault.Load(); localErr != nil {
 		// §13.1: the RPC ended on an unexpected condition at this end, not on
 		// anything the server did. Sent unconditionally — the peer behaved, so
 		// the closing handshake has nothing queued to drain, and the ordinary
 		// 1000 below costs the same handshake anyway.
-		return closeWithDrain(c.call.wsConn, drain, wsStatusClientInternal, "")
+		return closeClientWithError(c.call.wsConn, drain, localErr.Message())
 	}
 	// Best-effort clean close. Sending 1000 Normal Closure is correct even if
 	// Receive has not yet observed the EndStream: the server's completion path
@@ -1127,8 +1098,10 @@ type websocketClientUnmarshaler struct {
 
 	// endStreamSeen is atomic because Send and CloseSend, which may run
 	// concurrently with Receive, read it.
-	endStreamSeen  atomic.Bool
-	peerFaulted    bool
+	endStreamSeen atomic.Bool
+	// peerFaultErr is the first error the server's framing caused; its message
+	// is the close reason.
+	peerFaultErr   *connect.Error
 	endStreamError *connect.Error
 	trailer        http.Header
 	header         http.Header
@@ -1150,8 +1123,8 @@ func (u *websocketClientUnmarshaler) Unmarshal(message any) *connect.Error {
 		u.metadataConsumed = false
 		u.fault = FaultUnknown
 		err := u.unmarshal(message)
-		if peerFault(err) {
-			u.peerFaulted = true
+		if peerFault(err) && u.peerFaultErr == nil {
+			u.peerFaultErr = err
 		}
 		// Gated on the classification rather than peerFault; see the server
 		// side. Observation only — err is returned unchanged.
@@ -1213,10 +1186,14 @@ func (u *websocketClientUnmarshaler) readFailure(readerErr error) *connect.Error
 		)
 		return u.endStreamError
 	}
-	if limitErr := readLimitError(readerErr, u.readMaxBytes); limitErr != nil {
-		// Classified like any other peer fault: a server sending more than
-		// this client agreed to read is the server's mistake, and the
-		// monitor should see it under the same name the server uses.
+	// Classified like any other peer fault: a server sending more than this
+	// client agreed to read is the server's mistake, and the monitor should
+	// see it under the same name the server uses.
+	if errors.Is(readerErr, errMessageTooBig) {
+		u.fault = FaultSizeLimit
+		return exceedsReadLimit(u.readMaxBytes)
+	}
+	if limitErr := peerRejectedAsTooBig(readerErr); limitErr != nil {
 		u.fault = FaultSizeLimit
 		return limitErr
 	}

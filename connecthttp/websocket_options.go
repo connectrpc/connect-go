@@ -189,7 +189,7 @@ func WithoutWebSocketCompression() Option {
 // 30 seconds; zero or less turns keep-alive off.
 //
 // A peer heard nothing from for the keep-alive timeout, neither a message nor
-// a Pong, is hung up on with close code 1011 from a server or 3111 from a
+// a Pong, is hung up on with close code 1011 from a server or 3102 from a
 // client, and the RPC fails. See [WithWebSocketKeepAliveTimeout].
 func WithWebSocketKeepAlive(interval time.Duration) Option {
 	return webSocketBothOption{wstransport.WithKeepAlive(interval)}

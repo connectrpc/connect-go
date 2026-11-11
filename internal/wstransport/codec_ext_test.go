@@ -16,6 +16,7 @@ package wstransport_test
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -162,8 +163,9 @@ func TestBareEndOfClientStreamFollowsTheNegotiatedFrameType(t *testing.T) {
 }
 
 // closeCodeRecordingServer accepts an upgrade by hand and reports the close
-// code the client eventually sends, which is the only way to see one.
-func closeCodeRecordingServer(tb testing.TB, codes chan<- websocket.StatusCode) *httptest.Server {
+// code and reason the client eventually sends, which is the only way to see
+// them. A read that ended without a close frame reports code -1.
+func closeCodeRecordingServer(tb testing.TB, codes chan<- websocket.CloseError) *httptest.Server {
 	tb.Helper()
 	httpServer := httptest.NewServer(http.HandlerFunc(
 		func(responseWriter http.ResponseWriter, request *http.Request) {
@@ -177,7 +179,7 @@ func closeCodeRecordingServer(tb testing.TB, codes chan<- websocket.StatusCode) 
 			for {
 				if _, _, readErr := conn.Read(request.Context()); readErr != nil {
 					select {
-					case codes <- websocket.CloseStatus(readErr):
+					case codes <- closeErrorOf(readErr):
 					default:
 					}
 					return
@@ -189,12 +191,19 @@ func closeCodeRecordingServer(tb testing.TB, codes chan<- websocket.StatusCode) 
 	return httpServer
 }
 
+func closeErrorOf(err error) websocket.CloseError {
+	if closeErr, ok := errors.AsType[websocket.CloseError](err); ok {
+		return closeErr
+	}
+	return websocket.CloseError{Code: -1}
+}
+
 // §13.1: a client that ends an RPC on its own unexpected condition says so with
-// 3111, rather than the 1000 that would tell the server the stream finished
-// normally. The server behaved here — only this end failed.
+// 3102 and a reason, rather than the 1000 that would tell the server the stream
+// finished normally. The server behaved here — only this end failed.
 func TestClientClosesWithInternalErrorCode(t *testing.T) {
 	t.Parallel()
-	codes := make(chan websocket.StatusCode, 1)
+	codes := make(chan websocket.CloseError, 1)
 	httpServer := closeCodeRecordingServer(t, codes)
 
 	transport := connecthttp.NewTransport(
@@ -214,8 +223,10 @@ func TestClientClosesWithInternalErrorCode(t *testing.T) {
 	assert.Equal(t, connect.CodeOf(callErr), connect.CodeResourceExhausted)
 
 	select {
-	case code := <-codes:
-		assert.Equal(t, code, websocket.StatusCode(3111))
+	case closeErr := <-codes:
+		assert.Equal(t, closeErr.Code, websocket.StatusCode(3102))
+		assert.True(t, strings.Contains(closeErr.Reason, "16"))
+		assert.True(t, len(closeErr.Reason) <= 123)
 	case <-time.After(10 * time.Second):
 		t.Fatal("the client never closed")
 	}
@@ -225,7 +236,7 @@ func TestClientClosesWithInternalErrorCode(t *testing.T) {
 // be what this client always sends.
 func TestCleanStreamClosesNormally(t *testing.T) {
 	t.Parallel()
-	codes := make(chan websocket.StatusCode, 1)
+	codes := make(chan websocket.CloseError, 1)
 	httpServer := closeCodeRecordingServer(t, codes)
 
 	transport := connecthttp.NewTransport(
@@ -240,8 +251,8 @@ func TestCleanStreamClosesNormally(t *testing.T) {
 	assert.Nil(t, stream.Close())
 
 	select {
-	case code := <-codes:
-		assert.Equal(t, code, websocket.StatusNormalClosure)
+	case closeErr := <-codes:
+		assert.Equal(t, closeErr.Code, websocket.StatusNormalClosure)
 	case <-time.After(10 * time.Second):
 		t.Fatal("the client never closed")
 	}

@@ -365,7 +365,7 @@ func WithInfrastructureHeaders(names ...string) ServerOption {
 // See connecthttp.WithWebSocketKeepAlive.
 //
 // A peer heard nothing from for the timeout set by [WithKeepAliveTimeout] is
-// hung up on: 1011 from a server, 3111 from a client (§13.2). The RPC fails as
+// hung up on: 1011 from a server, 3102 from a client (§13.2). The RPC fails as
 // Unavailable on the client and Canceled on the server.
 //
 // Pongs are sent regardless of this setting. Either side may enable it alone.
