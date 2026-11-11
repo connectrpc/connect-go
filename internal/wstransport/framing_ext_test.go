@@ -215,10 +215,9 @@ func TestInvalidUTF8InATextMessageIsRejected(t *testing.T) {
 			assert.True(t, strings.Contains(string(data), "invalid_argument"))
 			assert.True(t, strings.Contains(string(data), "not valid UTF-8"))
 
-			// An encoding fault, so §13 gives it 1002 rather than 1003.
 			faults, _ := recorder.seen()
 			assert.Equal(t, len(faults), 1)
-			assert.Equal(t, faults[0], connecthttp.FaultMessageEncoding)
+			assert.Equal(t, faults[0], connecthttp.FaultTextEncoding)
 		})
 	}
 }
@@ -262,6 +261,14 @@ func TestFaultCloseCodeNamesTheFault(t *testing.T) {
 				sendJSONMessage(tb, conn, wireBody, nil)
 			},
 			want: websocket.StatusUnsupportedData, // 1003
+		},
+		{
+			name: "invalid UTF-8 in a text message is invalid payload data",
+			send: func(tb testing.TB, conn *websocket.Conn) {
+				tb.Helper()
+				sendJSONMessage(tb, conn, wireMetadata, []byte{'{', 0x80, '}'})
+			},
+			want: websocket.StatusInvalidFramePayloadData, // 1007
 		},
 		{
 			name: "an oversized message is too big",

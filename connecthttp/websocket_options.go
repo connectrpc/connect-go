@@ -82,6 +82,8 @@ const (
 	FaultMetadata = wstransport.FaultMetadata
 	// FaultMessageEncoding is a payload the negotiated codec cannot decode.
 	FaultMessageEncoding = wstransport.FaultMessageEncoding
+	// FaultTextEncoding is a text message that is not valid UTF-8.
+	FaultTextEncoding = wstransport.FaultTextEncoding
 )
 
 // WithWebSocketCheckOrigin replaces the default same-origin check on the

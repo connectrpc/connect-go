@@ -29,38 +29,50 @@ import (
 
 // §5: a client that reads a protocol error from the server fails the RPC and
 // closes with 3102, the client's counterpart of 1002, without being asked to.
+// §6.1 has it do the same for invalid UTF-8, as a browser would.
 func TestClientClosesFaultedServerWithCode(t *testing.T) {
 	t.Parallel()
-	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
-	assert.Nil(t, err)
-	t.Cleanup(func() { _ = listener.Close() })
-	closeCodes := make(chan int, 1)
-	go func() {
-		conn, reader := acceptRawUpgrade(t, listener)
+	for _, test := range []struct {
+		name  string
+		frame []byte
+	}{
 		// Server frames are unmasked: FIN | text, then the length.
-		_, _ = conn.Write([]byte{0x81, 3, 'M', '{', '}'})
-		_, _ = conn.Write([]byte{0x81, 3, 'Z', '{', '}'})
-		_, closeCode := watchFrames(reader, nil)
-		closeCodes <- closeCode
-		_ = conn.Close()
-	}()
+		{name: "unknown marker", frame: []byte{0x81, 3, 'Z', '{', '}'}},
+		{name: "invalid UTF-8", frame: []byte{0x81, 3, 'M', '{', 0x80}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+			assert.Nil(t, err)
+			t.Cleanup(func() { _ = listener.Close() })
+			closeCodes := make(chan int, 1)
+			go func() {
+				conn, reader := acceptRawUpgrade(t, listener)
+				_, _ = conn.Write([]byte{0x81, 3, 'M', '{', '}'})
+				_, _ = conn.Write(test.frame)
+				_, closeCode := watchFrames(reader, nil)
+				closeCodes <- closeCode
+				_ = conn.Close()
+			}()
 
-	transport, err := wstransport.NewTransport("http://" + listener.Addr().String())
-	assert.Nil(t, err)
-	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	stream, err := client.CumSum(ctx)
-	assert.Nil(t, err)
-	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
-	_, err = stream.Receive()
-	assert.NotNil(t, err)
-	go func() { _ = stream.Close() }()
+			transport, err := wstransport.NewTransport("http://" + listener.Addr().String())
+			assert.Nil(t, err)
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			stream, err := client.CumSum(ctx)
+			assert.Nil(t, err)
+			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+			_, err = stream.Receive()
+			assert.NotNil(t, err)
+			go func() { _ = stream.Close() }()
 
-	select {
-	case closeCode := <-closeCodes:
-		assert.Equal(t, closeCode, 3102)
-	case <-ctx.Done():
-		t.Fatal("client did not close the connection")
+			select {
+			case closeCode := <-closeCodes:
+				assert.Equal(t, closeCode, 3102)
+			case <-ctx.Done():
+				t.Fatal("client did not close the connection")
+			}
+		})
 	}
 }

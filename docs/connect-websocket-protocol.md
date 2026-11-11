@@ -257,7 +257,7 @@ A text message MUST contain valid UTF-8, which [RFC 6455](https://datatracker.ie
 An implementation MUST validate the UTF-8 encoding of every text message. A peer that emits
 invalid UTF-8 in a text frame has its connection closed by a browser, and a library that does not validate will not reproduce encoding errors in its own tests. 
 
-A browser client detects invalid UTF-8 automatically and closes the connection with a 1002 code. A non-browser client MUST treat it as a protocol error (3102). A server MUST accept either code. A server MUST close the connection with a 1002 code.
+A browser client detects invalid UTF-8 automatically and closes the connection with a 1002 code. A non-browser client MUST treat it as a protocol error (3102). A server MUST accept either code. A server MUST close the connection with a 1007 code.
 
 Because the frame type names the encoding, a body can arrive in a frame type whose codec does not match the encoding negotiated during the original WebSocket upgrade handshake. In this case, the receiver MUST reject such a message as a protocol error, naming the incorrect encoding. It MUST NOT fail in any way that is indistinguishable from a transport fault and MUST report the reason for failure was an invalid encoding.
 
@@ -585,6 +585,7 @@ After a server sends the `S` message, it SHOULD send a Close frame and then stop
 | Page navigates away | — | 1001 (sent by the browser) | §8 |
 | Protocol error | 1002 (after `S`) | 3102 | §5 |
 | Body in the wrong frame type | 1003 (after `S`) | 3103 | §6.1 |
+| Invalid UTF-8 in a text message | 1007 (after `S`) | 3102 | §6.1 |
 | Message exceeded read limit  | 1009 (after `S`) | 3109 | §12.1 |
 | Compression parameters not acceptable | — | 3110 | §10 |
 | Server could not marshal its `S` message | 1011 | — | §13 |
