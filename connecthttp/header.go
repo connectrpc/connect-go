@@ -77,9 +77,6 @@ func getHeaderCanonical(h http.Header, key string) string {
 // the key not being present and the key being present with
 // an empty value.
 func getHeaderCanonicalValid(h http.Header, key string) (string, bool) {
-	if h == nil {
-		return "", false
-	}
 	v, ok := h[key]
 	if len(v) == 0 {
 		return "", ok
