@@ -201,7 +201,7 @@ func (h *connectHandler) NewConn(
 			codecName,
 		)
 	} else {
-		requestBody = request.Body
+		requestBody = serverRequestBody{request}
 		contentType = getHeaderCanonical(request.Header, headerContentType)
 		codecName = connectCodecForContentType(
 			h.spec.StreamType,
