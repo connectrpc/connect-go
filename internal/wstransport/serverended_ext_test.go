@@ -19,6 +19,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 
@@ -35,7 +36,6 @@ import (
 // CloseSend succeeds, and Receive reports the server's verdict.
 func TestClientWriteAfterServerEndedReportsEOF(t *testing.T) {
 	t.Parallel()
-	verdict := []byte(`{"error":{"code":"resource_exhausted","message":"no more"}}`)
 	for _, test := range []struct {
 		name string
 		// failFirstWrite closes the connection before the client's opening M,
@@ -47,9 +47,7 @@ func TestClientWriteAfterServerEndedReportsEOF(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			httpServer := misframingServer(t, func(conn *websocket.Conn) {
-				writeRawFrame(conn, true, wireServerEndStream, verdict)
-			})
+			httpServer := endStreamServer(t, nil, "M{}", verdict)
 			wire := &closingRoundTripper{base: httpServer.Client().Transport}
 			wire.closed.Store(test.failFirstWrite)
 			transport := connecthttp.NewTransport(
@@ -80,7 +78,7 @@ func TestClientWriteAfterServerEndedReportsEOF(t *testing.T) {
 // side without error, and Receive reports why the call ended.
 func TestClientCloseSendAfterContextEnded(t *testing.T) {
 	t.Parallel()
-	httpServer := misframingServer(t, func(*websocket.Conn) {})
+	httpServer := endStreamServer(t, nil, "M{}")
 	wire := &closingRoundTripper{base: httpServer.Client().Transport}
 	transport := connecthttp.NewTransport(
 		&http.Client{Transport: wire},
@@ -100,6 +98,85 @@ func TestClientCloseSendAfterContextEnded(t *testing.T) {
 	assert.Nil(t, stream.CloseSend())
 	_, err = stream.Receive()
 	assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
+}
+
+// Once Receive has returned the server's verdict, the client writes nothing
+// more: §8 has it send no C, and a B would only be discarded. Writing either
+// would race the client's own reply to the server's Close frame.
+func TestClientWritesNothingAfterReceivingEndStream(t *testing.T) {
+	t.Parallel()
+	received := make(chan []byte, 1)
+	httpServer := endStreamServer(t, received, "M{}", verdict)
+	transport := connecthttp.NewTransport(
+		httpServer.Client(),
+		httpServer.URL,
+		connecthttp.WithWebSocket(connecthttp.SelectStreaming),
+	)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+	stream, err := client.CumSum(t.Context())
+	assert.Nil(t, err)
+
+	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+	_, err = stream.Receive()
+	assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+	assert.ErrorIs(t, stream.Send(&pingv1.CumSumRequest{Number: 2}), io.EOF)
+	assert.Nil(t, stream.CloseSend())
+	assert.Nil(t, stream.Close())
+
+	assert.Equal(t, string(<-received), string([]byte{wireMetadata, wireBody}))
+}
+
+const verdict = `S{"error":{"code":"resource_exhausted","message":"no more"}}`
+
+// endStreamServer accepts an upgrade, writes frames as text messages, and sends
+// no Close frame, so nothing races the client's writes. It reads until the
+// client closes or the test ends, then sends the markers it read to received.
+func endStreamServer(tb testing.TB, received chan<- []byte, frames ...string) *httptest.Server {
+	tb.Helper()
+	// Closed before any cleanup runs, so the read below ends even while the
+	// client's Close waits for the server's Close frame.
+	testDone := tb.Context().Done()
+	httpServer := httptest.NewServer(http.HandlerFunc(
+		func(responseWriter http.ResponseWriter, request *http.Request) {
+			conn, err := websocket.Accept(responseWriter, request, &websocket.AcceptOptions{
+				Subprotocols:       []string{"connectrpc.1+proto"},
+				InsecureSkipVerify: true,
+			})
+			if err != nil {
+				return
+			}
+			defer func() { _ = conn.CloseNow() }()
+			for _, frame := range frames {
+				_ = conn.Write(request.Context(), websocket.MessageText, []byte(frame))
+			}
+			// A client whose writes fail cannot send its Close frame, so the
+			// test's end is what stops this read.
+			readCtx, cancel := context.WithCancel(request.Context())
+			defer cancel()
+			go func() {
+				select {
+				case <-testDone:
+					cancel()
+				case <-readCtx.Done():
+				}
+			}()
+			var markers []byte
+			for {
+				_, frame, err := conn.Read(readCtx)
+				if err != nil {
+					break
+				}
+				if len(frame) > 0 {
+					markers = append(markers, frame[0])
+				}
+			}
+			if received != nil {
+				received <- markers
+			}
+		},
+	))
+	tb.Cleanup(httpServer.Close)
+	return httpServer
 }
 
 // closingRoundTripper makes writes on the upgraded connection fail once closed

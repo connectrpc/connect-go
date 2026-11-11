@@ -954,6 +954,11 @@ func (c *websocketClientConn) Send(msg any) error {
 	if c.sendClosed.Load() {
 		return errorf(connect.CodeUnknown, "send after CloseSend: %w", io.EOF)
 	}
+	// Writing now would race this end's reply to the server's Close frame,
+	// and the server discards anything sent after its S.
+	if c.unmarshaler.endStreamSeen.Load() {
+		return errorf(connect.CodeUnknown, "send after the server ended the stream: %w", io.EOF)
+	}
 	if err := c.open(); err != nil {
 		return err
 	}
@@ -965,6 +970,12 @@ func (c *websocketClientConn) Send(msg any) error {
 }
 
 func (c *websocketClientConn) CloseRequest() error {
+	// §8: no C once the response stream has ended. Writing one would race
+	// this end's reply to the server's Close frame.
+	if c.unmarshaler.endStreamSeen.Load() {
+		c.sendClosed.Store(true)
+		return nil
+	}
 	// A stream that sent no message still has to open before it can end.
 	if err := c.open(); err != nil {
 		if c.requestSideEnded(err) {
@@ -1007,7 +1018,7 @@ func (c *websocketClientConn) Receive(msg any) error {
 	// On EndStream, fold trailers and surface any server error. The trailers
 	// stay on the conn: v2 carries them on CallInfo, which the transport
 	// publishes, rather than attaching them to the error.
-	if c.unmarshaler.endStreamSeen {
+	if c.unmarshaler.endStreamSeen.Load() {
 		mergeHeaders(c.responseTrailer, c.unmarshaler.trailer)
 		if serverErr := c.unmarshaler.endStreamError; serverErr != nil {
 			return serverErr
@@ -1111,7 +1122,9 @@ type websocketClientUnmarshaler struct {
 	onProtocolError ClientProtocolErrorHandler
 	fault           ProtocolFault
 
-	endStreamSeen  bool
+	// endStreamSeen is atomic because Send and CloseSend, which may run
+	// concurrently with Receive, read it.
+	endStreamSeen  atomic.Bool
 	peerFaulted    bool
 	endStreamError *connect.Error
 	trailer        http.Header
@@ -1163,7 +1176,7 @@ func (u *websocketClientUnmarshaler) fail(
 // readFailure turns a failed read into the RPC's error. Every failure ends the
 // response stream.
 func (u *websocketClientUnmarshaler) readFailure(readerErr error) *connect.Error {
-	u.endStreamSeen = true
+	u.endStreamSeen.Store(true)
 	if u.call.keeper.timedOut() {
 		u.endStreamError = errorf(
 			connect.CodeUnavailable,
@@ -1209,11 +1222,11 @@ func (u *websocketClientUnmarshaler) readFailure(readerErr error) *connect.Error
 
 func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 	if err := u.call.ensureDialed(); err != nil {
-		u.endStreamSeen = true
+		u.endStreamSeen.Store(true)
 		u.endStreamError = err
 		return err
 	}
-	if u.endStreamSeen {
+	if u.endStreamSeen.Load() {
 		return errorf(connect.CodeUnknown, "%w", io.EOF)
 	}
 
@@ -1279,7 +1292,7 @@ func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 			u.fault = FaultMetadata
 			return decodeErr
 		}
-		u.endStreamSeen = true
+		u.endStreamSeen.Store(true)
 		u.trailer = trailer
 		u.endStreamError = end.Error.AsError()
 		return errorf(connect.CodeUnknown, "%w", io.EOF)
