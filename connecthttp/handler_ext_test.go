@@ -246,6 +246,146 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	})
 }
 
+func TestHandlerContentTypeParameters(t *testing.T) {
+	t.Parallel()
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, successPingServer{})
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, srv)
+	server := memhttptest.NewServer(t, mux)
+	testCases := []struct {
+		name                string
+		procedure           string
+		requestContentType  string
+		body                string
+		expectStatus        int
+		expectResponseCType string
+	}{
+		{
+			name:                "unary_extra_parameter",
+			procedure:           pingv1connect.PingServicePingProcedure,
+			requestContentType:  "application/proto; foo=bar",
+			expectStatus:        http.StatusOK,
+			expectResponseCType: "application/proto",
+		},
+		{
+			name:                "unary_uppercase_extra_parameter",
+			procedure:           pingv1connect.PingServicePingProcedure,
+			requestContentType:  "Application/Proto; Foo=Bar",
+			expectStatus:        http.StatusOK,
+			expectResponseCType: "application/proto",
+		},
+		{
+			name:                "unary_json_extra_parameters",
+			procedure:           pingv1connect.PingServicePingProcedure,
+			requestContentType:  "application/json; foo=bar; charset=utf-8",
+			body:                "{}",
+			expectStatus:        http.StatusOK,
+			expectResponseCType: "application/json",
+		},
+		{
+			name:                "unary_proto_ignores_charset",
+			procedure:           pingv1connect.PingServicePingProcedure,
+			requestContentType:  "application/proto; charset=latin1",
+			expectStatus:        http.StatusOK,
+			expectResponseCType: "application/proto",
+		},
+		{
+			name:               "unary_json_non_utf8_charset",
+			procedure:          pingv1connect.PingServicePingProcedure,
+			requestContentType: "application/json; foo=bar; charset=latin1",
+			body:               "{}",
+			expectStatus:       http.StatusUnsupportedMediaType,
+		},
+		{
+			name:               "unary_json_middle_non_utf8_charset",
+			procedure:          pingv1connect.PingServicePingProcedure,
+			requestContentType: "application/json; a=1; charset=latin1; b=2",
+			body:               "{}",
+			expectStatus:       http.StatusUnsupportedMediaType,
+		},
+		{
+			name:               "unary_json_empty_charset",
+			procedure:          pingv1connect.PingServicePingProcedure,
+			requestContentType: `application/json; charset=""`,
+			body:               "{}",
+			expectStatus:       http.StatusUnsupportedMediaType,
+		},
+		{
+			name:               "unary_malformed_parameter",
+			procedure:          pingv1connect.PingServicePingProcedure,
+			requestContentType: "application/proto; foo",
+			expectStatus:       http.StatusUnsupportedMediaType,
+		},
+		{
+			name:                "stream_extra_parameter",
+			procedure:           pingv1connect.PingServiceSumProcedure,
+			requestContentType:  "application/connect+proto; foo=bar",
+			expectStatus:        http.StatusOK,
+			expectResponseCType: "application/connect+proto",
+		},
+		{
+			name:                "stream_proto_ignores_charset",
+			procedure:           pingv1connect.PingServiceSumProcedure,
+			requestContentType:  "application/connect+proto; charset=latin1",
+			expectStatus:        http.StatusOK,
+			expectResponseCType: "application/connect+proto",
+		},
+		{
+			name:                "stream_json_utf8_charset",
+			procedure:           pingv1connect.PingServiceSumProcedure,
+			requestContentType:  "application/connect+json; charset=UTF-8",
+			expectStatus:        http.StatusOK,
+			expectResponseCType: "application/connect+json",
+		},
+		{
+			name:                "stream_json_last_utf8_charset",
+			procedure:           pingv1connect.PingServiceSumProcedure,
+			requestContentType:  "application/connect+json; a=1; b=2; charset=utf-8",
+			expectStatus:        http.StatusOK,
+			expectResponseCType: "application/connect+json",
+		},
+		{
+			name:               "stream_json_last_non_utf8_charset",
+			procedure:          pingv1connect.PingServiceSumProcedure,
+			requestContentType: "application/connect+json; a=1; b=2; charset=latin1",
+			expectStatus:       http.StatusUnsupportedMediaType,
+		},
+		{
+			name:               "stream_json_non_utf8_charset",
+			procedure:          pingv1connect.PingServiceSumProcedure,
+			requestContentType: "application/connect+json; charset=latin1",
+			expectStatus:       http.StatusUnsupportedMediaType,
+		},
+		{
+			name:               "stream_missing_plus",
+			procedure:          pingv1connect.PingServiceSumProcedure,
+			requestContentType: "application/connectproto",
+			expectStatus:       http.StatusUnsupportedMediaType,
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			request, err := http.NewRequestWithContext(
+				t.Context(),
+				http.MethodPost,
+				server.URL()+testCase.procedure,
+				strings.NewReader(testCase.body),
+			)
+			assert.Nil(t, err)
+			request.Header.Set("Content-Type", testCase.requestContentType)
+			response, err := server.Client().Do(request)
+			assert.Nil(t, err)
+			defer response.Body.Close()
+			assert.Equal(t, response.StatusCode, testCase.expectStatus)
+			if testCase.expectResponseCType != "" {
+				assert.Equal(t, response.Header.Get("Content-Type"), testCase.expectResponseCType)
+			}
+		})
+	}
+}
+
 func TestHandlerMaliciousPrefix(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()

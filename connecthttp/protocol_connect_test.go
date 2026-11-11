@@ -16,11 +16,14 @@ package connecthttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"connectrpc.com/connect/v2"
@@ -175,6 +178,46 @@ func TestConnectValidateUnaryResponseContentType(t *testing.T) {
 			statusCode:          http.StatusOK,
 			responseContentType: "application/json; charset=utf-8",
 		},
+		{
+			codecName:           connect.CodecNameJSON,
+			statusCode:          http.StatusOK,
+			responseContentType: "application/json;charset=utf-8",
+		},
+		{
+			codecName:           connect.CodecNameJSON,
+			statusCode:          http.StatusOK,
+			responseContentType: "Application/JSON; Charset=UTF-8",
+		},
+		{
+			codecName:           connect.CodecNameJSON,
+			statusCode:          http.StatusOK,
+			responseContentType: "application/json; foo=bar",
+		},
+		{
+			codecName:           connect.CodecNameJSON,
+			statusCode:          http.StatusOK,
+			responseContentType: "application/json; a=1; charset=utf-8; b=2",
+		},
+		{
+			codecName:           connect.CodecNameProto,
+			statusCode:          http.StatusOK,
+			responseContentType: "Application/Proto",
+		},
+		{
+			codecName:           connect.CodecNameProto,
+			statusCode:          http.StatusOK,
+			responseContentType: "application/proto; foo=bar",
+		},
+		{
+			codecName:           connect.CodecNameProto,
+			statusCode:          http.StatusOK,
+			responseContentType: "application/proto; charset=utf-8",
+		},
+		{
+			codecName:           connect.CodecNameProto,
+			statusCode:          http.StatusOK,
+			responseContentType: "application/proto; charset=latin1",
+		},
 		// Allowed content-types for error responses.
 		{
 			codecName:           connect.CodecNameProto,
@@ -196,6 +239,26 @@ func TestConnectValidateUnaryResponseContentType(t *testing.T) {
 			statusCode:          http.StatusPreconditionFailed,
 			responseContentType: "application/json; charset=utf-8",
 		},
+		{
+			codecName:           connect.CodecNameProto,
+			statusCode:          http.StatusBadRequest,
+			responseContentType: "application/json;charset=utf-8",
+		},
+		{
+			codecName:           connect.CodecNameProto,
+			statusCode:          http.StatusBadRequest,
+			responseContentType: "Application/JSON; Charset=UTF-8",
+		},
+		{
+			codecName:           connect.CodecNameProto,
+			statusCode:          http.StatusBadRequest,
+			responseContentType: "application/json; foo=bar",
+		},
+		{
+			codecName:           connect.CodecNameProto,
+			statusCode:          http.StatusBadRequest,
+			responseContentType: "application/json; foo=bar; charset=utf-8",
+		},
 		// 304 Not Modified for GET request gets a special error, regardless of content-type
 		{
 			codecName:           connect.CodecNameProto,
@@ -215,9 +278,30 @@ func TestConnectValidateUnaryResponseContentType(t *testing.T) {
 		},
 		// OK status, invalid content-type
 		{
+			codecName:            connect.CodecNameJSON,
+			statusCode:           http.StatusOK,
+			responseContentType:  "application/json; charset=latin1",
+			expectCode:           connect.CodeInternal,
+			expectBadContentType: true,
+		},
+		{
+			codecName:            connect.CodecNameJSON,
+			statusCode:           http.StatusOK,
+			responseContentType:  "application/json; a=1; charset=latin1; b=2",
+			expectCode:           connect.CodeInternal,
+			expectBadContentType: true,
+		},
+		{
+			codecName:            codecNameJSONCharsetUTF8,
+			statusCode:           http.StatusOK,
+			responseContentType:  "application/json; charset=latin1",
+			expectCode:           connect.CodeInternal,
+			expectBadContentType: true,
+		},
+		{
 			codecName:            connect.CodecNameProto,
 			statusCode:           http.StatusOK,
-			responseContentType:  "application/proto; charset=utf-8",
+			responseContentType:  "application/proto; foo",
 			expectCode:           connect.CodeInternal,
 			expectBadContentType: true,
 		},
@@ -243,6 +327,18 @@ func TestConnectValidateUnaryResponseContentType(t *testing.T) {
 			expectBadContentType: true,
 		},
 		// connect.Error status, invalid content-type, returns code based on HTTP status code
+		{
+			codecName:           connect.CodecNameProto,
+			statusCode:          http.StatusBadRequest,
+			responseContentType: "application/json; charset=latin1",
+			expectCode:          httpToCode(http.StatusBadRequest),
+		},
+		{
+			codecName:           connect.CodecNameProto,
+			statusCode:          http.StatusBadRequest,
+			responseContentType: "application/json; foo=bar; charset=latin1",
+			expectCode:          httpToCode(http.StatusBadRequest),
+		},
 		{
 			codecName:           connect.CodecNameProto,
 			statusCode:          http.StatusNotFound,
@@ -310,6 +406,34 @@ func TestConnectValidateStreamResponseContentType(t *testing.T) {
 			codecName:           connect.CodecNameJSON,
 			responseContentType: "application/connect+json",
 		},
+		{
+			codecName:           connect.CodecNameJSON,
+			responseContentType: "application/connect+json; charset=utf-8",
+		},
+		{
+			codecName:           connect.CodecNameJSON,
+			responseContentType: "Application/Connect+JSON;Charset=UTF-8",
+		},
+		{
+			codecName:           connect.CodecNameJSON,
+			responseContentType: "application/connect+json; foo=bar",
+		},
+		{
+			codecName:           connect.CodecNameJSON,
+			responseContentType: "application/connect+json; a=1; b=2; charset=utf-8",
+		},
+		{
+			codecName:           connect.CodecNameProto,
+			responseContentType: "Application/Connect+Proto",
+		},
+		{
+			codecName:           connect.CodecNameProto,
+			responseContentType: "application/connect+proto; foo=bar",
+		},
+		{
+			codecName:           connect.CodecNameProto,
+			responseContentType: "application/connect+proto; charset=latin1",
+		},
 		// Mismatched response codec
 		{
 			codecName:           connect.CodecNameProto,
@@ -324,8 +448,23 @@ func TestConnectValidateStreamResponseContentType(t *testing.T) {
 		// Disallowed content-types
 		{
 			codecName:           connect.CodecNameJSON,
-			responseContentType: "application/connect+json; charset=utf-8",
+			responseContentType: "application/connect+json; charset=latin1",
 			expectCode:          connect.CodeInternal, // *almost* looks right
+		},
+		{
+			codecName:           connect.CodecNameJSON,
+			responseContentType: "application/connect+json; a=1; charset=latin1; b=2",
+			expectCode:          connect.CodeInternal,
+		},
+		{
+			codecName:           connect.CodecNameProto,
+			responseContentType: "application/connect+proto; foo",
+			expectCode:          connect.CodeInternal,
+		},
+		{
+			codecName:           connect.CodecNameProto,
+			responseContentType: "application/connectproto",
+			expectCode:          connect.CodeUnknown,
 		},
 		{
 			codecName:           connect.CodecNameProto,
@@ -472,6 +611,89 @@ func TestConnectEncodeTimeout(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, connectEncodeTimeout(test.timeout), test.want)
+		})
+	}
+}
+
+func TestSetTimeout(t *testing.T) {
+	t.Parallel()
+	data := []struct {
+		name             string
+		value            string
+		expectedDuration time.Duration
+		expectedError    error
+	}{
+		{
+			name:             "empty",
+			value:            "",
+			expectedDuration: 0,
+			expectedError:    connect.NewError(connect.CodeInvalidArgument, "parse timeout: no value supplied"),
+		},
+		{
+			name:             "ok",
+			value:            "100",
+			expectedDuration: 100 * time.Millisecond,
+			expectedError:    nil,
+		},
+		{
+			name:             "plus",
+			value:            "+100",
+			expectedDuration: 0,
+			expectedError:    connect.NewError(connect.CodeInvalidArgument, `parse timeout: "+100" has non-digit characters`),
+		},
+		{
+			name:             "minus",
+			value:            "-100",
+			expectedDuration: 0,
+			expectedError:    connect.NewError(connect.CodeInvalidArgument, `parse timeout: "-100" has non-digit characters`),
+		},
+		{
+			name:             "zero",
+			value:            "0",
+			expectedDuration: 0,
+			expectedError:    nil,
+		},
+		{
+			name:             "long",
+			value:            "123456789801234567890",
+			expectedDuration: 0,
+			expectedError:    connect.NewError(connect.CodeInvalidArgument, `parse timeout: "123456789801234567890" has >10 digits`),
+		},
+	}
+	ch := connectHandler{}
+	// first, test not present
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+	req.Header = http.Header{}
+	ctx, cancel, err := ch.SetTimeout(req)
+	assert.NotNil(t, ctx)
+	_, ok := ctx.Deadline()
+	assert.False(t, ok)
+	assert.Nil(t, cancel)
+	assert.Nil(t, err)
+	for _, d := range data {
+		t.Run(d.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+				req.Header = http.Header{
+					connectHeaderTimeout: []string{d.value},
+				}
+				ctx, cancel, err := ch.SetTimeout(req)
+				if d.expectedError != nil {
+					assert.Nil(t, ctx)
+					assert.Nil(t, cancel)
+					// no Is support; have to compare strings
+					assert.Equal(t, err.Error(), d.expectedError.Error())
+				} else {
+					assert.NotNil(t, ctx)
+					assert.NotNil(t, cancel)
+					assert.Nil(t, err)
+					duration, ok := ctx.Deadline()
+					assert.True(t, ok)
+					cancelTime := time.Now().Add(d.expectedDuration)
+					assert.Equal(t, duration, cancelTime)
+				}
+			})
 		})
 	}
 }
