@@ -468,10 +468,13 @@ func TestConnectionReset(t *testing.T) {
 	t.Parallel()
 	// A reset observed by the client is a transport failure, not the caller
 	// canceling, so it must be CodeUnavailable. Retries remain the caller's
-	// responsibility and are safe only for idempotent RPCs.
+	// responsibility and are safe only for idempotent RPCs. net/http reports
+	// a connection lost before the response body ended as io.ErrUnexpectedEOF,
+	// which is the same failure.
 	resetErrs := map[string]error{
-		"ECONNRESET": &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.ECONNRESET)},
-		"EPIPE":      &net.OpError{Op: "write", Net: "tcp", Err: os.NewSyscallError("write", syscall.EPIPE)},
+		"ECONNRESET":       &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.ECONNRESET)},
+		"EPIPE":            &net.OpError{Op: "write", Net: "tcp", Err: os.NewSyscallError("write", syscall.EPIPE)},
+		"ErrUnexpectedEOF": io.ErrUnexpectedEOF,
 	}
 	pingServer := &pluggablePingServer{
 		ping: func(context.Context, *pingv1.PingRequest) (*pingv1.PingResponse, error) {
