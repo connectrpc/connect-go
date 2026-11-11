@@ -225,7 +225,7 @@ func (g *grpcHandler) NewConn(
 		unmarshaler: grpcUnmarshaler{
 			envelopeReader: envelopeReader{
 				ctx:             ctx,
-				reader:          request.Body,
+				reader:          serverRequestBody{request},
 				codec:           codec,
 				compressionPool: g.CompressionPools.Get(requestCompression),
 				readMaxBytes:    g.ReadMaxBytes,

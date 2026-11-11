@@ -56,3 +56,44 @@ func TestHeaderMerge(t *testing.T) {
 	}
 	assert.Equal(t, header, expect)
 }
+
+func Test_getHeaderCanonical(t *testing.T) {
+	t.Parallel()
+	header := http.Header{
+		"Foo": []string{"one"},
+		"Bar": []string{""},
+	}
+	data := []struct {
+		name          string
+		key           string
+		expectedValue string
+		expectedOK    bool
+	}{
+		{
+			name:          "present",
+			key:           "Foo",
+			expectedValue: "one",
+			expectedOK:    true,
+		},
+		{
+			name:          "present_empty",
+			key:           "Bar",
+			expectedValue: "",
+			expectedOK:    true,
+		},
+		{
+			name:          "missing",
+			key:           "Baz",
+			expectedValue: "",
+			expectedOK:    false,
+		},
+	}
+	for _, d := range data {
+		t.Run(d.name, func(t *testing.T) {
+			t.Parallel()
+			value, ok := getHeaderCanonicalValid(header, d.key)
+			assert.Equal(t, value, d.expectedValue)
+			assert.Equal(t, ok, d.expectedOK)
+		})
+	}
+}

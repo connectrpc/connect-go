@@ -16,6 +16,7 @@ package connecthttp
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"connectrpc.com/connect/v2"
@@ -108,6 +109,12 @@ func (h *handler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Re
 	}
 	if timeoutErr != nil {
 		_ = connCloser.Close(timeoutErr)
+		return
+	}
+	// A zero timeout expires before the RPC starts. Report it here, since the
+	// implementation may never check its context.
+	if err := ctx.Err(); errors.Is(err, context.DeadlineExceeded) {
+		_ = connCloser.Close(wrapIfContextError(err))
 		return
 	}
 	_ = connCloser.Close(h.implementation(ctx, connCloser, info))
