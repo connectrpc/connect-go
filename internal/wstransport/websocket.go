@@ -157,6 +157,8 @@ const (
 	FaultMetadata
 	// FaultMessageEncoding is a payload the negotiated codec cannot decode.
 	FaultMessageEncoding
+	// FaultTextEncoding is a text message that is not valid UTF-8.
+	FaultTextEncoding
 )
 
 func (f ProtocolFault) String() string {
@@ -171,6 +173,8 @@ func (f ProtocolFault) String() string {
 		return "metadata"
 	case FaultMessageEncoding:
 		return "message_encoding"
+	case FaultTextEncoding:
+		return "text_encoding"
 	case FaultUnknown:
 		return "unknown"
 	default:

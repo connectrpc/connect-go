@@ -228,20 +228,23 @@ func serverCloseCode(fault ProtocolFault) websocket.StatusCode {
 		return websocket.StatusUnsupportedData
 	case FaultSizeLimit:
 		return websocket.StatusMessageTooBig
+	case FaultTextEncoding:
+		return websocket.StatusInvalidFramePayloadData
 	case FaultMarker, FaultMetadata, FaultMessageEncoding, FaultUnknown:
 		return websocket.StatusProtocolError
 	}
 	return websocket.StatusProtocolError
 }
 
-// clientCloseCode is the 31xx counterpart of serverCloseCode.
+// clientCloseCode is the 31xx counterpart of serverCloseCode, except that §6.1
+// has a client report invalid UTF-8 as a protocol error, as a browser does.
 func clientCloseCode(fault ProtocolFault) websocket.StatusCode {
 	switch fault {
 	case FaultFrameType:
 		return wsStatusClientUnsupportedData
 	case FaultSizeLimit:
 		return wsStatusClientMessageTooBig
-	case FaultMarker, FaultMetadata, FaultMessageEncoding, FaultUnknown:
+	case FaultMarker, FaultMetadata, FaultMessageEncoding, FaultTextEncoding, FaultUnknown:
 		return wsStatusClientProtocolError
 	}
 	return wsStatusClientProtocolError
@@ -504,7 +507,7 @@ func (u *websocketUnmarshaler) nextMessage() (wireMessage, *connect.Error) {
 		return wireMessage{}, decodeErr
 	}
 	if utf8Err := textEncodingError(frame, text); utf8Err != nil {
-		u.fault = FaultMessageEncoding
+		u.fault = FaultTextEncoding
 		return wireMessage{}, utf8Err
 	}
 	if len(wire.payload) > u.readMaxBytes && u.readMaxBytes > 0 {
@@ -1244,7 +1247,7 @@ func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 		return decodeErr
 	}
 	if utf8Err := textEncodingError(frame, text); utf8Err != nil {
-		u.fault = FaultMessageEncoding
+		u.fault = FaultTextEncoding
 		return utf8Err
 	}
 	if u.readMaxBytes > 0 && len(wire.payload) > u.readMaxBytes {

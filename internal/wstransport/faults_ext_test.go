@@ -334,6 +334,13 @@ func TestClientProtocolFaultsAreClassified(t *testing.T) {
 			want: connecthttp.FaultMetadata,
 		},
 		{
+			name: "invalid UTF-8 in a text message",
+			write: func(conn *websocket.Conn) {
+				writeRawFrame(conn, true, wireMetadata, []byte{'{', 0x80, '}'})
+			},
+			want: connecthttp.FaultTextEncoding,
+		},
+		{
 			// The client's twin of the server case above: a text body where the
 			// subprotocol named Protobuf.
 			name: "a body in the encoding the handshake did not agree on",
