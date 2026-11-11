@@ -22,8 +22,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"connectrpc.com/connect/v2"
@@ -384,6 +386,147 @@ func TestHandlerContentTypeParameters(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandlerExpiredDeadline(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, &pluggablePingServer{
+		ping: func(context.Context, *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+			calls.Add(1)
+			return &pingv1.PingResponse{}, nil
+		},
+		countUp: func(context.Context, *pingv1.CountUpRequest, pingv1connect.PingServiceCountUpServerStream) error {
+			calls.Add(1)
+			return nil
+		},
+	})
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, srv)
+	server := memhttptest.NewServer(t, mux)
+	testCases := []struct {
+		name         string
+		method       string
+		procedure    string
+		header       http.Header
+		body         string
+		expectStatus int
+		// expectCode is read from the protocol's error encoding; zero means
+		// the RPC must succeed and call the implementation.
+		expectCode connect.Code
+	}{
+		{
+			name:         "connect_unary_not_expired",
+			method:       http.MethodPost,
+			procedure:    pingv1connect.PingServicePingProcedure,
+			header:       http.Header{"Content-Type": {"application/json"}, "Connect-Timeout-Ms": {"5000"}},
+			body:         "{}",
+			expectStatus: http.StatusOK,
+		},
+		{
+			name:         "connect_unary",
+			method:       http.MethodPost,
+			procedure:    pingv1connect.PingServicePingProcedure,
+			header:       http.Header{"Content-Type": {"application/json"}, "Connect-Timeout-Ms": {"0"}},
+			body:         "{}",
+			expectStatus: http.StatusGatewayTimeout,
+			expectCode:   connect.CodeDeadlineExceeded,
+		},
+		{
+			name:         "connect_unary_get",
+			method:       http.MethodGet,
+			procedure:    pingv1connect.PingServicePingProcedure + "?encoding=json&message={}",
+			header:       http.Header{"Connect-Timeout-Ms": {"0"}},
+			expectStatus: http.StatusGatewayTimeout,
+			expectCode:   connect.CodeDeadlineExceeded,
+		},
+		{
+			name:         "connect_server_stream",
+			method:       http.MethodPost,
+			procedure:    pingv1connect.PingServiceCountUpProcedure,
+			header:       http.Header{"Content-Type": {"application/connect+json"}, "Connect-Timeout-Ms": {"0"}},
+			body:         string([]byte{0, 0, 0, 0, 2}) + "{}",
+			expectStatus: http.StatusOK,
+			expectCode:   connect.CodeDeadlineExceeded,
+		},
+		{
+			name:         "grpc_unary",
+			method:       http.MethodPost,
+			procedure:    pingv1connect.PingServicePingProcedure,
+			header:       http.Header{"Content-Type": {"application/grpc"}, "Grpc-Timeout": {"0m"}},
+			body:         string([]byte{0, 0, 0, 0, 0}),
+			expectStatus: http.StatusOK,
+			expectCode:   connect.CodeDeadlineExceeded,
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			request, err := http.NewRequestWithContext(
+				t.Context(),
+				testCase.method,
+				server.URL()+testCase.procedure,
+				strings.NewReader(testCase.body),
+			)
+			assert.Nil(t, err)
+			request.Header = testCase.header
+			response, err := server.Client().Do(request)
+			assert.Nil(t, err)
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			assert.Nil(t, err)
+			assert.Equal(t, response.StatusCode, testCase.expectStatus)
+			if testCase.expectCode == 0 {
+				return
+			}
+			assert.Equal(t, readErrorCode(t, response, body), testCase.expectCode)
+		})
+	}
+	// Only the unexpired request may reach the implementation.
+	t.Cleanup(func() {
+		assert.Equal(t, calls.Load(), 1)
+	})
+}
+
+// readErrorCode extracts the error code from a raw Connect or gRPC response.
+func readErrorCode(t *testing.T, response *http.Response, body []byte) connect.Code {
+	t.Helper()
+	var code connect.Code
+	switch contentType := response.Header.Get("Content-Type"); {
+	case strings.HasPrefix(contentType, "application/grpc"):
+		// A trailers-only response puts the status in the headers.
+		status := response.Trailer.Get("Grpc-Status")
+		if status == "" {
+			status = response.Header.Get("Grpc-Status")
+		}
+		numeric, err := strconv.Atoi(status)
+		assert.Nil(t, err)
+		code = connect.Code(numeric)
+	case strings.HasPrefix(contentType, "application/connect+"):
+		// The end-of-stream message is the last envelope in the body.
+		var endStream struct {
+			Error struct {
+				Code connect.Code `json:"code"`
+			} `json:"error"`
+		}
+		for len(body) >= 5 {
+			size := binary.BigEndian.Uint32(body[1:5])
+			payload := body[5 : 5+size]
+			if body[0]&2 != 0 {
+				assert.Nil(t, json.Unmarshal(payload, &endStream))
+			}
+			body = body[5+size:]
+		}
+		code = endStream.Error.Code
+	default:
+		var unaryError struct {
+			Code connect.Code `json:"code"`
+		}
+		assert.Nil(t, json.Unmarshal(body, &unaryError))
+		code = unaryError.Code
+	}
+	return code
 }
 
 func TestHandlerMaliciousPrefix(t *testing.T) {
