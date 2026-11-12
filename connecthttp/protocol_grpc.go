@@ -82,8 +82,6 @@ var (
 	grpcAllowedMethods = map[string]struct{}{
 		http.MethodPost: {},
 	}
-	//nolint:gochecknoglobals
-	grpcHeaderNewlineToSpace = strings.NewReplacer("\n", " ", "\r", " ")
 )
 
 type protocolGRPC struct {
@@ -625,19 +623,15 @@ func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header, protobuf connect
 	raw := bufferpool.Get()
 	defer bufferpool.Put(raw)
 	padEnvelope(raw)
-	grpcWriteWebTrailer(raw, grpcHeaderStatus, status)
-	if err != nil {
-		grpcWriteWebTrailer(raw, grpcHeaderMessage, message)
-	}
-	if details != "" {
-		grpcWriteWebTrailer(raw, grpcHeaderDetails, details)
-	}
-	for key, values := range trailer {
-		if _, isProtocolHeader := protocolHeaders[key]; isProtocolHeader {
-			continue
+	grpcWriteWebStatus(raw, status, message, details)
+	if len(trailer) > 0 {
+		// gRPC-Web trailer keys are lowercase. Header.Write sanitizes the rest.
+		lower := make(http.Header, len(trailer))
+		for key, values := range trailer {
+			lower[strings.ToLower(key)] = values
 		}
-		for _, value := range values {
-			grpcWriteWebTrailer(raw, key, value)
+		if err := lower.Write(raw); err != nil {
+			return connect.Errorf(connect.CodeInternal, "format trailers: %s", err).WithCause(err)
 		}
 	}
 	writeErr := m.Write(grpcFlagEnvelopeTrailer, raw)
@@ -651,8 +645,7 @@ func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header, protobuf connect
 	}
 	raw.Reset()
 	padEnvelope(raw)
-	grpcWriteWebTrailer(raw, grpcHeaderStatus, status)
-	grpcWriteWebTrailer(raw, grpcHeaderMessage, message)
+	grpcWriteWebStatus(raw, status, message, "")
 	return m.write(grpcFlagEnvelopeTrailer, raw)
 }
 
@@ -1012,22 +1005,22 @@ func grpcStatusForError(ctx context.Context, protobuf connect.Codec, err error) 
 	return strconv.Itoa(int(code)), grpcPercentEncode(message), details
 }
 
-// grpcWriteWebTrailer writes a trailer line with a lowercase key. It sanitizes
-// like [http.Header.Write].
-func grpcWriteWebTrailer(buffer *bytes.Buffer, key, value string) {
-	if !isHeaderFieldName(key) {
-		return
-	}
-	for i := range len(key) {
-		char := key[i]
-		if 'A' <= char && char <= 'Z' {
-			char += 'a' - 'A'
-		}
-		buffer.WriteByte(char)
-	}
-	buffer.WriteString(": ")
-	buffer.WriteString(textproto.TrimString(grpcHeaderNewlineToSpace.Replace(value)))
+// grpcWriteWebStatus writes the gRPC status trailers. Their values are already
+// encoded and need no sanitizing.
+func grpcWriteWebStatus(buffer *bytes.Buffer, status, message, details string) {
+	buffer.WriteString("grpc-status: ")
+	buffer.WriteString(status)
 	buffer.WriteString("\r\n")
+	if status != "0" {
+		buffer.WriteString("grpc-message: ")
+		buffer.WriteString(message)
+		buffer.WriteString("\r\n")
+	}
+	if details != "" {
+		buffer.WriteString("grpc-status-details-bin: ")
+		buffer.WriteString(details)
+		buffer.WriteString("\r\n")
+	}
 }
 
 // grpcPercentEncode follows RFC 3986 Section 2.1 and the gRPC HTTP/2 spec.

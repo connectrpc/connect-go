@@ -16,7 +16,6 @@ package connecthttp
 
 import (
 	"net/http"
-	"strings"
 
 	"connectrpc.com/connect/v2"
 )
@@ -128,19 +127,4 @@ func fromHTTPHeader(header *connect.Header, h http.Header) {
 	for key, vals := range h {
 		header.SetValues(key, vals)
 	}
-}
-
-// isHeaderFieldName reports whether name is a valid HTTP header field name.
-func isHeaderFieldName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for i := range len(name) {
-		char := name[i]
-		isAlphanumeric := ('a' <= char && char <= 'z') || ('A' <= char && char <= 'Z') || ('0' <= char && char <= '9')
-		if !isAlphanumeric && strings.IndexByte("!#$%&'*+-.^_`|~", char) < 0 {
-			return false
-		}
-	}
-	return true
 }
