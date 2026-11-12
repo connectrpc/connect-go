@@ -15,6 +15,7 @@
 package connecthttp
 
 import (
+	"iter"
 	"net/http"
 
 	"connectrpc.com/connect/v2"
@@ -114,17 +115,34 @@ func delHeaderCanonical(h http.Header, key string) {
 // toHTTPHeader merges header into the HTTP header h, excluding protocol
 // headers so users can't override them.
 func toHTTPHeader(h http.Header, header *connect.Header) {
-	for key, vals := range header.All() {
-		if _, isProtocolHeader := protocolHeaders[key]; isProtocolHeader {
-			continue
-		}
+	for key, vals := range userHeaders(header) {
 		h[key] = append(h[key], vals...)
 	}
 }
 
-// fromHTTPHeader copies the HTTP header h into header.
+// fromHTTPHeader copies the HTTP header h into header. Keys without values
+// are skipped. Connect end-of-stream metadata can hold an empty list, and
+// [connect.Header.SetValues] would keep the key.
 func fromHTTPHeader(header *connect.Header, h http.Header) {
 	for key, vals := range h {
+		if len(vals) == 0 {
+			continue
+		}
 		header.SetValues(key, vals)
+	}
+}
+
+// userHeaders yields the keys and values of header, skipping protocol headers
+// so users can't override them.
+func userHeaders(header *connect.Header) iter.Seq2[string, []string] {
+	return func(yield func(string, []string) bool) {
+		for key, values := range header.All() {
+			if _, isProtocolHeader := protocolHeaders[key]; isProtocolHeader {
+				continue
+			}
+			if !yield(key, values) {
+				return
+			}
+		}
 	}
 }
