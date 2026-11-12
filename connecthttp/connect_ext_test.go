@@ -4232,6 +4232,9 @@ func TestCallInfoHeadersOnError(t *testing.T) {
 				}
 				count++
 			}
+			// Receive after the end returns the end again without re-reading trailers.
+			_, err = stream.Receive()
+			assert.ErrorIs(t, err, io.EOF)
 			assert.Nil(t, stream.Close())
 			assert.Equal(t, count, 3)
 
@@ -4307,6 +4310,8 @@ func TestCallInfoHeadersOnError(t *testing.T) {
 			assert.Equal(t, msg2.GetNumber(), int64(2))
 			_, err = stream.Receive()
 			assert.NotNil(t, err)
+			_, repeatErr := stream.Receive()
+			assert.Equal(t, repeatErr.Error(), err.Error())
 			assert.Nil(t, stream.Close())
 
 			assert.True(t, compareValues(callInfo.ResponseTrailer().Values("x-error-trailer"), []string{"error-after-streaming"}))
