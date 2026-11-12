@@ -199,6 +199,8 @@ func (t *transport) newProtocolClient(spec connect.Spec, opts *options) (protoco
 		return nil, err
 	}
 	codecs := newReadOnlyCodecs(opts.codecs)
+	procedureURL := *t.baseURLPtr
+	procedureURL.Path = joinURLPath(t.baseURLPtr.Path, spec.Procedure)
 	return proto.NewClient(&protocolClientParams{
 		CompressionName:  opts.sendCompressor,
 		CompressionPools: newReadOnlyCompressionPools(opts.compressors),
@@ -206,7 +208,7 @@ func (t *transport) newProtocolClient(spec connect.Spec, opts *options) (protoco
 		Protobuf:         codecs.Protobuf(),
 		CompressMinBytes: opts.compressMinBytes,
 		HTTPClient:       t.httpClient,
-		URL:              t.urlForProcedure(spec.Procedure),
+		URL:              &procedureURL,
 		ReadMaxBytes:     opts.readMaxBytes,
 		SendMaxBytes:     opts.sendMaxBytes,
 		EnableGet:        opts.getEnabled,
