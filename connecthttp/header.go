@@ -130,8 +130,7 @@ func fromHTTPHeader(header *connect.Header, h http.Header) {
 	}
 }
 
-// isHeaderFieldName reports whether name is a valid HTTP header field name,
-// a non-empty token as defined by RFC 9110.
+// isHeaderFieldName reports whether name is a valid HTTP header field name.
 func isHeaderFieldName(name string) bool {
 	if name == "" {
 		return false

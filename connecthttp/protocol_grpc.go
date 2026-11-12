@@ -82,9 +82,6 @@ var (
 	grpcAllowedMethods = map[string]struct{}{
 		http.MethodPost: {},
 	}
-	// grpcHeaderNewlineToSpace sanitizes gRPC-Web trailer values like
-	// [http.Header.Write] does.
-	//
 	//nolint:gochecknoglobals
 	grpcHeaderNewlineToSpace = strings.NewReplacer("\n", " ", "\r", " ")
 )
@@ -568,8 +565,8 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 		mergeHeaders(hc.responseWriter.Header(), hc.responseHeader)
 	}
 	// gRPC always sends the error's code, message, details, and metadata as
-	// trailing metadata. The Connect protocol doesn't do this, so we write
-	// them straight to the wire and don't mutate the trailers the user sees.
+	// trailing metadata. The Connect protocol doesn't do this, so we don't want
+	// to mutate the trailers map that the user sees.
 	header := hc.responseWriter.Header()
 	if hc.web && !hc.wroteToBody && len(hc.responseHeader) == 0 {
 		// We're using gRPC-Web, we haven't yet written to the body, and there are no
@@ -622,8 +619,7 @@ type grpcMarshaler struct {
 	envelopeWriter
 }
 
-// MarshalWebTrailers writes the gRPC-Web trailers frame. It holds the gRPC
-// status for err followed by the non-protocol keys of trailer.
+// MarshalWebTrailers writes the gRPC-Web trailers frame for err and trailer.
 func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header, protobuf connect.Codec, err error) *connect.Error {
 	status, message, details := grpcStatusForError(m.ctx, protobuf, err)
 	raw := bufferpool.Get()
@@ -982,9 +978,7 @@ func grpcErrorToTrailer(ctx context.Context, trailer http.Header, protobuf conne
 	}
 }
 
-// grpcStatusForError returns the values of the grpc-status, grpc-message, and
-// grpc-status-details-bin trailers for err. A nil err has status "0" and no
-// message. The details are empty if err has none.
+// grpcStatusForError returns the gRPC status, message, and details for err.
 func grpcStatusForError(ctx context.Context, protobuf connect.Codec, err error) (string, string, string) {
 	if err == nil {
 		return "0", "", "" // zero is the gRPC OK status
@@ -1018,9 +1012,8 @@ func grpcStatusForError(ctx context.Context, protobuf connect.Codec, err error) 
 	return strconv.Itoa(int(code)), grpcPercentEncode(message), details
 }
 
-// grpcWriteWebTrailer writes a gRPC-Web trailer line with a lowercase key.
-// Like [http.Header.Write], it drops invalid keys, replaces newlines in the
-// value with spaces, and trims surrounding whitespace.
+// grpcWriteWebTrailer writes a trailer line with a lowercase key. It sanitizes
+// like [http.Header.Write].
 func grpcWriteWebTrailer(buffer *bytes.Buffer, key, value string) {
 	if !isHeaderFieldName(key) {
 		return

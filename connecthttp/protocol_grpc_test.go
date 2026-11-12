@@ -77,8 +77,6 @@ func TestGRPCHandlerSender(t *testing.T) {
 		t.Parallel()
 		conn, responseWriter := newConn(true, true)
 		testGRPCHandlerConnMetadata(t, conn)
-		// Custom headers rule out a trailers-only response, so the trailers
-		// are in the body.
 		assert.Equal(t, responseWriter.Header().Get("Custom-Header"), "foo")
 		assert.Equal(t, responseWriter.Header().Get(grpcHeaderStatus), "")
 		responseWriter.Body.Next(5) // skip flags and message length
@@ -249,8 +247,6 @@ func TestGRPCWebTrailerMarshalling(t *testing.T) {
 	})
 	t.Run("sanitized", func(t *testing.T) {
 		t.Parallel()
-		// Like http.Header.Write, invalid keys are dropped and newlines in
-		// values can't start a new trailer.
 		trailer := http.Header{
 			"Bad Key":       {"dropped"},
 			"User-Provided": {" bar\r\nInjected: baz\n"},
