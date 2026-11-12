@@ -121,7 +121,7 @@ func toHTTPHeader(h http.Header, header *connect.Header) {
 }
 
 // fromHTTPHeader copies the HTTP header h into header. Keys without values
-// are skipped. 
+// are skipped.
 func fromHTTPHeader(header *connect.Header, h http.Header) {
 	for key, vals := range h {
 		if len(vals) == 0 {
