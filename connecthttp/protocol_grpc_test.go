@@ -36,7 +36,7 @@ import (
 
 func TestGRPCHandlerSender(t *testing.T) {
 	t.Parallel()
-	newConn := func(web bool) *grpcHandlerConn {
+	newConn := func(web, customHeader bool) (*grpcHandlerConn, *httptest.ResponseRecorder) {
 		responseWriter := httptest.NewRecorder()
 		protobufCodec := &connectproto.BinaryCodec{}
 		request := httptest.NewRequestWithContext(
@@ -45,7 +45,7 @@ func TestGRPCHandlerSender(t *testing.T) {
 			"https://demo.example.com",
 			strings.NewReader(""),
 		)
-		return &grpcHandlerConn{
+		conn := &grpcHandlerConn{
 			spec:     connect.Spec{},
 			web:      web,
 			protobuf: protobufCodec,
@@ -66,14 +66,46 @@ func TestGRPCHandlerSender(t *testing.T) {
 				},
 			},
 		}
+		if customHeader {
+			conn.responseHeader.Set("Custom-Header", "foo")
+		}
+		conn.responseTrailer.Set("Custom-Trailer", "bar")
+		conn.responseTrailer["Empty-Trailer"] = nil
+		return conn, responseWriter
 	}
 	t.Run("web", func(t *testing.T) {
 		t.Parallel()
-		testGRPCHandlerConnMetadata(t, newConn(true))
+		conn, responseWriter := newConn(true, true)
+		testGRPCHandlerConnMetadata(t, conn)
+		// Custom headers rule out a trailers-only response, so the trailers
+		// are in the body.
+		assert.Equal(t, responseWriter.Header().Get("Custom-Header"), "foo")
+		assert.Equal(t, responseWriter.Header().Get(grpcHeaderStatus), "")
+		responseWriter.Body.Next(5) // skip flags and message length
+		assert.Equal(t, responseWriter.Body.String(), "grpc-status: 14\r\ngrpc-message: oh no\r\ncustom-trailer: bar\r\n")
+	})
+	t.Run("web_trailers_only", func(t *testing.T) {
+		t.Parallel()
+		conn, responseWriter := newConn(true, false)
+		testGRPCHandlerConnMetadata(t, conn)
+		assert.Equal(t, responseWriter.Header().Get(grpcHeaderStatus), "14")
+		assert.Equal(t, responseWriter.Header().Get(grpcHeaderMessage), "oh no")
+		assert.Equal(t, responseWriter.Header().Get("Custom-Trailer"), "bar")
+		_, hasEmptyTrailer := responseWriter.Header()["Empty-Trailer"]
+		assert.False(t, hasEmptyTrailer)
+		assert.Zero(t, responseWriter.Body.Len())
 	})
 	t.Run("http2", func(t *testing.T) {
 		t.Parallel()
-		testGRPCHandlerConnMetadata(t, newConn(false))
+		conn, responseWriter := newConn(false, true)
+		testGRPCHandlerConnMetadata(t, conn)
+		result := responseWriter.Result()
+		assert.Equal(t, result.Header.Get("Custom-Header"), "foo")
+		assert.Equal(t, result.Trailer, http.Header{
+			grpcHeaderStatus:  {"14"},
+			grpcHeaderMessage: {"oh no"},
+			"Custom-Trailer":  {"bar"},
+		})
 	})
 }
 
@@ -190,21 +222,42 @@ func TestGRPCPercentDecodingInvalid(t *testing.T) {
 
 func TestGRPCWebTrailerMarshalling(t *testing.T) {
 	t.Parallel()
-	responseWriter := httptest.NewRecorder()
-	marshaler := grpcMarshaler{
-		envelopeWriter: envelopeWriter{
-			sender: writeSender{writer: responseWriter},
-		},
+	protobufCodec := &connectproto.BinaryCodec{}
+	marshal := func(t *testing.T, trailer http.Header, err error) string {
+		t.Helper()
+		responseWriter := httptest.NewRecorder()
+		marshaler := grpcMarshaler{
+			envelopeWriter: envelopeWriter{
+				sender: writeSender{writer: responseWriter},
+			},
+		}
+		assert.Nil(t, marshaler.MarshalWebTrailers(trailer, protobufCodec, err))
+		responseWriter.Body.Next(5) // skip flags and message length
+		return responseWriter.Body.String()
 	}
-	trailer := http.Header{}
-	trailer.Add("grpc-status", "0")
-	trailer.Add("Grpc-Message", "Foo")
-	trailer.Add("User-Provided", "bar")
-	err := marshaler.MarshalWebTrailers(trailer)
-	assert.Nil(t, err)
-	responseWriter.Body.Next(5) // skip flags and message length
-	marshalled := responseWriter.Body.String()
-	assert.Equal(t, marshalled, "grpc-message: Foo\r\ngrpc-status: 0\r\nuser-provided: bar\r\n")
+	t.Run("ok", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, marshal(t, nil, nil), "grpc-status: 0\r\n")
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		trailer := http.Header{}
+		trailer.Set("User-Provided", "bar")
+		trailer.Set(grpcHeaderStatus, "13") // protocol headers are dropped
+		got := marshal(t, trailer, connect.NewError(connect.CodeNotFound, "Foo"))
+		assert.Equal(t, got, "grpc-status: 5\r\ngrpc-message: Foo\r\nuser-provided: bar\r\n")
+	})
+	t.Run("sanitized", func(t *testing.T) {
+		t.Parallel()
+		// Like http.Header.Write, invalid keys are dropped and newlines in
+		// values can't start a new trailer.
+		trailer := http.Header{
+			"Bad Key":       {"dropped"},
+			"User-Provided": {" bar\r\nInjected: baz\n"},
+		}
+		got := marshal(t, trailer, nil)
+		assert.Equal(t, got, "grpc-status: 0\r\nuser-provided: bar  Injected: baz\r\n")
+	})
 }
 
 func BenchmarkGRPCPercentEncoding(b *testing.B) {
