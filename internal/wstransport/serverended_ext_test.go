@@ -28,6 +28,7 @@ import (
 	"connectrpc.com/connect/v2/internal/assert"
 	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
+	"connectrpc.com/connect/v2/internal/wstransport"
 	"github.com/coder/websocket"
 )
 
@@ -124,6 +125,61 @@ func TestClientWritesNothingAfterReceivingEndStream(t *testing.T) {
 	assert.Nil(t, stream.Close())
 
 	assert.Equal(t, string(<-received), string([]byte{wireMetadata, wireBody}))
+}
+
+// §13: once S has arrived the RPC is complete, so a server that then drops the
+// connection without a Close frame (1006) does not fail it.
+func TestClientCompletesWhenConnectionDropsAfterEndStream(t *testing.T) {
+	t.Parallel()
+	t.Run("unary", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connect.NewPingServiceClient(connect.NewClient(droppingServerTransport(t)))
+		response, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 1})
+		assert.Nil(t, err)
+		assert.Equal(t, response.GetNumber(), 1)
+	})
+	t.Run("stream", func(t *testing.T) {
+		t.Parallel()
+		client := pingv1connect.NewPingServiceClient(connect.NewClient(droppingServerTransport(t)))
+		stream, err := client.CumSum(t.Context())
+		assert.Nil(t, err)
+		assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+		assert.Nil(t, stream.CloseSend())
+		response, err := stream.Receive()
+		assert.Nil(t, err)
+		assert.Equal(t, response.GetSum(), 1)
+		_, err = stream.Receive()
+		assert.ErrorIs(t, err, io.EOF)
+		assert.Nil(t, stream.Close())
+	})
+}
+
+// droppingServerTransport dials a server that reads the request up to the
+// client's C, answers with a response whose field 1 is 1, and then closes the
+// TCP connection without a Close frame.
+func droppingServerTransport(tb testing.TB) connect.Transport {
+	tb.Helper()
+	listener, err := (&net.ListenConfig{}).Listen(tb.Context(), "tcp", "127.0.0.1:0")
+	assert.Nil(tb, err)
+	tb.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		conn, reader := acceptRawUpgrade(tb, listener)
+		// Reading the whole request first keeps the close from resetting the
+		// connection, which could discard the response before the client reads it.
+		for {
+			_, payload, err := nextFrame(reader)
+			if err != nil || (len(payload) > 0 && payload[0] == 'C') {
+				break
+			}
+		}
+		_, _ = conn.Write([]byte{0x81, 3, 'M', '{', '}'})
+		_, _ = conn.Write([]byte{0x82, 3, 'B', 0x08, 0x01})
+		_, _ = conn.Write([]byte{0x81, 3, 'S', '{', '}'})
+		_ = conn.Close()
+	}()
+	transport, err := wstransport.NewTransport("http://" + listener.Addr().String())
+	assert.Nil(tb, err)
+	return transport
 }
 
 const verdict = `S{"error":{"code":"resource_exhausted","message":"no more"}}`

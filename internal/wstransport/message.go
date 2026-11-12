@@ -26,7 +26,6 @@ package wstransport
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -252,12 +251,13 @@ func newCodecPair(codecs []connect.Codec) (codecPair, *connect.Error) {
 	return codecPair{binary: binary, text: text}, nil
 }
 
-// Metadata on the wire is a JSON object of string arrays. Two things separate
-// it from the http.Header this package keeps in memory: keys are lower-case,
-// matching HTTP/2 and HTTP/3, and a key ending in -bin carries base64 rather
-// than text, because JSON strings are Unicode and arbitrary bytes are not.
+// Metadata on the wire is a JSON object of string arrays whose keys are
+// lower-case, matching HTTP/2 and HTTP/3. A key ending in -bin carries base64,
+// because JSON strings are Unicode and arbitrary bytes are not. As over HTTP,
+// the application holds that base64 form: connect.EncodeBinaryHeader and
+// connect.DecodeBinaryHeader convert it, and this package passes it through.
 
-// metadataBinarySuffix marks a key whose values are raw bytes.
+// metadataBinarySuffix marks a key whose values are base64-encoded bytes.
 const metadataBinarySuffix = "-bin"
 
 // encodeMetadata renders headers for the wire.
@@ -267,16 +267,7 @@ func encodeMetadata(header http.Header) map[string][]string {
 	}
 	encoded := make(map[string][]string, len(header))
 	for key, values := range header {
-		lower := strings.ToLower(key)
-		if !strings.HasSuffix(lower, metadataBinarySuffix) {
-			encoded[lower] = values
-			continue
-		}
-		binary := make([]string, len(values))
-		for index, value := range values {
-			binary[index] = base64.RawStdEncoding.EncodeToString([]byte(value))
-		}
-		encoded[lower] = binary
+		encoded[strings.ToLower(key)] = values
 	}
 	return encoded
 }
@@ -314,19 +305,17 @@ func decodeMetadata(wire map[string][]string) (http.Header, *connect.Error) {
 			header[canonical] = values
 			continue
 		}
-		decoded := make([]string, len(values))
-		for index, value := range values {
-			// Senders must not pad, but receivers accept both forms.
-			raw, err := connect.DecodeBinaryHeader(value)
-			if err != nil {
+		for _, value := range values {
+			// §7.3.1: validated, not decoded. Senders must not pad, but
+			// receivers accept both forms.
+			if _, err := connect.DecodeBinaryHeader(value); err != nil {
 				return nil, errorf(
 					connect.CodeInvalidArgument,
 					"metadata %q is not base64: %w", key, err,
 				)
 			}
-			decoded[index] = string(raw)
 		}
-		header[canonical] = decoded
+		header[canonical] = values
 	}
 	return header, nil
 }

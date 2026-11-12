@@ -100,6 +100,37 @@ func TestTimeoutQueryParameterReachesHandler(t *testing.T) {
 	}
 }
 
+// §11: the deadline is an integer of at most ten digits, with no sign. Anything
+// else is reported in-band as invalid_argument, as over HTTP.
+func TestInvalidTimeoutQueryParameterIsRejected(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"-1000", "+1000", "", "soon", "12345678901"} {
+		t.Run(strconv.Quote(value), func(t *testing.T) {
+			t.Parallel()
+			httpServer := newHybridServer(t, pingServer{})
+			conn := dialCumSum(t, httpServer, "?connect-timeout-ms="+url.QueryEscape(value))
+			sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+
+			data := readServerOpening(t, conn)
+			assert.Equal(t, data[0], wireServerEndStream)
+			assert.True(t, strings.Contains(string(data), "invalid_argument"))
+		})
+	}
+}
+
+// A zero deadline is valid and has already passed, so the RPC fails at once
+// with deadline_exceeded rather than invalid_argument.
+func TestZeroTimeoutExpiresImmediately(t *testing.T) {
+	t.Parallel()
+	httpServer := newHybridServer(t, pingServer{})
+	conn := dialCumSum(t, httpServer, "?connect-timeout-ms=0")
+	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+
+	data := readServerOpening(t, conn)
+	assert.Equal(t, data[0], wireServerEndStream)
+	assert.True(t, strings.Contains(string(data), "deadline_exceeded"))
+}
+
 // A client that requests no deadline still gets one: the server's default
 // bounds every RPC, so a peer cannot hold a connection open forever.
 func TestNoClientTimeoutFallsBackToTheServerDefault(t *testing.T) {
@@ -169,35 +200,71 @@ func (slowDeadlineServer) CountUp(
 	return ctx.Err()
 }
 
+// lateSendServer ignores its deadline and sends after it has passed, as a
+// handler busy with slow work does.
+type lateSendServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (lateSendServer) CountUp(
+	ctx context.Context,
+	_ *pingv1.CountUpRequest,
+	stream pingv1connect.PingServiceCountUpServerStream,
+) error {
+	deadline, _ := ctx.Deadline()
+	time.Sleep(time.Until(deadline) + 50*time.Millisecond)
+	return stream.Send(&pingv1.CountUpResponse{Number: 1})
+}
+
 // A server whose deadline expires must still be able to say so. The terminal
 // write runs detached from the RPC's context for exactly this reason: writing
 // under the expired one fails, and the peer is left with a dead connection and
 // no verdict, which it can only report as a transport failure.
 func TestServerReportsItsOwnExpiredDeadline(t *testing.T) {
 	t.Parallel()
-	httpServer := newServerFor(t, slowDeadlineServer{})
-	// A raw client, so that only the server's deadline is in play: the Go
-	// client derives the server's deadline from its own, and always hears its
-	// own fire first.
-	url := "ws" + strings.TrimPrefix(httpServer.URL, "http") +
-		pingv1connect.PingServiceCountUpProcedure + "?connect-timeout-ms=200"
-	conn, res, err := websocket.Dial(t.Context(), url, &websocket.DialOptions{
-		HTTPClient:   httpServer.Client(),
-		Subprotocols: []string{"connectrpc.1+proto"},
-	})
-	if res != nil && res.Body != nil {
-		_ = res.Body.Close()
-	}
-	assert.Nil(t, err)
-	t.Cleanup(func() { _ = conn.CloseNow() })
-	sendJSONMessage(t, conn, wireMetadata, []byte("{}"))
-	sendProtoBody(t, conn, &pingv1.CountUpRequest{Number: 1})
+	for _, test := range []struct {
+		name    string
+		handler pingv1connect.PingServiceHandler
+		// withoutEnd leaves out the client's C, so the deadline fires while
+		// the server is still waiting for the request stream to end.
+		withoutEnd bool
+	}{
+		{name: "handler returns at the deadline", handler: slowDeadlineServer{}},
+		// A write under the expired context must neither tear down the
+		// connection nor count as the opening M.
+		{name: "handler sends after the deadline", handler: lateSendServer{}},
+		{name: "request stream never ends", handler: slowDeadlineServer{}, withoutEnd: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			httpServer := newServerFor(t, test.handler)
+			// A raw client, so that only the server's deadline is in play: the
+			// Go client derives the server's deadline from its own, and always
+			// hears its own fire first.
+			url := "ws" + strings.TrimPrefix(httpServer.URL, "http") +
+				pingv1connect.PingServiceCountUpProcedure + "?connect-timeout-ms=200"
+			conn, res, err := websocket.Dial(t.Context(), url, &websocket.DialOptions{
+				HTTPClient:   httpServer.Client(),
+				Subprotocols: []string{"connectrpc.1+proto"},
+			})
+			if res != nil && res.Body != nil {
+				_ = res.Body.Close()
+			}
+			assert.Nil(t, err)
+			t.Cleanup(func() { _ = conn.CloseNow() })
+			sendJSONMessage(t, conn, wireMetadata, []byte("{}"))
+			sendProtoBody(t, conn, &pingv1.CountUpRequest{Number: 1})
+			if !test.withoutEnd {
+				sendJSONMessage(t, conn, wireClientEndStream, nil)
+			}
 
-	data := readServerOpening(t, conn)
-	// An S message carrying the verdict, not a mute close.
-	assert.True(t, len(data) > 5)
-	assert.Equal(t, data[0], wireServerEndStream)
-	assert.True(t, strings.Contains(string(data), "deadline exceeded"))
+			data := readServerOpening(t, conn)
+			// An S message carrying the verdict, not a mute close.
+			assert.True(t, len(data) > 5)
+			assert.Equal(t, data[0], wireServerEndStream)
+			assert.True(t, strings.Contains(string(data), "deadline_exceeded"))
+		})
+	}
 }
 
 // newBidiClientWithTimeouts builds a plain WebSocket-backed client for the

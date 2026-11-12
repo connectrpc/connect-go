@@ -16,8 +16,9 @@ package wstransport
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
-	"strconv"
 	"time"
 
 	"connectrpc.com/connect/v2"
@@ -71,14 +72,14 @@ func (s *session) Serve(
 	ctx, cancelCall := context.WithCancel(ctx)
 	defer cancelCall()
 	procedure := info.Request.URL.Path
+	spec, registered := registeredSpec(server, procedure)
+	if !registered {
+		// Server.Call reports the unknown procedure; until then, bidi is the
+		// permissive answer.
+		spec = connect.Spec{Procedure: procedure, StreamType: connect.StreamTypeBidi}
+	}
 	callInfo := &connect.CallInfo{
-		Spec: connect.Spec{
-			Procedure: procedure,
-			// The real spec reaches the handler as an argument; the registry
-			// lookup in Server.Call has not happened yet, so the stream shape is
-			// unknown here and bidi is the permissive answer.
-			StreamType: connect.StreamTypeBidi,
-		},
+		Spec:     spec,
 		PeerAddr: info.PeerAddr,
 		Protocol: ProtocolConnectWebSocket,
 		Codec:    info.Codec.Name(),
@@ -170,20 +171,58 @@ func (s *session) Serve(
 		return handlerConn.Close(drainErr)
 	}
 
-	callErr := server.Call(ctx, procedure, callInfo, &serverStream{conn: handlerConn})
+	stream := &serverStream{
+		conn:          handlerConn,
+		singleRequest: spec.StreamType&connect.StreamTypeClient == 0,
+	}
+	callErr := server.Call(ctx, procedure, callInfo, stream)
 	// Trailing metadata is only knowable once the handler has returned. Leading
 	// metadata is read live by flushLeadingMetadata, which runs earlier.
 	copyToHTTPHeader(handlerConn.responseTrailer, callInfo.ResponseTrailer())
 	return handlerConn.Close(callErr)
 }
 
+// registeredSpec finds the spec server registered for procedure.
+func registeredSpec(server *connect.Server, procedure string) (connect.Spec, bool) {
+	for spec := range server.Specs() {
+		if spec.Procedure == procedure {
+			return spec, true
+		}
+	}
+	return connect.Spec{}, false
+}
+
 // serverStream adapts [websocketHandlerConn] to [connect.ServerStream].
 type serverStream struct {
 	conn *websocketHandlerConn
+	// singleRequest marks a unary or server-streaming call, whose one request
+	// Receive checks is followed by C, as connecthttp does.
+	singleRequest bool
+	received      bool
 }
 
 func (s *serverStream) Receive(msg any) error {
-	return s.conn.Receive(msg)
+	if !s.singleRequest {
+		return s.conn.Receive(msg)
+	}
+	if s.received {
+		return io.EOF
+	}
+	s.received = true
+	if err := s.conn.Receive(msg); err != nil {
+		if errors.Is(err, io.EOF) {
+			return connect.Errorf(connect.CodeUnimplemented, "unary request has zero messages")
+		}
+		return err
+	}
+	// Reading on to C is also what starts the post-C reads that §8.1 requires,
+	// since the handler never reads again.
+	if err := s.conn.Receive(msg); err == nil {
+		return connect.Errorf(connect.CodeUnimplemented, "unary request has multiple messages")
+	} else if !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }
 
 // SendHeaders does nothing on the wire. The HTTP response was committed by the
@@ -208,8 +247,8 @@ func timeoutFromRequest(
 	request *http.Request,
 	maxTimeout time.Duration,
 ) (context.Context, context.CancelFunc, *connect.Error) {
-	timeout := request.URL.Query().Get(wsQueryTimeoutMs)
-	if timeout == "" {
+	values, present := request.URL.Query()[wsQueryTimeoutMs]
+	if !present {
 		// No client deadline, so the server's bound is the whole of it.
 		if maxTimeout <= 0 {
 			return ctx, nil, nil
@@ -217,12 +256,23 @@ func timeoutFromRequest(
 		ctx, cancel := context.WithTimeout(ctx, maxTimeout)
 		return ctx, cancel, nil
 	}
+	timeout := values[0]
+	if timeout == "" {
+		return ctx, nil, errorf(connect.CodeInvalidArgument, "parse timeout: no value supplied")
+	}
 	if len(timeout) > 10 {
 		return ctx, nil, errorf(connect.CodeInvalidArgument, "parse timeout: %q has >10 digits", timeout)
 	}
-	millis, err := strconv.ParseInt(timeout, 10 /* base */, 64 /* bitSize */)
-	if err != nil {
-		return ctx, nil, errorf(connect.CodeInvalidArgument, "parse timeout: %w", err)
+	// §11 allows digits alone, as Connect over HTTP does: no sign, so neither
+	// a negative deadline nor "+" gets through.
+	var millis int64
+	for _, digit := range timeout {
+		if digit < '0' || digit > '9' {
+			return ctx, nil, errorf(
+				connect.CodeInvalidArgument, "parse timeout: %q has non-digit characters", timeout,
+			)
+		}
+		millis = millis*10 + int64(digit-'0')
 	}
 	requested := time.Duration(millis) * time.Millisecond
 	// A client may ask for less time than the server allows, never more.
