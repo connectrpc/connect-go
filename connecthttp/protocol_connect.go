@@ -116,23 +116,28 @@ func (h *connectHandler) ContentTypes() map[string]struct{} {
 }
 
 func (*connectHandler) SetTimeout(request *http.Request) (context.Context, context.CancelFunc, error) {
-	timeout := getHeaderCanonical(request.Header, connectHeaderTimeout)
+	timeout, ok := getHeaderCanonicalValid(request.Header, connectHeaderTimeout)
 	if timeout == "" {
+		if ok {
+			// present key with no value, that's an invalid argument
+			return nil, nil, connect.NewError(connect.CodeInvalidArgument, "parse timeout: no value supplied")
+		}
+		// no key
 		return request.Context(), nil, nil
 	}
 	if len(timeout) > 10 {
 		return nil, nil, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %q has >10 digits", timeout)
 	}
-	millis, err := strconv.ParseInt(timeout, 10 /* base */, 64 /* bitsize */)
-	if err != nil {
-		return nil, nil, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %s", err).WithCause(err)
-	}
-	if millis < 0 {
-		return nil, nil, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %q is negative", timeout)
+	theDuration := 0
+	for _, v := range timeout {
+		if v < '0' || v > '9' {
+			return nil, nil, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %q has non-digit characters", timeout)
+		}
+		theDuration = theDuration*10 + int(v-'0')
 	}
 	ctx, cancel := context.WithTimeout(
 		request.Context(),
-		time.Duration(millis)*time.Millisecond,
+		time.Duration(theDuration)*time.Millisecond,
 	)
 	return ctx, cancel, nil
 }
@@ -201,7 +206,7 @@ func (h *connectHandler) NewConn(
 			codecName,
 		)
 	} else {
-		requestBody = request.Body
+		requestBody = serverRequestBody{request}
 		contentType = getHeaderCanonical(request.Header, headerContentType)
 		codecName = connectCodecForContentType(
 			h.spec.StreamType,
@@ -1424,13 +1429,13 @@ func connectValidateUnaryResponseContentType(
 	statusMsg string,
 	responseContentType string,
 ) *connect.Error {
+	canonicalResponseContentType := canonicalizeContentType(responseContentType)
 	if statusCode != http.StatusOK {
 		if statusCode == http.StatusNotModified && httpMethod == http.MethodGet {
 			return connect.Errorf(connect.CodeUnknown, "%s", errNotModifiedClient).WithCause(errNotModifiedClient).WithRemote()
 		}
 		// connect.Error responses must be JSON-encoded.
-		if responseContentType == connectUnaryContentTypePrefix+connect.CodecNameJSON ||
-			responseContentType == connectUnaryContentTypePrefix+codecNameJSONCharsetUTF8 {
+		if canonicalResponseContentType == connectUnaryContentTypeJSON {
 			return nil
 		}
 		return connect.NewError(
@@ -1439,7 +1444,7 @@ func connectValidateUnaryResponseContentType(
 		).WithRemote()
 	}
 	// Normal responses must have valid content-type that indicates same codec as the request.
-	if !strings.HasPrefix(responseContentType, connectUnaryContentTypePrefix) {
+	if !strings.HasPrefix(canonicalResponseContentType, connectUnaryContentTypePrefix) {
 		// Doesn't even look like a Connect response? Use code "unknown".
 		return connect.Errorf(connect.CodeUnknown,
 			"invalid content-type: %q; expecting %q",
@@ -1447,30 +1452,23 @@ func connectValidateUnaryResponseContentType(
 			connectUnaryContentTypePrefix+requestCodecName,
 		)
 	}
-	responseCodecName := connectCodecForContentType(
-		connect.StreamTypeUnary,
-		responseContentType,
-	)
-	if responseCodecName == requestCodecName {
-		return nil
-	}
-	// HACK: We likely want a better way to handle the optional "charset" parameter
-	//       for application/json, instead of hard-coding. But this suffices for now.
-	if (responseCodecName == connect.CodecNameJSON && requestCodecName == codecNameJSONCharsetUTF8) ||
-		(responseCodecName == codecNameJSONCharsetUTF8 && requestCodecName == connect.CodecNameJSON) {
-		// Both are JSON
+	// Canonicalizing the request side too lets a "json; charset=utf-8" codec
+	// match a bare application/json response, and vice versa.
+	requestContentType := connectContentTypeForCodecName(connect.StreamTypeUnary, requestCodecName)
+	if canonicalResponseContentType == canonicalizeContentType(requestContentType) {
 		return nil
 	}
 	return connect.Errorf(connect.CodeInternal,
 		"invalid content-type: %q; expecting %q",
 		responseContentType,
-		connectUnaryContentTypePrefix+requestCodecName,
+		requestContentType,
 	)
 }
 
 func connectValidateStreamResponseContentType(requestCodecName string, streamType connect.StreamType, responseContentType string) *connect.Error {
+	canonicalResponseContentType := canonicalizeContentType(responseContentType)
 	// Responses must have valid content-type that indicates same codec as the request.
-	if !strings.HasPrefix(responseContentType, connectStreamingContentTypePrefix) {
+	if !strings.HasPrefix(canonicalResponseContentType, connectStreamingContentTypePrefix) {
 		// Doesn't even look like a Connect response? Use code "unknown".
 		return connect.Errorf(
 			connect.CodeUnknown,
@@ -1479,11 +1477,8 @@ func connectValidateStreamResponseContentType(requestCodecName string, streamTyp
 			connectStreamingContentTypePrefix+requestCodecName,
 		)
 	}
-	responseCodecName := connectCodecForContentType(
-		streamType,
-		responseContentType,
-	)
-	if responseCodecName != requestCodecName {
+	requestContentType := connectContentTypeForCodecName(streamType, requestCodecName)
+	if canonicalResponseContentType != canonicalizeContentType(requestContentType) {
 		return connect.Errorf(
 			connect.CodeInternal,
 			"invalid content-type: %q; expecting %q",

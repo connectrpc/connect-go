@@ -447,6 +447,22 @@ func (w writeSender) Send(data []byte) error {
 	return err
 }
 
+type serverRequestBody struct {
+	request *http.Request
+}
+
+func (b serverRequestBody) Read(data []byte) (int, error) {
+	bytesRead, err := b.request.Body.Read(data)
+	if err != nil && isClientDisconnected(err) {
+		err = connect.NewError(connect.CodeCanceled, err.Error()).WithCause(err)
+	}
+	return bytesRead, err
+}
+
+func (b serverRequestBody) Close() error {
+	return b.request.Body.Close()
+}
+
 // See: https://cs.opensource.google/go/go/+/refs/tags/go1.20.1:src/net/http/clone.go;l=22-33
 func cloneURL(oldURL *url.URL) *url.URL {
 	if oldURL == nil {
