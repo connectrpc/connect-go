@@ -59,10 +59,12 @@ func (s echoMetadataServer) CumSum(
 }
 
 // A -bin value carries bytes that are not valid UTF-8, which JSON cannot hold
-// unencoded. Base64 is what makes the round trip possible at all.
+// unencoded. As over HTTP, the application holds the base64 form, and the
+// transport carries it unchanged in both directions.
 func TestBinaryMetadataSurvivesTheRoundTrip(t *testing.T) {
 	t.Parallel()
-	raw := string([]byte{0x00, 0xff, 0xfe, 0x80, 'h', 'i'})
+	raw := []byte{0x00, 0xff, 0xfe, 0x80, 'h', 'i'}
+	encoded := connect.EncodeBinaryHeader(raw)
 	server := connect.NewServer()
 	pingv1connect.RegisterPingServiceHandler(server, echoMetadataServer{
 		readKey: "Acme-Token-Bin", writeKey: "Acme-Echo-Bin",
@@ -80,7 +82,7 @@ func TestBinaryMetadataSurvivesTheRoundTrip(t *testing.T) {
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
 
 	ctx, info := connect.NewClientContext(t.Context())
-	info.RequestHeader().SetValues("Acme-Token-Bin", []string{raw})
+	info.RequestHeader().SetValues("Acme-Token-Bin", []string{encoded})
 	stream, err := client.CumSum(ctx)
 	assert.Nil(t, err)
 	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
@@ -89,17 +91,21 @@ func TestBinaryMetadataSurvivesTheRoundTrip(t *testing.T) {
 	assert.True(t, errors.Is(err, io.EOF))
 	assert.Nil(t, stream.Close())
 
-	assert.Equal(t, info.ResponseTrailer().Get("Acme-Echo-Bin"), raw)
+	echoed := info.ResponseTrailer().Get("Acme-Echo-Bin")
+	assert.Equal(t, echoed, encoded)
+	decoded, err := connect.DecodeBinaryHeader(echoed)
+	assert.Nil(t, err)
+	assert.Equal(t, decoded, raw)
 }
 
 // The wire form is what a second implementation has to agree with: lower-case
-// keys, and -bin values in unpadded standard base64.
+// keys, and -bin values exactly as the application encoded them.
 func TestMetadataWireForm(t *testing.T) {
 	t.Parallel()
 	raw := []byte{0x00, 0xff, 0xfe}
 	server := connect.NewServer()
 	pingv1connect.RegisterPingServiceHandler(server, trailerWritingServer{
-		key: "Acme-Echo-Bin", value: string(raw),
+		key: "Acme-Echo-Bin", value: connect.EncodeBinaryHeader(raw),
 	})
 	mux := http.NewServeMux()
 	connecthttp.Mount(mux, server)
@@ -200,8 +206,8 @@ func TestPaddedBinaryMetadataIsAccepted(t *testing.T) {
 	echoed, ok := end.Metadata["acme-echo-bin"]
 	assert.True(t, ok)
 	assert.Equal(t, len(echoed), 1)
-	// The handler saw the decoded bytes, so the echo re-encodes them unpadded.
-	assert.Equal(t, echoed[0], base64.RawStdEncoding.EncodeToString(raw))
+	// The handler saw the value as sent, padding and all, and echoed it.
+	assert.Equal(t, echoed[0], padded)
 }
 
 // Two keys that fold to one are one key, and a map would keep whichever it

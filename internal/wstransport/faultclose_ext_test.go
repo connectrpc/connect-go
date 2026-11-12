@@ -30,14 +30,19 @@ import (
 
 // §5 and §13: a client that reads a protocol error from the server fails the
 // RPC and closes with 3102, the only error code a client has, without being
-// asked to. The reason is what tells the server which mistake it made.
+// asked to. The reason is what tells the server which mistake it made. The RPC
+// fails as Internal, as a malformed response does in Connect over HTTP.
 func TestClientClosesFaultedServerWithCode(t *testing.T) {
 	t.Parallel()
 	const readMaxBytes = 1024
 	for _, test := range []struct {
-		name       string
-		frame      []byte
-		wantReason string
+		name  string
+		frame []byte
+		// withoutMetadata leaves out the opening M, for a frame that is one.
+		withoutMetadata bool
+		wantReason      string
+		// wantCode is the RPC's error code when it is not Internal.
+		wantCode connect.Code
 	}{
 		// Server frames are unmasked: FIN | text, then the length.
 		{
@@ -51,10 +56,53 @@ func TestClientClosesFaultedServerWithCode(t *testing.T) {
 			wantReason: "not valid UTF-8",
 		},
 		{
+			// §5: whatever its error code, a fault in the server's framing is a
+			// protocol error, not an ordinary end to the RPC.
+			name:       "client end-stream marker",
+			frame:      []byte{0x81, 1, 'C'},
+			wantReason: "only a client may send",
+		},
+		{
+			name:       "bare end-stream",
+			frame:      []byte{0x81, 1, 'S'},
+			wantReason: "EndStreamMessage",
+		},
+		{
+			name:       "end-stream not JSON",
+			frame:      []byte{0x81, 4, 'S', 'b', 'a', 'd'},
+			wantReason: "EndStreamMessage",
+		},
+		{
+			name:            "bare metadata",
+			frame:           []byte{0x81, 1, 'M'},
+			withoutMetadata: true,
+			wantReason:      "empty M message",
+		},
+		{
+			name:            "metadata not JSON",
+			frame:           []byte{0x81, 4, 'M', 'b', 'a', 'd'},
+			withoutMetadata: true,
+			wantReason:      "unmarshal M message",
+		},
+		{
+			// §6.1: M and S are always JSON, so a binary frame is the wrong one
+			// even when the payload parses.
+			name:            "metadata in a binary frame",
+			frame:           []byte{0x82, 3, 'M', '{', '}'},
+			withoutMetadata: true,
+			wantReason:      "M in a binary frame",
+		},
+		{
+			name:       "end-stream in a binary frame",
+			frame:      []byte{0x82, 3, 'S', '{', '}'},
+			wantReason: "S in a binary frame",
+		},
+		{
 			// §12.1: not 1009 or 3109. The reason names the limit instead.
 			name:       "message past the read limit",
 			frame:      oversizedBinaryFrame(2 * readMaxBytes),
 			wantReason: "1024",
+			wantCode:   connect.CodeResourceExhausted,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -69,7 +117,9 @@ func TestClientClosesFaultedServerWithCode(t *testing.T) {
 			closes := make(chan closeFrame, 1)
 			go func() {
 				conn, reader := acceptRawUpgrade(t, listener)
-				_, _ = conn.Write([]byte{0x81, 3, 'M', '{', '}'})
+				if !test.withoutMetadata {
+					_, _ = conn.Write([]byte{0x81, 3, 'M', '{', '}'})
+				}
 				_, _ = conn.Write(test.frame)
 				_, code, reason := watchFrames(reader, nil)
 				closes <- closeFrame{code: code, reason: reason}
@@ -88,7 +138,11 @@ func TestClientClosesFaultedServerWithCode(t *testing.T) {
 			assert.Nil(t, err)
 			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
 			_, err = stream.Receive()
-			assert.NotNil(t, err)
+			wantCode := test.wantCode
+			if wantCode == 0 {
+				wantCode = connect.CodeInternal
+			}
+			assert.Equal(t, connect.CodeOf(err), wantCode)
 			go func() { _ = stream.Close() }()
 
 			select {

@@ -113,6 +113,7 @@ func pingOverRawFrames(tb testing.TB, text string, options ...wstransport.Server
 	// The request goes uncompressed: RSV1 is per message, so a peer may send
 	// plain frames even once the extension is negotiated.
 	assert.Nil(tb, writeClientFrame(conn, bodyFor(tb, &pingv1.PingRequest{Text: text}), false, false))
+	assert.Nil(tb, writeClientFrame(conn, []byte{wireClientEndStream}, false, false))
 
 	// Past the server's opening M, which is tiny and says nothing about how
 	// the response body was framed.
@@ -301,6 +302,24 @@ func TestFaultCloseCodeNamesTheFault(t *testing.T) {
 			assert.Equal(t, websocket.CloseStatus(err), test.want)
 		})
 	}
+}
+
+// §6.1: M is always JSON, so an M in a binary frame, which says its payload is
+// Protobuf, is the wrong frame type even though its payload parses as JSON.
+func TestMetadataInABinaryFrameIsRejected(t *testing.T) {
+	t.Parallel()
+	httpServer := newHybridServer(t, pingServer{})
+	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
+	sendWireMessage(t, conn, false, wireMetadata, []byte(`{}`))
+
+	data := readServerOpening(t, conn)
+	assert.Equal(t, data[0], wireServerEndStream)
+	assert.True(t, strings.Contains(string(data), "invalid_argument"))
+	assert.True(t, strings.Contains(string(data), "binary frame"))
+	readCtx, cancelRead := readContext(t)
+	defer cancelRead()
+	_, _, err := conn.Read(readCtx)
+	assert.Equal(t, websocket.CloseStatus(err), websocket.StatusUnsupportedData)
 }
 
 // A server that negotiates permessage-deflate without no-context-takeover is
