@@ -70,6 +70,20 @@ func getHeaderCanonical(h http.Header, key string) string {
 	return v[0]
 }
 
+// getHeaderCanonicalValid is a shortcut for Header.Get() which
+// bypasses the CanonicalMIMEHeaderKey operation when we
+// know the key is already in canonical form. It returns the
+// value found and a boolean flag to differentiate between
+// the key not being present and the key being present with
+// an empty value.
+func getHeaderCanonicalValid(h http.Header, key string) (string, bool) {
+	v, ok := h[key]
+	if len(v) == 0 {
+		return "", ok
+	}
+	return v[0], ok
+}
+
 // setUserAgentIfAbsent sets the User-Agent header to the given value, but
 // only if the caller has not already provided one. We check for the key's
 // presence rather than comparing getHeaderCanonical(...) to "" so that a
