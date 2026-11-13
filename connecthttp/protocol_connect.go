@@ -897,12 +897,11 @@ func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Hea
 	if marshalErr != nil {
 		return connect.Errorf(connect.CodeInternal, "marshal end stream: %s", marshalErr).WithCause(marshalErr)
 	}
-	raw := bytes.NewBuffer(data)
+	raw := bufferpool.Get()
 	defer bufferpool.Put(raw)
-	writeErr := m.Write(&envelope{
-		Data:  raw,
-		Flags: connectFlagEnvelopeEndStream,
-	})
+	padEnvelope(raw)
+	_, _ = raw.Write(data)
+	writeErr := m.Write(connectFlagEnvelopeEndStream, raw)
 	if writeErr == nil || writeErr.Code() != connect.CodeResourceExhausted {
 		return writeErr
 	}
@@ -918,11 +917,9 @@ func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Hea
 		return connect.Errorf(connect.CodeInternal, "marshal end stream: %s", marshalErr).WithCause(marshalErr)
 	}
 	raw.Reset()
+	padEnvelope(raw)
 	_, _ = raw.Write(data)
-	return m.write(&envelope{
-		Data:  raw,
-		Flags: connectFlagEnvelopeEndStream,
-	})
+	return m.write(connectFlagEnvelopeEndStream, raw)
 }
 
 type connectStreamingUnmarshaler struct {
@@ -933,19 +930,16 @@ type connectStreamingUnmarshaler struct {
 }
 
 func (u *connectStreamingUnmarshaler) Unmarshal(message any) *connect.Error {
-	err := u.envelopeReader.Unmarshal(message)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, errSpecialEnvelope) {
+	data, flags, err := u.Read()
+	defer bufferpool.Put(data)
+	if err != nil {
 		return err
 	}
-	env := u.last
-	data := env.Data
-	u.last.Data = nil // don't keep a reference to it
-	defer bufferpool.Put(data)
-	if !env.IsSet(connectFlagEnvelopeEndStream) {
-		return connect.Errorf(connect.CodeInternal, "protocol error: invalid envelope flags %d", env.Flags)
+	if flags&^flagEnvelopeCompressed == 0 {
+		return u.unmarshal(data, message)
+	}
+	if flags&connectFlagEnvelopeEndStream == 0 {
+		return connect.Errorf(connect.CodeInternal, "protocol error: invalid envelope flags %d", flags)
 	}
 	var end connectEndStreamMessage
 	if err := json.Unmarshal(data.Bytes(), &end); err != nil {
@@ -1029,8 +1023,7 @@ func (m *connectUnaryMarshaler) Marshal(message any) *connect.Error {
 
 func (m *connectUnaryMarshaler) write(data []byte) *connect.Error {
 	m.wroteHeader = true
-	payload := bytes.NewReader(data)
-	if _, err := m.sender.Send(payload); err != nil {
+	if err := m.sender.Send(data); err != nil {
 		err = wrapIfContextError(err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
