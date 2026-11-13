@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -152,7 +153,10 @@ func isClientDisconnected(err error) bool {
 
 // wrapIfClientTransportError wraps client-side connection failures with
 // connect.CodeUnavailable. A reset observed while reading or closing a response
-// is a transient transport failure, not caller cancellation.
+// is a transient transport failure, not caller cancellation. So is
+// io.ErrUnexpectedEOF, which net/http returns when the connection is lost
+// before the response body has ended. A body the peer ends early still reads
+// as a clean io.EOF and is reported by the protocol.
 func wrapIfClientTransportError(err error) error {
 	if err == nil {
 		return nil
@@ -160,7 +164,7 @@ func wrapIfClientTransportError(err error) error {
 	if _, ok := asError(err); ok {
 		return err
 	}
-	if !isClientDisconnected(err) {
+	if !isClientDisconnected(err) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return err
 	}
 	return connect.NewError(connect.CodeUnavailable, err.Error()).WithCause(err)
