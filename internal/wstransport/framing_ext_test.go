@@ -130,7 +130,7 @@ func pingOverRawFrames(tb testing.TB, text string, options ...wstransport.Server
 
 // openMessage is the empty M message that starts a stream.
 func openMessage() []byte {
-	return append([]byte{wireMetadata}, []byte("{}")...)
+	return append([]byte{wireMetadata}, []byte("[]")...)
 }
 
 // A response comfortably over the threshold must actually go out compressed.
@@ -198,7 +198,7 @@ func TestInvalidUTF8InATextMessageIsRejected(t *testing.T) {
 		frame []byte
 	}{
 		// A lone continuation byte, which can never begin a sequence.
-		{name: "bare continuation byte", frame: []byte{wireMetadata, '{', 0x80, '}'}},
+		{name: "bare continuation byte", frame: []byte{wireMetadata, '[', 0x80, ']'}},
 		// A truncated three-byte sequence: 0xE2 0x98 wants a third byte.
 		{name: "truncated sequence", frame: []byte{wireMetadata, 0xE2, 0x98}},
 		// 0xFF never appears in UTF-8 at all.
@@ -231,7 +231,7 @@ func TestValidUTF8InATextMessageIsAccepted(t *testing.T) {
 	httpServer := newObservationServer(t, observations)
 	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
 	// Multi-byte runes throughout: a snowman and an accented vowel.
-	sendJSONMessage(t, conn, wireMetadata, []byte(`{"acme-tenant":["\u2603 caf\u00e9"]}`))
+	sendJSONMessage(t, conn, wireMetadata, []byte(`[["acme-tenant","\u2603 caf\u00e9"]]`))
 	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
 	assert.Equal(t, <-observations, "☃ café")
@@ -267,7 +267,7 @@ func TestFaultCloseCodeNamesTheFault(t *testing.T) {
 			name: "invalid UTF-8 in a text message is invalid payload data",
 			send: func(tb testing.TB, conn *websocket.Conn) {
 				tb.Helper()
-				sendJSONMessage(tb, conn, wireMetadata, []byte{'{', 0x80, '}'})
+				sendJSONMessage(tb, conn, wireMetadata, []byte{'[', 0x80, ']'})
 			},
 			want: websocket.StatusInvalidFramePayloadData, // 1007
 		},
@@ -310,7 +310,7 @@ func TestMetadataInABinaryFrameIsRejected(t *testing.T) {
 	t.Parallel()
 	httpServer := newHybridServer(t, pingServer{})
 	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
-	sendWireMessage(t, conn, false, wireMetadata, []byte(`{}`))
+	sendWireMessage(t, conn, false, wireMetadata, []byte(`[]`))
 
 	data := readServerOpening(t, conn)
 	assert.Equal(t, data[0], wireServerEndStream)

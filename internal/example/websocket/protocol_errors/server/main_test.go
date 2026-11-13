@@ -68,7 +68,7 @@ func sendOneFrame(tb testing.TB, serverURL string, text bool, marker rune, paylo
 	defer func() { _ = conn.CloseNow() }()
 
 	// Every stream opens with one M message; the frame under test follows it.
-	if err := conn.Write(ctx, websocket.MessageText, []byte("M{}")); err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, []byte("M[]")); err != nil {
 		tb.Fatalf("write opening metadata: %v", err)
 	}
 

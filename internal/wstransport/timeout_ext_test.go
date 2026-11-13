@@ -51,7 +51,7 @@ func dialCumSum(tb testing.TB, httpServer *httptest.Server, query string) *webso
 	assert.Nil(tb, err)
 	tb.Cleanup(func() { _ = conn.CloseNow() })
 	// Every stream opens with Leading-Metadata; see the protocol's ordering rule.
-	sendJSONMessage(tb, conn, wireMetadata, []byte("{}"))
+	sendJSONMessage(tb, conn, wireMetadata, []byte("[]"))
 	return conn
 }
 
@@ -170,7 +170,7 @@ func TestTimeoutHeaderIsNotADeadline(t *testing.T) {
 	}
 	assert.Nil(t, err)
 	t.Cleanup(func() { _ = conn.CloseNow() })
-	sendJSONMessage(t, conn, wireMetadata, []byte("{}"))
+	sendJSONMessage(t, conn, wireMetadata, []byte("[]"))
 	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
 	select {
@@ -252,7 +252,7 @@ func TestServerReportsItsOwnExpiredDeadline(t *testing.T) {
 			}
 			assert.Nil(t, err)
 			t.Cleanup(func() { _ = conn.CloseNow() })
-			sendJSONMessage(t, conn, wireMetadata, []byte("{}"))
+			sendJSONMessage(t, conn, wireMetadata, []byte("[]"))
 			sendProtoBody(t, conn, &pingv1.CountUpRequest{Number: 1})
 			if !test.withoutEnd {
 				sendJSONMessage(t, conn, wireClientEndStream, nil)

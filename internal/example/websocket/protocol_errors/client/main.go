@@ -105,7 +105,7 @@ func main() {
 			name:  "a second M message",
 			which: "metadata",
 			send: func(ctx context.Context, conn *websocket.Conn) error {
-				return writeMessage(ctx, conn, true, markerMetadata, []byte("{}"))
+				return writeMessage(ctx, conn, true, markerMetadata, []byte("[]"))
 			},
 		},
 	}
@@ -185,15 +185,15 @@ func exchange(
 	defer func() { _ = conn.CloseNow() }()
 
 	// Every stream opens with exactly one M message, empty when the client has
-	// none. Anything else first is refused before the RPC starts.
-	if err := writeMessage(ctx, conn, true, markerMetadata, []byte("{}")); err != nil {
+	// no metadata to send. Starting with a B or C is invalid.
+	if err := writeMessage(ctx, conn, true, markerMetadata, []byte("[]")); err != nil {
 		return "", err
 	}
 	if err := send(ctx, conn); err != nil {
 		return "", err
 	}
-	// Every response stream opens with the server's own M message, which says
-	// nothing about the fault under test. Read past it to the verdict.
+	// Every response stream opens with the server's own M message, which
+	// is ignored. Read past it to the content.
 	if _, opening, err := conn.Read(ctx); err != nil {
 		return "", err
 	} else if len(opening) == 0 || rune(opening[0]) != markerMetadata {

@@ -77,7 +77,7 @@ func TestClientStreamingWireSequence(t *testing.T) {
 			marker, payload, text := client.readMessage(t)
 			assert.Equal(t, marker, wireMetadata)
 			assert.True(t, text)                   // metadata is JSON
-			assert.Equal(t, string(payload), "{}") // this handler sets none
+			assert.Equal(t, string(payload), "[]") // this handler sets none
 
 			marker, payload, text = client.readMessage(t)
 			assert.Equal(t, marker, wireBody)

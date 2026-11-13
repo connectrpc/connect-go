@@ -78,7 +78,7 @@ func dialBrowserClientWithToken(
 	client := &browserClient{conn: conn}
 	// Every stream opens with exactly one M message, empty when
 	// there is none. Tests with metadata of their own use dialBrowserClientOpening.
-	client.writeJSON(tb, wireMetadata, []byte("{}"))
+	client.writeJSON(tb, wireMetadata, []byte("[]"))
 	return client
 }
 
@@ -192,9 +192,7 @@ func newMetadataServer(tb testing.TB, seen chan http.Header) *httptest.Server {
 func TestBrowserLeadingMetadataMessage(t *testing.T) {
 	t.Parallel()
 	seen := make(chan http.Header, 1)
-	metadata, err := json.Marshal(map[string][]string{
-		"Acme-Tenant": {"tenant-42"},
-	})
+	metadata, err := json.Marshal([][]string{{"Acme-Tenant", "tenant-42"}})
 	assert.Nil(t, err)
 	client := dialBrowserClientOpening(t, newMetadataServer(t, seen), pingProcedure, metadata)
 

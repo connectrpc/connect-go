@@ -268,7 +268,7 @@ func misframingServer(tb testing.TB, write func(*websocket.Conn)) *httptest.Serv
 			// has to come behind a well-formed one. Without this the client
 			// refuses the opening itself, and every case below would report
 			// the same metadata fault rather than the one it provokes.
-			_ = conn.Write(request.Context(), websocket.MessageText, []byte("M{}"))
+			_ = conn.Write(request.Context(), websocket.MessageText, []byte("M[]"))
 			write(conn)
 			// Stay up until the client is done. Closing straight after the
 			// write would race the client's own frames, and the test would see
@@ -334,9 +334,16 @@ func TestClientProtocolFaultsAreClassified(t *testing.T) {
 			want: connecthttp.FaultMetadata,
 		},
 		{
+			name: "null metadata",
+			write: func(conn *websocket.Conn) {
+				writeRawFrame(conn, true, wireMetadata, []byte("null"))
+			},
+			want: connecthttp.FaultMetadata,
+		},
+		{
 			name: "invalid UTF-8 in a text message",
 			write: func(conn *websocket.Conn) {
-				writeRawFrame(conn, true, wireMetadata, []byte{'{', 0x80, '}'})
+				writeRawFrame(conn, true, wireMetadata, []byte{'[', 0x80, ']'})
 			},
 			want: connecthttp.FaultTextEncoding,
 		},

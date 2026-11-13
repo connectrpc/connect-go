@@ -49,9 +49,10 @@ import (
 //
 //   - C (End-Of-Client-Stream) stands in for request-body EOF, which a
 //     WebSocket cannot half-close.
-//   - M (Leading-Metadata) carries a JSON-encoded http.Header, for browsers,
-//     whose WebSocket API cannot set headers on the upgrade. Every stream opens
-//     with exactly one, in either direction.
+//   - M (Leading-Metadata) carries metadata as a JSON array of entries, each a
+//     key followed by its values, for browsers, whose WebSocket API cannot set
+//     headers on the upgrade. Every stream opens with exactly one, in either
+//     direction.
 //
 // The server answers with zero or more B messages and then one S message,
 // whose payload is the EndStreamMessage JSON that Connect's HTTP streaming
@@ -686,33 +687,36 @@ func (u *websocketUnmarshaler) decodeBody(wire wireMessage, message any) *connec
 }
 
 func (u *websocketUnmarshaler) mergeLeadingMetadata(payload []byte) *connect.Error {
-	// The empty object, never zero bytes: an M carries a JSON object, and a
+	// The empty array, never null: an M carries a JSON array, and a
 	// bare marker is not one.
 	if len(payload) == 0 {
-		return u.fail(FaultMetadata, "empty M message; an empty metadata object is {}")
+		return u.fail(FaultMetadata, "empty M message; empty metadata is []")
 	}
-	if dupErr := duplicateMetadataKey(payload); dupErr != nil {
-		u.fault = FaultMetadata
-		return dupErr
-	}
-	var wire map[string][]string
-	if err := json.Unmarshal(payload, &wire); err != nil {
+	var entries [][]string
+	if err := json.Unmarshal(payload, &entries); err != nil {
 		return u.fail(FaultMetadata, "unmarshal M message: %w", err)
+	}
+	// json.Unmarshal accepts null for a slice; [] decodes to an empty one.
+	if entries == nil {
+		return u.fail(FaultMetadata, "M message is null; empty metadata is []")
 	}
 	// Checked against the keys as sent, before canonicalization, so the error
 	// names the spelling the client used rather than an internal form of it.
 	// A reserved key ends the RPC rather than being dropped: a client that
 	// believed it had set an identity header would otherwise never learn that
 	// the server does not have it.
-	for key := range wire {
-		if reason, reserved := reservedHeaderReason(key, u.infrastructureHeaders); reserved {
+	for _, entry := range entries {
+		if len(entry) == 0 {
+			continue // decodeMetadata rejects it
+		}
+		if reason, reserved := reservedHeaderReason(entry[0], u.infrastructureHeaders); reserved {
 			return u.fail(
 				FaultMetadata,
-				"client set %q in its M message, which is %s", key, reason,
+				"client set %q in its M message, which is %s", entry[0], reason,
 			)
 		}
 	}
-	meta, decodeErr := decodeMetadata(wire)
+	meta, decodeErr := decodeMetadata(entries)
 	if decodeErr != nil {
 		u.fault = FaultMetadata
 		return decodeErr
@@ -1338,7 +1342,7 @@ func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 			u.fault = FaultMetadata
 			return errorf(connect.CodeInternal, "unmarshal EndStreamMessage: %w", err)
 		}
-		trailer, decodeErr := decodeMetadata(end.Trailer)
+		trailer, decodeErr := decodeTrailer(end.Trailer)
 		if decodeErr != nil {
 			u.fault = FaultMetadata
 			return decodeErr
@@ -1402,18 +1406,19 @@ func (u *websocketClientUnmarshaler) mergeLeadingMetadata(payload []byte) *conne
 	u.sawLeadingMetadata = true
 	if len(payload) == 0 {
 		u.fault = FaultMetadata
-		return errorf(connect.CodeInternal, "empty M message; an empty metadata object is {}")
+		return errorf(connect.CodeInternal, "empty M message; empty metadata is []")
 	}
-	if dupErr := duplicateMetadataKey(payload); dupErr != nil {
-		u.fault = FaultMetadata
-		return dupErr
-	}
-	var wire map[string][]string
-	if err := json.Unmarshal(payload, &wire); err != nil {
+	var entries [][]string
+	if err := json.Unmarshal(payload, &entries); err != nil {
 		u.fault = FaultMetadata
 		return errorf(connect.CodeInternal, "unmarshal M message: %w", err)
 	}
-	meta, decodeErr := decodeMetadata(wire)
+	// json.Unmarshal accepts null for a slice; [] decodes to an empty one.
+	if entries == nil {
+		u.fault = FaultMetadata
+		return errorf(connect.CodeInternal, "M message is null; empty metadata is []")
+	}
+	meta, decodeErr := decodeMetadata(entries)
 	if decodeErr != nil {
 		u.fault = FaultMetadata
 		return decodeErr

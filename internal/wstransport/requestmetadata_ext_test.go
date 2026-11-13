@@ -87,7 +87,7 @@ func TestLeadingMetadataIsCompleteBeforeTheHandlerStarts(t *testing.T) {
 	observations := make(chan string, 2)
 	httpServer := newObservationServer(t, observations)
 
-	metadata, err := json.Marshal(map[string][]string{"Acme-Tenant": {"tenant-42"}})
+	metadata, err := json.Marshal([][]string{{"Acme-Tenant", "tenant-42"}})
 	assert.Nil(t, err)
 	client := dialBrowserClientOpening(
 		t, httpServer, pingv1connect.PingServiceCumSumProcedure, metadata)
@@ -166,7 +166,7 @@ func TestRequestMetadataIsSafeForConcurrentReaders(t *testing.T) {
 	httpServer := httptest.NewServer(mux)
 	t.Cleanup(httpServer.Close)
 
-	metadata, err := json.Marshal(map[string][]string{"Acme-Tenant": {"tenant-42"}})
+	metadata, err := json.Marshal([][]string{{"Acme-Tenant", "tenant-42"}})
 	assert.Nil(t, err)
 	client := dialBrowserClientOpening(
 		t, httpServer, pingv1connect.PingServiceCumSumProcedure, metadata)
@@ -244,7 +244,7 @@ func TestLeadingMetadataReplacesHandshakeHeaders(t *testing.T) {
 	assert.Nil(t, err)
 	t.Cleanup(func() { _ = conn.CloseNow() })
 
-	sendJSONMessage(t, conn, wireMetadata, []byte(`{"acme-tenant":["from-the-message"]}`))
+	sendJSONMessage(t, conn, wireMetadata, []byte(`[["acme-tenant","from-the-message"]]`))
 	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
 	assert.Equal(t, <-observations, "from-the-message")
@@ -286,7 +286,7 @@ func TestReservedHeadersEndTheRPC(t *testing.T) {
 			httpServer := newHybridServer(t, pingServer{})
 			conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
 			sendJSONMessage(t, conn, wireMetadata,
-				[]byte(`{"`+test.key+`":["forged"]}`))
+				[]byte(`[["`+test.key+`","forged"]]`))
 
 			data := readServerOpening(t, conn)
 			assert.Equal(t, data[0], wireServerEndStream)
@@ -320,7 +320,7 @@ func TestProtocolHandshakeHeadersAreStripped(t *testing.T) {
 			}
 			assert.Nil(t, err)
 			t.Cleanup(func() { _ = conn.CloseNow() })
-			sendJSONMessage(t, conn, wireMetadata, []byte("{}"))
+			sendJSONMessage(t, conn, wireMetadata, []byte("[]"))
 			sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
 			header := <-seen
@@ -345,7 +345,7 @@ func TestInfrastructureHeadersAreConfigurable(t *testing.T) {
 	t.Cleanup(httpServer.Close)
 
 	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
-	sendJSONMessage(t, conn, wireMetadata, []byte(`{"acme-tenant":["forged"]}`))
+	sendJSONMessage(t, conn, wireMetadata, []byte(`[["acme-tenant","forged"]]`))
 
 	data := readServerOpening(t, conn)
 	assert.Equal(t, data[0], wireServerEndStream)
@@ -365,7 +365,7 @@ func TestLeadingMetadataAddsNewKeys(t *testing.T) {
 	t.Cleanup(httpServer.Close)
 
 	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
-	sendJSONMessage(t, conn, wireMetadata, []byte(`{"Acme-Trace":["added"]}`))
+	sendJSONMessage(t, conn, wireMetadata, []byte(`[["Acme-Trace","added"]]`))
 	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
 	assert.Equal(t, <-observations, "added")

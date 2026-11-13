@@ -313,7 +313,7 @@ func (h *upgradeHandler) rejectInBand(
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), wsCloseWriteTimeout)
 	defer cancel()
-	if _, err := writeFrame(ctx, conn, true, []byte{markerMetadata, '{', '}'}); err != nil {
+	if _, err := writeFrame(ctx, conn, true, []byte{markerMetadata, '[', ']'}); err != nil {
 		_ = conn.CloseNow()
 		return
 	}

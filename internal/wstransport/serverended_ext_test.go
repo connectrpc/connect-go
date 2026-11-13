@@ -48,7 +48,7 @@ func TestClientWriteAfterServerEndedReportsEOF(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			httpServer := endStreamServer(t, nil, "M{}", verdict)
+			httpServer := endStreamServer(t, nil, "M[]", verdict)
 			wire := &closingRoundTripper{base: httpServer.Client().Transport}
 			wire.closed.Store(test.failFirstWrite)
 			transport := connecthttp.NewTransport(
@@ -79,7 +79,7 @@ func TestClientWriteAfterServerEndedReportsEOF(t *testing.T) {
 // side without error, and Receive reports why the call ended.
 func TestClientCloseSendAfterContextEnded(t *testing.T) {
 	t.Parallel()
-	httpServer := endStreamServer(t, nil, "M{}")
+	httpServer := endStreamServer(t, nil, "M[]")
 	wire := &closingRoundTripper{base: httpServer.Client().Transport}
 	transport := connecthttp.NewTransport(
 		&http.Client{Transport: wire},
@@ -107,7 +107,7 @@ func TestClientCloseSendAfterContextEnded(t *testing.T) {
 func TestClientWritesNothingAfterReceivingEndStream(t *testing.T) {
 	t.Parallel()
 	received := make(chan []byte, 1)
-	httpServer := endStreamServer(t, received, "M{}", verdict)
+	httpServer := endStreamServer(t, received, "M[]", verdict)
 	transport := connecthttp.NewTransport(
 		httpServer.Client(),
 		httpServer.URL,
@@ -172,7 +172,7 @@ func droppingServerTransport(tb testing.TB) connect.Transport {
 				break
 			}
 		}
-		_, _ = conn.Write([]byte{0x81, 3, 'M', '{', '}'})
+		_, _ = conn.Write([]byte{0x81, 3, 'M', '[', ']'})
 		_, _ = conn.Write([]byte{0x82, 3, 'B', 0x08, 0x01})
 		_, _ = conn.Write([]byte{0x81, 3, 'S', '{', '}'})
 		_ = conn.Close()

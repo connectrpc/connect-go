@@ -215,7 +215,7 @@ func TestLateLeadingMetadataIsRejected(t *testing.T) {
 	reply := readServerOpening(t, conn) // past the server's own M, to the handler's reply
 	assert.Equal(t, reply[0], wireBody)
 
-	sendJSONMessage(t, conn, wireMetadata, []byte(`{"Acme-Late":["nope"]}`))
+	sendJSONMessage(t, conn, wireMetadata, []byte(`[["Acme-Late","nope"]]`))
 	readCtx, cancelRead := readContext(t)
 	defer cancelRead()
 	_, data, err := conn.Read(readCtx)
@@ -239,7 +239,7 @@ func TestServerAlwaysOpensWithLeadingMetadata(t *testing.T) {
 	messageType, opening, err := conn.Read(readCtx)
 	assert.Nil(t, err)
 	assert.Equal(t, messageType, websocket.MessageText) // JSON, so a text frame
-	assert.Equal(t, string(opening), "M{}")             // empty, but present
+	assert.Equal(t, string(opening), "M[]")             // empty, but present
 }
 
 // A server that sent a second M would be rewriting headers the application may
@@ -248,7 +248,7 @@ func TestSecondServerLeadingMetadataIsRejected(t *testing.T) {
 	t.Parallel()
 	httpServer := misframingServer(t, func(conn *websocket.Conn) {
 		// misframingServer already sent the opening M; this is the second.
-		_ = conn.Write(context.Background(), websocket.MessageText, []byte(`M{"acme-late":["nope"]}`))
+		_ = conn.Write(context.Background(), websocket.MessageText, []byte(`M[["acme-late","nope"]]`))
 	})
 	recorder := &clientFaultRecorder{}
 	transport := connecthttp.NewTransport(

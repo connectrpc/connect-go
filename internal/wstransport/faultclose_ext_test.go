@@ -52,7 +52,7 @@ func TestClientClosesFaultedServerWithCode(t *testing.T) {
 		},
 		{
 			name:       "invalid UTF-8",
-			frame:      []byte{0x81, 3, 'M', '{', 0x80},
+			frame:      []byte{0x81, 3, 'M', '[', 0x80},
 			wantReason: "not valid UTF-8",
 		},
 		{
@@ -88,7 +88,7 @@ func TestClientClosesFaultedServerWithCode(t *testing.T) {
 			// §6.1: M and S are always JSON, so a binary frame is the wrong one
 			// even when the payload parses.
 			name:            "metadata in a binary frame",
-			frame:           []byte{0x82, 3, 'M', '{', '}'},
+			frame:           []byte{0x82, 3, 'M', '[', ']'},
 			withoutMetadata: true,
 			wantReason:      "M in a binary frame",
 		},
@@ -118,7 +118,7 @@ func TestClientClosesFaultedServerWithCode(t *testing.T) {
 			go func() {
 				conn, reader := acceptRawUpgrade(t, listener)
 				if !test.withoutMetadata {
-					_, _ = conn.Write([]byte{0x81, 3, 'M', '{', '}'})
+					_, _ = conn.Write([]byte{0x81, 3, 'M', '[', ']'})
 				}
 				_, _ = conn.Write(test.frame)
 				_, code, reason := watchFrames(reader, nil)

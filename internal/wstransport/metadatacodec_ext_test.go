@@ -113,7 +113,7 @@ func TestMetadataWireForm(t *testing.T) {
 	t.Cleanup(httpServer.Close)
 
 	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
-	sendJSONMessage(t, conn, wireMetadata, []byte(`{}`))
+	sendJSONMessage(t, conn, wireMetadata, []byte(`[]`))
 	sendJSONMessage(t, conn, wireClientEndStream, nil)
 
 	data := readServerOpening(t, conn)
@@ -153,7 +153,7 @@ func TestMetadataKeysAreCaseInsensitive(t *testing.T) {
 	observations := make(chan string, 4)
 	httpServer := newObservationServer(t, observations)
 	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
-	sendJSONMessage(t, conn, wireMetadata, []byte(`{"acme-tenant":["lower-case-key"]}`))
+	sendJSONMessage(t, conn, wireMetadata, []byte(`[["acme-tenant","lower-case-key"]]`))
 	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
 	// observationServer reads "Acme-Tenant"; the client sent "acme-tenant".
@@ -167,7 +167,7 @@ func TestUndecodableBinaryMetadataIsRejected(t *testing.T) {
 	t.Parallel()
 	httpServer := newHybridServer(t, pingServer{})
 	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
-	sendJSONMessage(t, conn, wireMetadata, []byte(`{"acme-token-bin":["not!base64"]}`))
+	sendJSONMessage(t, conn, wireMetadata, []byte(`[["acme-token-bin","not!base64"]]`))
 
 	data := readServerOpening(t, conn)
 	assert.Equal(t, data[0], wireServerEndStream)
@@ -194,7 +194,7 @@ func TestPaddedBinaryMetadataIsAccepted(t *testing.T) {
 	assert.True(t, strings.HasSuffix(padded, "="))
 
 	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
-	sendJSONMessage(t, conn, wireMetadata, []byte(`{"acme-token-bin":["`+padded+`"]}`))
+	sendJSONMessage(t, conn, wireMetadata, []byte(`[["acme-token-bin","`+padded+`"]]`))
 	sendJSONMessage(t, conn, wireClientEndStream, nil)
 
 	data := readServerOpening(t, conn)
@@ -210,17 +210,16 @@ func TestPaddedBinaryMetadataIsAccepted(t *testing.T) {
 	assert.Equal(t, echoed[0], padded)
 }
 
-// Two keys that fold to one are one key, and a map would keep whichever it
-// reached last — a choice neither peer can see and Go does not make twice the
-// same way. It is a protocol error instead.
+// Two entries whose keys fold to one would leave the receiver to choose between
+// them, a choice the sender cannot see. It is a protocol error instead.
 func TestDuplicateMetadataKeysAreRejected(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
 		name    string
 		payload string
 	}{
-		{name: "differing only in case", payload: `{"acme-tenant":["a"],"Acme-Tenant":["b"]}`},
-		{name: "spelled identically", payload: `{"acme-tenant":["a"],"acme-tenant":["b"]}`},
+		{name: "differing only in case", payload: `[["acme-tenant","a"],["Acme-Tenant","b"]]`},
+		{name: "spelled identically", payload: `[["acme-tenant","a"],["acme-tenant","b"]]`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -248,28 +247,28 @@ func TestMalformedMetadataNamesAndValuesAreRejected(t *testing.T) {
 	}{
 		{
 			name:    "space in the key",
-			payload: `{"acme tenant":["x"]}`,
+			payload: `[["acme tenant","x"]]`,
 			mention: "field name",
 		},
 		{
 			name:    "separator in the key",
-			payload: `{"acme:tenant":["x"]}`,
+			payload: `[["acme:tenant","x"]]`,
 			mention: "field name",
 		},
 		{
 			name:    "empty key",
-			payload: `{"":["x"]}`,
+			payload: `[["","x"]]`,
 			mention: "field name",
 		},
 		{
 			// A header injection wherever this is forwarded as HTTP.
 			name:    "CRLF in the value",
-			payload: `{"acme-tenant":["a\r\nX-Evil: 1"]}`,
+			payload: `[["acme-tenant","a\r\nX-Evil: 1"]]`,
 			mention: "field value",
 		},
 		{
 			name:    "NUL in the value",
-			payload: `{"acme-tenant":["a\u0000b"]}`,
+			payload: `[["acme-tenant","a\u0000b"]]`,
 			mention: "field value",
 		},
 	} {
@@ -303,7 +302,7 @@ func TestBinaryMetadataMayDecodeToAnyBytes(t *testing.T) {
 
 	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
 	encoded := base64.RawStdEncoding.EncodeToString([]byte(raw))
-	sendJSONMessage(t, conn, wireMetadata, []byte(`{"acme-token-bin":["`+encoded+`"]}`))
+	sendJSONMessage(t, conn, wireMetadata, []byte(`[["acme-token-bin","`+encoded+`"]]`))
 	sendJSONMessage(t, conn, wireClientEndStream, nil)
 
 	data := readServerOpening(t, conn)
@@ -315,7 +314,115 @@ func TestBinaryMetadataMayDecodeToAnyBytes(t *testing.T) {
 	assert.Equal(t, end.Metadata["acme-echo-bin"], []string{encoded})
 }
 
-// An M with no payload is not an empty object; the empty object is {}.
+// An entry is an array of strings, the key first. Anything else, including the
+// JSON object an earlier draft used, is a protocol error.
+func TestMalformedMetadataEntriesAreRejected(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name    string
+		payload string
+		mention string
+	}{
+		{name: "object, not array", payload: `{"acme-tenant":["a"]}`, mention: "unmarshal M message"},
+		{name: "null, not array", payload: `null`, mention: "M message is null"},
+		{name: "entry is not an array", payload: `["acme-tenant"]`, mention: "unmarshal M message"},
+		{name: "entry has no key", payload: `[[]]`, mention: "metadata entry is empty"},
+		{name: "value is not a string", payload: `[["acme-tenant",1]]`, mention: "unmarshal M message"},
+		{name: "values nested in an array", payload: `[["acme-tenant",["a"]]]`, mention: "unmarshal M message"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			httpServer := newHybridServer(t, pingServer{})
+			conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
+			sendJSONMessage(t, conn, wireMetadata, []byte(test.payload))
+
+			data := readServerOpening(t, conn)
+			assert.Equal(t, data[0], wireServerEndStream)
+			assert.True(t, strings.Contains(string(data), test.mention))
+		})
+	}
+}
+
+// One entry carries every value of its key, and a key with no values is
+// valid metadata.
+func TestMetadataEntryCarriesAllItsValues(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name    string
+		payload string
+		want    []string
+	}{
+		{name: "several values", payload: `[["acme-tenant","a","b"]]`, want: []string{"a", "b"}},
+		{name: "no values", payload: `[["acme-tenant"]]`, want: []string{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			server := connect.NewServer()
+			pingv1connect.RegisterPingServiceHandler(server, echoMetadataServer{
+				readKey: "Acme-Tenant", writeKey: "Acme-Echo",
+			})
+			mux := http.NewServeMux()
+			connecthttp.Mount(mux, server)
+			httpServer := httptest.NewServer(mux)
+			t.Cleanup(httpServer.Close)
+
+			conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
+			sendJSONMessage(t, conn, wireMetadata, []byte(test.payload))
+			sendJSONMessage(t, conn, wireClientEndStream, nil)
+
+			data := readServerOpening(t, conn)
+			assert.Equal(t, data[0], wireServerEndStream)
+			var end struct {
+				Error    json.RawMessage     `json:"error"`
+				Metadata map[string][]string `json:"metadata"`
+			}
+			assert.Nil(t, json.Unmarshal(data[1:], &end))
+			assert.Equal(t, len(end.Error), 0)
+			assert.Equal(t, len(end.Metadata["acme-echo"]), len(test.want))
+			for index, value := range test.want {
+				assert.Equal(t, end.Metadata["acme-echo"][index], value)
+			}
+		})
+	}
+}
+
+// A sender puts every value of a key in one entry, with the key lower-case.
+func TestLeadingMetadataWireForm(t *testing.T) {
+	t.Parallel()
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, leadingHeaderServer{})
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, server)
+	httpServer := httptest.NewServer(mux)
+	t.Cleanup(httpServer.Close)
+
+	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
+	sendJSONMessage(t, conn, wireMetadata, []byte(`[]`))
+	sendJSONMessage(t, conn, wireClientEndStream, nil)
+
+	ctx, cancel := readContext(t)
+	defer cancel()
+	_, opening, err := conn.Read(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, string(opening), `M[["acme-tenant","a","b"],["acme-zone","z"]]`)
+}
+
+// leadingHeaderServer sets response headers and returns.
+type leadingHeaderServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (leadingHeaderServer) CumSum(
+	ctx context.Context,
+	_ pingv1connect.PingServiceCumSumServerStream,
+) error {
+	info, _ := connect.CallInfoForServerContext(ctx)
+	info.ResponseHeader().SetValues("Acme-Zone", []string{"z"})
+	info.ResponseHeader().SetValues("Acme-Tenant", []string{"a", "b"})
+	return nil
+}
+
+// An M with no payload is not an empty array; empty metadata is [].
 func TestBareMetadataMarkerIsRejected(t *testing.T) {
 	t.Parallel()
 	httpServer := newHybridServer(t, pingServer{})

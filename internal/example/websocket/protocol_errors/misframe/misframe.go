@@ -58,7 +58,7 @@ func Handler(responseWriter http.ResponseWriter, request *http.Request) {
 	// so the client accepts the stream and then meets the lie below — without
 	// it the client would refuse the opening itself, and the fault reported
 	// would be about metadata rather than the marker.
-	if err := conn.Write(ctx, websocket.MessageText, []byte("M{}")); err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, []byte("M[]")); err != nil {
 		return
 	}
 	frame := append([]byte("Z"), payload...) // the lie

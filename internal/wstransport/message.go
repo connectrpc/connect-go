@@ -27,7 +27,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -43,7 +45,7 @@ import (
 // is where a JS client gets debugged.
 const (
 	markerBody            byte = 'B' // an RPC message, either direction
-	markerMetadata        byte = 'M' // JSON http.Header, either direction
+	markerMetadata        byte = 'M' // JSON metadata entries, either direction
 	markerServerEndStream byte = 'S' // EndStreamMessage JSON, server -> client
 	markerClientEndStream byte = 'C' // end of the request stream, client -> server
 
@@ -206,7 +208,7 @@ func (w *messageWriter) writeJSON(marker byte, value any) *connect.Error {
 // writeEndStream sends the terminal message. Its EndStreamMessage schema is
 // shared with Connect over HTTP; only the framing around it differs.
 func (w *messageWriter) writeEndStream(err error, trailer http.Header) *connect.Error {
-	end := &connectwire.EndStreamMessage{Trailer: encodeMetadata(trailer)}
+	end := &connectwire.EndStreamMessage{Trailer: encodeTrailer(trailer)}
 	if err != nil {
 		end.Error = connectwire.NewWireError(err)
 	}
@@ -251,37 +253,67 @@ func newCodecPair(codecs []connect.Codec) (codecPair, *connect.Error) {
 	return codecPair{binary: binary, text: text}, nil
 }
 
-// Metadata on the wire is a JSON object of string arrays whose keys are
-// lower-case, matching HTTP/2 and HTTP/3. A key ending in -bin carries base64,
-// because JSON strings are Unicode and arbitrary bytes are not. As over HTTP,
-// the application holds that base64 form: connect.EncodeBinaryHeader and
-// connect.DecodeBinaryHeader convert it, and this package passes it through.
+// An M message's metadata is a JSON array of entries, each a key followed by
+// all of that key's values: [["acme-tenant","42"],["accept","a","b"]]. An
+// array is used instead of an object because some JSON parsers automatically
+// swallow duplicate keys and won't report if a key repeats. A repeated key is
+// a protocol error.
+//
+// Keys are lower-case on the wire, matching HTTP/2 and HTTP/3. A key ending in
+// -bin carries base64, because JSON strings are Unicode and arbitrary bytes
+// are not. As over HTTP, the application holds that base64 form:
+// connect.EncodeBinaryHeader and connect.DecodeBinaryHeader convert it, and
+// this package passes it through.
 
 // metadataBinarySuffix marks a key whose values are base64-encoded bytes.
 const metadataBinarySuffix = "-bin"
 
-// encodeMetadata renders headers for the wire.
-func encodeMetadata(header http.Header) map[string][]string {
-	if len(header) == 0 {
-		return map[string][]string{}
+// encodeMetadata renders headers as M message entries, in key order so the
+// wire form is deterministic. Keys must be canonical, so no two collide.
+func encodeMetadata(header http.Header) [][]string {
+	entries := make([][]string, 0, len(header))
+	for _, key := range slices.Sorted(maps.Keys(header)) {
+		entries = append(entries, append([]string{strings.ToLower(key)}, header[key]...))
 	}
-	encoded := make(map[string][]string, len(header))
-	for key, values := range header {
+	return entries
+}
+
+// encodeTrailer renders trailers for an S message, whose EndStreamMessage
+// schema is shared with Connect over HTTP and so remains a JSON object.
+func encodeTrailer(trailer http.Header) http.Header {
+	encoded := make(http.Header, len(trailer))
+	for key, values := range trailer {
 		encoded[strings.ToLower(key)] = values
 	}
 	return encoded
 }
 
-// decodeMetadata reads wire metadata into an http.Header. Keys are canonical
-// MIME form in memory so that Go's own case-insensitive accessors work; the
-// case-insensitivity the protocol requires is theirs.
-func decodeMetadata(wire map[string][]string) (http.Header, *connect.Error) {
-	header := make(http.Header, len(wire))
-	// Keys that differ only in case are one key, so two of them collide here.
-	// Left to the map, which of the two survived would depend on iteration
-	// order, and neither peer could tell which.
-	spelling := make(map[string]string, len(wire))
-	for key, values := range wire {
+// decodeTrailer reads an S message's trailers, holding them to the same rules
+// as M metadata.
+func decodeTrailer(trailer http.Header) (http.Header, *connect.Error) {
+	entries := make([][]string, 0, len(trailer))
+	for key, values := range trailer {
+		entries = append(entries, append([]string{key}, values...))
+	}
+	return decodeMetadata(entries)
+}
+
+// decodeMetadata reads metadata entries into an http.Header. Keys are
+// canonical MIME form in memory so that Go's own case-insensitive accessors
+// work; the case-insensitivity the protocol requires is theirs.
+func decodeMetadata(entries [][]string) (http.Header, *connect.Error) {
+	header := make(http.Header, len(entries))
+	// Keys that differ only in case are one key, so two of them collide here,
+	// as do two spelled identically.
+	spelling := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		if len(entry) == 0 {
+			return nil, errorf(
+				connect.CodeInvalidArgument,
+				"metadata entry is empty; an entry is a key followed by its values",
+			)
+		}
+		key, values := entry[0], entry[1:]
 		canonical := http.CanonicalHeaderKey(key)
 		if first, duplicate := spelling[canonical]; duplicate {
 			return nil, duplicateMetadataKeyError(first, key)
@@ -357,57 +389,15 @@ func validHeaderFieldValue(value string) bool {
 }
 
 // duplicateMetadataKeyError names both spellings in a stable order, so the
-// message does not depend on which one was reached first.
+// message does not depend on which one was reached first. Trailers arrive as
+// a map, so for them that order is random.
 func duplicateMetadataKeyError(one, other string) *connect.Error {
 	if one > other {
 		one, other = other, one
 	}
 	return errorf(
 		connect.CodeInvalidArgument,
-		"metadata keys %q and %q are the same key; a key carries all its values in one array",
+		"metadata keys %q and %q are the same key; a key carries all its values in one entry",
 		one, other,
 	)
-}
-
-// metadataObjectKeys lists an M object's keys in the order they were sent,
-// which a map cannot preserve. It stops at anything it cannot walk and returns
-// what it has: why a payload is malformed is the unmarshal's to report, and
-// with a better message than a half-finished scan could.
-func metadataObjectKeys(payload []byte) []string {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	opening, _ := decoder.Token()
-	if opening != json.Delim('{') {
-		return nil
-	}
-	var keys []string
-	for decoder.More() {
-		token, _ := decoder.Token()
-		key, isString := token.(string)
-		if !isString {
-			break
-		}
-		// Consumes exactly one value, whatever its shape, leaving the decoder
-		// on the next key.
-		var value json.RawMessage
-		if decoder.Decode(&value) != nil {
-			break
-		}
-		keys = append(keys, key)
-	}
-	return keys
-}
-
-// duplicateMetadataKey reports a key that appears twice in an M object.
-// json.Unmarshal keeps the last of two identical keys and both of two that
-// differ only in case, so neither reaches decodeMetadata as a duplicate.
-func duplicateMetadataKey(payload []byte) *connect.Error {
-	spelling := make(map[string]string)
-	for _, key := range metadataObjectKeys(payload) {
-		canonical := http.CanonicalHeaderKey(key)
-		if first, duplicate := spelling[canonical]; duplicate {
-			return duplicateMetadataKeyError(first, key)
-		}
-		spelling[canonical] = key
-	}
-	return nil
 }

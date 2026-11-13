@@ -117,7 +117,7 @@ func TestReadLimitSpansFragments(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 	_ = rawHandshake(t, conn, addr, pingv1connect.PingServiceCumSumProcedure)
 	assert.Nil(t, conn.SetDeadline(time.Now().Add(20*time.Second)))
-	assert.Nil(t, writeClientFragment(conn, []byte("M{}"), true, opcodeText))
+	assert.Nil(t, writeClientFragment(conn, []byte("M[]"), true, opcodeText))
 
 	// 4 KiB in 64-byte pieces: every frame is far under the limit, and the
 	// message they reassemble into is four times over it.

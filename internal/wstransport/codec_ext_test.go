@@ -417,7 +417,7 @@ func TestUnsupportedCodecIsReportedInBand(t *testing.T) {
 			defer cancelRead()
 			_, opening, err := conn.Read(readCtx)
 			assert.Nil(t, err)
-			assert.Equal(t, string(opening), "M{}")
+			assert.Equal(t, string(opening), "M[]")
 
 			_, data, err := conn.Read(readCtx)
 			assert.Nil(t, err)
