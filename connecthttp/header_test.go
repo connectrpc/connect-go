@@ -97,3 +97,17 @@ func Test_getHeaderCanonical(t *testing.T) {
 		})
 	}
 }
+
+func TestFromHTTPHeaderSkipsEmptyValues(t *testing.T) {
+	t.Parallel()
+	var header connect.Header
+	fromHTTPHeader(&header, http.Header{
+		"Foo": []string{"one"},
+		"Bar": []string{},
+		"Baz": nil,
+	})
+	assert.Equal(t, header.Len(), 1)
+	assert.Equal(t, header.Get("Foo"), "one")
+	assert.False(t, header.Has("Bar"))
+	assert.False(t, header.Has("Baz"))
+}
