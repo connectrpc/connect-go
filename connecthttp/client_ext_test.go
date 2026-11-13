@@ -420,7 +420,27 @@ func TestGetURLSizeBoundary(t *testing.T) {
 
 func TestConnectionDropped(t *testing.T) {
 	t.Parallel()
-	ctx := t.Context()
+	// The server drops the TCP connection before it responds, or after the
+	// first byte of the response body. Either way the client sees a lost
+	// connection, which is CodeUnavailable. This uses a real network
+	// connection because the errors net/http reports depend on it.
+	pingServer := &pluggablePingServer{
+		ping: func(_ context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+			return &pingv1.PingResponse{Number: request.GetNumber()}, nil
+		},
+		countUp: func(_ context.Context, request *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
+			for number := range request.GetNumber() {
+				if err := stream.Send(&pingv1.CountUpResponse{Number: number + 1}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, pingServer)
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, srv)
 	for _, protocol := range []string{connect.ProtocolNameConnect, connect.ProtocolNameGRPC, connect.ProtocolNameGRPCWeb} {
 		var opts []connecthttp.Option
 		switch protocol {
@@ -429,38 +449,56 @@ func TestConnectionDropped(t *testing.T) {
 		case connect.ProtocolNameGRPCWeb:
 			opts = []connecthttp.Option{connecthttp.WithGRPCWeb()}
 		}
-		t.Run(protocol, func(t *testing.T) {
-			t.Parallel()
-			httpClient := httpClientFunc(func(_ *http.Request) (*http.Response, error) {
-				return nil, io.EOF
-			})
-			client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(httpClient,
-				"http://1.2.3.4",
-				opts...),
-			))
-			t.Run("unary", func(t *testing.T) {
-				t.Parallel()
-				_, err := client.Ping(ctx, &pingv1.PingRequest{})
-				assert.NotNil(t, err)
-				if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
-					t.Logf("err = %v\n%#v", err, err)
-				}
-			})
-			t.Run("stream", func(t *testing.T) {
-				t.Parallel()
-				svrStream, err := client.CountUp(ctx, &pingv1.CountUpRequest{})
-				if err == nil {
-					t.Cleanup(func() {
-						assert.Nil(t, svrStream.Close())
-					})
-					_, err = svrStream.Receive()
-				}
-				assert.NotNil(t, err)
-				if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
-					t.Logf("err = %v\n%#v", err, err)
-				}
-			})
-		})
+		for _, httpVersion := range []string{"http1", "http2"} {
+			if protocol == connect.ProtocolNameGRPC && httpVersion == "http1" {
+				continue // gRPC requires HTTP/2.
+			}
+			for name, limit := range map[string]int{"before_response": 0, "mid_body": 1} {
+				t.Run(protocol+"/"+httpVersion+"/"+name, func(t *testing.T) {
+					t.Parallel()
+					// Each subtest has its own server, so dropping its
+					// connections doesn't affect other subtests.
+					var server *httptest.Server
+					server = httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+						mux.ServeHTTP(&dropResponseWriter{
+							ResponseWriter: writer,
+							limit:          limit,
+							drop:           server.CloseClientConnections,
+						}, request)
+					}))
+					server.Config.ErrorLog = log.New(io.Discard, "", 0) //nolint:forbidigo
+					serverProtocols := new(http.Protocols)
+					serverProtocols.SetHTTP1(true)
+					serverProtocols.SetUnencryptedHTTP2(true)
+					server.Config.Protocols = serverProtocols
+					server.Start()
+					t.Cleanup(server.Close)
+					httpClient := server.Client()
+					if httpVersion == "http2" {
+						transport, ok := httpClient.Transport.(*http.Transport)
+						assert.True(t, ok)
+						clientProtocols := new(http.Protocols)
+						clientProtocols.SetUnencryptedHTTP2(true)
+						transport.Protocols = clientProtocols
+					}
+					client := pingv1connect.NewPingServiceClient(connect.NewClient(
+						connecthttp.NewTransport(httpClient, server.URL, opts...),
+					))
+					_, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 42})
+					if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
+						t.Logf("unary err = %v", err)
+					}
+					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 2})
+					if err == nil {
+						_, err = stream.Receive()
+						assert.Nil(t, stream.Close())
+					}
+					if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
+						t.Logf("stream err = %v", err)
+					}
+				})
+			}
+		}
 	}
 }
 
@@ -1362,6 +1400,43 @@ type httpClientFunc func(*http.Request) (*http.Response, error)
 
 func (fn httpClientFunc) Do(req *http.Request) (*http.Response, error) {
 	return fn(req)
+}
+
+// dropResponseWriter writes up to limit bytes of the response body, then
+// flushes them and calls drop to close the connection. A limit of zero drops
+// the connection before the response headers are sent.
+type dropResponseWriter struct {
+	http.ResponseWriter
+
+	limit int
+	drop  func()
+}
+
+func (w *dropResponseWriter) Write(data []byte) (int, error) {
+	if len(data) <= w.limit {
+		n, err := w.ResponseWriter.Write(data)
+		w.limit -= n
+		return n, err
+	}
+	if w.limit > 0 {
+		_, _ = w.ResponseWriter.Write(data[:w.limit])
+		_ = http.NewResponseController(w.ResponseWriter).Flush()
+		w.limit = 0
+	}
+	w.drop()
+	return 0, net.ErrClosed
+}
+
+func (w *dropResponseWriter) Flush() {
+	// Hold back the response headers until the first write, so a limit of
+	// zero drops the connection before the client sees a response.
+	if w.limit > 0 {
+		_ = http.NewResponseController(w.ResponseWriter).Flush()
+	}
+}
+
+func (w *dropResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 // resetBody simulates a connection reset on a response body. readErr fails
