@@ -207,7 +207,8 @@ func isStreamMetadataMethod(name string) bool {
 
 // rewriteStreamMetadata moves a stream's RequestHeader/ResponseHeader/
 // ResponseTrailer access to the v2 CallInfo: handler streams read inline from
-// the server CallInfo; client streams seed a NewClientContext.
+// the server CallInfo; client streams seed a NewClientContext. A handler
+// stream's Spec() and Peer() move to the server CallInfo fields.
 func rewriteStreamMetadata(body *ast.BlockStmt, streamVars map[string]bool, params map[string]streamParam, state *rewriteState, report *Report, ctxName string) {
 	infoName := ""
 	walkFuncBody(body, func(n ast.Node) {
@@ -236,6 +237,18 @@ func rewriteStreamMetadata(body *ast.BlockStmt, streamVars map[string]bool, para
 		call.Fun = &ast.SelectorExpr{X: ast.NewIdent(infoName), Sel: ast.NewIdent(sel.Sel.Name)}
 		report.bump("stream_metadata_rewrite")
 	})
+	// A stream inherited from an enclosing function is skipped: whether it is
+	// a handler or a client stream is only known where it is declared.
+	handlerStreams, clientStreams := map[string]bool{}, map[string]bool{}
+	for name := range streamVars {
+		if _, isHandler := params[name]; isHandler {
+			handlerStreams[name] = true
+		} else if assignedFromMethodCall(body, name) {
+			clientStreams[name] = true
+		}
+	}
+	rewriteServerCallInfoFields(body, state, report, handlerStreams, ctxName)
+	warnClientCallInfoFields(body, report, clientStreams)
 	rewriteClientStreamMetadata(body, streamVars, params, state, report, ctxName)
 }
 
