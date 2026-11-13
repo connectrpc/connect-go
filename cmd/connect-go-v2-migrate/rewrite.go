@@ -62,6 +62,7 @@ const (
 	ruleBufgenGoMod          = "bufgen_update_go_mod"
 	ruleBufgenManualEdit     = "bufgen_manual_edit"
 	ruleReadLimitDefault     = "read_limit_default"
+	ruleV1OnlySymbol         = "v1_only_symbol"
 )
 
 var (
@@ -84,6 +85,7 @@ var (
 		"WithHTTPGet":                      true,
 		"WithHTTPGetMaxURLSize":            true,
 		"WithProtoJSON":                    true,
+		"HTTPClient":                       true,
 		"ErrorWriter":                      true,
 		"NewErrorWriter":                   true,
 		"IsNotModifiedError":               true,
@@ -127,6 +129,77 @@ var (
 	// core package, so only the selector changes.
 	renamedConnectCore = map[string]string{
 		"CallInfoForHandlerContext": "CallInfoForServerContext",
+	}
+
+	// v2CoreSymbols lists the exported identifiers of the v2 connect package,
+	// inlined to keep this module free of a connect dependency.
+	// TestV2CoreSymbols keeps it in sync with connect.go.
+	v2CoreSymbols = map[string]bool{
+		"CallInfo":                 true,
+		"CallInfoForClientContext": true,
+		"CallInfoForServerContext": true,
+		"Client":                   true,
+		"ClientFunc":               true,
+		"ClientInterceptor":        true,
+		"ClientStream":             true,
+		"Code":                     true,
+		"CodeAborted":              true,
+		"CodeAlreadyExists":        true,
+		"CodeCanceled":             true,
+		"CodeDataLoss":             true,
+		"CodeDeadlineExceeded":     true,
+		"CodeFailedPrecondition":   true,
+		"CodeInternal":             true,
+		"CodeInvalidArgument":      true,
+		"CodeNotFound":             true,
+		"CodeOf":                   true,
+		"CodeOutOfRange":           true,
+		"CodePermissionDenied":     true,
+		"CodeResourceExhausted":    true,
+		"CodeUnauthenticated":      true,
+		"CodeUnavailable":          true,
+		"CodeUnimplemented":        true,
+		"CodeUnknown":              true,
+		"Codec":                    true,
+		"CodecNameJSON":            true,
+		"CodecNameProto":           true,
+		"CompressionNameBr":        true,
+		"CompressionNameGzip":      true,
+		"CompressionNameIdentity":  true,
+		"CompressionNameZstd":      true,
+		"Compressor":               true,
+		"DecodeBinaryHeader":       true,
+		"EncodeBinaryHeader":       true,
+		"Error":                    true,
+		"ErrorDetail":              true,
+		"Errorf":                   true,
+		"Header":                   true,
+		"IdempotencyIdempotent":    true,
+		"IdempotencyLevel":         true,
+		"IdempotencyNoSideEffects": true,
+		"IdempotencyUnknown":       true,
+		"MessageStats":             true,
+		"Method":                   true,
+		"NewClient":                true,
+		"NewClientContext":         true,
+		"NewError":                 true,
+		"NewServer":                true,
+		"ProtocolNameConnect":      true,
+		"ProtocolNameGRPC":         true,
+		"ProtocolNameGRPCWeb":      true,
+		"Server":                   true,
+		"ServerFunc":               true,
+		"ServerInterceptor":        true,
+		"ServerStream":             true,
+		"Spec":                     true,
+		"StableCodec":              true,
+		"StreamType":               true,
+		"StreamTypeBidi":           true,
+		"StreamTypeClient":         true,
+		"StreamTypeServer":         true,
+		"StreamTypeUnary":          true,
+		"Transport":                true,
+		"Version":                  true,
 	}
 )
 
@@ -404,12 +477,15 @@ func finishRewrite(filename string, src []byte, fset *token.FileSet, file *ast.F
 	rewriteEcosystemImports(fset, file, state, report)
 	// Drop the v1 import once v2 took over its "connect" name or the alias is no
 	// longer referenced. Leftover connect.X (warned-only reshaped symbols) keeps
-	// it so the file still compiles against v1 until they are ported.
+	// it so the file still compiles against v1 until they are ported. When v2
+	// took over the name, leftovers resolve against v2 instead, so warn on any
+	// that v2 lacks.
 	if state.hadV1Import &&
 		((state.usedV2 && state.connectAlias == state.connectV2Alias) ||
 			!fileReferencesIdent(file, state.connectAlias)) {
 		removeConnectV1Import(fset, file, state)
 		report.bump("import_drop_v1")
+		warnV1OnlySymbols(report, file, state.connectAlias)
 	}
 	// Capture residual v1 symbols before printing so the retained-import warning
 	// can name what's left.
@@ -467,6 +543,33 @@ func warnIfV1Retained(report *Report, file *ast.File, retained bool, residual []
 		references = "still uses " + strings.Join(residual, ", ")
 	}
 	report.warnAtf(v1ImportPos(file), ruleRemoveV1Import, "connectrpc.com/connect (v1) import retained because it %s.", references)
+}
+
+// warnV1OnlySymbols warns at the first use of each connect.<X> selector under
+// alias that names no v2 core symbol, unless an earlier pass already warned
+// there. Once v2 takes over the v1 import's name, these leftovers no longer
+// compile, and nothing else reports them.
+func warnV1OnlySymbols(report *Report, file *ast.File, alias string) {
+	seen := map[string]bool{}
+	walk(file, func(n ast.Node) {
+		sel, isSel := n.(*ast.SelectorExpr)
+		if !isSel {
+			return
+		}
+		ident, isIdent := sel.X.(*ast.Ident)
+		if !isIdent || ident.Name != alias {
+			return
+		}
+		name := sel.Sel.Name
+		if v2CoreSymbols[name] || seen[name] {
+			return
+		}
+		seen[name] = true
+		if report.warnedAt(sel.Pos()) {
+			return
+		}
+		report.warnAtf(sel.Pos(), ruleV1OnlySymbol, "%s.%s is not in connectrpc.com/connect/v2, which replaced the v1 import. Port it by hand.", alias, name)
+	})
 }
 
 // v1ImportPos returns the position of the v1 connect import spec, or NoPos.

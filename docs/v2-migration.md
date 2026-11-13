@@ -442,8 +442,9 @@ connecthttp.WithGRPCWeb()
 connecthttp.WithSendCompression("gzip")
 ```
 
-The `ErrorWriter` type, `NewErrorWriter`, and `IsNotModifiedError` move to
-`connecthttp` the same way, keeping their signatures.
+The `HTTPClient` and `ErrorWriter` types, `NewErrorWriter`, and
+`IsNotModifiedError` move to `connecthttp` the same way, keeping their
+signatures.
 
 ✅ `connect-go-v2-migrate` handles these.
 
