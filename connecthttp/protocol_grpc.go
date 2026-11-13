@@ -565,23 +565,19 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 	// gRPC always sends the error's code, message, details, and metadata as
 	// trailing metadata. The Connect protocol doesn't do this, so we don't want
 	// to mutate the trailers map that the user sees.
-	mergedTrailers := make(
-		http.Header,
-		len(hc.responseTrailer)+2, // always make space for status & message
-	)
-	mergeHeaders(mergedTrailers, hc.responseTrailer)
-	grpcErrorToTrailer(hc.marshaler.ctx, mergedTrailers, hc.protobuf, err)
+	header := hc.responseWriter.Header()
 	if hc.web && !hc.wroteToBody && len(hc.responseHeader) == 0 {
 		// We're using gRPC-Web, we haven't yet written to the body, and there are no
 		// custom headers. That means we can send a "trailers-only" response and send
 		// trailing metadata as HTTP headers (instead of as trailers).
-		mergeHeaders(hc.responseWriter.Header(), mergedTrailers)
+		mergeHeaders(header, hc.responseTrailer)
+		grpcErrorToTrailer(hc.marshaler.ctx, header, hc.protobuf, err)
 		return nil
 	}
 	if hc.web {
 		// We're using gRPC-Web and we've already sent the headers, so we write
 		// trailing metadata to the HTTP body.
-		if err := hc.marshaler.MarshalWebTrailers(mergedTrailers); err != nil {
+		if err := hc.marshaler.MarshalWebTrailers(hc.responseTrailer, hc.protobuf, err); err != nil {
 			return err
 		}
 		return nil // must be a literal nil: nil *connect.Error is a non-nil error
@@ -599,12 +595,20 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 	// Note that this is _very_ finicky and difficult to test with net/http,
 	// since correctness depends on low-level framing details. Breaking this
 	// logic breaks Envoy's gRPC-Web translation.
-	for key, values := range mergedTrailers {
-		for _, value := range values {
-			// These are potentially user-supplied, so we can't assume they're in
-			// canonical form.
-			hc.responseWriter.Header().Add(http.TrailerPrefix+key, value)
+	for key, values := range hc.responseTrailer {
+		if len(values) > 0 {
+			header[http.TrailerPrefix+key] = values
 		}
+	}
+	if err == nil {
+		header[http.TrailerPrefix+grpcHeaderStatus] = []string{"0"} // zero is the gRPC OK status
+		return nil
+	}
+	status, message, details := grpcStatusForError(hc.marshaler.ctx, hc.protobuf, err)
+	header[http.TrailerPrefix+grpcHeaderStatus] = []string{status}
+	header[http.TrailerPrefix+grpcHeaderMessage] = []string{message}
+	if details != "" {
+		header[http.TrailerPrefix+grpcHeaderDetails] = []string{details}
 	}
 	return nil
 }
@@ -613,23 +617,22 @@ type grpcMarshaler struct {
 	envelopeWriter
 }
 
-func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *connect.Error {
+// MarshalWebTrailers writes the gRPC-Web trailers frame for err and trailer.
+func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header, protobuf connect.Codec, err error) *connect.Error {
+	status, message, details := grpcStatusForError(m.ctx, protobuf, err)
 	raw := bufferpool.Get()
 	defer bufferpool.Put(raw)
 	padEnvelope(raw)
-	for key, values := range trailer {
-		// Per the Go specification, keys inserted during iteration may be produced
-		// later in the iteration or may be skipped. For safety, avoid mutating the
-		// map if the key is already lower-cased.
-		lower := strings.ToLower(key)
-		if key == lower {
-			continue
+	grpcWriteWebStatus(raw, status, message, details)
+	if len(trailer) > 0 {
+		// gRPC-Web trailer keys are lowercase. Header.Write sanitizes the rest.
+		lower := make(http.Header, len(trailer))
+		for key, values := range trailer {
+			lower[strings.ToLower(key)] = values
 		}
-		delete(trailer, key)
-		trailer[lower] = values
-	}
-	if err := trailer.Write(raw); err != nil {
-		return connect.Errorf(connect.CodeInternal, "format trailers: %s", err).WithCause(err)
+		if err := lower.Write(raw); err != nil {
+			return connect.Errorf(connect.CodeInternal, "format trailers: %s", err).WithCause(err)
+		}
 	}
 	writeErr := m.Write(grpcFlagEnvelopeTrailer, raw)
 	if writeErr == nil || writeErr.Code() != connect.CodeResourceExhausted {
@@ -637,19 +640,12 @@ func (m *grpcMarshaler) MarshalWebTrailers(trailer http.Header) *connect.Error {
 	}
 	// The trailers exceed sendMaxBytes. Rather than drop them, send only the
 	// status and message, reporting the limit if there's no error.
-	status, message := strings.ToLower(grpcHeaderStatus), strings.ToLower(grpcHeaderMessage)
-	minimal := http.Header{status: trailer[status], message: trailer[message]}
-	if code := trailer[status]; len(code) == 0 || code[0] == "0" {
-		minimal = http.Header{
-			status:  {strconv.Itoa(int(writeErr.Code()))},
-			message: {grpcPercentEncode(writeErr.Message())},
-		}
+	if status == "0" {
+		status, message = strconv.Itoa(int(writeErr.Code())), grpcPercentEncode(writeErr.Message())
 	}
 	raw.Reset()
 	padEnvelope(raw)
-	if err := minimal.Write(raw); err != nil {
-		return connect.Errorf(connect.CodeInternal, "format trailers: %s", err).WithCause(err)
-	}
+	grpcWriteWebStatus(raw, status, message, "")
 	return m.write(grpcFlagEnvelopeTrailer, raw)
 }
 
@@ -965,9 +961,20 @@ func grpcContentTypeForCodecName(web bool, name string) string {
 }
 
 func grpcErrorToTrailer(ctx context.Context, trailer http.Header, protobuf connect.Codec, err error) {
+	status, message, details := grpcStatusForError(ctx, protobuf, err)
+	setHeaderCanonical(trailer, grpcHeaderStatus, status)
+	if err != nil {
+		setHeaderCanonical(trailer, grpcHeaderMessage, message)
+	}
+	if details != "" {
+		setHeaderCanonical(trailer, grpcHeaderDetails, details)
+	}
+}
+
+// grpcStatusForError returns the gRPC status, message, and details for err.
+func grpcStatusForError(ctx context.Context, protobuf connect.Codec, err error) (string, string, string) {
 	if err == nil {
-		setHeaderCanonical(trailer, grpcHeaderStatus, "0") // zero is the gRPC OK status
-		return
+		return "0", "", "" // zero is the gRPC OK status
 	}
 	var (
 		code    = uint32(connect.CodeUnknown)
@@ -991,10 +998,28 @@ func grpcErrorToTrailer(ctx context.Context, trailer http.Header, protobuf conne
 			}
 		}
 	}
-	setHeaderCanonical(trailer, grpcHeaderStatus, strconv.Itoa(int(code)))
-	setHeaderCanonical(trailer, grpcHeaderMessage, grpcPercentEncode(message))
+	var details string
 	if len(bin) > 0 {
-		setHeaderCanonical(trailer, grpcHeaderDetails, connect.EncodeBinaryHeader(bin))
+		details = connect.EncodeBinaryHeader(bin)
+	}
+	return strconv.Itoa(int(code)), grpcPercentEncode(message), details
+}
+
+// grpcWriteWebStatus writes the gRPC status trailers. Their values are already
+// encoded and need no sanitizing.
+func grpcWriteWebStatus(buffer *bytes.Buffer, status, message, details string) {
+	buffer.WriteString("grpc-status: ")
+	buffer.WriteString(status)
+	buffer.WriteString("\r\n")
+	if status != "0" {
+		buffer.WriteString("grpc-message: ")
+		buffer.WriteString(message)
+		buffer.WriteString("\r\n")
+	}
+	if details != "" {
+		buffer.WriteString("grpc-status-details-bin: ")
+		buffer.WriteString(details)
+		buffer.WriteString("\r\n")
 	}
 }
 
