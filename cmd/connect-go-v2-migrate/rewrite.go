@@ -127,6 +127,9 @@ var (
 	// core package, so only the selector changes.
 	renamedConnectCore = map[string]string{
 		"CallInfoForHandlerContext": "CallInfoForServerContext",
+		"ProtocolConnect":           "ProtocolNameConnect",
+		"ProtocolGRPC":              "ProtocolNameGRPC",
+		"ProtocolGRPCWeb":           "ProtocolNameGRPCWeb",
 	}
 )
 
@@ -671,6 +674,7 @@ func rewriteFuncBody(body *ast.BlockStmt, state *rewriteState, report *Report, m
 
 		serverResponses := scanServerResponseHolders(body, state.connectAlias)
 		rewriteRequestMetadata(body, state, report, serverRequests, serverResponses, ctxName)
+		rewriteServerCallInfoFields(body, state, report, serverRequests, ctxName)
 		rewriteBareMsg(body, msgHolders, report)
 	}
 	// A client request header set here seeds a context; the response pass then
@@ -678,6 +682,7 @@ func rewriteFuncBody(body *ast.BlockStmt, state *rewriteState, report *Report, m
 	requestHeaderSet := false
 	if len(clientRequests) > 0 {
 		requestHeaderSet = rewriteClientRequestHeaders(body, state, report, clientRequests)
+		warnClientCallInfoFields(body, report, clientRequests)
 	}
 	if len(clientResponses) > 0 {
 		rewriteClientResponseMetadata(body, state, report, clientResponses, requestHeaderSet)
@@ -685,8 +690,8 @@ func rewriteFuncBody(body *ast.BlockStmt, state *rewriteState, report *Report, m
 }
 
 // rewriteRequestMetadata moves server-side metadata access to the v2 CallInfo.
-// Client response info is done in rewriteClientResponseMetadata and .Spec() is
-// warned.
+// Client response info is done in rewriteClientResponseMetadata, and the
+// request's Spec() and Peer() in rewriteServerCallInfoFields.
 func rewriteRequestMetadata(body *ast.BlockStmt, state *rewriteState, report *Report, serverRequests, serverResponses map[string]bool, ctxName string) {
 	infoName := ""
 	walkFuncBody(body, func(n ast.Node) {
@@ -703,11 +708,6 @@ func rewriteRequestMetadata(body *ast.BlockStmt, state *rewriteState, report *Re
 			return
 		}
 		name := root.Name
-		// .Spec() has no CallInfo equivalent; it becomes a handler argument.
-		if sel.Sel.Name == "Spec" && serverRequests[name] {
-			report.warnAtf(call.Pos(), ruleRequestMetadata, "%s.Spec() arrives as a separate handler argument in v2", name)
-			return
-		}
 		// Map the v1 metadata access to its v2 CallInfo method and report key.
 		var method, bumpKey, warnMsg string
 		switch {
@@ -733,6 +733,116 @@ func rewriteRequestMetadata(body *ast.BlockStmt, state *rewriteState, report *Re
 		call.Fun = &ast.SelectorExpr{X: ast.NewIdent(infoName), Sel: ast.NewIdent(method)}
 		report.bump(bumpKey)
 	})
+}
+
+// peerCallInfoFields maps the v1 connect.Peer fields to the server CallInfo
+// fields that replace them. Peer.Query has no CallInfo equivalent.
+var peerCallInfoFields = map[string]string{
+	"Addr":     "PeerAddr",
+	"Protocol": "Protocol",
+}
+
+// rewriteServerCallInfoFields moves the Spec() and Peer() accessors of the v1
+// handler requests and streams in holders to the server CallInfo: x.Spec()
+// becomes info.Spec, and x.Peer().Addr and x.Peer().Protocol become
+// info.PeerAddr and info.Protocol. Other Peer() uses, which include the GET
+// query, and HTTPMethod() move to connecthttp.ServerInfo and are warned.
+func rewriteServerCallInfoFields(body *ast.BlockStmt, state *rewriteState, report *Report, holders map[string]bool, ctxName string) {
+	if len(holders) == 0 {
+		return
+	}
+	infoName := ""
+	toCallInfo := func(cursor *astutil.Cursor, field string) {
+		if infoName == "" {
+			infoName = ensureServerCallInfo(body, state, ctxName)
+		}
+		cursor.Replace(&ast.SelectorExpr{X: ast.NewIdent(infoName), Sel: ast.NewIdent(field)})
+		report.bump("server_call_info_rewrite")
+	}
+	visit := func(cursor *astutil.Cursor) bool {
+		switch node := cursor.Node().(type) {
+		case *ast.FuncLit:
+			// Closures are rewritten separately, against their own context.
+			return false
+		case *ast.SelectorExpr:
+			name, method := callInfoAccessorCall(node.X, holders)
+			field, mapped := peerCallInfoFields[node.Sel.Name]
+			if method != "Peer" || !mapped {
+				return true
+			}
+			if ctxName == "" {
+				report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Peer().%s moves to the connect.CallInfoForServerContext(ctx) info's %s field in v2", name, node.Sel.Name, field)
+				return false
+			}
+			toCallInfo(cursor, field)
+			return false
+		case *ast.CallExpr:
+			name, method := callInfoAccessorCall(node, holders)
+			switch method {
+			case "Spec":
+				if ctxName == "" {
+					report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Spec() moves to the connect.CallInfoForServerContext(ctx) info's Spec field in v2", name)
+					return false
+				}
+				toCallInfo(cursor, "Spec")
+				return false
+			case "Peer":
+				report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Peer() is split in v2: PeerAddr and Protocol move to the connect.CallInfoForServerContext(ctx) info, and the query to the connecthttp.ServerInfoForContext(ctx) info's RequestURL()", name)
+				return false
+			case "HTTPMethod":
+				report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.HTTPMethod() moves to the connecthttp.ServerInfoForContext(ctx) info's HTTPMethod() in v2", name)
+				return false
+			}
+		}
+		return true
+	}
+	// Seeding the CallInfo inserts into body.List, so walk a snapshot of it.
+	for _, stmt := range slices.Clone(body.List) {
+		astutil.Apply(stmt, visit, nil)
+	}
+}
+
+// warnClientCallInfoFields warns on the Spec(), Peer(), and HTTPMethod()
+// accessors of the v1 client requests and streams in holders. Their v2
+// replacements live on the client CallInfo, which the call must seed.
+func warnClientCallInfoFields(body *ast.BlockStmt, report *Report, holders map[string]bool) {
+	if len(holders) == 0 {
+		return
+	}
+	walkFuncBody(body, func(node ast.Node) {
+		name, method := callInfoAccessorCall(node, holders)
+		switch method {
+		case "Spec":
+			report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Spec() moves to the connect.NewClientContext(ctx) info's Spec field in v2", name)
+		case "Peer":
+			report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Peer() moves to the connect.NewClientContext(ctx) info's PeerAddr and Protocol fields in v2", name)
+		case "HTTPMethod":
+			report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.HTTPMethod() moves to the connecthttp.ClientInfoForContext(ctx) info's HTTPMethod() in v2", name)
+		}
+	})
+}
+
+// callInfoAccessorCall reports the holder and method of a node of the form
+// holder.Spec(), holder.Peer(), or holder.HTTPMethod() for a holder in
+// holders. It returns empty strings for any other node.
+func callInfoAccessorCall(node ast.Node, holders map[string]bool) (holder, method string) {
+	call, isCall := node.(*ast.CallExpr)
+	if !isCall || len(call.Args) != 0 {
+		return "", ""
+	}
+	sel, isSel := call.Fun.(*ast.SelectorExpr)
+	if !isSel {
+		return "", ""
+	}
+	recv, isIdent := sel.X.(*ast.Ident)
+	if !isIdent || !holders[recv.Name] {
+		return "", ""
+	}
+	switch sel.Sel.Name {
+	case "Spec", "Peer", "HTTPMethod":
+		return recv.Name, sel.Sel.Name
+	}
+	return "", ""
 }
 
 // ensureServerCallInfo returns the name of a server CallInfo variable usable

@@ -317,6 +317,24 @@ The v1 `connect.CallInfoForHandlerContext(ctx)` is renamed to
 `connect.CallInfoForServerContext(ctx)`; both return `(CallInfo, bool)`, so
 existing comma-ok call sites carry over unchanged.
 
+The v1 `Spec()` and `Peer()` accessors on requests and streams become fields
+of the same `CallInfo`. `Peer().Addr` becomes `PeerAddr`, `Peer().Protocol`
+becomes `Protocol`, and the protocol constants gain a `Name` infix, such as
+`connect.ProtocolNameGRPC`. The HTTP method and the query, through
+`RequestURL()`, moved to `connecthttp.ServerInfoForContext(ctx)`:
+
+```go
+// v1
+log.Println(req.Spec().Procedure, req.Peer().Addr, req.HTTPMethod())
+```
+
+```go
+// v2
+info, _ := connect.CallInfoForServerContext(ctx)
+httpInfo, _ := connecthttp.ServerInfoForContext(ctx)
+log.Println(info.Spec.Procedure, info.PeerAddr, httpInfo.HTTPMethod())
+```
+
 ✅ `connect-go-v2-migrate` moves metadata access to the `CallInfo`:
 
 - A handler's request-header read (`req.Header()`) and response
@@ -327,10 +345,19 @@ existing comma-ok call sites carry over unchanged.
   header/trailer read (`res.Header()`/`res.Trailer()`) become
   `connect.NewClientContext(ctx)` plus `info.*`.
 - `connect.CallInfoForHandlerContext` renames to `connect.CallInfoForServerContext`.
+- A handler's `Spec()`, `Peer().Addr`, and `Peer().Protocol`, on the request
+  or the stream, become `info.Spec`, `info.PeerAddr`, and `info.Protocol` on
+  the same seeded info.
+- `connect.ProtocolConnect`, `connect.ProtocolGRPC`, and
+  `connect.ProtocolGRPCWeb` rename to `connect.ProtocolNameConnect`,
+  `connect.ProtocolNameGRPC`, and `connect.ProtocolNameGRPCWeb`.
 
 ⚠️ A function that both sets a client request header and reads a client response
 header, or that touches several response holders, is warned rather than seeding
 one shared context.
+
+⚠️ `HTTPMethod()`, any other use of `Peer()` such as `Peer().Query`, and the
+`Spec()` and `Peer()` of client requests and streams are warned.
 
 ### Errors
 
