@@ -654,6 +654,12 @@ func TestSetTimeout(t *testing.T) {
 			expectedError:    nil,
 		},
 		{
+			name:             "max_digits",
+			value:            "9999999999", // 10 digit max, overflows a 32-bit int.
+			expectedDuration: 9999999999 * time.Millisecond,
+			expectedError:    nil,
+		},
+		{
 			name:             "long",
 			value:            "123456789801234567890",
 			expectedDuration: 0,

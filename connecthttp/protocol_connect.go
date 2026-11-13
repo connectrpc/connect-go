@@ -128,16 +128,17 @@ func (*connectHandler) SetTimeout(request *http.Request) (context.Context, conte
 	if len(timeout) > 10 {
 		return nil, nil, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %q has >10 digits", timeout)
 	}
-	theDuration := 0
+	// Ten digits overflow a 32-bit int, so accumulate in an int64.
+	var millis int64
 	for _, v := range timeout {
 		if v < '0' || v > '9' {
 			return nil, nil, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %q has non-digit characters", timeout)
 		}
-		theDuration = theDuration*10 + int(v-'0')
+		millis = millis*10 + int64(v-'0')
 	}
 	ctx, cancel := context.WithTimeout(
 		request.Context(),
-		time.Duration(theDuration)*time.Millisecond,
+		time.Duration(millis)*time.Millisecond,
 	)
 	return ctx, cancel, nil
 }
