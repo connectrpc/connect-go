@@ -177,6 +177,7 @@ func rewriteStreams(funcType *ast.FuncType, body *ast.BlockStmt, state *rewriteS
 	if body == nil {
 		return nil
 	}
+	warnUnmigratedStreams(funcType, body, state, report)
 	localVars, params := collectStreamVars(funcType, body, state)
 	streamVars := mergeUnwrappedScopes(outerStreams, funcType, localVars)
 	if len(streamVars) == 0 {
@@ -196,9 +197,39 @@ func rewriteStreams(funcType *ast.FuncType, body *ast.BlockStmt, state *rewriteS
 	holders := map[string]bool{}
 	rewriteStreamBlocks(body, streamVars, funcType, state, report, holders)
 	dropMsgForHolders(body, holders, report)
-	threadStreamMethods(body, streamVars, report)
+	threadStreamMethods(body, streamVars, state, report)
 	rewriteStreamMetadata(body, streamVars, params, state, report, contextParamName(funcType))
 	return streamVars
+}
+
+// warnUnmigratedStreams warns at each v1 stream the type checker found that
+// the tool cannot migrate, such as a helper parameter or a stream held in a
+// type of the user's own. Their stream calls are left as they are.
+func warnUnmigratedStreams(funcType *ast.FuncType, body *ast.BlockStmt, state *rewriteState, report *Report) {
+	if len(state.streamKinds) == 0 {
+		return
+	}
+	warn := func(node ast.Node) {
+		ident, isIdent := node.(*ast.Ident)
+		if !isIdent {
+			return
+		}
+		switch state.streamKinds[ident] {
+		case streamV1Client:
+			report.warnAtf(ident.Pos(), ruleStreamV1Client, "%q has a v1 connect client stream type. Change it to the v2 stream type and migrate its stream calls by hand.", ident.Name)
+		case streamWrapper:
+			report.warnAtf(ident.Pos(), ruleStreamWrapper, "%q holds a v1 connect stream in a type of its own. Migrate its stream calls to the v2 stream API by hand.", ident.Name)
+		case streamNone, streamValue, streamConstructed:
+		}
+	}
+	if funcType != nil && funcType.Params != nil {
+		for _, field := range funcType.Params.List {
+			for _, name := range field.Names {
+				warn(name)
+			}
+		}
+	}
+	walkFuncBody(body, warn)
 }
 
 func isStreamMetadataMethod(name string) bool {
@@ -224,6 +255,9 @@ func rewriteStreamMetadata(body *ast.BlockStmt, streamVars map[string]bool, para
 			return
 		}
 		if _, isHandler := params[recv.Name]; !isHandler {
+			return
+		}
+		if kind, typed := state.streamKinds[recv]; typed && kind < streamValue {
 			return
 		}
 		if ctxName == "" {
@@ -343,17 +377,23 @@ func importedAs(file *ast.File, pkgPath, pkgName string) string {
 }
 
 // collectStreamVars returns every stream variable name in the function, plus
-// the subset that are server handler parameters. A name the type checker
-// knows is not a connect stream at any of its stream-named calls is left out.
+// the subset that are server handler parameters. A variable the type checker
+// judged is a stream exactly when it says so, even with no stream method
+// called on it. The others are detected by name.
 func collectStreamVars(funcType *ast.FuncType, body *ast.BlockStmt, state *rewriteState) (map[string]bool, map[string]streamParam) {
 	params := collectStreamParams(funcType, state.connectAlias)
 	vars := map[string]bool{}
 	for name := range params {
 		vars[name] = true
 	}
+	walkFuncBody(body, func(n ast.Node) {
+		if id, isIdent := n.(*ast.Ident); isIdent && state.streamKinds[id] >= streamValue {
+			vars[id.Name] = true
+		}
+	})
 	// Include nested closures, since a stream is often created here but only
 	// used from a goroutine or errgroup closure.
-	called, notStreams := map[string]bool{}, map[string]bool{}
+	called := map[string]bool{}
 	walk(body, func(n ast.Node) {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -364,14 +404,13 @@ func collectStreamVars(funcType *ast.FuncType, body *ast.BlockStmt, state *rewri
 			return
 		}
 		if id, ok := sel.X.(*ast.Ident); ok {
-			called[id.Name] = true
-			if state.notStreams[state.fset.Position(id.Pos()).Offset] {
-				notStreams[id.Name] = true
+			if _, typed := state.streamKinds[id]; !typed {
+				called[id.Name] = true
 			}
 		}
 	})
 	for name := range called {
-		if !vars[name] && !notStreams[name] && assignedFromMethodCall(body, name) {
+		if !vars[name] && assignedFromMethodCall(body, name) {
 			vars[name] = true
 		}
 	}
@@ -524,12 +563,12 @@ func rewriteStmtList(list []ast.Stmt, streamVars map[string]bool, funcType *ast.
 	changed := false
 	for i := 0; i < len(list); i++ {
 		stmt := list[i]
-		if newStmts, ok := tryConstructorTuple(stmt, streamVars, funcType, report); ok {
+		if newStmts, ok := tryConstructorTuple(stmt, streamVars, funcType, state, report); ok {
 			out = append(out, newStmts...)
 			changed = true
 			continue
 		}
-		if newStmts, holder, ok := tryCloseAndReceive(stmt, streamVars, funcType, report); ok {
+		if newStmts, holder, ok := tryCloseAndReceive(stmt, streamVars, state, report); ok {
 			out = append(out, newStmts...)
 			if holder != "" {
 				holders[holder] = true
@@ -542,7 +581,7 @@ func rewriteStmtList(list []ast.Stmt, streamVars map[string]bool, funcType *ast.
 			out = append(out, stmt)
 			continue
 		}
-		streamName, isBoolLoop := boolLoopStreamName(forStmt, streamVars)
+		streamName, isBoolLoop := boolLoopStreamName(forStmt, streamVars, state)
 		if !isBoolLoop {
 			out = append(out, stmt)
 			continue
@@ -704,14 +743,14 @@ func setStmtPos(n ast.Node, pos token.Pos) {
 // sole-LHS stream constructor binding, in either the `stream := client.M(ctx)`
 // or the type-inferred `var stream = client.M(ctx)` form. A binding that already
 // has an error result (two LHS) is left alone.
-func tryConstructorTuple(stmt ast.Stmt, streamVars map[string]bool, funcType *ast.FuncType, report *Report) ([]ast.Stmt, bool) {
+func tryConstructorTuple(stmt ast.Stmt, streamVars map[string]bool, funcType *ast.FuncType, state *rewriteState, report *Report) ([]ast.Stmt, bool) {
 	switch node := stmt.(type) {
 	case *ast.AssignStmt:
 		if node.Tok != token.DEFINE || len(node.Lhs) != 1 || len(node.Rhs) != 1 {
 			return nil, false
 		}
 		id, isIdent := node.Lhs[0].(*ast.Ident)
-		if !isIdent || !streamVars[id.Name] || !isSelectorCall(node.Rhs[0]) {
+		if !isIdent || !state.isConstructedStream(id, streamVars) || !isSelectorCall(node.Rhs[0]) {
 			return nil, false
 		}
 		node.Lhs = append(node.Lhs, errResultIdent(node.Pos()))
@@ -725,7 +764,7 @@ func tryConstructorTuple(stmt ast.Stmt, streamVars map[string]bool, funcType *as
 		if !isSpec || spec.Type != nil || len(spec.Names) != 1 || len(spec.Values) != 1 {
 			return nil, false
 		}
-		if !streamVars[spec.Names[0].Name] || !isSelectorCall(spec.Values[0]) {
+		if !state.isConstructedStream(spec.Names[0], streamVars) || !isSelectorCall(spec.Values[0]) {
 			return nil, false
 		}
 		spec.Names = append(spec.Names, errResultIdent(node.Pos()))
@@ -749,7 +788,7 @@ func errResultIdent(pos token.Pos) *ast.Ident {
 // tryCloseAndReceive handles `res, err := stream.CloseAndReceive()`, which v2
 // keeps but with no context argument and a bare-message result. It returns the
 // response holder name so its .Msg accesses can be dropped.
-func tryCloseAndReceive(stmt ast.Stmt, streamVars map[string]bool, _ *ast.FuncType, report *Report) ([]ast.Stmt, string, bool) {
+func tryCloseAndReceive(stmt ast.Stmt, streamVars map[string]bool, state *rewriteState, report *Report) ([]ast.Stmt, string, bool) {
 	assign, isAssign := stmt.(*ast.AssignStmt)
 	if !isAssign || len(assign.Rhs) != 1 {
 		return nil, "", false
@@ -763,7 +802,7 @@ func tryCloseAndReceive(stmt ast.Stmt, streamVars map[string]bool, _ *ast.FuncTy
 		return nil, "", false
 	}
 	streamName, isIdent := sel.X.(*ast.Ident)
-	if !isIdent || !streamVars[streamName.Name] {
+	if !isIdent || !state.isStreamIdent(streamName, streamVars) {
 		return nil, "", false
 	}
 	assign.Rhs[0] = methodCall(streamName.Name, "CloseAndReceive")
@@ -778,7 +817,7 @@ func tryCloseAndReceive(stmt ast.Stmt, streamVars map[string]bool, _ *ast.FuncTy
 
 // boolLoopStreamName reports the stream variable of a v1
 // `for stream.Receive() { ... }` loop.
-func boolLoopStreamName(forStmt *ast.ForStmt, streamVars map[string]bool) (string, bool) {
+func boolLoopStreamName(forStmt *ast.ForStmt, streamVars map[string]bool, state *rewriteState) (string, bool) {
 	if forStmt.Init != nil || forStmt.Post != nil || forStmt.Cond == nil {
 		return "", false
 	}
@@ -791,7 +830,7 @@ func boolLoopStreamName(forStmt *ast.ForStmt, streamVars map[string]bool) (strin
 		return "", false
 	}
 	id, isIdent := sel.X.(*ast.Ident)
-	if !isIdent || !streamVars[id.Name] {
+	if !isIdent || !state.isStreamIdent(id, streamVars) {
 		return "", false
 	}
 	return id.Name, true
@@ -1097,7 +1136,7 @@ func isStreamMsgCall(node ast.Node, streamName string) bool {
 // threadStreamMethods renames CloseRequest/CloseResponse to CloseSend/Close on
 // stream variables. (Send/Receive keep their v1 shape; the loop reshape handles
 // the bool-to-error Receive change.)
-func threadStreamMethods(body *ast.BlockStmt, streamVars map[string]bool, report *Report) {
+func threadStreamMethods(body *ast.BlockStmt, streamVars map[string]bool, state *rewriteState, report *Report) {
 	walkFuncBody(body, func(n ast.Node) {
 		call, isCall := n.(*ast.CallExpr)
 		if !isCall {
@@ -1108,7 +1147,7 @@ func threadStreamMethods(body *ast.BlockStmt, streamVars map[string]bool, report
 			return
 		}
 		id, isIdent := sel.X.(*ast.Ident)
-		if !isIdent || !streamVars[id.Name] {
+		if !isIdent || !state.isStreamIdent(id, streamVars) {
 			return
 		}
 		switch sel.Sel.Name {

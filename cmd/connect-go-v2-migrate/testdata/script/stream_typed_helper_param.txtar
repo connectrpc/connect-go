@@ -1,0 +1,74 @@
+# A stream with no stream method called on it is still found by its type, so
+# its constructor gets the v2 error result. A v1 client stream that no v2 stub
+# produced, like a helper parameter or a struct field, is warned about and left
+# unchanged.
+stubs v2
+exec migrate
+cmp stdout out.txt
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func runCumSum(ctx context.Context, client pingv1connect.PingServiceClient) error {
+	stream := client.CumSum(ctx)
+	return pump(stream)
+}
+
+func pump(stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+	if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+		return err
+	}
+	return stream.CloseRequest()
+}
+
+type cumSumStream = *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]
+
+func aliasPump(stream cumSumStream) error {
+	return stream.CloseRequest()
+}
+
+type holder struct {
+	stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]
+}
+
+func (h holder) drain() error {
+	stream := h.stream
+	for stream.Receive() {
+		_ = stream.Msg()
+	}
+	return stream.CloseResponse()
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: stream_client_ctor=1
+--- ./service.go
++++ ./service.go
+@@ -9,7 +9,10 @@
+ )
+ 
+ func runCumSum(ctx context.Context, client pingv1connect.PingServiceClient) error {
+-	stream := client.CumSum(ctx)
++	stream, err := client.CumSum(ctx)
++	if err != nil {
++		return err
++	}
+ 	return pump(stream)
+ }
+ 
+
+
+The following issues require manual code changes:
+  ./service.go:6:2: connectrpc.com/connect (v1) import retained because it still uses connect.BidiStreamForClient.
+  ./service.go:16:11: "stream" has a v1 connect client stream type. Change it to the v2 stream type and migrate its stream calls by hand.
+  ./service.go:25:16: "stream" has a v1 connect client stream type. Change it to the v2 stream type and migrate its stream calls by hand.
+  ./service.go:34:2: "stream" has a v1 connect client stream type. Change it to the v2 stream type and migrate its stream calls by hand.
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

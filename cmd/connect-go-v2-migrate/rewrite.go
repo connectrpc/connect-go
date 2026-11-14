@@ -57,6 +57,8 @@ const (
 	ruleInterceptorMigration = "interceptor_migration"
 	ruleStreamParamType      = "stream_param_type"
 	ruleStreamParamAmbiguous = "stream_param_ambiguous"
+	ruleStreamWrapper        = "stream_wrapper"
+	ruleStreamV1Client       = "stream_v1_client_type"
 	ruleEcosystemMigration   = "ecosystem_migration"
 	ruleBufgenReinstall      = "bufgen_reinstall_plugin"
 	ruleBufgenGoMod          = "bufgen_update_go_mod"
@@ -223,12 +225,6 @@ func withHandlerStreams(resolver *handlerStreamResolver) rewriteOption {
 	return func(state *rewriteState) { state.handlerStreams = resolver }
 }
 
-// withNotStreams supplies the receivers the type checker knows are not
-// connect streams.
-func withNotStreams(offsets map[int]bool) rewriteOption {
-	return func(state *rewriteState) { state.notStreams = offsets }
-}
-
 // withStubUse marks a file that calls stubs without importing connect.
 func withStubUse(position token.Position) rewriteOption {
 	return func(state *rewriteState) {
@@ -236,6 +232,27 @@ func withStubUse(position token.Position) rewriteOption {
 		if position.IsValid() && tokenFile != nil && position.Offset < tokenFile.Size() {
 			state.stubUse = tokenFile.Pos(position.Offset)
 		}
+	}
+}
+
+// withStreamKinds supplies the type checker's stream verdicts, keyed by source
+// offset. They are bound to the parsed identifiers before any rewrite runs, so
+// an identifier a rewrite synthesizes never picks one up.
+func withStreamKinds(offsets map[int]streamKind) rewriteOption {
+	return func(state *rewriteState) {
+		tokenFile := state.fset.File(state.file.Pos())
+		if offsets == nil || tokenFile == nil {
+			return
+		}
+		state.streamKinds = map[*ast.Ident]streamKind{}
+		ast.Inspect(state.file, func(node ast.Node) bool {
+			if id, isIdent := node.(*ast.Ident); isIdent {
+				if kind := offsets[tokenFile.Offset(id.Pos())]; kind != 0 {
+					state.streamKinds[id] = kind
+				}
+			}
+			return true
+		})
 	}
 }
 
@@ -503,9 +520,9 @@ type rewriteState struct {
 	// the AST-only path, where the stream parameter is warned instead.
 	handlerStreams *handlerStreamResolver
 	stubUse        token.Pos
-	// notStreams holds the offsets of stream-named method receivers known not
-	// to be connect streams; see nonStreamReceivers.
-	notStreams map[int]bool
+	// streamKinds holds the type checker's stream verdicts. It is nil on the
+	// AST-only path, where stream detection goes by name alone.
+	streamKinds map[*ast.Ident]streamKind
 	// sdkModules are v1 BSR connect SDKs whose imports move to v2.
 	sdkModules []string
 	// imports maps path->package name for imports a rewrite introduces;
@@ -560,6 +577,25 @@ func newRewriteState(fset *token.FileSet, file *ast.File) *rewriteState {
 
 func (s *rewriteState) hasConnectV1Import() bool {
 	return s.hadV1Import
+}
+
+// isStreamIdent reports whether ident refers to a stream. It uses the type
+// checker's verdict when there is one and the name otherwise.
+func (s *rewriteState) isStreamIdent(ident *ast.Ident, streamVars map[string]bool) bool {
+	if kind, typed := s.streamKinds[ident]; typed {
+		return kind >= streamValue
+	}
+	return streamVars[ident.Name]
+}
+
+// isConstructedStream reports whether ident is a stream bound from a v1-shaped
+// constructor call, which gains an error result in v2. A variable the type
+// checker resolved to a stream type already has its one result.
+func (s *rewriteState) isConstructedStream(ident *ast.Ident, streamVars map[string]bool) bool {
+	if kind, typed := s.streamKinds[ident]; typed {
+		return kind == streamConstructed
+	}
+	return streamVars[ident.Name]
 }
 
 // rewriteFuncSignature unwraps *connect.Request[T] params to *T and
