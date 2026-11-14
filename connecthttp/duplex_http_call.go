@@ -56,6 +56,12 @@ type duplexHTTPCall struct {
 	responseReady chan struct{}
 	response      *http.Response
 	responseErr   error
+
+	// The response body is closed once, by CloseRead or when the request's
+	// context ends, whichever is first. CloseRead reports the close error once.
+	bodyCloseOnce     sync.Once
+	bodyCloseErr      error
+	bodyCloseReported atomic.Bool
 }
 
 func newDuplexHTTPCall(
@@ -107,6 +113,10 @@ func newDuplexHTTPCall(
 		duplex.request.Body = pipeReader
 		duplex.request.GetBody = nil // GetBody is not supported for client streaming.
 		duplex.request.ContentLength = -1
+		// Closing the response body when the context ends aborts an HTTP/2
+		// stream, which closes the request body. The HTTP/1.1 transport doesn't,
+		// and its request writer stays blocked reading the idle pipe.
+		context.AfterFunc(requestCtx, func() { _ = pipeWriter.CloseWithError(requestCtx.Err()) })
 	}
 	return duplex
 }
@@ -261,6 +271,11 @@ func (d *duplexHTTPCall) Read(data []byte) (int, error) {
 	}
 	bytesRead, err := d.response.Body.Read(data)
 	if err != nil && !errors.Is(err, io.EOF) {
+		// The body is closed when the request's context ends, so a failed read
+		// reports that, not the transport's error for the closed stream.
+		if ctxErr := d.request.Context().Err(); ctxErr != nil {
+			return bytesRead, wrapIfContextError(ctxErr)
+		}
 		err = wrapIfContextDone(d.ctx, err)
 		err = wrapIfRSTError(d.ctx, err)
 		err = wrapIfClientTransportError(err)
@@ -283,10 +298,20 @@ func (d *duplexHTTPCall) CloseRead() error {
 	if response == nil {
 		return nil // No response, so nothing to close.
 	}
-	err := response.Body.Close()
+	d.closeResponseBody()
+	var err error
+	if !d.bodyCloseReported.Swap(true) {
+		err = d.bodyCloseErr
+	}
 	err = wrapIfContextDone(d.ctx, err)
 	err = wrapIfRSTError(d.ctx, err)
 	return wrapIfClientTransportError(err)
+}
+
+// closeResponseBody closes the response body unless it's already closed. It
+// returns once the body is closed.
+func (d *duplexHTTPCall) closeResponseBody() {
+	d.bodyCloseOnce.Do(func() { d.bodyCloseErr = d.response.Body.Close() })
 }
 
 // ResponseStatusCode is the response's HTTP status code.
@@ -392,6 +417,10 @@ func (d *duplexHTTPCall) makeRequest() {
 	// We've got a response. We can now read from the response body.
 	// Closing the response body is delegated to the caller even on error.
 	d.response = response
+	// The HTTP/2 transport doesn't wake a pending body read, or a request body
+	// write waiting on flow control, when the request's context ends. Closing
+	// the body aborts the stream.
+	context.AfterFunc(d.request.Context(), d.closeResponseBody)
 	if d.onResponseReceive != nil {
 		d.onResponseReceive(response)
 	}

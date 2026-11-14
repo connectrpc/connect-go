@@ -268,6 +268,425 @@ func TestClientStreamCloseBeforeResponseHeaders(t *testing.T) {
 	}
 }
 
+func clientCancelProtocols() map[string][]connecthttp.Option {
+	return map[string][]connecthttp.Option{
+		connect.ProtocolNameConnect: nil,
+		connect.ProtocolNameGRPC:    {connecthttp.WithGRPC()},
+		connect.ProtocolNameGRPCWeb: {connecthttp.WithGRPCWeb()},
+	}
+}
+
+func TestClientStreamCancelUnblocksReceive(t *testing.T) {
+	t.Parallel()
+	// The handler answers one message and then waits for the next one, so the
+	// client's send side stays open. Canceling the call's context must unblock
+	// the client's pending Receive and end the RPC on the handler's side too.
+	spec := connect.Spec{StreamType: connect.StreamTypeBidi, Procedure: pingv1connect.PingServiceCumSumProcedure}
+	for name, opts := range clientCancelProtocols() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				handlerDone := make(chan error, 1)
+				srv := connect.NewServer()
+				srv.Register(connect.Method{
+					Spec: spec,
+					Handler: func(_ context.Context, _ connect.Spec, stream connect.ServerStream) error {
+						err := func() error {
+							var req pingv1.CumSumRequest
+							if err := stream.Receive(&req); err != nil {
+								return err
+							}
+							if err := stream.Send(&pingv1.CumSumResponse{Sum: req.GetNumber()}); err != nil {
+								return err
+							}
+							return stream.Receive(&req)
+						}()
+						handlerDone <- err
+						return err
+					},
+				})
+				mux := http.NewServeMux()
+				connecthttp.Mount(mux, srv)
+				server := memhttptest.NewServer(t, mux)
+				client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), opts...))
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				stream, err := client.CallClientStream(ctx, spec)
+				assert.Nil(t, err)
+				// Closing the stream releases the call if the assertions below fail.
+				defer stream.Close()
+				assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+				assert.Nil(t, stream.Receive(&pingv1.CumSumResponse{}))
+
+				receiveDone := make(chan error, 1)
+				go func() {
+					receiveDone <- stream.Receive(&pingv1.CumSumResponse{})
+				}()
+				// The client's Receive and the handler's Receive now wait on each other.
+				synctest.Wait()
+				cancel()
+				synctest.Wait()
+				select {
+				case err := <-receiveDone:
+					assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
+				default:
+					t.Fatal("canceling the context didn't unblock Receive")
+				}
+				select {
+				case err := <-handlerDone:
+					assert.NotNil(t, err)
+				default:
+					t.Error("the handler wasn't told that the client canceled")
+				}
+			})
+		})
+	}
+}
+
+func TestClientStreamCancelReleasesHTTP1RequestBody(t *testing.T) {
+	t.Parallel()
+	// HTTP/1.1 supports client streaming. The handler has sent its response
+	// headers but is still reading the request, so the transport waits on the
+	// idle request body. Canceling the call's context must end the request body
+	// without a pending Receive or a later Close.
+	spec := connect.Spec{StreamType: connect.StreamTypeClient, Procedure: pingv1connect.PingServiceSumProcedure}
+	for name, opts := range map[string][]connecthttp.Option{
+		connect.ProtocolNameConnect: nil,
+		connect.ProtocolNameGRPCWeb: {connecthttp.WithGRPCWeb()},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				// An HTTP/1.1 handler isn't told when the client goes away while
+				// it's reading, so the test ends it.
+				release := make(chan struct{})
+				defer close(release)
+				srv := connect.NewServer()
+				srv.Register(connect.Method{
+					Spec: spec,
+					Handler: func(_ context.Context, _ connect.Spec, stream connect.ServerStream) error {
+						var req pingv1.SumRequest
+						if err := stream.Receive(&req); err != nil {
+							return err
+						}
+						if err := stream.SendHeaders(); err != nil {
+							return err
+						}
+						<-release
+						return nil
+					},
+				})
+				mux := http.NewServeMux()
+				connecthttp.Mount(mux, srv)
+				server := memhttptest.NewServer(t, mux)
+				httpClient := &http.Client{Transport: server.TransportHTTP1()}
+				defer httpClient.CloseIdleConnections()
+				requestBodyClosed := make(chan struct{})
+				gotResponse := make(chan struct{})
+				client := connect.NewClient(connecthttp.NewTransport(httpClientFunc(func(req *http.Request) (*http.Response, error) {
+					req.Body = &closeSignalBody{ReadCloser: req.Body, closed: requestBodyClosed}
+					res, err := httpClient.Do(req)
+					if err == nil {
+						close(gotResponse)
+					}
+					return res, err
+				}), server.URL(), opts...))
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				stream, err := client.CallClientStream(ctx, spec)
+				assert.Nil(t, err)
+				// Closing the stream releases the call if the assertion below fails.
+				defer stream.Close()
+				assert.Nil(t, stream.Send(&pingv1.SumRequest{Number: 1}))
+				<-gotResponse
+				synctest.Wait()
+				cancel()
+				synctest.Wait()
+				select {
+				case <-requestBodyClosed:
+				default:
+					t.Error("canceling the context didn't end the request body")
+				}
+			})
+		})
+	}
+}
+
+func TestClientStreamCancelUnblocksFlowControl(t *testing.T) {
+	t.Parallel()
+	// The handler stops reading the request after it sends its first response,
+	// so the client's sends fill the HTTP/2 flow control window and the
+	// transport waits for window updates that never come. Canceling the call's
+	// context must still unblock the client's blocked Send and pending Receive.
+	spec := connect.Spec{StreamType: connect.StreamTypeBidi, Procedure: pingv1connect.PingServicePingProcedure}
+	for name, opts := range clientCancelProtocols() {
+		for _, receive := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/pending_receive=%t", name, receive), func(t *testing.T) {
+				t.Parallel()
+				synctest.Test(t, func(t *testing.T) {
+					handlerDone := make(chan error, 1)
+					srv := connect.NewServer()
+					srv.Register(connect.Method{
+						Spec: spec,
+						Handler: func(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+							if err := stream.Send(&pingv1.PingResponse{}); err != nil {
+								return err
+							}
+							<-ctx.Done()
+							handlerDone <- ctx.Err()
+							return ctx.Err()
+						},
+					})
+					mux := http.NewServeMux()
+					connecthttp.Mount(mux, srv)
+					server := memhttptest.NewServer(t, mux)
+					client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), opts...))
+					ctx, cancel := context.WithCancel(t.Context())
+					defer cancel()
+					stream, err := client.CallClientStream(ctx, spec)
+					assert.Nil(t, err)
+					// Closing the stream releases the call if the assertions below fail.
+					defer stream.Close()
+					assert.Nil(t, stream.SendHeaders())
+					assert.Nil(t, stream.Receive(&pingv1.PingResponse{}))
+
+					var sent atomic.Int64
+					sendDone := make(chan error, 1)
+					go func() {
+						msg := &pingv1.PingRequest{Text: strings.Repeat("x", 64*1024)}
+						for {
+							if err := stream.Send(msg); err != nil {
+								sendDone <- err
+								return
+							}
+							sent.Add(1)
+						}
+					}()
+					receiveDone := make(chan error, 1)
+					if receive {
+						go func() {
+							receiveDone <- stream.Receive(&pingv1.PingResponse{})
+						}()
+					}
+					// The sends stop once they fill the flow control window.
+					synctest.Wait()
+					select {
+					case err := <-sendDone:
+						t.Fatalf("Send returned before the call was canceled: %v", err)
+					default:
+					}
+					assert.True(t, sent.Load() > 0)
+					cancel()
+					synctest.Wait()
+					select {
+					case err := <-sendDone:
+						assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
+					default:
+						t.Error("canceling the context didn't unblock Send")
+					}
+					if receive {
+						select {
+						case err := <-receiveDone:
+							assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
+						default:
+							t.Error("canceling the context didn't unblock Receive")
+						}
+					}
+					select {
+					case err := <-handlerDone:
+						assert.NotNil(t, err)
+					default:
+						t.Error("the handler wasn't told that the client canceled")
+					}
+				})
+			})
+		}
+	}
+}
+
+func TestClientStreamEndedCallErrors(t *testing.T) {
+	t.Parallel()
+	// A call that ends while the client waits on the server, with the client's
+	// send side open, fails with the code for why it ended, not with the
+	// HTTP/2 error for the aborted stream.
+	spec := connect.Spec{StreamType: connect.StreamTypeBidi, Procedure: pingv1connect.PingServiceCumSumProcedure}
+	for name, opts := range clientCancelProtocols() {
+		for _, testCase := range []struct {
+			name string
+			end  func(cancel context.CancelFunc, stream connect.ClientStream)
+			code connect.Code
+		}{
+			{name: "cancel", end: func(cancel context.CancelFunc, _ connect.ClientStream) { cancel() }, code: connect.CodeCanceled},
+			{name: "deadline", end: func(context.CancelFunc, connect.ClientStream) {}, code: connect.CodeDeadlineExceeded},
+			{name: "close", end: func(_ context.CancelFunc, stream connect.ClientStream) { _ = stream.Close() }, code: connect.CodeCanceled},
+		} {
+			t.Run(name+"/"+testCase.name, func(t *testing.T) {
+				t.Parallel()
+				synctest.Test(t, func(t *testing.T) {
+					srv := connect.NewServer()
+					srv.Register(connect.Method{
+						Spec: spec,
+						Handler: func(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+							var req pingv1.CumSumRequest
+							if err := stream.Receive(&req); err != nil {
+								return err
+							}
+							if err := stream.Send(&pingv1.CumSumResponse{Sum: req.GetNumber()}); err != nil {
+								return err
+							}
+							<-ctx.Done()
+							return ctx.Err()
+						},
+					})
+					mux := http.NewServeMux()
+					connecthttp.Mount(mux, srv)
+					server := memhttptest.NewServer(t, mux)
+					client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), opts...))
+					ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+					defer cancel()
+					stream, err := client.CallClientStream(ctx, spec)
+					assert.Nil(t, err)
+					defer stream.Close()
+					assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+					assert.Nil(t, stream.Receive(&pingv1.CumSumResponse{}))
+
+					receiveDone := make(chan error, 1)
+					go func() {
+						receiveDone <- stream.Receive(&pingv1.CumSumResponse{})
+					}()
+					synctest.Wait()
+					testCase.end(cancel, stream)
+					// With no other way to end the call, fake time reaches the deadline.
+					err = <-receiveDone
+					assert.Equal(t, connect.CodeOf(err), testCase.code)
+					assert.False(t, strings.Contains(err.Error(), "http2"))
+					if testCase.name != "close" {
+						err = stream.Send(&pingv1.CumSumRequest{Number: 2})
+						assert.Equal(t, connect.CodeOf(err), testCase.code)
+					}
+				})
+			})
+		}
+	}
+}
+
+func TestClientResponseBodyClosedOnce(t *testing.T) {
+	t.Parallel()
+	// Calls end the response body from several places: reading to the end, the
+	// caller's Close, and the context ending. The body must be closed once
+	// however they overlap, including when the context ends before the
+	// response arrives and when nothing but the context ends the call.
+	pingServer := &pluggablePingServer{
+		ping: func(context.Context, *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+			return &pingv1.PingResponse{}, nil
+		},
+		countUp: func(_ context.Context, request *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
+			for number := range request.GetNumber() {
+				if err := stream.Send(&pingv1.CountUpResponse{Number: number}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+	for name, opts := range clientCancelProtocols() {
+		for _, testCase := range []struct {
+			name string
+			// cancelAfterDo cancels the call's context once the transport has
+			// the response, before the call sees it.
+			cancelAfterDo bool
+			call          func(ctx context.Context, t *testing.T, client pingv1connect.PingServiceClient, cancel context.CancelFunc)
+		}{
+			{call: func(ctx context.Context, t *testing.T, client pingv1connect.PingServiceClient, _ context.CancelFunc) {
+				t.Helper()
+				_, err := client.Ping(ctx, &pingv1.PingRequest{})
+				assert.Nil(t, err)
+			}, name: "unary"},
+			{call: func(ctx context.Context, t *testing.T, client pingv1connect.PingServiceClient, _ context.CancelFunc) {
+				t.Helper()
+				stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 2})
+				assert.Nil(t, err)
+				for err == nil {
+					_, err = stream.Receive()
+				}
+				assert.Nil(t, stream.Close())
+				assert.Nil(t, stream.Close())
+			}, name: "read_to_end"},
+			{call: func(ctx context.Context, t *testing.T, client pingv1connect.PingServiceClient, _ context.CancelFunc) {
+				t.Helper()
+				stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 1000})
+				assert.Nil(t, err)
+				_, err = stream.Receive()
+				assert.Nil(t, err)
+				assert.Nil(t, stream.Close())
+				assert.Nil(t, stream.Close())
+			}, name: "close_early"},
+			{call: func(ctx context.Context, t *testing.T, client pingv1connect.PingServiceClient, cancel context.CancelFunc) {
+				t.Helper()
+				stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 1000})
+				assert.Nil(t, err)
+				_, err = stream.Receive()
+				assert.Nil(t, err)
+				var wg sync.WaitGroup
+				wg.Go(cancel)
+				wg.Go(func() { _ = stream.Close() })
+				wg.Wait()
+				_ = stream.Close()
+			}, name: "cancel_then_close"},
+			{call: func(ctx context.Context, t *testing.T, client pingv1connect.PingServiceClient, cancel context.CancelFunc) {
+				t.Helper()
+				stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 1000})
+				assert.Nil(t, err)
+				_, err = stream.Receive()
+				assert.Nil(t, err)
+				cancel()
+			}, name: "cancel_only"},
+			{cancelAfterDo: true, call: func(ctx context.Context, t *testing.T, client pingv1connect.PingServiceClient, _ context.CancelFunc) {
+				t.Helper()
+				stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 1000})
+				if err == nil {
+					_, err = stream.Receive()
+					assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
+					_ = stream.Close()
+				}
+			}, name: "response_after_cancel"},
+		} {
+			t.Run(name+"/"+testCase.name, func(t *testing.T) {
+				t.Parallel()
+				synctest.Test(t, func(t *testing.T) {
+					srv := connect.NewServer()
+					pingv1connect.RegisterPingServiceHandler(srv, pingServer)
+					mux := http.NewServeMux()
+					connecthttp.Mount(mux, srv)
+					server := memhttptest.NewServer(t, mux)
+					ctx, cancel := context.WithCancel(t.Context())
+					defer cancel()
+					var closes atomic.Int32
+					httpClient := httpClientFunc(func(req *http.Request) (*http.Response, error) {
+						res, err := server.Client().Do(req)
+						if err != nil {
+							return nil, err
+						}
+						res.Body = &countingBody{ReadCloser: res.Body, closes: &closes}
+						if testCase.cancelAfterDo {
+							cancel()
+						}
+						return res, nil
+					})
+					client := pingv1connect.NewPingServiceClient(connect.NewClient(
+						connecthttp.NewTransport(httpClient, server.URL(), opts...),
+					))
+					testCase.call(ctx, t, client, cancel)
+					// Wait for the callback that closes the body when the context ends.
+					cancel()
+					synctest.Wait()
+					assert.Equal(t, closes.Load(), 1)
+				})
+			})
+		}
+	}
+}
+
 func TestClientStreamCloseUnusedDoesNotDispatch(t *testing.T) {
 	t.Parallel()
 	var calls atomic.Int32
@@ -1459,6 +1878,32 @@ func (w *dropResponseWriter) Flush() {
 
 func (w *dropResponseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
+}
+
+// countingBody counts Close calls.
+type countingBody struct {
+	io.ReadCloser
+
+	closes *atomic.Int32
+}
+
+func (b *countingBody) Close() error {
+	b.closes.Add(1)
+	return b.ReadCloser.Close()
+}
+
+// closeSignalBody closes closed the first time Close is called.
+type closeSignalBody struct {
+	io.ReadCloser
+
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (b *closeSignalBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.once.Do(func() { close(b.closed) })
+	return err
 }
 
 // resetBody simulates a connection reset on a response body. readErr fails
