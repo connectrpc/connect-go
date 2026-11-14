@@ -356,8 +356,8 @@ log.Println(info.Spec.Procedure, info.PeerAddr, httpInfo.HTTPMethod())
 header, or that touches several response holders, is warned rather than seeding
 one shared context.
 
-⚠️ `HTTPMethod()`, any other use of `Peer()` such as `Peer().Query`, and the
-`Spec()` and `Peer()` of client requests and streams are warned.
+⚠️ `HTTPMethod()`, or use of `Peer()` fields, `Peer().Query` and
+`Spec().IsClient`, are warned.
 
 ### Errors
 

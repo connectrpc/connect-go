@@ -1,6 +1,8 @@
 # Spec() and Peer() accessors that cannot become server CallInfo fields are
-# warned: a blank context, the GET query, a bare Peer(), HTTPMethod(), and
-# client requests and streams (golden-only).
+# warned: a blank context, the GET query, a bare Peer(), HTTPMethod(),
+# Spec().IsClient, a stream inherited by a closure, a request param of a
+# function not shaped like a handler, and client requests and streams
+# (golden-only).
 stubs v2
 exec migrate
 cmp stdout out.txt
@@ -34,6 +36,28 @@ func (s *pingServer) Fail(ctx context.Context, req *connect.Request[pingv1.FailR
 	return connect.NewResponse(&pingv1.FailResponse{}), nil
 }
 
+func (s *pingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+	if stream.Spec().IsClient {
+		log.Println("client")
+	}
+	return connect.NewResponse(&pingv1.SumResponse{}), nil
+}
+
+func (s *pingServer) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+	go func() {
+		log.Println(stream.Peer().Addr, stream.Spec().Procedure)
+	}()
+	return stream.Send(&pingv1.CumSumResponse{})
+}
+
+func send(ctx context.Context, client pingv1connect.PingServiceClient, req *connect.Request[pingv1.PingRequest]) error {
+	if _, err := client.Ping(ctx, req); err != nil {
+		return err
+	}
+	log.Println(req.Peer().Addr, req.Spec().Procedure)
+	return nil
+}
+
 func call(ctx context.Context, client pingv1connect.PingServiceClient) error {
 	req := connect.NewRequest(&pingv1.PingRequest{})
 	if _, err := client.Ping(ctx, req); err != nil {
@@ -46,7 +70,7 @@ func call(ctx context.Context, client pingv1connect.PingServiceClient) error {
 }
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./service.go: import_drop_v1=1 param_unwrap_request=2 result_unwrap_response=2 stream_client_ctor=1 stream_close_rename=1 strip_new_request=1 strip_new_response=2
+  ./service.go: import_drop_v1=1 param_unwrap_request=3 result_unwrap_response=3 stream_client_ctor=1 stream_close_rename=1 stream_handler_param=2 strip_new_request=1 strip_new_response=3
 --- ./service.go
 +++ ./service.go
 @@ -4,7 +4,6 @@
@@ -57,7 +81,7 @@ Proposed rewrites (rerun with -w to apply):
  	pingv1 "example.com/app/gen/connect/ping/v1"
  	"example.com/app/gen/connect/ping/v1/pingv1connect"
  )
-@@ -13,28 +12,31 @@
+@@ -13,35 +12,35 @@
  	pingv1connect.UnimplementedPingServiceHandler
  }
  
@@ -77,6 +101,31 @@ Proposed rewrites (rerun with -w to apply):
  	}()
 -	return connect.NewResponse(&pingv1.FailResponse{}), nil
 +	return &pingv1.FailResponse{}, nil
+ }
+ 
+-func (s *pingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
++func (s *pingServer) Sum(ctx context.Context, stream pingv1connect.PingServiceSumServerStream) (*pingv1.SumResponse, error) {
+ 	if stream.Spec().IsClient {
+ 		log.Println("client")
+ 	}
+-	return connect.NewResponse(&pingv1.SumResponse{}), nil
++	return &pingv1.SumResponse{}, nil
+ }
+ 
+-func (s *pingServer) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
++func (s *pingServer) CumSum(ctx context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
+ 	go func() {
+ 		log.Println(stream.Peer().Addr, stream.Spec().Procedure)
+ 	}()
+ 	return stream.Send(&pingv1.CumSumResponse{})
+ }
+ 
+-func send(ctx context.Context, client pingv1connect.PingServiceClient, req *connect.Request[pingv1.PingRequest]) error {
++func send(ctx context.Context, client pingv1connect.PingServiceClient, req *pingv1.PingRequest) error {
+ 	if _, err := client.Ping(ctx, req); err != nil {
+ 		return err
+ 	}
+@@ -50,13 +49,16 @@
  }
  
  func call(ctx context.Context, client pingv1connect.PingServiceClient) error {
@@ -105,10 +154,15 @@ The following issues require manual code changes:
   ./service.go:23:25: req.Peer() is split in v2: PeerAddr and Protocol move to the connect.CallInfoForServerContext(ctx) info, and the query to the connecthttp.ServerInfoForContext(ctx) info's RequestURL()
   ./service.go:23:54: req.HTTPMethod() moves to the connecthttp.ServerInfoForContext(ctx) info's HTTPMethod() in v2
   ./service.go:25:15: req.Spec() moves to the connect.CallInfoForServerContext(ctx) info's Spec field in v2
-  ./service.go:35:14: req.Peer() moves to the connect.NewClientContext(ctx) info's PeerAddr and Protocol fields in v2
-  ./service.go:35:31: req.HTTPMethod() moves to the connecthttp.ClientInfoForContext(ctx) info's HTTPMethod() in v2
-  ./service.go:37:14: stream.Spec() moves to the connect.NewClientContext(ctx) info's Spec field in v2
-  ./service.go:37:39: stream.Peer() moves to the connect.NewClientContext(ctx) info's PeerAddr and Protocol fields in v2
+  ./service.go:31:5: stream.Spec().IsClient has no v2 equivalent and is always false in a handler
+  ./service.go:39:15: stream.Peer() moves to the CallInfo's PeerAddr and Protocol fields in v2
+  ./service.go:39:35: stream.Spec() moves to the CallInfo's Spec field in v2
+  ./service.go:48:14: req.Peer() moves to the CallInfo's PeerAddr and Protocol fields in v2
+  ./service.go:48:31: req.Spec() moves to the CallInfo's Spec field in v2
+  ./service.go:57:14: req.Peer() moves to the connect.NewClientContext(ctx) info's PeerAddr and Protocol fields in v2
+  ./service.go:57:31: req.HTTPMethod() moves to the connecthttp.ClientInfoForContext(ctx) info's HTTPMethod() in v2
+  ./service.go:59:14: stream.Spec() moves to the connect.NewClientContext(ctx) info's Spec field in v2
+  ./service.go:59:39: stream.Peer() moves to the connect.NewClientContext(ctx) info's PeerAddr and Protocol fields in v2
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
 Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

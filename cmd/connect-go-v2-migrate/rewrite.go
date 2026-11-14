@@ -124,7 +124,7 @@ var (
 	}
 
 	// renamedConnectCore lists v1 connect symbols that v2 renamed but kept in the
-	// core package, so only the selector changes.
+	// core package, so the selector changes and the qualifier flips to v2.
 	renamedConnectCore = map[string]string{
 		"CallInfoForHandlerContext": "CallInfoForServerContext",
 		"ProtocolConnect":           "ProtocolNameConnect",
@@ -284,12 +284,16 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 	// into each closure (minus names it shadows), so `req.Msg` referenced from a
 	// callback is still unwrapped.
 	processed := map[*ast.FuncLit]bool{}
-	var processFunc func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs, outerStreams map[string]bool)
-	processFunc = func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs, outerStreams map[string]bool) {
+	var processFunc func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs, outerHandlerReqs, outerStreams map[string]bool)
+	processFunc = func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs, outerHandlerReqs, outerStreams map[string]bool) {
 		// serverReqs are *connect.Request[T] params; their .Header()/.Spec() map
 		// to the server CallInfo. Client response holders also lose .Msg but read
-		// response metadata, so the two sets stay apart.
-		serverReqs := rewriteFuncSignature(funcType, state, &report)
+		// response metadata, so the two sets stay apart. handlerReqs are the
+		// serverReqs of a function shaped like a handler, one that also returns a
+		// *connect.Response[U] or takes a handler stream. Their Spec() and Peer()
+		// move to the server CallInfo.
+		hasStreamParam := len(collectStreamParams(funcType, state.connectAlias)) > 0
+		serverReqs, returnsResponse := rewriteFuncSignature(funcType, state, &report)
 		if body == nil {
 			return
 		}
@@ -304,7 +308,12 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 		}
 		mergedMsg := mergeUnwrappedScopes(outerMsg, funcType, msgHolders)
 		mergedServerReqs := mergeUnwrappedScopes(outerServerReqs, funcType, serverReqs)
-		rewriteFuncBody(body, state, &report, mergedMsg, mergedServerReqs, clientRequests, clientResponses, contextParamName(funcType))
+		handlerReqs := map[string]bool{}
+		if returnsResponse || hasStreamParam {
+			handlerReqs = serverReqs
+		}
+		mergedHandlerReqs := mergeUnwrappedScopes(outerHandlerReqs, funcType, handlerReqs)
+		rewriteFuncBody(body, state, &report, mergedMsg, mergedServerReqs, mergedHandlerReqs, clientRequests, clientResponses, contextParamName(funcType))
 		streams := rewriteStreams(funcType, body, state, &report, methodName, recvName, outerStreams)
 		// Recurse into nested closures with the merged sets as their outer scope,
 		// marking them processed so the file-level walk skips them.
@@ -314,18 +323,18 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 				return
 			}
 			processed[lit] = true
-			processFunc(lit.Type, lit.Body, "", "", mergedMsg, mergedServerReqs, streams)
+			processFunc(lit.Type, lit.Body, "", "", mergedMsg, mergedServerReqs, mergedHandlerReqs, streams)
 		})
 	}
 	walk(file, func(n ast.Node) {
 		switch node := n.(type) {
 		case *ast.FuncDecl:
-			processFunc(node.Type, node.Body, node.Name.Name, receiverTypeName(node.Recv), nil, nil, nil)
+			processFunc(node.Type, node.Body, node.Name.Name, receiverTypeName(node.Recv), nil, nil, nil, nil)
 		case *ast.FuncLit:
 			if processed[node] {
 				return
 			}
-			processFunc(node.Type, node.Body, "", "", nil, nil, nil)
+			processFunc(node.Type, node.Body, "", "", nil, nil, nil, nil)
 		case *ast.InterfaceType:
 			// Interface methods have a signature but no body.
 			for _, field := range node.Methods.List {
@@ -558,9 +567,11 @@ func (s *rewriteState) hasConnectV1Import() bool {
 
 // rewriteFuncSignature unwraps *connect.Request[T] params to *T and
 // *connect.Response[U] results to *U. Returns the set of parameter names
-// whose types were unwrapped so the body pass can drop their .Msg accesses.
-func rewriteFuncSignature(funcType *ast.FuncType, state *rewriteState, report *Report) map[string]bool {
+// whose types were unwrapped so the body pass can drop their .Msg accesses,
+// and whether a result was unwrapped.
+func rewriteFuncSignature(funcType *ast.FuncType, state *rewriteState, report *Report) (map[string]bool, bool) {
 	unwrapped := map[string]bool{}
+	returnsResponse := false
 	if funcType.Params != nil {
 		for _, field := range funcType.Params.List {
 			if newType, ok := unwrapConnectGeneric(field.Type, state.connectAlias, "Request"); ok {
@@ -577,10 +588,11 @@ func rewriteFuncSignature(funcType *ast.FuncType, state *rewriteState, report *R
 			if newType, ok := unwrapConnectGeneric(field.Type, state.connectAlias, "Response"); ok {
 				field.Type = newType
 				report.bump("result_unwrap_response")
+				returnsResponse = true
 			}
 		}
 	}
-	return unwrapped
+	return unwrapped, returnsResponse
 }
 
 // flipMessageWrapperTypes replaces every connect.Request[T]/Response[T] type
@@ -645,7 +657,7 @@ func unwrapConnectGeneric(typ ast.Expr, connectAlias, typeName string) (ast.Expr
 // (server request params and client response holders), rewrites server
 // request-header access to the v2 CallInfo, and warns on response-holder
 // metadata access (which moves to the client CallInfo).
-func rewriteFuncBody(body *ast.BlockStmt, state *rewriteState, report *Report, msgHolders, serverRequests, clientRequests, clientResponses map[string]bool, ctxName string) {
+func rewriteFuncBody(body *ast.BlockStmt, state *rewriteState, report *Report, msgHolders, serverRequests, handlerRequests, clientRequests, clientResponses map[string]bool, ctxName string) {
 	if len(msgHolders) == 0 && len(clientRequests) == 0 {
 		return
 	}
@@ -674,7 +686,8 @@ func rewriteFuncBody(body *ast.BlockStmt, state *rewriteState, report *Report, m
 
 		serverResponses := scanServerResponseHolders(body, state.connectAlias)
 		rewriteRequestMetadata(body, state, report, serverRequests, serverResponses, ctxName)
-		rewriteServerCallInfoFields(body, state, report, serverRequests, ctxName)
+		rewriteServerCallInfoFields(body, state, report, handlerRequests, ctxName)
+		warnUnclassifiedCallInfoFields(body, report, withoutNames(serverRequests, handlerRequests))
 		rewriteBareMsg(body, msgHolders, report)
 	}
 	// A client request header set here seeds a context; the response pass then
@@ -766,6 +779,10 @@ func rewriteServerCallInfoFields(body *ast.BlockStmt, state *rewriteState, repor
 			return false
 		case *ast.SelectorExpr:
 			name, method := callInfoAccessorCall(node.X, holders)
+			if method == "Spec" && node.Sel.Name == "IsClient" {
+				report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Spec().IsClient has no v2 equivalent and is always false in a handler", name)
+				return false
+			}
 			field, mapped := peerCallInfoFields[node.Sel.Name]
 			if method != "Peer" || !mapped {
 				return true
@@ -818,6 +835,27 @@ func warnClientCallInfoFields(body *ast.BlockStmt, report *Report, holders map[s
 			report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Peer() moves to the connect.NewClientContext(ctx) info's PeerAddr and Protocol fields in v2", name)
 		case "HTTPMethod":
 			report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.HTTPMethod() moves to the connecthttp.ClientInfoForContext(ctx) info's HTTPMethod() in v2", name)
+		}
+	})
+}
+
+// warnUnclassifiedCallInfoFields warns on the Spec(), Peer(), and
+// HTTPMethod() accessors of the requests and streams in holders that are not
+// known to belong to a handler or a client call: a stream a closure inherits,
+// or a request param of a function that does not return a *connect.Response.
+func warnUnclassifiedCallInfoFields(body *ast.BlockStmt, report *Report, holders map[string]bool) {
+	if len(holders) == 0 {
+		return
+	}
+	walkFuncBody(body, func(node ast.Node) {
+		name, method := callInfoAccessorCall(node, holders)
+		switch method {
+		case "Spec":
+			report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Spec() moves to the CallInfo's Spec field in v2", name)
+		case "Peer":
+			report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Peer() moves to the CallInfo's PeerAddr and Protocol fields in v2", name)
+		case "HTTPMethod":
+			report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.HTTPMethod() moves to the connecthttp ServerInfo or ClientInfo HTTPMethod() in v2", name)
 		}
 	})
 }
@@ -1907,8 +1945,8 @@ func flipRemainingConnectSelectors(file *ast.File, state *rewriteState, report *
 }
 
 // rewriteMovedSymbols handles the package split: relocated options flip to
-// connecthttp, reshaped ones become warnings, core renames keep the connect
-// qualifier.
+// connecthttp, reshaped ones become warnings, core renames keep the core
+// package and flip to the v2 qualifier.
 func rewriteMovedSymbols(file *ast.File, state *rewriteState, report *Report) {
 	warnedReshaped := map[string]bool{}
 	walk(file, func(n ast.Node) {
@@ -1923,6 +1961,7 @@ func rewriteMovedSymbols(file *ast.File, state *rewriteState, report *Report) {
 		name := sel.Sel.Name
 		switch {
 		case renamedConnectCore[name] != "":
+			ident.Name = state.connectV2Alias
 			sel.Sel.Name = renamedConnectCore[name]
 			state.usedV2 = true
 			report.bump("rename_connect_core")
@@ -2255,6 +2294,17 @@ func mergeUnwrappedScopes(outer map[string]bool, funcType *ast.FuncType, local m
 		merged[name] = true
 	}
 	return merged
+}
+
+// withoutNames returns the names in names that are not in exclude.
+func withoutNames(names, exclude map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	for name := range names {
+		if !exclude[name] {
+			out[name] = true
+		}
+	}
+	return out
 }
 
 // walkFuncBody is like [walk] but does not descend into nested [*ast.FuncLit]
