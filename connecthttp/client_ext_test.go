@@ -268,6 +268,78 @@ func TestClientStreamCloseBeforeResponseHeaders(t *testing.T) {
 	}
 }
 
+func TestClientStreamCancelUnblocksReceive(t *testing.T) {
+	t.Parallel()
+	// The handler answers one message and then waits for the next one, so the
+	// client's send side stays open. Canceling the call's context must unblock
+	// the client's pending Receive and end the RPC on the handler's side too.
+	spec := connect.Spec{StreamType: connect.StreamTypeBidi, Procedure: pingv1connect.PingServiceCumSumProcedure}
+	protocols := map[string][]connecthttp.Option{
+		connect.ProtocolNameConnect: nil,
+		connect.ProtocolNameGRPC:    {connecthttp.WithGRPC()},
+		connect.ProtocolNameGRPCWeb: {connecthttp.WithGRPCWeb()},
+	}
+	for name, opts := range protocols {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				handlerDone := make(chan error, 1)
+				srv := connect.NewServer()
+				srv.Register(connect.Method{
+					Spec: spec,
+					Handler: func(_ context.Context, _ connect.Spec, stream connect.ServerStream) error {
+						err := func() error {
+							var req pingv1.CumSumRequest
+							if err := stream.Receive(&req); err != nil {
+								return err
+							}
+							if err := stream.Send(&pingv1.CumSumResponse{Sum: req.GetNumber()}); err != nil {
+								return err
+							}
+							return stream.Receive(&req)
+						}()
+						handlerDone <- err
+						return err
+					},
+				})
+				mux := http.NewServeMux()
+				connecthttp.Mount(mux, srv)
+				server := memhttptest.NewServer(t, mux)
+				client := connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), opts...))
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				stream, err := client.CallClientStream(ctx, spec)
+				assert.Nil(t, err)
+				// Closing the stream releases the call if the assertions below fail.
+				defer stream.Close()
+				assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+				assert.Nil(t, stream.Receive(&pingv1.CumSumResponse{}))
+
+				receiveDone := make(chan error, 1)
+				go func() {
+					receiveDone <- stream.Receive(&pingv1.CumSumResponse{})
+				}()
+				// The client's Receive and the handler's Receive now wait on each other.
+				synctest.Wait()
+				cancel()
+				synctest.Wait()
+				select {
+				case err := <-receiveDone:
+					assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
+				default:
+					t.Fatal("canceling the context didn't unblock Receive")
+				}
+				select {
+				case err := <-handlerDone:
+					assert.NotNil(t, err)
+				default:
+					t.Error("the handler wasn't told that the client canceled")
+				}
+			})
+		})
+	}
+}
+
 func TestClientStreamCloseUnusedDoesNotDispatch(t *testing.T) {
 	t.Parallel()
 	var calls atomic.Int32
