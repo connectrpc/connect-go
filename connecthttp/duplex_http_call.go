@@ -107,6 +107,11 @@ func newDuplexHTTPCall(
 		duplex.request.Body = pipeReader
 		duplex.request.GetBody = nil // GetBody is not supported for client streaming.
 		duplex.request.ContentLength = -1
+		// The HTTP/2 transport only checks the request context between reads of
+		// the request body, and a read of an idle pipe blocks. Closing the pipe
+		// when the context ends makes the transport reset the stream and fail
+		// the response body, which unblocks a pending Read.
+		context.AfterFunc(requestCtx, func() { pipeWriter.CloseWithError(requestCtx.Err()) })
 	}
 	return duplex
 }
