@@ -1,0 +1,116 @@
+# A type of the user's own with v1 stream method names is left alone: only the
+# connect stream in the same file is rewritten.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- feed/feed.go --
+package feed
+
+// Feed shares the method names of a v1 stream but is not one.
+type Feed struct {
+	items []string
+	next  int
+}
+
+func Open(items ...string) *Feed { return &Feed{items: items} }
+
+func (f *Feed) Receive() bool {
+	if f.next == len(f.items) {
+		return false
+	}
+	f.next++
+	return true
+}
+
+func (f *Feed) Msg() string { return f.items[f.next-1] }
+
+func (f *Feed) Err() error { return nil }
+-- service.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+
+	"example.com/app/feed"
+)
+
+func collect() []string {
+	f := feed.Open("a", "b")
+	var out []string
+	for f.Receive() {
+		out = append(out, f.Msg())
+	}
+	return out
+}
+
+func runCountUp(ctx context.Context, client pingv1connect.PingServiceClient) error {
+	stream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 3}))
+	if err != nil {
+		return err
+	}
+	for stream.Receive() {
+		fmt.Println(stream.Msg().Number)
+	}
+	if err := stream.Err(); err != nil {
+		return err
+	}
+	return stream.Close()
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_drop_v1=1 stream_recv_loop=1 strip_new_request=1
+--- ./service.go
++++ ./service.go
+@@ -2,9 +2,10 @@
+ 
+ import (
+ 	"context"
++	"errors"
+ 	"fmt"
++	"io"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ 
+@@ -21,16 +22,21 @@
+ }
+ 
+ func runCountUp(ctx context.Context, client pingv1connect.PingServiceClient) error {
+-	stream, err := client.CountUp(ctx, connect.NewRequest(&pingv1.CountUpRequest{Number: 3}))
++	stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 3})
+ 	if err != nil {
+ 		return err
+ 	}
+-	for stream.Receive() {
+-		fmt.Println(stream.Msg().Number)
+-	}
+-	if err := stream.Err(); err != nil {
+-		return err
++	for {
++		msg, err := stream.Receive()
++		if err != nil {
++			if errors.Is(err, io.EOF) {
++				break
++			}
++			return err
++		}
++		fmt.Println(msg.Number)
+ 	}
++
+ 	return stream.Close()
+ }
+ 
+
+
+Scanned 2 Go files and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

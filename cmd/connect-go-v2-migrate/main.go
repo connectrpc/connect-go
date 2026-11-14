@@ -129,9 +129,9 @@ func runMain(args []string) int {
 	// imports to v2, the Go equivalent of regenerating.
 	if anyReady || !proj.hasV1Gen {
 		for _, source := range proj.sources {
-			ready, stubUse := source.ready, source.stubUse
+			ready, stubUse, notStreams := source.ready, source.stubUse, source.notStreams
 			rewrite := func(path string, content []byte) ([]byte, Report, error) {
-				return Rewrite(path, content, ready, withHandlerStreams(proj.handlerStreams), withStubUse(stubUse), withSDKModules(proj.sdkModules))
+				return Rewrite(path, content, ready, withHandlerStreams(proj.handlerStreams), withStubUse(stubUse), withNotStreams(notStreams), withSDKModules(proj.sdkModules))
 			}
 			processFile(source, rewrite, *write, &run)
 		}
