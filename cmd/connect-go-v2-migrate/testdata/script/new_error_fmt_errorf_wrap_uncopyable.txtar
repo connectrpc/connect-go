@@ -1,0 +1,73 @@
+# fmt.Errorf whose %w operand is a call, or with several %w, gets no cause and is reported.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) Fail(ctx context.Context, req *connect.Request[pingv1.FailRequest]) (*connect.Response[pingv1.FailResponse], error) {
+	if err := ctx.Err(); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %w", context.Cause(ctx)))
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("%w then %w", err, err))
+	}
+	return connect.NewResponse(&pingv1.FailResponse{}), nil
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: convert_code_const=2 convert_new_error=2 flip_residual_connect=2 import_add_connectv2=1 import_drop_v1=1 param_unwrap_request=1 result_unwrap_response=1 strip_new_response=1
+--- ./service.go
++++ ./service.go
+@@ -4,7 +4,7 @@
+ 	"context"
+ 	"fmt"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -13,13 +13,13 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) Fail(ctx context.Context, req *connect.Request[pingv1.FailRequest]) (*connect.Response[pingv1.FailResponse], error) {
++func (s *pingServer) Fail(ctx context.Context, req *pingv1.FailRequest) (*pingv1.FailResponse, error) {
+ 	if err := ctx.Err(); err != nil {
+-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %w", context.Cause(ctx)))
++		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %w", context.Cause(ctx)).Error())
+ 	}
+ 	if err := ctx.Err(); err != nil {
+-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("%w then %w", err, err))
++		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("%w then %w", err, err).Error())
+ 	}
+-	return connect.NewResponse(&pingv1.FailResponse{}), nil
++	return &pingv1.FailResponse{}, nil
+ }
+ 
+
+
+The following issues require manual code changes:
+  ./service.go:18:15: connect.NewError keeps only the message of fmt.Errorf("wrap: %w", context.Cause(ctx)); errors.Is and errors.As no longer reach it. Assign it to a variable and attach it with WithCause.
+  ./service.go:21:15: connect.NewError keeps only the message of fmt.Errorf("%w then %w", err, err); errors.Is and errors.As no longer reach it. Assign it to a variable and attach it with WithCause.
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

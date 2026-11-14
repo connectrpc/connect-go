@@ -1,4 +1,4 @@
-# fmt.Errorf with %w cannot collapse to Errorf; the message is taken via .Error().
+# fmt.Errorf with %w cannot collapse to Errorf; the message is taken via .Error() and the %w operand becomes the cause.
 stubs v2
 exec migrate
 cmp stdout out.txt
@@ -50,7 +50,7 @@ Proposed rewrites (rerun with -w to apply):
 +func (s *pingServer) Fail(ctx context.Context, req *pingv1.FailRequest) (*pingv1.FailResponse, error) {
  	if err := ctx.Err(); err != nil {
 -		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %w", err))
-+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %w", err).Error())
++		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %w", err).Error()).WithCause(err)
  	}
 -	return connect.NewResponse(&pingv1.FailResponse{}), nil
 +	return &pingv1.FailResponse{}, nil
