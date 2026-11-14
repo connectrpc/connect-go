@@ -261,6 +261,9 @@ Interceptors move to `connect.NewClient`. Other client options move to
 
 ✅ `connect-go-v2-migrate` handles this.
 
+⚠️ The v1 generic `connect.Client[Req, Res]` and `connect.NewClient[Req, Res]`
+have no v2 form. Call the generated client instead. The tool warns at each use.
+
 ### Headers and trailers
 
 With the wrapper types gone, metadata moves to a `*connect.CallInfo` carried
@@ -478,6 +481,10 @@ Options whose signature changed are warned with the v2 replacement:
 | `connect.NewNotModifiedError(header)` | `connecthttp.NewNotModifiedError()` (no header argument) |
 
 ⚠️ Update these by hand.
+
+Custom `connect.Codec` and `connect.Compressor` implementations need the v2
+methods. A codec implements `MarshalWrite` and `UnmarshalRead`. A compressor
+implements `Compress` and `Decompress`. The tool warns at each use.
 
 ### Interceptors
 

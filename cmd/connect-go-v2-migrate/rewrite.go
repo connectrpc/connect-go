@@ -201,6 +201,21 @@ var (
 		"Transport":                true,
 		"Version":                  true,
 	}
+
+	// v1GenericSymbols lists v2 core symbols that were generic in v1. An
+	// indexed use such as connect.NewClient[Req, Res] no longer compiles.
+	// ClientStream and ServerStream params are warned by the stream pass.
+	v1GenericSymbols = map[string]bool{
+		"Client":    true,
+		"NewClient": true,
+	}
+
+	// reshapedInterfaces lists v2 core interfaces whose method set changed.
+	reshapedInterfaces = map[string]bool{
+		"Codec":       true,
+		"Compressor":  true,
+		"StableCodec": true,
+	}
 )
 
 // WarningKind groups diagnostics for the sectioned output.
@@ -546,13 +561,25 @@ func warnIfV1Retained(report *Report, file *ast.File, retained bool, residual []
 }
 
 // warnV1OnlySymbols warns at the first use of each connect.<X> selector under
-// alias that names no v2 core symbol, unless an earlier pass already warned
-// there. Once v2 takes over the v1 import's name, these leftovers no longer
-// compile, and nothing else reports them.
+// alias that names no v2 core symbol, or whose v2 namesake has a different
+// shape, unless an earlier pass already warned there. Once v2 takes over the
+// v1 import's name, these leftovers no longer compile, and nothing else
+// reports them.
 func warnV1OnlySymbols(report *Report, file *ast.File, alias string) {
 	seen := map[string]bool{}
-	walk(file, func(n ast.Node) {
-		sel, isSel := n.(*ast.SelectorExpr)
+	indexed := map[*ast.SelectorExpr]bool{}
+	walk(file, func(node ast.Node) {
+		switch node := node.(type) {
+		case *ast.IndexExpr:
+			if sel, isSel := node.X.(*ast.SelectorExpr); isSel {
+				indexed[sel] = true
+			}
+		case *ast.IndexListExpr:
+			if sel, isSel := node.X.(*ast.SelectorExpr); isSel {
+				indexed[sel] = true
+			}
+		}
+		sel, isSel := node.(*ast.SelectorExpr)
 		if !isSel {
 			return
 		}
@@ -561,14 +588,25 @@ func warnV1OnlySymbols(report *Report, file *ast.File, alias string) {
 			return
 		}
 		name := sel.Sel.Name
-		if v2CoreSymbols[name] || seen[name] {
+		var format string
+		switch {
+		case !v2CoreSymbols[name]:
+			format = "%s.%s is not in connectrpc.com/connect/v2, which replaced the v1 import. Port it by hand."
+		case v1GenericSymbols[name] && indexed[sel]:
+			format = "%s.%s is not generic in connectrpc.com/connect/v2, which replaced the v1 import. Port it by hand."
+		case reshapedInterfaces[name]:
+			format = "%s.%s has a different method set in connectrpc.com/connect/v2, which replaced the v1 import. Port implementations by hand."
+		default:
+			return
+		}
+		if seen[name] {
 			return
 		}
 		seen[name] = true
 		if report.warnedAt(sel.Pos()) {
 			return
 		}
-		report.warnAtf(sel.Pos(), ruleV1OnlySymbol, "%s.%s is not in connectrpc.com/connect/v2, which replaced the v1 import. Port it by hand.", alias, name)
+		report.warnAtf(sel.Pos(), ruleV1OnlySymbol, format, alias, name)
 	})
 }
 
