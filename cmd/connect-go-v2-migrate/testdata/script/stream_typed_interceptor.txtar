@@ -1,0 +1,82 @@
+# The v1 interceptor connection interfaces share the stream method names but
+# are not streams. Only the real stream in the file is migrated.
+stubs v2
+exec migrate
+cmp stdout out.txt
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type headerInterceptor struct{}
+
+func (headerInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc { return next }
+
+func (headerInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
+		conn := next(ctx, spec)
+		conn.RequestHeader().Set("X-Test", "1")
+		if err := conn.CloseRequest(); err != nil {
+			return conn
+		}
+		return conn
+	}
+}
+
+func (headerInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
+		if err := conn.Send(nil); err != nil {
+			return err
+		}
+		return next(ctx, conn)
+	}
+}
+
+func runCumSum(ctx context.Context, client pingv1connect.PingServiceClient) error {
+	stream := client.CumSum(ctx)
+	if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+		return err
+	}
+	if err := stream.CloseRequest(); err != nil {
+		return err
+	}
+	return stream.CloseResponse()
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: stream_client_ctor=1 stream_close_rename=2
+--- ./service.go
++++ ./service.go
+@@ -33,13 +33,16 @@
+ }
+ 
+ func runCumSum(ctx context.Context, client pingv1connect.PingServiceClient) error {
+-	stream := client.CumSum(ctx)
++	stream, err := client.CumSum(ctx)
++	if err != nil {
++		return err
++	}
+ 	if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+ 		return err
+ 	}
+-	if err := stream.CloseRequest(); err != nil {
++	if err := stream.CloseSend(); err != nil {
+ 		return err
+ 	}
+-	return stream.CloseResponse()
++	return stream.Close()
+ }
+ 
+
+
+The following issues require manual code changes:
+  ./service.go:6:2: connectrpc.com/connect (v1) import retained because it still uses connect.Spec, connect.StreamingClientConn, connect.StreamingClientFunc, connect.StreamingHandlerConn, connect.StreamingHandlerFunc, connect.UnaryFunc.
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

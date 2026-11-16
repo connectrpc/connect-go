@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -35,6 +36,17 @@ const commonErrorsURL = "https://connectrpc.com/docs/go/common-errors"
 const (
 	clientDisconnectedMessage = "client disconnected"
 	streamClosedMessage       = "http2: stream closed"
+)
+
+// goAwayClosedPrefix starts the error net/http returns when the server closes
+// the connection after sending GOAWAY.
+const goAwayClosedPrefix = "http2: server sent GOAWAY and closed the connection"
+
+// Windows socket errors for a connection the peer reset or the host aborted.
+// On Windows syscall.ECONNRESET is an invented errno that never matches them.
+const (
+	errWSAConnAborted syscall.Errno = 10053 // WSAECONNABORTED
+	errWSAConnReset   syscall.Errno = 10054 // WSAECONNRESET
 )
 
 var (
@@ -143,7 +155,8 @@ func wrapIfContextError(err error) error {
 // the client going away. HTTP/2 has its own errors for this, other transports
 // surface the connection's error.
 func isClientDisconnected(err error) bool {
-	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, errWSAConnReset) || errors.Is(err, errWSAConnAborted) {
 		return true
 	}
 	msg := err.Error()
@@ -152,7 +165,11 @@ func isClientDisconnected(err error) bool {
 
 // wrapIfClientTransportError wraps client-side connection failures with
 // connect.CodeUnavailable. A reset observed while reading or closing a response
-// is a transient transport failure, not caller cancellation.
+// is a transient transport failure, not caller cancellation. So is
+// io.ErrUnexpectedEOF, which net/http returns when the connection is lost
+// before the response body has ended. A body the peer ends early still reads
+// as a clean io.EOF and is reported by the protocol. A connection closed after
+// an HTTP/2 GOAWAY is the same failure.
 func wrapIfClientTransportError(err error) error {
 	if err == nil {
 		return nil
@@ -160,7 +177,8 @@ func wrapIfClientTransportError(err error) error {
 	if _, ok := asError(err); ok {
 		return err
 	}
-	if !isClientDisconnected(err) {
+	if !isClientDisconnected(err) && !errors.Is(err, io.ErrUnexpectedEOF) &&
+		!strings.HasPrefix(err.Error(), goAwayClosedPrefix) {
 		return err
 	}
 	return connect.NewError(connect.CodeUnavailable, err.Error()).WithCause(err)
