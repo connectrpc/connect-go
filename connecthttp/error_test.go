@@ -120,6 +120,16 @@ func TestWrapIfClientTransportError(t *testing.T) {
 			wantCode: connect.CodeUnavailable,
 		},
 		{
+			name:     "WSAECONNRESET",
+			err:      fmt.Errorf("wsarecv: %w", errWSAConnReset),
+			wantCode: connect.CodeUnavailable,
+		},
+		{
+			name:     "WSAECONNABORTED",
+			err:      fmt.Errorf("wsarecv: %w", errWSAConnAborted),
+			wantCode: connect.CodeUnavailable,
+		},
+		{
 			name:     "client disconnected",
 			err:      errors.New(clientDisconnectedMessage),
 			wantCode: connect.CodeUnavailable,

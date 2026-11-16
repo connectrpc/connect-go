@@ -38,6 +38,13 @@ const (
 	streamClosedMessage       = "http2: stream closed"
 )
 
+// Windows socket errors for a connection the peer reset or the host aborted.
+// On Windows syscall.ECONNRESET is an invented errno that never matches them.
+const (
+	errWSAConnAborted syscall.Errno = 10053 // WSAECONNABORTED
+	errWSAConnReset   syscall.Errno = 10054 // WSAECONNRESET
+)
+
 var (
 	// errNotModified signals Connect-protocol responses to GET requests to use the
 	// 304 Not Modified HTTP error code.
@@ -144,7 +151,8 @@ func wrapIfContextError(err error) error {
 // the client going away. HTTP/2 has its own errors for this, other transports
 // surface the connection's error.
 func isClientDisconnected(err error) bool {
-	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, errWSAConnReset) || errors.Is(err, errWSAConnAborted) {
 		return true
 	}
 	msg := err.Error()
