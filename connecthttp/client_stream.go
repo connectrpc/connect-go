@@ -166,7 +166,11 @@ func (s *connectStreamingClientStream) Receive(dst any) error {
 	}
 	if s.streamType == connect.StreamTypeClient {
 		s.rxErr = io.EOF
-		return receiveUnaryResponse(s.conn, dst, s.info)
+		err := receiveUnaryResponse(s.conn, dst, s.info)
+		if err != nil {
+			s.rxErr = err
+		}
+		return err
 	}
 	err := s.conn.Receive(dst)
 	if !s.syncedHeader && s.info != nil {
