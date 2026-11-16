@@ -1,4 +1,4 @@
-# fmt.Errorf with a non-leading %w keeps fmt.Errorf and appends .Error().
+# fmt.Errorf with a non-leading %w keeps fmt.Errorf, appends .Error(), and the %w operand becomes the cause.
 stubs v2
 exec migrate
 cmp stdout out.txt
@@ -52,7 +52,7 @@ Proposed rewrites (rerun with -w to apply):
  	name := "ping"
  	if err := ctx.Err(); err != nil {
 -		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("%w occurred for %s", err, name))
-+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("%w occurred for %s", err, name).Error())
++		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("%w occurred for %s", err, name).Error()).WithCause(err)
  	}
 -	return connect.NewResponse(&pingv1.FailResponse{}), nil
 +	return &pingv1.FailResponse{}, nil

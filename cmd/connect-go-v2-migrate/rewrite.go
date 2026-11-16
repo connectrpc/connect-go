@@ -57,11 +57,14 @@ const (
 	ruleInterceptorMigration = "interceptor_migration"
 	ruleStreamParamType      = "stream_param_type"
 	ruleStreamParamAmbiguous = "stream_param_ambiguous"
+	ruleStreamWrapper        = "stream_wrapper"
+	ruleStreamV1Client       = "stream_v1_client_type"
 	ruleEcosystemMigration   = "ecosystem_migration"
 	ruleBufgenReinstall      = "bufgen_reinstall_plugin"
 	ruleBufgenGoMod          = "bufgen_update_go_mod"
 	ruleBufgenManualEdit     = "bufgen_manual_edit"
 	ruleReadLimitDefault     = "read_limit_default"
+	ruleNewErrorCause        = "new_error_cause"
 	ruleV1OnlySymbol         = "v1_only_symbol"
 )
 
@@ -318,6 +321,27 @@ func withStubUse(position token.Position) rewriteOption {
 		if position.IsValid() && tokenFile != nil && position.Offset < tokenFile.Size() {
 			state.stubUse = tokenFile.Pos(position.Offset)
 		}
+	}
+}
+
+// withStreamKinds supplies the type checker's stream verdicts, keyed by source
+// offset. They are bound to the parsed identifiers before any rewrite runs, so
+// an identifier a rewrite synthesizes never picks one up.
+func withStreamKinds(offsets map[int]streamKind) rewriteOption {
+	return func(state *rewriteState) {
+		tokenFile := state.fset.File(state.file.Pos())
+		if offsets == nil || tokenFile == nil {
+			return
+		}
+		state.streamKinds = map[*ast.Ident]streamKind{}
+		ast.Inspect(state.file, func(node ast.Node) bool {
+			if id, isIdent := node.(*ast.Ident); isIdent {
+				if kind := offsets[tokenFile.Offset(id.Pos())]; kind != 0 {
+					state.streamKinds[id] = kind
+				}
+			}
+			return true
+		})
 	}
 }
 
@@ -638,6 +662,9 @@ type rewriteState struct {
 	// the AST-only path, where the stream parameter is warned instead.
 	handlerStreams *handlerStreamResolver
 	stubUse        token.Pos
+	// streamKinds holds the type checker's stream verdicts. It is nil on the
+	// AST-only path, where stream detection goes by name alone.
+	streamKinds map[*ast.Ident]streamKind
 	// sdkModules are v1 BSR connect SDKs whose imports move to v2.
 	sdkModules []string
 	// imports maps path->package name for imports a rewrite introduces;
@@ -692,6 +719,25 @@ func newRewriteState(fset *token.FileSet, file *ast.File) *rewriteState {
 
 func (s *rewriteState) hasConnectV1Import() bool {
 	return s.hadV1Import
+}
+
+// isStreamIdent reports whether ident refers to a stream. It uses the type
+// checker's verdict when there is one and the name otherwise.
+func (s *rewriteState) isStreamIdent(ident *ast.Ident, streamVars map[string]bool) bool {
+	if kind, typed := s.streamKinds[ident]; typed {
+		return kind >= streamValue
+	}
+	return streamVars[ident.Name]
+}
+
+// isConstructedStream reports whether ident is a stream bound from a v1-shaped
+// constructor call, which gains an error result in v2. A variable the type
+// checker resolved to a stream type already has its one result.
+func (s *rewriteState) isConstructedStream(ident *ast.Ident, streamVars map[string]bool) bool {
+	if kind, typed := s.streamKinds[ident]; typed {
+		return kind == streamConstructed
+	}
+	return streamVars[ident.Name]
 }
 
 // rewriteFuncSignature unwraps *connect.Request[T] params to *T and
@@ -1549,7 +1595,8 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 
 	// connect.NewError(c, err); see convertNewErrorInPlace for the cases.
 	if call, ok := expr.(*ast.CallExpr); ok && len(call.Args) == 2 && isConnectSelector(call.Fun, state.connectAlias, "NewError") {
-		converted, cause := convertNewErrorInPlace(call, state)
+		errArg := call.Args[1]
+		converted, cause, causeLost := convertNewErrorInPlace(call, state)
 		if !converted {
 			return
 		}
@@ -1557,6 +1604,9 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 		report.bump("convert_new_error")
 		if cause != nil {
 			*exprPtr = withCauseCall(call, cause)
+		}
+		if causeLost {
+			report.warnAtf(call.Pos(), ruleNewErrorCause, "connect.NewError keeps only the message of %s; errors.Is and errors.As no longer reach it. Assign it to a variable and attach it with WithCause.", exprString(errArg))
 		}
 		return
 	}
@@ -1594,16 +1644,18 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 //
 //   - errors.New("s")        -> connect.NewError(code, "s")
 //   - fmt.Errorf(f, args...) -> connect.Errorf(code, f, args...)
-//   - fmt.Errorf(... %w ...) -> connect.NewError(code, fmt.Errorf(...).Error())
+//   - fmt.Errorf(... %w ...) -> connect.NewError(code, fmt.Errorf(...).Error()).WithCause(wrapped)
 //   - nil                    -> connect.NewError(code, "")
 //   - other err expr         -> connect.NewError(code, err.Error()).WithCause(err)
 //
-// cause is set only when err is safe to evaluate twice. A string message arg
-// is left alone, so the rewrite is idempotent.
-func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) (converted bool, cause ast.Expr) {
+// cause is set only when it is safe to evaluate twice: err itself, or the
+// operand of the single %w in a fmt.Errorf. causeLost reports a converted call
+// whose error is reachable by errors.Is and errors.As in v1 but gets no cause.
+// A string message arg is left alone, so the rewrite is idempotent.
+func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) (converted bool, cause ast.Expr, causeLost bool) {
 	errArg := call.Args[1]
 	if isMessageStringExpr(errArg) {
-		return false, nil
+		return false, nil, false
 	}
 	// The remaining branches migrate a v1 argument, so flip the qualifier to v2.
 	if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
@@ -1615,10 +1667,15 @@ func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) (converted 
 		// v1 allowed a nil error for a code-only error; v2 needs a string.
 		pos := errArg.Pos()
 		call.Args[1] = &ast.BasicLit{ValuePos: pos, Kind: token.STRING, Value: `""`}
-		return true, nil
+		return true, nil, false
 	}
-	if inner, ok := errArg.(*ast.CallExpr); ok && rewriteNewErrorCallArg(call, inner) {
-		return true, nil
+	inner, isCall := errArg.(*ast.CallExpr)
+	if isCall && rewriteNewErrorCallArg(call, inner) {
+		return true, nil, false
+	}
+	cause = copyIdentChain(errArg)
+	if isCall && isFmtErrorf(inner.Fun) {
+		cause = wrappedOperand(inner)
 	}
 	// Fallback: connect.NewError(code, err.Error()), anchored to errArg's position.
 	pos := errArg.Pos()
@@ -1630,7 +1687,75 @@ func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) (converted 
 		Lparen: pos,
 		Rparen: pos,
 	}
-	return true, copyIdentChain(errArg)
+	return true, cause, cause == nil
+}
+
+// wrappedOperand returns a copy of the operand of the single %w in a
+// fmt.Errorf call with a literal format, when it is an identifier or selector
+// chain. Otherwise it returns nil.
+func wrappedOperand(call *ast.CallExpr) ast.Expr {
+	if call.Ellipsis.IsValid() {
+		// The operands are in a []any, not separate arguments.
+		return nil
+	}
+	format, ok := errorfFormat(call)
+	if !ok {
+		return nil
+	}
+	count, index := scanWrapVerbs(format)
+	if count != 1 || index < 0 || 1+index >= len(call.Args) {
+		return nil
+	}
+	return copyIdentChain(call.Args[1+index])
+}
+
+// errorfFormat returns the format of a fmt.Errorf call when it is a string
+// literal.
+func errorfFormat(call *ast.CallExpr) (string, bool) {
+	if len(call.Args) == 0 {
+		return "", false
+	}
+	lit, ok := call.Args[0].(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	format, err := strconv.Unquote(lit.Value)
+	return format, err == nil
+}
+
+// scanWrapVerbs returns the number of %w verbs in format and the argument
+// index of the first one. The index is -1 when it does not follow from the
+// verbs' order: an explicit argument index or a * width or precision comes
+// before it.
+func scanWrapVerbs(format string) (count, index int) {
+	index = -1
+	verbs, ordered := 0, true
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			continue
+		}
+		i++
+		for i < len(format) && strings.IndexByte("+-# 0123456789.*[]", format[i]) >= 0 {
+			if format[i] == '*' || format[i] == '[' {
+				ordered = false
+			}
+			i++
+		}
+		if i == len(format) {
+			break
+		}
+		switch format[i] {
+		case '%':
+			continue
+		case 'w':
+			if count == 0 && ordered {
+				index = verbs
+			}
+			count++
+		}
+		verbs++
+	}
+	return count, index
 }
 
 // withCauseCall builds `call.WithCause(cause)`.
@@ -1685,7 +1810,7 @@ func rewriteNewErrorCallArg(call, inner *ast.CallExpr) bool {
 	if !isFmtErrorf(inner.Fun) {
 		return false
 	}
-	if containsErrorWrap(inner.Args) {
+	if containsErrorWrap(inner) {
 		// v2's Errorf is plain Sprintf (%w is literal); splitting into WithCause
 		// would drop the cause from the wire. Use the .Error() fallback instead.
 		return false
@@ -1697,6 +1822,7 @@ func rewriteNewErrorCallArg(call, inner *ast.CallExpr) bool {
 	newArgs = append(newArgs, call.Args[0])
 	newArgs = append(newArgs, inner.Args...)
 	call.Args = newArgs
+	call.Ellipsis = inner.Ellipsis
 	return true
 }
 
@@ -1724,17 +1850,15 @@ func isFmtErrorf(fun ast.Expr) bool {
 	return id.Name == "fmt" && sel.Sel.Name == identErrorf
 }
 
-// containsErrorWrap reports whether an fmt.Errorf format string contains %w. A
-// non-literal format conservatively returns true (forcing the .Error() path).
-func containsErrorWrap(args []ast.Expr) bool {
-	if len(args) == 0 {
-		return false
-	}
-	lit, ok := args[0].(*ast.BasicLit)
+// containsErrorWrap reports whether an fmt.Errorf call's format has a %w verb.
+// A non-literal format conservatively returns true (forcing the .Error() path).
+func containsErrorWrap(call *ast.CallExpr) bool {
+	format, ok := errorfFormat(call)
 	if !ok {
 		return true
 	}
-	return strings.Contains(lit.Value, "%w")
+	count, _ := scanWrapVerbs(format)
+	return count > 0
 }
 
 // unwrapConnectMessageLiteral returns the Msg value of a &connect.Request/Response[T]{Msg: x}
