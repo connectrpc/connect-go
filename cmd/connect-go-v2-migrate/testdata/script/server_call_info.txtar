@@ -1,0 +1,125 @@
+# Handler request and stream Spec() and Peer().Addr/Protocol move to the
+# server CallInfo fields, sharing one seeded info with the header rewrites.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- service.go --
+package app
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	log.Printf("%s from %s over %s", req.Spec().Procedure, req.Peer().Addr, req.Peer().Protocol)
+	token := req.Header().Get("Authorization")
+	return connect.NewResponse(&pingv1.PingResponse{Text: token}), nil
+}
+
+func (s *pingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+	spec := stream.Spec()
+	log.Println(spec.Procedure, stream.Peer().Addr)
+	return connect.NewResponse(&pingv1.SumResponse{}), nil
+}
+
+func (s *pingServer) CountUp(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+	if req.Peer().Protocol == connect.ProtocolGRPC {
+		log.Println(req.Peer().Addr)
+	}
+	return stream.Send(&pingv1.CountUpResponse{Number: req.Msg.Number})
+}
+
+func (s *pingServer) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+	log.Println(stream.Spec().Procedure, stream.Peer().Addr, stream.Peer().Protocol)
+	for {
+		req, err := stream.Receive()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := stream.Send(&pingv1.CumSumResponse{Sum: req.Number}); err != nil {
+			return err
+		}
+	}
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: body_drop_msg=1 import_add_connectv2=1 import_drop_v1=1 param_unwrap_request=2 rename_connect_core=1 result_unwrap_response=2 server_call_info_rewrite=10 server_header_rewrite=1 stream_handler_param=3 strip_new_response=2
+--- ./service.go
++++ ./service.go
+@@ -6,7 +6,7 @@
+ 	"io"
+ 	"log"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -15,27 +15,31 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+-	log.Printf("%s from %s over %s", req.Spec().Procedure, req.Peer().Addr, req.Peer().Protocol)
+-	token := req.Header().Get("Authorization")
+-	return connect.NewResponse(&pingv1.PingResponse{Text: token}), nil
++func (s *pingServer) Ping(ctx context.Context, req *pingv1.PingRequest) (*pingv1.PingResponse, error) {
++	info, _ := connect.CallInfoForServerContext(ctx)
++	log.Printf("%s from %s over %s", info.Spec.Procedure, info.PeerAddr, info.Protocol)
++	token := info.RequestHeader().Get("Authorization")
++	return &pingv1.PingResponse{Text: token}, nil
+ }
+ 
+-func (s *pingServer) Sum(ctx context.Context, stream *connect.ClientStream[pingv1.SumRequest]) (*connect.Response[pingv1.SumResponse], error) {
+-	spec := stream.Spec()
+-	log.Println(spec.Procedure, stream.Peer().Addr)
+-	return connect.NewResponse(&pingv1.SumResponse{}), nil
++func (s *pingServer) Sum(ctx context.Context, stream pingv1connect.PingServiceSumServerStream) (*pingv1.SumResponse, error) {
++	info, _ := connect.CallInfoForServerContext(ctx)
++	spec := info.Spec
++	log.Println(spec.Procedure, info.PeerAddr)
++	return &pingv1.SumResponse{}, nil
+ }
+ 
+-func (s *pingServer) CountUp(ctx context.Context, req *connect.Request[pingv1.CountUpRequest], stream *connect.ServerStream[pingv1.CountUpResponse]) error {
+-	if req.Peer().Protocol == connect.ProtocolGRPC {
+-		log.Println(req.Peer().Addr)
++func (s *pingServer) CountUp(ctx context.Context, req *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
++	info, _ := connect.CallInfoForServerContext(ctx)
++	if info.Protocol == connect.ProtocolNameGRPC {
++		log.Println(info.PeerAddr)
+ 	}
+-	return stream.Send(&pingv1.CountUpResponse{Number: req.Msg.Number})
++	return stream.Send(&pingv1.CountUpResponse{Number: req.Number})
+ }
+ 
+-func (s *pingServer) CumSum(ctx context.Context, stream *connect.BidiStream[pingv1.CumSumRequest, pingv1.CumSumResponse]) error {
+-	log.Println(stream.Spec().Procedure, stream.Peer().Addr, stream.Peer().Protocol)
++func (s *pingServer) CumSum(ctx context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
++	info, _ := connect.CallInfoForServerContext(ctx)
++	log.Println(info.Spec.Procedure, info.PeerAddr, info.Protocol)
+ 	for {
+ 		req, err := stream.Receive()
+ 		if errors.Is(err, io.EOF) {
+
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

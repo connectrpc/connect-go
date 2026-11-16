@@ -1,0 +1,59 @@
+# A renamed protocol constant in a file that keeps its v1 import is qualified
+# with the v2 package, not the retained v1 alias.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+-- interceptor.go --
+package app
+
+import (
+	"context"
+
+	connectv1 "connectrpc.com/connect"
+)
+
+func isGRPC(p string) bool {
+	return p == connectv1.ProtocolGRPC
+}
+
+var _ connectv1.UnaryInterceptorFunc = func(next connectv1.UnaryFunc) connectv1.UnaryFunc {
+	return func(ctx context.Context, req connectv1.AnyRequest) (connectv1.AnyResponse, error) {
+		if req.Peer().Protocol == connectv1.ProtocolConnect {
+			return next(ctx, req)
+		}
+		return next(ctx, req)
+	}
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./interceptor.go: import_add_connectv2=1 rename_connect_core=2
+--- ./interceptor.go
++++ ./interceptor.go
+@@ -4,15 +4,16 @@
+ 	"context"
+ 
+ 	connectv1 "connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
+ )
+ 
+ func isGRPC(p string) bool {
+-	return p == connectv1.ProtocolGRPC
++	return p == connect.ProtocolNameGRPC
+ }
+ 
+ var _ connectv1.UnaryInterceptorFunc = func(next connectv1.UnaryFunc) connectv1.UnaryFunc {
+ 	return func(ctx context.Context, req connectv1.AnyRequest) (connectv1.AnyResponse, error) {
+-		if req.Peer().Protocol == connectv1.ProtocolConnect {
++		if req.Peer().Protocol == connect.ProtocolNameConnect {
+ 			return next(ctx, req)
+ 		}
+ 		return next(ctx, req)
+
+
+The following issues require manual code changes:
+  ./interceptor.go:6:2: connectrpc.com/connect (v1) import retained because it still uses connectv1.AnyRequest, connectv1.AnyResponse, connectv1.UnaryFunc, connectv1.UnaryInterceptorFunc.
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md
