@@ -1667,9 +1667,6 @@ func isFmtErrorf(fun ast.Expr) bool {
 // containsErrorWrap reports whether an fmt.Errorf call's format has a %w verb.
 // A non-literal format conservatively returns true (forcing the .Error() path).
 func containsErrorWrap(call *ast.CallExpr) bool {
-	if len(call.Args) == 0 {
-		return false
-	}
 	format, ok := errorfFormat(call)
 	if !ok {
 		return true
