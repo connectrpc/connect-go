@@ -1,0 +1,51 @@
+# A v1 stream held in a type of the user's own, by embedding or behind an
+# interface, is warned about and its calls are left unchanged.
+stubs v2
+exec migrate
+cmp stdout out.txt
+-- service.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type loggedStream struct {
+	*connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]
+}
+
+type logger struct{}
+
+func (logger) wrap(stream *connect.BidiStreamForClient[pingv1.CumSumRequest, pingv1.CumSumResponse]) *loggedStream {
+	return &loggedStream{stream}
+}
+
+type sender interface {
+	Send(*pingv1.CumSumRequest) error
+}
+
+func runWrapped(ctx context.Context, client pingv1connect.PingServiceClient, log logger) error {
+	stream := log.wrap(client.CumSum(ctx))
+	if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+		return err
+	}
+	return stream.CloseRequest()
+}
+
+func runHolder(ctx context.Context, client pingv1connect.PingServiceClient) error {
+	var stream sender = client.CumSum(ctx)
+	return stream.Send(&pingv1.CumSumRequest{Number: 1})
+}
+-- out.txt --
+The following issues require manual code changes:
+  ./service.go:6:2: connectrpc.com/connect (v1) import retained because it still uses connect.BidiStreamForClient.
+  ./service.go:17:20: "stream" has a v1 connect client stream type. Change it to the v2 stream type and migrate its stream calls by hand.
+  ./service.go:26:2: "stream" holds a v1 connect stream in a type of its own. Migrate its stream calls to the v2 stream API by hand.
+  ./service.go:34:6: "stream" holds a v1 connect stream in a type of its own. Migrate its stream calls to the v2 stream API by hand.
+
+Scanned 1 Go file and 0 Buf templates. No automatic rewrites were applied.
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

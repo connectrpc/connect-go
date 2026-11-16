@@ -1,0 +1,52 @@
+# Code already on v2 is left alone. A stream returned by a helper already has
+# its one result, and holding a v2 stream in an interface or any is not a v1
+# stream to warn about.
+stubs v2
+exec go build ./...
+exec migrate
+cmp stdout out.txt
+-- service.go --
+package app
+
+import (
+	"context"
+	"net/http"
+
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type sender interface {
+	Send(*pingv1.CumSumRequest) error
+}
+
+type opener struct {
+	client pingv1connect.PingServiceClient
+}
+
+func newOpener() opener {
+	return opener{client: pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
+		http.DefaultClient,
+		"http://localhost",
+	)))}
+}
+
+func (o opener) open(ctx context.Context) pingv1connect.PingServiceCumSumClientStream {
+	stream, _ := o.client.CumSum(ctx)
+	return stream
+}
+
+func run(ctx context.Context) error {
+	stream := newOpener().open(ctx)
+	var holder sender = stream
+	var anything any = stream
+	_ = anything
+	if err := holder.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+		return err
+	}
+	return stream.CloseSend()
+}
+-- out.txt --
+Scanned 1 Go file and 0 Buf templates. No automatic rewrites were applied.
