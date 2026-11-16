@@ -1,4 +1,4 @@
-# A variable or field error argument becomes the cause; a call gets no cause.
+# A variable or field error argument becomes the cause; a call gets no cause and is reported.
 stubs v2
 exec migrate
 cmp stdout out.txt
@@ -58,6 +58,9 @@ Proposed rewrites (rerun with -w to apply):
  }
  
 
+
+The following issues require manual code changes:
+  ./service.go:21:14: connect.NewError keeps only the message of context.Cause(ctx); errors.Is and errors.As no longer reach it. Assign it to a variable and attach it with WithCause.
 
 Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
 Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md
