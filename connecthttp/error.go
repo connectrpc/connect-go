@@ -144,7 +144,7 @@ func wrapIfContextError(err error) error {
 // the client going away. HTTP/2 has its own errors for this, other transports
 // surface the connection's error.
 func isClientDisconnected(err error) bool {
-	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || isConnectionReset(err) {
 		return true
 	}
 	msg := err.Error()
