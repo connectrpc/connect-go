@@ -422,7 +422,8 @@ func TestConnectionDropped(t *testing.T) {
 	t.Parallel()
 	// The server drops the TCP connection before it responds, or after the
 	// first byte of the response body. Either way the client sees a lost
-	// connection, which is CodeUnavailable. This uses a real network
+	// connection, which is CodeUnavailable. With goAway the server first sends
+	// an HTTP/2 GOAWAY as it does on shutdown. This uses a real network
 	// connection because the errors net/http reports depend on it.
 	pingServer := &pluggablePingServer{
 		ping: func(_ context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
@@ -453,8 +454,19 @@ func TestConnectionDropped(t *testing.T) {
 			if protocol == connect.ProtocolNameGRPC && httpVersion == "http1" {
 				continue // gRPC requires HTTP/2.
 			}
-			for name, limit := range map[string]int{"before_response": 0, "mid_body": 1} {
-				t.Run(protocol+"/"+httpVersion+"/"+name, func(t *testing.T) {
+			for _, testCase := range []struct {
+				name   string
+				limit  int
+				goAway bool
+			}{
+				{name: "before_response"},
+				{name: "mid_body", limit: 1},
+				{name: "goaway", limit: 1, goAway: true},
+			} {
+				if testCase.goAway && httpVersion == "http1" {
+					continue // GOAWAY is an HTTP/2 frame.
+				}
+				t.Run(protocol+"/"+httpVersion+"/"+testCase.name, func(t *testing.T) {
 					t.Parallel()
 					// Each subtest has its own server, so dropping its
 					// connections doesn't affect other subtests.
@@ -462,7 +474,8 @@ func TestConnectionDropped(t *testing.T) {
 					server = httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 						mux.ServeHTTP(&dropResponseWriter{
 							ResponseWriter: writer,
-							limit:          limit,
+							limit:          testCase.limit,
+							goAway:         testCase.goAway,
 							drop:           server.CloseClientConnections,
 						}, request)
 					}))
@@ -1404,15 +1417,22 @@ func (fn httpClientFunc) Do(req *http.Request) (*http.Response, error) {
 
 // dropResponseWriter writes up to limit bytes of the response body, then
 // flushes them and calls drop to close the connection. A limit of zero drops
-// the connection before the response headers are sent.
+// the connection before the response headers are sent. With goAway an HTTP/2
+// server sends GOAWAY with the response headers.
 type dropResponseWriter struct {
 	http.ResponseWriter
 
-	limit int
-	drop  func()
+	limit  int
+	goAway bool
+	drop   func()
 }
 
 func (w *dropResponseWriter) Write(data []byte) (int, error) {
+	if w.goAway {
+		// The HTTP/2 server turns this header into a GOAWAY frame.
+		w.Header().Set("Connection", "close")
+		w.goAway = false
+	}
 	if len(data) <= w.limit {
 		n, err := w.ResponseWriter.Write(data)
 		w.limit -= n
