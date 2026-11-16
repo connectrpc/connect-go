@@ -38,6 +38,10 @@ const (
 	streamClosedMessage       = "http2: stream closed"
 )
 
+// goAwayClosedPrefix starts the error net/http returns when the server closes
+// the connection after sending GOAWAY.
+const goAwayClosedPrefix = "http2: server sent GOAWAY and closed the connection"
+
 // Windows socket errors for a connection the peer reset or the host aborted.
 // On Windows syscall.ECONNRESET is an invented errno that never matches them.
 const (
@@ -164,7 +168,8 @@ func isClientDisconnected(err error) bool {
 // is a transient transport failure, not caller cancellation. So is
 // io.ErrUnexpectedEOF, which net/http returns when the connection is lost
 // before the response body has ended. A body the peer ends early still reads
-// as a clean io.EOF and is reported by the protocol.
+// as a clean io.EOF and is reported by the protocol. A connection closed after
+// an HTTP/2 GOAWAY is the same failure.
 func wrapIfClientTransportError(err error) error {
 	if err == nil {
 		return nil
@@ -172,7 +177,8 @@ func wrapIfClientTransportError(err error) error {
 	if _, ok := asError(err); ok {
 		return err
 	}
-	if !isClientDisconnected(err) && !errors.Is(err, io.ErrUnexpectedEOF) {
+	if !isClientDisconnected(err) && !errors.Is(err, io.ErrUnexpectedEOF) &&
+		!strings.HasPrefix(err.Error(), goAwayClosedPrefix) {
 		return err
 	}
 	return connect.NewError(connect.CodeUnavailable, err.Error()).WithCause(err)
