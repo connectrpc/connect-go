@@ -346,7 +346,16 @@ type transport struct {
 	baseURLPtr *url.URL
 	baseURLErr error
 
-	procedureURLs sync.Map // procedure string -> *url.URL
+	clientStates sync.Map // procedure string -> func() *clientState
+}
+
+// clientState is the per-call-invariant client state resolved from the options
+// for a spec. A failed resolution is cached as err.
+type clientState struct {
+	opts          *options
+	sendCodecName string
+	client        protocolClient
+	err           error
 }
 
 // NewClientStream implements [connect.Transport].
@@ -357,30 +366,11 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 	}
 	clientInfo := &ClientInfo{}
 	info.TransportInfo = clientInfo
-	opts := t.options.forSpec(spec)
-	if opts.sendCompressor != "" && opts.sendCompressor != connect.CompressionNameIdentity {
-		if !slices.ContainsFunc(opts.compressors, func(c connect.Compressor) bool {
-			return c.Name() == opts.sendCompressor
-		}) {
-			return nil, connect.Errorf(connect.CodeUnknown, "unknown compression %q", opts.sendCompressor)
-		}
+	state := t.clientStateForSpec(spec)
+	if state.err != nil {
+		return nil, state.err
 	}
-	sendCodecName := opts.getSendCodecName()
-	if sendCodecName == "" {
-		return nil, connect.Errorf(connect.CodeUnknown, "no codecs registered")
-	}
-	if !slices.ContainsFunc(opts.codecs, func(c connect.Codec) bool {
-		return c.Name() == sendCodecName
-	}) {
-		return nil, connect.Errorf(connect.CodeUnknown, "unknown codec %q", sendCodecName)
-	}
-	if t.baseURLErr != nil {
-		return nil, connect.Errorf(connect.CodeUnavailable, "invalid base URL: %v", t.baseURLErr)
-	}
-	protocolClient, err := t.newProtocolClient(spec, opts)
-	if err != nil {
-		return nil, err
-	}
+	opts, sendCodecName, protocolClient := state.opts, state.sendCodecName, state.client
 	conn := protocolClient.NewConn(ctx, spec, make(http.Header, 8))
 	peer := conn.Peer()
 	info.Spec = spec
@@ -404,17 +394,45 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 	return &connectStreamingClientStream{conn: conn, info: info, protoClient: protocolClient, streamType: spec.StreamType}, nil
 }
 
-// urlForProcedure returns a cached *url.URL for the given procedure path,
-// rooted at the transport's baseURL. The returned URL must not be mutated
-// because it is shared across concurrent dispatches.
-func (t *transport) urlForProcedure(procedure string) *url.URL {
-	if v, ok := t.procedureURLs.Load(procedure); ok {
-		return v.(*url.URL) //nolint:errcheck,forcetypeassert // map only stores *url.URL
+// clientStateForSpec returns the client state for spec. It resolves on first
+// use and is keyed by procedure, because a procedure always has the same spec.
+// The resolver is only allocated on a miss, so cached calls don't allocate.
+func (t *transport) clientStateForSpec(spec connect.Spec) *clientState {
+	resolve, ok := t.clientStates.Load(spec.Procedure)
+	if !ok {
+		resolve, _ = t.clientStates.LoadOrStore(spec.Procedure, sync.OnceValue(func() *clientState {
+			return t.newClientState(spec)
+		}))
 	}
-	u := *t.baseURLPtr
-	u.Path = joinURLPath(t.baseURLPtr.Path, procedure)
-	actual, _ := t.procedureURLs.LoadOrStore(procedure, &u)
-	return actual.(*url.URL) //nolint:errcheck,forcetypeassert // map only stores *url.URL
+	return resolve.(func() *clientState)() //nolint:errcheck,forcetypeassert // map only stores func() *clientState
+}
+
+func (t *transport) newClientState(spec connect.Spec) *clientState {
+	opts := t.options.forSpec(spec)
+	if opts.sendCompressor != "" && opts.sendCompressor != connect.CompressionNameIdentity {
+		if !slices.ContainsFunc(opts.compressors, func(c connect.Compressor) bool {
+			return c.Name() == opts.sendCompressor
+		}) {
+			return &clientState{err: connect.Errorf(connect.CodeUnknown, "unknown compression %q", opts.sendCompressor)}
+		}
+	}
+	sendCodecName := opts.getSendCodecName()
+	if sendCodecName == "" {
+		return &clientState{err: connect.Errorf(connect.CodeUnknown, "no codecs registered")}
+	}
+	if !slices.ContainsFunc(opts.codecs, func(c connect.Codec) bool {
+		return c.Name() == sendCodecName
+	}) {
+		return &clientState{err: connect.Errorf(connect.CodeUnknown, "unknown codec %q", sendCodecName)}
+	}
+	if t.baseURLErr != nil {
+		return &clientState{err: connect.Errorf(connect.CodeUnavailable, "invalid base URL: %v", t.baseURLErr)}
+	}
+	client, err := t.newProtocolClient(spec, opts)
+	if err != nil {
+		return &clientState{err: err}
+	}
+	return &clientState{opts: opts, sendCodecName: sendCodecName, client: client}
 }
 
 // options holds the resolved options for a transport ([NewTransport]) or server

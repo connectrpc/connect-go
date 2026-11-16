@@ -16,6 +16,7 @@ package connecthttp
 
 import (
 	"bytes"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -75,6 +76,14 @@ func TestStableCodec(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := buffer.Bytes()
+			// A writer that isn't a *bytes.Buffer takes the codecs' copying path.
+			var plain bytes.Buffer
+			if err := codec.MarshalWriteStable(t.Context(), struct{ io.Writer }{&plain}, initialProto); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(plain.Bytes(), want) {
+				return false
+			}
 			for range 10 {
 				roundtripProto := &structpb.Struct{}
 				if err := codec.UnmarshalRead(t.Context(), bytes.NewReader(want), roundtripProto); err != nil {

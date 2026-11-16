@@ -1,5 +1,6 @@
 # Error wrapping inside a real handler: connect.NewError(code, fmt.Errorf(...))
-# becomes connect.Errorf(code, format, args...).
+# becomes connect.Errorf(code, format, args...), keeping a spread. A literal %%w
+# is not a %w verb.
 stubs v2
 exec migrate
 cmp stdout out.txt
@@ -27,11 +28,18 @@ func (s *pingServer) Fail(ctx context.Context, req *connect.Request[pingv1.FailR
 	if err := ctx.Err(); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %s", err))
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("100%%w: %s", err))
+	}
+	if err := ctx.Err(); err != nil {
+		args := []any{err}
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %s", args...))
+	}
 	return connect.NewResponse(&pingv1.FailResponse{}), nil
 }
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./service.go: convert_code_const=1 convert_new_error=1 flip_residual_connect=2 import_add_connectv2=1 import_drop_v1=1 param_unwrap_request=1 result_unwrap_response=1 strip_new_response=1
+  ./service.go: convert_code_const=3 convert_new_error=3 flip_residual_connect=6 import_add_connectv2=1 import_drop_v1=1 param_unwrap_request=1 result_unwrap_response=1 strip_new_response=1
 --- ./service.go
 +++ ./service.go
 @@ -2,9 +2,8 @@
@@ -45,7 +53,7 @@ Proposed rewrites (rerun with -w to apply):
  	pingv1 "example.com/app/gen/connect/ping/v1"
  	"example.com/app/gen/connect/ping/v1/pingv1connect"
  )
-@@ -13,10 +12,10 @@
+@@ -13,17 +12,17 @@
  	pingv1connect.UnimplementedPingServiceHandler
  }
  
@@ -54,6 +62,15 @@ Proposed rewrites (rerun with -w to apply):
  	if err := ctx.Err(); err != nil {
 -		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %s", err))
 +		return nil, connect.Errorf(connect.CodeInternal, "wrap: %s", err)
+ 	}
+ 	if err := ctx.Err(); err != nil {
+-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("100%%w: %s", err))
++		return nil, connect.Errorf(connect.CodeInternal, "100%%w: %s", err)
+ 	}
+ 	if err := ctx.Err(); err != nil {
+ 		args := []any{err}
+-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %s", args...))
++		return nil, connect.Errorf(connect.CodeInternal, "wrap: %s", args...)
  	}
 -	return connect.NewResponse(&pingv1.FailResponse{}), nil
 +	return &pingv1.FailResponse{}, nil

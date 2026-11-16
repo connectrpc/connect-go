@@ -210,7 +210,7 @@ func WithHTTPGetMaxURLSize(bytes int, fallback bool) Option {
 //
 // WithConditionalOptions takes a function which may inspect each procedure's
 // [connect.Spec] before deciding which options to apply. Both clients and
-// servers evaluate it per procedure. Returning a nil slice is safe.
+// servers evaluate it once per procedure. Returning a nil slice is safe.
 func WithConditionalOptions(conditional func(spec connect.Spec) []Option) Option {
 	return conditionalOption{conditional: conditional}
 }
