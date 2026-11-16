@@ -190,23 +190,28 @@ func (c *JSONCodec) MarshalWrite(_ context.Context, dst io.Writer, msg any) erro
 // MarshalWriteStable writes msg encoded as compact protobuf JSON to dst.
 // protojson's whitespace is nondeterministic, so this method compacts the output
 // so equivalent messages produce identical bytes for Connect GET request
-// caching. protojson emits fields in field-number order, but map entries are
-// not sorted, so messages containing maps are not guaranteed to be stable.
+// caching. protojson emits fields in field-number order and map entries sorted
+// by key, so the output is stable for a given protobuf-go version.
 func (c *JSONCodec) MarshalWriteStable(_ context.Context, dst io.Writer, msg any) error {
 	protoMsg, ok := msg.(proto.Message)
 	if !ok {
 		return fmt.Errorf("%w: got %T", ErrNotProtoMessage, msg)
 	}
-	raw, err := c.MarshalOptions.Marshal(protoMsg)
+	raw := bufferpool.Get()
+	defer bufferpool.Put(raw)
+	out, err := c.MarshalOptions.MarshalAppend(raw.AvailableBuffer(), protoMsg)
 	if err != nil {
 		return err
 	}
-	var buf bytes.Buffer
-	buf.Grow(len(raw))
-	if err := json.Compact(&buf, raw); err != nil {
+	if buf, ok := dst.(*bytes.Buffer); ok {
+		return json.Compact(buf, out)
+	}
+	compact := bufferpool.Get()
+	defer bufferpool.Put(compact)
+	if err := json.Compact(compact, out); err != nil {
 		return err
 	}
-	_, err = dst.Write(buf.Bytes())
+	_, err = dst.Write(compact.Bytes())
 	return err
 }
 
