@@ -37,6 +37,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"testing/synctest"
 	"time"
 
@@ -3936,6 +3937,44 @@ func TestClientDisconnect(t *testing.T) {
 		t.Parallel()
 		testTransportClosure(t, http2RoundTripper)
 	})
+}
+
+func TestClientDisconnectBeforeCancel(t *testing.T) {
+	t.Parallel()
+	for _, contentType := range []string{
+		"application/connect+proto",
+		"application/grpc",
+		"application/grpc-web+proto",
+	} {
+		t.Run(contentType, func(t *testing.T) {
+			t.Parallel()
+			var handlerReceiveErr error
+			pingServer := &pluggablePingServer{
+				sum: func(_ context.Context, stream pingv1connect.PingServiceSumServerStream) (*pingv1.SumResponse, error) {
+					_, handlerReceiveErr = stream.Receive()
+					return &pingv1.SumResponse{}, nil
+				},
+			}
+			mux := http.NewServeMux()
+			srv := connect.NewServer()
+			pingv1connect.RegisterPingServiceHandler(srv, pingServer)
+			connecthttp.Mount(mux, srv)
+			body := io.MultiReader(
+				bytes.NewReader([]byte{0, 0}),
+				iotest.ErrReader(errors.New("client disconnected")),
+			)
+			request := httptest.NewRequestWithContext(
+				t.Context(),
+				http.MethodPost,
+				pingv1connect.PingServiceSumProcedure,
+				body,
+			)
+			request.ProtoMajor, request.ProtoMinor = 2, 0
+			request.Header.Set("Content-Type", contentType)
+			mux.ServeHTTP(httptest.NewRecorder(), request)
+			assert.Equal(t, connect.CodeOf(handlerReceiveErr), connect.CodeCanceled)
+		})
+	}
 }
 
 // TestBlankImportCodeGeneration tests that services.connect.go is generated with

@@ -15,6 +15,7 @@
 package connecthttp
 
 import (
+	"iter"
 	"net/http"
 
 	"connectrpc.com/connect/v2"
@@ -70,6 +71,20 @@ func getHeaderCanonical(h http.Header, key string) string {
 	return v[0]
 }
 
+// getHeaderCanonicalValid is a shortcut for Header.Get() which
+// bypasses the CanonicalMIMEHeaderKey operation when we
+// know the key is already in canonical form. It returns the
+// value found and a boolean flag to differentiate between
+// the key not being present and the key being present with
+// an empty value.
+func getHeaderCanonicalValid(h http.Header, key string) (string, bool) {
+	v, ok := h[key]
+	if len(v) == 0 {
+		return "", ok
+	}
+	return v[0], ok
+}
+
 // setUserAgentIfAbsent sets the User-Agent header to the given value, but
 // only if the caller has not already provided one. We check for the key's
 // presence rather than comparing getHeaderCanonical(...) to "" so that a
@@ -100,17 +115,33 @@ func delHeaderCanonical(h http.Header, key string) {
 // toHTTPHeader merges header into the HTTP header h, excluding protocol
 // headers so users can't override them.
 func toHTTPHeader(h http.Header, header *connect.Header) {
-	for key, vals := range header.All() {
-		if _, isProtocolHeader := protocolHeaders[key]; isProtocolHeader {
-			continue
-		}
+	for key, vals := range userHeaders(header) {
 		h[key] = append(h[key], vals...)
 	}
 }
 
-// fromHTTPHeader copies the HTTP header h into header.
+// fromHTTPHeader copies the HTTP header h into header. Keys without values
+// are skipped.
 func fromHTTPHeader(header *connect.Header, h http.Header) {
 	for key, vals := range h {
+		if len(vals) == 0 {
+			continue
+		}
 		header.SetValues(key, vals)
+	}
+}
+
+// userHeaders yields the keys and values of header, skipping protocol headers
+// so users can't override them.
+func userHeaders(header *connect.Header) iter.Seq2[string, []string] {
+	return func(yield func(string, []string) bool) {
+		for key, values := range header.All() {
+			if _, isProtocolHeader := protocolHeaders[key]; isProtocolHeader {
+				continue
+			}
+			if !yield(key, values) {
+				return
+			}
+		}
 	}
 }
