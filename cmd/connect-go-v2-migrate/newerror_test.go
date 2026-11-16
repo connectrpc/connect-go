@@ -16,28 +16,32 @@ package main
 
 import "testing"
 
-// TestWrapVerbIndex covers finding the argument a fmt.Errorf %w wraps: only a
-// single %w whose verbs map to arguments in order is found.
-func TestWrapVerbIndex(t *testing.T) {
+// TestScanWrapVerbs covers counting the %w verbs in a fmt.Errorf format and
+// finding the argument the first one wraps: the index is known only while the
+// verbs map to arguments in order.
+func TestScanWrapVerbs(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
 		format string
+		count  int
 		index  int
-		ok     bool
 	}{
-		{format: "wrap: %w", index: 0, ok: true},
-		{format: "%s %d: %w", index: 2, ok: true},
-		{format: "%w occurred for %s", index: 0, ok: true},
-		{format: "100%% %-8.3f %+v: %w", index: 2, ok: true},
-		{format: "no wrap: %v", ok: false},
-		{format: "%w then %w", ok: false},
-		{format: "%[2]s: %[1]w", ok: false},
-		{format: "%*d: %w", ok: false},
-		{format: "trailing %", ok: false},
+		{format: "wrap: %w", count: 1, index: 0},
+		{format: "%s %d: %w", count: 1, index: 2},
+		{format: "%w occurred for %s", count: 1, index: 0},
+		{format: "100%% %-8.3f %+v: %w", count: 1, index: 2},
+		{format: "wrap: %+w", count: 1, index: 0},
+		{format: "no wrap: %v", count: 0, index: -1},
+		{format: "100%%w", count: 0, index: -1},
+		{format: "%w then %w", count: 2, index: 0},
+		{format: "%[2]s: %[1]w", count: 1, index: -1},
+		{format: "%*d: %w", count: 1, index: -1},
+		{format: "%w: %*d", count: 1, index: 0},
+		{format: "trailing %", count: 0, index: -1},
 	} {
-		index, ok := wrapVerbIndex(tt.format)
-		if ok != tt.ok || (ok && index != tt.index) {
-			t.Errorf("wrapVerbIndex(%q) = %d, %v; want %d, %v", tt.format, index, ok, tt.index, tt.ok)
+		count, index := scanWrapVerbs(tt.format)
+		if count != tt.count || index != tt.index {
+			t.Errorf("scanWrapVerbs(%q) = %d, %d; want %d, %d", tt.format, count, index, tt.count, tt.index)
 		}
 	}
 }

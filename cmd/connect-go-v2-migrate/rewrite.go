@@ -1508,54 +1508,68 @@ func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) (converted 
 // fmt.Errorf call with a literal format, when it is an identifier or selector
 // chain. Otherwise it returns nil.
 func wrappedOperand(call *ast.CallExpr) ast.Expr {
-	if len(call.Args) == 0 {
+	if call.Ellipsis.IsValid() {
+		// The operands are in a []any, not separate arguments.
 		return nil
 	}
-	lit, isLit := call.Args[0].(*ast.BasicLit)
-	if !isLit || lit.Kind != token.STRING {
+	format, ok := errorfFormat(call)
+	if !ok {
 		return nil
 	}
-	format, err := strconv.Unquote(lit.Value)
-	if err != nil {
-		return nil
-	}
-	index, found := wrapVerbIndex(format)
-	if !found || 1+index >= len(call.Args) {
+	count, index := scanWrapVerbs(format)
+	if count != 1 || index < 0 || 1+index >= len(call.Args) {
 		return nil
 	}
 	return copyIdentChain(call.Args[1+index])
 }
 
-// wrapVerbIndex returns the argument index of the only %w verb in format. It
-// fails for none, several, or a format whose verbs do not map to arguments in
-// order: an explicit argument index or a * width or precision.
-func wrapVerbIndex(format string) (int, bool) {
-	index, verbs := -1, 0
+// errorfFormat returns the format of a fmt.Errorf call when it is a string
+// literal.
+func errorfFormat(call *ast.CallExpr) (string, bool) {
+	if len(call.Args) == 0 {
+		return "", false
+	}
+	lit, ok := call.Args[0].(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	format, err := strconv.Unquote(lit.Value)
+	return format, err == nil
+}
+
+// scanWrapVerbs returns the number of %w verbs in format and the argument
+// index of the first one. The index is -1 when it does not follow from the
+// verbs' order: an explicit argument index or a * width or precision comes
+// before it.
+func scanWrapVerbs(format string) (count, index int) {
+	index = -1
+	verbs, ordered := 0, true
 	for i := 0; i < len(format); i++ {
 		if format[i] != '%' {
 			continue
 		}
 		i++
-		for i < len(format) && strings.IndexByte("+-# 0123456789.", format[i]) >= 0 {
+		for i < len(format) && strings.IndexByte("+-# 0123456789.*[]", format[i]) >= 0 {
+			if format[i] == '*' || format[i] == '[' {
+				ordered = false
+			}
 			i++
 		}
 		if i == len(format) {
-			return 0, false
+			break
 		}
 		switch format[i] {
 		case '%':
 			continue
-		case '[', '*':
-			return 0, false
 		case 'w':
-			if index >= 0 {
-				return 0, false
+			if count == 0 && ordered {
+				index = verbs
 			}
-			index = verbs
+			count++
 		}
 		verbs++
 	}
-	return index, index >= 0
+	return count, index
 }
 
 // withCauseCall builds `call.WithCause(cause)`.
@@ -1610,7 +1624,7 @@ func rewriteNewErrorCallArg(call, inner *ast.CallExpr) bool {
 	if !isFmtErrorf(inner.Fun) {
 		return false
 	}
-	if containsErrorWrap(inner.Args) {
+	if containsErrorWrap(inner) {
 		// v2's Errorf is plain Sprintf (%w is literal); splitting into WithCause
 		// would drop the cause from the wire. Use the .Error() fallback instead.
 		return false
@@ -1622,6 +1636,7 @@ func rewriteNewErrorCallArg(call, inner *ast.CallExpr) bool {
 	newArgs = append(newArgs, call.Args[0])
 	newArgs = append(newArgs, inner.Args...)
 	call.Args = newArgs
+	call.Ellipsis = inner.Ellipsis
 	return true
 }
 
@@ -1649,17 +1664,18 @@ func isFmtErrorf(fun ast.Expr) bool {
 	return id.Name == "fmt" && sel.Sel.Name == identErrorf
 }
 
-// containsErrorWrap reports whether an fmt.Errorf format string contains %w. A
-// non-literal format conservatively returns true (forcing the .Error() path).
-func containsErrorWrap(args []ast.Expr) bool {
-	if len(args) == 0 {
+// containsErrorWrap reports whether an fmt.Errorf call's format has a %w verb.
+// A non-literal format conservatively returns true (forcing the .Error() path).
+func containsErrorWrap(call *ast.CallExpr) bool {
+	if len(call.Args) == 0 {
 		return false
 	}
-	lit, ok := args[0].(*ast.BasicLit)
+	format, ok := errorfFormat(call)
 	if !ok {
 		return true
 	}
-	return strings.Contains(lit.Value, "%w")
+	count, _ := scanWrapVerbs(format)
+	return count > 0
 }
 
 // unwrapConnectMessageLiteral returns the Msg value of a &connect.Request/Response[T]{Msg: x}

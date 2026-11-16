@@ -1,4 +1,4 @@
-# fmt.Errorf with %w cannot collapse to Errorf; the message is taken via .Error() and the %w operand becomes the cause.
+# fmt.Errorf with %w, flags included, cannot collapse to Errorf; the message is taken via .Error() and the %w operand becomes the cause.
 stubs v2
 exec migrate
 cmp stdout out.txt
@@ -26,11 +26,14 @@ func (s *pingServer) Fail(ctx context.Context, req *connect.Request[pingv1.FailR
 	if err := ctx.Err(); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %w", err))
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %+w", err))
+	}
 	return connect.NewResponse(&pingv1.FailResponse{}), nil
 }
 -- out.txt --
 Proposed rewrites (rerun with -w to apply):
-  ./service.go: convert_code_const=1 convert_new_error=1 flip_residual_connect=1 import_add_connectv2=1 import_drop_v1=1 param_unwrap_request=1 result_unwrap_response=1 strip_new_response=1
+  ./service.go: convert_code_const=2 convert_new_error=2 flip_residual_connect=2 import_add_connectv2=1 import_drop_v1=1 param_unwrap_request=1 result_unwrap_response=1 strip_new_response=1
 --- ./service.go
 +++ ./service.go
 @@ -4,7 +4,7 @@
@@ -42,7 +45,7 @@ Proposed rewrites (rerun with -w to apply):
  	pingv1 "example.com/app/gen/connect/ping/v1"
  	"example.com/app/gen/connect/ping/v1/pingv1connect"
  )
-@@ -13,10 +13,10 @@
+@@ -13,13 +13,13 @@
  	pingv1connect.UnimplementedPingServiceHandler
  }
  
@@ -51,6 +54,10 @@ Proposed rewrites (rerun with -w to apply):
  	if err := ctx.Err(); err != nil {
 -		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %w", err))
 +		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %w", err).Error()).WithCause(err)
+ 	}
+ 	if err := ctx.Err(); err != nil {
+-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %+w", err))
++		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("wrap: %+w", err).Error()).WithCause(err)
  	}
 -	return connect.NewResponse(&pingv1.FailResponse{}), nil
 +	return &pingv1.FailResponse{}, nil
