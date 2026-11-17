@@ -1,0 +1,133 @@
+# A type of the user's own with v1 stream method names is left alone, even next
+# to a real stream in the same function: the type checker tells them apart.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- queue/queue.go --
+package queue
+
+// Queue shares the method names of a v1 stream but is not one.
+type Queue struct {
+	items []int64
+	next  int
+}
+
+type Opener struct{}
+
+func (Opener) Open() *Queue { return &Queue{} }
+
+func (q *Queue) Send(n int64) error {
+	q.items = append(q.items, n)
+	return nil
+}
+
+func (q *Queue) CloseRequest() error { return nil }
+
+func (q *Queue) Receive() bool {
+	if q.next == len(q.items) {
+		return false
+	}
+	q.next++
+	return true
+}
+
+func (q *Queue) Msg() int64 { return q.items[q.next-1] }
+
+func (q *Queue) Err() error { return nil }
+-- service.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+
+	"example.com/app/queue"
+)
+
+func runCumSum(ctx context.Context, client pingv1connect.PingServiceClient, opener queue.Opener) error {
+	if _, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{})); err != nil {
+		return err
+	}
+	local := opener.Open()
+	stream := client.CumSum(ctx)
+	for i := int64(1); i <= 3; i++ {
+		if err := local.Send(i); err != nil {
+			return err
+		}
+		if err := stream.Send(&pingv1.CumSumRequest{Number: i}); err != nil {
+			return err
+		}
+	}
+	if err := local.CloseRequest(); err != nil {
+		return err
+	}
+	if err := stream.CloseRequest(); err != nil {
+		return err
+	}
+	for local.Receive() {
+		fmt.Println(local.Msg())
+	}
+	if err := local.Err(); err != nil {
+		return err
+	}
+	return stream.CloseResponse()
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_drop_v1=1 stream_client_ctor=1 stream_close_rename=2 strip_new_request=1
+--- ./service.go
++++ ./service.go
+@@ -4,7 +4,6 @@
+ 	"context"
+ 	"fmt"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ 
+@@ -12,11 +11,14 @@
+ )
+ 
+ func runCumSum(ctx context.Context, client pingv1connect.PingServiceClient, opener queue.Opener) error {
+-	if _, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{})); err != nil {
++	if _, err := client.Ping(ctx, &pingv1.PingRequest{}); err != nil {
+ 		return err
+ 	}
+ 	local := opener.Open()
+-	stream := client.CumSum(ctx)
++	stream, err := client.CumSum(ctx)
++	if err != nil {
++		return err
++	}
+ 	for i := int64(1); i <= 3; i++ {
+ 		if err := local.Send(i); err != nil {
+ 			return err
+@@ -28,7 +30,7 @@
+ 	if err := local.CloseRequest(); err != nil {
+ 		return err
+ 	}
+-	if err := stream.CloseRequest(); err != nil {
++	if err := stream.CloseSend(); err != nil {
+ 		return err
+ 	}
+ 	for local.Receive() {
+@@ -37,6 +39,6 @@
+ 	if err := local.Err(); err != nil {
+ 		return err
+ 	}
+-	return stream.CloseResponse()
++	return stream.Close()
+ }
+ 
+
+
+Scanned 2 Go files and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md
