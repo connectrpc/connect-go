@@ -15,6 +15,7 @@
 package connecthttp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/internal/bufferpool"
 	"github.com/coder/websocket"
 )
 
@@ -282,11 +284,27 @@ func websocketReadLimit(readMaxBytes int) int64 {
 	return int64(readMaxBytes) + 1
 }
 
-// newWebSocketMessage returns marker followed by payload.
-func newWebSocketMessage(marker byte, payload []byte) []byte {
+// writeWebSocketBody marshals msg and writes it as a B message.
+func writeWebSocketBody(ctx context.Context, conn *websocket.Conn, codec connect.Codec, msg any) error {
+	buffer := bufferpool.Get()
+	defer bufferpool.Put(buffer)
+	buffer.WriteByte(websocketMarkerBody)
+	if err := codec.MarshalWrite(ctx, buffer, msg); err != nil {
+		return connect.Errorf(connect.CodeInternal, "marshal message: %s", err).WithCause(err)
+	}
+	messageType := websocket.MessageBinary
+	if websocketBodyIsText(codec.Name()) {
+		messageType = websocket.MessageText
+	}
+	return conn.Write(ctx, messageType, buffer.Bytes())
+}
+
+// writeWebSocketText writes marker and payload as one text message.
+func writeWebSocketText(ctx context.Context, conn *websocket.Conn, marker byte, payload []byte) error {
 	message := make([]byte, 0, len(payload)+1)
 	message = append(message, marker)
-	return append(message, payload...)
+	message = append(message, payload...)
+	return conn.Write(ctx, websocket.MessageText, message)
 }
 
 func newWebSocketProtocolError(format string, args ...any) *connect.Error {
