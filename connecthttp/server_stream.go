@@ -62,14 +62,18 @@ func (s *handlerStream) Receive(dst any) error {
 		return io.EOF
 	}
 	s.rxEnd = true
-	if err := s.conn.Receive(dst); err != nil {
-		if errors.Is(err, io.EOF) {
-			return connect.Errorf(connect.CodeUnimplemented, "unary request has zero messages")
-		}
+	return receiveExactlyOne(s.conn.Receive, dst, "request")
+}
+
+func receiveExactlyOne(receive func(any) error, msg any, side string) error {
+	err := receive(msg)
+	if errors.Is(err, io.EOF) {
+		return connect.Errorf(connect.CodeUnimplemented, "unary %s has zero messages", side)
+	} else if err != nil {
 		return err
 	}
-	if err := s.conn.Receive(dst); err == nil {
-		return connect.Errorf(connect.CodeUnimplemented, "unary request has multiple messages")
+	if err := receive(msg); err == nil {
+		return connect.Errorf(connect.CodeUnimplemented, "unary %s has multiple messages", side)
 	} else if !errors.Is(err, io.EOF) {
 		return err
 	}

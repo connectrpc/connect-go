@@ -265,7 +265,7 @@ func Mount(mux ServeMux, server *connect.Server, options ...Option) {
 		if spec.StreamType == connect.StreamTypeBidi {
 			procedureHandler = requireHTTP2(procedureHandler)
 		}
-		// Outermost, because the WebSocket handshake is HTTP/1.1.
+		// Outermost because the WebSocket handshake is HTTP/1.1.
 		if specOpts := opts.forSpec(spec); specOpts.websocket {
 			procedureHandler = newWebSocketHandler(server, spec, specOpts, procedureHandler)
 		}
