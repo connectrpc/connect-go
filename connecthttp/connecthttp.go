@@ -456,6 +456,7 @@ type options struct {
 
 	// Server-only ([NewTransport] ignores these).
 	requireConnectProtocolHeader bool
+	websocket                    bool
 
 	// conditional holds per-procedure option functions registered with
 	// WithConditionalOptions. They are evaluated against each spec by forSpec.

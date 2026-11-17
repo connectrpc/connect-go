@@ -3,6 +3,7 @@ module connectrpc.com/connect/v2
 go 1.26.0
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/google/go-cmp v0.7.0
 	google.golang.org/protobuf v1.36.11
 )
