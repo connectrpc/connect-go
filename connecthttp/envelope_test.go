@@ -23,6 +23,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
 	"testing"
 
 	"connectrpc.com/connect/v2"
@@ -143,19 +144,23 @@ func TestEnvelopeCompressed(t *testing.T) {
 }
 
 // TestEnvelopeReadGrowsAsBytesArrive tests that a peer claiming a large
-// message doesn't make Read allocate for it before the bytes arrive.
-func TestEnvelopeReadGrowsAsBytesArrive(t *testing.T) {
-	t.Parallel()
+// message doesn't make Read allocate for it before the bytes arrive. It
+// measures bytes allocated rather than the buffer's capacity, since the pool
+// may hand Read a large buffer recycled by another test.
+func TestEnvelopeReadGrowsAsBytesArrive(t *testing.T) { //nolint:paralleltest // parallel siblings would skew the allocation count
 	var prefix [envelopePrefixSize]byte
 	binary.BigEndian.PutUint32(prefix[1:], 1<<30)
 	rdr := envelopeReader{
 		ctx:    t.Context(),
 		reader: io.MultiReader(bytes.NewReader(prefix[:]), bytes.NewReader(make([]byte, 10))),
 	}
-	data, _, err := rdr.Read()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, _, err := rdr.Read()
+	runtime.ReadMemStats(&after)
 	assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
 	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
-	assert.True(t, data.Cap() < 64*1024)
+	assert.True(t, after.TotalAlloc-before.TotalAlloc < 1<<20)
 }
 
 // TestEnvelopeReadEndStream tests that Read keeps the end-stream message
