@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -39,10 +40,17 @@ type websocketClientConfig struct {
 	sendMaxBytes int
 }
 
-func newWebSocketClientConfig(httpClient HTTPClient, procedureURL url.URL, opts *options) (*websocketClientConfig, error) {
+func newWebSocketClientConfig(httpClient HTTPClient, procedureURL url.URL, opts *options) *websocketClientConfig {
 	client, ok := httpClient.(*http.Client)
 	if !ok {
-		return nil, connect.Errorf(connect.CodeInternal, "WebSocket needs an *http.Client, got %T", httpClient)
+		// coder only takes an *http.Client. The wrapped client follows
+		// redirects with its own policy.
+		client = &http.Client{
+			Transport: &websocketDoTransport{httpClient: httpClient},
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 	}
 	return &websocketClientConfig{
 		httpClient:   client,
@@ -50,7 +58,7 @@ func newWebSocketClientConfig(httpClient HTTPClient, procedureURL url.URL, opts 
 		codec:        newReadOnlyCodecs(opts.codecs).Get(opts.getSendCodecName()),
 		readLimit:    websocketReadLimit(opts.readMaxBytes),
 		sendMaxBytes: opts.sendMaxBytes,
-	}, nil
+	}
 }
 
 // websocketClientStream's send and receive sides may run concurrently.
@@ -110,11 +118,11 @@ func (s *websocketClientStream) SendHeaders() error {
 
 // Send returns io.EOF once the connection is closing. Receive reports why.
 func (s *websocketClientStream) Send(msg any) error {
-	if s.sendClosed {
-		return io.EOF
-	}
 	if s.singleRequest && s.sent {
 		return errors.New("connecthttp: unary stream sent more than once")
+	}
+	if s.sendClosed {
+		return io.EOF
 	}
 	// Marshal before dialing, so a message over the limit sends nothing.
 	body, err := marshalWebSocketBody(s.ctx, s.config.codec, msg, s.config.sendMaxBytes)
@@ -129,6 +137,11 @@ func (s *websocketClientStream) Send(msg any) error {
 	s.sent = true
 	if err := conn.Write(s.ioCtx, websocketBodyType(s.config.codec.Name()), body.Bytes()); err != nil {
 		return io.EOF
+	}
+	if s.singleRequest {
+		// A unary request is always followed by C.
+		s.sendClosed = true
+		_ = writeWebSocketText(s.ioCtx, conn, websocketMarkerClientEndStream, nil)
 	}
 	return nil
 }
@@ -157,8 +170,10 @@ func (s *websocketClientStream) Receive(msg any) error {
 	}
 	receive := func(msg any) error { return s.receive(conn, msg) }
 	if s.singleResponse {
-		s.receiveErr = io.EOF
 		err = receiveExactlyOne(receive, msg, "response")
+		if err == nil {
+			s.receiveErr = io.EOF
+		}
 	} else {
 		err = receive(msg)
 	}
@@ -237,6 +252,9 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 }
 
 func (s *websocketClientStream) dialError(response *http.Response, err error) error {
+	if errors.Is(err, errWebSocketHTTPClient) {
+		return connect.Errorf(connect.CodeInternal, "dial WebSocket: %s", err).WithCause(err)
+	}
 	if response == nil {
 		if connectErr, ok := asError(wrapIfContextDone(s.ctx, err)); ok {
 			return connectErr
@@ -360,4 +378,35 @@ func (t *websocketRecordingTransport) RoundTrip(request *http.Request) (*http.Re
 		})
 	}
 	return response, err
+}
+
+// websocketDoTransport adapts an [HTTPClient] that isn't an [*http.Client].
+// The upgrade needs the 101 response body to be writable. A client with a
+// Timeout, or one that buffers or wraps the body, breaks that, so it fails
+// here with a clear error rather than inside coder.
+type websocketDoTransport struct {
+	httpClient HTTPClient
+}
+
+func (t *websocketDoTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	response, err := t.httpClient.Do(request)
+	switch {
+	case err != nil:
+		// net/http logs a response returned with an error, and drops it.
+		if response != nil && response.Body != nil {
+			_ = response.Body.Close()
+		}
+		return nil, err
+	case response == nil:
+		return nil, fmt.Errorf("%w: no response", errWebSocketHTTPClient)
+	case response.StatusCode != http.StatusSwitchingProtocols:
+		return response, nil
+	}
+	if _, ok := response.Body.(io.ReadWriteCloser); !ok {
+		if response.Body != nil {
+			_ = response.Body.Close()
+		}
+		return nil, fmt.Errorf("%w: the 101 response body %T can't be written", errWebSocketHTTPClient, response.Body)
+	}
+	return response, nil
 }

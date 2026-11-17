@@ -60,6 +60,7 @@ func (s *websocketServerStream) Receive(msg any) error {
 	if !s.singleRequest {
 		return s.receive(msg)
 	}
+	// Clients always send C after a unary request, so read up to it.
 	if s.receivedSingle {
 		return io.EOF
 	}
@@ -106,10 +107,7 @@ func (s *websocketServerStream) receive(msg any) error {
 		}
 		message = received
 	case <-s.ctx.Done():
-		if err := s.reader.failure(); err != nil {
-			return err
-		}
-		return wrapIfContextError(s.ctx.Err())
+		return wrapIfContextError(context.Cause(s.ctx))
 	}
 	switch message.marker {
 	case websocketMarkerBody:
@@ -148,7 +146,7 @@ func (s *websocketServerStream) writeError(err error) error {
 }
 
 func (s *websocketServerStream) finish(ctx context.Context, err error) {
-	peerGone, failure := s.reader.stop()
+	peerGone, failure := s.reader.beginEndStream()
 	switch {
 	case peerGone:
 		_ = s.conn.CloseNow()
@@ -282,8 +280,8 @@ func (r *websocketServerReader) connectionEnded(err error) {
 	r.cancel(r.err)
 }
 
-// stop must be called once, before S is sent.
-func (r *websocketServerReader) stop() (peerGone bool, failure error) {
+// beginEndStream must be called once.
+func (r *websocketServerReader) beginEndStream() (peerGone bool, failure error) {
 	close(r.done)
 	r.mu.Lock()
 	defer r.mu.Unlock()

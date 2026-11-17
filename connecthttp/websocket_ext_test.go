@@ -97,6 +97,20 @@ func TestWebSocketRoundTrip(t *testing.T) {
 				assert.Nil(t, err)
 				assert.Equal(t, response.GetSum(), 6)
 			})
+			t.Run("send_without_close_send", func(t *testing.T) {
+				t.Parallel()
+				// The client sends C after a unary request without CloseSend.
+				ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+				defer cancel()
+				stream, err := connect.NewClient(connecthttp.NewTransport(
+					httpClient, server.URL(), connecthttp.WithWebSocket(), connecthttp.WithSendCodec(codec),
+				)).CallClientStream(ctx, connect.Spec{StreamType: connect.StreamTypeServer, Procedure: pingv1connect.PingServiceCountUpProcedure})
+				assert.Nil(t, err)
+				assert.Nil(t, stream.Send(&pingv1.CountUpRequest{Number: 1}))
+				var response pingv1.CountUpResponse
+				assert.Nil(t, stream.Receive(&response))
+				assert.Equal(t, response.GetNumber(), 1)
+			})
 			t.Run("server_stream", func(t *testing.T) {
 				t.Parallel()
 				stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 3})
@@ -165,6 +179,7 @@ func TestWebSocketWire(t *testing.T) {
 	tests := []struct {
 		name        string
 		server      *memhttp.Server
+		procedure   string
 		subprotocol string
 		query       string
 		send        []websocketFrame
@@ -229,6 +244,7 @@ func TestWebSocketWire(t *testing.T) {
 		},
 		{
 			name:        "deadline_while_receiving",
+			procedure:   pingv1connect.PingServiceSumProcedure,
 			subprotocol: "connectrpc.1+json",
 			query:       "?connect-timeout-ms=50",
 			send:        []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest)},
@@ -281,7 +297,11 @@ func TestWebSocketWire(t *testing.T) {
 			if test.server != nil {
 				testServer = test.server
 			}
-			conn := dialWebSocket(t, testServer, pingv1connect.PingServicePingProcedure+test.query, test.subprotocol)
+			procedure := pingv1connect.PingServicePingProcedure
+			if test.procedure != "" {
+				procedure = test.procedure
+			}
+			conn := dialWebSocket(t, testServer, procedure+test.query, test.subprotocol)
 			go func() {
 				for _, frame := range test.send {
 					if err := conn.Write(ctx, frame.MessageType, []byte(frame.Data)); err != nil {
@@ -422,21 +442,78 @@ func TestWebSocketClientSilentServer(t *testing.T) {
 	})
 }
 
+func TestWebSocketHTTPClientWrapper(t *testing.T) {
+	t.Parallel()
+	server := newWebSocketServer(t, &websocketPingServer{})
+	pass := &http.Client{Transport: server.TransportHTTP1()}
+	// A Timeout makes net/http wrap the body, so it can't be written.
+	withTimeout := &http.Client{Transport: server.TransportHTTP1(), Timeout: time.Minute}
+	tests := []struct {
+		name     string
+		do       func(*http.Request) (*http.Response, error)
+		wantCode connect.Code
+	}{
+		{name: "passes_response_through", do: pass.Do},
+		{name: "timeout", do: withTimeout.Do, wantCode: connect.CodeInternal},
+		{
+			name: "nil_response",
+			do: func(*http.Request) (*http.Response, error) {
+				return nil, nil //nolint:nilnil // a broken HTTPClient
+			},
+			wantCode: connect.CodeInternal,
+		},
+		{
+			name: "nil_body",
+			do: func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusSwitchingProtocols}, nil
+			},
+			wantCode: connect.CodeInternal,
+		},
+		{
+			// The wrapper owns redirects, so a 3xx it returns is not followed.
+			// Following it would loop until the deadline.
+			name: "redirect",
+			do: func(request *http.Request) (*http.Response, error) {
+				if err := request.Context().Err(); err != nil {
+					return nil, err
+				}
+				header := http.Header{"Location": {server.URL() + "/again"}}
+				return &http.Response{StatusCode: http.StatusFound, Header: header, Body: http.NoBody}, nil
+			},
+			wantCode: connect.CodeUnknown,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(
+				connecthttp.NewTransport(httpClientFunc(test.do), server.URL(), connecthttp.WithWebSocket()),
+			))
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			_, err := client.Ping(ctx, &pingv1.PingRequest{Number: 7})
+			if test.wantCode == 0 {
+				assert.Nil(t, err)
+				return
+			}
+			assert.Equal(t, connect.CodeOf(err), test.wantCode)
+		})
+	}
+}
+
 func TestWebSocketClientDisconnect(t *testing.T) {
 	t.Parallel()
-	handlerDone := make(chan error, 1)
-	server := newWebSocketServer(t, &websocketPingServer{cumSumDone: handlerDone})
-	conn := dialWebSocket(t, server, pingv1connect.PingServiceCumSumProcedure, "connectrpc.1+json")
-	assert.Nil(t, conn.Write(t.Context(), websocket.MessageText, []byte("M[]")))
-	assert.Nil(t, conn.Write(t.Context(), websocket.MessageText, []byte(`B{"number":"1"}`)))
-	for _, want := range []string{"M[]", `B{"sum":"1"}`} {
-		_, data, err := conn.Read(t.Context())
-		assert.Nil(t, err)
-		assert.Equal(t, string(data), want)
+	// The client goes away after C while a unary handler runs.
+	pingServer := &websocketPingServer{sleeping: make(chan struct{}), sleepCause: make(chan error, 1)}
+	server := newWebSocketServer(t, pingServer)
+	conn := dialWebSocket(t, server, pingv1connect.PingServicePingProcedure, "connectrpc.1+json")
+	for _, message := range []string{"M[]", `B{"text":"sleep"}`, "C"} {
+		assert.Nil(t, conn.Write(t.Context(), websocket.MessageText, []byte(message)))
 	}
+	<-pingServer.sleeping
 	assert.Nil(t, conn.CloseNow())
 	select {
-	case err := <-handlerDone:
+	case err := <-pingServer.sleepCause:
 		assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
 	case <-time.After(5 * time.Second):
 		t.Fatal("handler was not canceled")
@@ -448,7 +525,8 @@ func TestWebSocketClientDisconnect(t *testing.T) {
 type websocketPingServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
 
-	cumSumDone chan error
+	sleeping   chan struct{}
+	sleepCause chan error
 }
 
 func (p *websocketPingServer) Ping(ctx context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
@@ -463,7 +541,13 @@ func (p *websocketPingServer) Ping(ctx context.Context, request *pingv1.PingRequ
 	case "secret":
 		return nil, errors.New("internal detail")
 	case "sleep":
+		if p.sleeping != nil {
+			close(p.sleeping)
+		}
 		<-ctx.Done()
+		if p.sleepCause != nil {
+			p.sleepCause <- context.Cause(ctx)
+		}
 		return nil, ctx.Err()
 	case "bad-metadata":
 		for _, header := range []*connect.Header{info.ResponseHeader(), info.ResponseTrailer()} {
@@ -509,16 +593,7 @@ func (p *websocketPingServer) CountUp(_ context.Context, request *pingv1.CountUp
 	return nil
 }
 
-func (p *websocketPingServer) CumSum(ctx context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
-	err := p.cumSum(stream)
-	if p.cumSumDone != nil {
-		<-ctx.Done()
-		p.cumSumDone <- context.Cause(ctx)
-	}
-	return err
-}
-
-func (p *websocketPingServer) cumSum(stream pingv1connect.PingServiceCumSumServerStream) error {
+func (p *websocketPingServer) CumSum(_ context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
 	var sum int64
 	for {
 		request, err := stream.Receive()

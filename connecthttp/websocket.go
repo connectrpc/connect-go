@@ -53,6 +53,9 @@ var (
 	errWebSocketProtocol = errors.New("protocol error")
 	// Both sides close with 1007, and a server sends no S.
 	errWebSocketInvalidUTF8 = errors.New("invalid UTF-8 in text message")
+	// An HTTPClient with a Timeout, or one that buffers or wraps the
+	// response body, can't carry a WebSocket.
+	errWebSocketHTTPClient = errors.New("HTTP client can't carry a WebSocket")
 )
 
 // WithWebSocket enables Connect over WebSocket.
@@ -66,10 +69,15 @@ var (
 // handshake headers with the same name. Authenticate RPCs in an interceptor
 // or handler, not in HTTP middleware that only sees the handshake.
 //
-// Clients need an [*http.Client] as their [HTTPClient]. Its Timeout covers
-// only the handshake, so use a context deadline to bound an RPC. The
-// handshake is HTTP/1.1, so a client that only speaks HTTP/2 can't dial. A
-// server that answers with a bad upgrade can delay the dial error by up to
+// An [*http.Client] works as is, and its Timeout only bounds the handshake.
+// Use a context deadline to bound an RPC. Any other [HTTPClient] makes the
+// handshake request and must return the 101 response unchanged, with a body
+// the connection can write to. A client with a Timeout, or one that buffers
+// or wraps the response body, fails the dial with [connect.CodeInternal].
+// It follows redirects with its own policy, so it can't follow a redirect to
+// a ws or wss URL.
+// The handshake is HTTP/1.1, so a client that only speaks HTTP/2 can't dial.
+// A server that answers with a bad upgrade can delay the dial error by up to
 // three seconds.
 func WithWebSocket() Option {
 	return websocketOption{}
