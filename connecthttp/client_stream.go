@@ -128,7 +128,7 @@ type connectStreamingClientStream struct {
 
 	headerFlushed bool
 	syncedHeader  bool
-	rxEnd         bool
+	rxErr         error // returned by Receive once the stream has ended
 }
 
 // flushHeader merges request metadata, then writes protocol headers.
@@ -161,12 +161,16 @@ func (s *connectStreamingClientStream) CloseSend() error {
 }
 
 func (s *connectStreamingClientStream) Receive(dst any) error {
+	if s.rxErr != nil {
+		return s.rxErr
+	}
 	if s.streamType == connect.StreamTypeClient {
-		if s.rxEnd {
-			return io.EOF
+		s.rxErr = io.EOF
+		err := receiveUnaryResponse(s.conn, dst, s.info)
+		if err != nil {
+			s.rxErr = err
 		}
-		s.rxEnd = true
-		return receiveUnaryResponse(s.conn, dst, s.info)
+		return err
 	}
 	err := s.conn.Receive(dst)
 	if !s.syncedHeader && s.info != nil {
@@ -179,6 +183,7 @@ func (s *connectStreamingClientStream) Receive(dst any) error {
 			fromHTTPHeader(s.info.ResponseTrailer(), s.conn.ResponseTrailer())
 		}
 		_ = s.conn.CloseResponse()
+		s.rxErr = err
 	}
 	return err
 }
