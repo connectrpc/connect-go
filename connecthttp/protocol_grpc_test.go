@@ -105,6 +105,20 @@ func TestGRPCHandlerSender(t *testing.T) {
 			"Custom-Trailer":  {"bar"},
 		})
 	})
+	t.Run("http2_existing_trailer", func(t *testing.T) {
+		t.Parallel()
+		conn, responseWriter := newConn(false, true)
+		// Trailers set by middleware before the handler runs. User trailers
+		// append to them and the status replaces them.
+		responseWriter.Header()[http.TrailerPrefix+"Custom-Trailer"] = []string{"middleware"}
+		responseWriter.Header()[http.TrailerPrefix+grpcHeaderStatus] = []string{"7"}
+		testGRPCHandlerConnMetadata(t, conn)
+		assert.Equal(t, responseWriter.Result().Trailer, http.Header{
+			grpcHeaderStatus:  {"14"},
+			grpcHeaderMessage: {"oh no"},
+			"Custom-Trailer":  {"middleware", "bar"},
+		})
+	})
 }
 
 func testGRPCHandlerConnMetadata(t *testing.T, conn handlerConnCloser) {

@@ -596,8 +596,16 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 	// since correctness depends on low-level framing details. Breaking this
 	// logic breaks Envoy's gRPC-Web translation.
 	for key, values := range hc.responseTrailer {
-		if len(values) > 0 {
-			header[http.TrailerPrefix+key] = values
+		if len(values) == 0 {
+			continue
+		}
+		// Append to trailers set by outer middleware. Otherwise reuse the
+		// slice to save an allocation.
+		trailerKey := http.TrailerPrefix + key
+		if existing := header[trailerKey]; len(existing) > 0 {
+			header[trailerKey] = append(existing, values...)
+		} else {
+			header[trailerKey] = values
 		}
 	}
 	status, message, details := grpcStatusForError(hc.marshaler.ctx, hc.protobuf, err)
