@@ -241,7 +241,7 @@ func TestGRPCWebTrailerMarshalling(t *testing.T) {
 		t.Parallel()
 		trailer := http.Header{}
 		trailer.Set("User-Provided", "bar")
-		got := marshal(t, trailer, connect.NewError(connect.CodeNotFound, "Foo"))
+		got := marshal(t, trailer, connect.NewError(connect.CodeNotFound, " Foo "))
 		assert.Equal(t, got, "grpc-status: 5\r\ngrpc-message: Foo\r\nuser-provided: bar\r\n")
 	})
 	t.Run("sanitized", func(t *testing.T) {

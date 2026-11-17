@@ -600,13 +600,11 @@ func (hc *grpcHandlerConn) Close(err error) (retErr error) {
 			header[http.TrailerPrefix+key] = values
 		}
 	}
-	if err == nil {
-		header[http.TrailerPrefix+grpcHeaderStatus] = []string{"0"} // zero is the gRPC OK status
-		return nil
-	}
 	status, message, details := grpcStatusForError(hc.marshaler.ctx, hc.protobuf, err)
 	header[http.TrailerPrefix+grpcHeaderStatus] = []string{status}
-	header[http.TrailerPrefix+grpcHeaderMessage] = []string{message}
+	if err != nil {
+		header[http.TrailerPrefix+grpcHeaderMessage] = []string{message}
+	}
 	if details != "" {
 		header[http.TrailerPrefix+grpcHeaderDetails] = []string{details}
 	}
@@ -1006,14 +1004,14 @@ func grpcStatusForError(ctx context.Context, protobuf connect.Codec, err error) 
 }
 
 // grpcWriteWebStatus writes the gRPC status trailers. Their values are already
-// encoded and need no sanitizing.
+// encoded. The message is trimmed as Header.Write would.
 func grpcWriteWebStatus(buffer *bytes.Buffer, status, message, details string) {
 	buffer.WriteString("grpc-status: ")
 	buffer.WriteString(status)
 	buffer.WriteString("\r\n")
 	if status != "0" {
 		buffer.WriteString("grpc-message: ")
-		buffer.WriteString(message)
+		buffer.WriteString(textproto.TrimString(message))
 		buffer.WriteString("\r\n")
 	}
 	if details != "" {
