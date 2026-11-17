@@ -104,10 +104,9 @@ func TestWebSocketRoundTrip(t *testing.T) {
 				var got []int64
 				for {
 					response, err := stream.Receive()
-					if errors.Is(err, io.EOF) {
+					if errors.Is(err, io.EOF) || !assert.Nil(t, err) {
 						break
 					}
-					assert.Nil(t, err)
 					got = append(got, response.GetNumber())
 				}
 				assert.Equal(t, got, []int64{1, 2, 3})
@@ -129,10 +128,9 @@ func TestWebSocketRoundTrip(t *testing.T) {
 				var got []int64
 				for {
 					response, err := stream.Receive()
-					if errors.Is(err, io.EOF) {
+					if errors.Is(err, io.EOF) || !assert.Nil(t, err) {
 						break
 					}
-					assert.Nil(t, err)
 					got = append(got, response.GetSum())
 				}
 				assert.Nil(t, <-sendErr)
@@ -189,6 +187,29 @@ func TestWebSocketWire(t *testing.T) {
 			wantStatus: websocket.StatusProtocolError,
 		},
 		{
+			// The deadline ends a handler waiting for C.
+			name:        "deadline_while_receiving",
+			subprotocol: "connectrpc.1+json",
+			query:       "?connect-timeout-ms=50",
+			send:        []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest)},
+			want: []websocketFrame{
+				textFrame("M[]"),
+				textFrame(`S{"error":{"code":"deadline_exceeded","message":"context deadline exceeded"}}`),
+			},
+			wantStatus: websocket.StatusNormalClosure,
+		},
+		{
+			name:        "zero_timeout",
+			subprotocol: "connectrpc.1+json",
+			query:       "?connect-timeout-ms=0",
+			send:        []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("C")},
+			want: []websocketFrame{
+				textFrame("M[]"),
+				textFrame(`S{"error":{"code":"deadline_exceeded","message":"context deadline exceeded"}}`),
+			},
+			wantStatus: websocket.StatusNormalClosure,
+		},
+		{
 			name:        "invalid_timeout",
 			subprotocol: "connectrpc.1+json",
 			query:       "?connect-timeout-ms=-1",
@@ -203,18 +224,20 @@ func TestWebSocketWire(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
 			conn := dialWebSocket(t, server, pingv1connect.PingServicePingProcedure+test.query, test.subprotocol)
 			// Send from a goroutine, because memhttp pipes have no buffer.
 			go func() {
 				for _, frame := range test.send {
-					if err := conn.Write(t.Context(), frame.MessageType, []byte(frame.Data)); err != nil {
+					if err := conn.Write(ctx, frame.MessageType, []byte(frame.Data)); err != nil {
 						return
 					}
 				}
 			}()
 			var got []websocketFrame
 			for {
-				messageType, data, err := conn.Read(t.Context())
+				messageType, data, err := conn.Read(ctx)
 				if err != nil {
 					assert.Equal(t, websocket.CloseStatus(err), test.wantStatus)
 					break
@@ -321,7 +344,7 @@ func (p *websocketPingServer) CumSum(ctx context.Context, stream pingv1connect.P
 	err := p.cumSum(stream)
 	if p.cumSumDone != nil {
 		<-ctx.Done()
-		p.cumSumDone <- connect.NewError(connect.CodeOf(context.Cause(ctx)), "")
+		p.cumSumDone <- context.Cause(ctx)
 	}
 	return err
 }

@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -87,7 +88,6 @@ func (websocketOption) apply(opts *options) {
 type websocketMessage struct {
 	marker  byte
 	payload []byte
-	text    bool
 }
 
 // parseWebSocketMessage checks a message as read from the connection and
@@ -101,7 +101,7 @@ func parseWebSocketMessage(messageType websocket.MessageType, data []byte, bodyI
 	if len(data) == 0 {
 		return websocketMessage{}, newWebSocketProtocolError("empty message")
 	}
-	message := websocketMessage{marker: data[0], payload: data[1:], text: text}
+	message := websocketMessage{marker: data[0], payload: data[1:]}
 	switch message.marker {
 	case websocketMarkerBody:
 		if text != bodyIsText {
@@ -127,28 +127,30 @@ func parseWebSocketMessage(messageType websocket.MessageType, data []byte, bodyI
 	return message, nil
 }
 
-// encodeWebSocketMetadata returns the payload of an M message for header. Keys
-// are lower-cased and sorted. Keys without values and keys starting with
-// "connect-" are skipped.
-func encodeWebSocketMetadata(header http.Header) []byte {
-	merged := make(map[string][]string, len(header))
-	for key, values := range header {
+// websocketMetadata returns the entries of header that an M or S message
+// carries, with lower-case keys. Protocol headers, keys starting with
+// "connect-" and keys without values are skipped.
+func websocketMetadata(header *connect.Header) http.Header {
+	metadata := make(http.Header)
+	for key, values := range userHeaders(header) {
 		key = strings.ToLower(key)
 		if len(values) == 0 || strings.HasPrefix(key, "connect-") {
 			continue
 		}
-		merged[key] = append(merged[key], values...)
+		metadata[key] = append(metadata[key], values...)
 	}
-	entries := make([][]string, 0, len(merged))
-	for key, values := range merged {
+	return metadata
+}
+
+// encodeWebSocketMetadata returns the payload of an M message for metadata
+// from [websocketMetadata], sorted by key.
+func encodeWebSocketMetadata(metadata http.Header) []byte {
+	entries := make([][]string, 0, len(metadata))
+	for key, values := range metadata {
 		entries = append(entries, append([]string{key}, values...))
 	}
 	slices.SortFunc(entries, func(a, b []string) int { return strings.Compare(a[0], b[0]) })
-	payload, err := json.Marshal(entries)
-	if err != nil {
-		// Marshaling a slice of string slices cannot fail.
-		return []byte("[]")
-	}
+	payload, _ := json.Marshal(entries) //nolint:errchkjson // a slice of string slices always marshals
 	return payload
 }
 
@@ -264,11 +266,6 @@ func isHTTPFieldValue(value string) bool {
 	return true
 }
 
-// websocketSubprotocol returns the subprotocol token for a codec.
-func websocketSubprotocol(codecName string) string {
-	return websocketSubprotocolPrefix + codecName
-}
-
 // websocketBodyIsText reports whether B messages for a codec are sent as text.
 // JSON is text and every other codec is binary.
 func websocketBodyIsText(codecName string) bool {
@@ -305,6 +302,24 @@ func writeWebSocketText(ctx context.Context, conn *websocket.Conn, marker byte, 
 	message = append(message, marker)
 	message = append(message, payload...)
 	return conn.Write(ctx, websocket.MessageText, message)
+}
+
+// receiveExactlyOne reads the one message of a unary side with receive. Zero
+// or more than one message is unimplemented, as on HTTP. side names the
+// message in the error.
+func receiveExactlyOne(receive func(any) error, msg any, side string) error {
+	err := receive(msg)
+	if errors.Is(err, io.EOF) {
+		return connect.Errorf(connect.CodeUnimplemented, "unary %s has zero messages", side)
+	} else if err != nil {
+		return err
+	}
+	if err := receive(msg); err == nil {
+		return connect.Errorf(connect.CodeUnimplemented, "unary %s has multiple messages", side)
+	} else if !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }
 
 func newWebSocketProtocolError(format string, args ...any) *connect.Error {

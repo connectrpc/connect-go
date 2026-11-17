@@ -376,19 +376,7 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 		return nil, state.err
 	}
 	if state.websocket != nil {
-		info.Spec = spec
-		info.PeerAddr = state.websocket.url.Host
-		info.Protocol = protocolNameWebSocket
-		info.Codec = state.sendCodecName
-		info.RequestEncoding = connect.CompressionNameIdentity
-		return &websocketClientStream{
-			ctx:            ctx,
-			config:         state.websocket,
-			info:           info,
-			clientInfo:     clientInfo,
-			singleRequest:  spec.StreamType == connect.StreamTypeUnary || spec.StreamType == connect.StreamTypeServer,
-			singleResponse: spec.StreamType == connect.StreamTypeUnary || spec.StreamType == connect.StreamTypeClient,
-		}, nil
+		return newWebSocketClientStream(ctx, spec, state.websocket, info, clientInfo), nil
 	}
 	opts, sendCodecName, protocolClient := state.opts, state.sendCodecName, state.client
 	conn := protocolClient.NewConn(ctx, spec, make(http.Header, 8))

@@ -1362,8 +1362,6 @@ func connectCodeToHTTP(code connect.Code) int {
 	}
 }
 
-// connectEncodeTimeout encodes timeout as a positive number of milliseconds.
-// Returns an empty string for timeouts over the protocol's ten-digit limit.
 // connectParseTimeout parses a Connect timeout in milliseconds: at most ten
 // digits and nothing else.
 func connectParseTimeout(timeout string) (time.Duration, error) {
@@ -1381,6 +1379,8 @@ func connectParseTimeout(timeout string) (time.Duration, error) {
 	return time.Duration(millis) * time.Millisecond, nil
 }
 
+// connectEncodeTimeout encodes timeout as a positive number of milliseconds.
+// Returns an empty string for timeouts over the protocol's ten-digit limit.
 func connectEncodeTimeout(timeout time.Duration) string {
 	millis := max(int64(timeout/time.Millisecond), 1)
 	encoded := strconv.FormatInt(millis, 10 /* base */)

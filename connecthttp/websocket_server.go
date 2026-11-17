@@ -67,23 +67,15 @@ func (s *websocketServerStream) Receive(msg any) error {
 		return io.EOF
 	}
 	s.receivedSingle = true
-	if err := s.receive(msg); err != nil {
-		if errors.Is(err, io.EOF) {
-			return connect.Errorf(connect.CodeUnimplemented, "unary request has zero messages")
-		}
-		return err
-	}
-	if err := s.receive(msg); err == nil {
-		return connect.Errorf(connect.CodeUnimplemented, "unary request has multiple messages")
-	} else if !errors.Is(err, io.EOF) {
-		return err
-	}
-	return nil
+	return receiveExactlyOne(s.receive, msg, "request")
 }
 
+// SendHeaders and Send write with the RPC context, so a canceled handler
+// isn't stuck behind a client that stopped reading. If the context ends
+// during a write, coder drops the connection and no S is sent.
 func (s *websocketServerStream) SendHeaders() error {
-	if s.sentHeader {
-		return nil
+	if err := s.ctx.Err(); err != nil {
+		return wrapIfContextError(err)
 	}
 	return s.writeHeader(s.ctx)
 }
@@ -92,10 +84,8 @@ func (s *websocketServerStream) Send(msg any) error {
 	if err := s.ctx.Err(); err != nil {
 		return wrapIfContextError(err)
 	}
-	if !s.sentHeader {
-		if err := s.writeHeader(s.ctx); err != nil {
-			return err
-		}
+	if err := s.writeHeader(s.ctx); err != nil {
+		return err
 	}
 	if err := writeWebSocketBody(s.ctx, s.conn, s.codec, msg); err != nil {
 		return s.writeError(err)
@@ -107,9 +97,19 @@ func (s *websocketServerStream) receive(msg any) error {
 	if s.receivedEnd {
 		return io.EOF
 	}
-	message, ok := <-s.reader.messages
-	if !ok {
-		return s.reader.failure()
+	var message websocketMessage
+	select {
+	case received, open := <-s.reader.messages:
+		if !open {
+			return s.reader.failure()
+		}
+		message = received
+	case <-s.ctx.Done():
+		// A deadline or a client failure ends the RPC while it waits.
+		if err := s.reader.failure(); err != nil {
+			return err
+		}
+		return wrapIfContextError(s.ctx.Err())
 	}
 	switch message.marker {
 	case websocketMarkerBody:
@@ -127,22 +127,21 @@ func (s *websocketServerStream) receive(msg any) error {
 	}
 }
 
-// writeHeader writes the M message from the response headers set so far.
-// Headers set after it are dropped.
+// writeHeader writes the M message from the response headers set so far,
+// once. Headers set after it are dropped.
 func (s *websocketServerStream) writeHeader(ctx context.Context) error {
-	s.sentHeader = true
-	header := make(http.Header)
-	toHTTPHeader(header, s.info.ResponseHeader())
-	if err := writeWebSocketText(ctx, s.conn, websocketMarkerLeadingMetadata, encodeWebSocketMetadata(header)); err != nil {
+	if s.sentHeader {
+		return nil
+	}
+	metadata := encodeWebSocketMetadata(websocketMetadata(s.info.ResponseHeader()))
+	if err := writeWebSocketText(ctx, s.conn, websocketMarkerLeadingMetadata, metadata); err != nil {
 		return s.writeError(err)
 	}
+	s.sentHeader = true
 	return nil
 }
 
 func (s *websocketServerStream) writeError(err error) error {
-	if _, ok := asError(err); ok {
-		return err
-	}
 	err = wrapIfContextDone(s.ctx, err)
 	if _, ok := asError(err); ok {
 		return err
@@ -153,10 +152,9 @@ func (s *websocketServerStream) writeError(err error) error {
 // finish ends the RPC with err as its verdict. It sends M if it is unsent,
 // then S, then closes. It sends nothing to a client that has gone away.
 func (s *websocketServerStream) finish(ctx context.Context, err error) {
-	s.reader.stop()
-	failure := s.reader.failure()
+	peerGone, failure := s.reader.stop()
 	switch {
-	case s.reader.isPeerGone():
+	case peerGone:
 		_ = s.conn.CloseNow()
 		return
 	case errors.Is(failure, errWebSocketInvalidUTF8):
@@ -170,19 +168,11 @@ func (s *websocketServerStream) finish(ctx context.Context, err error) {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), websocketCloseTimeout)
 	defer cancel()
-	if !s.sentHeader {
-		if writeErr := s.writeHeader(ctx); writeErr != nil {
-			_ = s.conn.CloseNow()
-			return
-		}
+	if writeErr := s.writeHeader(ctx); writeErr != nil {
+		_ = s.conn.CloseNow()
+		return
 	}
-	end := &connectEndStreamMessage{Trailer: make(http.Header)}
-	toHTTPHeader(end.Trailer, s.info.ResponseTrailer())
-	for key := range end.Trailer {
-		if strings.HasPrefix(strings.ToLower(key), "connect-") {
-			delete(end.Trailer, key)
-		}
-	}
+	end := &connectEndStreamMessage{Trailer: websocketMetadata(s.info.ResponseTrailer())}
 	if err != nil {
 		end.Error = newConnectWireError(err)
 	}
@@ -206,13 +196,11 @@ type websocketServerReader struct {
 	bodyIsText bool
 	cancel     context.CancelCauseFunc
 	messages   chan websocketMessage
-	done       chan struct{}
-	stopOnce   sync.Once
+	done       chan struct{} // closed by stop
 
 	mu       sync.Mutex
 	err      error
 	peerGone bool
-	stopped  bool
 }
 
 func newWebSocketServerReader(conn *websocket.Conn, bodyIsText bool, cancel context.CancelCauseFunc) *websocketServerReader {
@@ -270,29 +258,32 @@ func (r *websocketServerReader) fail(err error) {
 }
 
 // connectionEnded records the end of the connection. Before S it means the
-// client canceled the RPC.
+// client canceled the RPC, or sent a message over the read limit and coder
+// closed with 1009.
 func (r *websocketServerReader) connectionEnded(err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.stopped {
+	if r.isStopped() {
 		return
 	}
 	r.peerGone = true
 	if r.err == nil {
 		r.err = connect.Errorf(connect.CodeCanceled, "client closed the connection: %s", err).WithCause(err)
+		if errors.Is(err, websocket.ErrMessageTooBig) {
+			r.err = connect.Errorf(connect.CodeResourceExhausted, "read message: %s", err).WithCause(err)
+		}
 	}
 	r.cancel(r.err)
 }
 
-// stop marks S as about to be sent. Later reads are discarded and the end of
-// the connection is no longer a cancellation.
-func (r *websocketServerReader) stop() {
-	r.stopOnce.Do(func() {
-		r.mu.Lock()
-		r.stopped = true
-		r.mu.Unlock()
-		close(r.done)
-	})
+// stop marks S as about to be sent and returns the failure so far. Later
+// reads are discarded and the end of the connection is no longer a
+// cancellation. It is called once.
+func (r *websocketServerReader) stop() (peerGone bool, failure error) {
+	close(r.done)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.peerGone, r.err
 }
 
 func (r *websocketServerReader) failure() error {
@@ -301,16 +292,13 @@ func (r *websocketServerReader) failure() error {
 	return r.err
 }
 
-func (r *websocketServerReader) isPeerGone() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.peerGone
-}
-
 func (r *websocketServerReader) isStopped() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.stopped
+	select {
+	case <-r.done:
+		return true
+	default:
+		return false
+	}
 }
 
 // newWebSocketHandler serves WebSocket upgrades for spec and passes every
@@ -339,6 +327,9 @@ func serveWebSocket(server *connect.Server, spec connect.Spec, opts *options, re
 	if err != nil {
 		return
 	}
+	// finish closes the connection. This covers a handler panic, because
+	// net/http doesn't close hijacked connections.
+	defer func() { _ = conn.CloseNow() }()
 	conn.SetReadLimit(websocketReadLimit(opts.readMaxBytes))
 
 	ctx, cancel := context.WithCancelCause(request.Context())
@@ -367,10 +358,11 @@ func serveWebSocket(server *connect.Server, spec connect.Spec, opts *options, re
 		reader:        reader,
 		singleRequest: spec.StreamType == connect.StreamTypeUnary || spec.StreamType == connect.StreamTypeServer,
 	}
-	metadata, err := receiveWebSocketMetadata(ctx, reader)
-	if err == nil && timeoutErr != nil {
-		err = timeoutErr
+	if timeoutErr != nil {
+		stream.finish(ctx, timeoutErr)
+		return
 	}
+	metadata, err := receiveWebSocketMetadata(ctx, reader)
 	if err != nil {
 		stream.finish(ctx, err)
 		return

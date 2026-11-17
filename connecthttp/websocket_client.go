@@ -45,12 +45,6 @@ func newWebSocketClientConfig(httpClient HTTPClient, procedureURL url.URL, opts 
 	if !ok {
 		return nil, connect.Errorf(connect.CodeInternal, "WebSocket needs an *http.Client, got %T", httpClient)
 	}
-	switch procedureURL.Scheme {
-	case "http":
-		procedureURL.Scheme = "ws"
-	case "https":
-		procedureURL.Scheme = "wss"
-	}
 	return &websocketClientConfig{
 		httpClient: client,
 		url:        procedureURL,
@@ -64,20 +58,18 @@ func newWebSocketClientConfig(httpClient HTTPClient, procedureURL url.URL, opts 
 // run concurrently.
 type websocketClientStream struct {
 	ctx            context.Context //nolint:containedctx // the stream is the RPC's lifetime
+	cancel         context.CancelFunc
 	config         *websocketClientConfig
 	info           *connect.CallInfo
 	clientInfo     *ClientInfo
 	singleRequest  bool
 	singleResponse bool
+	closed         atomic.Bool
 
 	dialMu       sync.Mutex
-	dialed       bool
 	conn         *websocket.Conn
 	dialErr      error
 	stopWatching func() bool
-
-	ended  atomic.Bool // S has arrived
-	closed atomic.Bool // Close was called
 
 	// Send side.
 	sent       bool
@@ -87,24 +79,50 @@ type websocketClientStream struct {
 	receiveErr     error
 }
 
+func newWebSocketClientStream(
+	ctx context.Context,
+	spec connect.Spec,
+	config *websocketClientConfig,
+	info *connect.CallInfo,
+	clientInfo *ClientInfo,
+) *websocketClientStream {
+	info.Spec = spec
+	info.PeerAddr = config.url.Host
+	info.Protocol = protocolNameWebSocket
+	info.Codec = config.codec.Name()
+	info.RequestEncoding = connect.CompressionNameIdentity
+	// Close cancels ctx, which also stops a dial in progress.
+	ctx, cancel := context.WithCancel(ctx)
+	return &websocketClientStream{
+		ctx:            ctx,
+		cancel:         cancel,
+		config:         config,
+		info:           info,
+		clientInfo:     clientInfo,
+		singleRequest:  spec.StreamType == connect.StreamTypeUnary || spec.StreamType == connect.StreamTypeServer,
+		singleResponse: spec.StreamType == connect.StreamTypeUnary || spec.StreamType == connect.StreamTypeClient,
+	}
+}
+
 func (s *websocketClientStream) SendHeaders() error {
 	_, err := s.dial()
 	return err
 }
 
+// Send writes a B message. Once the connection is closing, it returns io.EOF
+// and Receive reports why.
 func (s *websocketClientStream) Send(msg any) error {
 	conn, err := s.dial()
 	if err != nil {
 		return err
 	}
-	if s.sendClosed || s.ended.Load() {
+	if s.sendClosed {
 		return io.EOF
 	}
 	if s.singleRequest && s.sent {
 		return errors.New("connecthttp: unary stream sent more than once")
 	}
 	s.sent = true
-	// A failed write means the connection is closing. Receive reports why.
 	if err := writeWebSocketBody(context.WithoutCancel(s.ctx), conn, s.config.codec, msg); err != nil {
 		if _, ok := asError(err); ok {
 			return err
@@ -114,12 +132,14 @@ func (s *websocketClientStream) Send(msg any) error {
 	return nil
 }
 
+// CloseSend writes a C message. A failed write means the connection is
+// closing, and Receive reports why.
 func (s *websocketClientStream) CloseSend() error {
 	conn, err := s.dial()
 	if err != nil {
 		return err
 	}
-	if s.sendClosed || s.ended.Load() {
+	if s.sendClosed {
 		return nil
 	}
 	s.sendClosed = true
@@ -136,44 +156,30 @@ func (s *websocketClientStream) Receive(msg any) error {
 		s.receiveErr = err
 		return err
 	}
-	if !s.singleResponse {
-		err := s.receive(conn, msg)
-		if err != nil {
-			s.receiveErr = err
-		}
-		return err
-	}
-	// Unary and client-streaming RPCs return exactly one response.
-	s.receiveErr = io.EOF
-	err = s.receive(conn, msg)
-	if err == nil {
-		if drainErr := s.receive(conn, msg); drainErr == nil {
-			err = connect.Errorf(connect.CodeUnimplemented, "unary stream has multiple messages")
-		} else if !errors.Is(drainErr, io.EOF) {
-			err = drainErr
-		}
-	} else if errors.Is(err, io.EOF) {
-		err = connect.Errorf(connect.CodeUnimplemented, "unary stream has zero messages")
+	receive := func(msg any) error { return s.receive(conn, msg) }
+	if s.singleResponse {
+		// Unary and client-streaming RPCs return exactly one response.
+		s.receiveErr = io.EOF
+		err = receiveExactlyOne(receive, msg, "response")
+	} else {
+		err = receive(msg)
 	}
 	if err != nil {
 		s.receiveErr = err
+		// The RPC is over. After S the connection is already closed.
+		closeCode := websocketStatusClientError
+		if errors.Is(err, errWebSocketInvalidUTF8) {
+			closeCode = websocket.StatusInvalidFramePayloadData
+		}
+		s.release(closeCode)
 	}
 	return err
 }
 
+// Close ends the RPC. The connection closes with 1000 in the background.
 func (s *websocketClientStream) Close() error {
 	s.closed.Store(true)
-	s.dialMu.Lock()
-	defer s.dialMu.Unlock()
-	if !s.dialed {
-		// Never dial after Close.
-		s.dialed = true
-		s.dialErr = connect.NewError(connect.CodeCanceled, "stream closed")
-		return nil
-	}
-	if s.conn != nil {
-		s.release(websocket.StatusNormalClosure)
-	}
+	s.cancel()
 	return nil
 }
 
@@ -181,19 +187,21 @@ func (s *websocketClientStream) Close() error {
 func (s *websocketClientStream) dial() (*websocket.Conn, error) {
 	s.dialMu.Lock()
 	defer s.dialMu.Unlock()
-	if s.dialed {
-		return s.conn, s.dialErr
+	if s.conn == nil && s.dialErr == nil {
+		s.conn, s.dialErr = s.connect()
+		if s.dialErr != nil {
+			s.cancel()
+		}
 	}
-	s.dialed = true
-	s.conn, s.dialErr = s.connect()
 	return s.conn, s.dialErr
 }
 
 func (s *websocketClientStream) connect() (*websocket.Conn, error) {
+	if s.closed.Load() {
+		return nil, connect.NewError(connect.CodeCanceled, "stream closed")
+	}
 	// Check the metadata before dialing, so a bad key sends nothing.
-	header := make(http.Header)
-	toHTTPHeader(header, s.info.RequestHeader())
-	metadata := encodeWebSocketMetadata(header)
+	metadata := encodeWebSocketMetadata(websocketMetadata(s.info.RequestHeader()))
 	if _, err := decodeWebSocketMetadata(metadata, true); err != nil {
 		return nil, err
 	}
@@ -209,10 +217,8 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 	conn, response, err := websocket.Dial(s.ctx, requestURL.String(), &websocket.DialOptions{
 		HTTPClient:   &httpClient,
 		HTTPHeader:   http.Header{headerUserAgent: {defaultConnectUserAgent}},
-		Subprotocols: []string{websocketSubprotocol(s.config.codec.Name())},
+		Subprotocols: []string{websocketSubprotocolPrefix + s.config.codec.Name()},
 	})
-	// coder clears the body after an upgrade and keeps a prefix after a
-	// failure.
 	if response != nil && response.Body != nil {
 		defer response.Body.Close()
 	}
@@ -238,10 +244,8 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 // dialError maps a failed handshake to an error.
 func (s *websocketClientStream) dialError(response *http.Response, err error) error {
 	if response == nil {
-		if err := wrapIfContextDone(s.ctx, err); err != nil {
-			if _, ok := asError(err); ok {
-				return err
-			}
+		if connectErr, ok := asError(wrapIfContextDone(s.ctx, err)); ok {
+			return connectErr
 		}
 		return connect.Errorf(connect.CodeUnavailable, "dial WebSocket: %s", err).WithCause(err)
 	}
@@ -268,20 +272,20 @@ func (s *websocketClientStream) receive(conn *websocket.Conn, msg any) error {
 		}
 		message, parseErr := parseWebSocketMessage(messageType, data, bodyIsText)
 		if parseErr != nil {
-			return s.fail(parseErr)
+			return parseErr
 		}
 		if !s.receivedHeader && message.marker != websocketMarkerLeadingMetadata {
-			return s.fail(newWebSocketProtocolError("first message is %c, expected M", message.marker))
+			return newWebSocketProtocolError("first message is %c, expected M", message.marker)
 		}
 		switch message.marker {
 		case websocketMarkerLeadingMetadata:
 			if s.receivedHeader {
-				return s.fail(newWebSocketProtocolError("second M message"))
+				return newWebSocketProtocolError("second M message")
 			}
 			s.receivedHeader = true
 			header, err := decodeWebSocketMetadata(message.payload, false)
 			if err != nil {
-				return s.fail(err)
+				return err
 			}
 			fromHTTPHeader(s.info.ResponseHeader(), header)
 		case websocketMarkerBody:
@@ -292,7 +296,7 @@ func (s *websocketClientStream) receive(conn *websocket.Conn, msg any) error {
 		case websocketMarkerServerEndStream:
 			return s.receiveEnd(message.payload)
 		default:
-			return s.fail(newWebSocketProtocolError("unexpected %c message from server", message.marker))
+			return newWebSocketProtocolError("unexpected %c message from server", message.marker)
 		}
 	}
 }
@@ -301,12 +305,15 @@ func (s *websocketClientStream) receive(conn *websocket.Conn, msg any) error {
 func (s *websocketClientStream) receiveEnd(payload []byte) error {
 	var end connectEndStreamMessage
 	if err := json.Unmarshal(payload, &end); err != nil {
-		return s.fail(newWebSocketProtocolError("S message is invalid: %v", err))
+		return newWebSocketProtocolError("S message is invalid: %v", err)
 	}
+	trailer := make(http.Header, len(end.Trailer))
 	for key, values := range end.Trailer {
-		s.info.ResponseTrailer().SetValues(http.CanonicalHeaderKey(key), values)
+		for _, value := range values {
+			trailer.Add(key, value)
+		}
 	}
-	s.ended.Store(true)
+	fromHTTPHeader(s.info.ResponseTrailer(), trailer)
 	s.release(websocket.StatusNormalClosure)
 	if end.Error != nil {
 		return end.Error.asError()
@@ -314,20 +321,13 @@ func (s *websocketClientStream) receiveEnd(payload []byte) error {
 	return io.EOF
 }
 
-// fail closes the connection after a protocol error from the server.
-func (s *websocketClientStream) fail(err *connect.Error) error {
-	code := websocketStatusClientError
-	if errors.Is(err, errWebSocketInvalidUTF8) {
-		code = websocket.StatusInvalidFramePayloadData
-	}
-	s.release(code)
-	return err
-}
-
-// release stops watching the context and closes the connection with code.
-func (s *websocketClientStream) release(code websocket.StatusCode) {
+// release closes the connection with closeCode and ends the stream's
+// context. Calls after the first do nothing.
+func (s *websocketClientStream) release(closeCode websocket.StatusCode) {
+	// Stop the context watcher first, so it can't close with 1000 instead.
 	s.stopWatching()
-	_ = s.conn.Close(code, "")
+	_ = s.conn.Close(closeCode, "")
+	s.cancel()
 }
 
 // readError maps a connection that ended without S to an error.
