@@ -359,6 +359,7 @@ type clientState struct {
 	opts          *options
 	sendCodecName string
 	client        protocolClient
+	websocket     *websocketClientConfig
 	err           error
 }
 
@@ -373,6 +374,21 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 	state := t.clientStateForSpec(spec)
 	if state.err != nil {
 		return nil, state.err
+	}
+	if state.websocket != nil {
+		info.Spec = spec
+		info.PeerAddr = state.websocket.url.Host
+		info.Protocol = protocolNameWebSocket
+		info.Codec = state.sendCodecName
+		info.RequestEncoding = connect.CompressionNameIdentity
+		return &websocketClientStream{
+			ctx:            ctx,
+			config:         state.websocket,
+			info:           info,
+			clientInfo:     clientInfo,
+			singleRequest:  spec.StreamType == connect.StreamTypeUnary || spec.StreamType == connect.StreamTypeServer,
+			singleResponse: spec.StreamType == connect.StreamTypeUnary || spec.StreamType == connect.StreamTypeClient,
+		}, nil
 	}
 	opts, sendCodecName, protocolClient := state.opts, state.sendCodecName, state.client
 	conn := protocolClient.NewConn(ctx, spec, make(http.Header, 8))
@@ -431,6 +447,15 @@ func (t *transport) newClientState(spec connect.Spec) *clientState {
 	}
 	if t.baseURLErr != nil {
 		return &clientState{err: connect.Errorf(connect.CodeUnavailable, "invalid base URL: %v", t.baseURLErr)}
+	}
+	if opts.protocol == protocolNameWebSocket {
+		procedureURL := *t.baseURLPtr
+		procedureURL.Path = joinURLPath(t.baseURLPtr.Path, spec.Procedure)
+		config, err := newWebSocketClientConfig(t.httpClient, procedureURL, opts)
+		if err != nil {
+			return &clientState{err: err}
+		}
+		return &clientState{opts: opts, sendCodecName: sendCodecName, websocket: config}
 	}
 	client, err := t.newProtocolClient(spec, opts)
 	if err != nil {
