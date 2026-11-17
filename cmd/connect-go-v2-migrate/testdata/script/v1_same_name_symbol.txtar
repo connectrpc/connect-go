@@ -1,0 +1,93 @@
+# Once v2 takes over the connect name, v1 symbols whose v2 namesake has a
+# different shape are warned too: the generic Client and NewClient, and the
+# Codec and Compressor interfaces.
+stubs v2
+exec migrate
+stdout 'connect.NewClient is not generic in connectrpc.com/connect/v2'
+stdout 'connect.Client is not generic in connectrpc.com/connect/v2'
+stdout 'connect.Codec has a different method set in connectrpc.com/connect/v2'
+stdout 'connect.Compressor has a different method set in connectrpc.com/connect/v2'
+cmp stdout out.txt
+-- service.go --
+package app
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	if req.Msg.Number < 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, nil)
+	}
+	return connect.NewResponse(&pingv1.PingResponse{Number: req.Msg.Number}), nil
+}
+
+func newRaw() *connect.Client[pingv1.PingRequest, pingv1.PingResponse] {
+	return connect.NewClient[pingv1.PingRequest, pingv1.PingResponse](http.DefaultClient, "http://x/ping.v1.PingService/Ping")
+}
+
+type rawCodec struct{}
+
+var _ connect.Codec = rawCodec{}
+
+func (rawCodec) Name() string                         { return "raw" }
+func (rawCodec) Marshal(msg any) ([]byte, error)      { return msg.([]byte), nil }
+func (rawCodec) Unmarshal(data []byte, msg any) error { return nil }
+
+type nopCompressor struct{ bytes.Buffer }
+
+var _ connect.Compressor = (*nopCompressor)(nil)
+
+func (*nopCompressor) Close() error      { return nil }
+func (*nopCompressor) Reset(_ io.Writer) {}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: body_drop_msg=2 convert_code_const=2 convert_new_error=1 flip_residual_connect=2 import_add_connectv2=1 import_drop_v1=1 param_unwrap_request=1 result_unwrap_response=1 strip_new_response=1
+--- ./service.go
++++ ./service.go
+@@ -6,7 +6,7 @@
+ 	"io"
+ 	"net/http"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -15,11 +15,11 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+-	if req.Msg.Number < 0 {
+-		return nil, connect.NewError(connect.CodeInvalidArgument, nil)
++func (s *pingServer) Ping(ctx context.Context, req *pingv1.PingRequest) (*pingv1.PingResponse, error) {
++	if req.Number < 0 {
++		return nil, connect.NewError(connect.CodeInvalidArgument, "")
+ 	}
+-	return connect.NewResponse(&pingv1.PingResponse{Number: req.Msg.Number}), nil
++	return &pingv1.PingResponse{Number: req.Number}, nil
+ }
+ 
+ func newRaw() *connect.Client[pingv1.PingRequest, pingv1.PingResponse] {
+
+
+The following issues require manual code changes:
+  ./service.go:25:16: connect.Client is not generic in connectrpc.com/connect/v2, which replaced the v1 import. Port it by hand.
+  ./service.go:26:9: connect.NewClient is not generic in connectrpc.com/connect/v2, which replaced the v1 import. Port it by hand.
+  ./service.go:31:7: connect.Codec has a different method set in connectrpc.com/connect/v2, which replaced the v1 import. Port implementations by hand.
+  ./service.go:39:7: connect.Compressor has a different method set in connectrpc.com/connect/v2, which replaced the v1 import. Port implementations by hand.
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

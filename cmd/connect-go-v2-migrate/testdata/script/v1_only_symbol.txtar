@@ -1,0 +1,78 @@
+# Once v2 takes over the connect name, v1 symbols that v2 lacks are warned at
+# their first use instead of silently resolving against v2 (golden-only).
+stubs v2
+exec migrate
+cmp stdout out.txt
+-- service.go --
+package app
+
+import (
+	"context"
+	"log"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+type pingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+	if req.Msg.Number < 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, nil)
+	}
+	return connect.NewResponse(&pingv1.PingResponse{Number: req.Msg.Number}), nil
+}
+
+func newLoggingInterceptor() connect.UnaryInterceptorFunc {
+	return func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			log.Println(req.Spec().Procedure)
+			return next(ctx, req)
+		}
+	}
+}
+
+var _ connect.UnaryFunc
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: body_drop_msg=2 convert_code_const=1 convert_new_error=1 flip_residual_connect=1 import_add_connectv2=1 import_drop_v1=1 param_unwrap_request=1 result_unwrap_response=1 strip_new_response=1
+--- ./service.go
++++ ./service.go
+@@ -4,7 +4,7 @@
+ 	"context"
+ 	"log"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+@@ -13,11 +13,11 @@
+ 	pingv1connect.UnimplementedPingServiceHandler
+ }
+ 
+-func (s *pingServer) Ping(ctx context.Context, req *connect.Request[pingv1.PingRequest]) (*connect.Response[pingv1.PingResponse], error) {
+-	if req.Msg.Number < 0 {
+-		return nil, connect.NewError(connect.CodeInvalidArgument, nil)
++func (s *pingServer) Ping(ctx context.Context, req *pingv1.PingRequest) (*pingv1.PingResponse, error) {
++	if req.Number < 0 {
++		return nil, connect.NewError(connect.CodeInvalidArgument, "")
+ 	}
+-	return connect.NewResponse(&pingv1.PingResponse{Number: req.Msg.Number}), nil
++	return &pingv1.PingResponse{Number: req.Number}, nil
+ }
+ 
+ func newLoggingInterceptor() connect.UnaryInterceptorFunc {
+
+
+The following issues require manual code changes:
+  ./service.go:23:30: connect.UnaryInterceptorFunc is not in connectrpc.com/connect/v2, which replaced the v1 import. Port it by hand.
+  ./service.go:24:19: connect.UnaryFunc is not in connectrpc.com/connect/v2, which replaced the v1 import. Port it by hand.
+  ./service.go:25:40: connect.AnyRequest is not in connectrpc.com/connect/v2, which replaced the v1 import. Port it by hand.
+  ./service.go:25:61: connect.AnyResponse is not in connectrpc.com/connect/v2, which replaced the v1 import. Port it by hand.
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md
