@@ -80,13 +80,6 @@ type peer struct {
 	Query    url.Values // server-only
 }
 
-func newPeerForURL(url *url.URL, protocol string) peer {
-	return peer{
-		Addr:     url.Host,
-		Protocol: protocol,
-	}
-}
-
 // handlerConnCloser extends streamingHandlerConn with a method for handlers to
 // terminate the message exchange (and optionally send an error to the client).
 type handlerConnCloser interface {

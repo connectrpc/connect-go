@@ -17,6 +17,7 @@ package connecthttp
 import (
 	"errors"
 	"io"
+	"net/url"
 
 	"connectrpc.com/connect/v2"
 )
@@ -196,16 +197,12 @@ func (s *connectStreamingClientStream) Close() error {
 	return err
 }
 
-// newProtocolClient builds a v1 protocol client for spec from the transport's
-// resolved options, adapting the v2 codec/compressors to the in-package types.
-func (t *transport) newProtocolClient(spec connect.Spec, opts *options) (protocolClient, error) {
+func (t *transport) newProtocolClient(opts *options, procedureURL *url.URL) (protocolClient, error) {
 	proto, err := selectClientProtocol(opts.protocol)
 	if err != nil {
 		return nil, err
 	}
 	codecs := newReadOnlyCodecs(opts.codecs)
-	procedureURL := *t.baseURLPtr
-	procedureURL.Path = joinURLPath(t.baseURLPtr.Path, spec.Procedure)
 	return proto.NewClient(&protocolClientParams{
 		CompressionName:  opts.sendCompressor,
 		CompressionPools: newReadOnlyCompressionPools(opts.compressors),
@@ -213,7 +210,7 @@ func (t *transport) newProtocolClient(spec connect.Spec, opts *options) (protoco
 		Protobuf:         codecs.Protobuf(),
 		CompressMinBytes: opts.compressMinBytes,
 		HTTPClient:       t.httpClient,
-		URL:              &procedureURL,
+		URL:              procedureURL,
 		ReadMaxBytes:     opts.readMaxBytes,
 		SendMaxBytes:     opts.sendMaxBytes,
 		EnableGet:        opts.getEnabled,

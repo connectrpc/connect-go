@@ -133,9 +133,6 @@ type protocolClientParams struct {
 // Client is the client side of a protocol. HTTP clients typically use a single
 // protocol, codec, and compressor to send requests.
 type protocolClient interface {
-	// peer describes the server for the RPC.
-	Peer() peer
-
 	// WriteRequestHeader writes any protocol-specific request headers.
 	WriteRequestHeader(connect.StreamType, http.Header)
 
@@ -151,8 +148,6 @@ type protocolClient interface {
 // streamingClientConn is the client's view of a bidirectional message exchange,
 // plus a method for registering a hook when the HTTP request is actually sent.
 type streamingClientConn interface {
-	Spec() connect.Spec
-	Peer() peer
 	Send(any) error
 	RequestHeader() http.Header
 	CloseRequest() error
