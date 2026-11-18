@@ -202,11 +202,7 @@ func (r *handshakeRecorder) RoundTrip(request *http.Request) (*http.Response, er
 	if info, ok := ClientInfoForContext(request.Context()); ok {
 		info.request.Store(request)
 		if response != nil {
-			info.response.Store(&clientResponseInfo{
-				status: response.StatusCode,
-				proto:  response.Proto,
-				tls:    response.TLS,
-			})
+			info.response.Store(response)
 		}
 	}
 	return response, err

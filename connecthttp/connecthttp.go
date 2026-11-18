@@ -48,7 +48,7 @@ type HTTPClient interface {
 // For an RPC over WebSocket, the request and response are the handshake's.
 type ClientInfo struct {
 	request  atomic.Pointer[http.Request]
-	response atomic.Pointer[clientResponseInfo]
+	response atomic.Pointer[http.Response]
 }
 
 // ClientInfoForContext returns the [*ClientInfo] carried on the client-side
@@ -93,7 +93,7 @@ func (c *ClientInfo) ResponseStatus() int {
 	if response == nil {
 		return 0
 	}
-	return response.status
+	return response.StatusCode
 }
 
 // ResponseProto is the HTTP protocol version reported on the
@@ -103,7 +103,7 @@ func (c *ClientInfo) ResponseProto() string {
 	if response == nil {
 		return ""
 	}
-	return response.proto
+	return response.Proto
 }
 
 // TLS is the TLS connection state for the response, or nil if the
@@ -113,7 +113,7 @@ func (c *ClientInfo) TLS() *tls.ConnectionState {
 	if response == nil {
 		return nil
 	}
-	return response.tls
+	return response.TLS
 }
 
 func (c *ClientInfo) loadRequest() *http.Request {
@@ -123,7 +123,7 @@ func (c *ClientInfo) loadRequest() *http.Request {
 	return c.request.Load()
 }
 
-func (c *ClientInfo) loadResponse() *clientResponseInfo {
+func (c *ClientInfo) loadResponse() *http.Response {
 	if c == nil {
 		return nil
 	}
@@ -362,14 +362,6 @@ func newUnknownMethodHandler(server *connect.Server, opts *options) http.Handler
 	})
 }
 
-// clientResponseInfo is the subset of the [http.Response] that [ClientInfo]
-// exposes.
-type clientResponseInfo struct {
-	status int
-	proto  string
-	tls    *tls.ConnectionState
-}
-
 type transport struct {
 	httpClient HTTPClient
 	options    options
@@ -413,11 +405,7 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 		clientInfo.request.Store(request)
 	})
 	conn.onResponseReceive(func(response *http.Response) {
-		clientInfo.response.Store(&clientResponseInfo{
-			status: response.StatusCode,
-			proto:  response.Proto,
-			tls:    response.TLS,
-		})
+		clientInfo.response.Store(response)
 	})
 	if spec.StreamType == connect.StreamTypeUnary {
 		return &connectUnaryClientStream{conn: conn, info: info, protoClient: protocolClient, streamType: spec.StreamType}, nil

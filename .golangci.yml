@@ -99,6 +99,10 @@ linters:
       - linters:
           - bodyclose
         source: blockUntilResponseReady
+      # ClientInfo reads response metadata. The stream closes the body.
+      - linters:
+          - bodyclose
+        source: loadResponse
       # We need to init a global in-mem HTTP server for testable examples.
       - linters:
           - gochecknoglobals
