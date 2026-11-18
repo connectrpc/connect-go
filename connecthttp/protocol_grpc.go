@@ -330,21 +330,10 @@ func (g *grpcClient) NewConn(
 				stats:        receiveStats,
 			},
 		},
-		responseHeader:  make(http.Header),
-		responseTrailer: make(http.Header),
 	}
 	duplexCall.SetValidateResponse(conn.validateResponse)
 	if g.web {
 		conn.unmarshaler.web = true
-		conn.readTrailers = func(unmarshaler *grpcUnmarshaler, _ *duplexHTTPCall) http.Header {
-			return unmarshaler.WebTrailer()
-		}
-	} else {
-		conn.readTrailers = func(_ *grpcUnmarshaler, call *duplexHTTPCall) http.Header {
-			// To access HTTP trailers, we need to read the body to EOF.
-			_, _ = discard(call)
-			return call.ResponseTrailer()
-		}
 	}
 	return wrapClientConnWithCodedErrors(conn)
 }
@@ -361,7 +350,6 @@ type grpcClientConn struct {
 	unmarshaler      grpcUnmarshaler
 	responseHeader   http.Header
 	responseTrailer  http.Header
-	readTrailers     func(*grpcUnmarshaler, *duplexHTTPCall) http.Header
 }
 
 func (cc *grpcClientConn) Spec() connect.Spec {
@@ -403,10 +391,11 @@ func (cc *grpcClientConn) Receive(msg any) error {
 		// the client. Trailers already received at EOF are kept.
 		_ = cc.duplexCall.CloseRead()
 	}
-	mergeHeaders(
-		cc.responseTrailer,
-		cc.readTrailers(&cc.unmarshaler, cc.duplexCall),
-	)
+	if trailer := cc.readTrailers(); cc.responseTrailer == nil {
+		cc.responseTrailer = trailer
+	} else {
+		mergeHeaders(cc.responseTrailer, trailer)
+	}
 	if errors.Is(err, io.EOF) && cc.unmarshaler.bytesRead == 0 && len(cc.responseTrailer) == 0 {
 		// No body and no trailers means a trailers-only response.
 		// Note: per the specification, only the HTTP status code and Content-Type
@@ -414,6 +403,9 @@ func (cc *grpcClientConn) Receive(msg any) error {
 		// metadata. But it would be unsafe to mutate cc.responseHeader at this
 		// point. So we'll leave cc.responseHeader alone but copy the relevant
 		// metadata into cc.responseTrailer.
+		if cc.responseTrailer == nil {
+			cc.responseTrailer = make(http.Header, len(cc.responseHeader))
+		}
 		mergeHeaders(cc.responseTrailer, cc.responseHeader)
 		delHeaderCanonical(cc.responseTrailer, headerContentType)
 
@@ -476,19 +468,34 @@ func (cc *grpcClientConn) onResponseReceive(fn func(*http.Response)) {
 func (cc *grpcClientConn) validateResponse(response *http.Response) *connect.Error {
 	if err := grpcValidateResponse(
 		response,
-		cc.responseHeader,
 		cc.compressionPools,
 		cc.unmarshaler.web,
 		cc.marshaler.codec.Name(),
 	); err != nil {
 		return err
 	}
+	cc.responseHeader = response.Header
 	compression := getHeaderCanonical(response.Header, grpcHeaderCompression)
 	cc.unmarshaler.compressionPool = cc.compressionPools.Get(compression)
 	if cc.info != nil {
 		cc.info.ResponseEncoding = encodingOrIdentity(compression)
 	}
 	return nil
+}
+
+func (cc *grpcClientConn) readTrailers() http.Header {
+	if cc.unmarshaler.web {
+		return cc.unmarshaler.WebTrailer()
+	}
+	trailer := cc.duplexCall.response.Trailer
+	for key, values := range trailer {
+		if len(values) == 0 {
+			// net/http adds the trailers announced in the headers without
+			// values, so drop those the server didn't send.
+			delete(trailer, key)
+		}
+	}
+	return trailer
 }
 
 type grpcHandlerConn struct {
@@ -699,7 +706,6 @@ func (u *grpcUnmarshaler) WebTrailer() http.Header {
 
 func grpcValidateResponse(
 	response *http.Response,
-	header http.Header,
 	availableCompressors readOnlyCompressionPools,
 	web bool,
 	codecName string,
@@ -727,8 +733,6 @@ func grpcValidateResponse(
 			availableCompressors.CommaSeparatedNames(),
 		)
 	}
-	// The response is valid, so we should expose the headers.
-	mergeHeaders(header, response.Header)
 	return nil
 }
 
