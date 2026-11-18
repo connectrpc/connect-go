@@ -45,6 +45,7 @@ type HTTPClient interface {
 // ClientInfo is the HTTP metadata for a client RPC, carried on
 // [connect.CallInfo.TransportInfo]. Its methods are safe for concurrent use.
 // They return zero values until the request is sent or the response arrives.
+// For an RPC over WebSocket, the request and response are the handshake's.
 type ClientInfo struct {
 	request  atomic.Pointer[http.Request]
 	response atomic.Pointer[clientResponseInfo]
@@ -130,7 +131,8 @@ func (c *ClientInfo) loadResponse() *clientResponseInfo {
 }
 
 // ServerInfo is the HTTP metadata for a server RPC, carried on
-// [connect.CallInfo.TransportInfo].
+// [connect.CallInfo.TransportInfo]. For an RPC over WebSocket, the request is
+// the handshake's.
 type ServerInfo struct {
 	request *http.Request
 }
@@ -223,25 +225,23 @@ func NewTransport(httpClient HTTPClient, baseURL string, options ...Option) conn
 		baseURLErr: err,
 		options:    opts,
 	}
-	if opts.websocketSelector == nil {
+	if opts.websocketSelector == nil && len(opts.conditional) == 0 {
 		return httpTransport
 	}
-	clientOptions := opts.websocketClientOpts(httpClient)
-	if opts.websocketFallbackOnErr {
-		clientOptions = append(clientOptions, wstransport.WithEagerDial())
-	}
-	websocketTransport, wsErr := wstransport.NewTransport(baseURL, clientOptions...)
-	if wsErr != nil {
+	websocketClient := websocketHTTPClient(httpClient)
+	base := newWebSocketRoute(&opts, websocketClient, baseURL)
+	if base.err != nil {
 		// The URL or codec set is unusable for WebSocket. Reporting it from
 		// every RPC beats returning an HTTP-only transport that silently
 		// ignores the selector the caller supplied.
-		return &brokenTransport{err: wsErr}
+		return &brokenTransport{err: base.err}
 	}
 	return &hybridTransport{
-		websocket:       websocketTransport,
-		fallback:        httpTransport,
-		selector:        opts.websocketSelector,
-		fallbackOnError: opts.websocketFallbackOnErr,
+		fallback:   httpTransport,
+		options:    &opts,
+		httpClient: websocketClient,
+		baseURL:    baseURL,
+		base:       base,
 	}
 }
 
@@ -275,22 +275,18 @@ func defaultCompressors() []connect.Compressor {
 // plus a per-service catch-all that routes RPC requests for unknown methods
 // through [connect.Server.Call]. Non-RPC requests get a plain 404, and
 // requests for unknown services fall through to mux.
+//
+// Every route also serves Connect over WebSocket unless [WithoutWebSocket] is
+// given, because which transport carries an RPC is the client's choice. A
+// WebSocket client sends its request headers in a message after the
+// handshake, so a header that this deployment's own proxies set, and that a
+// client must not be able to forge, belongs on the deny list that
+// [WithWebSocketInfrastructureHeaders] configures; identity headers added by
+// an authenticating proxy are the usual example.
 func Mount(mux ServeMux, server *connect.Server, options ...Option) {
 	opts := defaultOptions()
 	for _, opt := range options {
 		opt.apply(&opts)
-	}
-	target := mux
-	if !opts.websocketDisabled {
-		// Both transports on every path, because which one carries an RPC is
-		// the client's choice: a server serving only HTTP would reject a
-		// client that upgraded. WithWebSocketPrefix splits them instead.
-		target = &websocketMux{
-			mux:     mux,
-			server:  server,
-			options: opts.websocketServerOpts(),
-			prefix:  opts.websocketPrefix,
-		}
 	}
 	services := make(map[string]struct{})
 	for spec := range server.Specs() {
@@ -298,14 +294,16 @@ func Mount(mux ServeMux, server *connect.Server, options ...Option) {
 		if spec.StreamType == connect.StreamTypeBidi {
 			procedureHandler = requireHTTP2(procedureHandler)
 		}
-		target.Handle(spec.Procedure, procedureHandler)
+		mux.Handle(spec.Procedure, withWebSocket(
+			server, procedureHandler, opts.forSpec(spec), wstransport.WithProcedure(spec.Procedure),
+		))
 		// "/package.Service/Method" -> subtree pattern "/package.Service/".
 		if idx := strings.LastIndexByte(spec.Procedure, '/'); idx > 0 {
 			services[spec.Procedure[:idx+1]] = struct{}{}
 		}
 	}
 	for service := range services {
-		target.Handle(service, newUnknownMethodHandler(server, &opts))
+		mux.Handle(service, withWebSocket(server, newUnknownMethodHandler(server, &opts), &opts))
 	}
 }
 
@@ -472,7 +470,6 @@ type options struct {
 	// Server-only ([NewTransport] ignores these).
 	requireConnectProtocolHeader bool
 	websocketDisabled            bool
-	websocketPrefix              string
 
 	// Client-only, and the switch that turns WebSocket on there: a nil
 	// selector means every RPC goes over HTTP.
@@ -520,6 +517,8 @@ func (o *options) clone() *options {
 	opts := *o
 	opts.codecs = slices.Clone(o.codecs)
 	opts.compressors = slices.Clone(o.compressors)
+	opts.websocketClientOptions = slices.Clone(o.websocketClientOptions)
+	opts.websocketServerOptions = slices.Clone(o.websocketServerOptions)
 	opts.conditional = nil
 	return &opts
 }

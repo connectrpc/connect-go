@@ -91,8 +91,9 @@ func main() {
 	// other request by the connecthttp handler underneath. The client picks
 	// which transport carries each RPC; the server accepts either.
 	//
-	// WebSocket is on by default. connecthttp.WithoutWebSocket() turns it off,
-	// and connecthttp.WithWebSocketPrefix("/ws") moves it to its own paths.
+	// WebSocket is on by default, and connecthttp.WithoutWebSocket() turns it
+	// off. To give WebSocket its own paths, mount a second mux under them and
+	// give WebSocket clients that base URL.
 	connecthttp.Mount(mux, server)
 
 	protocols := new(http.Protocols)

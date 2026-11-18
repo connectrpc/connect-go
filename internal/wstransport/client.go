@@ -20,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,18 +56,30 @@ func NewTransport(baseURL string, options ...ClientOption) (connect.Transport, e
 	default:
 		return nil, connect.Errorf(connect.CodeUnavailable, "unsupported URL scheme %q", parsed.Scheme)
 	}
-	codecs, codecErr := newCodecPair(opts.codecs)
-	if codecErr != nil {
-		return nil, codecErr
-	}
-	if _, ok := newCodecRegistry(opts.codecs).get(opts.sendCodec); !ok {
+	codecs := newCodecRegistry(opts.codecs)
+	sendCodec, ok := codecs.get(opts.sendCodec)
+	if !ok {
 		return nil, connect.Errorf(connect.CodeUnknown, "unknown codec %q", opts.sendCodec)
+	}
+	if !validCodecName(opts.sendCodec) {
+		return nil, connect.Errorf(
+			connect.CodeUnknown,
+			"send codec %q has no WebSocket subprotocol; §4.3 requires a lower-case HTTP token",
+			opts.sendCodec,
+		)
+	}
+	offered := []string{subprotocolForCodec(opts.sendCodec)}
+	for _, codec := range carriedCodecs(opts.codecs) {
+		if codec.Name() != opts.sendCodec {
+			offered = append(offered, subprotocolForCodec(codec.Name()))
+		}
 	}
 	return &clientTransport{
 		baseURL:    parsed,
 		httpClient: opts.httpClient,
 		codecs:     codecs,
-		bodyIsText: opts.sendCodec == connect.CodecNameJSON,
+		sendCodec:  sendCodec,
+		offered:    offered,
 		opts:       &opts,
 	}, nil
 }
@@ -74,12 +87,18 @@ func NewTransport(baseURL string, options ...ClientOption) (connect.Transport, e
 type clientTransport struct {
 	baseURL    *url.URL
 	httpClient *http.Client
-	// Both codecs are live on every connection: the frame type selects between
-	// them per message, so a peer may answer in either. bodyIsText is the
-	// negotiated default for what this client sends.
-	codecs     codecPair
-	bodyIsText bool
-	opts       *options
+	codecs     registry[connect.Codec]
+	sendCodec  connect.Codec
+	// offered lists the tokens to offer, most preferred first: the send
+	// codec's, then every other registered codec's in registration order.
+	offered []string
+	opts    *options
+}
+
+// offeredSubprotocols returns a copy of the tokens to offer, since the dial
+// options and the call each keep the slice.
+func (t *clientTransport) offeredSubprotocols() []string {
+	return slices.Clone(t.offered)
 }
 
 // encodeTimeout renders the context's deadline for the connect-timeout-ms
@@ -108,80 +127,38 @@ func encodeTimeout(ctx context.Context) (string, bool) {
 
 func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec) (connect.ClientStream, error) {
 	info, _ := connect.CallInfoForClientContext(ctx)
-
-	// The caller's metadata travels in the M message and nowhere else. Copying
-	// it onto the handshake as well would put the same keys on two channels
-	// where the handshake wins, so a client's own M would be shadowed by its
-	// own headers — redundant at best, and confusing the moment the two
-	// disagree. The handshake's headers are for what the connection carries,
-	// not for what the RPC says.
-	requestMeta := make(http.Header, 8)
-	if info != nil {
-		for key, values := range info.RequestHeader().All() {
-			requestMeta[http.CanonicalHeaderKey(key)] = append([]string(nil), values...)
-		}
-	}
-	dialURL := *t.baseURL
-	// The prefix goes on the WebSocket half only: the HTTP fallback keeps the
-	// bare procedure paths, which is what makes the two distinguishable to a
-	// load balancer. See WithPathPrefix.
-	dialURL.Path = strings.TrimSuffix(dialURL.Path, "/") + t.opts.pathPrefix + spec.Procedure
-	if encoded, ok := encodeTimeout(ctx); ok {
-		query := dialURL.Query()
-		query.Set(wsQueryTimeoutMs, encoded)
-		dialURL.RawQuery = query.Encode()
-	}
-
-	readLimit := messageReadLimit(t.opts.readMaxBytes)
-	drain := newDrainLimiter(readLimit)
-	call := &wsClientCall{
-		ctx:               ctx,
-		drain:             drain,
-		keepAliveInterval: t.opts.keepAliveInterval,
-		keepAliveTimeout:  t.opts.keepAliveTimeout,
-		dialOptions: &websocket.DialOptions{
-			HTTPClient: withDrainLimiter(t.httpClient, drain),
-			// The subprotocol names both the transport and the codec, so it
-			// has to follow WithSendCodec: offering the wrong token would have
-			// the server decode with a codec the client is not encoding with.
-			Subprotocols: []string{subprotocolForCodec(t.opts.sendCodec)},
-			// Offer permessage-deflate with a per-message context. A server
-			// that declines leaves messages uncompressed; one that requires
-			// no-context-takeover is already satisfied by this offer.
-			CompressionMode:      t.opts.compressionMode(),
-			CompressionThreshold: t.opts.compressionThreshold(),
-		},
-		url:              &dialURL,
-		subprotocol:      subprotocolForCodec(t.opts.sendCodec),
-		handshakeTimeout: t.opts.handshakeTimeout,
-		dialDone:         make(chan struct{}),
-		readLimit:        readLimit,
-	}
+	dialURL := t.dialURL(ctx, spec)
+	call := t.newCall(ctx, dialURL)
 	conn := &websocketClientConn{
-		call:   call,
-		codecs: t.codecs,
+		call: call,
 		marshaler: messageWriter{
 			// No compression here: permessage-deflate compresses whole messages
 			// below this layer.
 			ctx:          ctx,
 			sender:       call,
-			codecs:       t.codecs,
-			bodyIsText:   t.bodyIsText,
+			codec:        t.sendCodec,
+			bodyIsText:   codecIsText(t.sendCodec),
 			sendMaxBytes: t.opts.sendMaxBytes,
 		},
 		unmarshaler: websocketClientUnmarshaler{
+			frameDecoder: frameDecoder{
+				fromServer:   true,
+				codec:        t.sendCodec,
+				bodyIsText:   codecIsText(t.sendCodec),
+				readMaxBytes: t.opts.readMaxBytes,
+			},
 			call:            call,
-			codecs:          t.codecs,
-			bodyIsText:      t.opts.sendCodec == connect.CodecNameJSON,
-			readMaxBytes:    t.opts.readMaxBytes,
 			spec:            spec,
 			onProtocolError: t.opts.onClientProtocolError,
 		},
-		requestMeta:     requestMeta,
+		callInfo:        info,
 		responseHeader:  make(http.Header),
 		responseTrailer: make(http.Header),
 	}
 	if info != nil {
+		info.Spec = spec
+		conn.marshaler.stats = &info.SendStats
+		conn.unmarshaler.stats = &info.ReceiveStats
 		info.PeerAddr = dialURL.Host
 		info.Protocol = ProtocolConnectWebSocket
 		info.Codec = t.opts.sendCodec
@@ -205,11 +182,61 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 	}, nil
 }
 
+// dialURL is where spec's procedure is served, carrying ctx's deadline.
+func (t *clientTransport) dialURL(ctx context.Context, spec connect.Spec) *url.URL {
+	dialURL := *t.baseURL
+	dialURL.Path = strings.TrimSuffix(dialURL.Path, "/") + spec.Procedure
+	if encoded, ok := encodeTimeout(ctx); ok {
+		query := dialURL.Query()
+		query.Set(wsQueryTimeoutMs, encoded)
+		dialURL.RawQuery = query.Encode()
+	}
+	return &dialURL
+}
+
+// newCall prepares, but does not dial, the connection for one RPC.
+func (t *clientTransport) newCall(ctx context.Context, dialURL *url.URL) *wsClientCall {
+	readLimit := messageReadLimit(t.opts.readMaxBytes)
+	drain := newDrainLimiter(readLimit)
+	offered := t.offeredSubprotocols()
+	beat := &heartbeat{}
+	return &wsClientCall{
+		heartbeat:         beat,
+		ctx:               ctx,
+		drain:             drain,
+		keepAliveInterval: t.opts.keepAliveInterval,
+		keepAliveTimeout:  t.opts.keepAliveTimeout,
+		dialOptions: &websocket.DialOptions{
+			HTTPClient: withDrainLimiter(t.httpClient, drain),
+			// §4.6: a server's own PINGs and PONGs are frames from it too.
+			OnPingReceived: beat.onPing,
+			OnPongReceived: beat.onPong,
+			// §4.3: the preferred codec first, then any other this client can
+			// encode. The server picks one and the client follows its choice.
+			Subprotocols: offered,
+			// Offer permessage-deflate with a per-message context. A server
+			// that declines leaves messages uncompressed; one that requires
+			// no-context-takeover is already satisfied by this offer.
+			CompressionMode:      t.opts.compressionMode(),
+			CompressionThreshold: t.opts.compressionThreshold(),
+		},
+		url:              dialURL,
+		offered:          offered,
+		codecs:           t.codecs,
+		codec:            t.sendCodec,
+		bodyIsText:       codecIsText(t.sendCodec),
+		handshakeTimeout: t.opts.handshakeTimeout,
+		readLimit:        readLimit,
+	}
+}
+
 // clientStream adapts [websocketClientConn] to [connect.ClientStream].
 type clientStream struct {
 	conn           *websocketClientConn
 	info           *connect.CallInfo
 	singleResponse bool
+	// received marks the one response a single-response call has read.
+	received bool
 	// Close may run concurrently with Receive by contract, and both publish.
 	// A sync.Once rather than a flag: the ordering that makes a plain bool
 	// safe today is incidental — Close publishes before touching the conn and
@@ -243,27 +270,43 @@ func (s *clientStream) Receive(msg any) error {
 	if err != nil {
 		// Reading to completion is what makes response metadata available.
 		s.publishMetadata()
+		// §6.2: a unary or client-streaming call returns exactly one message,
+		// so a successful end with none is a cardinality error, as over HTTP.
+		if s.singleResponse && !s.received && errors.Is(err, io.EOF) {
+			return connect.Errorf(connect.CodeUnimplemented, "unary stream has zero messages")
+		}
 		return err
 	}
 	// Leading metadata has arrived by now, and connecthttp makes it readable at
 	// exactly this point: after the first Receive, not before.
 	s.publishHeadersOnce.Do(s.publishHeaders)
 	if s.singleResponse {
+		s.received = true
 		// Such a caller receives exactly once, so nothing would ever read the
 		// end-of-stream message — and the trailers it carries would be lost. A
-		// server-streaming caller reaches it by reading to io.EOF.
-		endErr := s.conn.Receive(nil)
+		// server-streaming caller reaches it by reading to io.EOF. A second
+		// message where the S belongs is decoded into msg only to be refused.
+		endErr := s.conn.Receive(msg)
 		s.publishMetadata()
-		if endErr != nil && !errors.Is(endErr, io.EOF) {
+		if endErr == nil {
+			return connect.Errorf(connect.CodeUnimplemented, "unary stream has multiple messages")
+		}
+		if !errors.Is(endErr, io.EOF) {
 			return endErr
 		}
 	}
 	return nil
 }
 
+// Close ends the stream without sending C: a client that closes before S
+// without sending C cancels the RPC (§8), and one that has S needs no C. A
+// stream that never dialed is closed without dialing.
 func (s *clientStream) Close() error {
+	dialed := s.conn.call.preventDial()
 	s.publishMetadata()
-	_ = s.conn.CloseRequest()
+	if !dialed {
+		return nil
+	}
 	return s.conn.CloseResponse()
 }
 

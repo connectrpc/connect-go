@@ -16,13 +16,14 @@ package wstransport
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/internal/connectwire"
+	"connectrpc.com/connect/v2/connectproto"
 	"github.com/coder/websocket"
 )
 
@@ -35,13 +36,9 @@ const hijackerHelp = "Connect over WebSocket requires the HTTP listener to suppo
 // handshake. Every field is resolved before the 101 response, because HTTP
 // headers cannot be added once the connection is upgraded.
 type SessionInfo struct {
-	// Codec is the codec negotiated through the WebSocket subprotocol. It is
-	// the default for bodies this server sends; an incoming body is decoded
-	// with whichever codec its frame type names.
+	// Codec is the codec negotiated through the WebSocket subprotocol. Bodies
+	// in both directions use it, in the frame type it calls for (§6.1).
 	Codec connect.Codec
-	// Codecs are both codecs the frame type selects between, since a client
-	// may send either on any connection.
-	Codecs codecPair
 	// Subprotocol is the token echoed to the client in Sec-WebSocket-Protocol.
 	Subprotocol string
 	// PeerAddr is the client's address, for [connect.CallInfo].
@@ -71,8 +68,19 @@ type SessionInfo struct {
 	// KeepAliveTimeout is how long the client may stay silent; see
 	// [WithKeepAliveTimeout].
 	KeepAliveTimeout time.Duration
+	// HandshakeTimeout bounds the wait for the client's opening M message;
+	// see [WithHandshakeTimeout]. Zero means no bound.
+	HandshakeTimeout time.Duration
+	// Procedure is the procedure this connection calls; see [WithProcedure].
+	// Empty means the request path.
+	Procedure string
+	// TransportInfo is what [connect.CallInfo.TransportInfo] carries; see
+	// [WithTransportInfo].
+	TransportInfo any
 	// drain caps what the closing handshake reads; see drainLimiter.
 	drain *drainLimiter
+	// heartbeat carries the peer's PINGs and PONGs to the session's reader.
+	heartbeat *heartbeat
 }
 
 // Session serves RPCs on an upgraded WebSocket connection. Serve reads
@@ -112,27 +120,33 @@ func Upgrade(server *connect.Server, next http.Handler, options ...ServerOption)
 	if serve == nil {
 		serve = &session{}
 	}
-	// The error is not fatal here, unlike on the client: a handler with
-	// neither codec negotiates nothing, so every upgrade is refused with a 415
-	// naming the empty set rather than failing at some later point.
-	pair, _ := newCodecPair(opts.codecs)
+	// §4.3: a server MUST support JSON, so a client that offers it can always
+	// connect, whatever else the codecs were narrowed to.
+	if _, ok := newCodecRegistry(opts.codecs).get(connect.CodecNameJSON); !ok {
+		opts.codecs = append(slices.Clone(opts.codecs), connectproto.NewJSONCodec())
+	}
 	return &upgradeHandler{
 		server:    server,
 		session:   serve,
 		next:      next,
 		codecs:    newCodecRegistry(opts.codecs),
-		codecPair: pair,
+		carried:   carriedCodecs(opts.codecs),
 		opts:      &opts,
+		shutdowns: newShutdownTracker(),
 	}
 }
 
 type upgradeHandler struct {
-	server    *connect.Server
-	session   Session
-	next      http.Handler
-	codecs    registry[connect.Codec]
-	codecPair codecPair
-	opts      *options
+	server  *connect.Server
+	session Session
+	next    http.Handler
+	codecs  registry[connect.Codec]
+	// carried is the registered codecs a token can name, in registration
+	// order, for the 400 body.
+	carried []connect.Codec
+	opts    *options
+	// shutdowns ends this handler's sessions when their server shuts down.
+	shutdowns *shutdownTracker
 }
 
 func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
@@ -157,49 +171,85 @@ func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *
 		h.next.ServeHTTP(responseWriter, request)
 		return
 	}
-	// Checked first: a listener that cannot hijack is a deployment fault, and
-	// reporting it as a client error would send the operator down the wrong path.
-	if _, hijackable := responseWriter.(http.Hijacker); !hijackable {
-		http.Error(responseWriter, hijackerHelp, http.StatusInternalServerError)
+	subprotocol, codecName, admitted := h.admit(responseWriter, request)
+	if !admitted {
 		return
-	}
-	// A custom policy is applied here and Accept is told to skip its own, so
-	// that WithCheckOrigin fully replaces the check rather than adding to it.
-	// Without one, Accept's same-origin check stands.
-	if h.opts.checkOrigin != nil && !h.opts.checkOrigin(request) {
-		http.Error(responseWriter, "origin not allowed", http.StatusForbidden)
-		return
-	}
-	subprotocol, codecName, outcome := negotiateSubprotocol(
-		requestedSubprotocols(request),
-		h.servesCodec,
-	)
-	switch outcome {
-	case negotiationUnrecognized:
-		http.Error(
-			responseWriter,
-			"no supported WebSocket subprotocol in Sec-WebSocket-Protocol",
-			http.StatusBadRequest,
-		)
-		return
-	case negotiationUnsupportedCodec:
-		// A browser cannot read a status code, and this client is speaking the
-		// protocol — so the upgrade completes and the verdict travels in band.
-		h.rejectInBand(responseWriter, request, subprotocol, errorf(
-			connect.CodeUnimplemented,
-			"no message encoding in common: this server speaks %v",
-			h.servedCodecNames(),
-		))
-		return
-	case negotiationOK:
 	}
 	codec, _ := h.codecs.get(codecName)
 	drain := newDrainLimiter(messageReadLimit(h.opts.readMaxBytes))
-	// Accept echoes Sec-WebSocket-Protocol itself from the list it is given.
-	conn, upgradeErr := websocket.Accept(&drainResponseWriter{ResponseWriter: responseWriter, limiter: drain}, request, &websocket.AcceptOptions{
+	beat := &heartbeat{}
+	conn, upgradeErr := websocket.Accept(
+		&drainResponseWriter{ResponseWriter: responseWriter, limiter: drain},
+		request,
+		h.acceptOptions(subprotocol, beat),
+	)
+	if upgradeErr != nil {
+		// Accept has already written the error response.
+		return
+	}
+	info := h.sessionInfo(request, codec, subprotocol, drain, beat)
+	ctx, untrack := h.shutdowns.track(request.Context())
+	defer untrack()
+	if err := h.session.Serve(ctx, h.server, conn, info); err != nil {
+		h.opts.logger.Error(
+			"websocket session ended with error",
+			"procedure", info.Procedure,
+			"peer", request.RemoteAddr,
+			"error", err,
+		)
+	}
+}
+
+// admit decides whether to complete an upgrade, and picks the subprotocol and
+// codec when it does. A refusal has already been written to responseWriter.
+func (h *upgradeHandler) admit(
+	responseWriter http.ResponseWriter,
+	request *http.Request,
+) (subprotocol, codecName string, admitted bool) {
+	// Checked first: a listener that cannot hijack is a deployment fault, and
+	// reporting it as a client error would send the operator down the wrong path.
+	if !canHijack(responseWriter) {
+		http.Error(responseWriter, hijackerHelp, http.StatusInternalServerError)
+		return "", "", false
+	}
+	// §4.4 before §4.3, so a cross-origin handshake is refused as one whatever
+	// it offered. Accept is told to skip its own check, which would run too
+	// late; WithCheckOrigin replaces this one rather than adding to it.
+	checkOrigin := h.opts.checkOrigin
+	if checkOrigin == nil {
+		checkOrigin = isSameOrigin
+	}
+	if !checkOrigin(request) {
+		http.Error(responseWriter, "origin not allowed", http.StatusForbidden)
+		return "", "", false
+	}
+	// §4.3: an upgrade that offers no token this server can serve is refused
+	// before the handshake completes, whether or not it offered a Connect token.
+	subprotocol, codecName, negotiated := negotiateSubprotocol(
+		requestedSubprotocols(request),
+		h.servesCodec,
+	)
+	if !negotiated {
+		http.Error(
+			responseWriter,
+			"no supported Connect subprotocol in Sec-WebSocket-Protocol; this server speaks "+
+				strings.Join(h.servedSubprotocols(), ", "),
+			http.StatusBadRequest,
+		)
+		return "", "", false
+	}
+	return subprotocol, codecName, true
+}
+
+func (h *upgradeHandler) acceptOptions(subprotocol string, beat *heartbeat) *websocket.AcceptOptions {
+	return &websocket.AcceptOptions{
+		// Accept echoes Sec-WebSocket-Protocol itself from the list it is given.
 		Subprotocols: []string{subprotocol},
-		// Only when WithCheckOrigin supplied a policy, which has already run.
-		InsecureSkipVerify: h.opts.checkOrigin != nil,
+		// The origin policy has already run.
+		InsecureSkipVerify: true,
+		// §4.6: a peer's own PINGs and PONGs are frames from it too.
+		OnPingReceived: beat.onPing,
+		OnPongReceived: beat.onPong,
 		// Compression is the transport's job, not the framing layer's: browsers
 		// get permessage-deflate for free and cannot negotiate a Connect-level
 		// encoding on an upgrade request.
@@ -211,14 +261,29 @@ func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *
 		// plain permessage-deflate still gets a per-message context.
 		CompressionMode:      h.opts.compressionMode(),
 		CompressionThreshold: h.opts.compressionThreshold(),
-	})
-	if upgradeErr != nil {
-		// Accept has already written the error response.
-		return
 	}
-	info := SessionInfo{
+}
+
+func (h *upgradeHandler) sessionInfo(
+	request *http.Request,
+	codec connect.Codec,
+	subprotocol string,
+	drain *drainLimiter,
+	beat *heartbeat,
+) SessionInfo {
+	procedure := h.opts.procedure
+	if procedure == "" {
+		procedure = request.URL.Path
+	}
+	var transportInfo any
+	if h.opts.transportInfo != nil {
+		transportInfo = h.opts.transportInfo(request)
+	}
+	return SessionInfo{
+		Procedure:             procedure,
+		TransportInfo:         transportInfo,
+		HandshakeTimeout:      h.opts.handshakeTimeout,
 		Codec:                 codec,
-		Codecs:                h.codecPair,
 		Subprotocol:           subprotocol,
 		PeerAddr:              request.RemoteAddr,
 		Request:               request,
@@ -228,16 +293,39 @@ func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *
 		InfrastructureHeaders: h.opts.infrastructureHeaders,
 		OnProtocolError:       h.opts.onProtocolError,
 		drain:                 drain,
+		heartbeat:             beat,
 		KeepAliveInterval:     h.opts.keepAliveInterval,
 		KeepAliveTimeout:      h.opts.keepAliveTimeout,
 	}
-	if err := h.session.Serve(request.Context(), h.server, conn, info); err != nil {
-		h.opts.logger.Error(
-			"websocket session ended with error",
-			"procedure", request.URL.Path,
-			"peer", request.RemoteAddr,
-			"error", err,
-		)
+}
+
+// isSameOrigin is the default origin policy (§4.4): a request without Origin is
+// not from a browser, and one with it must name the request's own host and
+// port, compared case-insensitively and exactly as written.
+func isSameOrigin(request *http.Request) bool {
+	origin := request.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return parsed.Host != "" && strings.EqualFold(parsed.Host, request.Host)
+}
+
+// canHijack reports whether responseWriter, or one it wraps, can hijack the
+// connection, which is how [http.ResponseController] finds a Hijacker too.
+func canHijack(responseWriter http.ResponseWriter) bool {
+	for {
+		if _, ok := responseWriter.(http.Hijacker); ok {
+			return true
+		}
+		unwrapper, ok := responseWriter.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return false
+		}
+		responseWriter = unwrapper.Unwrap()
 	}
 }
 
@@ -254,23 +342,19 @@ func IsUpgrade(request *http.Request) bool {
 }
 
 // servesCodec reports whether this server can encode and decode bodies with
-// the named codec. A server MAY be configured with only one of the two.
+// the named codec. JSON is always among them (§4.3).
 func (h *upgradeHandler) servesCodec(name string) bool {
 	_, ok := h.codecs.get(name)
 	return ok
 }
 
-// servedCodecNames lists the codecs a client could negotiate, for the 415
-// body. It is the registry filtered to the two this binding can carry, not
-// every codec the server happens to hold.
-func (h *upgradeHandler) servedCodecNames() []string {
-	var names []string
-	for _, name := range []string{connect.CodecNameProto, connect.CodecNameJSON} {
-		if h.servesCodec(name) {
-			names = append(names, name)
-		}
+// servedSubprotocols lists the tokens a client could offer, for the 400 body.
+func (h *upgradeHandler) servedSubprotocols() []string {
+	tokens := make([]string, 0, len(h.carried))
+	for _, codec := range h.carried {
+		tokens = append(tokens, subprotocolForCodec(codec.Name()))
 	}
-	return names
+	return tokens
 }
 
 // requestedSubprotocols parses the client's Sec-WebSocket-Protocol offer, in
@@ -287,103 +371,22 @@ func requestedSubprotocols(request *http.Request) []string {
 	return protocols
 }
 
-// rejectInBand completes the handshake and reports rpcErr as the RPC's own
-// outcome. §4.5 keeps this distinct from a handshake failure: a status code is
-// invisible to a browser script, and a client that offered a Connect token is
-// speaking this protocol — it needs to be told which codec to offer instead,
-// not that it dialed the wrong thing.
-//
-// M and S are JSON under both subprotocols, so a server can send them for a
-// codec it does not have.
-func (h *upgradeHandler) rejectInBand(
-	responseWriter http.ResponseWriter,
-	request *http.Request,
-	subprotocol string,
-	rpcErr *connect.Error,
-) {
-	drain := newDrainLimiter(messageReadLimit(h.opts.readMaxBytes))
-	conn, upgradeErr := websocket.Accept(&drainResponseWriter{ResponseWriter: responseWriter, limiter: drain}, request, &websocket.AcceptOptions{
-		Subprotocols:         []string{subprotocol},
-		InsecureSkipVerify:   h.opts.checkOrigin != nil,
-		CompressionMode:      h.opts.compressionMode(),
-		CompressionThreshold: h.opts.compressionThreshold(),
-	})
-	if upgradeErr != nil {
-		return // Accept has already written the error response.
-	}
-	ctx, cancel := context.WithTimeout(request.Context(), wsCloseWriteTimeout)
-	defer cancel()
-	if _, err := writeFrame(ctx, conn, true, []byte{markerMetadata, '[', ']'}); err != nil {
-		_ = conn.CloseNow()
-		return
-	}
-	payload, marshalErr := json.Marshal(&connectwire.EndStreamMessage{
-		Error: connectwire.NewWireError(rpcErr),
-	})
-	if marshalErr != nil {
-		_ = closeWithDrain(conn, drain, websocket.StatusInternalError, closeReason(marshalErr.Error()))
-		return
-	}
-	if _, err := writeFrame(ctx, conn, true, append([]byte{markerServerEndStream}, payload...)); err != nil {
-		_ = conn.CloseNow()
-		return
-	}
-	// The RPC reached a verdict, so the connection ends normally.
-	_ = closeWithDrain(conn, drain, websocket.StatusNormalClosure, "")
-}
-
-// negotiationOutcome distinguishes a client that is not speaking this protocol
-// from one that is but offered an encoding this server does not have. The
-// remedies differ, and so do the HTTP statuses.
-type negotiationOutcome int
-
-const (
-	negotiationOK negotiationOutcome = iota
-	negotiationUnrecognized
-	negotiationUnsupportedCodec
-)
-
-// codecForSubprotocol maps a token to the codec it selects, or "" if the token
-// is not one of this binding's.
-func codecForSubprotocol(name string) string {
-	switch name {
-	case wsSubprotocolProto:
-		return connect.CodecNameProto
-	case wsSubprotocolJSON:
-		return connect.CodecNameJSON
-	}
-	return ""
-}
-
 // negotiateSubprotocol picks the first offered subprotocol this server both
-// recognizes and can serve.
-//
-// A recognized token whose codec is missing is skipped rather than accepted,
-// so a client offering JSON first still reaches a Protobuf-only server through
-// its second choice.
+// recognizes and can serve, as RFC 6455 §4.1 negotiation does. Tokens it does
+// not recognize, and recognized tokens whose codec it lacks, are skipped, so a
+// client offering JSON first still reaches a Protobuf-only server through its
+// second choice.
 func negotiateSubprotocol(
 	requested []string,
 	supported func(string) bool,
-) (subprotocol, codecName string, outcome negotiationOutcome) {
-	recognized := ""
+) (subprotocol, codecName string, ok bool) {
 	for _, name := range requested {
 		codec := codecForSubprotocol(name)
-		if codec == "" {
-			continue
-		}
-		if recognized == "" {
-			recognized = name
-		}
-		if supported(codec) {
-			return name, codec, negotiationOK
+		if codec != "" && supported(codec) {
+			return name, codec, true
 		}
 	}
-	if recognized != "" {
-		// Echoed on the way to an in-band error: the client is speaking this
-		// protocol, so it gets a WebSocket and a verdict it can read.
-		return recognized, "", negotiationUnsupportedCodec
-	}
-	return "", "", negotiationUnrecognized
+	return "", "", false
 }
 
 func headerContainsToken(header http.Header, key, token string) bool {
@@ -397,7 +400,7 @@ func headerContainsToken(header http.Header, key, token string) bool {
 	return false
 }
 
-// registry is a name-keyed lookup for codecs and compressors.
+// registry is a name-keyed lookup for codecs.
 type registry[T interface{ Name() string }] struct {
 	byName map[string]T
 }

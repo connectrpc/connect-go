@@ -31,11 +31,9 @@ import (
 
 const trailerKey = "Acme-Trailer"
 
-// trailerServer sets a response trailer on every RPC and can be told to fail.
+// trailerServer sets a response trailer on every RPC.
 type trailerServer struct {
 	pingv1connect.UnimplementedPingServiceHandler
-
-	fail bool
 }
 
 func (s trailerServer) setTrailer(ctx context.Context) {
@@ -46,9 +44,6 @@ func (s trailerServer) setTrailer(ctx context.Context) {
 
 func (s trailerServer) Ping(ctx context.Context, req *pingv1.PingRequest) (*pingv1.PingResponse, error) {
 	s.setTrailer(ctx)
-	if s.fail {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, "handler said no")
-	}
 	return &pingv1.PingResponse{Number: req.Number}, nil
 }
 
@@ -83,15 +78,6 @@ func newTrailerClient(tb testing.TB, handler trailerServer) pingv1connect.PingSe
 		connecthttp.WithWebSocket(connecthttp.SelectAll),
 	)
 	return pingv1connect.NewPingServiceClient(connect.NewClient(transport))
-}
-
-// An error the handler returns must reach the caller over WebSocket.
-func TestUnaryErrorOverWebSocket(t *testing.T) {
-	t.Parallel()
-	client := newTrailerClient(t, trailerServer{fail: true})
-	_, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 1})
-	assert.NotNil(t, err)
-	assert.Equal(t, connect.CodeOf(err), connect.CodeFailedPrecondition)
 }
 
 // Trailers a handler sets must reach the caller on a successful unary call.

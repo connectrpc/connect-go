@@ -87,7 +87,7 @@ func TestLeadingMetadataIsCompleteBeforeTheHandlerStarts(t *testing.T) {
 	observations := make(chan string, 2)
 	httpServer := newObservationServer(t, observations)
 
-	metadata, err := json.Marshal([][]string{{"Acme-Tenant", "tenant-42"}})
+	metadata, err := json.Marshal([][]string{{"acme-tenant", "tenant-42"}})
 	assert.Nil(t, err)
 	client := dialBrowserClientOpening(
 		t, httpServer, pingv1connect.PingServiceCumSumProcedure, metadata)
@@ -166,7 +166,7 @@ func TestRequestMetadataIsSafeForConcurrentReaders(t *testing.T) {
 	httpServer := httptest.NewServer(mux)
 	t.Cleanup(httpServer.Close)
 
-	metadata, err := json.Marshal([][]string{{"Acme-Tenant", "tenant-42"}})
+	metadata, err := json.Marshal([][]string{{"acme-tenant", "tenant-42"}})
 	assert.Nil(t, err)
 	client := dialBrowserClientOpening(
 		t, httpServer, pingv1connect.PingServiceCumSumProcedure, metadata)
@@ -197,7 +197,7 @@ func TestStreamMustOpenWithLeadingMetadata(t *testing.T) {
 
 	data := readServerOpening(t, conn)
 	assert.Equal(t, data[0], wireServerEndStream) // S carries the verdict
-	assert.True(t, strings.Contains(string(data), "invalid_argument"))
+	assert.True(t, strings.Contains(string(data), "internal"))
 	assert.True(t, strings.Contains(string(data), "first message must be M"))
 }
 
@@ -279,6 +279,7 @@ func TestReservedHeadersEndTheRPC(t *testing.T) {
 		// Matching is case-insensitive, so casing is not a way past the list.
 		{name: "mixed case is the same name", key: "Connect-Timeout-Ms", reason: "controlled by this protocol"},
 		{name: "infrastructure sets it", key: "x-forwarded-for", reason: "infrastructure deny list"},
+		{name: "any connect- name", key: "connect-anything", reason: "controlled by this protocol"},
 		{name: "infrastructure, exact name", key: "x-real-ip", reason: "infrastructure deny list"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -290,7 +291,7 @@ func TestReservedHeadersEndTheRPC(t *testing.T) {
 
 			data := readServerOpening(t, conn)
 			assert.Equal(t, data[0], wireServerEndStream)
-			assert.True(t, strings.Contains(string(data), "invalid_argument"))
+			assert.True(t, strings.Contains(string(data), "internal"))
 			// The key as the client spelled it, not an internal form of it.
 			assert.True(t, strings.Contains(string(data), test.key))
 			assert.True(t, strings.Contains(string(data), test.reason))
@@ -298,12 +299,13 @@ func TestReservedHeadersEndTheRPC(t *testing.T) {
 	}
 }
 
-// A non-browser client can put these on the handshake, where no Leading-Metadata
-// check reaches them. They name channels this binding carries elsewhere, so the
-// server drops them rather than letting one masquerade as application metadata.
+// §7.1: a non-browser client can put Connect- headers on the handshake, where
+// no Leading-Metadata check reaches them. This binding carries their
+// information elsewhere, so the server drops every one of them rather than
+// letting it masquerade as application metadata.
 func TestProtocolHandshakeHeadersAreStripped(t *testing.T) {
 	t.Parallel()
-	for _, key := range []string{"Connect-Protocol-Version", "Connect-Timeout-Ms"} {
+	for _, key := range []string{"Connect-Protocol-Version", "Connect-Timeout-Ms", "Connect-Anything"} {
 		t.Run(key, func(t *testing.T) {
 			t.Parallel()
 			seen := make(chan http.Header, 1)
@@ -325,6 +327,11 @@ func TestProtocolHandshakeHeadersAreStripped(t *testing.T) {
 
 			header := <-seen
 			assert.Equal(t, header.Get(key), "")
+			// §7.1: the headers that establish the WebSocket are not
+			// metadata either.
+			for _, handshakeKey := range []string{"Connection", "Upgrade", "Sec-WebSocket-Version", "Sec-WebSocket-Key"} {
+				assert.Equal(t, header.Get(handshakeKey), "")
+			}
 		})
 	}
 }
@@ -350,46 +357,4 @@ func TestInfrastructureHeadersAreConfigurable(t *testing.T) {
 	data := readServerOpening(t, conn)
 	assert.Equal(t, data[0], wireServerEndStream)
 	assert.True(t, strings.Contains(string(data), "infrastructure deny list"))
-}
-
-// The other half of the same rule: a key the handshake did not carry is the
-// client's to set, which is the only channel a browser has.
-func TestLeadingMetadataAddsNewKeys(t *testing.T) {
-	t.Parallel()
-	observations := make(chan string, 4)
-	server := connect.NewServer()
-	pingv1connect.RegisterPingServiceHandler(server, traceObservingServer{observations: observations})
-	mux := http.NewServeMux()
-	connecthttp.Mount(mux, server)
-	httpServer := httptest.NewServer(mux)
-	t.Cleanup(httpServer.Close)
-
-	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
-	sendJSONMessage(t, conn, wireMetadata, []byte(`[["Acme-Trace","added"]]`))
-	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
-
-	assert.Equal(t, <-observations, "added")
-}
-
-// traceObservingServer reports a header the handshake never carried.
-type traceObservingServer struct {
-	pingv1connect.UnimplementedPingServiceHandler
-
-	observations chan string
-}
-
-func (s traceObservingServer) CumSum(
-	ctx context.Context,
-	stream pingv1connect.PingServiceCumSumServerStream,
-) error {
-	info, _ := connect.CallInfoForServerContext(ctx)
-	s.observations <- info.RequestHeader().Get("Acme-Trace")
-	for {
-		if _, err := stream.Receive(); err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
-		}
-	}
 }

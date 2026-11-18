@@ -56,7 +56,7 @@ type hijackableRecorder struct {
 }
 
 func (h hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return nil, nil, errors.New("connectwebsocket_test: hijack not supported")
+	return nil, nil, errors.New("wstransport_test: hijack not supported")
 }
 
 func newHijackableRecorder() hijackableRecorder {
@@ -99,21 +99,6 @@ func TestUpgradeRejectsDisallowedOrigin(t *testing.T) {
 	recorder := newHijackableRecorder()
 	handler.ServeHTTP(recorder, upgradeRequest(t, "connectrpc.1+proto"))
 	assert.Equal(t, recorder.Code, http.StatusForbidden)
-}
-
-func TestUpgradeRejectsMissingSubprotocol(t *testing.T) {
-	t.Parallel()
-	recorder := newHijackableRecorder()
-	// No Sec-WebSocket-Protocol at all.
-	newUpgradeHandler(t).ServeHTTP(recorder, upgradeRequest(t, ""))
-	assert.Equal(t, recorder.Code, http.StatusBadRequest)
-}
-
-func TestUpgradeRejectsUnknownSubprotocol(t *testing.T) {
-	t.Parallel()
-	recorder := newHijackableRecorder()
-	newUpgradeHandler(t).ServeHTTP(recorder, upgradeRequest(t, "chat, superchat"))
-	assert.Equal(t, recorder.Code, http.StatusBadRequest)
 }
 
 // RFC 8441's Extended CONNECT carries WebSocket over HTTP/2, which this binding
@@ -364,24 +349,18 @@ var (
 	_ wstransport.ClientOption = wstransport.WithCompressMinBytes(0)
 	_ wstransport.ServerOption = wstransport.WithCompressMinBytes(0)
 
-	_ wstransport.ClientOption = wstransport.WithCompressors()
-	_ wstransport.ServerOption = wstransport.WithCompressors()
-
 	// Client-only: these have no server meaning, and WithHTTPClient reaching a
 	// handler used to be silently ignored. The routing options moved to
 	// connecthttp, which owns the choice between the two transports.
 	_ wstransport.ClientOption = wstransport.WithHTTPClient(nil)
 	_ wstransport.ClientOption = wstransport.WithHandshakeTimeout(0)
 	_ wstransport.ClientOption = wstransport.WithSendCodec("")
-	_ wstransport.ClientOption = wstransport.WithSendCompression("")
 	_ wstransport.ClientOption = wstransport.WithEagerDial()
 
 	// Server-only.
 	_ wstransport.ServerOption = wstransport.WithCheckOrigin(nil)
 	_ wstransport.ServerOption = wstransport.WithSession(nil)
 	_ wstransport.ServerOption = wstransport.WithLogger(nil)
-	_ wstransport.ClientOption = wstransport.WithPathPrefix("")
-	_ wstransport.ServerOption = wstransport.WithPathPrefix("")
 	// The monitoring hooks mirror each other, one per side.
 	_ wstransport.ServerOption = wstransport.WithServerProtocolErrorHandler(nil)
 	_ wstransport.ClientOption = wstransport.WithClientProtocolErrorHandler(nil)

@@ -151,35 +151,32 @@ func openRawCumSum(tb testing.TB, httpServer *httptest.Server) net.Conn {
 }
 
 // A client that goes silent is sent 1011 once the timeout passes with nothing
-// from it, the Pings in between notwithstanding.
+// from it, the Pings in between notwithstanding. The timeout is its own
+// setting, not a count of intervals: a longer one means more Pings first.
 func TestServerHangsUpOnSilentClient(t *testing.T) {
 	t.Parallel()
-	httpServer := newKeepAliveServer(t,
-		wstransport.WithKeepAlive(keepAliveInterval),
-		wstransport.WithKeepAliveTimeout(keepAliveTimeout),
-	)
-	conn := openRawCumSum(t, httpServer)
+	for _, test := range []struct {
+		name     string
+		timeout  time.Duration
+		minPings int
+	}{
+		{name: "shortest timeout", timeout: keepAliveTimeout, minPings: 1},
+		{name: "ten intervals", timeout: 10 * keepAliveInterval, minPings: 5},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			httpServer := newKeepAliveServer(t,
+				wstransport.WithKeepAlive(keepAliveInterval),
+				wstransport.WithKeepAliveTimeout(test.timeout),
+			)
+			conn := openRawCumSum(t, httpServer)
 
-	assert.Nil(t, conn.SetReadDeadline(time.Now().Add(10*time.Second)))
-	pings, closeCode, _ := watchFrames(conn, nil)
-	assert.True(t, pings >= 1)
-	assert.Equal(t, closeCode, 1011)
-}
-
-// The timeout is its own setting, not a count of intervals: a silent client is
-// pinged many times before it is hung up on.
-func TestServerWaitsOutKeepAliveTimeout(t *testing.T) {
-	t.Parallel()
-	httpServer := newKeepAliveServer(t,
-		wstransport.WithKeepAlive(keepAliveInterval),
-		wstransport.WithKeepAliveTimeout(10*keepAliveInterval),
-	)
-	conn := openRawCumSum(t, httpServer)
-
-	assert.Nil(t, conn.SetReadDeadline(time.Now().Add(10*time.Second)))
-	pings, closeCode, _ := watchFrames(conn, nil)
-	assert.True(t, pings >= 5)
-	assert.Equal(t, closeCode, 1011)
+			assert.Nil(t, conn.SetReadDeadline(time.Now().Add(10*time.Second)))
+			pings, closeCode, _ := watchFrames(conn, nil)
+			assert.True(t, pings >= test.minPings, assert.Sprintf("%d pings", pings))
+			assert.Equal(t, closeCode, 1011)
+		})
+	}
 }
 
 // A Pong is a sign of life on its own: a client that sends no messages but
@@ -306,10 +303,38 @@ func TestKeepAliveLeavesIdleStreamIntact(t *testing.T) {
 	assert.True(t, errors.Is(err, io.EOF))
 }
 
-// The cost of keeping backpressure: a client that leaves a message untaken
+// A client that leaves a message untaken goes on reading the socket while its
+// read-ahead has room, so it goes on answering Pings and is not hung up on.
+func TestClientNotReceivingStillAnswersPings(t *testing.T) {
+	t.Parallel()
+	httpServer := newKeepAliveServer(t,
+		wstransport.WithKeepAlive(sparedInterval),
+		wstransport.WithKeepAliveTimeout(sparedTimeout),
+	)
+	transport, err := wstransport.NewTransport(httpServer.URL, wstransport.WithKeepAlive(0))
+	assert.Nil(t, err)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	stream, err := client.CumSum(ctx)
+	assert.Nil(t, err)
+	t.Cleanup(func() { _ = stream.Close() })
+
+	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+	time.Sleep(5 * sparedTimeout)
+	response, err := stream.Receive()
+	assert.Nil(t, err)
+	assert.Equal(t, response.GetSum(), int64(1))
+	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 2}))
+	response, err = stream.Receive()
+	assert.Nil(t, err)
+	assert.Equal(t, response.GetSum(), int64(3))
+}
+
+// The cost of keeping backpressure: once a client's read-ahead is full it
 // stops reading the socket, so it stops answering Pings too, and the server
 // hangs up once the timeout passes. Python's websockets makes the same call.
-func TestServerHangsUpOnClientThatStopsReceiving(t *testing.T) {
+func TestServerHangsUpOnClientWhoseReadAheadIsFull(t *testing.T) {
 	t.Parallel()
 	httpServer := newKeepAliveServer(t,
 		wstransport.WithKeepAlive(keepAliveInterval),
@@ -324,9 +349,13 @@ func TestServerHangsUpOnClientThatStopsReceiving(t *testing.T) {
 	assert.Nil(t, err)
 	t.Cleanup(func() { _ = stream.Close() })
 
-	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+	// Each response is a few bytes, so this many is well past 64 KiB of
+	// read-ahead once its per-message overhead is counted.
+	for range 3000 {
+		assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+	}
 	time.Sleep(10 * keepAliveInterval)
-	for range 3 {
+	for {
 		if _, err = stream.Receive(); err != nil {
 			break
 		}

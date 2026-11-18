@@ -17,7 +17,7 @@
 // A framing fault is reported to the offending client in the end-of-stream
 // message, which means it is a *successful* outcome from the server's point of
 // view: it never reaches the logger, and a Session wrapper sees a nil error. An
-// interceptor does see it, but only as InvalidArgument — the same code every
+// interceptor does see it, but only as Internal — the same code every
 // framing fault carries. WithWebSocketServerProtocolErrorHandler is the hook that says
 // which kind of mistake it was and who made it.
 //

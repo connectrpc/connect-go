@@ -58,35 +58,39 @@ func isFetchForbidden(lower string) bool {
 	return strings.HasPrefix(lower, "proxy-") || strings.HasPrefix(lower, "sec-")
 }
 
-// isProtocolControlled reports whether this binding owns the name itself. The
-// sec- prefix above already covers the WebSocket handshake's own headers.
+// isProtocolControlled reports whether this binding owns the name itself:
+// every connect- name (§7.3.2), and the two encoding names. The sec- prefix
+// above already covers the WebSocket handshake's own headers.
 //
 // The encoding names are here because the frame type and the subprotocol carry
 // that decision; a client resetting them would describe a body it is not
 // sending.
 func isProtocolControlled(lower string) bool {
 	switch lower {
-	case "connect-protocol-version",
-		"connect-timeout-ms",
-		"content-type",
-		"content-encoding",
-		"connect-content-encoding",
-		"connect-accept-encoding":
+	case "content-type", "content-encoding":
 		return true
 	}
-	return false
+	return isConnectReserved(lower)
 }
 
-// isStrippedHandshakeHeader reports whether a handshake header must be kept out
-// of the effective headers. This binding carries both elsewhere — the version
-// in the subprotocol, the deadline in the query string — so one arriving as a
-// header is a non-browser client duplicating a channel it does not own.
+// isConnectReserved reports whether a lower-cased name is in the connect-
+// namespace, which Connect reserves for itself. A server never sends one in
+// an M or S message either (§7.3.2, §9).
+func isConnectReserved(lower string) bool {
+	return strings.HasPrefix(lower, "connect-")
+}
+
+// isStrippedHandshakeHeader reports whether a handshake header is kept out of
+// the effective headers (§7.1): the ones that establish the WebSocket itself,
+// and every Connect- header, whose information this binding carries elsewhere
+// — the version in the subprotocol, the deadline in the query string.
 func isStrippedHandshakeHeader(key string) bool {
-	switch strings.ToLower(key) {
-	case "connect-protocol-version", "connect-timeout-ms":
+	lower := strings.ToLower(key)
+	switch lower {
+	case "connection", "upgrade":
 		return true
 	}
-	return false
+	return strings.HasPrefix(lower, "sec-websocket-") || isConnectReserved(lower)
 }
 
 // defaultInfrastructureHeaders is what a proxy in front of the server sets and

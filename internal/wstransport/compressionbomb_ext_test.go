@@ -75,14 +75,15 @@ func (c *countingConn) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// zeroOutputDeflate builds a DEFLATE stream of empty sync-flush blocks. Each
-// 4-byte marker inflates to nothing, so the compressed size grows without the
-// inflated size ever moving — the shape that would defeat a limit applied only
-// after inflation.
+// zeroOutputDeflate builds a DEFLATE stream of empty stored blocks. Each
+// 5-byte block (a non-final stored header, then LEN 0 and NLEN 0xFFFF)
+// inflates to nothing, so the compressed size grows without the inflated size
+// ever moving — the shape that would defeat a limit applied only after
+// inflation.
 func zeroOutputDeflate(size int) []byte {
 	payload := make([]byte, 0, size)
 	for len(payload) < size {
-		payload = append(payload, 0x00, 0x00, 0xFF, 0xFF)
+		payload = append(payload, 0x00, 0x00, 0x00, 0xFF, 0xFF)
 	}
 	// permessage-deflate strips the trailing marker; the receiver appends it.
 	return payload[:len(payload)-4]
@@ -281,7 +282,7 @@ func hostileServer(tb testing.TB, read *atomic.Int64) string {
 				"Sec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: %s\r\n"+
 				"Sec-WebSocket-Extensions: permessage-deflate; client_no_context_takeover; server_no_context_takeover\r\n\r\n",
 			base64.StdEncoding.EncodeToString(sum[:]),
-			request.Header.Get("Sec-WebSocket-Protocol"),
+			firstOfferedSubprotocol(request),
 		)
 		// Server frames are unmasked; FIN | RSV1 | binary.
 		payload := zeroOutputDeflate(bombCompressed)

@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"syscall"
 	"time"
@@ -69,10 +68,10 @@ func IsNotModifiedError(err error) bool {
 	return errors.Is(err, errNotModified)
 }
 
-// asError unwraps any error and looks for a non-nil *connect.Error.
+// asError unwraps any error and looks for a non-nil *connect.Error. See
+// [connecterr.AsError].
 func asError(err error) (*connect.Error, bool) {
-	connectErr, ok := errors.AsType[*connect.Error](err)
-	return connectErr, ok && connectErr != nil // Protect against typed nils (*connect.Error)(nil).
+	return connecterr.AsError(err)
 }
 
 // wrapIfUncoded ensures that all errors are wrapped. It leaves already-wrapped
@@ -91,28 +90,9 @@ func wrapIfUncoded(err error) error {
 }
 
 // scrubHandlerError converts a handler's returned error into the wire
-// verdict: only a locally authored *connect.Error keeps its code, message,
-// and details. Remote errors become [connect.CodeInternal] and other errors
-// [connect.CodeUnknown] (context errors keep their codes), all with no
-// message. The original error stays attached as a local-only cause.
+// verdict. See [connecterr.ScrubHandlerError].
 func scrubHandlerError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if cerr, ok := asError(err); ok {
-		if cerr.IsRemote() {
-			return connect.NewError(connect.CodeInternal, "").WithCause(err)
-		}
-		return err
-	}
-	code := connect.CodeUnknown
-	switch {
-	case errors.Is(err, context.Canceled):
-		code = connect.CodeCanceled
-	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, os.ErrDeadlineExceeded):
-		code = connect.CodeDeadlineExceeded
-	}
-	return connect.NewError(code, "").WithCause(err)
+	return connecterr.ScrubHandlerError(err)
 }
 
 // wrapIfContextError applies connect.CodeCanceled or connect.CodeDeadlineExceeded to Go's
@@ -274,18 +254,7 @@ func wrapIfRSTError(ctx context.Context, err error) error {
 }
 
 // wrapIfMaxBytesError wraps errors returned reading from a http.MaxBytesHandler
-// whose limit has been exceeded.
+// whose limit has been exceeded. See [connecterr.WrapIfMaxBytesError].
 func wrapIfMaxBytesError(err error, tmpl string, args ...any) error {
-	if err == nil {
-		return nil
-	}
-	if _, ok := asError(err); ok {
-		return err
-	}
-	maxBytesErr, ok := errors.AsType[*http.MaxBytesError](err)
-	if !ok {
-		return err
-	}
-	prefix := fmt.Sprintf(tmpl, args...)
-	return connect.Errorf(connect.CodeResourceExhausted, "%s: exceeded %d byte http.MaxBytesReader limit", prefix, maxBytesErr.Limit)
+	return connecterr.WrapIfMaxBytesError(err, tmpl, args...)
 }

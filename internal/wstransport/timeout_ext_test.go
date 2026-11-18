@@ -82,33 +82,27 @@ func sendWireMessage(tb testing.TB, conn *websocket.Conn, text bool, marker byte
 	assert.Nil(tb, conn.Write(tb.Context(), messageType, frame))
 }
 
-// The query parameter has to produce a real deadline on the handler's context,
-// not merely be accepted.
-func TestTimeoutQueryParameterReachesHandler(t *testing.T) {
-	t.Parallel()
-	deadlines := make(chan time.Duration, 1)
-	httpServer := newHybridServer(t, pingServer{sawDeadline: deadlines})
-	conn := dialCumSum(t, httpServer, "?connect-timeout-ms=1500")
-	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
-
-	select {
-	case remaining := <-deadlines:
-		assert.True(t, remaining > 0)
-		assert.True(t, remaining <= 1500*time.Millisecond)
-	case <-time.After(5 * time.Second):
-		t.Fatal("handler never ran")
-	}
-}
-
-// §11: the deadline is an integer of at most ten digits, with no sign. Anything
-// else is reported in-band as invalid_argument, as over HTTP.
+// §11: the deadline is an integer of at most ten digits, with no sign, stated
+// once. Anything else is reported in-band as invalid_argument, as over HTTP.
 func TestInvalidTimeoutQueryParameterIsRejected(t *testing.T) {
 	t.Parallel()
-	for _, value := range []string{"-1000", "+1000", "", "soon", "12345678901"} {
-		t.Run(strconv.Quote(value), func(t *testing.T) {
+	for _, query := range []string{
+		"connect-timeout-ms=-1000",
+		"connect-timeout-ms=%2B1000",
+		"connect-timeout-ms=",
+		"connect-timeout-ms=soon",
+		"connect-timeout-ms=1.5",
+		"connect-timeout-ms=12345678901",
+		"connect-timeout-ms=1000&connect-timeout-ms=1000",
+		// Not valid percent-encoding, and a semicolon, both of which a lenient
+		// query parser drops, making the deadline look absent.
+		"connect-timeout-ms=1%zz",
+		"connect-timeout-ms=5;x",
+	} {
+		t.Run(strconv.Quote(query), func(t *testing.T) {
 			t.Parallel()
 			httpServer := newHybridServer(t, pingServer{})
-			conn := dialCumSum(t, httpServer, "?connect-timeout-ms="+url.QueryEscape(value))
+			conn := dialCumSum(t, httpServer, "?"+query)
 			sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
 			data := readServerOpening(t, conn)
@@ -118,17 +112,27 @@ func TestInvalidTimeoutQueryParameterIsRejected(t *testing.T) {
 	}
 }
 
-// A zero deadline is valid and has already passed, so the RPC fails at once
-// with deadline_exceeded rather than invalid_argument.
+// §11: a zero deadline is valid and has already passed, so the RPC is not
+// dispatched and fails in-band with deadline_exceeded, as over HTTP.
 func TestZeroTimeoutExpiresImmediately(t *testing.T) {
 	t.Parallel()
-	httpServer := newHybridServer(t, pingServer{})
+	deadlines := make(chan time.Duration, 1)
+	httpServer := newHybridServer(t, pingServer{sawDeadline: deadlines})
 	conn := dialCumSum(t, httpServer, "?connect-timeout-ms=0")
 	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
 
 	data := readServerOpening(t, conn)
 	assert.Equal(t, data[0], wireServerEndStream)
 	assert.True(t, strings.Contains(string(data), "deadline_exceeded"))
+	readCtx, cancelRead := readContext(t)
+	defer cancelRead()
+	_, _, err := conn.Read(readCtx)
+	assert.Equal(t, websocket.CloseStatus(err), websocket.StatusNormalClosure)
+	select {
+	case <-deadlines:
+		t.Fatal("the handler ran")
+	default:
+	}
 }
 
 // A client that requests no deadline still gets one: the server's default

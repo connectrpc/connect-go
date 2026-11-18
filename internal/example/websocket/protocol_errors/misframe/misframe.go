@@ -33,8 +33,8 @@ import (
 // Handler answers an upgrade with a response carrying a marker nobody has
 // defined — the mistake a client reports as connecthttp.FaultMarker.
 //
-// It speaks the wire format by hand rather than going through
-// connectwebsocket, because that transport frames correctly and no option
+// It speaks the wire format by hand rather than going through connecthttp's
+// WebSocket transport, because that transport frames correctly and no option
 // makes it stop.
 func Handler(responseWriter http.ResponseWriter, request *http.Request) {
 	conn, err := websocket.Accept(responseWriter, request, &websocket.AcceptOptions{

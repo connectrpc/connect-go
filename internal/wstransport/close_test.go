@@ -208,13 +208,11 @@ func TestCloseReasonFitsTheFrame(t *testing.T) {
 // did.
 func TestSendReportsAFailedBodyWrite(t *testing.T) {
 	t.Parallel()
-	codecs, codecErr := newCodecPair([]connect.Codec{connectproto.NewBinaryCodec()})
-	assert.Nil(t, codecErr)
 	conn := &websocketHandlerConn{
 		marshaler: messageWriter{
 			ctx:    t.Context(),
 			sender: deadSender{},
-			codecs: codecs,
+			codec:  connectproto.NewBinaryCodec(),
 		},
 		leadingSent: true, // isolate the body write from the metadata write
 	}
@@ -246,13 +244,11 @@ func TestReadFailureAtTheDeadlineIsDeadlineExceeded(t *testing.T) {
 	_ = clientConn.CloseNow()
 
 	call := &wsClientCall{
-		ctx:      pastDeadlineContext{Context: t.Context()},
-		wsConn:   clientConn,
-		dialDone: make(chan struct{}),
+		ctx:    pastDeadlineContext{Context: t.Context()},
+		wsConn: clientConn,
 	}
-	close(call.dialDone)
 	call.dialOnce.Do(func() {}) // consume it, so ensureDialed will not dial
-	call.reader = newFrameReader(call.ctx, clientConn.Read)
+	call.reader = newFrameReader(call.ctx, clientConn.Read, nil)
 	t.Cleanup(call.reader.close)
 
 	unmarshaler := &websocketClientUnmarshaler{call: call}

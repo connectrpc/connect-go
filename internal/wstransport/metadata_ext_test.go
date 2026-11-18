@@ -220,7 +220,7 @@ func TestLateLeadingMetadataIsRejected(t *testing.T) {
 	defer cancelRead()
 	_, data, err := conn.Read(readCtx)
 	assert.Nil(t, err)
-	assert.True(t, strings.Contains(string(data), "invalid_argument"))
+	assert.True(t, strings.Contains(string(data), "internal"))
 	assert.True(t, strings.Contains(string(data), "second M message"))
 }
 

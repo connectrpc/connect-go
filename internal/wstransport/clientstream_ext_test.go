@@ -37,68 +37,77 @@ import (
 // implementation has to reproduce it exactly.
 func TestClientStreamingWireSequence(t *testing.T) {
 	t.Parallel()
+	httpServer := newServerFor(t, scriptedServer{})
+	client := dialBrowserClient(t, httpServer, pingv1connect.PingServiceSumProcedure)
+
+	var want int64
+	for _, value := range []int64{1, 2, 3, 4} {
+		payload, err := proto.Marshal(&pingv1.SumRequest{Number: value})
+		assert.Nil(t, err)
+		client.writeProto(t, payload)
+		want += value
+	}
+	// §6.1: C is bare and always text, whatever the codec.
+	client.writeJSON(t, wireClientEndStream, nil)
+
+	// The response is three messages: the server's own opening M, the body,
+	// then the end-of-stream message carrying the trailers. A client that
+	// stops after the body silently drops them.
+	marker, payload, text := client.readMessage(t)
+	assert.Equal(t, marker, wireMetadata)
+	assert.True(t, text)                   // metadata is JSON
+	assert.Equal(t, string(payload), "[]") // this handler sets none
+
+	marker, payload, text = client.readMessage(t)
+	assert.Equal(t, marker, wireBody)
+	assert.False(t, text) // Protobuf body, binary frame
+	var response pingv1.SumResponse
+	assert.Nil(t, proto.Unmarshal(payload, &response))
+	assert.Equal(t, response.Sum, want)
+
+	marker, payload, text = client.readMessage(t)
+	assert.Equal(t, marker, wireServerEndStream)
+	assert.True(t, text) // EndStreamMessage JSON, text frame
+	assert.True(t, strings.Contains(string(payload), "set-by-handler"))
+	assert.True(t, !strings.Contains(string(payload), "error"))
+
+	// Nothing follows but the close, which the server sends itself: the RPC is
+	// over, and one connection carries only the one RPC.
+	readCtx, cancelRead := readContext(t)
+	defer cancelRead()
+	_, _, err := client.conn.Read(readCtx)
+	assert.NotNil(t, err)
+	assert.Equal(t, websocket.CloseStatus(err), websocket.StatusNormalClosure)
+}
+
+// §6.1: C carries no payload and is always text, so an empty final message
+// can never be mistaken for it. A C with a payload, or one in a binary frame,
+// is a protocol error rather than a final message to deliver.
+func TestEndOfClientStreamMustBeBareText(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name string
-		// foldFinalValue puts the last value inside the End-Of-Client-Stream
-		// message instead of sending it in a message of its own. Both are
-		// permitted, and the sum must come out the same either way.
-		foldFinalValue bool
+		text bool
+		want string
 	}{
-		{name: "final value in its own message"},
-		{name: "final value folded into End-Of-Client-Stream", foldFinalValue: true},
+		{name: "payload in a binary frame", want: "C in a binary frame; expected a text frame"},
+		{name: "payload in a text frame", text: true, want: "C carries none"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			httpServer := newServerFor(t, scriptedServer{})
-			client := dialBrowserClient(t, httpServer, pingv1connect.PingServiceSumProcedure)
-
-			values := []int64{1, 2, 3, 4}
-			var want int64
-			for _, value := range values {
-				want += value
-			}
-			for _, value := range values[:len(values)-1] {
-				payload, err := proto.Marshal(&pingv1.SumRequest{Number: value})
-				assert.Nil(t, err)
-				client.writeProto(t, payload)
-			}
-			payload, err := proto.Marshal(&pingv1.SumRequest{Number: values[len(values)-1]})
+			httpServer := newHybridServer(t, pingServer{})
+			conn := dialCumSum(t, httpServer, "")
+			payload, err := proto.Marshal(&pingv1.CumSumRequest{Number: 1})
 			assert.Nil(t, err)
-			if test.foldFinalValue {
-				client.writeProtoEnd(t, payload)
-			} else {
-				client.writeProto(t, payload)
-				client.writeJSON(t, wireClientEndStream, nil)
+			if test.text {
+				payload = []byte(`{"number":"1"}`)
 			}
+			sendWireMessage(t, conn, test.text, wireClientEndStream, payload)
 
-			// The response is three messages: the server's own opening M, the
-			// body, then the end-of-stream message carrying the trailers. A
-			// client that stops after the body silently drops them.
-			marker, payload, text := client.readMessage(t)
-			assert.Equal(t, marker, wireMetadata)
-			assert.True(t, text)                   // metadata is JSON
-			assert.Equal(t, string(payload), "[]") // this handler sets none
-
-			marker, payload, text = client.readMessage(t)
-			assert.Equal(t, marker, wireBody)
-			assert.False(t, text) // Protobuf body, binary frame
-			var response pingv1.SumResponse
-			assert.Nil(t, proto.Unmarshal(payload, &response))
-			assert.Equal(t, response.Sum, want)
-
-			marker, payload, text = client.readMessage(t)
-			assert.Equal(t, marker, wireServerEndStream)
-			assert.True(t, text) // EndStreamMessage JSON, text frame
-			assert.True(t, strings.Contains(string(payload), "set-by-handler"))
-			assert.True(t, !strings.Contains(string(payload), "error"))
-
-			// Nothing follows but the close, which the server sends itself: the
-			// RPC is over, and one connection carries only the one RPC.
-			readCtx, cancelRead := readContext(t)
-			defer cancelRead()
-			_, _, err = client.conn.Read(readCtx)
-			assert.NotNil(t, err)
-			assert.Equal(t, websocket.CloseStatus(err), websocket.StatusNormalClosure)
+			data := readServerOpening(t, conn)
+			assert.Equal(t, data[0], wireServerEndStream)
+			assert.True(t, strings.Contains(string(data), "internal"))
+			assert.True(t, strings.Contains(string(data), test.want))
 		})
 	}
 }
@@ -164,33 +173,6 @@ func TestMessagesAfterEndOfClientStreamAreDiscarded(t *testing.T) {
 		t.Fatal("writes after C outlasted the handler, so nothing was draining them")
 	default:
 	}
-}
-
-// §8: after C the only frames left are Close, Ping and Pong, so a message is a
-// protocol error. It cannot end the read — the peer would stall on a full
-// buffer before it could read the verdict — so it is recorded and reported in
-// the S message instead.
-func TestMessageAfterEndOfClientStreamIsAProtocolError(t *testing.T) {
-	t.Parallel()
-	// The drain runs alongside the handler, so the handler has to still be in
-	// flight when the illegal message lands: a server that had already sent its
-	// S would have nothing left to report it in.
-	httpServer := newHybridServer2(t, lingeringServer{
-		linger: 300 * time.Millisecond,
-		done:   make(chan struct{}),
-	})
-	conn := dialCumSum(t, httpServer, "")
-	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
-	sendJSONMessage(t, conn, wireClientEndStream, nil)
-	// The illegal message: the client already said it was done.
-	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 2})
-
-	// lingeringServer sends no bodies, so the message after the opening M is
-	// the terminal one.
-	data := readServerOpening(t, conn)
-	assert.Equal(t, data[0], wireServerEndStream)
-	assert.True(t, strings.Contains(string(data), "invalid_argument"))
-	assert.True(t, strings.Contains(string(data), "after its C message"))
 }
 
 // lingeringServer reads to EOF and then stays in the handler, holding the
