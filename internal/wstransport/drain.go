@@ -34,6 +34,10 @@ const defaultDrainBudget = 4 << 20
 // bound keeps a stream of zero-output deflate blocks from being read forever.
 const compressedReadMargin = 64 << 10
 
+// maxDrainBudget caps the closing drain of a side with a read limit. Draining
+// discards without inflating, so a larger limit is no reason to read more.
+const maxDrainBudget = 1 << 20
+
 var (
 	errDrainBudgetSpent = errors.New("closing drain reached its byte limit")
 	errWireLimit        = errors.New("message exceeded its compressed size limit")
@@ -59,14 +63,15 @@ type drainLimiter struct {
 	messageRemaining atomic.Int64
 }
 
-// newDrainLimiter returns a limiter whose budget is readLimit, the size of
-// the largest message this side would accept, so the drain costs no more
-// than one message it would have read anyway. A readLimit that is not
-// positive means no limit, and gets defaultDrainBudget.
+// newDrainLimiter budgets one message's wire bound (§12), capped, so the rest of
+// an oversized message is drained rather than reset away with the S (§13.2).
 func newDrainLimiter(readLimit int64) *drainLimiter {
-	limiter := &drainLimiter{budget: readLimit}
-	if readLimit <= 0 {
+	limiter := &drainLimiter{budget: maxDrainBudget}
+	switch {
+	case readLimit <= 0:
 		limiter.budget = defaultDrainBudget
+	case readLimit < (maxDrainBudget-compressedReadMargin)/2:
+		limiter.budget = 2*readLimit + compressedReadMargin
 	}
 	limiter.remaining.Store(-1)
 	limiter.messageRemaining.Store(-1)

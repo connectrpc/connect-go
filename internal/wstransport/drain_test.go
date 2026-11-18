@@ -16,6 +16,7 @@ package wstransport
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
@@ -25,7 +26,7 @@ import (
 func TestDrainLimiter(t *testing.T) {
 	t.Parallel()
 	limiter := newDrainLimiter(10)
-	reader := strings.NewReader(strings.Repeat("x", 100))
+	reader := strings.NewReader(strings.Repeat("x", int(limiter.budget)+100))
 	buf := make([]byte, 64)
 
 	// Reads before the drain are not counted.
@@ -34,11 +35,16 @@ func TestDrainLimiter(t *testing.T) {
 	assert.Equal(t, n, 64)
 
 	limiter.begin()
-	n, err = limiter.read(reader, buf)
-	assert.Nil(t, err)
-	assert.Equal(t, n, 10)
-	_, err = limiter.read(reader, buf)
+	var drained int64
+	for {
+		n, err = limiter.read(reader, buf)
+		drained += int64(n)
+		if err != nil {
+			break
+		}
+	}
 	assert.True(t, errors.Is(err, errDrainBudgetSpent))
+	assert.Equal(t, drained, limiter.budget)
 
 	// A second begin does not refill the budget.
 	limiter.begin()
@@ -48,8 +54,11 @@ func TestDrainLimiter(t *testing.T) {
 
 func TestDrainLimiterBudget(t *testing.T) {
 	t.Parallel()
-	// §12 leaves the marker out of the limit, so the budget allows for it.
-	assert.Equal(t, newDrainLimiter(messageReadLimit(1024)).budget, int64(1025))
+	// One message's wire bound (§12), whose limit leaves room for the marker.
+	assert.Equal(t, newDrainLimiter(messageReadLimit(1024)).budget, int64(2*1025+compressedReadMargin))
+	// A large limit is capped, and one near the int64 maximum must not overflow.
+	assert.Equal(t, newDrainLimiter(messageReadLimit(4<<20)).budget, int64(maxDrainBudget))
+	assert.Equal(t, newDrainLimiter(math.MaxInt64).budget, int64(maxDrainBudget))
 	assert.Equal(t, newDrainLimiter(messageReadLimit(0)).budget, int64(defaultDrainBudget))
 
 	var limiter *drainLimiter

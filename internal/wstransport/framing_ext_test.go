@@ -349,6 +349,35 @@ func TestFaultCloseCodeNamesTheFault(t *testing.T) {
 	}
 }
 
+// §13.2: a server that rejects a moderately oversized message drains the rest
+// of it before closing. Closing with it unread resets the connection, and
+// Windows then discards the S and Close frame the client has yet to read.
+func TestServerDrainsAnOversizedMessageBeforeClosing(t *testing.T) {
+	t.Parallel()
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, server, connecthttp.WithReadMaxBytes(1024))
+	httpServer := httptest.NewServer(mux)
+	t.Cleanup(httpServer.Close)
+
+	addr := httpServer.Listener.Addr().String()
+	conn, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", addr)
+	assert.Nil(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = rawHandshake(t, conn, addr, pingProcedure)
+	assert.Nil(t, conn.SetDeadline(time.Now().Add(10*time.Second)))
+	assert.Nil(t, writeClientFrame(conn, openMessage(), false, true))
+	_ = writeClientFrame(conn, append([]byte{wireBody}, make([]byte, 32<<10)...), false, false)
+
+	_, closeCode, _ := watchFrames(conn, nil)
+	assert.Equal(t, closeCode, int(websocket.StatusMessageTooBig))
+	_ = writeClientFragment(conn, []byte{0x03, 0xF1}, true, opcodeClose)
+	// A clean close reads as EOF; a reset reads as an error of its own.
+	_, err = conn.Read(make([]byte, 1))
+	assert.ErrorIs(t, err, io.EOF)
+}
+
 // §6.1: M is always JSON, so an M in a binary frame, which says its payload is
 // Protobuf, is the wrong frame type even though its payload parses as JSON.
 func TestMetadataInABinaryFrameIsRejected(t *testing.T) {

@@ -42,8 +42,8 @@ import (
 const (
 	bombReadMaxBytes = 64 * 1024       // what the server will accept
 	bombCompressed   = 8 * 1024 * 1024 // what the attacker sends
-	// What a side that rejects the bomb will read: its own limit, the closing
-	// drain's budget, which is the same limit again, and the library's buffering.
+	// What a side that rejects the bomb will read: its own wire bound, the
+	// closing drain's budget, which is the same bound again, and buffering.
 	bombInflateCeiling = 1024 * 1024
 )
 

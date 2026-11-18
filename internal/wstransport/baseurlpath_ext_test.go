@@ -15,6 +15,8 @@
 package wstransport_test
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -167,7 +169,11 @@ func TestUnregisteredProcedureIsUnimplemented(t *testing.T) {
 	})
 	assert.Nil(t, err)
 	t.Cleanup(func() { _ = stream.Close() })
-	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+	// The server answers once it reads M, so the verdict can beat the first body
+	// to the wire; Send then reports io.EOF, as over HTTP.
+	if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+		assert.True(t, errors.Is(err, io.EOF), assert.Sprintf("%v", err))
+	}
 	err = stream.Receive(&pingv1.CumSumResponse{})
 	assert.NotNil(t, err)
 	assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)

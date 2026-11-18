@@ -49,6 +49,8 @@ type keepAlive struct {
 	// expired is set before the connection is closed, so the read that fails
 	// as a result can say why.
 	expired atomic.Bool
+	// firstPing is when the first Ping went out, in Unix nanoseconds, or zero.
+	firstPing atomic.Int64
 }
 
 // startKeepAlive returns nil when interval is not positive. A timeout shorter
@@ -110,9 +112,6 @@ func (k *keepAlive) run(ctx context.Context) {
 	defer k.cancel()
 	ticker := time.NewTicker(k.interval)
 	defer ticker.Stop()
-	// A late tick can find the timeout already passed. Requiring a Ping an
-	// interval old means no peer is hung up on before it could have answered.
-	var lastPing time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -122,16 +121,21 @@ func (k *keepAlive) run(ctx context.Context) {
 			// will never call stop.
 			return
 		case now := <-ticker.C:
-			pinged := !lastPing.IsZero() && now.Sub(lastPing) >= k.interval
-			if pinged && k.reader.silence(now) >= k.timeout() {
+			if k.couldHaveAnswered(now) && k.reader.silence(now) >= k.timeout() {
 				k.expired.Store(true)
 				_ = k.conn.Close(k.closeCode, "keep-alive timeout")
 				return
 			}
-			lastPing = now
 		}
 		k.pings.Go(func() { k.ping(ctx) })
 	}
+}
+
+// couldHaveAnswered reports whether a Ping went out an interval or more before
+// now. Judged from the send, not the tick: a ping goroutine can start late.
+func (k *keepAlive) couldHaveAnswered(now time.Time) bool {
+	sent := k.firstPing.Load()
+	return sent != 0 && now.Sub(time.Unix(0, sent)) >= k.interval
 }
 
 // ping sends one Ping and records its Pong. It runs apart from the ticker, and
@@ -141,6 +145,7 @@ func (k *keepAlive) run(ctx context.Context) {
 func (k *keepAlive) ping(ctx context.Context) {
 	pingCtx, cancel := context.WithTimeout(ctx, k.timeout())
 	defer cancel()
+	k.firstPing.CompareAndSwap(0, time.Now().UnixNano())
 	if k.conn.Ping(pingCtx) == nil {
 		k.reader.heard()
 	}

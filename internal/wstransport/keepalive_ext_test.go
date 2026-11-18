@@ -27,6 +27,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -336,10 +337,18 @@ func TestClientNotReceivingStillAnswersPings(t *testing.T) {
 // hangs up once the timeout passes. Python's websockets makes the same call.
 func TestServerHangsUpOnClientWhoseReadAheadIsFull(t *testing.T) {
 	t.Parallel()
-	httpServer := newKeepAliveServer(t,
+	server := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+	mux := http.NewServeMux()
+	mountBoth(mux, server,
 		wstransport.WithKeepAlive(keepAliveInterval),
 		wstransport.WithKeepAliveTimeout(keepAliveTimeout),
 	)
+	httpServer := httptest.NewUnstartedServer(mux)
+	watcher := &closeFrameListener{Listener: httpServer.Listener, closed: make(chan struct{})}
+	httpServer.Listener = watcher
+	httpServer.Start()
+	t.Cleanup(httpServer.Close)
 	transport, err := wstransport.NewTransport(httpServer.URL, wstransport.WithKeepAlive(0))
 	assert.Nil(t, err)
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
@@ -352,15 +361,56 @@ func TestServerHangsUpOnClientWhoseReadAheadIsFull(t *testing.T) {
 	// Each response is a few bytes, so this many is well past 64 KiB of
 	// read-ahead once its per-message overhead is counted.
 	for range 3000 {
-		assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+		// A stall here is silence too once read-ahead is full, so the server
+		// may hang up before the last Send.
+		if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+			assert.True(t, errors.Is(err, io.EOF), assert.Sprintf("%v", err))
+			break
+		}
 	}
-	time.Sleep(10 * keepAliveInterval)
+	// The server cannot judge the client silent while its own read-ahead is
+	// full, so reading before it hangs up would answer its Pings in time.
+	select {
+	case <-watcher.closed:
+	case <-ctx.Done():
+		t.Fatal("server never hung up")
+	}
 	for {
 		if _, err = stream.Receive(); err != nil {
 			break
 		}
 	}
 	assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
+}
+
+// closeFrameListener reports the server's Close frame, which starts a write
+// because frames are flushed whole. The handler returns 5s later.
+type closeFrameListener struct {
+	net.Listener
+
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (l *closeFrameListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &closeFrameConn{Conn: conn, listener: l}, nil
+}
+
+type closeFrameConn struct {
+	net.Conn
+
+	listener *closeFrameListener
+}
+
+func (c *closeFrameConn) Write(p []byte) (int, error) {
+	if len(p) > 0 && p[0] == 0x80|opcodeClose {
+		c.listener.once.Do(func() { close(c.listener.closed) })
+	}
+	return c.Conn.Write(p)
 }
 
 // The public options reach both halves: Mount's server and NewTransport's

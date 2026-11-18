@@ -209,7 +209,11 @@ func TestRequestHeadersAreReadAtFirstSend(t *testing.T) {
 	stream, err := client.CumSum(ctx)
 	assert.Nil(t, err)
 	info.RequestHeader().Set("Acme-Late", "set after the stream opened")
-	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+	// The handler returns without reading, so its verdict can beat the body to
+	// the wire; Send then reports io.EOF, as over HTTP.
+	if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+		assert.True(t, errors.Is(err, io.EOF), assert.Sprintf("%v", err))
+	}
 	assert.Equal(t, <-handler.seen, "set after the stream opened")
 	assert.Nil(t, stream.CloseSend())
 	_, err = stream.Receive()
