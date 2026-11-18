@@ -55,7 +55,11 @@ func TestConditionalOptionsReachWebSocketRoutes(t *testing.T) {
 
 	stream, err := client.CumSum(t.Context())
 	assert.Nil(t, err)
-	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1000}))
+	// A one-byte limit rejects even the opening M, so the verdict can beat the
+	// first body to the wire; Send then reports io.EOF, as over HTTP.
+	if err := stream.Send(&pingv1.CumSumRequest{Number: 1000}); err != nil {
+		assert.True(t, errors.Is(err, io.EOF), assert.Sprintf("%v", err))
+	}
 	_, err = stream.Receive()
 	assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
 	assert.Nil(t, stream.Close())

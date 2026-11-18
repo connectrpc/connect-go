@@ -316,7 +316,9 @@ func TestFaultCloseCodeNamesTheFault(t *testing.T) {
 			name: "an oversized message is too big",
 			send: func(tb testing.TB, conn *websocket.Conn) {
 				tb.Helper()
-				sendWireMessage(tb, conn, false, wireBody, make([]byte, 8192))
+				// The server hangs up after a bounded drain, so the rest of the
+				// write may be reset; the verdict and close are already queued.
+				_ = conn.Write(tb.Context(), websocket.MessageBinary, append([]byte{wireBody}, make([]byte, 8192)...))
 			},
 			want: websocket.StatusMessageTooBig, // 1009
 		},

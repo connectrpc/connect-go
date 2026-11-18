@@ -160,7 +160,9 @@ func TestProtocolFaultsAreClassified(t *testing.T) {
 			if test.text {
 				messageType = websocket.MessageText
 			}
-			assert.Nil(t, conn.Write(t.Context(), messageType, frame))
+			// The server may hang up before an oversized write finishes; the
+			// recorder, not the write, says whether the fault arrived.
+			_ = conn.Write(t.Context(), messageType, frame)
 
 			// Read the server's verdict, which is what makes the fault
 			// observable to the peer as well as to the monitor.

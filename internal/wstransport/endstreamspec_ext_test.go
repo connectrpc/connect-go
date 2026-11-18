@@ -54,7 +54,9 @@ func TestOversizedMessageAfterEndOfClientStreamIsRejected(t *testing.T) {
 	sendJSONMessage(t, conn, wireClientEndStream, nil)
 	ctx, cancel := readContext(t)
 	defer cancel()
-	assert.Nil(t, conn.Write(ctx, websocket.MessageBinary, append([]byte{wireBody}, make([]byte, 4096)...)))
+	// The server hangs up after a bounded drain, so the rest of the write may
+	// be reset; the verdict and close are already queued.
+	_ = conn.Write(ctx, websocket.MessageBinary, append([]byte{wireBody}, make([]byte, 4096)...))
 
 	data := readServerOpening(t, conn)
 	assert.Equal(t, data[0], wireServerEndStream)
