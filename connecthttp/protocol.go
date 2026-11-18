@@ -197,40 +197,6 @@ func (hc *errorTranslatingHandlerConnCloser) getHTTPMethod() string {
 	return http.MethodPost
 }
 
-// errorTranslatingClientConn wraps a StreamingClientConn to make sure that we always
-// return coded errors from clients.
-//
-// It's used in protocol implementations.
-type errorTranslatingClientConn struct {
-	streamingClientConn
-
-	fromWire func(error) error
-}
-
-func (cc *errorTranslatingClientConn) Send(msg any) error {
-	return cc.fromWire(cc.streamingClientConn.Send(msg))
-}
-
-func (cc *errorTranslatingClientConn) Receive(msg any) error {
-	return cc.fromWire(cc.streamingClientConn.Receive(msg))
-}
-
-func (cc *errorTranslatingClientConn) CloseRequest() error {
-	return cc.fromWire(cc.streamingClientConn.CloseRequest())
-}
-
-func (cc *errorTranslatingClientConn) CloseResponse() error {
-	return cc.fromWire(cc.streamingClientConn.CloseResponse())
-}
-
-func (cc *errorTranslatingClientConn) onRequestSend(fn func(*http.Request)) {
-	cc.streamingClientConn.onRequestSend(fn)
-}
-
-func (cc *errorTranslatingClientConn) onResponseReceive(fn func(*http.Response)) {
-	cc.streamingClientConn.onResponseReceive(fn)
-}
-
 // wrapHandlerConnWithCodedErrors ensures that we (1) scrub handler errors
 // before writing them to the network, and (2) return *Errors from all
 // exported APIs.
@@ -239,15 +205,6 @@ func wrapHandlerConnWithCodedErrors(conn handlerConnCloser) handlerConnCloser {
 		handlerConnCloser: conn,
 		toWire:            scrubHandlerError,
 		fromWire:          wrapIfUncoded,
-	}
-}
-
-// wrapClientConnWithCodedErrors ensures that we always return *Errors from
-// public APIs.
-func wrapClientConnWithCodedErrors(conn streamingClientConn) streamingClientConn {
-	return &errorTranslatingClientConn{
-		streamingClientConn: conn,
-		fromWire:            wrapIfUncoded,
 	}
 }
 

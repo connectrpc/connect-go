@@ -76,13 +76,13 @@ func (s *connectUnaryClientStream) Send(msg any) error {
 	}
 	s.sentOnce = true
 	s.flushHeader()
-	return s.conn.Send(msg)
+	return wrapIfUncoded(s.conn.Send(msg))
 }
 
 func (s *connectUnaryClientStream) CloseSend() error {
 	s.sendClosed = true
 	s.flushHeader()
-	return s.conn.CloseRequest()
+	return wrapIfUncoded(s.conn.CloseRequest())
 }
 
 func (s *connectUnaryClientStream) Receive(dst any) error {
@@ -96,9 +96,9 @@ func (s *connectUnaryClientStream) Receive(dst any) error {
 // receiveUnaryResponse reads the single response message, mapping a cardinality
 // violation to CodeUnimplemented, then syncs trailers and closes the response.
 func receiveUnaryResponse(conn streamingClientConn, dst any, info *connect.CallInfo) error {
-	err := conn.Receive(dst)
+	err := wrapIfUncoded(conn.Receive(dst))
 	if err == nil {
-		if drainErr := conn.Receive(dst); drainErr == nil {
+		if drainErr := wrapIfUncoded(conn.Receive(dst)); drainErr == nil {
 			err = connect.Errorf(connect.CodeUnimplemented, "unary stream has multiple messages")
 		} else if !errors.Is(drainErr, io.EOF) {
 			err = drainErr
@@ -117,7 +117,7 @@ func receiveUnaryResponse(conn streamingClientConn, dst any, info *connect.CallI
 func (s *connectUnaryClientStream) Close() error {
 	err := s.conn.CloseResponse()
 	_ = s.conn.CloseRequest()
-	return err
+	return wrapIfUncoded(err)
 }
 
 // connectStreamingClientStream adapts a streaming [streamingClientConn] to [connect.ClientStream].
@@ -151,17 +151,17 @@ func (s *connectStreamingClientStream) SendHeaders() error {
 	if s.streamType&connect.StreamTypeClient == 0 {
 		return nil
 	}
-	return s.conn.Send(nil)
+	return wrapIfUncoded(s.conn.Send(nil))
 }
 
 func (s *connectStreamingClientStream) Send(msg any) error {
 	s.flushHeader()
-	return s.conn.Send(msg)
+	return wrapIfUncoded(s.conn.Send(msg))
 }
 
 func (s *connectStreamingClientStream) CloseSend() error {
 	s.flushHeader()
-	return s.conn.CloseRequest()
+	return wrapIfUncoded(s.conn.CloseRequest())
 }
 
 func (s *connectStreamingClientStream) Receive(dst any) error {
@@ -176,7 +176,7 @@ func (s *connectStreamingClientStream) Receive(dst any) error {
 		}
 		return err
 	}
-	err := s.conn.Receive(dst)
+	err := wrapIfUncoded(s.conn.Receive(dst))
 	if !s.syncedHeader && s.info != nil {
 		fromHTTPHeader(s.info.ResponseHeader(), s.conn.ResponseHeader())
 		s.syncedHeader = true
@@ -197,7 +197,7 @@ func (s *connectStreamingClientStream) Close() error {
 	// after it doesn't send a request that was never started.
 	err := s.conn.CloseResponse()
 	_ = s.conn.CloseRequest()
-	return err
+	return wrapIfUncoded(err)
 }
 
 // newProtocolClient builds a v1 protocol client for spec from the transport's

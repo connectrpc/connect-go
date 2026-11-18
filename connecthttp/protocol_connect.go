@@ -455,7 +455,7 @@ func (c *connectClient) NewConn(
 		conn = streamingConn
 		duplexCall.SetValidateResponse(streamingConn.validateResponse)
 	}
-	return wrapClientConnWithCodedErrors(conn)
+	return conn
 }
 
 type connectUnaryClientConn struct {
