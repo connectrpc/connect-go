@@ -407,8 +407,6 @@ func (c *connectClient) NewConn(
 				readMaxBytes: c.ReadMaxBytes,
 				stats:        receiveStats,
 			},
-			responseHeader:  make(http.Header),
-			responseTrailer: make(http.Header),
 		}
 		if spec.IdempotencyLevel == connect.IdempotencyNoSideEffects {
 			unaryConn.marshaler.enableGet = c.EnableGet
@@ -449,8 +447,6 @@ func (c *connectClient) NewConn(
 					stats:        receiveStats,
 				},
 			},
-			responseHeader:  make(http.Header),
-			responseTrailer: make(http.Header),
 		}
 		conn = streamingConn
 		duplexCall.SetValidateResponse(streamingConn.validateResponse)
@@ -531,13 +527,16 @@ func (cc *connectUnaryClientConn) onResponseReceive(fn func(*http.Response)) {
 }
 
 func (cc *connectUnaryClientConn) validateResponse(response *http.Response) *connect.Error {
-	for k, v := range response.Header {
-		if !strings.HasPrefix(k, connectUnaryTrailerPrefix) {
-			cc.responseHeader[k] = v
-			continue
+	for key, values := range response.Header {
+		if name, ok := strings.CutPrefix(key, connectUnaryTrailerPrefix); ok {
+			if cc.responseTrailer == nil {
+				cc.responseTrailer = make(http.Header)
+			}
+			cc.responseTrailer[name] = values
+			delete(response.Header, key)
 		}
-		cc.responseTrailer[k[len(connectUnaryTrailerPrefix):]] = v
 	}
+	cc.responseHeader = response.Header
 	if err := connectValidateUnaryResponseContentType(
 		cc.marshaler.codec.Name(),
 		cc.duplexCall.Method(),
@@ -642,7 +641,11 @@ func (cc *connectStreamingClientConn) Receive(msg any) error {
 		return nil
 	}
 	// See if the server sent an explicit error in the end-of-stream message.
-	mergeHeaders(cc.responseTrailer, cc.unmarshaler.Trailer())
+	if trailer := cc.unmarshaler.Trailer(); cc.responseTrailer == nil {
+		cc.responseTrailer = trailer
+	} else {
+		mergeHeaders(cc.responseTrailer, trailer)
+	}
 	if serverErr := cc.unmarshaler.EndStreamError(); serverErr != nil {
 		// This is expected from a protocol perspective, but receiving an
 		// end-of-stream message means that we're _not_ getting a regular message.
@@ -716,7 +719,7 @@ func (cc *connectStreamingClientConn) validateResponse(response *http.Response) 
 	if cc.info != nil {
 		cc.info.ResponseEncoding = encodingOrIdentity(compression)
 	}
-	mergeHeaders(cc.responseHeader, response.Header)
+	cc.responseHeader = response.Header
 	return nil
 }
 
