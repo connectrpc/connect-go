@@ -987,9 +987,6 @@ func (m *connectUnaryMarshaler) recordStats(size, compressedSize int) {
 }
 
 func (m *connectUnaryMarshaler) Marshal(message any) *connect.Error {
-	if message == nil {
-		return m.write(nil)
-	}
 	uncompressed := bufferpool.Get()
 	if err := m.codec.MarshalWrite(m.ctx, uncompressed, message); err != nil {
 		return connect.Errorf(connect.CodeInternal, "marshal message: %s", err).WithCause(err)
@@ -1066,11 +1063,8 @@ func (m *connectUnaryRequestMarshaler) Marshal(message any) *connect.Error {
 
 func (m *connectUnaryRequestMarshaler) marshalWithGet(message any) *connect.Error {
 	var buffer bytes.Buffer
-	var err error
-	if message != nil {
-		if err = m.stableCodec.MarshalWriteStable(context.Background(), &buffer, message); err != nil {
-			return connect.Errorf(connect.CodeInternal, "marshal message stable: %s", err).WithCause(err)
-		}
+	if err := m.stableCodec.MarshalWriteStable(context.Background(), &buffer, message); err != nil {
+		return connect.Errorf(connect.CodeInternal, "marshal message stable: %s", err).WithCause(err)
 	}
 	isTooBig := m.sendMaxBytes > 0 && buffer.Len() > m.sendMaxBytes
 	if isTooBig && m.compressionPool == nil {

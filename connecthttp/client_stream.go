@@ -148,6 +148,9 @@ func (s *connectStreamingClientStream) flushHeader() {
 // SendHeaders opens the stream without sending a message.
 func (s *connectStreamingClientStream) SendHeaders() error {
 	s.flushHeader()
+	if s.streamType&connect.StreamTypeClient == 0 {
+		return nil
+	}
 	return s.conn.Send(nil)
 }
 
