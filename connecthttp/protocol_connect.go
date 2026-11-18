@@ -96,7 +96,6 @@ func (*protocolConnect) NewHandler(params *protocolHandlerParams) protocolHandle
 func (*protocolConnect) NewClient(params *protocolClientParams) (protocolClient, error) {
 	return &connectClient{
 		protocolClientParams: *params,
-		peer:                 newPeerForURL(params.URL, connect.ProtocolNameConnect),
 	}, nil
 }
 
@@ -326,12 +325,6 @@ func (h *connectHandler) NewConn(
 
 type connectClient struct {
 	protocolClientParams
-
-	peer peer
-}
-
-func (c *connectClient) Peer() peer {
-	return c.peer
 }
 
 func (c *connectClient) WriteRequestHeader(streamType connect.StreamType, header http.Header) {
@@ -382,8 +375,6 @@ func (c *connectClient) NewConn(
 	var conn streamingClientConn
 	if spec.StreamType == connect.StreamTypeUnary {
 		unaryConn := &connectUnaryClientConn{
-			spec:             spec,
-			peer:             c.Peer(),
 			info:             info,
 			duplexCall:       duplexCall,
 			compressionPools: c.CompressionPools,
@@ -423,8 +414,6 @@ func (c *connectClient) NewConn(
 		duplexCall.SetValidateResponse(unaryConn.validateResponse)
 	} else {
 		streamingConn := &connectStreamingClientConn{
-			spec:             spec,
-			peer:             c.Peer(),
 			info:             info,
 			duplexCall:       duplexCall,
 			compressionPools: c.CompressionPools,
@@ -459,8 +448,6 @@ func (c *connectClient) NewConn(
 }
 
 type connectUnaryClientConn struct {
-	spec             connect.Spec
-	peer             peer
 	info             *connect.CallInfo
 	duplexCall       *duplexHTTPCall
 	compressionPools readOnlyCompressionPools
@@ -468,14 +455,6 @@ type connectUnaryClientConn struct {
 	unmarshaler      connectUnaryUnmarshaler
 	responseHeader   http.Header
 	responseTrailer  http.Header
-}
-
-func (cc *connectUnaryClientConn) Spec() connect.Spec {
-	return cc.spec
-}
-
-func (cc *connectUnaryClientConn) Peer() peer {
-	return cc.peer
 }
 
 func (cc *connectUnaryClientConn) Send(msg any) error {
@@ -597,8 +576,6 @@ func (cc *connectUnaryClientConn) unmarshalResponseError(response *http.Response
 }
 
 type connectStreamingClientConn struct {
-	spec             connect.Spec
-	peer             peer
 	info             *connect.CallInfo
 	duplexCall       *duplexHTTPCall
 	compressionPools readOnlyCompressionPools
@@ -607,14 +584,6 @@ type connectStreamingClientConn struct {
 	unmarshaler      connectStreamingUnmarshaler
 	responseHeader   http.Header
 	responseTrailer  http.Header
-}
-
-func (cc *connectStreamingClientConn) Spec() connect.Spec {
-	return cc.spec
-}
-
-func (cc *connectStreamingClientConn) Peer() peer {
-	return cc.peer
 }
 
 func (cc *connectStreamingClientConn) Send(msg any) error {
@@ -696,7 +665,7 @@ func (cc *connectStreamingClientConn) validateResponse(response *http.Response) 
 	}
 	if err := connectValidateStreamResponseContentType(
 		cc.codec.Name(),
-		cc.spec.StreamType,
+		cc.duplexCall.streamType,
 		getHeaderCanonical(response.Header, headerContentType),
 	); err != nil {
 		return err

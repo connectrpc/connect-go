@@ -355,6 +355,7 @@ type clientState struct {
 	opts          *options
 	sendCodecName string
 	client        protocolClient
+	url           *url.URL
 	err           error
 }
 
@@ -372,10 +373,9 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 	}
 	opts, sendCodecName, protocolClient := state.opts, state.sendCodecName, state.client
 	conn := protocolClient.NewConn(ctx, spec, make(http.Header, 8))
-	peer := conn.Peer()
 	info.Spec = spec
-	info.PeerAddr = peer.Addr
-	info.Protocol = peer.Protocol
+	info.PeerAddr = state.url.Host
+	info.Protocol = opts.protocol
 	info.Codec = sendCodecName
 	info.RequestEncoding = encodingOrIdentity(opts.sendCompressor)
 	conn.onRequestSend(func(request *http.Request) {
@@ -428,11 +428,13 @@ func (t *transport) newClientState(spec connect.Spec) *clientState {
 	if t.baseURLErr != nil {
 		return &clientState{err: connect.Errorf(connect.CodeUnavailable, "invalid base URL: %v", t.baseURLErr)}
 	}
-	client, err := t.newProtocolClient(spec, opts)
+	procedureURL := *t.baseURLPtr
+	procedureURL.Path = joinURLPath(t.baseURLPtr.Path, spec.Procedure)
+	client, err := t.newProtocolClient(opts, &procedureURL)
 	if err != nil {
 		return &clientState{err: err}
 	}
-	return &clientState{opts: opts, sendCodecName: sendCodecName, client: client}
+	return &clientState{opts: opts, sendCodecName: sendCodecName, client: client, url: &procedureURL}
 }
 
 // options holds the resolved options for a transport ([NewTransport]) or server

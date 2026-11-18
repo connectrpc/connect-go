@@ -110,14 +110,9 @@ func (g *protocolGRPC) NewHandler(params *protocolHandlerParams) protocolHandler
 
 // NewClient implements protocol, so it must return an interface.
 func (g *protocolGRPC) NewClient(params *protocolClientParams) (protocolClient, error) {
-	peer := newPeerForURL(params.URL, connect.ProtocolNameGRPC)
-	if g.web {
-		peer = newPeerForURL(params.URL, connect.ProtocolNameGRPCWeb)
-	}
 	return &grpcClient{
 		protocolClientParams: *params,
 		web:                  g.web,
-		peer:                 peer,
 	}, nil
 }
 
@@ -245,12 +240,7 @@ func (g *grpcHandler) NewConn(
 type grpcClient struct {
 	protocolClientParams
 
-	web  bool
-	peer peer
-}
-
-func (g *grpcClient) Peer() peer {
-	return g.peer
+	web bool
 }
 
 func (g *grpcClient) WriteRequestHeader(_ connect.StreamType, header http.Header) {
@@ -304,8 +294,6 @@ func (g *grpcClient) NewConn(
 		sendStats, receiveStats = &info.SendStats, &info.ReceiveStats
 	}
 	conn := &grpcClientConn{
-		spec:             spec,
-		peer:             g.Peer(),
 		info:             info,
 		duplexCall:       duplexCall,
 		compressionPools: g.CompressionPools,
@@ -351,8 +339,6 @@ func (g *grpcClient) NewConn(
 
 // grpcClientConn works for both gRPC and gRPC-Web.
 type grpcClientConn struct {
-	spec             connect.Spec
-	peer             peer
 	info             *connect.CallInfo
 	duplexCall       *duplexHTTPCall
 	compressionPools readOnlyCompressionPools
@@ -362,14 +348,6 @@ type grpcClientConn struct {
 	responseHeader   http.Header
 	responseTrailer  http.Header
 	readTrailers     func(*grpcUnmarshaler, *duplexHTTPCall) http.Header
-}
-
-func (cc *grpcClientConn) Spec() connect.Spec {
-	return cc.spec
-}
-
-func (cc *grpcClientConn) Peer() peer {
-	return cc.peer
 }
 
 func (cc *grpcClientConn) Send(msg any) error {
