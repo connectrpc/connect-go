@@ -111,54 +111,51 @@ func newDuplexHTTPCall(
 	return duplex
 }
 
-// Send sends a message to the server.
-func (d *duplexHTTPCall) Send(payload messagePayload) (int64, error) {
+// Send sends a message to the server. Empty data sends only the request
+// headers.
+func (d *duplexHTTPCall) Send(data []byte) error {
 	if d.streamType&connect.StreamTypeClient == 0 {
-		return d.sendUnary(payload)
+		return d.sendUnary(data)
 	}
-	isFirst := d.requestSent.CompareAndSwap(false, true)
-	if isFirst {
+	if d.requestSent.CompareAndSwap(false, true) {
 		// This is the first time we're sending a message to the server. The
 		// request body pipe has already been set up by newDuplexHTTPCall, so
 		// we just kick off the HTTP request here.
 		go d.makeRequest() // concurrent request
 	}
 	if err := d.ctx.Err(); err != nil {
-		return 0, wrapIfContextError(err)
+		return wrapIfContextError(err)
 	}
-	if isFirst && payload.Len() == 0 {
-		// On first write a nil Send is used to send request headers. Avoid
-		// writing a zero-length payload to avoid superfluous errors with close.
-		return 0, nil
+	if len(data) == 0 {
+		// A nil Send is used to send request headers. Avoid writing a
+		// zero-length payload, which blocks on the pipe until it's read.
+		return nil
 	}
 	// It's safe to write to this side of the pipe while net/http concurrently
 	// reads from the other side.
-	bytesWritten, err := payload.WriteTo(d.requestBodyWriter)
+	_, err := d.requestBodyWriter.Write(data)
 	if err != nil && errors.Is(err, io.ErrClosedPipe) {
 		// Signal that the stream is closed with the more-typical io.EOF instead of
 		// io.ErrClosedPipe. This makes it easier for protocol-specific wrappers to
 		// match grpc-go's behavior.
 		err = io.EOF
 	}
-	return bytesWritten, err
+	return err
 }
 
-func (d *duplexHTTPCall) sendUnary(payload messagePayload) (int64, error) {
+func (d *duplexHTTPCall) sendUnary(data []byte) error {
 	// Unary messages are sent as a single HTTP request. We don't need to use a
 	// pipe for the request body and we don't need to send headers separately.
 	if !d.requestSent.CompareAndSwap(false, true) {
-		return 0, errors.New("request already sent")
+		return errors.New("request already sent")
 	}
-	payloadLength := int64(payload.Len())
-	if payloadLength > 0 {
+	if len(data) > 0 {
 		// Build the request body from the payload.
-		payloadBody := newPayloadCloser(payload)
+		payloadBody := &payloadCloser{data: data}
 		d.request.Body = payloadBody
-		d.request.ContentLength = payloadLength
+		d.request.ContentLength = int64(len(data))
 		d.request.GetBody = func() (io.ReadCloser, error) {
-			if !payloadBody.Rewind() {
-				return nil, errors.New("payload cannot be retried")
-			}
+			payloadBody.Rewind()
 			return payloadBody, nil
 		}
 		// Release the payload ensuring that after Send returns the
@@ -171,10 +168,10 @@ func (d *duplexHTTPCall) sendUnary(payload messagePayload) (int64, error) {
 		// Check on response errors for context errors. Other errors are
 		// handled on read.
 		if err := d.ctx.Err(); err != nil {
-			return 0, wrapIfContextError(err)
+			return wrapIfContextError(err)
 		}
 	}
-	return payloadLength, nil
+	return nil
 }
 
 // failSend records err as the outcome of a unary or server-streaming call
@@ -422,41 +419,11 @@ func getNoBody() (io.ReadCloser, error) {
 	return http.NoBody, nil
 }
 
-// messagePayload is a sized and seekable message payload. The interface is
-// implemented by [*bytes.Reader] and *envelope. Reads must be non-blocking.
-type messagePayload interface {
-	io.Reader
-	io.WriterTo
-	io.Seeker
-	Len() int
-}
-
-// nopPayload is a message payload that does nothing. It's used to send headers
-// to the server.
-type nopPayload struct{}
-
-var _ messagePayload = nopPayload{}
-
-func (nopPayload) Read([]byte) (int, error) {
-	return 0, io.EOF
-}
-
-func (nopPayload) WriteTo(io.Writer) (int64, error) {
-	return 0, nil
-}
-
-func (nopPayload) Seek(int64, int) (int64, error) {
-	return 0, nil
-}
-
-func (nopPayload) Len() int {
-	return 0
-}
-
-// messageSender sends a message payload. The interface is implemented by
-// [*duplexHTTPCall] and writeSender.
+// messageSender sends a message. Empty data sends nothing, other than any
+// headers not yet sent. Send doesn't retain data after it returns. The
+// interface is implemented by [*duplexHTTPCall] and writeSender.
 type messageSender interface {
-	Send(messagePayload) (int64, error)
+	Send(data []byte) error
 }
 
 // writeSender is a sender that writes to an [io.Writer]. Useful for wrapping
@@ -467,14 +434,17 @@ type writeSender struct {
 
 var _ messageSender = writeSender{}
 
-func (w writeSender) Send(payload messagePayload) (int64, error) {
-	written, err := payload.WriteTo(w.writer)
+func (w writeSender) Send(data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	_, err := w.writer.Write(data)
 	// The request context is cancelled from a different goroutine than the one
 	// failing the write, so a write can fail while ctx.Err() is still nil.
 	if err != nil && isClientDisconnected(err) {
 		err = connect.NewError(connect.CodeCanceled, err.Error()).WithCause(err)
 	}
-	return written, err
+	return err
 }
 
 type serverRequestBody struct {
@@ -507,33 +477,34 @@ func cloneURL(oldURL *url.URL) *url.URL {
 	return newURL
 }
 
-// payloadCloser is an [io.ReadCloser] that wraps a messagePayload. It's used to
-// implement the request body for unary calls. To safely reuse the buffer
-// call Release after the response is received to ensure the payload is safe for
-// reuse.
+// payloadCloser is an [io.ReadCloser] over a message. It's used to implement
+// the request body for unary calls. To safely reuse the message's buffer, call
+// Release once the response is received.
 type payloadCloser struct {
-	mu      sync.Mutex
-	payload messagePayload
-}
-
-func newPayloadCloser(payload messagePayload) *payloadCloser {
-	return &payloadCloser{
-		payload: payload,
-	}
+	mu     sync.Mutex
+	data   []byte
+	offset int
 }
 
 // Read implements [io.Reader].
-func (p *payloadCloser) Read(dst []byte) (readN int, err error) {
+func (p *payloadCloser) Read(dst []byte) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.payload.Read(dst)
+	if p.offset >= len(p.data) {
+		return 0, io.EOF
+	}
+	n := copy(dst, p.data[p.offset:])
+	p.offset += n
+	return n, nil
 }
 
 // WriteTo implements [io.WriterTo].
 func (p *payloadCloser) WriteTo(dst io.Writer) (int64, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.payload.WriteTo(dst)
+	n, err := dst.Write(p.data[p.offset:])
+	p.offset += n
+	return int64(n), err
 }
 
 // Close implements [io.Closer].
@@ -543,11 +514,10 @@ func (p *payloadCloser) Close() error {
 
 // Rewind rewinds the payload to the beginning. It must not be called after
 // Release, which is only called once the request is no longer retried.
-func (p *payloadCloser) Rewind() bool {
+func (p *payloadCloser) Rewind() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	_, err := p.payload.Seek(0, io.SeekStart)
-	return err == nil
+	p.offset = 0
 }
 
 // Release detaches the payload so the caller's buffer is safe to reuse. The
@@ -556,11 +526,10 @@ func (p *payloadCloser) Rewind() bool {
 func (p *payloadCloser) Release() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.payload.Len() == 0 {
-		p.payload = nopPayload{}
-		return
+	if p.offset < len(p.data) {
+		p.data = bytes.Clone(p.data[p.offset:])
+	} else {
+		p.data = nil
 	}
-	unread := make([]byte, p.payload.Len())
-	n, _ := io.ReadFull(p.payload, unread)
-	p.payload = bytes.NewReader(unread[:n])
+	p.offset = 0
 }

@@ -1,0 +1,63 @@
+# connect.HTTPClient moves to connecthttp.HTTPClient.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- client.go --
+package app
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+)
+
+func ping(ctx context.Context, httpClient connect.HTTPClient, baseURL string) (*pingv1.PingResponse, error) {
+	client := pingv1connect.NewPingServiceClient(httpClient, baseURL)
+	res, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
+	if err != nil {
+		return nil, err
+	}
+	return res.Msg, nil
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./client.go: body_drop_msg=1 client_construction=1 import_add_connecthttp=1 import_add_connectv2=1 import_drop_v1=1 option_to_connecthttp=1 read_limit_pinned=1 strip_new_request=1
+--- ./client.go
++++ ./client.go
+@@ -3,17 +3,18 @@
+ import (
+ 	"context"
+ 
+-	"connectrpc.com/connect"
++	"connectrpc.com/connect/v2"
++	"connectrpc.com/connect/v2/connecthttp"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ )
+ 
+-func ping(ctx context.Context, httpClient connect.HTTPClient, baseURL string) (*pingv1.PingResponse, error) {
+-	client := pingv1connect.NewPingServiceClient(httpClient, baseURL)
+-	res, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{}))
++func ping(ctx context.Context, httpClient connecthttp.HTTPClient, baseURL string) (*pingv1.PingResponse, error) {
++	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(httpClient, baseURL, connecthttp.WithReadMaxBytes(0))))
++	res, err := client.Ping(ctx, &pingv1.PingRequest{})
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	return res.Msg, nil
++	return res, nil
+ }
+ 
+
+
+The following issues require manual code changes:
+  ./client.go:12:12: v2 limits reads to 4 MiB per message where v1 allowed any size, so this call is pinned to WithReadMaxBytes(0) to keep v1 behaviour. Drop it to take the v2 default.
+
+Scanned 1 Go file and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

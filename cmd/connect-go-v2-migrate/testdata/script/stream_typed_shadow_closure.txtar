@@ -1,0 +1,184 @@
+# A closure that declares its own variable with a stream's name gets the
+# verdict for that variable, not for the name: a real stream and a look-alike
+# can shadow each other in either direction. A plain value that shadows a
+# stream in a closure or a block is left alone too.
+stubs v2
+exec migrate
+cmp stdout out.txt
+exec migrate -w
+exec go build ./...
+exec migrate
+! stdout 'Proposed rewrites'
+-- queue/queue.go --
+package queue
+
+// Queue shares the method names of a v1 stream but is not one.
+type Queue struct{ items []int64 }
+
+type Opener struct{}
+
+func (Opener) Open() *Queue { return &Queue{} }
+
+func (Opener) Name() string { return "queue" }
+
+func (q *Queue) Send(n int64) error {
+	q.items = append(q.items, n)
+	return nil
+}
+
+func (q *Queue) CloseRequest() error { return nil }
+-- service.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"connectrpc.com/connect"
+	pingv1 "example.com/app/gen/connect/ping/v1"
+	"example.com/app/gen/connect/ping/v1/pingv1connect"
+
+	"example.com/app/queue"
+)
+
+// outerStream shadows a real stream with look-alikes in closures.
+func outerStream(ctx context.Context, client pingv1connect.PingServiceClient, opener queue.Opener) error {
+	if _, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{})); err != nil {
+		return err
+	}
+	stream := client.CumSum(ctx)
+	go func() {
+		stream := opener.Open()
+		_ = stream.Send(1)
+		_ = stream.CloseRequest()
+	}()
+	go func() {
+		stream := opener.Open()
+		fmt.Println(stream)
+	}()
+	if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+		return err
+	}
+	if err := stream.CloseRequest(); err != nil {
+		return err
+	}
+	return stream.CloseResponse()
+}
+
+// outerLookalike shadows a look-alike with a real stream in a closure.
+func outerLookalike(ctx context.Context, client pingv1connect.PingServiceClient, opener queue.Opener) error {
+	stream := opener.Open()
+	if err := stream.Send(1); err != nil {
+		return err
+	}
+	run := func() error {
+		stream := client.CumSum(ctx)
+		if err := stream.CloseRequest(); err != nil {
+			return err
+		}
+		return stream.CloseResponse()
+	}
+	return run()
+}
+
+// outerPlain shadows a real stream with a plain value in a closure and a
+// block.
+func outerPlain(ctx context.Context, client pingv1connect.PingServiceClient, opener queue.Opener) error {
+	stream := client.CumSum(ctx)
+	go func() {
+		stream := opener.Name()
+		fmt.Println(stream)
+	}()
+	{
+		stream := opener.Name()
+		fmt.Println(stream)
+	}
+	if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+		return err
+	}
+	return stream.CloseRequest()
+}
+-- out.txt --
+Proposed rewrites (rerun with -w to apply):
+  ./service.go: import_drop_v1=1 stream_client_ctor=3 stream_close_rename=5 strip_new_request=1
+--- ./service.go
++++ ./service.go
+@@ -4,7 +4,6 @@
+ 	"context"
+ 	"fmt"
+ 
+-	"connectrpc.com/connect"
+ 	pingv1 "example.com/app/gen/connect/ping/v1"
+ 	"example.com/app/gen/connect/ping/v1/pingv1connect"
+ 
+@@ -13,10 +12,13 @@
+ 
+ // outerStream shadows a real stream with look-alikes in closures.
+ func outerStream(ctx context.Context, client pingv1connect.PingServiceClient, opener queue.Opener) error {
+-	if _, err := client.Ping(ctx, connect.NewRequest(&pingv1.PingRequest{})); err != nil {
++	if _, err := client.Ping(ctx, &pingv1.PingRequest{}); err != nil {
+ 		return err
+ 	}
+-	stream := client.CumSum(ctx)
++	stream, err := client.CumSum(ctx)
++	if err != nil {
++		return err
++	}
+ 	go func() {
+ 		stream := opener.Open()
+ 		_ = stream.Send(1)
+@@ -29,10 +31,10 @@
+ 	if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+ 		return err
+ 	}
+-	if err := stream.CloseRequest(); err != nil {
++	if err := stream.CloseSend(); err != nil {
+ 		return err
+ 	}
+-	return stream.CloseResponse()
++	return stream.Close()
+ }
+ 
+ // outerLookalike shadows a look-alike with a real stream in a closure.
+@@ -42,11 +44,14 @@
+ 		return err
+ 	}
+ 	run := func() error {
+-		stream := client.CumSum(ctx)
+-		if err := stream.CloseRequest(); err != nil {
++		stream, err := client.CumSum(ctx)
++		if err != nil {
+ 			return err
+ 		}
+-		return stream.CloseResponse()
++		if err := stream.CloseSend(); err != nil {
++			return err
++		}
++		return stream.Close()
+ 	}
+ 	return run()
+ }
+@@ -54,7 +59,10 @@
+ // outerPlain shadows a real stream with a plain value in a closure and a
+ // block.
+ func outerPlain(ctx context.Context, client pingv1connect.PingServiceClient, opener queue.Opener) error {
+-	stream := client.CumSum(ctx)
++	stream, err := client.CumSum(ctx)
++	if err != nil {
++		return err
++	}
+ 	go func() {
+ 		stream := opener.Name()
+ 		fmt.Println(stream)
+@@ -66,6 +74,6 @@
+ 	if err := stream.Send(&pingv1.CumSumRequest{Number: 1}); err != nil {
+ 		return err
+ 	}
+-	return stream.CloseRequest()
++	return stream.CloseSend()
+ }
+ 
+
+
+Scanned 2 Go files and 0 Buf templates. 1 rewrite(s) ready (rerun with -w to apply).
+Full migration guide: https://github.com/connectrpc/connect-go/blob/main/docs/v2-migration.md

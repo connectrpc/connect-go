@@ -261,6 +261,9 @@ Interceptors move to `connect.NewClient`. Other client options move to
 
 ✅ `connect-go-v2-migrate` handles this.
 
+⚠️ The v1 generic `connect.Client[Req, Res]` and `connect.NewClient[Req, Res]`
+have no v2 form. Call the generated client instead. The tool warns at each use.
+
 ### Headers and trailers
 
 With the wrapper types gone, metadata moves to a `*connect.CallInfo` carried
@@ -317,6 +320,24 @@ The v1 `connect.CallInfoForHandlerContext(ctx)` is renamed to
 `connect.CallInfoForServerContext(ctx)`; both return `(CallInfo, bool)`, so
 existing comma-ok call sites carry over unchanged.
 
+The v1 `Spec()` and `Peer()` accessors on requests and streams become fields
+of the same `CallInfo`. `Peer().Addr` becomes `PeerAddr`, `Peer().Protocol`
+becomes `Protocol`, and the protocol constants gain a `Name` infix, such as
+`connect.ProtocolNameGRPC`. The HTTP method and the query, through
+`RequestURL()`, moved to `connecthttp.ServerInfoForContext(ctx)`:
+
+```go
+// v1
+log.Println(req.Spec().Procedure, req.Peer().Addr, req.HTTPMethod())
+```
+
+```go
+// v2
+info, _ := connect.CallInfoForServerContext(ctx)
+httpInfo, _ := connecthttp.ServerInfoForContext(ctx)
+log.Println(info.Spec.Procedure, info.PeerAddr, httpInfo.HTTPMethod())
+```
+
 ✅ `connect-go-v2-migrate` moves metadata access to the `CallInfo`:
 
 - A handler's request-header read (`req.Header()`) and response
@@ -327,10 +348,19 @@ existing comma-ok call sites carry over unchanged.
   header/trailer read (`res.Header()`/`res.Trailer()`) become
   `connect.NewClientContext(ctx)` plus `info.*`.
 - `connect.CallInfoForHandlerContext` renames to `connect.CallInfoForServerContext`.
+- A handler's `Spec()`, `Peer().Addr`, and `Peer().Protocol`, on the request
+  or the stream, become `info.Spec`, `info.PeerAddr`, and `info.Protocol` on
+  the same seeded info.
+- `connect.ProtocolConnect`, `connect.ProtocolGRPC`, and
+  `connect.ProtocolGRPCWeb` rename to `connect.ProtocolNameConnect`,
+  `connect.ProtocolNameGRPC`, and `connect.ProtocolNameGRPCWeb`.
 
 ⚠️ A function that both sets a client request header and reads a client response
 header, or that touches several response holders, is warned rather than seeding
 one shared context.
+
+⚠️ `HTTPMethod()`, or use of `Peer()` fields, `Peer().Query` and
+`Spec().IsClient`, are warned.
 
 ### Errors
 
@@ -348,12 +378,12 @@ return nil, connect.NewError(connect.CodeInternal, err)
 return nil, connect.NewError(connect.CodeInternal, err.Error()).WithCause(err)
 ```
 
-v1 sent the error's full string to the client, so the tool rewrites to
+v1 sent the error's full string to the client. The tool rewrites to
 `err.Error()` to preserve what callers see today, and attaches `err` with
-`WithCause` so `errors.Is` and `errors.As` still match. When the argument is
-a function call no `WithCause` is added, since repeating the call would
-evaluate it twice. Assign it to a variable first if you need `errors.Is` or
-`errors.As` to match.
+`WithCause` so `errors.Is` and `errors.As` still match. For a `fmt.Errorf`
+with a single `%w`, the wrapped variable becomes the cause. Functions that
+create errors don't add `WithCause` to avoid invoking them twice or declaring
+a variable.
 
 Common argument shapes collapse to simpler forms with the same wire message:
 
@@ -442,8 +472,9 @@ connecthttp.WithGRPCWeb()
 connecthttp.WithSendCompression("gzip")
 ```
 
-The `ErrorWriter` type, `NewErrorWriter`, and `IsNotModifiedError` move to
-`connecthttp` the same way, keeping their signatures.
+The `HTTPClient` and `ErrorWriter` types, `NewErrorWriter`, and
+`IsNotModifiedError` move to `connecthttp` the same way, keeping their
+signatures.
 
 ✅ `connect-go-v2-migrate` handles these.
 
@@ -477,6 +508,10 @@ Options whose signature changed are warned with the v2 replacement:
 | `connect.NewNotModifiedError(header)` | `connecthttp.NewNotModifiedError()` (no header argument) |
 
 ⚠️ Update these by hand.
+
+Custom `connect.Codec` and `connect.Compressor` implementations need the v2
+methods. A codec implements `MarshalWrite` and `UnmarshalRead`. A compressor
+implements `Compress` and `Decompress`. The tool warns at each use.
 
 ### Interceptors
 

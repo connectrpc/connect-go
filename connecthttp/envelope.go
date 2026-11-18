@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"math"
 
@@ -27,105 +26,23 @@ import (
 	"connectrpc.com/connect/v2/internal/bufferpool"
 )
 
-// flagEnvelopeCompressed indicates that the data is compressed. It has the
-// same meaning in the gRPC-Web, gRPC-HTTP2, and Connect protocols.
-const flagEnvelopeCompressed = 0b00000001
+const (
+	// flagEnvelopeCompressed indicates that the data is compressed. It has the
+	// same meaning in the gRPC-Web, gRPC-HTTP2, and Connect protocols.
+	flagEnvelopeCompressed = 0b00000001
+
+	// envelopePrefixSize is the size of the prefix before each message in gRPC
+	// and Connect streams. The first byte is a set of bitwise flags, and the
+	// rest is the message length as a big-endian uint32. gRPC and Connect
+	// interpret the flags differently, so the caller interprets them.
+	envelopePrefixSize = 5
+)
 
 var errSpecialEnvelope = connect.Errorf(
 	connect.CodeUnknown,
 	"final message has protocol-specific flags: %s",
 	io.EOF,
 ).WithCause(io.EOF) // User code checks for end of stream with errors.Is(err, io.EOF).
-
-// envelope is a block of arbitrary bytes wrapped in gRPC and Connect's framing
-// protocol.
-//
-// Each message is preceded by a 5-byte prefix. The first byte is a uint8 used
-// as a set of bitwise flags, and the remainder is a uint32 indicating the
-// message length. gRPC and Connect interpret the bitwise flags differently, so
-// envelope leaves their interpretation up to the caller.
-type envelope struct {
-	Data   *bytes.Buffer
-	Flags  uint8
-	offset int64
-}
-
-var _ messagePayload = (*envelope)(nil)
-
-func (e *envelope) IsSet(flag uint8) bool {
-	return e.Flags&flag == flag
-}
-
-// Read implements [io.Reader].
-func (e *envelope) Read(data []byte) (readN int, err error) {
-	if e.offset < 5 {
-		prefix, err := makeEnvelopePrefix(e.Flags, e.Data.Len())
-		if err != nil {
-			return 0, err
-		}
-		readN = copy(data, prefix[e.offset:])
-		e.offset += int64(readN)
-		if e.offset < 5 {
-			return readN, nil
-		}
-		data = data[readN:]
-	}
-	n := copy(data, e.Data.Bytes()[e.offset-5:])
-	e.offset += int64(n)
-	readN += n
-	if readN == 0 && e.offset == int64(e.Data.Len()+5) {
-		err = io.EOF
-	}
-	return readN, err
-}
-
-// WriteTo implements [io.WriterTo].
-func (e *envelope) WriteTo(dst io.Writer) (wroteN int64, err error) {
-	if e.offset < 5 {
-		prefix, err := makeEnvelopePrefix(e.Flags, e.Data.Len())
-		if err != nil {
-			return 0, err
-		}
-		prefixN, err := dst.Write(prefix[e.offset:])
-		e.offset += int64(prefixN)
-		wroteN += int64(prefixN)
-		if e.offset < 5 {
-			return wroteN, err
-		}
-	}
-	n, err := dst.Write(e.Data.Bytes()[e.offset-5:])
-	e.offset += int64(n)
-	wroteN += int64(n)
-	return wroteN, err
-}
-
-// Seek implements [io.Seeker]. Based on the implementation of [bytes.Reader].
-func (e *envelope) Seek(offset int64, whence int) (int64, error) {
-	var abs int64
-	switch whence {
-	case io.SeekStart:
-		abs = offset
-	case io.SeekCurrent:
-		abs = e.offset + offset
-	case io.SeekEnd:
-		abs = int64(e.Data.Len()) + offset
-	default:
-		return 0, errors.New("connect.envelope.Seek: invalid whence")
-	}
-	if abs < 0 {
-		return 0, errors.New("connect.envelope.Seek: negative position")
-	}
-	e.offset = abs
-	return abs, nil
-}
-
-// Len returns the number of bytes of the unread portion of the envelope.
-func (e *envelope) Len() int {
-	if length := int(int64(e.Data.Len()) + 5 - e.offset); length > 0 {
-		return length
-	}
-	return 0
-}
 
 type envelopeWriter struct {
 	ctx              context.Context //nolint:containedctx
@@ -137,19 +54,10 @@ type envelopeWriter struct {
 	stats            *connect.MessageStats
 }
 
-// recordStats records message byte counts, skipping protocol envelopes.
-func (w *envelopeWriter) recordStats(flags uint8, size, compressedSize int) {
-	if w.stats == nil || flags&^flagEnvelopeCompressed != 0 {
-		return
-	}
-	*w.stats = connect.MessageStats{Size: size, CompressedSize: compressedSize}
-}
-
 func (w *envelopeWriter) Marshal(message any) *connect.Error {
 	if message == nil {
-		// Send no-op message to create the request and send headers.
-		payload := nopPayload{}
-		if _, err := w.sender.Send(payload); err != nil {
+		// Send no data to create the request and send headers.
+		if err := w.sender.Send(nil); err != nil {
 			if connectErr, ok := asError(err); ok {
 				return connectErr
 			}
@@ -157,58 +65,60 @@ func (w *envelopeWriter) Marshal(message any) *connect.Error {
 		}
 		return nil
 	}
-	// Codec supports MarshalAppend; try to re-use a []byte from the pool.
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
+	padEnvelope(buffer)
 	if err := w.codec.MarshalWrite(w.ctx, buffer, message); err != nil {
 		return connect.Errorf(connect.CodeInternal, "marshal message: %s", err).WithCause(err)
 	}
-	envelope := &envelope{Data: buffer}
-	return w.Write(envelope)
+	return w.Write(0, buffer)
 }
 
-// Write writes the enveloped message, compressing as necessary. It doesn't
-// retain any references to the supplied envelope or its underlying data.
-func (w *envelopeWriter) Write(env *envelope) *connect.Error {
-	if env.IsSet(flagEnvelopeCompressed) ||
-		w.compressionPool == nil ||
-		env.Data.Len() < w.compressMinBytes {
-		if w.sendMaxBytes > 0 && env.Data.Len() > w.sendMaxBytes {
-			return connect.Errorf(connect.CodeResourceExhausted, "message size %d exceeds sendMaxBytes %d", env.Data.Len(), w.sendMaxBytes)
-		}
-		size, compressedSize := env.Data.Len(), 0
-		if env.IsSet(flagEnvelopeCompressed) {
-			// Pre-compressed payload; uncompressed size unknown.
-			size, compressedSize = 0, env.Data.Len()
-		}
-		if err := w.write(env); err != nil {
+// Write compresses the message in buffer as necessary, then sends it with
+// the given flags. The buffer must start with the padding from padEnvelope.
+// Write doesn't retain the buffer.
+func (w *envelopeWriter) Write(flags uint8, buffer *bytes.Buffer) *connect.Error {
+	size := buffer.Len() - envelopePrefixSize
+	compressedSize := 0
+	if w.compressionPool != nil && size >= w.compressMinBytes {
+		compressed := bufferpool.Get()
+		defer bufferpool.Put(compressed)
+		padEnvelope(compressed)
+		buffer.Next(envelopePrefixSize) // compress only the message
+		if err := w.compressionPool.Compress(compressed, buffer); err != nil {
 			return err
 		}
-		w.recordStats(env.Flags, size, compressedSize)
-		return nil
+		buffer = compressed
+		compressedSize = buffer.Len() - envelopePrefixSize
+		flags |= flagEnvelopeCompressed
+		if w.sendMaxBytes > 0 && compressedSize > w.sendMaxBytes {
+			return connect.Errorf(connect.CodeResourceExhausted, "compressed message size %d exceeds sendMaxBytes %d", compressedSize, w.sendMaxBytes)
+		}
+	} else if w.sendMaxBytes > 0 && size > w.sendMaxBytes {
+		return connect.Errorf(connect.CodeResourceExhausted, "message size %d exceeds sendMaxBytes %d", size, w.sendMaxBytes)
 	}
-	size := env.Data.Len() // before Compress drains the buffer
-	data := bufferpool.Get()
-	defer bufferpool.Put(data)
-	if err := w.compressionPool.Compress(data, env.Data); err != nil {
+	if err := w.write(flags, buffer); err != nil {
 		return err
 	}
-	if w.sendMaxBytes > 0 && data.Len() > w.sendMaxBytes {
-		return connect.Errorf(connect.CodeResourceExhausted, "compressed message size %d exceeds sendMaxBytes %d", data.Len(), w.sendMaxBytes)
+	// Protocol messages, like the end of stream, aren't counted.
+	if w.stats != nil && flags&^flagEnvelopeCompressed == 0 {
+		*w.stats = connect.MessageStats{Size: size, CompressedSize: compressedSize}
 	}
-	compressedSize := data.Len() // before write drains the buffer
-	if err := w.write(&envelope{
-		Data:  data,
-		Flags: env.Flags | flagEnvelopeCompressed,
-	}); err != nil {
-		return err
-	}
-	w.recordStats(env.Flags, size, compressedSize)
 	return nil
 }
 
-func (w *envelopeWriter) write(env *envelope) *connect.Error {
-	if _, err := w.sender.Send(env); err != nil {
+// write fills in the prefix of buffer and sends it, without compressing it or
+// checking its size. The buffer must start with the padding from padEnvelope.
+func (w *envelopeWriter) write(flags uint8, buffer *bytes.Buffer) *connect.Error {
+	data := buffer.Bytes()
+	// Cast as 64-bit to ensure comparison works on all architectures.
+	size := int64(len(data) - envelopePrefixSize)
+	if size > math.MaxUint32 {
+		return connect.Errorf(connect.CodeInternal, "envelope size %d out of bounds", size)
+	}
+	data[0] = flags
+	binary.BigEndian.PutUint32(data[1:envelopePrefixSize], uint32(size))
+	if err := w.sender.Send(data); err != nil {
 		err = wrapIfContextDone(w.ctx, err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr
@@ -221,146 +131,72 @@ func (w *envelopeWriter) write(env *envelope) *connect.Error {
 type envelopeReader struct {
 	ctx             context.Context //nolint:containedctx
 	reader          io.Reader
-	bytesRead       int64 // detect trailers-only gRPC responses
+	limited         io.LimitedReader // avoids allocating one per message
+	bytesRead       int64            // detect trailers-only gRPC responses
 	codec           connect.Codec
-	last            envelope
 	compressionPool *compressionPool
 	readMaxBytes    int
 	stats           *connect.MessageStats
 }
 
-func (r *envelopeReader) Unmarshal(message any) *connect.Error {
+// Read reads the next enveloped message into a pooled buffer, decompressing
+// it, and returns the buffer and the envelope's flags. The caller must return
+// the buffer to the pool, even on error.
+//
+// A message with protocol-specific flags ends the stream. Read checks that no
+// data follows it, and leaves the message for the caller to interpret.
+func (r *envelopeReader) Read() (*bytes.Buffer, uint8, *connect.Error) {
 	buffer := bufferpool.Get()
-	var dontRelease *bytes.Buffer
-	defer func() {
-		if buffer != dontRelease {
-			bufferpool.Put(buffer)
-		}
-	}()
-
-	env := &envelope{Data: buffer}
-	err := r.Read(env)
-	switch {
-	case err == nil && env.IsSet(flagEnvelopeCompressed) && r.compressionPool == nil:
-		return connect.Errorf(connect.CodeInternal,
-			"protocol error: sent compressed message without compression support",
-		)
-	case err == nil &&
-		(env.Flags == 0 || env.Flags == flagEnvelopeCompressed) &&
-		env.Data.Len() == 0:
-		// This is a standard message (because none of the top 7 bits are set) and
-		// there's no data, so the zero value of the message is correct.
-		if r.stats != nil {
-			*r.stats = connect.MessageStats{}
-		}
-		return nil
-	case err != nil && errors.Is(err, io.EOF):
-		// The stream has ended. Propagate the EOF to the caller.
-		return err
-	case err != nil:
-		// Something's wrong.
-		return err
-	}
-
-	data := env.Data
-	compressedSize := 0
-	if data.Len() > 0 && env.IsSet(flagEnvelopeCompressed) {
-		compressedSize = data.Len()
-		decompressed := bufferpool.Get()
-		defer func() {
-			if decompressed != dontRelease {
-				bufferpool.Put(decompressed)
-			}
-		}()
-		if err := r.compressionPool.Decompress(decompressed, data, int64(r.readMaxBytes)); err != nil {
-			return err
-		}
-		data = decompressed
-	}
-
-	if env.Flags != 0 && env.Flags != flagEnvelopeCompressed {
-		// Drain the rest of the stream to ensure there is no extra data.
-		numBytes, err := discard(r.reader)
-		r.bytesRead += numBytes
-		if err != nil {
-			err = wrapIfContextError(err)
-			if connErr, ok := asError(err); ok && connErr.Code() != connect.CodeUnavailable {
-				return connErr
-			}
-			// Ignore uncoded read errors and unavailable transport errors if the
-			// complete end-stream message was already received. In HTTP/1.1,
-			// http.Transport closes the connection on request write failures,
-			// which can cause subsequent reads to fail despite having received
-			// the entire response.
-		}
-		if numBytes > 0 {
-			return connect.Errorf(connect.CodeInternal, "corrupt response: %d extra bytes after end of stream", numBytes)
-		}
-		// One of the protocol-specific flags are set, so this is the end of the
-		// stream. Save the message for protocol-specific code to process and
-		// return a sentinel error. We alias the buffer with dontRelease as a
-		// way of marking it so above defers don't release it to the pool.
-		r.last = envelope{
-			Data:  data,
-			Flags: env.Flags,
-		}
-		dontRelease = data
-		return errSpecialEnvelope
-	}
-
-	size := data.Len() // before UnmarshalRead drains the buffer
-	if err := r.codec.UnmarshalRead(r.ctx, data, message); err != nil {
-		return connect.Errorf(connect.CodeInvalidArgument, "unmarshal message: %s", err).WithCause(err)
-	}
-	if r.stats != nil {
-		*r.stats = connect.MessageStats{Size: size, CompressedSize: compressedSize}
-	}
-	return nil
-}
-
-func (r *envelopeReader) Read(env *envelope) *connect.Error {
-	prefixes := [5]byte{}
+	// Read the prefix into the buffer's spare capacity. It isn't kept: the
+	// message overwrites it.
+	buffer.Grow(envelopePrefixSize)
+	prefix := buffer.AvailableBuffer()[:envelopePrefixSize]
 	// io.ReadFull reads the number of bytes requested, or returns an error.
 	// io.EOF will only be returned if no bytes were read.
-	n, err := io.ReadFull(r.reader, prefixes[:])
+	n, err := io.ReadFull(r.reader, prefix)
 	r.bytesRead += int64(n)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			// The stream ended cleanly. That's expected, but we need to propagate an EOF
 			// to the user so that they know that the stream has ended. We shouldn't
 			// add any alarming text about protocol errors, though.
-			return connect.Errorf(connect.CodeUnknown, "%s", err).WithCause(err)
+			return buffer, 0, connect.Errorf(connect.CodeUnknown, "%s", err).WithCause(err)
 		}
 		err = wrapIfMaxBytesError(err, "read 5 byte message prefix")
 		err = wrapIfContextDone(r.ctx, err)
 		if connectErr, ok := asError(err); ok {
-			return connectErr
+			return buffer, 0, connectErr
 		}
 		// Something else has gone wrong - the stream didn't end cleanly.
-		return connect.Errorf(
+		return buffer, 0, connect.Errorf(
 			connect.CodeInternal,
 			"protocol error: incomplete envelope: %s", err,
 		).WithCause(err)
 	}
-	size := int64(binary.BigEndian.Uint32(prefixes[1:5]))
+	flags := prefix[0]
+	size := int64(binary.BigEndian.Uint32(prefix[1:envelopePrefixSize]))
 	if r.readMaxBytes > 0 && size > int64(r.readMaxBytes) {
 		n, err := io.CopyN(io.Discard, r.reader, size)
 		r.bytesRead += n
 		if err != nil && !errors.Is(err, io.EOF) {
-			return connect.Errorf(connect.CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %s", r.readMaxBytes, err).WithCause(err)
+			return buffer, 0, connect.Errorf(connect.CodeResourceExhausted, "message is larger than configured max %d - unable to determine message size: %s", r.readMaxBytes, err).WithCause(err)
 		}
-		return connect.Errorf(connect.CodeResourceExhausted, "message size %d is larger than configured max %d", size, r.readMaxBytes)
+		return buffer, 0, connect.Errorf(connect.CodeResourceExhausted, "message size %d is larger than configured max %d", size, r.readMaxBytes)
 	}
-	// We've read the prefix, so we know how many bytes to expect.
-	// CopyN will return an error if it doesn't read the requested
-	// number of bytes.
-	readN, err := io.CopyN(env.Data, r.reader, size)
+	// The buffer grows as bytes arrive since size comes from the peer.
+	r.limited = io.LimitedReader{R: r.reader, N: size}
+	readN, err := buffer.ReadFrom(&r.limited)
 	r.bytesRead += readN
+	if readN == size {
+		err = nil // like io.CopyN, ignore an error returned with the last bytes
+	} else if err == nil {
+		err = io.EOF // ReadFrom hides EOF, so a short read needs it put back
+	}
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			// We've gotten fewer bytes than we expected, so the stream has ended
 			// unexpectedly.
-			return connect.Errorf(connect.CodeInternal,
+			return buffer, 0, connect.Errorf(connect.CodeInternal,
 				"protocol error: promised %d bytes in enveloped message, got %d bytes",
 				size,
 				readN,
@@ -369,22 +205,72 @@ func (r *envelopeReader) Read(env *envelope) *connect.Error {
 		err = wrapIfMaxBytesError(err, "read %d byte message", size)
 		err = wrapIfContextDone(r.ctx, err)
 		if connectErr, ok := asError(err); ok {
-			return connectErr
+			return buffer, 0, connectErr
 		}
-		return connect.Errorf(connect.CodeUnknown, "read enveloped message: %s", err).WithCause(err)
+		return buffer, 0, connect.Errorf(connect.CodeUnknown, "read enveloped message: %s", err).WithCause(err)
 	}
-	env.Flags = prefixes[0]
+
+	compressedSize := 0
+	if flags&flagEnvelopeCompressed != 0 {
+		if r.compressionPool == nil {
+			return buffer, 0, connect.Errorf(connect.CodeInternal,
+				"protocol error: sent compressed message without compression support",
+			)
+		}
+		if buffer.Len() > 0 {
+			compressedSize = buffer.Len()
+			decompressed := bufferpool.Get()
+			err := r.compressionPool.Decompress(decompressed, buffer, int64(r.readMaxBytes))
+			bufferpool.Put(buffer)
+			buffer = decompressed
+			if err != nil {
+				return buffer, 0, err
+			}
+		}
+	}
+
+	if flags&^flagEnvelopeCompressed == 0 {
+		if r.stats != nil {
+			*r.stats = connect.MessageStats{Size: buffer.Len(), CompressedSize: compressedSize}
+		}
+		return buffer, flags, nil
+	}
+	// Drain the rest of the stream to ensure there is no extra data.
+	numBytes, err := discard(r.reader)
+	r.bytesRead += numBytes
+	if err != nil {
+		err = wrapIfContextError(err)
+		if connErr, ok := asError(err); ok && connErr.Code() != connect.CodeUnavailable {
+			return buffer, 0, connErr
+		}
+		// Ignore uncoded read errors and unavailable transport errors if the
+		// complete end-stream message was already received. In HTTP/1.1,
+		// http.Transport closes the connection on request write failures,
+		// which can cause subsequent reads to fail despite having received
+		// the entire response.
+	}
+	if numBytes > 0 {
+		return buffer, 0, connect.Errorf(connect.CodeInternal, "corrupt response: %d extra bytes after end of stream", numBytes)
+	}
+	return buffer, flags, nil
+}
+
+// unmarshal decodes a message from a buffer returned by Read.
+func (r *envelopeReader) unmarshal(buffer *bytes.Buffer, message any) *connect.Error {
+	if buffer.Len() == 0 {
+		// There's no data, so the zero value of the message is correct.
+		return nil
+	}
+	if err := r.codec.UnmarshalRead(r.ctx, buffer, message); err != nil {
+		return connect.Errorf(connect.CodeInvalidArgument, "unmarshal message: %s", err).WithCause(err)
+	}
 	return nil
 }
 
-func makeEnvelopePrefix(flags uint8, size int) ([5]byte, error) {
-	// Cast as 64-bit to ensure comparison works on all architectures.
-	size64 := int64(size)
-	if size64 < 0 || size64 > math.MaxUint32 {
-		return [5]byte{}, fmt.Errorf("connect.makeEnvelopePrefix: size %d out of bounds", size)
-	}
-	prefix := [5]byte{}
-	prefix[0] = flags
-	binary.BigEndian.PutUint32(prefix[1:5], uint32(size64))
-	return prefix, nil
+// padEnvelope writes zeros to reserve the envelope prefix at the front of
+// buffer. Write the message after it. envelopeWriter fills in the prefix when
+// sending.
+func padEnvelope(buffer *bytes.Buffer) {
+	var prefix [envelopePrefixSize]byte
+	_, _ = buffer.Write(prefix[:])
 }

@@ -122,10 +122,10 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 	writer := envelopeWriter{
 		sender: writeSender{writer: &buffer},
 	}
-	err = writer.Write(&envelope{
-		Flags: connectFlagEnvelopeEndStream,
-		Data:  bytes.NewBuffer(endStreamData),
-	})
+	frame := &bytes.Buffer{}
+	padEnvelope(frame)
+	frame.Write(endStreamData)
+	err = writer.Write(connectFlagEnvelopeEndStream, frame)
 	assert.Nil(t, err)
 
 	unmarshaler := connectStreamingUnmarshaler{
@@ -651,6 +651,12 @@ func TestSetTimeout(t *testing.T) {
 			name:             "zero",
 			value:            "0",
 			expectedDuration: 0,
+			expectedError:    nil,
+		},
+		{
+			name:             "max_digits",
+			value:            "9999999999", // 10 digit max, overflows a 32-bit int.
+			expectedDuration: 9999999999 * time.Millisecond,
 			expectedError:    nil,
 		},
 		{

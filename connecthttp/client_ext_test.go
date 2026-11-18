@@ -277,6 +277,8 @@ func TestClientStreamCloseUnusedDoesNotDispatch(t *testing.T) {
 	})
 	client := connect.NewClient(connecthttp.NewTransport(httpClient, "http://localhost"))
 	for _, spec := range []connect.Spec{
+		{StreamType: connect.StreamTypeUnary, Procedure: pingv1connect.PingServicePingProcedure},
+		{StreamType: connect.StreamTypeServer, Procedure: pingv1connect.PingServiceCountUpProcedure},
 		{StreamType: connect.StreamTypeClient, Procedure: pingv1connect.PingServiceSumProcedure},
 		{StreamType: connect.StreamTypeBidi, Procedure: pingv1connect.PingServiceCumSumProcedure},
 	} {
@@ -420,7 +422,28 @@ func TestGetURLSizeBoundary(t *testing.T) {
 
 func TestConnectionDropped(t *testing.T) {
 	t.Parallel()
-	ctx := t.Context()
+	// The server drops the TCP connection before it responds, or after the
+	// first byte of the response body. Either way the client sees a lost
+	// connection, which is CodeUnavailable. With goAway the server first sends
+	// an HTTP/2 GOAWAY as it does on shutdown. This uses a real network
+	// connection because the errors net/http reports depend on it.
+	pingServer := &pluggablePingServer{
+		ping: func(_ context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+			return &pingv1.PingResponse{Number: request.GetNumber()}, nil
+		},
+		countUp: func(_ context.Context, request *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
+			for number := range request.GetNumber() {
+				if err := stream.Send(&pingv1.CountUpResponse{Number: number + 1}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, pingServer)
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, srv)
 	for _, protocol := range []string{connect.ProtocolNameConnect, connect.ProtocolNameGRPC, connect.ProtocolNameGRPCWeb} {
 		var opts []connecthttp.Option
 		switch protocol {
@@ -429,38 +452,68 @@ func TestConnectionDropped(t *testing.T) {
 		case connect.ProtocolNameGRPCWeb:
 			opts = []connecthttp.Option{connecthttp.WithGRPCWeb()}
 		}
-		t.Run(protocol, func(t *testing.T) {
-			t.Parallel()
-			httpClient := httpClientFunc(func(_ *http.Request) (*http.Response, error) {
-				return nil, io.EOF
-			})
-			client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(httpClient,
-				"http://1.2.3.4",
-				opts...),
-			))
-			t.Run("unary", func(t *testing.T) {
-				t.Parallel()
-				_, err := client.Ping(ctx, &pingv1.PingRequest{})
-				assert.NotNil(t, err)
-				if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
-					t.Logf("err = %v\n%#v", err, err)
+		for _, httpVersion := range []string{"http1", "http2"} {
+			if protocol == connect.ProtocolNameGRPC && httpVersion == "http1" {
+				continue // gRPC requires HTTP/2.
+			}
+			for _, testCase := range []struct {
+				name   string
+				limit  int
+				goAway bool
+			}{
+				{name: "before_response"},
+				{name: "mid_body", limit: 1},
+				{name: "goaway", limit: 1, goAway: true},
+			} {
+				if testCase.goAway && httpVersion == "http1" {
+					continue // GOAWAY is an HTTP/2 frame.
 				}
-			})
-			t.Run("stream", func(t *testing.T) {
-				t.Parallel()
-				svrStream, err := client.CountUp(ctx, &pingv1.CountUpRequest{})
-				if err == nil {
-					t.Cleanup(func() {
-						assert.Nil(t, svrStream.Close())
-					})
-					_, err = svrStream.Receive()
-				}
-				assert.NotNil(t, err)
-				if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
-					t.Logf("err = %v\n%#v", err, err)
-				}
-			})
-		})
+				t.Run(protocol+"/"+httpVersion+"/"+testCase.name, func(t *testing.T) {
+					t.Parallel()
+					// Each subtest has its own server, so dropping its
+					// connections doesn't affect other subtests.
+					var server *httptest.Server
+					server = httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+						mux.ServeHTTP(&dropResponseWriter{
+							ResponseWriter: writer,
+							limit:          testCase.limit,
+							goAway:         testCase.goAway,
+							drop:           server.CloseClientConnections,
+						}, request)
+					}))
+					server.Config.ErrorLog = log.New(io.Discard, "", 0) //nolint:forbidigo
+					serverProtocols := new(http.Protocols)
+					serverProtocols.SetHTTP1(true)
+					serverProtocols.SetUnencryptedHTTP2(true)
+					server.Config.Protocols = serverProtocols
+					server.Start()
+					t.Cleanup(server.Close)
+					httpClient := server.Client()
+					if httpVersion == "http2" {
+						transport, ok := httpClient.Transport.(*http.Transport)
+						assert.True(t, ok)
+						clientProtocols := new(http.Protocols)
+						clientProtocols.SetUnencryptedHTTP2(true)
+						transport.Protocols = clientProtocols
+					}
+					client := pingv1connect.NewPingServiceClient(connect.NewClient(
+						connecthttp.NewTransport(httpClient, server.URL, opts...),
+					))
+					_, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 42})
+					if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
+						t.Logf("unary err = %v", err)
+					}
+					stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 2})
+					if err == nil {
+						_, err = stream.Receive()
+						assert.Nil(t, stream.Close())
+					}
+					if !assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable) {
+						t.Logf("stream err = %v", err)
+					}
+				})
+			}
+		}
 	}
 }
 
@@ -468,10 +521,13 @@ func TestConnectionReset(t *testing.T) {
 	t.Parallel()
 	// A reset observed by the client is a transport failure, not the caller
 	// canceling, so it must be CodeUnavailable. Retries remain the caller's
-	// responsibility and are safe only for idempotent RPCs.
+	// responsibility and are safe only for idempotent RPCs. net/http reports
+	// a connection lost before the response body ended as io.ErrUnexpectedEOF,
+	// which is the same failure.
 	resetErrs := map[string]error{
-		"ECONNRESET": &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.ECONNRESET)},
-		"EPIPE":      &net.OpError{Op: "write", Net: "tcp", Err: os.NewSyscallError("write", syscall.EPIPE)},
+		"ECONNRESET":       &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.ECONNRESET)},
+		"EPIPE":            &net.OpError{Op: "write", Net: "tcp", Err: os.NewSyscallError("write", syscall.EPIPE)},
+		"ErrUnexpectedEOF": io.ErrUnexpectedEOF,
 	}
 	pingServer := &pluggablePingServer{
 		ping: func(context.Context, *pingv1.PingRequest) (*pingv1.PingResponse, error) {
@@ -1012,6 +1068,169 @@ func TestClientDeadlineHandling(t *testing.T) {
 	})
 }
 
+func TestClientConditionalOptions(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, pingServer{})
+	connecthttp.Mount(mux, srv)
+	server := memhttptest.NewServer(t, mux)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
+		server.Client(),
+		server.URL(),
+		connecthttp.WithConditionalOptions(func(spec connect.Spec) []connecthttp.Option {
+			if spec.Procedure == pingv1connect.PingServicePingProcedure {
+				return []connecthttp.Option{connecthttp.WithReadMaxBytes(1)}
+			}
+			return nil
+		}),
+	)))
+	text := strings.Repeat(".", 32)
+	// Options resolve per procedure, so repeated calls keep their own limits.
+	for range 2 {
+		_, err := client.Ping(t.Context(), &pingv1.PingRequest{Text: text})
+		assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+		stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 1})
+		assert.Nil(t, err)
+		_, err = stream.Receive()
+		assert.Nil(t, err)
+		assert.Nil(t, stream.Close())
+	}
+}
+
+func TestClientResponseContentTypeParameters(t *testing.T) {
+	t.Parallel()
+	pingServer := &pluggablePingServer{
+		ping: func(_ context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
+			if request.GetNumber() < 0 {
+				return nil, connect.NewError(connect.CodeFailedPrecondition, "negative")
+			}
+			return &pingv1.PingResponse{Number: request.GetNumber()}, nil
+		},
+		countUp: func(_ context.Context, request *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
+			for i := range request.GetNumber() {
+				if err := stream.Send(&pingv1.CountUpResponse{Number: i + 1}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, pingServer)
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, srv)
+	testCases := []struct {
+		name string
+		json bool
+		// rewrite maps the Content-Type the server chose to the one sent.
+		rewrite   func(string) string
+		expectErr connect.Code
+		// expectErrorBodyCode is the code for an RPC that fails with
+		// failed_precondition: it falls back to the HTTP status's code when
+		// the client must discard the JSON error body.
+		expectErrorBodyCode connect.Code
+	}{
+		{
+			name:                "proto_extra_parameter",
+			rewrite:             func(contentType string) string { return contentType + "; foo=bar" },
+			expectErrorBodyCode: connect.CodeFailedPrecondition,
+		},
+		{
+			name:                "proto_uppercase",
+			rewrite:             strings.ToUpper,
+			expectErrorBodyCode: connect.CodeFailedPrecondition,
+		},
+		{
+			name:                "proto_ignores_charset",
+			rewrite:             func(contentType string) string { return contentType + "; charset=latin1" },
+			expectErrorBodyCode: connect.CodeInternal,
+		},
+		{
+			name:                "json_utf8_charset_no_space",
+			json:                true,
+			rewrite:             func(contentType string) string { return contentType + ";charset=utf-8" },
+			expectErrorBodyCode: connect.CodeFailedPrecondition,
+		},
+		{
+			name:                "json_uppercase_charset_and_extra_parameter",
+			json:                true,
+			rewrite:             func(contentType string) string { return strings.ToUpper(contentType) + "; Charset=UTF-8; foo=bar" },
+			expectErrorBodyCode: connect.CodeFailedPrecondition,
+		},
+		{
+			name:                "json_last_utf8_charset",
+			json:                true,
+			rewrite:             func(contentType string) string { return contentType + "; a=1; b=2; charset=utf-8" },
+			expectErrorBodyCode: connect.CodeFailedPrecondition,
+		},
+		{
+			name:                "json_middle_non_utf8_charset",
+			json:                true,
+			rewrite:             func(contentType string) string { return contentType + "; a=1; charset=latin1; b=2" },
+			expectErr:           connect.CodeInternal,
+			expectErrorBodyCode: connect.CodeInternal,
+		},
+		{
+			name:                "json_non_utf8_charset",
+			json:                true,
+			rewrite:             func(contentType string) string { return contentType + "; charset=latin1" },
+			expectErr:           connect.CodeInternal,
+			expectErrorBodyCode: connect.CodeInternal,
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			server := memhttptest.NewServer(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				mux.ServeHTTP(&contentTypeRewriter{ResponseWriter: writer, rewrite: testCase.rewrite}, request)
+			}))
+			var options []connecthttp.Option
+			if testCase.json {
+				options = append(options, connecthttp.WithProtoJSON())
+			}
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(
+				connecthttp.NewTransport(server.Client(), server.URL(), options...),
+			))
+			t.Run("unary", func(t *testing.T) {
+				t.Parallel()
+				response, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 42})
+				if testCase.expectErr != 0 {
+					assert.Equal(t, connect.CodeOf(err), testCase.expectErr)
+					return
+				}
+				assert.Nil(t, err)
+				assert.Equal(t, response.GetNumber(), 42)
+			})
+			t.Run("unary_error", func(t *testing.T) {
+				t.Parallel()
+				_, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: -1})
+				assert.Equal(t, connect.CodeOf(err), testCase.expectErrorBodyCode)
+			})
+			t.Run("server_stream", func(t *testing.T) {
+				t.Parallel()
+				stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 3})
+				if err == nil {
+					var received []int64
+					var msg *pingv1.CountUpResponse
+					for msg, err = stream.Receive(); err == nil; msg, err = stream.Receive() {
+						received = append(received, msg.GetNumber())
+					}
+					if errors.Is(err, io.EOF) {
+						err = nil
+						assert.Equal(t, received, []int64{1, 2, 3})
+					}
+				}
+				if testCase.expectErr != 0 {
+					assert.Equal(t, connect.CodeOf(err), testCase.expectErr)
+					return
+				}
+				assert.Nil(t, err)
+			})
+		})
+	}
+}
+
 func testClientDeadlineBruteForceLoop(
 	t *testing.T,
 	duration time.Duration,
@@ -1198,6 +1417,50 @@ func (fn httpClientFunc) Do(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
 
+// dropResponseWriter writes up to limit bytes of the response body, then
+// flushes them and calls drop to close the connection. A limit of zero drops
+// the connection before the response headers are sent. With goAway an HTTP/2
+// server sends GOAWAY with the response headers.
+type dropResponseWriter struct {
+	http.ResponseWriter
+
+	limit  int
+	goAway bool
+	drop   func()
+}
+
+func (w *dropResponseWriter) Write(data []byte) (int, error) {
+	if w.goAway {
+		// The HTTP/2 server turns this header into a GOAWAY frame.
+		w.Header().Set("Connection", "close")
+		w.goAway = false
+	}
+	if len(data) <= w.limit {
+		n, err := w.ResponseWriter.Write(data)
+		w.limit -= n
+		return n, err
+	}
+	if w.limit > 0 {
+		_, _ = w.ResponseWriter.Write(data[:w.limit])
+		_ = http.NewResponseController(w.ResponseWriter).Flush()
+		w.limit = 0
+	}
+	w.drop()
+	return 0, net.ErrClosed
+}
+
+func (w *dropResponseWriter) Flush() {
+	// Hold back the response headers until the first write, so a limit of
+	// zero drops the connection before the client sees a response.
+	if w.limit > 0 {
+		_ = http.NewResponseController(w.ResponseWriter).Flush()
+	}
+}
+
+func (w *dropResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 // resetBody simulates a connection reset on a response body. readErr fails
 // the first Read, eofErr replaces io.EOF, and closeErr fails the first Close.
 type resetBody struct {
@@ -1281,139 +1544,6 @@ func (b *blockingResetBody) Read([]byte) (int, error) {
 	b.once.Do(func() { close(b.started) })
 	<-b.release
 	return 0, b.err
-}
-
-func TestClientResponseContentTypeParameters(t *testing.T) {
-	t.Parallel()
-	pingServer := &pluggablePingServer{
-		ping: func(_ context.Context, request *pingv1.PingRequest) (*pingv1.PingResponse, error) {
-			if request.GetNumber() < 0 {
-				return nil, connect.NewError(connect.CodeFailedPrecondition, "negative")
-			}
-			return &pingv1.PingResponse{Number: request.GetNumber()}, nil
-		},
-		countUp: func(_ context.Context, request *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
-			for i := range request.GetNumber() {
-				if err := stream.Send(&pingv1.CountUpResponse{Number: i + 1}); err != nil {
-					return err
-				}
-			}
-			return nil
-		},
-	}
-	srv := connect.NewServer()
-	pingv1connect.RegisterPingServiceHandler(srv, pingServer)
-	mux := http.NewServeMux()
-	connecthttp.Mount(mux, srv)
-	testCases := []struct {
-		name string
-		json bool
-		// rewrite maps the Content-Type the server chose to the one sent.
-		rewrite   func(string) string
-		expectErr connect.Code
-		// expectErrorBodyCode is the code for an RPC that fails with
-		// failed_precondition: it falls back to the HTTP status's code when
-		// the client must discard the JSON error body.
-		expectErrorBodyCode connect.Code
-	}{
-		{
-			name:                "proto_extra_parameter",
-			rewrite:             func(contentType string) string { return contentType + "; foo=bar" },
-			expectErrorBodyCode: connect.CodeFailedPrecondition,
-		},
-		{
-			name:                "proto_uppercase",
-			rewrite:             strings.ToUpper,
-			expectErrorBodyCode: connect.CodeFailedPrecondition,
-		},
-		{
-			name:                "proto_ignores_charset",
-			rewrite:             func(contentType string) string { return contentType + "; charset=latin1" },
-			expectErrorBodyCode: connect.CodeInternal,
-		},
-		{
-			name:                "json_utf8_charset_no_space",
-			json:                true,
-			rewrite:             func(contentType string) string { return contentType + ";charset=utf-8" },
-			expectErrorBodyCode: connect.CodeFailedPrecondition,
-		},
-		{
-			name:                "json_uppercase_charset_and_extra_parameter",
-			json:                true,
-			rewrite:             func(contentType string) string { return strings.ToUpper(contentType) + "; Charset=UTF-8; foo=bar" },
-			expectErrorBodyCode: connect.CodeFailedPrecondition,
-		},
-		{
-			name:                "json_last_utf8_charset",
-			json:                true,
-			rewrite:             func(contentType string) string { return contentType + "; a=1; b=2; charset=utf-8" },
-			expectErrorBodyCode: connect.CodeFailedPrecondition,
-		},
-		{
-			name:                "json_middle_non_utf8_charset",
-			json:                true,
-			rewrite:             func(contentType string) string { return contentType + "; a=1; charset=latin1; b=2" },
-			expectErr:           connect.CodeInternal,
-			expectErrorBodyCode: connect.CodeInternal,
-		},
-		{
-			name:                "json_non_utf8_charset",
-			json:                true,
-			rewrite:             func(contentType string) string { return contentType + "; charset=latin1" },
-			expectErr:           connect.CodeInternal,
-			expectErrorBodyCode: connect.CodeInternal,
-		},
-	}
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			t.Parallel()
-			server := memhttptest.NewServer(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-				mux.ServeHTTP(&contentTypeRewriter{ResponseWriter: writer, rewrite: testCase.rewrite}, request)
-			}))
-			var options []connecthttp.Option
-			if testCase.json {
-				options = append(options, connecthttp.WithProtoJSON())
-			}
-			client := pingv1connect.NewPingServiceClient(connect.NewClient(
-				connecthttp.NewTransport(server.Client(), server.URL(), options...),
-			))
-			t.Run("unary", func(t *testing.T) {
-				t.Parallel()
-				response, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 42})
-				if testCase.expectErr != 0 {
-					assert.Equal(t, connect.CodeOf(err), testCase.expectErr)
-					return
-				}
-				assert.Nil(t, err)
-				assert.Equal(t, response.GetNumber(), 42)
-			})
-			t.Run("unary_error", func(t *testing.T) {
-				t.Parallel()
-				_, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: -1})
-				assert.Equal(t, connect.CodeOf(err), testCase.expectErrorBodyCode)
-			})
-			t.Run("server_stream", func(t *testing.T) {
-				t.Parallel()
-				stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 3})
-				if err == nil {
-					var received []int64
-					var msg *pingv1.CountUpResponse
-					for msg, err = stream.Receive(); err == nil; msg, err = stream.Receive() {
-						received = append(received, msg.GetNumber())
-					}
-					if errors.Is(err, io.EOF) {
-						err = nil
-						assert.Equal(t, received, []int64{1, 2, 3})
-					}
-				}
-				if testCase.expectErr != 0 {
-					assert.Equal(t, connect.CodeOf(err), testCase.expectErr)
-					return
-				}
-				assert.Nil(t, err)
-			})
-		})
-	}
 }
 
 // contentTypeRewriter rewrites the response Content-Type just before the

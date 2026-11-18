@@ -115,8 +115,9 @@ func receiveUnaryResponse(conn streamingClientConn, dst any, info *connect.CallI
 }
 
 func (s *connectUnaryClientStream) Close() error {
+	err := s.conn.CloseResponse()
 	_ = s.conn.CloseRequest()
-	return s.conn.CloseResponse()
+	return err
 }
 
 // connectStreamingClientStream adapts a streaming [streamingClientConn] to [connect.ClientStream].
@@ -128,7 +129,7 @@ type connectStreamingClientStream struct {
 
 	headerFlushed bool
 	syncedHeader  bool
-	rxEnd         bool
+	rxErr         error // returned by Receive once the stream has ended
 }
 
 // flushHeader merges request metadata, then writes protocol headers.
@@ -161,12 +162,16 @@ func (s *connectStreamingClientStream) CloseSend() error {
 }
 
 func (s *connectStreamingClientStream) Receive(dst any) error {
+	if s.rxErr != nil {
+		return s.rxErr
+	}
 	if s.streamType == connect.StreamTypeClient {
-		if s.rxEnd {
-			return io.EOF
+		s.rxErr = io.EOF
+		err := receiveUnaryResponse(s.conn, dst, s.info)
+		if err != nil {
+			s.rxErr = err
 		}
-		s.rxEnd = true
-		return receiveUnaryResponse(s.conn, dst, s.info)
+		return err
 	}
 	err := s.conn.Receive(dst)
 	if !s.syncedHeader && s.info != nil {
@@ -179,6 +184,7 @@ func (s *connectStreamingClientStream) Receive(dst any) error {
 			fromHTTPHeader(s.info.ResponseTrailer(), s.conn.ResponseTrailer())
 		}
 		_ = s.conn.CloseResponse()
+		s.rxErr = err
 	}
 	return err
 }
@@ -199,6 +205,8 @@ func (t *transport) newProtocolClient(spec connect.Spec, opts *options) (protoco
 		return nil, err
 	}
 	codecs := newReadOnlyCodecs(opts.codecs)
+	procedureURL := *t.baseURLPtr
+	procedureURL.Path = joinURLPath(t.baseURLPtr.Path, spec.Procedure)
 	return proto.NewClient(&protocolClientParams{
 		CompressionName:  opts.sendCompressor,
 		CompressionPools: newReadOnlyCompressionPools(opts.compressors),
@@ -206,7 +214,7 @@ func (t *transport) newProtocolClient(spec connect.Spec, opts *options) (protoco
 		Protobuf:         codecs.Protobuf(),
 		CompressMinBytes: opts.compressMinBytes,
 		HTTPClient:       t.httpClient,
-		URL:              t.urlForProcedure(spec.Procedure),
+		URL:              &procedureURL,
 		ReadMaxBytes:     opts.readMaxBytes,
 		SendMaxBytes:     opts.sendMaxBytes,
 		EnableGet:        opts.getEnabled,

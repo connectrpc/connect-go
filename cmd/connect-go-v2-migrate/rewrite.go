@@ -57,11 +57,15 @@ const (
 	ruleInterceptorMigration = "interceptor_migration"
 	ruleStreamParamType      = "stream_param_type"
 	ruleStreamParamAmbiguous = "stream_param_ambiguous"
+	ruleStreamWrapper        = "stream_wrapper"
+	ruleStreamV1Client       = "stream_v1_client_type"
 	ruleEcosystemMigration   = "ecosystem_migration"
 	ruleBufgenReinstall      = "bufgen_reinstall_plugin"
 	ruleBufgenGoMod          = "bufgen_update_go_mod"
 	ruleBufgenManualEdit     = "bufgen_manual_edit"
 	ruleReadLimitDefault     = "read_limit_default"
+	ruleNewErrorCause        = "new_error_cause"
+	ruleV1OnlySymbol         = "v1_only_symbol"
 )
 
 var (
@@ -84,6 +88,7 @@ var (
 		"WithHTTPGet":                      true,
 		"WithHTTPGetMaxURLSize":            true,
 		"WithProtoJSON":                    true,
+		"HTTPClient":                       true,
 		"ErrorWriter":                      true,
 		"NewErrorWriter":                   true,
 		"IsNotModifiedError":               true,
@@ -124,9 +129,98 @@ var (
 	}
 
 	// renamedConnectCore lists v1 connect symbols that v2 renamed but kept in the
-	// core package, so only the selector changes.
+	// core package, so the selector changes and the qualifier flips to v2.
 	renamedConnectCore = map[string]string{
 		"CallInfoForHandlerContext": "CallInfoForServerContext",
+		"ProtocolConnect":           "ProtocolNameConnect",
+		"ProtocolGRPC":              "ProtocolNameGRPC",
+		"ProtocolGRPCWeb":           "ProtocolNameGRPCWeb",
+	}
+
+	// v2CoreSymbols lists the exported identifiers of the v2 connect package,
+	// inlined to keep this module free of a connect dependency.
+	// TestV2CoreSymbols keeps it in sync with connect.go.
+	v2CoreSymbols = map[string]bool{
+		"CallInfo":                 true,
+		"CallInfoForClientContext": true,
+		"CallInfoForServerContext": true,
+		"Client":                   true,
+		"ClientFunc":               true,
+		"ClientInterceptor":        true,
+		"ClientStream":             true,
+		"Code":                     true,
+		"CodeAborted":              true,
+		"CodeAlreadyExists":        true,
+		"CodeCanceled":             true,
+		"CodeDataLoss":             true,
+		"CodeDeadlineExceeded":     true,
+		"CodeFailedPrecondition":   true,
+		"CodeInternal":             true,
+		"CodeInvalidArgument":      true,
+		"CodeNotFound":             true,
+		"CodeOf":                   true,
+		"CodeOutOfRange":           true,
+		"CodePermissionDenied":     true,
+		"CodeResourceExhausted":    true,
+		"CodeUnauthenticated":      true,
+		"CodeUnavailable":          true,
+		"CodeUnimplemented":        true,
+		"CodeUnknown":              true,
+		"Codec":                    true,
+		"CodecNameJSON":            true,
+		"CodecNameProto":           true,
+		"CompressionNameBr":        true,
+		"CompressionNameGzip":      true,
+		"CompressionNameIdentity":  true,
+		"CompressionNameZstd":      true,
+		"Compressor":               true,
+		"DecodeBinaryHeader":       true,
+		"EncodeBinaryHeader":       true,
+		"Error":                    true,
+		"ErrorDetail":              true,
+		"Errorf":                   true,
+		"Header":                   true,
+		"IdempotencyIdempotent":    true,
+		"IdempotencyLevel":         true,
+		"IdempotencyNoSideEffects": true,
+		"IdempotencyUnknown":       true,
+		"MessageStats":             true,
+		"Method":                   true,
+		"NewClient":                true,
+		"NewClientContext":         true,
+		"NewError":                 true,
+		"NewServer":                true,
+		"ProtocolNameConnect":      true,
+		"ProtocolNameGRPC":         true,
+		"ProtocolNameGRPCWeb":      true,
+		"Server":                   true,
+		"ServerFunc":               true,
+		"ServerInterceptor":        true,
+		"ServerStream":             true,
+		"Spec":                     true,
+		"StableCodec":              true,
+		"StreamType":               true,
+		"StreamTypeBidi":           true,
+		"StreamTypeClient":         true,
+		"StreamTypeServer":         true,
+		"StreamTypeUnary":          true,
+		"Transport":                true,
+		"Version":                  true,
+	}
+
+	// v1GenericSymbols lists v2 core symbols that were generic in v1. An
+	// indexed use such as connect.NewClient[Req, Res] no longer compiles.
+	// ClientStream and ServerStream params are warned by the stream pass.
+	v1GenericSymbols = map[string]bool{
+		"Client":    true,
+		"NewClient": true,
+	}
+
+	// reshapedInterfaces lists v2 core interfaces whose method set changed.
+	reshapedInterfaces = map[string]bool{
+		"Codec":       true,
+		"Compressor":  true,
+		"StableCodec": true,
 	}
 )
 
@@ -233,6 +327,27 @@ func withStubUse(position token.Position) rewriteOption {
 	}
 }
 
+// withStreamKinds supplies the type checker's stream verdicts, keyed by source
+// offset. They are bound to the parsed identifiers before any rewrite runs, so
+// an identifier a rewrite synthesizes never picks one up.
+func withStreamKinds(offsets map[int]streamKind) rewriteOption {
+	return func(state *rewriteState) {
+		tokenFile := state.fset.File(state.file.Pos())
+		if offsets == nil || tokenFile == nil {
+			return
+		}
+		state.streamKinds = map[*ast.Ident]streamKind{}
+		ast.Inspect(state.file, func(node ast.Node) bool {
+			if id, isIdent := node.(*ast.Ident); isIdent {
+				if kind := offsets[tokenFile.Offset(id.Pos())]; kind != 0 {
+					state.streamKinds[id] = kind
+				}
+			}
+			return true
+		})
+	}
+}
+
 // Rewrite applies the v1->v2 mechanical rewrites to src, returning the output
 // and a [Report]. Errors are syntax errors only; type mismatches surface as
 // warnings. When stubsReady is false (generated bindings are still v1),
@@ -281,12 +396,16 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 	// into each closure (minus names it shadows), so `req.Msg` referenced from a
 	// callback is still unwrapped.
 	processed := map[*ast.FuncLit]bool{}
-	var processFunc func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs, outerStreams map[string]bool)
-	processFunc = func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs, outerStreams map[string]bool) {
+	var processFunc func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs, outerHandlerReqs, outerStreams map[string]bool)
+	processFunc = func(funcType *ast.FuncType, body *ast.BlockStmt, methodName, recvName string, outerMsg, outerServerReqs, outerHandlerReqs, outerStreams map[string]bool) {
 		// serverReqs are *connect.Request[T] params; their .Header()/.Spec() map
 		// to the server CallInfo. Client response holders also lose .Msg but read
-		// response metadata, so the two sets stay apart.
-		serverReqs := rewriteFuncSignature(funcType, state, &report)
+		// response metadata, so the two sets stay apart. handlerReqs are the
+		// serverReqs of a function shaped like a handler, one that also returns a
+		// *connect.Response[U] or takes a handler stream. Their Spec() and Peer()
+		// move to the server CallInfo.
+		hasStreamParam := len(collectStreamParams(funcType, state.connectAlias)) > 0
+		serverReqs, returnsResponse := rewriteFuncSignature(funcType, state, &report)
 		if body == nil {
 			return
 		}
@@ -301,7 +420,12 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 		}
 		mergedMsg := mergeUnwrappedScopes(outerMsg, funcType, msgHolders)
 		mergedServerReqs := mergeUnwrappedScopes(outerServerReqs, funcType, serverReqs)
-		rewriteFuncBody(body, state, &report, mergedMsg, mergedServerReqs, clientRequests, clientResponses, contextParamName(funcType))
+		handlerReqs := map[string]bool{}
+		if returnsResponse || hasStreamParam {
+			handlerReqs = serverReqs
+		}
+		mergedHandlerReqs := mergeUnwrappedScopes(outerHandlerReqs, funcType, handlerReqs)
+		rewriteFuncBody(body, state, &report, mergedMsg, mergedServerReqs, mergedHandlerReqs, clientRequests, clientResponses, contextParamName(funcType))
 		streams := rewriteStreams(funcType, body, state, &report, methodName, recvName, outerStreams)
 		// Recurse into nested closures with the merged sets as their outer scope,
 		// marking them processed so the file-level walk skips them.
@@ -311,18 +435,18 @@ func Rewrite(filename string, src []byte, stubsReady bool, opts ...rewriteOption
 				return
 			}
 			processed[lit] = true
-			processFunc(lit.Type, lit.Body, "", "", mergedMsg, mergedServerReqs, streams)
+			processFunc(lit.Type, lit.Body, "", "", mergedMsg, mergedServerReqs, mergedHandlerReqs, streams)
 		})
 	}
 	walk(file, func(n ast.Node) {
 		switch node := n.(type) {
 		case *ast.FuncDecl:
-			processFunc(node.Type, node.Body, node.Name.Name, receiverTypeName(node.Recv), nil, nil, nil)
+			processFunc(node.Type, node.Body, node.Name.Name, receiverTypeName(node.Recv), nil, nil, nil, nil)
 		case *ast.FuncLit:
 			if processed[node] {
 				return
 			}
-			processFunc(node.Type, node.Body, "", "", nil, nil, nil)
+			processFunc(node.Type, node.Body, "", "", nil, nil, nil, nil)
 		case *ast.InterfaceType:
 			// Interface methods have a signature but no body.
 			for _, field := range node.Methods.List {
@@ -404,12 +528,15 @@ func finishRewrite(filename string, src []byte, fset *token.FileSet, file *ast.F
 	rewriteEcosystemImports(fset, file, state, report)
 	// Drop the v1 import once v2 took over its "connect" name or the alias is no
 	// longer referenced. Leftover connect.X (warned-only reshaped symbols) keeps
-	// it so the file still compiles against v1 until they are ported.
+	// it so the file still compiles against v1 until they are ported. When v2
+	// took over the name, leftovers resolve against v2 instead, so warn on any
+	// that v2 lacks.
 	if state.hadV1Import &&
 		((state.usedV2 && state.connectAlias == state.connectV2Alias) ||
 			!fileReferencesIdent(file, state.connectAlias)) {
 		removeConnectV1Import(fset, file, state)
 		report.bump("import_drop_v1")
+		warnV1OnlySymbols(report, file, state.connectAlias)
 	}
 	// Capture residual v1 symbols before printing so the retained-import warning
 	// can name what's left.
@@ -469,6 +596,56 @@ func warnIfV1Retained(report *Report, file *ast.File, retained bool, residual []
 	report.warnAtf(v1ImportPos(file), ruleRemoveV1Import, "connectrpc.com/connect (v1) import retained because it %s.", references)
 }
 
+// warnV1OnlySymbols warns at the first use of each connect.<X> selector under
+// alias that names no v2 core symbol, or whose v2 namesake has a different
+// shape, unless an earlier pass already warned there. Once v2 takes over the
+// v1 import's name, these leftovers no longer compile, and nothing else
+// reports them.
+func warnV1OnlySymbols(report *Report, file *ast.File, alias string) {
+	seen := map[string]bool{}
+	indexed := map[*ast.SelectorExpr]bool{}
+	walk(file, func(node ast.Node) {
+		switch node := node.(type) {
+		case *ast.IndexExpr:
+			if sel, isSel := node.X.(*ast.SelectorExpr); isSel {
+				indexed[sel] = true
+			}
+		case *ast.IndexListExpr:
+			if sel, isSel := node.X.(*ast.SelectorExpr); isSel {
+				indexed[sel] = true
+			}
+		}
+		sel, isSel := node.(*ast.SelectorExpr)
+		if !isSel {
+			return
+		}
+		ident, isIdent := sel.X.(*ast.Ident)
+		if !isIdent || ident.Name != alias {
+			return
+		}
+		name := sel.Sel.Name
+		var format string
+		switch {
+		case !v2CoreSymbols[name]:
+			format = "%s.%s is not in connectrpc.com/connect/v2, which replaced the v1 import. Port it by hand."
+		case v1GenericSymbols[name] && indexed[sel]:
+			format = "%s.%s is not generic in connectrpc.com/connect/v2, which replaced the v1 import. Port it by hand."
+		case reshapedInterfaces[name]:
+			format = "%s.%s has a different method set in connectrpc.com/connect/v2, which replaced the v1 import. Port implementations by hand."
+		default:
+			return
+		}
+		if seen[name] {
+			return
+		}
+		seen[name] = true
+		if report.warnedAt(sel.Pos()) {
+			return
+		}
+		report.warnAtf(sel.Pos(), ruleV1OnlySymbol, format, alias, name)
+	})
+}
+
 // v1ImportPos returns the position of the v1 connect import spec, or NoPos.
 func v1ImportPos(file *ast.File) token.Pos {
 	for _, spec := range file.Imports {
@@ -497,6 +674,9 @@ type rewriteState struct {
 	// the AST-only path, where the stream parameter is warned instead.
 	handlerStreams *handlerStreamResolver
 	stubUse        token.Pos
+	// streamKinds holds the type checker's stream verdicts. It is nil on the
+	// AST-only path, where stream detection goes by name alone.
+	streamKinds map[*ast.Ident]streamKind
 	// sdkModules are v1 BSR connect SDKs whose imports move to v2.
 	sdkModules []string
 	// imports maps path->package name for imports a rewrite introduces;
@@ -553,11 +733,32 @@ func (s *rewriteState) hasConnectV1Import() bool {
 	return s.hadV1Import
 }
 
+// isStreamIdent reports whether ident refers to a stream. It uses the type
+// checker's verdict when there is one and the name otherwise.
+func (s *rewriteState) isStreamIdent(ident *ast.Ident, streamVars map[string]bool) bool {
+	if kind, typed := s.streamKinds[ident]; typed {
+		return kind >= streamValue
+	}
+	return streamVars[ident.Name]
+}
+
+// isConstructedStream reports whether ident is a stream bound from a v1-shaped
+// constructor call, which gains an error result in v2. A variable the type
+// checker resolved to a stream type already has its one result.
+func (s *rewriteState) isConstructedStream(ident *ast.Ident, streamVars map[string]bool) bool {
+	if kind, typed := s.streamKinds[ident]; typed {
+		return kind == streamConstructed
+	}
+	return streamVars[ident.Name]
+}
+
 // rewriteFuncSignature unwraps *connect.Request[T] params to *T and
 // *connect.Response[U] results to *U. Returns the set of parameter names
-// whose types were unwrapped so the body pass can drop their .Msg accesses.
-func rewriteFuncSignature(funcType *ast.FuncType, state *rewriteState, report *Report) map[string]bool {
+// whose types were unwrapped so the body pass can drop their .Msg accesses,
+// and whether a result was unwrapped.
+func rewriteFuncSignature(funcType *ast.FuncType, state *rewriteState, report *Report) (map[string]bool, bool) {
 	unwrapped := map[string]bool{}
+	returnsResponse := false
 	if funcType.Params != nil {
 		for _, field := range funcType.Params.List {
 			if newType, ok := unwrapConnectGeneric(field.Type, state.connectAlias, "Request"); ok {
@@ -574,10 +775,11 @@ func rewriteFuncSignature(funcType *ast.FuncType, state *rewriteState, report *R
 			if newType, ok := unwrapConnectGeneric(field.Type, state.connectAlias, "Response"); ok {
 				field.Type = newType
 				report.bump("result_unwrap_response")
+				returnsResponse = true
 			}
 		}
 	}
-	return unwrapped
+	return unwrapped, returnsResponse
 }
 
 // flipMessageWrapperTypes replaces every connect.Request[T]/Response[T] type
@@ -642,7 +844,7 @@ func unwrapConnectGeneric(typ ast.Expr, connectAlias, typeName string) (ast.Expr
 // (server request params and client response holders), rewrites server
 // request-header access to the v2 CallInfo, and warns on response-holder
 // metadata access (which moves to the client CallInfo).
-func rewriteFuncBody(body *ast.BlockStmt, state *rewriteState, report *Report, msgHolders, serverRequests, clientRequests, clientResponses map[string]bool, ctxName string) {
+func rewriteFuncBody(body *ast.BlockStmt, state *rewriteState, report *Report, msgHolders, serverRequests, handlerRequests, clientRequests, clientResponses map[string]bool, ctxName string) {
 	if len(msgHolders) == 0 && len(clientRequests) == 0 {
 		return
 	}
@@ -671,6 +873,8 @@ func rewriteFuncBody(body *ast.BlockStmt, state *rewriteState, report *Report, m
 
 		serverResponses := scanServerResponseHolders(body, state.connectAlias)
 		rewriteRequestMetadata(body, state, report, serverRequests, serverResponses, ctxName)
+		rewriteServerCallInfoFields(body, state, report, handlerRequests, ctxName)
+		warnUnclassifiedCallInfoFields(body, report, withoutNames(serverRequests, handlerRequests))
 		rewriteBareMsg(body, msgHolders, report)
 	}
 	// A client request header set here seeds a context; the response pass then
@@ -678,6 +882,7 @@ func rewriteFuncBody(body *ast.BlockStmt, state *rewriteState, report *Report, m
 	requestHeaderSet := false
 	if len(clientRequests) > 0 {
 		requestHeaderSet = rewriteClientRequestHeaders(body, state, report, clientRequests)
+		warnClientCallInfoFields(body, report, clientRequests)
 	}
 	if len(clientResponses) > 0 {
 		rewriteClientResponseMetadata(body, state, report, clientResponses, requestHeaderSet)
@@ -685,8 +890,8 @@ func rewriteFuncBody(body *ast.BlockStmt, state *rewriteState, report *Report, m
 }
 
 // rewriteRequestMetadata moves server-side metadata access to the v2 CallInfo.
-// Client response info is done in rewriteClientResponseMetadata and .Spec() is
-// warned.
+// Client response info is done in rewriteClientResponseMetadata, and the
+// request's Spec() and Peer() in rewriteServerCallInfoFields.
 func rewriteRequestMetadata(body *ast.BlockStmt, state *rewriteState, report *Report, serverRequests, serverResponses map[string]bool, ctxName string) {
 	infoName := ""
 	walkFuncBody(body, func(n ast.Node) {
@@ -703,11 +908,6 @@ func rewriteRequestMetadata(body *ast.BlockStmt, state *rewriteState, report *Re
 			return
 		}
 		name := root.Name
-		// .Spec() has no CallInfo equivalent; it becomes a handler argument.
-		if sel.Sel.Name == "Spec" && serverRequests[name] {
-			report.warnAtf(call.Pos(), ruleRequestMetadata, "%s.Spec() arrives as a separate handler argument in v2", name)
-			return
-		}
 		// Map the v1 metadata access to its v2 CallInfo method and report key.
 		var method, bumpKey, warnMsg string
 		switch {
@@ -733,6 +933,141 @@ func rewriteRequestMetadata(body *ast.BlockStmt, state *rewriteState, report *Re
 		call.Fun = &ast.SelectorExpr{X: ast.NewIdent(infoName), Sel: ast.NewIdent(method)}
 		report.bump(bumpKey)
 	})
+}
+
+// peerCallInfoFields maps the v1 connect.Peer fields to the server CallInfo
+// fields that replace them. Peer.Query has no CallInfo equivalent.
+var peerCallInfoFields = map[string]string{
+	"Addr":     "PeerAddr",
+	"Protocol": "Protocol",
+}
+
+// rewriteServerCallInfoFields moves the Spec() and Peer() accessors of the v1
+// handler requests and streams in holders to the server CallInfo: x.Spec()
+// becomes info.Spec, and x.Peer().Addr and x.Peer().Protocol become
+// info.PeerAddr and info.Protocol. Other Peer() uses, which include the GET
+// query, and HTTPMethod() move to connecthttp.ServerInfo and are warned.
+func rewriteServerCallInfoFields(body *ast.BlockStmt, state *rewriteState, report *Report, holders map[string]bool, ctxName string) {
+	if len(holders) == 0 {
+		return
+	}
+	infoName := ""
+	toCallInfo := func(cursor *astutil.Cursor, field string) {
+		if infoName == "" {
+			infoName = ensureServerCallInfo(body, state, ctxName)
+		}
+		cursor.Replace(&ast.SelectorExpr{X: ast.NewIdent(infoName), Sel: ast.NewIdent(field)})
+		report.bump("server_call_info_rewrite")
+	}
+	visit := func(cursor *astutil.Cursor) bool {
+		switch node := cursor.Node().(type) {
+		case *ast.FuncLit:
+			// Closures are rewritten separately, against their own context.
+			return false
+		case *ast.SelectorExpr:
+			name, method := callInfoAccessorCall(node.X, holders)
+			if method == "Spec" && node.Sel.Name == "IsClient" {
+				report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Spec().IsClient has no v2 equivalent and is always false in a handler", name)
+				return false
+			}
+			field, mapped := peerCallInfoFields[node.Sel.Name]
+			if method != "Peer" || !mapped {
+				return true
+			}
+			if ctxName == "" {
+				report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Peer().%s moves to the connect.CallInfoForServerContext(ctx) info's %s field in v2", name, node.Sel.Name, field)
+				return false
+			}
+			toCallInfo(cursor, field)
+			return false
+		case *ast.CallExpr:
+			name, method := callInfoAccessorCall(node, holders)
+			switch method {
+			case "Spec":
+				if ctxName == "" {
+					report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Spec() moves to the connect.CallInfoForServerContext(ctx) info's Spec field in v2", name)
+					return false
+				}
+				toCallInfo(cursor, "Spec")
+				return false
+			case "Peer":
+				report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Peer() is split in v2: PeerAddr and Protocol move to the connect.CallInfoForServerContext(ctx) info, and the query to the connecthttp.ServerInfoForContext(ctx) info's RequestURL()", name)
+				return false
+			case "HTTPMethod":
+				report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.HTTPMethod() moves to the connecthttp.ServerInfoForContext(ctx) info's HTTPMethod() in v2", name)
+				return false
+			}
+		}
+		return true
+	}
+	// Seeding the CallInfo inserts into body.List, so walk a snapshot of it.
+	for _, stmt := range slices.Clone(body.List) {
+		astutil.Apply(stmt, visit, nil)
+	}
+}
+
+// warnClientCallInfoFields warns on the Spec(), Peer(), and HTTPMethod()
+// accessors of the v1 client requests and streams in holders. Their v2
+// replacements live on the client CallInfo, which the call must seed.
+func warnClientCallInfoFields(body *ast.BlockStmt, report *Report, holders map[string]bool) {
+	if len(holders) == 0 {
+		return
+	}
+	walkFuncBody(body, func(node ast.Node) {
+		name, method := callInfoAccessorCall(node, holders)
+		switch method {
+		case "Spec":
+			report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Spec() moves to the connect.NewClientContext(ctx) info's Spec field in v2", name)
+		case "Peer":
+			report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Peer() moves to the connect.NewClientContext(ctx) info's PeerAddr and Protocol fields in v2", name)
+		case "HTTPMethod":
+			report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.HTTPMethod() moves to the connecthttp.ClientInfoForContext(ctx) info's HTTPMethod() in v2", name)
+		}
+	})
+}
+
+// warnUnclassifiedCallInfoFields warns on the Spec(), Peer(), and
+// HTTPMethod() accessors of the requests and streams in holders that are not
+// known to belong to a handler or a client call: a stream a closure inherits,
+// or a request param of a function that does not return a *connect.Response.
+func warnUnclassifiedCallInfoFields(body *ast.BlockStmt, report *Report, holders map[string]bool) {
+	if len(holders) == 0 {
+		return
+	}
+	walkFuncBody(body, func(node ast.Node) {
+		name, method := callInfoAccessorCall(node, holders)
+		switch method {
+		case "Spec":
+			report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Spec() moves to the CallInfo's Spec field in v2", name)
+		case "Peer":
+			report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.Peer() moves to the CallInfo's PeerAddr and Protocol fields in v2", name)
+		case "HTTPMethod":
+			report.warnAtf(node.Pos(), ruleRequestMetadata, "%s.HTTPMethod() moves to the connecthttp ServerInfo or ClientInfo HTTPMethod() in v2", name)
+		}
+	})
+}
+
+// callInfoAccessorCall reports the holder and method of a node of the form
+// holder.Spec(), holder.Peer(), or holder.HTTPMethod() for a holder in
+// holders. It returns empty strings for any other node.
+func callInfoAccessorCall(node ast.Node, holders map[string]bool) (holder, method string) {
+	call, isCall := node.(*ast.CallExpr)
+	if !isCall || len(call.Args) != 0 {
+		return "", ""
+	}
+	sel, isSel := call.Fun.(*ast.SelectorExpr)
+	if !isSel {
+		return "", ""
+	}
+	recv, isIdent := sel.X.(*ast.Ident)
+	if !isIdent || !holders[recv.Name] {
+		return "", ""
+	}
+	switch sel.Sel.Name {
+	case "Spec", "Peer", "HTTPMethod":
+		return recv.Name, sel.Sel.Name
+	}
+	return "", ""
 }
 
 // ensureServerCallInfo returns the name of a server CallInfo variable usable
@@ -1408,7 +1743,8 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 
 	// connect.NewError(c, err); see convertNewErrorInPlace for the cases.
 	if call, ok := expr.(*ast.CallExpr); ok && len(call.Args) == 2 && isConnectSelector(call.Fun, state.connectAlias, "NewError") {
-		converted, cause := convertNewErrorInPlace(call, state)
+		errArg := call.Args[1]
+		converted, cause, causeLost := convertNewErrorInPlace(call, state)
 		if !converted {
 			return
 		}
@@ -1416,6 +1752,9 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 		report.bump("convert_new_error")
 		if cause != nil {
 			*exprPtr = withCauseCall(call, cause)
+		}
+		if causeLost {
+			report.warnAtf(call.Pos(), ruleNewErrorCause, "connect.NewError keeps only the message of %s; errors.Is and errors.As no longer reach it. Assign it to a variable and attach it with WithCause.", exprString(errArg))
 		}
 		return
 	}
@@ -1453,16 +1792,18 @@ func rewriteExpr(exprPtr *ast.Expr, state *rewriteState, report *Report) {
 //
 //   - errors.New("s")        -> connect.NewError(code, "s")
 //   - fmt.Errorf(f, args...) -> connect.Errorf(code, f, args...)
-//   - fmt.Errorf(... %w ...) -> connect.NewError(code, fmt.Errorf(...).Error())
+//   - fmt.Errorf(... %w ...) -> connect.NewError(code, fmt.Errorf(...).Error()).WithCause(wrapped)
 //   - nil                    -> connect.NewError(code, "")
 //   - other err expr         -> connect.NewError(code, err.Error()).WithCause(err)
 //
-// cause is set only when err is safe to evaluate twice. A string message arg
-// is left alone, so the rewrite is idempotent.
-func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) (converted bool, cause ast.Expr) {
+// cause is set only when it is safe to evaluate twice: err itself, or the
+// operand of the single %w in a fmt.Errorf. causeLost reports a converted call
+// whose error is reachable by errors.Is and errors.As in v1 but gets no cause.
+// A string message arg is left alone, so the rewrite is idempotent.
+func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) (converted bool, cause ast.Expr, causeLost bool) {
 	errArg := call.Args[1]
 	if isMessageStringExpr(errArg) {
-		return false, nil
+		return false, nil, false
 	}
 	// The remaining branches migrate a v1 argument, so flip the qualifier to v2.
 	if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
@@ -1474,10 +1815,15 @@ func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) (converted 
 		// v1 allowed a nil error for a code-only error; v2 needs a string.
 		pos := errArg.Pos()
 		call.Args[1] = &ast.BasicLit{ValuePos: pos, Kind: token.STRING, Value: `""`}
-		return true, nil
+		return true, nil, false
 	}
-	if inner, ok := errArg.(*ast.CallExpr); ok && rewriteNewErrorCallArg(call, inner) {
-		return true, nil
+	inner, isCall := errArg.(*ast.CallExpr)
+	if isCall && rewriteNewErrorCallArg(call, inner) {
+		return true, nil, false
+	}
+	cause = copyIdentChain(errArg)
+	if isCall && isFmtErrorf(inner.Fun) {
+		cause = wrappedOperand(inner)
 	}
 	// Fallback: connect.NewError(code, err.Error()), anchored to errArg's position.
 	pos := errArg.Pos()
@@ -1489,7 +1835,75 @@ func convertNewErrorInPlace(call *ast.CallExpr, state *rewriteState) (converted 
 		Lparen: pos,
 		Rparen: pos,
 	}
-	return true, copyIdentChain(errArg)
+	return true, cause, cause == nil
+}
+
+// wrappedOperand returns a copy of the operand of the single %w in a
+// fmt.Errorf call with a literal format, when it is an identifier or selector
+// chain. Otherwise it returns nil.
+func wrappedOperand(call *ast.CallExpr) ast.Expr {
+	if call.Ellipsis.IsValid() {
+		// The operands are in a []any, not separate arguments.
+		return nil
+	}
+	format, ok := errorfFormat(call)
+	if !ok {
+		return nil
+	}
+	count, index := scanWrapVerbs(format)
+	if count != 1 || index < 0 || 1+index >= len(call.Args) {
+		return nil
+	}
+	return copyIdentChain(call.Args[1+index])
+}
+
+// errorfFormat returns the format of a fmt.Errorf call when it is a string
+// literal.
+func errorfFormat(call *ast.CallExpr) (string, bool) {
+	if len(call.Args) == 0 {
+		return "", false
+	}
+	lit, ok := call.Args[0].(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	format, err := strconv.Unquote(lit.Value)
+	return format, err == nil
+}
+
+// scanWrapVerbs returns the number of %w verbs in format and the argument
+// index of the first one. The index is -1 when it does not follow from the
+// verbs' order: an explicit argument index or a * width or precision comes
+// before it.
+func scanWrapVerbs(format string) (count, index int) {
+	index = -1
+	verbs, ordered := 0, true
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			continue
+		}
+		i++
+		for i < len(format) && strings.IndexByte("+-# 0123456789.*[]", format[i]) >= 0 {
+			if format[i] == '*' || format[i] == '[' {
+				ordered = false
+			}
+			i++
+		}
+		if i == len(format) {
+			break
+		}
+		switch format[i] {
+		case '%':
+			continue
+		case 'w':
+			if count == 0 && ordered {
+				index = verbs
+			}
+			count++
+		}
+		verbs++
+	}
+	return count, index
 }
 
 // withCauseCall builds `call.WithCause(cause)`.
@@ -1544,7 +1958,7 @@ func rewriteNewErrorCallArg(call, inner *ast.CallExpr) bool {
 	if !isFmtErrorf(inner.Fun) {
 		return false
 	}
-	if containsErrorWrap(inner.Args) {
+	if containsErrorWrap(inner) {
 		// v2's Errorf is plain Sprintf (%w is literal); splitting into WithCause
 		// would drop the cause from the wire. Use the .Error() fallback instead.
 		return false
@@ -1556,6 +1970,7 @@ func rewriteNewErrorCallArg(call, inner *ast.CallExpr) bool {
 	newArgs = append(newArgs, call.Args[0])
 	newArgs = append(newArgs, inner.Args...)
 	call.Args = newArgs
+	call.Ellipsis = inner.Ellipsis
 	return true
 }
 
@@ -1583,17 +1998,15 @@ func isFmtErrorf(fun ast.Expr) bool {
 	return id.Name == "fmt" && sel.Sel.Name == identErrorf
 }
 
-// containsErrorWrap reports whether an fmt.Errorf format string contains %w. A
-// non-literal format conservatively returns true (forcing the .Error() path).
-func containsErrorWrap(args []ast.Expr) bool {
-	if len(args) == 0 {
-		return false
-	}
-	lit, ok := args[0].(*ast.BasicLit)
+// containsErrorWrap reports whether an fmt.Errorf call's format has a %w verb.
+// A non-literal format conservatively returns true (forcing the .Error() path).
+func containsErrorWrap(call *ast.CallExpr) bool {
+	format, ok := errorfFormat(call)
 	if !ok {
 		return true
 	}
-	return strings.Contains(lit.Value, "%w")
+	count, _ := scanWrapVerbs(format)
+	return count > 0
 }
 
 // unwrapConnectMessageLiteral returns the Msg value of a &connect.Request/Response[T]{Msg: x}
@@ -1797,8 +2210,8 @@ func flipRemainingConnectSelectors(file *ast.File, state *rewriteState, report *
 }
 
 // rewriteMovedSymbols handles the package split: relocated options flip to
-// connecthttp, reshaped ones become warnings, core renames keep the connect
-// qualifier.
+// connecthttp, reshaped ones become warnings, core renames keep the core
+// package and flip to the v2 qualifier.
 func rewriteMovedSymbols(file *ast.File, state *rewriteState, report *Report) {
 	warnedReshaped := map[string]bool{}
 	walk(file, func(n ast.Node) {
@@ -1813,6 +2226,7 @@ func rewriteMovedSymbols(file *ast.File, state *rewriteState, report *Report) {
 		name := sel.Sel.Name
 		switch {
 		case renamedConnectCore[name] != "":
+			ident.Name = state.connectV2Alias
 			sel.Sel.Name = renamedConnectCore[name]
 			state.usedV2 = true
 			report.bump("rename_connect_core")
@@ -2145,6 +2559,17 @@ func mergeUnwrappedScopes(outer map[string]bool, funcType *ast.FuncType, local m
 		merged[name] = true
 	}
 	return merged
+}
+
+// withoutNames returns the names in names that are not in exclude.
+func withoutNames(names, exclude map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	for name := range names {
+		if !exclude[name] {
+			out[name] = true
+		}
+	}
+	return out
 }
 
 // walkFuncBody is like [walk] but does not descend into nested [*ast.FuncLit]

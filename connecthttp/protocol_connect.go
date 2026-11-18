@@ -128,16 +128,17 @@ func (*connectHandler) SetTimeout(request *http.Request) (context.Context, conte
 	if len(timeout) > 10 {
 		return nil, nil, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %q has >10 digits", timeout)
 	}
-	theDuration := 0
+	// Ten digits overflow a 32-bit int, so accumulate in an int64.
+	var millis int64
 	for _, v := range timeout {
 		if v < '0' || v > '9' {
 			return nil, nil, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %q has non-digit characters", timeout)
 		}
-		theDuration = theDuration*10 + int(v-'0')
+		millis = millis*10 + int64(v-'0')
 	}
 	ctx, cancel := context.WithTimeout(
 		request.Context(),
-		time.Duration(theDuration)*time.Millisecond,
+		time.Duration(millis)*time.Millisecond,
 	)
 	return ctx, cancel, nil
 }
@@ -897,12 +898,11 @@ func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Hea
 	if marshalErr != nil {
 		return connect.Errorf(connect.CodeInternal, "marshal end stream: %s", marshalErr).WithCause(marshalErr)
 	}
-	raw := bytes.NewBuffer(data)
+	raw := bufferpool.Get()
 	defer bufferpool.Put(raw)
-	writeErr := m.Write(&envelope{
-		Data:  raw,
-		Flags: connectFlagEnvelopeEndStream,
-	})
+	padEnvelope(raw)
+	_, _ = raw.Write(data)
+	writeErr := m.Write(connectFlagEnvelopeEndStream, raw)
 	if writeErr == nil || writeErr.Code() != connect.CodeResourceExhausted {
 		return writeErr
 	}
@@ -918,11 +918,9 @@ func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Hea
 		return connect.Errorf(connect.CodeInternal, "marshal end stream: %s", marshalErr).WithCause(marshalErr)
 	}
 	raw.Reset()
+	padEnvelope(raw)
 	_, _ = raw.Write(data)
-	return m.write(&envelope{
-		Data:  raw,
-		Flags: connectFlagEnvelopeEndStream,
-	})
+	return m.write(connectFlagEnvelopeEndStream, raw)
 }
 
 type connectStreamingUnmarshaler struct {
@@ -933,19 +931,16 @@ type connectStreamingUnmarshaler struct {
 }
 
 func (u *connectStreamingUnmarshaler) Unmarshal(message any) *connect.Error {
-	err := u.envelopeReader.Unmarshal(message)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, errSpecialEnvelope) {
+	data, flags, err := u.Read()
+	defer bufferpool.Put(data)
+	if err != nil {
 		return err
 	}
-	env := u.last
-	data := env.Data
-	u.last.Data = nil // don't keep a reference to it
-	defer bufferpool.Put(data)
-	if !env.IsSet(connectFlagEnvelopeEndStream) {
-		return connect.Errorf(connect.CodeInternal, "protocol error: invalid envelope flags %d", env.Flags)
+	if flags&^flagEnvelopeCompressed == 0 {
+		return u.unmarshal(data, message)
+	}
+	if flags&connectFlagEnvelopeEndStream == 0 {
+		return connect.Errorf(connect.CodeInternal, "protocol error: invalid envelope flags %d", flags)
 	}
 	var end connectEndStreamMessage
 	if err := json.Unmarshal(data.Bytes(), &end); err != nil {
@@ -1029,8 +1024,7 @@ func (m *connectUnaryMarshaler) Marshal(message any) *connect.Error {
 
 func (m *connectUnaryMarshaler) write(data []byte) *connect.Error {
 	m.wroteHeader = true
-	payload := bytes.NewReader(data)
-	if _, err := m.sender.Send(payload); err != nil {
+	if err := m.sender.Send(data); err != nil {
 		err = wrapIfContextError(err)
 		if connectErr, ok := asError(err); ok {
 			return connectErr

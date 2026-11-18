@@ -58,6 +58,8 @@ type fileContent struct {
 	ready   bool
 	// stubUse is the first stub call in a file that imports no connect package.
 	stubUse token.Position
+	// streams holds the type checker's stream verdicts from streamKinds.
+	streams map[int]streamKind
 }
 
 // project is the result of discovering what to migrate.
@@ -170,6 +172,9 @@ func discover(roots []string) (project, error) {
 	// are read, not edited), plus the ecosystem modules they import.
 	ecosystem := map[string]bool{}
 	seen := map[string]bool{}
+	// Every variant that compiles a file contributes stream verdicts, since a
+	// test file can change what a type is.
+	streamsByPath := map[string]map[int]streamKind{}
 	for _, pkg := range pkgs {
 		collectEcosystemModules(pkg, ecosystem)
 		for index, file := range pkg.Syntax {
@@ -177,13 +182,15 @@ func discover(roots []string) (project, error) {
 				continue
 			}
 			path := pkg.CompiledGoFiles[index]
+			if isGeneratedAST(file) || underGenDir(path, genDirs) {
+				seen[path] = true
+				continue
+			}
+			mergeStreamKinds(streamsByPath, path, streamKinds(file, pkg.Fset, pkg.TypesInfo, genPkgs))
 			if seen[path] {
 				continue
 			}
 			seen[path] = true
-			if isGeneratedAST(file) || underGenDir(path, genDirs) {
-				continue
-			}
 			proj.goFilesScanned++
 			// A file is a rewrite candidate if it uses connect or imports a
 			// connectrpc.com ecosystem module (grpchealth, vanguard, ...): the
@@ -209,6 +216,9 @@ func discover(roots []string) (project, error) {
 				stubUse: stubUse,
 			})
 		}
+	}
+	for index := range proj.sources {
+		proj.sources[index].streams = streamsByPath[proj.sources[index].path]
 	}
 
 	for pkg := range mockV1Pkgs {

@@ -15,7 +15,6 @@
 package connecthttp
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -89,7 +88,7 @@ func TestHTTPCallGetBody(t *testing.T) {
 		buf := bufferpool.Get()
 		defer bufferpool.Put(buf)
 		buf.Write(make([]byte, size))
-		_, err := call.Send(bytes.NewReader(buf.Bytes()))
+		err := call.Send(buf.Bytes())
 		assert.Nil(t, err)
 		assert.Nil(t, call.CloseWrite())
 		buf.Reset()
@@ -138,6 +137,31 @@ func TestHTTPCallGetBody(t *testing.T) {
 	wg.Wait()
 }
 
+// TestPayloadCloser tests that a unary request body can be replayed, and that
+// Release keeps the unread bytes after the caller reuses its buffer.
+func TestPayloadCloser(t *testing.T) {
+	t.Parallel()
+	data := []byte("hello world")
+	payload := &payloadCloser{data: data}
+	head := make([]byte, 6)
+	_, err := io.ReadFull(payload, head)
+	assert.Nil(t, err)
+	assert.Equal(t, string(head), "hello ")
+	payload.Rewind()
+	all, err := io.ReadAll(payload)
+	assert.Nil(t, err)
+	assert.Equal(t, string(all), "hello world")
+
+	payload.Rewind()
+	_, err = io.ReadFull(payload, head)
+	assert.Nil(t, err)
+	payload.Release()
+	copy(data, "XXXXXXXXXXX") // the caller reuses its buffer
+	rest, err := io.ReadAll(payload)
+	assert.Nil(t, err)
+	assert.Equal(t, string(rest), "world")
+}
+
 // TestUnaryRequestBodyAfterEarlyResponse tests that a unary request body is
 // sent in full when the server responds before reading it. Send returns once
 // the response headers arrive, while net/http may still be writing the body.
@@ -170,7 +194,7 @@ func TestUnaryRequestBodyAfterEarlyResponse(t *testing.T) {
 		http.Header{},
 	)
 	call.SetValidateResponse(func(*http.Response) *connect.Error { return nil })
-	_, err = call.Send(bytes.NewReader(make([]byte, size)))
+	err = call.Send(make([]byte, size))
 	assert.Nil(t, err)
 	close(sent)
 	assert.Nil(t, call.CloseWrite())
@@ -224,7 +248,7 @@ func TestDuplexHTTPCallSendCloseWriteNoNilDeref(t *testing.T) {
 	// requestBodyWriter==nil and nil-derefs. With the fix, Send reports the
 	// closed request body as io.EOF.
 	assert.Nil(t, call.CloseWrite())
-	_, err = call.Send(bytes.NewReader([]byte{1}))
+	err = call.Send([]byte{1})
 	assert.ErrorIs(t, err, io.EOF)
 	_ = call.CloseRead()
 }
@@ -252,7 +276,7 @@ func TestBlockUntilResponseReadyRespectsContext(t *testing.T) {
 		)
 		call.SetValidateResponse(func(*http.Response) *connect.Error { return nil })
 
-		_, err = call.Send(bytes.NewReader([]byte("hello")))
+		err = call.Send([]byte("hello"))
 		assert.Nil(t, err)
 		assert.Nil(t, call.CloseWrite())
 
@@ -291,7 +315,7 @@ func TestAwaitResponseRespectsContext(t *testing.T) {
 		)
 		call.SetValidateResponse(func(*http.Response) *connect.Error { return nil })
 
-		_, err = call.Send(bytes.NewReader([]byte("hello")))
+		err = call.Send([]byte("hello"))
 		assert.Nil(t, err)
 		assert.Nil(t, call.CloseWrite())
 
@@ -322,7 +346,7 @@ func TestWriteSenderClientDisconnected(t *testing.T) {
 		t.Run(writeErr.Error(), func(t *testing.T) {
 			t.Parallel()
 			sender := writeSender{writer: errWriter{writeErr}}
-			_, err := sender.Send(bytes.NewReader([]byte("payload")))
+			err := sender.Send([]byte("payload"))
 			assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
 			assert.ErrorIs(t, err, writeErr)
 		})
@@ -331,7 +355,7 @@ func TestWriteSenderClientDisconnected(t *testing.T) {
 		t.Parallel()
 		writeErr := errors.New("other")
 		sender := writeSender{writer: errWriter{writeErr}}
-		_, err := sender.Send(bytes.NewReader([]byte("payload")))
+		err := sender.Send([]byte("payload"))
 		_, ok := asError(err)
 		assert.False(t, ok)
 		assert.ErrorIs(t, err, writeErr)
