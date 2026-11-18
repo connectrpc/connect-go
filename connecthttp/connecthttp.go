@@ -444,24 +444,24 @@ func (t *transport) newClientState(spec connect.Spec) *clientState {
 		if !slices.ContainsFunc(opts.compressors, func(c connect.Compressor) bool {
 			return c.Name() == opts.sendCompressor
 		}) {
-			return &clientState{err: connect.Errorf(connect.CodeUnknown, "unknown compression %q", opts.sendCompressor)}
+			return &clientState{opts: opts, err: connect.Errorf(connect.CodeUnknown, "unknown compression %q", opts.sendCompressor)}
 		}
 	}
 	sendCodecName := opts.getSendCodecName()
 	if sendCodecName == "" {
-		return &clientState{err: connect.Errorf(connect.CodeUnknown, "no codecs registered")}
+		return &clientState{opts: opts, err: connect.Errorf(connect.CodeUnknown, "no codecs registered")}
 	}
 	if !slices.ContainsFunc(opts.codecs, func(c connect.Codec) bool {
 		return c.Name() == sendCodecName
 	}) {
-		return &clientState{err: connect.Errorf(connect.CodeUnknown, "unknown codec %q", sendCodecName)}
+		return &clientState{opts: opts, err: connect.Errorf(connect.CodeUnknown, "unknown codec %q", sendCodecName)}
 	}
 	if t.baseURLErr != nil {
-		return &clientState{err: connect.Errorf(connect.CodeUnavailable, "invalid base URL: %v", t.baseURLErr)}
+		return &clientState{opts: opts, err: connect.Errorf(connect.CodeUnavailable, "invalid base URL: %v", t.baseURLErr)}
 	}
 	client, err := t.newProtocolClient(spec, opts)
 	if err != nil {
-		return &clientState{err: err}
+		return &clientState{opts: opts, err: err}
 	}
 	return &clientState{opts: opts, sendCodecName: sendCodecName, client: client}
 }

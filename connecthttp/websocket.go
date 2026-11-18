@@ -32,7 +32,7 @@ import (
 // hybridTransport opens each stream on WebSocket or fallback according to the
 // [Selector] in effect for its spec.
 type hybridTransport struct {
-	fallback   connect.Transport
+	fallback   *transport
 	options    *options
 	httpClient *http.Client
 	baseURL    string
@@ -77,7 +77,7 @@ func (t *hybridTransport) route(spec connect.Spec) *webSocketRoute {
 			return route
 		}
 	}
-	route := newWebSocketRoute(t.options.forSpec(spec), t.httpClient, t.baseURL)
+	route := newWebSocketRoute(t.fallback.clientStateForSpec(spec).opts, t.httpClient, t.baseURL)
 	actual, _ := t.routes.LoadOrStore(spec.Procedure, route)
 	if stored, ok := actual.(*webSocketRoute); ok {
 		return stored

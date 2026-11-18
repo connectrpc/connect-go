@@ -28,7 +28,7 @@ import (
 func TestTransportCachesClientState(t *testing.T) {
 	t.Parallel()
 	var calls atomic.Int32
-	transport, ok := NewTransport(
+	transport := httpTransport(t, NewTransport(
 		http.DefaultClient,
 		"http://localhost",
 		WithConditionalOptions(func(spec connect.Spec) []Option {
@@ -38,8 +38,7 @@ func TestTransportCachesClientState(t *testing.T) {
 			}
 			return nil
 		}),
-	).(*transport)
-	assert.True(t, ok)
+	))
 	// The cache keys by procedure. This Schema would panic as a map key.
 	specA := connect.Spec{
 		StreamType: connect.StreamTypeUnary,
@@ -74,8 +73,7 @@ func TestTransportCachesClientState(t *testing.T) {
 
 func TestTransportCachesClientStateErrors(t *testing.T) {
 	t.Parallel()
-	transport, ok := NewTransport(http.DefaultClient, "http://[bad").(*transport)
-	assert.True(t, ok)
+	transport := httpTransport(t, NewTransport(http.DefaultClient, "http://[bad"))
 	spec := connect.Spec{StreamType: connect.StreamTypeUnary, Procedure: "/svc/A"}
 	_, err := transport.NewClientStream(t.Context(), spec)
 	assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
@@ -83,12 +81,26 @@ func TestTransportCachesClientStateErrors(t *testing.T) {
 }
 
 func TestTransportCachedClientStateNoAllocs(t *testing.T) { //nolint:paralleltest // AllocsPerRun can't run in parallel
-	transport, ok := NewTransport(http.DefaultClient, "http://localhost").(*transport)
-	assert.True(t, ok)
+	transport := httpTransport(t, NewTransport(http.DefaultClient, "http://localhost"))
 	spec := connect.Spec{StreamType: connect.StreamTypeUnary, Procedure: "/svc/A"}
 	transport.clientStateForSpec(spec)
 	allocs := testing.AllocsPerRun(100, func() {
 		transport.clientStateForSpec(spec)
 	})
 	assert.Equal(t, allocs, 0)
+}
+
+// httpTransport returns the Connect-over-HTTP transport that client uses.
+// Conditional options make NewTransport return a hybridTransport, since they
+// may select WebSocket for some procedures.
+func httpTransport(tb testing.TB, client connect.Transport) *transport {
+	tb.Helper()
+	if hybrid, ok := client.(*hybridTransport); ok {
+		client = hybrid.fallback
+	}
+	httpClient, ok := client.(*transport)
+	if !ok {
+		tb.Fatalf("NewTransport returned %T, not a Connect-over-HTTP transport", client)
+	}
+	return httpClient
 }

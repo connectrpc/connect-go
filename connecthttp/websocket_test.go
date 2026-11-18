@@ -15,7 +15,10 @@
 package connecthttp
 
 import (
+	"net/http"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,4 +44,44 @@ func TestForSpecClonesWebSocketOptions(t *testing.T) {
 	assert.Equal(t, len(first.websocketServerOptions), 2)
 	assert.True(t, &first.websocketServerOptions[1] != &second.websocketServerOptions[1])
 	assert.True(t, &first.websocketClientOptions[1] != &second.websocketClientOptions[1])
+}
+
+// The hybrid transport's WebSocket routes and its fallback's client state are
+// both per procedure. They share one resolution of the conditional options,
+// so the callback runs once per procedure even when first calls race.
+func TestHybridTransportResolvesConditionalOptionsOnce(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	hybrid, ok := NewTransport(
+		http.DefaultClient,
+		"http://localhost",
+		WithConditionalOptions(func(connect.Spec) []Option {
+			calls.Add(1)
+			return []Option{WithWebSocket(SelectStreaming)}
+		}),
+	).(*hybridTransport)
+	if !ok {
+		t.Fatal("conditional options must produce a hybridTransport")
+	}
+	spec := connect.Spec{StreamType: connect.StreamTypeUnary, Procedure: "/svc/A"}
+
+	start := make(chan struct{})
+	var group sync.WaitGroup
+	for range 8 {
+		group.Go(func() {
+			<-start
+			hybrid.route(spec)
+		})
+		group.Go(func() {
+			<-start
+			hybrid.fallback.clientStateForSpec(spec)
+		})
+	}
+	close(start)
+	group.Wait()
+	// A unary call routes to the fallback, through both caches.
+	_, err := hybrid.NewClientStream(t.Context(), spec)
+	assert.Nil(t, err)
+	assert.Equal(t, calls.Load(), int32(1))
+	assert.True(t, hybrid.route(spec).selector != nil)
 }
