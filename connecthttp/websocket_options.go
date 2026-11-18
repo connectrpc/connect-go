@@ -158,7 +158,7 @@ func WithWebSocketServerProtocolErrorHandler(handler ServerProtocolErrorHandler)
 	}
 	return webSocketServerOptionsOption{wstransport.WithServerProtocolErrorHandler(
 		func(info wstransport.SessionInfo, fault wstransport.ProtocolFault, err *connect.Error) {
-			handler(info.PeerAddr, info.Request, fault, err)
+			handler(info.Request.RemoteAddr, info.Request, fault, err)
 		},
 	)}
 }

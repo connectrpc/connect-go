@@ -39,12 +39,9 @@ type SessionInfo struct {
 	// Codec is the codec negotiated through the WebSocket subprotocol. Bodies
 	// in both directions use it, in the frame type it calls for (§6.1).
 	Codec connect.Codec
-	// Subprotocol is the token echoed to the client in Sec-WebSocket-Protocol.
-	Subprotocol string
-	// PeerAddr is the client's address, for [connect.CallInfo].
-	PeerAddr string
 	// Request is the HTTP request that carried the upgrade. Its body has been
-	// consumed by the handshake; it is provided for headers, URL, and context.
+	// consumed by the handshake; it is provided for headers, URL, context, and
+	// the client's address (RemoteAddr).
 	Request *http.Request
 	// OnProtocolError observes a client's framing mistakes; see
 	// [WithServerProtocolErrorHandler]. It is nil unless one was registered.
@@ -187,7 +184,7 @@ func (h *upgradeHandler) ServeHTTP(responseWriter http.ResponseWriter, request *
 		// Accept has already written the error response.
 		return
 	}
-	info := h.sessionInfo(request, codec, subprotocol, drain, beat)
+	info := h.sessionInfo(request, codec, drain, beat)
 	ctx, untrack := h.shutdowns.track(request.Context())
 	defer untrack()
 	if err := h.session.Serve(ctx, h.server, conn, info); err != nil {
@@ -267,7 +264,6 @@ func (h *upgradeHandler) acceptOptions(subprotocol string, beat *heartbeat) *web
 func (h *upgradeHandler) sessionInfo(
 	request *http.Request,
 	codec connect.Codec,
-	subprotocol string,
 	drain *drainLimiter,
 	beat *heartbeat,
 ) SessionInfo {
@@ -284,8 +280,6 @@ func (h *upgradeHandler) sessionInfo(
 		TransportInfo:         transportInfo,
 		HandshakeTimeout:      h.opts.handshakeTimeout,
 		Codec:                 codec,
-		Subprotocol:           subprotocol,
-		PeerAddr:              request.RemoteAddr,
 		Request:               request,
 		MaxTimeout:            h.opts.maxTimeout,
 		ReadMaxBytes:          h.opts.readMaxBytes,

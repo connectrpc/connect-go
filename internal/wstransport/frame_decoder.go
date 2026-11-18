@@ -31,11 +31,7 @@ type frameDecoder struct {
 	// fromServer is set on a client, whose peer is the server. It names the
 	// peer in errors and decides who a body the codec rejects blames.
 	fromServer   bool
-	codec        connect.Codec
 	readMaxBytes int
-	// bodyIsText is the frame type the negotiated codec uses. A body in the
-	// other one is a protocol error.
-	bodyIsText bool
 	// fault classifies the most recent peer fault for the protocol error
 	// monitor.
 	fault ProtocolFault
@@ -93,8 +89,14 @@ func (d *frameDecoder) parseFrame(messageType websocket.MessageType, frame []byt
 }
 
 // decodeBody decodes a B message's payload with the negotiated codec.
-func (d *frameDecoder) decodeBody(ctx context.Context, wire wireMessage, message any) *connect.Error {
-	if wire.text != d.bodyIsText {
+func (d *frameDecoder) decodeBody(
+	ctx context.Context,
+	codec connect.Codec,
+	wire wireMessage,
+	message any,
+) *connect.Error {
+	bodyIsText := codecIsText(codec)
+	if wire.text != bodyIsText {
 		// The subprotocol named one encoding and the frame names another. This
 		// end may well hold a codec for what arrived, which is exactly why it
 		// has to be refused rather than decoded: accepting it would let a peer
@@ -102,10 +104,10 @@ func (d *frameDecoder) decodeBody(ctx context.Context, wire wireMessage, message
 		return d.fail(
 			FaultFrameType,
 			"%s sent a body in a %s frame; the negotiated %s codec expects a %s frame",
-			d.peer(), frameName(wire.text), d.codec.Name(), frameName(d.bodyIsText),
+			d.peer(), frameName(wire.text), codec.Name(), frameName(bodyIsText),
 		)
 	}
-	if err := d.codec.UnmarshalRead(ctx, bytes.NewReader(wire.payload), message); err != nil {
+	if err := codec.UnmarshalRead(ctx, bytes.NewReader(wire.payload), message); err != nil {
 		return d.fail(FaultMessageEncoding, "unmarshal message: %w", err)
 	}
 	return nil

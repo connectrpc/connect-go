@@ -210,8 +210,8 @@ type ServerProtocolErrorHandler func(SessionInfo, ProtocolFault, *connect.Error)
 type ClientProtocolErrorHandler func(connect.Spec, ProtocolFault, *connect.Error)
 
 // WithServerProtocolErrorHandler registers a [ServerProtocolErrorHandler]. Use
-// it to attribute framing faults to a client — [SessionInfo] carries PeerAddr
-// and the upgrade request — which the logger cannot do: a framing fault is
+// it to attribute framing faults to a client — [SessionInfo] carries the
+// upgrade request, and so the client's address — which the logger cannot do: a framing fault is
 // reported to the peer in the S message and is a successful outcome from the
 // session's point of view, so it never reaches [WithLogger].
 func WithServerProtocolErrorHandler(handler ServerProtocolErrorHandler) ServerOption {

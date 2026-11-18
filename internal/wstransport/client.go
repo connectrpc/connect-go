@@ -95,8 +95,8 @@ type clientTransport struct {
 	opts    *options
 }
 
-// offeredSubprotocols returns a copy of the tokens to offer, since the dial
-// options and the call each keep the slice.
+// offeredSubprotocols returns a copy of the tokens to offer, for a call's dial
+// options to keep without sharing the transport's slice.
 func (t *clientTransport) offeredSubprotocols() []string {
 	return slices.Clone(t.offered)
 }
@@ -134,17 +134,12 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 		marshaler: messageWriter{
 			// No compression here: permessage-deflate compresses whole messages
 			// below this layer.
-			ctx:          ctx,
 			sender:       call,
-			codec:        t.sendCodec,
-			bodyIsText:   codecIsText(t.sendCodec),
 			sendMaxBytes: t.opts.sendMaxBytes,
 		},
 		unmarshaler: websocketClientUnmarshaler{
 			frameDecoder: frameDecoder{
 				fromServer:   true,
-				codec:        t.sendCodec,
-				bodyIsText:   codecIsText(t.sendCodec),
 				readMaxBytes: t.opts.readMaxBytes,
 			},
 			call:            call,
@@ -175,7 +170,6 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 	}
 	return &clientStream{
 		conn: conn,
-		info: info,
 		// Unary and client-streaming both have exactly one response message,
 		// and it is the second read that reaches the trailers.
 		singleResponse: spec.StreamType&connect.StreamTypeServer == 0,
@@ -196,16 +190,13 @@ func (t *clientTransport) dialURL(ctx context.Context, spec connect.Spec) *url.U
 
 // newCall prepares, but does not dial, the connection for one RPC.
 func (t *clientTransport) newCall(ctx context.Context, dialURL *url.URL) *wsClientCall {
-	readLimit := messageReadLimit(t.opts.readMaxBytes)
-	drain := newDrainLimiter(readLimit)
-	offered := t.offeredSubprotocols()
+	drain := newDrainLimiter(messageReadLimit(t.opts.readMaxBytes))
 	beat := &heartbeat{}
 	return &wsClientCall{
-		heartbeat:         beat,
-		ctx:               ctx,
-		drain:             drain,
-		keepAliveInterval: t.opts.keepAliveInterval,
-		keepAliveTimeout:  t.opts.keepAliveTimeout,
+		heartbeat: beat,
+		ctx:       ctx,
+		transport: t,
+		drain:     drain,
 		dialOptions: &websocket.DialOptions{
 			HTTPClient: withDrainLimiter(t.httpClient, drain),
 			// §4.6: a server's own PINGs and PONGs are frames from it too.
@@ -213,27 +204,21 @@ func (t *clientTransport) newCall(ctx context.Context, dialURL *url.URL) *wsClie
 			OnPongReceived: beat.onPong,
 			// §4.3: the preferred codec first, then any other this client can
 			// encode. The server picks one and the client follows its choice.
-			Subprotocols: offered,
+			Subprotocols: t.offeredSubprotocols(),
 			// Offer permessage-deflate with a per-message context. A server
 			// that declines leaves messages uncompressed; one that requires
 			// no-context-takeover is already satisfied by this offer.
 			CompressionMode:      t.opts.compressionMode(),
 			CompressionThreshold: t.opts.compressionThreshold(),
 		},
-		url:              dialURL,
-		offered:          offered,
-		codecs:           t.codecs,
-		codec:            t.sendCodec,
-		bodyIsText:       codecIsText(t.sendCodec),
-		handshakeTimeout: t.opts.handshakeTimeout,
-		readLimit:        readLimit,
+		url:   dialURL,
+		codec: t.sendCodec,
 	}
 }
 
 // clientStream adapts [websocketClientConn] to [connect.ClientStream].
 type clientStream struct {
 	conn           *websocketClientConn
-	info           *connect.CallInfo
 	singleResponse bool
 	// received marks the one response a single-response call has read.
 	received bool
@@ -320,26 +305,26 @@ func (s *clientStream) Close() error {
 // than papered over here; see "Current limitations" in
 // docs/websocket-transport-design.md.
 func (s *clientStream) publishMetadata() {
-	if s.info == nil {
+	if s.conn.callInfo == nil {
 		return
 	}
 	s.publishOnce.Do(s.publish)
 }
 
 func (s *clientStream) publishHeaders() {
-	if s.info == nil {
+	if s.conn.callInfo == nil {
 		return
 	}
 	for key, values := range s.conn.ResponseHeader() {
-		s.info.ResponseHeader().SetValues(key, values)
+		s.conn.callInfo.ResponseHeader().SetValues(key, values)
 	}
 }
 
 func (s *clientStream) publish() {
 	s.publishHeadersOnce.Do(s.publishHeaders)
 	for key, values := range s.conn.ResponseTrailer() {
-		s.info.ResponseTrailer().SetValues(key, values)
+		s.conn.callInfo.ResponseTrailer().SetValues(key, values)
 	}
 	// Identity at the Connect layer: permessage-deflate is below the protocol.
-	s.info.ResponseEncoding = connect.CompressionNameIdentity
+	s.conn.callInfo.ResponseEncoding = connect.CompressionNameIdentity
 }

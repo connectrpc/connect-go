@@ -78,57 +78,40 @@ const (
 // websocketHandlerConn is the server's view of one RPC. [session.Serve] wraps
 // it in a [connect.ServerStream] and hands that to [connect.Server.Call].
 type websocketHandlerConn struct {
-	request *http.Request
-	wsConn  *websocket.Conn
-	// drain caps what the closing handshake reads; see drainLimiter.
-	drain *drainLimiter
+	// ctx is the RPC's, for both directions. Send, SendHeaders and Receive come
+	// from the handler, which passes none.
+	ctx    context.Context //nolint:containedctx
+	wsConn *websocket.Conn
 
-	marshaler   messageWriter
+	marshaler messageWriter
+	// unmarshaler also holds the session's SessionInfo and CallInfo, which
+	// the conn reads from there rather than keeping copies.
 	unmarshaler websocketUnmarshaler
 
-	// callInfo is read at flush time rather than copied in: a handler sets its
-	// leading metadata during the call, and the conn sends it before the first
-	// message, so there is no point at which a snapshot would be current.
-	callInfo        *connect.CallInfo
-	responseTrailer http.Header
-	leadingSent     bool
+	leadingSent bool
 	// headerErr is a response header the handler set that §7.3.1 does not let
 	// this server send.
 	headerErr *connect.Error
-	// closeCtx writes the terminal messages. Bodies go out under the RPC's
-	// context; the S message cannot, because the commonest reason to send one
-	// is that the context just expired.
-	closeCtx context.Context //nolint:containedctx
 	// shuttingDown reports that the HTTP server is shutting down, which §13
 	// reports as unavailable and closes with 1001. Nil means it never is.
 	shuttingDown func() bool
 }
 
 func (c *websocketHandlerConn) Receive(msg any) error {
-	if err := c.unmarshaler.Unmarshal(msg); err != nil {
+	if err := c.unmarshaler.Unmarshal(c.ctx, c.unmarshaler.info.Codec, msg); err != nil {
 		return err
 	}
 	return nil // literal nil; a nil *Error is a non-nil error
 }
 
 func (c *websocketHandlerConn) Send(msg any) error {
-	if err := c.flushLeadingMetadata(); err != nil {
+	if err := c.flushLeadingMetadata(c.ctx); err != nil {
 		return err
 	}
-	if err := c.marshaler.writeBody(msg); err != nil {
+	if err := c.marshaler.writeBody(c.ctx, c.unmarshaler.info.Codec, msg); err != nil {
 		return err
 	}
 	return nil // literal nil; a nil *Error is a non-nil error
-}
-
-// terminalMarshaler copies the marshaler onto the detached close context, so
-// the final messages are not written under a context whose expiry is the very
-// thing being reported.
-func (c *websocketHandlerConn) terminalMarshaler() messageWriter {
-	terminal := c.marshaler
-	terminal.ctx = c.closeCtx
-	terminal.sender = &websocketBinarySender{ctx: c.closeCtx, conn: c.wsConn}
-	return terminal
 }
 
 // flushLeadingMetadata writes the server's M message. It must run before the
@@ -141,13 +124,15 @@ func (c *websocketHandlerConn) terminalMarshaler() messageWriter {
 // without a branch for the empty case — and can take that message as the
 // signal that the server has accepted the stream, which is what the response
 // header block gives it for free over HTTP.
-func (c *websocketHandlerConn) flushLeadingMetadata() *connect.Error {
+func (c *websocketHandlerConn) flushLeadingMetadata(ctx context.Context) *connect.Error {
 	if c.leadingSent {
 		return nil
 	}
 	header := make(http.Header)
-	if c.callInfo != nil {
-		for key, values := range c.callInfo.ResponseHeader().All() {
+	// Read at flush time rather than copied in: a handler sets its leading
+	// metadata during the call, so no earlier snapshot would be current.
+	if callInfo := c.unmarshaler.callInfo; callInfo != nil {
+		for key, values := range callInfo.ResponseHeader().All() {
 			// §7.3.2: a server never sends a connect- key in its M.
 			if isConnectReserved(strings.ToLower(key)) {
 				continue
@@ -164,7 +149,7 @@ func (c *websocketHandlerConn) flushLeadingMetadata() *connect.Error {
 	}
 	// Marked only once written, so that Close still opens with M after a
 	// failed Send.
-	if err := c.marshaler.writeJSON(markerMetadata, entries); err != nil {
+	if err := c.marshaler.writeJSON(ctx, markerMetadata, entries); err != nil {
 		return err
 	}
 	c.leadingSent = true
@@ -284,19 +269,17 @@ func closeReason(reason string) string {
 	return truncated
 }
 
-func (c *websocketHandlerConn) Close(err error) error {
+// Close sends the verdict and closes the connection. ctx is the RPC's context,
+// and an expired deadline there is often the verdict itself, so the final
+// writes run detached from it, bounded by wsCloseWriteTimeout from this call.
+func (c *websocketHandlerConn) Close(ctx context.Context, err error) error {
 	goingAway, err := c.outcome(err)
-	// A deadline that fired is what produced most of the errors reaching here,
-	// and writing under the expired context would fail — leaving the peer with
-	// a closed connection and no verdict, which it can only report as
-	// Unavailable. Detach for the final write.
-	if c.closeCtx != nil {
-		c.marshaler = c.terminalMarshaler()
-	}
+	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), wsCloseWriteTimeout)
+	defer cancel()
 	// §6.1: invalid UTF-8 fails the connection outright, with no S message.
 	if utf8Err := c.unmarshaler.textEncodingErr; utf8Err != nil {
 		_ = closeWithDrain(
-			c.wsConn, c.drain, websocket.StatusInvalidFramePayloadData, closeReason(utf8Err.Message()),
+			c.wsConn, c.unmarshaler.info.drain, websocket.StatusInvalidFramePayloadData, closeReason(utf8Err.Message()),
 		)
 		return nil
 	}
@@ -308,12 +291,12 @@ func (c *websocketHandlerConn) Close(err error) error {
 		_ = c.wsConn.CloseNow()
 		return nil
 	}
-	marshalErr, err := c.writeVerdict(err)
+	marshalErr, err := c.writeVerdict(closeCtx, err)
 	closeCode, closeMessage := c.closeStatus(err, marshalErr, goingAway)
 	// §13: a faulted peer gets the code for its fault too, since a browser
 	// script can read the code but not the S message. The drain is capped, so
 	// a peer with a bomb queued behind its fault cannot make this read it all.
-	_ = closeWithDrain(c.wsConn, c.drain, closeCode, closeReason(closeMessage))
+	_ = closeWithDrain(c.wsConn, c.unmarshaler.info.drain, closeCode, closeReason(closeMessage))
 	if marshalErr != nil {
 		return marshalErr
 	}
@@ -351,10 +334,10 @@ func (c *websocketHandlerConn) outcome(err error) (goingAway bool, result error)
 // writeVerdict sends the leading metadata if it is still pending, then the S
 // message. It returns the write's failure, and the outcome, which an
 // unsendable header can replace.
-func (c *websocketHandlerConn) writeVerdict(err error) (writeErr *connect.Error, result error) {
+func (c *websocketHandlerConn) writeVerdict(ctx context.Context, err error) (writeErr *connect.Error, result error) {
 	// Leading metadata precedes the S message even when no body was
 	// sent, so headers stay headers rather than folding into the trailers.
-	marshalErr := c.flushLeadingMetadata()
+	marshalErr := c.flushLeadingMetadata(ctx)
 	if marshalErr != nil && marshalErr == c.headerErr {
 		marshalErr = nil
 	}
@@ -363,9 +346,19 @@ func (c *websocketHandlerConn) writeVerdict(err error) (writeErr *connect.Error,
 		err = c.headerErr
 	}
 	if marshalErr == nil {
-		marshalErr = c.marshaler.writeEndStream(err, c.responseTrailer)
+		marshalErr = c.marshaler.writeEndStream(ctx, err, c.responseTrailer())
 	}
 	return c.terminalWriteError(marshalErr), err
+}
+
+// responseTrailer is what the handler set as trailing metadata. It is read here
+// because Close runs once the handler has returned, when it is final.
+func (c *websocketHandlerConn) responseTrailer() http.Header {
+	trailer := make(http.Header)
+	if callInfo := c.unmarshaler.callInfo; callInfo != nil {
+		copyToHTTPHeader(trailer, callInfo.ResponseTrailer())
+	}
+	return trailer
 }
 
 // closeStatus picks the close code and reason that end the connection.
@@ -396,18 +389,17 @@ func (c *websocketHandlerConn) closeStatus(
 // message as one WebSocket frame rather than appending it to an HTTP response
 // body.
 type websocketBinarySender struct {
-	ctx  context.Context //nolint:containedctx
 	conn *websocket.Conn
 }
 
-func (s *websocketBinarySender) send(text bool, data []byte) (int64, error) {
-	if err := s.ctx.Err(); err != nil {
+func (s *websocketBinarySender) send(ctx context.Context, text bool, data []byte) (int64, error) {
+	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
 	// Detached, because the library closes the connection when a write's
 	// context ends, even mid-write, leaving nowhere to send the S that says why.
 	written := make(chan struct{})
-	stop := context.AfterFunc(s.ctx, func() {
+	stop := context.AfterFunc(ctx, func() {
 		timer := time.NewTimer(abandonWriteAfter)
 		defer timer.Stop()
 		select {
@@ -418,7 +410,7 @@ func (s *websocketBinarySender) send(text bool, data []byte) (int64, error) {
 	})
 	defer stop()
 	defer close(written)
-	return writeFrame(context.WithoutCancel(s.ctx), s.conn, text, data)
+	return writeFrame(context.WithoutCancel(ctx), s.conn, text, data)
 }
 
 // writeFrame sends one already-encoded message as a single WebSocket frame.
@@ -448,7 +440,6 @@ func writeFrame(
 type websocketUnmarshaler struct {
 	frameDecoder
 
-	ctx    context.Context //nolint:containedctx
 	reader *frameReader
 	// keeper is consulted only to say why the connection ended. Nil when
 	// keep-alive is off.
@@ -457,11 +448,9 @@ type websocketUnmarshaler struct {
 	// handshake, so this is the only way a browser's metadata reaches the
 	// handler.
 	callInfo *connect.CallInfo
-	// infrastructureHeaders names what this deployment's own proxies set, and
-	// so what a client may not send in an M message.
-	infrastructureHeaders []string
 	// info is carried so a fault can be attributed to the connection that
-	// produced it; its OnProtocolError is the monitor.
+	// produced it; its OnProtocolError is the monitor. Its
+	// InfrastructureHeaders are what a client may not send in an M message.
 	info SessionInfo
 
 	// eof stops the read path; sawEndOfClientStream says why it stopped. A
@@ -488,9 +477,9 @@ type websocketUnmarshaler struct {
 
 // Unmarshal records whether a failure was the peer's doing, which decides how
 // the connection is torn down.
-func (u *websocketUnmarshaler) Unmarshal(message any) *connect.Error {
+func (u *websocketUnmarshaler) Unmarshal(ctx context.Context, codec connect.Codec, message any) *connect.Error {
 	u.fault = FaultUnknown
-	err := u.unmarshal(message)
+	err := u.unmarshal(ctx, codec, message)
 	u.reportFault(err)
 	return err
 }
@@ -515,18 +504,18 @@ func (u *websocketUnmarshaler) reportFault(err *connect.Error) {
 	}
 }
 
-func (u *websocketUnmarshaler) unmarshal(message any) *connect.Error {
+func (u *websocketUnmarshaler) unmarshal(ctx context.Context, codec connect.Codec, message any) *connect.Error {
 	if u.textEncodingErr != nil {
 		return u.textEncodingErr
 	}
 	if u.eof {
 		return u.endOfStreamError()
 	}
-	wire, readErr := u.nextMessage()
+	wire, readErr := u.nextMessage(ctx)
 	if readErr != nil {
 		return readErr
 	}
-	return u.dispatch(wire, message)
+	return u.dispatch(ctx, codec, wire, message)
 }
 
 // endOfStreamError says why the request stream stopped: the client finished,
@@ -554,8 +543,8 @@ func (u *websocketUnmarshaler) endOfStreamError() *connect.Error {
 }
 
 // nextMessage reads one frame and returns the message it carries.
-func (u *websocketUnmarshaler) nextMessage() (wireMessage, *connect.Error) {
-	messageType, frame, readerErr := u.reader.next(u.ctx)
+func (u *websocketUnmarshaler) nextMessage(ctx context.Context) (wireMessage, *connect.Error) {
+	messageType, frame, readerErr := u.reader.next(ctx)
 	if readerErr != nil && errors.Is(readerErr, context.Canceled) && u.reader.hasEnded() {
 		// The reader canceled the call because the connection ended. What it
 		// read before the end is still delivered, in order, and then the end
@@ -565,7 +554,7 @@ func (u *websocketUnmarshaler) nextMessage() (wireMessage, *connect.Error) {
 	if readerErr != nil {
 		u.eof = true
 		// The call ended, not the connection: a deadline is deadline_exceeded.
-		if ctxErr := u.ctx.Err(); ctxErr != nil && errors.Is(readerErr, ctxErr) {
+		if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(readerErr, ctxErr) {
 			return wireMessage{}, wsContextError(ctxErr)
 		}
 		if errors.Is(readerErr, errMessageTooBig) {
@@ -586,7 +575,12 @@ func (u *websocketUnmarshaler) nextMessage() (wireMessage, *connect.Error) {
 }
 
 // dispatch interprets one message and decodes its payload into message.
-func (u *websocketUnmarshaler) dispatch(wire wireMessage, message any) *connect.Error {
+func (u *websocketUnmarshaler) dispatch(
+	ctx context.Context,
+	codec connect.Codec,
+	wire wireMessage,
+	message any,
+) *connect.Error {
 	switch wire.marker {
 	case markerMetadata:
 		// The opening message was consumed before dispatch; a second one would
@@ -610,10 +604,10 @@ func (u *websocketUnmarshaler) dispatch(wire wireMessage, message any) *connect.
 		}
 		u.eof = true
 		u.sawEndOfClientStream = true
-		u.discardAfterEndOfStream()
+		u.discardAfterEndOfStream(ctx)
 		return errorf(connect.CodeUnknown, "%w", io.EOF)
 	case markerBody:
-		if err := u.decodeBody(u.ctx, wire, message); err != nil {
+		if err := u.decodeBody(ctx, codec, wire, message); err != nil {
 			return err
 		}
 		if u.callInfo != nil {
@@ -642,19 +636,19 @@ func (u *websocketUnmarshaler) dispatch(wire wireMessage, message any) *connect.
 // bounds the whole thing, so a peer cannot use this to buy unbounded work. The
 // goroutine ends when the context is done or the connection closes, except
 // after a protocol error: then it reads until the connection closes.
-func (u *websocketUnmarshaler) discardAfterEndOfStream() {
-	u.discardOnce.Do(func() { go u.drainAfterEndOfStream() })
+func (u *websocketUnmarshaler) discardAfterEndOfStream(ctx context.Context) {
+	u.discardOnce.Do(func() { go u.drainAfterEndOfStream(ctx) })
 }
 
-func (u *websocketUnmarshaler) drainAfterEndOfStream() {
-	for u.reader.await(u.ctx) {
+func (u *websocketUnmarshaler) drainAfterEndOfStream(ctx context.Context) {
+	for u.reader.await(ctx) {
 		if afterC, _ := u.checkAfterEndOfStream(); afterC != nil {
 			// §5 has a protocol error end the stream: canceling the call stops
 			// the handler, and Close sends the S.
 			if u.cancelCall != nil {
 				u.cancelCall()
 			}
-			u.readUntilClosed()
+			u.readUntilClosed(ctx)
 			return
 		}
 		// The connection ended. The reader has already canceled the call (§8).
@@ -666,8 +660,8 @@ func (u *websocketUnmarshaler) drainAfterEndOfStream() {
 
 // readUntilClosed discards messages past the call's cancellation, so the peer
 // reaches the verdict rather than stalling on a full buffer.
-func (u *websocketUnmarshaler) readUntilClosed() {
-	uncanceled := context.WithoutCancel(u.ctx)
+func (u *websocketUnmarshaler) readUntilClosed(ctx context.Context) {
+	uncanceled := context.WithoutCancel(ctx)
 	for {
 		if _, _, err := u.reader.next(uncanceled); err != nil {
 			return
@@ -750,17 +744,14 @@ func (u *websocketUnmarshaler) drainLeadingMetadata(ctx context.Context) *connec
 
 // nextOpeningMessage reads the client's first message, which must arrive
 // within the handshake timeout rather than the RPC's much longer deadline.
-// callCtx is the RPC's context, which u.ctx holds for every later read.
 func (u *websocketUnmarshaler) nextOpeningMessage(callCtx context.Context) (wireMessage, *connect.Error) {
 	timeout := u.info.HandshakeTimeout
 	if timeout <= 0 {
-		return u.nextMessage()
+		return u.nextMessage(callCtx)
 	}
 	openingCtx, cancel := context.WithTimeoutCause(callCtx, timeout, errNoOpeningMessage)
 	defer cancel()
-	u.ctx = openingCtx
-	wire, readErr := u.nextMessage()
-	u.ctx = callCtx
+	wire, readErr := u.nextMessage(openingCtx)
 	if readErr != nil && callCtx.Err() == nil && errors.Is(context.Cause(openingCtx), errNoOpeningMessage) {
 		return wire, errorf(
 			connect.CodeDeadlineExceeded, "client sent no opening M message within %v", timeout,
@@ -783,7 +774,7 @@ func (u *websocketUnmarshaler) mergeLeadingMetadata(payload []byte) *connect.Err
 		if len(entry) == 0 {
 			continue // decodeMetadata rejects it
 		}
-		if reason, reserved := reservedHeaderReason(entry[0], u.infrastructureHeaders); reserved {
+		if reason, reserved := reservedHeaderReason(entry[0], u.info.InfrastructureHeaders); reserved {
 			return u.fail(
 				FaultMetadata,
 				"client set %q in its M message, which is %s", entry[0], reason,
@@ -909,26 +900,17 @@ func isCleanWebSocketClose(err error) bool {
 // writer sends through. Dialing on first use rather than at construction is
 // what lets a stream be created without a round trip.
 type wsClientCall struct {
-	ctx         context.Context //nolint:containedctx
+	ctx context.Context //nolint:containedctx
+	// transport supplies the settings every call shares: the codecs and the
+	// subprotocols offered for them, the read limit, and the timeouts.
+	transport   *clientTransport
 	dialOptions *websocket.DialOptions
 	url         *url.URL
-	// offered is what the client put in Sec-WebSocket-Protocol, most preferred
-	// first. codec and bodyIsText start as the first choice and become the
-	// server's once the handshake completes.
-	offered          []string
-	codecs           registry[connect.Codec]
-	codec            connect.Codec
-	bodyIsText       bool
-	handshakeTimeout time.Duration
-
-	readLimit int64
+	// codec starts as the send codec and becomes the server's choice once the
+	// handshake completes.
+	codec connect.Codec
 	// drain caps what the closing handshake reads; see drainLimiter.
 	drain *drainLimiter
-	// keepAliveInterval is how often to ping once dialed; see WithKeepAlive.
-	keepAliveInterval time.Duration
-	// keepAliveTimeout is how long the server may stay silent; see
-	// WithKeepAliveTimeout.
-	keepAliveTimeout time.Duration
 
 	// heartbeat carries the server's PINGs and PONGs to reader; the dial
 	// options' callbacks hold it.
@@ -964,9 +946,9 @@ func (c *wsClientCall) ensureDialed() *connect.Error {
 func (c *wsClientCall) handshake() (*websocket.Conn, *connect.Error) {
 	// The handshake gets its own deadline; the connection outlives it.
 	dialCtx := c.ctx
-	if c.handshakeTimeout > 0 {
+	if c.transport.opts.handshakeTimeout > 0 {
 		var cancelDial context.CancelFunc
-		dialCtx, cancelDial = context.WithTimeout(c.ctx, c.handshakeTimeout)
+		dialCtx, cancelDial = context.WithTimeout(c.ctx, c.transport.opts.handshakeTimeout)
 		defer cancelDial()
 	}
 	conn, response, err := websocket.Dial(dialCtx, c.url.String(), c.dialOptions)
@@ -993,13 +975,12 @@ func (c *wsClientCall) handshake() (*websocket.Conn, *connect.Error) {
 		return nil, errorf(
 			connect.CodeInternal,
 			"server echoed no Sec-WebSocket-Protocol (offered %s)",
-			strings.Join(c.offered, ", "),
+			strings.Join(c.transport.offered, ", "),
 		)
 	}
 	// Every offered token names a codec this client holds.
-	if codec, ok := c.codecs.get(codecForSubprotocol(token)); ok {
+	if codec, ok := c.transport.codecs.get(codecForSubprotocol(token)); ok {
 		c.codec = codec
-		c.bodyIsText = codecIsText(codec)
 	}
 	if takeoverErr := checkNoContextTakeover(response); takeoverErr != nil {
 		_ = closeClientWithError(
@@ -1021,6 +1002,7 @@ func (c *wsClientCall) start(conn *websocket.Conn) {
 	// read's or write's context ends, so the connection runs detached from
 	// the call. §11.1 and §13 have a client whose call ends before S close
 	// with 1000, which the server takes as the cancellation (§8).
+	readLimit := messageReadLimit(c.transport.opts.readMaxBytes)
 	connCtx := context.WithoutCancel(c.ctx)
 	c.stopCloseOnDone = context.AfterFunc(c.ctx, func() {
 		_ = closeWithDrain(conn, c.drain, websocket.StatusNormalClosure, "")
@@ -1028,13 +1010,14 @@ func (c *wsClientCall) start(conn *websocket.Conn) {
 	c.reader = newFrameReader(
 		connCtx,
 		func(readCtx context.Context) (websocket.MessageType, []byte, error) {
-			return readBoundedMessage(readCtx, conn, c.readLimit, c.drain)
+			return readBoundedMessage(readCtx, conn, readLimit, c.drain)
 		},
 		nil,
 	)
 	c.heartbeat.attach(c.reader)
 	c.keeper = startKeepAlive(
-		connCtx, conn, c.reader, c.keepAliveInterval, c.keepAliveTimeout, wsStatusClientProtocolError,
+		connCtx, conn, c.reader, c.transport.opts.keepAliveInterval, c.transport.opts.keepAliveTimeout,
+		wsStatusClientProtocolError,
 	)
 }
 
@@ -1051,7 +1034,7 @@ func (c *wsClientCall) preventDial() bool {
 // offered, or "" when the server echoed none. Token matching is
 // case-insensitive, as the library's own check is.
 func (c *wsClientCall) selectedSubprotocol(echoed string) string {
-	for _, token := range c.offered {
+	for _, token := range c.transport.offered {
 		if echoed != "" && strings.EqualFold(token, echoed) {
 			return token
 		}
@@ -1061,17 +1044,17 @@ func (c *wsClientCall) selectedSubprotocol(echoed string) string {
 
 // send implements [messageSender], writing one message as a single WebSocket
 // frame.
-func (c *wsClientCall) send(text bool, data []byte) (int64, error) {
+func (c *wsClientCall) send(ctx context.Context, text bool, data []byte) (int64, error) {
 	if err := c.ensureDialed(); err != nil {
 		return 0, err
 	}
 	// Checked here and the write detached: a write under a context that ends
 	// would drop the connection without the Close frame §13 asks for.
-	if err := c.ctx.Err(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	written, err := writeFrame(context.WithoutCancel(c.ctx), c.wsConn, text, data)
-	if err != nil && c.ctx.Err() == nil {
+	written, err := writeFrame(context.WithoutCancel(ctx), c.wsConn, text, data)
+	if err != nil && ctx.Err() == nil {
 		// A server may end the RPC before reading every request, so a failed
 		// write is how this end learns the stream is over. As over HTTP, it
 		// reads as io.EOF and the caller calls Receive for the server's verdict.
@@ -1138,17 +1121,12 @@ func (c *websocketClientConn) open() *connect.Error {
 			c.openErr = encodeErr
 			return
 		}
-		c.openErr = c.marshaler.writeJSON(markerMetadata, entries)
-		// Writing M is what dials, so the server's codec choice is known now,
-		// and every later Send and Receive runs after this. A failed dial
-		// leaves nothing to encode or decode.
+		c.openErr = c.marshaler.writeJSON(c.call.ctx, markerMetadata, entries)
+		// Writing M is what dials, so the server's codec choice is known now.
+		// A failed dial leaves nothing to report.
 		if c.call.wsConn == nil {
 			return
 		}
-		c.marshaler.codec = c.call.codec
-		c.marshaler.bodyIsText = c.call.bodyIsText
-		c.unmarshaler.codec = c.call.codec
-		c.unmarshaler.bodyIsText = c.call.bodyIsText
 		if c.callInfo != nil {
 			c.callInfo.Codec = c.call.codec.Name()
 		}
@@ -1188,7 +1166,7 @@ func (c *websocketClientConn) Send(msg any) error {
 	if err := c.open(); err != nil {
 		return err
 	}
-	if err := c.marshaler.writeBody(msg); err != nil {
+	if err := c.marshaler.writeBody(c.call.ctx, c.call.codec, msg); err != nil {
 		c.noteLocalFault(err)
 		return err
 	}
@@ -1214,7 +1192,7 @@ func (c *websocketClientConn) CloseRequest() error {
 		defer c.sendClosed.Store(true)
 		// §6.1: C is a bare control message and always text, whatever the
 		// codec, so an empty final message is never mistaken for it.
-		c.sendCloseErr = c.marshaler.send(markerClientEndStream, true, nil)
+		c.sendCloseErr = c.marshaler.send(c.call.ctx, markerClientEndStream, true, nil)
 	})
 	if c.sendCloseErr != nil && !c.requestSideEnded(c.sendCloseErr) {
 		return c.sendCloseErr
@@ -1408,9 +1386,6 @@ type websocketClientUnmarshaler struct {
 	// sawLeadingMetadata records the server's opening M, which must arrive
 	// exactly once and before anything else.
 	sawLeadingMetadata bool
-	// metadataConsumed reports that this frame was metadata, so Unmarshal reads
-	// again rather than returning a message it never decoded.
-	metadataConsumed bool
 }
 
 // serverFault is the first failure the server's framing caused: its message is
@@ -1424,9 +1399,8 @@ type serverFault struct {
 // the connection is torn down.
 func (u *websocketClientUnmarshaler) Unmarshal(message any) *connect.Error {
 	for {
-		u.metadataConsumed = false
 		u.fault = FaultUnknown
-		err := u.unmarshal(message)
+		wasMetadata, err := u.unmarshal(message)
 		// A classified fault is a protocol error whatever its code: §5 has the
 		// client close with 3102 for it, not end the RPC with 1000.
 		if err != nil && (u.fault != FaultUnknown || peerFault(err)) {
@@ -1437,7 +1411,9 @@ func (u *websocketClientUnmarshaler) Unmarshal(message any) *connect.Error {
 		if u.fault != FaultUnknown && u.onProtocolError != nil {
 			u.onProtocolError(u.spec, u.fault, err)
 		}
-		if err == nil && u.metadataConsumed {
+		// An M carries no message for the caller, so read again rather than
+		// return one that was never decoded.
+		if err == nil && wasMetadata {
 			continue
 		}
 		return err
@@ -1505,20 +1481,21 @@ func (u *websocketClientUnmarshaler) readFailure(readerErr error) *connect.Error
 	return errorf(connect.CodeUnavailable, "read websocket message: %v", readerErr)
 }
 
-func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
+// unmarshal reads and dispatches one message, and reports whether it was an M.
+func (u *websocketClientUnmarshaler) unmarshal(message any) (wasMetadata bool, err *connect.Error) {
 	if err := u.call.ensureDialed(); err != nil {
 		u.endStreamSeen.Store(true)
 		u.endStreamError = err
-		return err
+		return false, err
 	}
 	if u.endStreamSeen.Load() {
-		return errorf(connect.CodeUnknown, "%w", io.EOF)
+		return false, errorf(connect.CodeUnknown, "%w", io.EOF)
 	}
 	wire, readErr := u.nextMessage()
 	if readErr != nil {
-		return readErr
+		return false, readErr
 	}
-	return u.dispatch(wire, message)
+	return wire.marker == markerMetadata, u.dispatch(wire, message)
 }
 
 // nextMessage reads one frame and returns the message it carries.
@@ -1558,7 +1535,6 @@ func (u *websocketClientUnmarshaler) dispatch(wire wireMessage, message any) *co
 		if mergeErr := u.mergeLeadingMetadata(wire.payload); mergeErr != nil {
 			return mergeErr
 		}
-		u.metadataConsumed = true
 		return nil
 	case markerServerEndStream:
 		if !wire.text {
@@ -1567,7 +1543,7 @@ func (u *websocketClientUnmarshaler) dispatch(wire wireMessage, message any) *co
 		return u.endStream(wire.payload)
 	case markerBody:
 		u.sawData = true
-		if err := u.decodeBody(u.call.ctx, wire, message); err != nil {
+		if err := u.decodeBody(u.call.ctx, u.call.codec, wire, message); err != nil {
 			return err
 		}
 		if u.stats != nil {
@@ -1660,6 +1636,11 @@ func dialError(err error, response *http.Response, body []byte) *connect.Error {
 		return errorf(connect.CodeCanceled, "WebSocket upgrade canceled: %w", err)
 	case errors.Is(err, context.DeadlineExceeded):
 		return errorf(connect.CodeDeadlineExceeded, "WebSocket upgrade deadline exceeded: %w", err)
+	}
+	// Callers read io.EOF as a clean end of stream, so a connection dropped
+	// mid-handshake is reported as unexpected, as connecthttp does.
+	if errors.Is(err, io.EOF) {
+		err = fmt.Errorf("%s: %w", err.Error(), io.ErrUnexpectedEOF)
 	}
 	if response == nil {
 		return errorf(connect.CodeUnavailable, "WebSocket upgrade failed: %w", err)

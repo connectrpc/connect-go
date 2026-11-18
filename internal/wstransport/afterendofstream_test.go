@@ -16,7 +16,6 @@ package wstransport
 
 import (
 	"context"
-	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -31,7 +30,7 @@ type recordingSender struct {
 	messages [][]byte
 }
 
-func (s *recordingSender) send(_ bool, data []byte) (int64, error) {
+func (s *recordingSender) send(_ context.Context, _ bool, data []byte) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.messages = append(s.messages, append([]byte(nil), data...))
@@ -95,21 +94,18 @@ func TestCloseReportsAMessageReadAfterEndOfClientStream(t *testing.T) {
 			conn := &websocketHandlerConn{
 				wsConn: serverConn,
 				marshaler: messageWriter{
-					ctx:    t.Context(),
 					sender: sender,
 				},
 				unmarshaler: websocketUnmarshaler{
 					frameDecoder:         frameDecoder{readMaxBytes: 1024},
-					ctx:                  ctx,
 					reader:               reader,
 					eof:                  true,
 					sawEndOfClientStream: true,
 				},
-				leadingSent:     true,
-				responseTrailer: http.Header{},
+				leadingSent: true,
 			}
 			closed := make(chan error, 1)
-			go func() { closed <- conn.Close(nil) }()
+			go func() { closed <- conn.Close(t.Context(), nil) }()
 
 			readCtx, cancelRead := context.WithTimeout(t.Context(), wsTestReadTimeout)
 			defer cancelRead()

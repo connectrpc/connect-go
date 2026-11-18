@@ -125,37 +125,33 @@ func frameName(text bool) string {
 // messageSender writes one encoded message as one WebSocket frame. text says
 // which frame type to use.
 type messageSender interface {
-	send(text bool, data []byte) (int64, error)
+	send(ctx context.Context, text bool, data []byte) (int64, error)
 }
 
 // messageWriter encodes messages and hands them to a sender.
 type messageWriter struct {
-	ctx    context.Context //nolint:containedctx // bound to the RPC, as the sender is
-	sender messageSender
-	codec  connect.Codec
-	// bodyIsText is the frame type codec's bodies go in. Control messages
-	// ignore it, being always JSON.
-	bodyIsText   bool
+	sender       messageSender
 	sendMaxBytes int
 	stats        *connect.MessageStats
 }
 
 // writeBody encodes message with the negotiated codec and sends it as a body.
-func (w *messageWriter) writeBody(message any) *connect.Error {
+func (w *messageWriter) writeBody(ctx context.Context, codec connect.Codec, message any) *connect.Error {
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
-	if err := w.codec.MarshalWrite(w.ctx, buffer, message); err != nil {
+	if err := codec.MarshalWrite(ctx, buffer, message); err != nil {
 		return errorf(connect.CodeInternal, "marshal message: %w", err)
 	}
 	// JSON is UTF-8 by construction; a custom text codec is checked, since
 	// the peer would otherwise fail the whole connection with 1007 (§6.1).
-	if w.bodyIsText && w.codec.Name() != connect.CodecNameJSON && !utf8.Valid(buffer.Bytes()) {
+	bodyIsText := codecIsText(codec)
+	if bodyIsText && codec.Name() != connect.CodecNameJSON && !utf8.Valid(buffer.Bytes()) {
 		return errorf(
 			connect.CodeInternal,
-			"marshal message: codec %q produced invalid UTF-8 for a text frame", w.codec.Name(),
+			"marshal message: codec %q produced invalid UTF-8 for a text frame", codec.Name(),
 		)
 	}
-	if err := w.send(markerBody, w.bodyIsText, buffer.Bytes()); err != nil {
+	if err := w.send(ctx, markerBody, bodyIsText, buffer.Bytes()); err != nil {
 		return err
 	}
 	if w.stats != nil {
@@ -166,17 +162,17 @@ func (w *messageWriter) writeBody(message any) *connect.Error {
 
 // writeJSON sends a control message, whose payload is always JSON and whose
 // frame is therefore always text.
-func (w *messageWriter) writeJSON(marker byte, value any) *connect.Error {
+func (w *messageWriter) writeJSON(ctx context.Context, marker byte, value any) *connect.Error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return errorf(connect.CodeInternal, "marshal %s message: %w", markerName(marker), err)
 	}
-	return w.send(marker, true, data)
+	return w.send(ctx, marker, true, data)
 }
 
 // writeEndStream sends the terminal message. Its EndStreamMessage schema is
 // shared with Connect over HTTP; only the framing around it differs.
-func (w *messageWriter) writeEndStream(err error, trailer http.Header) *connect.Error {
+func (w *messageWriter) writeEndStream(ctx context.Context, err error, trailer http.Header) *connect.Error {
 	encoded, trailerErr := encodeTrailer(trailer)
 	if trailerErr != nil {
 		// As with an unsendable header: the trailers are dropped, and the
@@ -190,11 +186,11 @@ func (w *messageWriter) writeEndStream(err error, trailer http.Header) *connect.
 	if err != nil {
 		end.Error = connectwire.NewWireError(err)
 	}
-	return w.writeJSON(markerServerEndStream, end)
+	return w.writeJSON(ctx, markerServerEndStream, end)
 }
 
 // send encodes one message and hands it to the sender.
-func (w *messageWriter) send(marker byte, text bool, payload []byte) *connect.Error {
+func (w *messageWriter) send(ctx context.Context, marker byte, text bool, payload []byte) *connect.Error {
 	// §12 leaves the marker out of the limit, as Connect over HTTP leaves out
 	// its envelope, so one configured size means the same on both transports.
 	// Only an RPC message is limited: an M or S over it would leave the stream
@@ -208,8 +204,8 @@ func (w *messageWriter) send(marker byte, text bool, payload []byte) *connect.Er
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
 	encodeMessage(buffer, marker, payload)
-	if _, sendErr := w.sender.send(text, buffer.Bytes()); sendErr != nil {
-		wrapped := connecterr.WrapIfContextDone(w.ctx, sendErr)
+	if _, sendErr := w.sender.send(ctx, text, buffer.Bytes()); sendErr != nil {
+		wrapped := connecterr.WrapIfContextDone(ctx, sendErr)
 		if connectErr, ok := connecterr.AsError(wrapped); ok {
 			return connectErr
 		}

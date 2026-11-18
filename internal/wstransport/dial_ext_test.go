@@ -16,6 +16,8 @@ package wstransport_test
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -115,4 +117,41 @@ func TestDialFailureDeadlineExceeded(t *testing.T) {
 	_, err := client.Ping(ctx, &pingv1.PingRequest{Number: 1})
 	assert.NotNil(t, err)
 	assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded)
+}
+
+// A server that drops the connection mid-handshake leaves io.EOF at the bottom
+// of the dial error. Callers read io.EOF as a clean end of stream, so a
+// receive loop would take the failed call for an empty one that succeeded.
+func TestDialFailureDroppedConnectionIsNotEndOfStream(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			return
+		}
+		if conn, _, err := hijacker.Hijack(); err == nil {
+			_ = conn.Close()
+		}
+	}))
+	t.Cleanup(server.Close)
+	transport := connecthttp.NewTransport(
+		server.Client(),
+		server.URL,
+		connecthttp.WithWebSocket(connecthttp.SelectAll),
+	)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+
+	// The dial runs on the opening Send, so the error may come from the call
+	// itself or, if a transport defers it, from the first Receive.
+	stream, err := client.CountUp(t.Context(), &pingv1.CountUpRequest{Number: 1})
+	if err == nil {
+		_, err = stream.Receive()
+		_ = stream.Close()
+	}
+	assert.False(t, errors.Is(err, io.EOF), assert.Sprintf("%v", err))
+	assert.True(t, errors.Is(err, io.ErrUnexpectedEOF), assert.Sprintf("%v", err))
+	assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
+
+	_, err = client.Ping(t.Context(), &pingv1.PingRequest{Number: 1})
+	assert.Equal(t, connect.CodeOf(err), connect.CodeUnavailable)
 }

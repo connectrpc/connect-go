@@ -17,6 +17,8 @@ package wstransport_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -131,4 +133,41 @@ func TestUpgradeFindsTheHijackerThroughUnwrap(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, response.GetNumber(), int64(3))
 	assert.Equal(t, info.Protocol, connecthttp.ProtocolNameConnectWebSocket)
+}
+
+// slowFinishServer finishes a stream only after wsCloseWriteTimeout (5s) has
+// passed since the upgrade, then sets a trailer that only S can carry.
+type slowFinishServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (slowFinishServer) CountUp(
+	ctx context.Context,
+	_ *pingv1.CountUpRequest,
+	_ pingv1connect.PingServiceCountUpServerStream,
+) error {
+	select {
+	case <-time.After(6 * time.Second):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	info, _ := connect.CallInfoForServerContext(ctx)
+	info.ResponseTrailer().Set("Acme-Finished", "yes")
+	return nil
+}
+
+// The bound on the closing write starts when the handler returns, not when
+// the stream opened, so a stream that outlives it still delivers its verdict.
+func TestLongRunningStreamStillSendsItsVerdict(t *testing.T) {
+	t.Parallel()
+	httpServer := newServerFor(t, slowFinishServer{})
+	client := newWebSocketClient(t, httpServer.Client(), httpServer.URL)
+	ctx, info := connect.NewClientContext(t.Context())
+	stream, err := client.CountUp(ctx, &pingv1.CountUpRequest{Number: 1})
+	assert.Nil(t, err)
+
+	_, err = stream.Receive()
+	assert.True(t, errors.Is(err, io.EOF), assert.Sprintf("%v", err))
+	assert.Equal(t, info.ResponseTrailer().Get("Acme-Finished"), "yes")
+	assert.Nil(t, stream.Close())
 }

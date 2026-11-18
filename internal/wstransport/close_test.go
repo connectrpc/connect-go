@@ -46,7 +46,7 @@ func (deadSender) reason() string {
 	return "write tcp 127.0.0.1:8080->127.0.0.1:1234: write: broken pipe"
 }
 
-func (d deadSender) send(_ bool, _ []byte) (int64, error) {
+func (d deadSender) send(context.Context, bool, []byte) (int64, error) {
 	return 0, errors.New(d.reason())
 }
 
@@ -130,19 +130,17 @@ func TestCloseReportsAFailedVerdictToAPresentPeer(t *testing.T) {
 	conn := &websocketHandlerConn{
 		wsConn: serverConn,
 		marshaler: messageWriter{
-			ctx:    t.Context(),
 			sender: deadSender{},
 		},
 		// The peer is still there: it never sent C, and the read path never
 		// reached EOF, so the failed write is not excused.
-		leadingSent:     true,
-		responseTrailer: http.Header{},
+		leadingSent: true,
 	}
 
 	// Close runs the closing handshake, which waits for the peer's own close
 	// frame — the read below — so it cannot be called inline.
 	closed := make(chan error, 1)
-	go func() { closed <- conn.Close(nil) }()
+	go func() { closed <- conn.Close(t.Context(), nil) }()
 
 	// Bounded: an unbounded read here would wait out the package's own timeout
 	// if the close frame never arrived, rather than failing this one test.
@@ -209,10 +207,12 @@ func TestCloseReasonFitsTheFrame(t *testing.T) {
 func TestSendReportsAFailedBodyWrite(t *testing.T) {
 	t.Parallel()
 	conn := &websocketHandlerConn{
+		ctx: t.Context(),
 		marshaler: messageWriter{
-			ctx:    t.Context(),
 			sender: deadSender{},
-			codec:  connectproto.NewBinaryCodec(),
+		},
+		unmarshaler: websocketUnmarshaler{
+			info: SessionInfo{Codec: connectproto.NewBinaryCodec()},
 		},
 		leadingSent: true, // isolate the body write from the metadata write
 	}
@@ -252,7 +252,7 @@ func TestReadFailureAtTheDeadlineIsDeadlineExceeded(t *testing.T) {
 	t.Cleanup(call.reader.close)
 
 	unmarshaler := &websocketClientUnmarshaler{call: call}
-	err := unmarshaler.unmarshal(&pingv1.CumSumResponse{})
+	_, err := unmarshaler.unmarshal(&pingv1.CumSumResponse{})
 
 	assert.NotNil(t, err)
 	assert.Equal(t, err.Code(), connect.CodeDeadlineExceeded)

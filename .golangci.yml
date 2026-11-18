@@ -94,6 +94,10 @@ linters:
       - linters:
           - contextcheck
         path: internal/wstransport/client.go
+      - linters:
+          - contextcheck
+        path: internal/wstransport/protocol_websocket.go
+        text: ensureDialed
       # blockUntilResponseReady returns the shared response, whose body is
       # closed once by CloseRead rather than at each call site.
       - linters:

@@ -78,10 +78,6 @@ func (s *session) Serve(
 	procedure, spec := sessionSpec(server, info)
 	callInfo := newCallInfo(spec, info)
 
-	// Detached from the RPC's deadline: see websocketHandlerConn.Close. Bounded
-	// so that an unresponsive peer cannot hold the session open.
-	closeCtx, closeCancel := context.WithTimeout(context.WithoutCancel(ctx), wsCloseWriteTimeout)
-	defer closeCancel()
 	// Every return below has closed conn by the time these run, which is what
 	// lets the reader's read in flight return.
 	//
@@ -110,43 +106,32 @@ func (s *session) Serve(
 	)
 	defer keeper.stop()
 	handlerConn := &websocketHandlerConn{
-		request: info.Request,
-		wsConn:  conn,
-		drain:   info.drain,
+		ctx:    ctx,
+		wsConn: conn,
 		marshaler: messageWriter{
 			// No compression here: the WebSocket transport compresses whole
 			// messages itself, so a second pass would deflate gzip.
-			ctx:          ctx,
-			sender:       &websocketBinarySender{ctx: ctx, conn: conn},
-			codec:        info.Codec,
-			bodyIsText:   codecIsText(info.Codec),
+			sender:       &websocketBinarySender{conn: conn},
 			sendMaxBytes: info.SendMaxBytes,
 			stats:        &callInfo.SendStats,
 		},
 		unmarshaler: websocketUnmarshaler{
 			frameDecoder: frameDecoder{
-				codec:        info.Codec,
-				bodyIsText:   codecIsText(info.Codec),
 				readMaxBytes: info.ReadMaxBytes,
 			},
-			ctx:                   ctx,
-			reader:                reader,
-			keeper:                keeper,
-			callInfo:              callInfo,
-			cancelCall:            cancelCall,
-			infrastructureHeaders: info.InfrastructureHeaders,
-			info:                  info,
+			reader:     reader,
+			keeper:     keeper,
+			callInfo:   callInfo,
+			cancelCall: cancelCall,
+			info:       info,
 		},
-		callInfo:        callInfo,
-		responseTrailer: make(http.Header),
-		closeCtx:        closeCtx,
-		shuttingDown:    func() bool { return isShuttingDown(serveCtx) },
+		shuttingDown: func() bool { return isShuttingDown(serveCtx) },
 	}
 
 	if timeoutErr != nil {
 		// The handshake already committed the HTTP response, so a malformed
 		// deadline can only be reported in the end-of-stream message.
-		return handlerConn.Close(timeoutErr)
+		return handlerConn.Close(ctx, timeoutErr)
 	}
 
 	// net/http recovers a panicking handler but deliberately leaves a hijacked
@@ -166,7 +151,7 @@ func (s *session) Serve(
 	// CallInfo is complete for interceptors and frozen for the handler. See
 	// drainLeadingMetadata.
 	if drainErr := handlerConn.unmarshaler.drainLeadingMetadata(ctx); drainErr != nil {
-		return handlerConn.Close(drainErr)
+		return handlerConn.Close(ctx, drainErr)
 	}
 
 	stream := &serverStream{
@@ -174,10 +159,7 @@ func (s *session) Serve(
 		singleRequest: spec.StreamType&connect.StreamTypeClient == 0,
 	}
 	callErr := server.Call(ctx, procedure, callInfo, stream)
-	// Trailing metadata is only knowable once the handler has returned. Leading
-	// metadata is read live by flushLeadingMetadata, which runs earlier.
-	copyToHTTPHeader(handlerConn.responseTrailer, callInfo.ResponseTrailer())
-	return handlerConn.Close(callErr)
+	return handlerConn.Close(ctx, callErr)
 }
 
 // sessionSpec names the procedure a session calls and finds its spec.
@@ -200,7 +182,7 @@ func sessionSpec(server *connect.Server, info SessionInfo) (string, connect.Spec
 func newCallInfo(spec connect.Spec, info SessionInfo) *connect.CallInfo {
 	callInfo := &connect.CallInfo{
 		Spec:     spec,
-		PeerAddr: info.PeerAddr,
+		PeerAddr: info.Request.RemoteAddr,
 		Protocol: ProtocolConnectWebSocket,
 		Codec:    info.Codec.Name(),
 		// Identity at the Connect layer: the transport's permessage-deflate is
@@ -269,7 +251,7 @@ func (s *serverStream) Receive(msg any) error {
 // SendHeaders sends the M message now, before any body (§7.4). Headers set
 // after it are late and are not sent.
 func (s *serverStream) SendHeaders() error {
-	if err := s.conn.flushLeadingMetadata(); err != nil {
+	if err := s.conn.flushLeadingMetadata(s.conn.ctx); err != nil {
 		return err
 	}
 	return nil // literal nil; a nil *connect.Error is a non-nil error
