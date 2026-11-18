@@ -329,12 +329,10 @@ func (g *grpcClient) NewConn(
 				readMaxBytes: g.ReadMaxBytes,
 				stats:        receiveStats,
 			},
+			web: g.web,
 		},
 	}
 	duplexCall.SetValidateResponse(conn.validateResponse)
-	if g.web {
-		conn.unmarshaler.web = true
-	}
 	return wrapClientConnWithCodedErrors(conn)
 }
 
