@@ -277,6 +277,8 @@ func TestClientStreamCloseUnusedDoesNotDispatch(t *testing.T) {
 	})
 	client := connect.NewClient(connecthttp.NewTransport(httpClient, "http://localhost"))
 	for _, spec := range []connect.Spec{
+		{StreamType: connect.StreamTypeUnary, Procedure: pingv1connect.PingServicePingProcedure},
+		{StreamType: connect.StreamTypeServer, Procedure: pingv1connect.PingServiceCountUpProcedure},
 		{StreamType: connect.StreamTypeClient, Procedure: pingv1connect.PingServiceSumProcedure},
 		{StreamType: connect.StreamTypeBidi, Procedure: pingv1connect.PingServiceCumSumProcedure},
 	} {
