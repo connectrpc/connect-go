@@ -321,6 +321,16 @@ func writeWebSocketText(ctx context.Context, conn *websocket.Conn, marker byte, 
 	return conn.Write(ctx, websocket.MessageText, message)
 }
 
+// websocketCloseReason truncates reason to fit a Close frame. coder sends no
+// Close frame for a reason over 123 bytes.
+func websocketCloseReason(reason string) string {
+	const maxReasonBytes = 123
+	if len(reason) <= maxReasonBytes {
+		return reason
+	}
+	return strings.ToValidUTF8(reason[:maxReasonBytes], "")
+}
+
 // websocketGraceContext ends [websocketCloseGrace] after ctx. coder drops the
 // connection when a read or write context ends, so a nearly done write or
 // close handshake gets time to finish. coder bounds Close at 5s on its own.

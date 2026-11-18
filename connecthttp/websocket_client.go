@@ -121,7 +121,7 @@ func (s *websocketClientStream) Send(msg any) error {
 	if s.singleRequest && s.sent {
 		return errors.New("connecthttp: unary stream sent more than once")
 	}
-	if s.sendClosed {
+	if s.sendClosed || s.ctx.Err() != nil {
 		return io.EOF
 	}
 	// Marshal before dialing, so a message over the limit sends nothing.
@@ -183,7 +183,7 @@ func (s *websocketClientStream) Receive(msg any) error {
 		if errors.Is(err, errWebSocketInvalidUTF8) {
 			closeCode = websocket.StatusInvalidFramePayloadData
 		}
-		s.release(closeCode)
+		s.release(closeCode, websocketCloseReason(err.Error()))
 	}
 	return err
 }
@@ -236,8 +236,9 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 		return nil, s.dialError(response, err)
 	}
 	if conn.Subprotocol() == "" {
-		_ = conn.Close(websocketStatusClientError, "")
-		return nil, connect.NewError(connect.CodeInternal, "server accepted the WebSocket without a subprotocol")
+		const message = "server accepted the WebSocket without a subprotocol"
+		_ = conn.Close(websocketStatusClientError, message)
+		return nil, connect.NewError(connect.CodeInternal, message)
 	}
 	conn.SetReadLimit(s.config.readLimit)
 	s.stopWatching = context.AfterFunc(s.ctx, func() {
@@ -277,6 +278,10 @@ func (s *websocketClientStream) receive(conn *websocket.Conn, msg any) error {
 	bodyIsText := websocketBodyIsText(s.config.codec.Name())
 	for {
 		messageType, data, err := conn.Read(s.ioCtx)
+		if err == nil {
+			// ioCtx outlives ctx, so a message can still arrive after cancel.
+			err = s.ctx.Err()
+		}
 		if err != nil {
 			return s.readError(err)
 		}
@@ -325,19 +330,19 @@ func (s *websocketClientStream) receiveEnd(payload []byte) error {
 		}
 	}
 	fromHTTPHeader(s.info.ResponseTrailer(), trailer)
-	s.release(websocket.StatusNormalClosure)
+	s.release(websocket.StatusNormalClosure, "")
 	if end.Error != nil {
 		return end.Error.asError()
 	}
 	return io.EOF
 }
 
-func (s *websocketClientStream) release(closeCode websocket.StatusCode) {
+func (s *websocketClientStream) release(closeCode websocket.StatusCode, reason string) {
 	// Stop the context watcher first, so it can't close with 1000 instead.
 	s.stopWatching()
 	// Don't make the caller wait for the close handshake, up to 5s in coder.
 	conn := s.conn
-	go func() { _ = conn.Close(closeCode, "") }()
+	go func() { _ = conn.Close(closeCode, reason) }()
 	s.cancel()
 }
 
@@ -347,6 +352,10 @@ func (s *websocketClientStream) readError(err error) error {
 	}
 	if ctxErr := s.ctx.Err(); ctxErr != nil {
 		return wrapIfContextError(ctxErr)
+	}
+	// A cause that wraps io.EOF would read as a clean end of stream.
+	if errors.Is(err, io.EOF) {
+		err = io.ErrUnexpectedEOF
 	}
 	switch {
 	case errors.Is(err, websocket.ErrMessageTooBig), websocket.CloseStatus(err) == websocket.StatusMessageTooBig:

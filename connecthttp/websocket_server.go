@@ -271,6 +271,10 @@ func (r *websocketServerReader) connectionEnded(err error) {
 		return
 	}
 	r.peerGone = true
+	// A cause that wraps io.EOF would read as a clean end of stream.
+	if errors.Is(err, io.EOF) {
+		err = io.ErrUnexpectedEOF
+	}
 	if r.err == nil {
 		r.err = connect.Errorf(connect.CodeCanceled, "client closed the connection: %s", err).WithCause(err)
 		if errors.Is(err, websocket.ErrMessageTooBig) {
