@@ -346,7 +346,7 @@ func (g *grpcClient) NewConn(
 			return call.ResponseTrailer()
 		}
 	}
-	return wrapClientConnWithCodedErrors(conn)
+	return conn
 }
 
 // grpcClientConn works for both gRPC and gRPC-Web.
