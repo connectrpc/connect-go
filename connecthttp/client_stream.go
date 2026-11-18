@@ -115,8 +115,9 @@ func receiveUnaryResponse(conn streamingClientConn, dst any, info *connect.CallI
 }
 
 func (s *connectUnaryClientStream) Close() error {
+	err := s.conn.CloseResponse()
 	_ = s.conn.CloseRequest()
-	return s.conn.CloseResponse()
+	return err
 }
 
 // connectStreamingClientStream adapts a streaming [streamingClientConn] to [connect.ClientStream].
