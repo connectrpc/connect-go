@@ -2737,6 +2737,7 @@ func TestClientFailedSendSkipsRequest(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			assert.Nil(t, stream.SendHeaders())
 			err = stream.Send(&pingv1.CountUpRequest{Number: 1000})
 			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
 			assert.Nil(t, stream.CloseSend())
