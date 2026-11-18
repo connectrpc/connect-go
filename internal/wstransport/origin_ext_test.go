@@ -25,41 +25,38 @@ import (
 	"connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
 )
 
-// A browser attaches the user's cookies to a WebSocket handshake and no CORS
-// preflight stands in the way, so a cross-origin upgrade must be refused
-// unless the server opted in.
-func TestCrossOriginUpgradeIsRefusedByDefault(t *testing.T) {
+// §4.4: a request with no Origin is not from a browser, and one whose origin
+// names the request's own host is the ordinary same-origin call. Behind a
+// TLS-terminating proxy the page's origin is https on a plaintext connection,
+// so the scheme is not compared, whether it comes from there or from a header.
+func TestSameOriginAndOriginlessUpgradesAreAllowed(t *testing.T) {
 	t.Parallel()
-	httpServer := newHybridServer(t, pingServer{})
-	request := newUpgradeRequest(t, httpServer.URL)
-	request.Header.Set("Origin", "https://evil.example.com")
-	res, err := httpServer.Client().Do(request)
-	assert.Nil(t, err)
-	t.Cleanup(func() { _ = res.Body.Close() })
-	assert.Equal(t, res.StatusCode, http.StatusForbidden)
-}
-
-// A request with no Origin header is not a browser, and must still be served.
-func TestUpgradeWithoutOriginIsAllowed(t *testing.T) {
-	t.Parallel()
-	httpServer := newHybridServer(t, pingServer{})
-	request := newUpgradeRequest(t, httpServer.URL)
-	res, err := httpServer.Client().Do(request)
-	assert.Nil(t, err)
-	t.Cleanup(func() { _ = res.Body.Close() })
-	assert.Equal(t, res.StatusCode, http.StatusSwitchingProtocols)
-}
-
-// An origin matching the host is the ordinary same-origin browser call.
-func TestSameOriginUpgradeIsAllowed(t *testing.T) {
-	t.Parallel()
-	httpServer := newHybridServer(t, pingServer{})
-	request := newUpgradeRequest(t, httpServer.URL)
-	request.Header.Set("Origin", httpServer.URL)
-	res, err := httpServer.Client().Do(request)
-	assert.Nil(t, err)
-	t.Cleanup(func() { _ = res.Body.Close() })
-	assert.Equal(t, res.StatusCode, http.StatusSwitchingProtocols)
+	for _, test := range []struct {
+		name           string
+		scheme         string
+		forwardedProto string
+	}{
+		{name: "no Origin"},
+		{name: "same origin", scheme: "http"},
+		{name: "https origin on plaintext", scheme: "https"},
+		{name: "https origin, proxy says http", scheme: "https", forwardedProto: "http"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			httpServer := newHybridServer(t, pingServer{})
+			request := newUpgradeRequest(t, httpServer.URL)
+			if test.scheme != "" {
+				request.Header.Set("Origin", test.scheme+"://"+request.URL.Host)
+			}
+			if test.forwardedProto != "" {
+				request.Header.Set("X-Forwarded-Proto", test.forwardedProto)
+			}
+			res, err := httpServer.Client().Do(request)
+			assert.Nil(t, err)
+			t.Cleanup(func() { _ = res.Body.Close() })
+			assert.Equal(t, res.StatusCode, http.StatusSwitchingProtocols)
+		})
+	}
 }
 
 // WithCheckOrigin must still be able to open the endpoint up.

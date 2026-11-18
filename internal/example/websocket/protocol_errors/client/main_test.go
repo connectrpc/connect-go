@@ -28,7 +28,7 @@ import (
 
 // The mirror: a server that misframes its responses is reported to the
 // client's handler, which is the only way a client can tell a framing fault
-// from any other InvalidArgument.
+// from any other Internal error.
 func TestClientHandlerSeesAMisframingServer(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(pingv1connect.PingServiceCumSumProcedure, http.HandlerFunc(misframe.Handler))

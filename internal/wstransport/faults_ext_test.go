@@ -139,8 +139,7 @@ func TestProtocolFaultsAreClassified(t *testing.T) {
 		},
 		{
 			// A text frame on a connection that negotiated Protobuf. Caught by
-			// the encoding check, ahead of the separate rule that an empty
-			// text body is not the empty JSON message.
+			// the encoding check before the codec sees the payload.
 			name:   "a body in the encoding the handshake did not agree on",
 			marker: wireBody,
 			text:   true,
@@ -176,28 +175,6 @@ func TestProtocolFaultsAreClassified(t *testing.T) {
 			assert.True(t, strings.HasPrefix(peers[0], "127.0.0.1:"))
 		})
 	}
-}
-
-// The handler observes; it cannot suppress. Whatever it does, the peer still
-// gets the error and the RPC still fails.
-func TestProtocolErrorHandlerCannotSuppress(t *testing.T) {
-	t.Parallel()
-	recorder := &faultRecorder{}
-	httpServer := newFaultServer(t, recorder)
-	conn := dialCumSum(t, httpServer, "")
-
-	message, err := proto.Marshal(&pingv1.CumSumRequest{Number: 7})
-	assert.Nil(t, err)
-	writeRawFrame(conn, false, 'Z', message)
-
-	data := readServerOpening(t, conn)
-	// An S message carrying the error, exactly as without a handler.
-	assert.Equal(t, data[0], wireServerEndStream)
-	assert.True(t, strings.Contains(string(data), "invalid_argument"))
-	assert.True(t, strings.Contains(string(data), "unknown marker Z"))
-
-	faults, _ := recorder.seen()
-	assert.Equal(t, len(faults), 1)
 }
 
 // A well-behaved peer must not be reported at all: the handler is for faults,
@@ -288,6 +265,7 @@ func misframingServer(tb testing.TB, write func(*websocket.Conn)) *httptest.Serv
 
 // A server that frames its responses wrongly is reported to the client's
 // handler, classified the same way a client's mistakes are to the server's.
+// The caller sees Internal: InvalidArgument would blame its own request.
 func TestClientProtocolFaultsAreClassified(t *testing.T) {
 	t.Parallel()
 	message, err := proto.Marshal(&pingv1.CumSumResponse{Sum: 7})
@@ -375,6 +353,7 @@ func TestClientProtocolFaultsAreClassified(t *testing.T) {
 			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
 			_, err = stream.Receive()
 			assert.NotNil(t, err)
+			assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
 
 			faults, procedures := recorder.seen()
 			assert.Equal(t, len(faults), 1)

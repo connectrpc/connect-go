@@ -29,9 +29,10 @@ import (
 )
 
 // §5 and §13: a client that reads a protocol error from the server fails the
-// RPC and closes with 3102, the only error code a client has, without being
-// asked to. The reason is what tells the server which mistake it made. The RPC
-// fails as Internal, as a malformed response does in Connect over HTTP.
+// RPC and closes with 3102, without being asked to. The reason is what tells
+// the server which mistake it made. The RPC fails as Internal, as a malformed
+// response does in Connect over HTTP. Two faults have codes of their own:
+// invalid UTF-8 is 1007 (§6.1), and an oversized message is 1009 (§12.1).
 func TestClientClosesFaultedServerWithCode(t *testing.T) {
 	t.Parallel()
 	const readMaxBytes = 1024
@@ -43,6 +44,8 @@ func TestClientClosesFaultedServerWithCode(t *testing.T) {
 		wantReason      string
 		// wantCode is the RPC's error code when it is not Internal.
 		wantCode connect.Code
+		// wantClose is the close code when it is not 3102.
+		wantClose int
 	}{
 		// Server frames are unmasked: FIN | text, then the length.
 		{
@@ -54,6 +57,7 @@ func TestClientClosesFaultedServerWithCode(t *testing.T) {
 			name:       "invalid UTF-8",
 			frame:      []byte{0x81, 3, 'M', '[', 0x80},
 			wantReason: "not valid UTF-8",
+			wantClose:  1007,
 		},
 		{
 			// §5: whatever its error code, a fault in the server's framing is a
@@ -98,11 +102,13 @@ func TestClientClosesFaultedServerWithCode(t *testing.T) {
 			wantReason: "S in a binary frame",
 		},
 		{
-			// §12.1: not 1009 or 3109. The reason names the limit instead.
+			// §12.1: a non-browser client closes with 1009, and the reason
+			// names the limit.
 			name:       "message past the read limit",
 			frame:      oversizedBinaryFrame(2 * readMaxBytes),
 			wantReason: "1024",
 			wantCode:   connect.CodeResourceExhausted,
+			wantClose:  1009,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -147,7 +153,11 @@ func TestClientClosesFaultedServerWithCode(t *testing.T) {
 
 			select {
 			case got := <-closes:
-				assert.Equal(t, got.code, 3102)
+				wantClose := test.wantClose
+				if wantClose == 0 {
+					wantClose = 3102
+				}
+				assert.Equal(t, got.code, wantClose)
 				assert.True(t, strings.Contains(got.reason, test.wantReason))
 				assert.True(t, len(got.reason) <= 123)
 			case <-ctx.Done():

@@ -29,20 +29,34 @@ import (
 // It matches the 4MiB message limit common to gRPC implementations.
 const defaultDrainBudget = 4 << 20
 
-var errDrainBudgetSpent = errors.New("closing drain reached its byte limit")
+// compressedReadMargin is what a message may take on the wire beyond twice its
+// size limit, for frame headers, deflate overhead and buffering. Any fixed
+// bound keeps a stream of zero-output deflate blocks from being read forever.
+const compressedReadMargin = 64 << 10
+
+var (
+	errDrainBudgetSpent = errors.New("closing drain reached its byte limit")
+	errWireLimit        = errors.New("message exceeded its compressed size limit")
+)
 
 // drainLimiter caps how much of a connection is read once this side starts a
 // closing handshake. The WebSocket library's handshake reads and discards the
 // peer's frames until its Close frame arrives, bounded at five seconds but by
 // no number of bytes, so a peer with a compression bomb queued could make the
-// drain read all of it. §13 asks for a bound on bytes as well as time, and
+// drain read all of it. §13.2 asks for a bound on bytes as well as time, and
 // this supplies it.
 //
 // Every method is a no-op on a nil drainLimiter.
+//
+// It also bounds the compressed bytes of each message read before then
+// (§12), which only the connection underneath the library can count.
 type drainLimiter struct {
 	budget int64
 	// remaining is negative until the drain begins.
 	remaining atomic.Int64
+	// messageRemaining is what the message being read may still take from the
+	// connection, or negative between messages.
+	messageRemaining atomic.Int64
 }
 
 // newDrainLimiter returns a limiter whose budget is readLimit, the size of
@@ -55,7 +69,26 @@ func newDrainLimiter(readLimit int64) *drainLimiter {
 		limiter.budget = defaultDrainBudget
 	}
 	limiter.remaining.Store(-1)
+	limiter.messageRemaining.Store(-1)
 	return limiter
+}
+
+// beginMessage starts bounding what the connection yields for one message at
+// twice readLimit plus compressedReadMargin. Bytes the library buffered before
+// it are not counted, which the margin covers.
+func (l *drainLimiter) beginMessage(readLimit int64) {
+	if l == nil {
+		return
+	}
+	l.messageRemaining.Store(2*readLimit + compressedReadMargin)
+}
+
+// endMessage stops bounding the message begun by beginMessage.
+func (l *drainLimiter) endMessage() {
+	if l == nil {
+		return
+	}
+	l.messageRemaining.Store(-1)
 }
 
 // begin starts counting reads against the budget. Only the first call counts.
@@ -72,7 +105,7 @@ func (l *drainLimiter) read(reader io.Reader, data []byte) (int, error) {
 	}
 	remaining := l.remaining.Load()
 	if remaining < 0 {
-		return reader.Read(data)
+		return l.readMessage(reader, data)
 	}
 	if remaining == 0 {
 		return 0, errDrainBudgetSpent
@@ -82,6 +115,23 @@ func (l *drainLimiter) read(reader io.Reader, data []byte) (int, error) {
 	}
 	n, err := reader.Read(data)
 	l.remaining.Add(-int64(n))
+	return n, err
+}
+
+// readMessage reads within the current message's compressed bound, if any.
+func (l *drainLimiter) readMessage(reader io.Reader, data []byte) (int, error) {
+	remaining := l.messageRemaining.Load()
+	if remaining < 0 {
+		return reader.Read(data)
+	}
+	if remaining == 0 {
+		return 0, errWireLimit
+	}
+	if int64(len(data)) > remaining {
+		data = data[:remaining]
+	}
+	n, err := reader.Read(data)
+	l.messageRemaining.Add(-int64(n))
 	return n, err
 }
 
@@ -113,11 +163,7 @@ type drainResponseWriter struct {
 }
 
 func (w *drainResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	hijacker, ok := w.ResponseWriter.(http.Hijacker)
-	if !ok {
-		return nil, nil, errors.New("response writer does not implement http.Hijacker")
-	}
-	conn, readWriter, err := hijacker.Hijack()
+	conn, readWriter, err := http.NewResponseController(w.ResponseWriter).Hijack()
 	if err != nil {
 		return nil, nil, err
 	}

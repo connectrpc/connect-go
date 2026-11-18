@@ -19,6 +19,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect/v2"
@@ -26,10 +28,10 @@ import (
 )
 
 // NewSession returns the [Session] that serves Connect RPCs on an upgraded
-// connection. One connection carries one RPC: the procedure is the request
-// path, so the upgrade itself selects the method.
+// connection. One connection carries one RPC: the procedure is the one given
+// to [WithProcedure], or else the request path.
 //
-// [Upgrade], [Mux], and [Mount] build this themselves. Call it only to wrap
+// [Upgrade] builds this itself. Call it only to wrap
 // the default behavior in a [Session] of your own and pass the result to
 // [WithSession]; it needs no configuring, because everything it uses arrives
 // on [SessionInfo].
@@ -48,10 +50,11 @@ func (s *session) Serve(
 	conn *websocket.Conn,
 	info SessionInfo,
 ) error {
-	// Bounds both sides of permessage-deflate: the inflated message is capped at
-	// the limit, and compressed input at roughly the limit plus a read-ahead
-	// buffer. A stream of zero-output DEFLATE blocks, which never inflates to
-	// anything, is still cut off at about the limit.
+	// Bounds both sides of permessage-deflate (§12): the inflated message is
+	// capped at the limit, and its compressed input at twice the limit plus a
+	// margin, which drainLimiter counts on the connection. A stream of
+	// zero-output DEFLATE blocks, which never inflates to anything, is cut off
+	// there.
 	//
 	// The bound only holds because the closing handshake's drain is capped
 	// too: it would otherwise read whatever the peer queued. See drainLimiter,
@@ -62,38 +65,18 @@ func (s *session) Serve(
 	// SetReadLimit closes with 1009 the moment it trips, leaving nothing to
 	// write the S message on.
 	conn.SetReadLimit(-1)
+	serveCtx := ctx
 	ctx, cancel, timeoutErr := timeoutFromRequest(ctx, info.Request, info.MaxTimeout)
 	if cancel != nil {
 		defer cancel()
 	}
-	// Cancelable in its own right, so that the post-C drain can end the call
-	// when the connection dies under it (§8.1). timeoutFromRequest returns no
-	// cancel of its own when neither side set a deadline.
+	// Cancelable in its own right, so that the reader can end the call when
+	// the connection dies under it (§8). timeoutFromRequest returns no cancel
+	// of its own when neither side set a deadline.
 	ctx, cancelCall := context.WithCancel(ctx)
 	defer cancelCall()
-	procedure := info.Request.URL.Path
-	spec, registered := registeredSpec(server, procedure)
-	if !registered {
-		// Server.Call reports the unknown procedure; until then, bidi is the
-		// permissive answer.
-		spec = connect.Spec{Procedure: procedure, StreamType: connect.StreamTypeBidi}
-	}
-	callInfo := &connect.CallInfo{
-		Spec:     spec,
-		PeerAddr: info.PeerAddr,
-		Protocol: ProtocolConnectWebSocket,
-		Codec:    info.Codec.Name(),
-		// Identity at the Connect layer: the transport's permessage-deflate is
-		// below it and invisible to the protocol.
-		RequestEncoding:  connect.CompressionNameIdentity,
-		ResponseEncoding: connect.CompressionNameIdentity,
-	}
-	for key, values := range info.Request.Header {
-		if isStrippedHandshakeHeader(key) {
-			continue
-		}
-		callInfo.RequestHeader().SetValues(key, values)
-	}
+	procedure, spec := sessionSpec(server, info)
+	callInfo := newCallInfo(spec, info)
 
 	// Detached from the RPC's deadline: see websocketHandlerConn.Close. Bounded
 	// so that an unresponsive peer cannot hold the session open.
@@ -105,13 +88,25 @@ func (s *session) Serve(
 	// The reader is detached from the RPC's deadline: the WebSocket library
 	// closes the connection when a read's context expires, which would leave
 	// no connection to send the deadline's S message on.
+	//
+	// §8: a connection that ends before S cancels the RPC, whether or not C
+	// arrived and whether or not the handler is reading. Once S is sent the
+	// handler has returned, so the cancellation reaches nobody.
 	readLimit := messageReadLimit(info.ReadMaxBytes)
-	reader := newFrameReader(context.WithoutCancel(ctx), func(readCtx context.Context) (websocket.MessageType, []byte, error) {
-		return readBoundedMessage(readCtx, conn, readLimit)
-	})
+	reader := newFrameReader(
+		context.WithoutCancel(ctx),
+		func(readCtx context.Context) (websocket.MessageType, []byte, error) {
+			return readBoundedMessage(readCtx, conn, readLimit, info.drain)
+		},
+		cancelCall,
+	)
+	info.heartbeat.attach(reader)
 	defer reader.close()
+	// Detached, as the reader is: the library closes the connection when a
+	// Ping's context ends, so the RPC's end would cut off its own S.
 	keeper := startKeepAlive(
-		ctx, conn, reader, info.KeepAliveInterval, info.KeepAliveTimeout, websocket.StatusInternalError,
+		context.WithoutCancel(ctx), conn, reader, info.KeepAliveInterval, info.KeepAliveTimeout,
+		websocket.StatusInternalError,
 	)
 	defer keeper.stop()
 	handlerConn := &websocketHandlerConn{
@@ -123,26 +118,29 @@ func (s *session) Serve(
 			// messages itself, so a second pass would deflate gzip.
 			ctx:          ctx,
 			sender:       &websocketBinarySender{ctx: ctx, conn: conn},
-			codecs:       info.Codecs,
-			bodyIsText:   info.Codec.Name() == connect.CodecNameJSON,
+			codec:        info.Codec,
+			bodyIsText:   codecIsText(info.Codec),
 			sendMaxBytes: info.SendMaxBytes,
 			stats:        &callInfo.SendStats,
 		},
 		unmarshaler: websocketUnmarshaler{
+			frameDecoder: frameDecoder{
+				codec:        info.Codec,
+				bodyIsText:   codecIsText(info.Codec),
+				readMaxBytes: info.ReadMaxBytes,
+			},
 			ctx:                   ctx,
 			reader:                reader,
 			keeper:                keeper,
 			callInfo:              callInfo,
-			codecs:                info.Codecs,
-			bodyIsText:            info.Codec.Name() == connect.CodecNameJSON,
 			cancelCall:            cancelCall,
-			readMaxBytes:          info.ReadMaxBytes,
 			infrastructureHeaders: info.InfrastructureHeaders,
 			info:                  info,
 		},
 		callInfo:        callInfo,
 		responseTrailer: make(http.Header),
 		closeCtx:        closeCtx,
+		shuttingDown:    func() bool { return isShuttingDown(serveCtx) },
 	}
 
 	if timeoutErr != nil {
@@ -167,7 +165,7 @@ func (s *session) Serve(
 	// Consume the client's Leading-Metadata before the handler exists, so
 	// CallInfo is complete for interceptors and frozen for the handler. See
 	// drainLeadingMetadata.
-	if drainErr := handlerConn.unmarshaler.drainLeadingMetadata(); drainErr != nil {
+	if drainErr := handlerConn.unmarshaler.drainLeadingMetadata(ctx); drainErr != nil {
 		return handlerConn.Close(drainErr)
 	}
 
@@ -180,6 +178,49 @@ func (s *session) Serve(
 	// metadata is read live by flushLeadingMetadata, which runs earlier.
 	copyToHTTPHeader(handlerConn.responseTrailer, callInfo.ResponseTrailer())
 	return handlerConn.Close(callErr)
+}
+
+// sessionSpec names the procedure a session calls and finds its spec.
+func sessionSpec(server *connect.Server, info SessionInfo) (string, connect.Spec) {
+	procedure := info.Procedure
+	if procedure == "" {
+		procedure = info.Request.URL.Path
+	}
+	spec, registered := registeredSpec(server, procedure)
+	if !registered {
+		// Server.Call reports the unknown procedure; until then, bidi is the
+		// permissive answer.
+		spec = connect.Spec{Procedure: procedure, StreamType: connect.StreamTypeBidi}
+	}
+	return procedure, spec
+}
+
+// newCallInfo describes the RPC to the handler, starting from the upgrade
+// request's headers. The client's M message adds to them later.
+func newCallInfo(spec connect.Spec, info SessionInfo) *connect.CallInfo {
+	callInfo := &connect.CallInfo{
+		Spec:     spec,
+		PeerAddr: info.PeerAddr,
+		Protocol: ProtocolConnectWebSocket,
+		Codec:    info.Codec.Name(),
+		// Identity at the Connect layer: the transport's permessage-deflate is
+		// below it and invisible to the protocol.
+		RequestEncoding:  connect.CompressionNameIdentity,
+		ResponseEncoding: connect.CompressionNameIdentity,
+		TransportInfo:    info.TransportInfo,
+	}
+	for key, values := range info.Request.Header {
+		if isStrippedHandshakeHeader(key) {
+			continue
+		}
+		callInfo.RequestHeader().SetValues(key, values)
+	}
+	// net/http moves Host out of the header map; over HTTP, connecthttp puts
+	// it back, and a handler should not have to know which transport ran it.
+	if info.Request.Host != "" {
+		callInfo.RequestHeader().Set("Host", info.Request.Host)
+	}
+	return callInfo
 }
 
 // registeredSpec finds the spec server registered for procedure.
@@ -225,15 +266,39 @@ func (s *serverStream) Receive(msg any) error {
 	return nil
 }
 
-// SendHeaders does nothing on the wire. The HTTP response was committed by the
-// upgrade, so response metadata can only travel in the trailing
-// EndStreamMessage, which Close writes.
+// SendHeaders sends the M message now, before any body (§7.4). Headers set
+// after it are late and are not sent.
 func (s *serverStream) SendHeaders() error {
-	return nil
+	if err := s.conn.flushLeadingMetadata(); err != nil {
+		return err
+	}
+	return nil // literal nil; a nil *connect.Error is a non-nil error
 }
 
 func (s *serverStream) Send(msg any) error {
 	return s.conn.Send(msg)
+}
+
+// rawQueryValues returns every value of name in a raw query string. Unlike
+// URL.Query, it keeps a value that is not valid percent-encoding, or that a
+// semicolon runs into, rather than dropping the pair: §11 makes such a
+// deadline invalid, not absent.
+func rawQueryValues(rawQuery, name string) []string {
+	var values []string
+	for pair := range strings.SplitSeq(rawQuery, "&") {
+		key, value, _ := strings.Cut(pair, "=")
+		if unescaped, err := url.QueryUnescape(key); err == nil {
+			key = unescaped
+		}
+		if key != name {
+			continue
+		}
+		if unescaped, err := url.QueryUnescape(value); err == nil {
+			value = unescaped
+		}
+		values = append(values, value)
+	}
+	return values
 }
 
 // timeoutFromRequest applies the client's deadline to ctx.
@@ -247,14 +312,21 @@ func timeoutFromRequest(
 	request *http.Request,
 	maxTimeout time.Duration,
 ) (context.Context, context.CancelFunc, *connect.Error) {
-	values, present := request.URL.Query()[wsQueryTimeoutMs]
-	if !present {
+	values := rawQueryValues(request.URL.RawQuery, wsQueryTimeoutMs)
+	if len(values) == 0 {
 		// No client deadline, so the server's bound is the whole of it.
 		if maxTimeout <= 0 {
 			return ctx, nil, nil
 		}
 		ctx, cancel := context.WithTimeout(ctx, maxTimeout)
 		return ctx, cancel, nil
+	}
+	// §11: a deadline stated twice is invalid, rather than a choice between
+	// the two that the client cannot see the server make.
+	if len(values) > 1 {
+		return ctx, nil, errorf(
+			connect.CodeInvalidArgument, "parse timeout: %s appears %d times", wsQueryTimeoutMs, len(values),
+		)
 	}
 	timeout := values[0]
 	if timeout == "" {
@@ -274,8 +346,14 @@ func timeoutFromRequest(
 		}
 		millis = millis*10 + int64(digit-'0')
 	}
+	// §11: as over HTTP, a zero timeout means the RPC is not dispatched at all.
+	if millis == 0 {
+		return ctx, nil, errorf(
+			connect.CodeDeadlineExceeded, "%s is 0, so the deadline has already passed", wsQueryTimeoutMs,
+		)
+	}
 	requested := time.Duration(millis) * time.Millisecond
-	// A client may ask for less time than the server allows, never more.
+	// The effective deadline is the shorter of the client's and the server's.
 	if maxTimeout > 0 && requested > maxTimeout {
 		requested = maxTimeout
 	}

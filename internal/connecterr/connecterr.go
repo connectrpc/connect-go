@@ -26,11 +26,37 @@ import (
 	"connectrpc.com/connect/v2"
 )
 
-// AsError uses errors.As to unwrap any error and look for a *connect.Error.
+// AsError uses errors.As to unwrap any error and look for a non-nil
+// *connect.Error.
 func AsError(err error) (*connect.Error, bool) {
-	var connectErr *connect.Error
-	ok := errors.As(err, &connectErr)
-	return connectErr, ok
+	connectErr, ok := errors.AsType[*connect.Error](err)
+	// A handler returning a nil *connect.Error as error boxes a typed nil.
+	return connectErr, ok && connectErr != nil
+}
+
+// ScrubHandlerError converts a handler's returned error into the wire
+// verdict: only a locally authored *connect.Error keeps its code, message,
+// and details. Remote errors become [connect.CodeInternal] and other errors
+// [connect.CodeUnknown] (context errors keep their codes), all with no
+// message. The original error stays attached as a local-only cause.
+func ScrubHandlerError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if connectErr, ok := AsError(err); ok {
+		if connectErr.IsRemote() {
+			return connect.NewError(connect.CodeInternal, "").WithCause(err)
+		}
+		return err
+	}
+	code := connect.CodeUnknown
+	switch {
+	case errors.Is(err, context.Canceled):
+		code = connect.CodeCanceled
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, os.ErrDeadlineExceeded):
+		code = connect.CodeDeadlineExceeded
+	}
+	return connect.NewError(code, "").WithCause(err)
 }
 
 // WrapIfContextError applies connect.CodeCanceled or
@@ -88,8 +114,8 @@ func WrapIfMaxBytesError(err error, tmpl string, args ...any) error {
 	if _, ok := AsError(err); ok {
 		return err
 	}
-	var maxBytesErr *http.MaxBytesError
-	if ok := errors.As(err, &maxBytesErr); !ok {
+	maxBytesErr, ok := errors.AsType[*http.MaxBytesError](err)
+	if !ok {
 		return err
 	}
 	prefix := fmt.Sprintf(tmpl, args...)

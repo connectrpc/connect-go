@@ -48,6 +48,7 @@ func TestDrainLimiter(t *testing.T) {
 
 func TestDrainLimiterBudget(t *testing.T) {
 	t.Parallel()
+	// §12 leaves the marker out of the limit, so the budget allows for it.
 	assert.Equal(t, newDrainLimiter(messageReadLimit(1024)).budget, int64(1025))
 	assert.Equal(t, newDrainLimiter(messageReadLimit(0)).budget, int64(defaultDrainBudget))
 

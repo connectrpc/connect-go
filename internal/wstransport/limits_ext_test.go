@@ -30,6 +30,7 @@ import (
 	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
 	"connectrpc.com/connect/v2/internal/wstransport"
+	"google.golang.org/protobuf/proto"
 )
 
 // echoSizeServer answers with a response of a fixed size, so a test can put
@@ -45,28 +46,6 @@ func (s echoSizeServer) Ping(_ context.Context, req *pingv1.PingRequest) (*pingv
 		Number: req.Number,
 		Text:   strings.Repeat("x", s.responseBytes),
 	}, nil
-}
-
-// SendMaxBytes has to bite before the message reaches the socket, whichever
-// transport carries it.
-func TestSendMaxBytesRejectsOversizeRequest(t *testing.T) {
-	t.Parallel()
-	httpServer := newServerFor(t, echoSizeServer{})
-	transport := connecthttp.NewTransport(
-		httpServer.Client(),
-		httpServer.URL,
-		connecthttp.WithWebSocket(connecthttp.SelectAll),
-		connecthttp.WithSendMaxBytes(128),
-	)
-	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
-
-	_, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 1})
-	assert.Nil(t, err)
-
-	_, err = client.Ping(t.Context(), &pingv1.PingRequest{Text: strings.Repeat("x", 4096)})
-	assert.NotNil(t, err)
-	assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-	assert.True(t, strings.Contains(err.Error(), "sendMaxBytes"))
 }
 
 // A server that rejects an oversized request explains itself in an S message
@@ -138,29 +117,9 @@ func TestReadLimitSpansFragments(t *testing.T) {
 	assert.True(t, strings.Contains(string(payload), "configured max of 1024 bytes"))
 }
 
-// The receiving half of the same limit: a response the client never asked to
-// be this large must be refused rather than buffered.
-func TestReadMaxBytesRejectsOversizeResponse(t *testing.T) {
-	t.Parallel()
-	httpServer := newServerFor(t, echoSizeServer{responseBytes: 64 * 1024})
-	transport := connecthttp.NewTransport(
-		httpServer.Client(),
-		httpServer.URL,
-		connecthttp.WithWebSocket(connecthttp.SelectAll),
-		connecthttp.WithReadMaxBytes(1024),
-	)
-	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
-
-	_, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 1})
-	assert.NotNil(t, err)
-	assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-	// The number a caller configured, not the WebSocket library's wire limit,
-	// which is four bytes larger to leave room for the marker.
-	assert.True(t, strings.Contains(err.Error(), "configured max of 1024 bytes"))
-}
-
 // A client enforces its limit per reassembled message too, and classifies the
 // overrun the same way a server does so one monitor sees both directions.
+// A response the client never asked to be this large is refused, not buffered.
 func TestClientReportsSizeLimitFaults(t *testing.T) {
 	t.Parallel()
 	httpServer := newServerFor(t, echoSizeServer{responseBytes: 64 * 1024})
@@ -176,30 +135,60 @@ func TestClientReportsSizeLimitFaults(t *testing.T) {
 
 	_, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 1})
 	assert.NotNil(t, err)
+	assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+	// The number a caller configured, not the WebSocket library's wire limit,
+	// which is four bytes larger to leave room for the marker.
+	assert.True(t, strings.Contains(err.Error(), "configured max of 1024 bytes"))
 
 	faults, _ := recorder.seen()
 	assert.Equal(t, len(faults), 1)
 	assert.Equal(t, faults[0], wstransport.FaultSizeLimit)
 }
 
-// A JSON round trip over WebSocket. The subprotocol test pins the token; this
-// pins that a message actually survives the codec it names.
-func TestJSONCodecRoundTrip(t *testing.T) {
+// §12: the limit covers the payload, not the marker, as Connect over HTTP
+// leaves out its envelope. A message exactly at the limit fits on both the
+// sending and the receiving side; one byte more does not.
+func TestSizeLimitsExcludeTheMarker(t *testing.T) {
 	t.Parallel()
-	httpServer := newServerFor(t, pingServer{})
-	transport := connecthttp.NewTransport(
-		httpServer.Client(),
-		httpServer.URL,
-		connecthttp.WithWebSocket(connecthttp.SelectStreaming),
-		connecthttp.WithSendCodec(connect.CodecNameJSON),
-	)
-	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+	const limit = 100
+	// A Text of n bytes encodes to n+2: its tag, its length, then the bytes.
+	atLimit := &pingv1.PingRequest{Text: strings.Repeat("x", limit-2)}
+	overLimit := &pingv1.PingRequest{Text: strings.Repeat("x", limit-1)}
+	assert.Equal(t, proto.Size(atLimit), limit)
 
-	stream, err := client.CumSum(t.Context())
-	assert.Nil(t, err)
-	t.Cleanup(func() { _ = stream.Close() })
-	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 5}))
-	res, err := stream.Receive()
-	assert.Nil(t, err)
-	assert.Equal(t, res.Sum, int64(5))
+	for _, test := range []struct {
+		name          string
+		serverOptions []wstransport.ServerOption
+		clientOptions []connecthttp.Option
+		want          string
+	}{
+		{
+			name:          "read limit",
+			serverOptions: []wstransport.ServerOption{wstransport.WithReadMaxBytes(limit)},
+			want:          "configured max of 100 bytes",
+		},
+		{
+			// Refused before the message reaches the socket.
+			name:          "send limit",
+			clientOptions: []connecthttp.Option{connecthttp.WithSendMaxBytes(limit)},
+			want:          "sendMaxBytes",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			httpServer := newServerFor(t, echoSizeServer{}, test.serverOptions...)
+			transport := connecthttp.NewTransport(
+				httpServer.Client(),
+				httpServer.URL,
+				append([]connecthttp.Option{connecthttp.WithWebSocket(connecthttp.SelectAll)}, test.clientOptions...)...,
+			)
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+
+			_, err := client.Ping(t.Context(), atLimit)
+			assert.Nil(t, err)
+			_, err = client.Ping(t.Context(), overLimit)
+			assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+			assert.True(t, strings.Contains(err.Error(), test.want), assert.Sprintf("error %v", err))
+		})
+	}
 }

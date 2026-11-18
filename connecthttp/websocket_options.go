@@ -61,18 +61,27 @@ func IsWebSocketUpgrade(request *http.Request) bool {
 	return wstransport.IsUpgrade(request)
 }
 
+// TextCodec is an optional interface for a [connect.Codec] whose encoding is
+// UTF-8 text. Only the WebSocket transport consults it: a codec registered
+// with [WithCodecs] travels as the subprotocol connectrpc.1+ and its name, and
+// its bodies go in text frames if it implements TextCodec and IsText returns
+// true, or binary frames otherwise. The proto and json codecs are binary and
+// text by definition. A codec name must be a lower-case HTTP token to be
+// offered over WebSocket.
+type TextCodec = wstransport.TextCodec
+
 // ProtocolFault classifies a peer's framing mistake, so a monitor can tell a
 // client that consistently sends unknown markers from one that mismatches a
-// frame type once. The Connect code alone cannot: most framing faults are
-// InvalidArgument, separable only by matching message strings.
+// frame type once. The Connect code alone cannot: every framing fault is
+// Internal, separable only by matching message strings.
 type ProtocolFault = wstransport.ProtocolFault
 
 // The framing mistakes a peer can make. See [ProtocolFault].
 const (
 	// FaultUnknown is a peer fault this package has not classified.
 	FaultUnknown = wstransport.FaultUnknown
-	// FaultMarker is a marker that is unknown, belongs to the other direction,
-	// or sets the reserved high bit.
+	// FaultMarker is a message that is empty, has an unknown marker or one for
+	// the other direction, or breaks the rules for C.
 	FaultMarker = wstransport.FaultMarker
 	// FaultFrameType is a frame whose type does not match its payload.
 	FaultFrameType = wstransport.FaultFrameType
@@ -109,9 +118,11 @@ func WithWebSocketMaxTimeout(timeout time.Duration) Option {
 }
 
 // WithWebSocketHandshakeTimeout bounds the handshake. The connection outlives
-// it; only the upgrade is bounded.
+// it; only the upgrade is bounded. A server applies it to the wait for the
+// client's opening metadata message, so that a client which upgrades and then
+// sends nothing is hung up on. The default is 10 seconds; zero means no bound.
 func WithWebSocketHandshakeTimeout(timeout time.Duration) Option {
-	return webSocketClientOptionsOption{wstransport.WithHandshakeTimeout(timeout)}
+	return webSocketBothOption{wstransport.WithHandshakeTimeout(timeout)}
 }
 
 // WithWebSocketInfrastructureHeaders replaces the request headers a client may

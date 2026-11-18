@@ -55,9 +55,11 @@ func newHTTPOnlyServer(tb testing.TB) (*httptest.Server, *atomic.Int64) {
 	return httpServer, &rpcs
 }
 
+// The retry reaches the HTTP half exactly once, rather than the call happening
+// to succeed for some other reason.
 func TestFallbackOnUpgradeErrorRetriesOverHTTP(t *testing.T) {
 	t.Parallel()
-	httpServer, _ := newHTTPOnlyServer(t)
+	httpServer, rpcs := newHTTPOnlyServer(t)
 	transport := connecthttp.NewTransport(
 		httpServer.Client(),
 		httpServer.URL,
@@ -70,6 +72,7 @@ func TestFallbackOnUpgradeErrorRetriesOverHTTP(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, res.Number, int64(9))
 	assert.Equal(t, res.Text, "hi")
+	assert.Equal(t, rpcs.Load(), int64(1))
 }
 
 // The same server without the option must fail, so the test above cannot pass
@@ -108,22 +111,4 @@ func TestFallbackOnUpgradeErrorSkipsRetryWhenCanceled(t *testing.T) {
 	assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
 	// The count is the assertion: no RPC reached the HTTP half.
 	assert.Equal(t, rpcs.Load(), int64(0))
-}
-
-// The retry reaches the HTTP half exactly once, rather than the call happening
-// to succeed for some other reason.
-func TestFallbackOnUpgradeErrorReachesTheHTTPHalfOnce(t *testing.T) {
-	t.Parallel()
-	httpServer, rpcs := newHTTPOnlyServer(t)
-	transport := connecthttp.NewTransport(
-		httpServer.Client(),
-		httpServer.URL,
-		connecthttp.WithWebSocket(connecthttp.SelectAll),
-		connecthttp.WithFallbackOnUpgradeError(),
-	)
-	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
-
-	_, err := client.Ping(t.Context(), &pingv1.PingRequest{Number: 1})
-	assert.Nil(t, err)
-	assert.Equal(t, rpcs.Load(), int64(1))
 }

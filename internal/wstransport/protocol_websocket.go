@@ -39,7 +39,7 @@ import (
 
 // Marker framing over WebSocket frames, for both directions.
 //
-// Each WebSocket frame carries exactly one message: a single byte below 0x80
+// Each WebSocket frame carries exactly one message: a single marker byte
 // naming its kind, then the payload. There is no length prefix — the frame is
 // the boundary — and the frame type says how the payload is encoded, binary
 // for Protobuf and text for JSON.
@@ -62,9 +62,6 @@ const (
 	// ProtocolConnectWebSocket identifies the WebSocket transport for the
 	// Connect protocol on the [connect.CallInfo].Protocol field.
 	ProtocolConnectWebSocket = "connect+ws"
-
-	wsSubprotocolProto = "connectrpc.1+proto"
-	wsSubprotocolJSON  = "connectrpc.1+json"
 
 	wsHeaderUpgrade    = "Upgrade"
 	wsHeaderConnection = "Connection"
@@ -95,10 +92,16 @@ type websocketHandlerConn struct {
 	callInfo        *connect.CallInfo
 	responseTrailer http.Header
 	leadingSent     bool
+	// headerErr is a response header the handler set that §7.3.1 does not let
+	// this server send.
+	headerErr *connect.Error
 	// closeCtx writes the terminal messages. Bodies go out under the RPC's
 	// context; the S message cannot, because the commonest reason to send one
 	// is that the context just expired.
 	closeCtx context.Context //nolint:containedctx
+	// shuttingDown reports that the HTTP server is shutting down, which §13
+	// reports as unavailable and closes with 1001. Nil means it never is.
+	shuttingDown func() bool
 }
 
 func (c *websocketHandlerConn) Receive(msg any) error {
@@ -133,7 +136,7 @@ func (c *websocketHandlerConn) terminalMarshaler() messageWriter {
 // sending a body is where leading metadata is most wanted, and there would be
 // nothing else to carry it.
 //
-// It goes out even when there is no metadata, as {}. Every stream opens with
+// It goes out even when there is no metadata, as []. Every stream opens with
 // exactly one M in each direction, so a client can read its first message
 // without a branch for the empty case — and can take that message as the
 // signal that the server has accepted the stream, which is what the response
@@ -145,16 +148,27 @@ func (c *websocketHandlerConn) flushLeadingMetadata() *connect.Error {
 	header := make(http.Header)
 	if c.callInfo != nil {
 		for key, values := range c.callInfo.ResponseHeader().All() {
+			// §7.3.2: a server never sends a connect- key in its M.
+			if isConnectReserved(strings.ToLower(key)) {
+				continue
+			}
 			header[http.CanonicalHeaderKey(key)] = values
 		}
 	}
+	entries, encodeErr := encodeMetadata(header)
+	if encodeErr != nil {
+		// The handler set a header this server cannot send (§7.3.1). M still
+		// opens the stream, empty, and the header becomes the RPC's outcome.
+		entries = [][]string{}
+		c.headerErr = encodeErr
+	}
 	// Marked only once written, so that Close still opens with M after a
 	// failed Send.
-	if err := c.marshaler.writeJSON(markerMetadata, encodeMetadata(header)); err != nil {
+	if err := c.marshaler.writeJSON(markerMetadata, entries); err != nil {
 		return err
 	}
 	c.leadingSent = true
-	return nil
+	return c.headerErr
 }
 
 // terminalWriteError decides whether a failed terminal write is worth
@@ -176,7 +190,7 @@ func (c *websocketHandlerConn) peerGone() bool {
 	// Two ways to lose a peer: it never sent C and stopped reading, or it sent
 	// C and then went away while the handler was still working. §8 makes no
 	// distinction — either way the connection ended before S.
-	if c.unmarshaler.leftAfterEndOfStream.Load() {
+	if c.unmarshaler.reader.hasEnded() {
 		return true
 	}
 	if c.unmarshaler.eof && !c.unmarshaler.sawEndOfClientStream {
@@ -186,6 +200,10 @@ func (c *websocketHandlerConn) peerGone() bool {
 	// see the connection end before either has read the failure.
 	return c.unmarshaler.reader.connectionEnded(peerGoneGrace)
 }
+
+// abandonWriteAfter is how long a write may go on after its RPC ends. One that
+// takes longer is stuck on a peer that stopped reading, so the connection goes.
+const abandonWriteAfter = time.Second
 
 // peerGoneGrace bounds how long a failed write waits for the reader to notice
 // the connection it failed on is gone, which takes microseconds when it is.
@@ -206,9 +224,9 @@ func peerFault(err *connect.Error) bool {
 	return code == connect.CodeResourceExhausted || code == connect.CodeInvalidArgument
 }
 
-// wsStatusClientProtocolError is the only error code §13 lets a client send. A
-// browser script may only pass 1000 or 3000-4999 to close(), so the reason, not
-// the code, says what went wrong.
+// wsStatusClientProtocolError is the code §13 has a client send for most faults.
+// A browser script may only pass 1000 or 3000-4999 to close(), so the reason,
+// not the code, says what went wrong.
 const wsStatusClientProtocolError = websocket.StatusCode(3102)
 
 // serverCloseCode is the code §13 assigns each framing fault. A more specific
@@ -225,6 +243,21 @@ func serverCloseCode(fault ProtocolFault) websocket.StatusCode {
 		return websocket.StatusProtocolError
 	}
 	return websocket.StatusProtocolError
+}
+
+// clientCloseCode is the code a client closes with for a server's fault.
+// §6.1 requires 1007 for invalid UTF-8, and §12.1 asks a non-browser client,
+// which this is, for 1009 on an oversized message. Everything else is 3102.
+func clientCloseCode(fault ProtocolFault) websocket.StatusCode {
+	switch fault {
+	case FaultTextEncoding:
+		return websocket.StatusInvalidFramePayloadData
+	case FaultSizeLimit:
+		return websocket.StatusMessageTooBig
+	case FaultUnknown, FaultMarker, FaultFrameType, FaultMetadata, FaultMessageEncoding:
+		return wsStatusClientProtocolError
+	}
+	return wsStatusClientProtocolError
 }
 
 // closeClientWithError ends a client's connection with 3102. The code alone
@@ -252,16 +285,7 @@ func closeReason(reason string) string {
 }
 
 func (c *websocketHandlerConn) Close(err error) error {
-	// As over HTTP, a handler that returns its context's error reports the
-	// matching code rather than unknown.
-	err = connecterr.WrapIfContextError(err)
-	// A message after C is the RPC's outcome whatever the handler concluded:
-	// the peer broke the framing, and §8 makes that a protocol error.
-	if afterC := c.unmarshaler.afterEndOfStream.Load(); afterC != nil {
-		err = afterC
-		c.unmarshaler.peerFaulted = true
-		c.unmarshaler.fault = FaultMarker
-	}
+	goingAway, err := c.outcome(err)
 	// A deadline that fired is what produced most of the errors reaching here,
 	// and writing under the expired context would fail — leaving the peer with
 	// a closed connection and no verdict, which it can only report as
@@ -269,36 +293,23 @@ func (c *websocketHandlerConn) Close(err error) error {
 	if c.closeCtx != nil {
 		c.marshaler = c.terminalMarshaler()
 	}
+	// §6.1: invalid UTF-8 fails the connection outright, with no S message.
+	if utf8Err := c.unmarshaler.textEncodingErr; utf8Err != nil {
+		_ = closeWithDrain(
+			c.wsConn, c.drain, websocket.StatusInvalidFramePayloadData, closeReason(utf8Err.Message()),
+		)
+		return nil
+	}
 	// §8: a connection that ended before S means the caller can no longer
-	// receive one, so none is attempted. Gated on the drain's own signal, not
+	// receive one, so none is attempted. Gated on the reader's own signal, not
 	// on peerGone: eof is set by any failed read, including an oversized
 	// message this end refused while its sender waits for the verdict.
-	if c.unmarshaler.leftAfterEndOfStream.Load() {
+	if c.unmarshaler.reader.hasEnded() {
 		_ = c.wsConn.CloseNow()
 		return nil
 	}
-	// Leading metadata precedes the S message even when no body was
-	// sent, so headers stay headers rather than folding into the trailers.
-	marshalErr := c.flushLeadingMetadata()
-	if marshalErr == nil {
-		marshalErr = c.marshaler.writeEndStream(err, c.responseTrailer)
-	}
-	marshalErr = c.terminalWriteError(marshalErr)
-	closeCode := websocket.StatusNormalClosure
-	var closeMessage string
-	switch {
-	case marshalErr != nil:
-		closeCode = websocket.StatusInternalError
-		closeMessage = marshalErr.Message()
-	case c.unmarshaler.peerFaulted:
-		// The S message carries the verdict; the code says which kind of
-		// mistake it was to a peer that reads codes and not JSON — which is
-		// every browser script.
-		closeCode = serverCloseCode(c.unmarshaler.fault)
-		if connectErr, ok := errors.AsType[*connect.Error](err); ok {
-			closeMessage = connectErr.Message()
-		}
-	}
+	marshalErr, err := c.writeVerdict(err)
+	closeCode, closeMessage := c.closeStatus(err, marshalErr, goingAway)
 	// §13: a faulted peer gets the code for its fault too, since a browser
 	// script can read the code but not the S message. The drain is capped, so
 	// a peer with a bomb queued behind its fault cannot make this read it all.
@@ -307,6 +318,78 @@ func (c *websocketHandlerConn) Close(err error) error {
 		return marshalErr
 	}
 	return nil
+}
+
+// outcome decides what the RPC's result is, given what the handler returned,
+// and reports whether the server shutting down produced it.
+func (c *websocketHandlerConn) outcome(err error) (goingAway bool, result error) {
+	// As over HTTP, only a locally authored *connect.Error reaches the client
+	// intact, so a handler cannot leak internal text or relay an upstream's
+	// verdict as its own.
+	err = connecterr.ScrubHandlerError(err)
+	// The shutdown canceled the RPC, so the cancellation is the server's, and
+	// the client may retry elsewhere.
+	goingAway = err != nil && connect.CodeOf(err) == connect.CodeCanceled &&
+		c.shuttingDown != nil && c.shuttingDown()
+	if goingAway {
+		err = errorf(connect.CodeUnavailable, "server is shutting down")
+	}
+	// A message after C is the RPC's outcome whatever the handler concluded:
+	// the peer broke the framing, and §8 makes that a protocol error. One the
+	// reader has already taken counts, even if the drain has not seen it yet.
+	if !c.unmarshaler.sawEndOfClientStream {
+		return goingAway, err
+	}
+	if afterC, fault := c.unmarshaler.checkAfterEndOfStream(); afterC != nil {
+		err = afterC
+		c.unmarshaler.peerFaulted = true
+		c.unmarshaler.fault = fault
+	}
+	return goingAway, err
+}
+
+// writeVerdict sends the leading metadata if it is still pending, then the S
+// message. It returns the write's failure, and the outcome, which an
+// unsendable header can replace.
+func (c *websocketHandlerConn) writeVerdict(err error) (writeErr *connect.Error, result error) {
+	// Leading metadata precedes the S message even when no body was
+	// sent, so headers stay headers rather than folding into the trailers.
+	marshalErr := c.flushLeadingMetadata()
+	if marshalErr != nil && marshalErr == c.headerErr {
+		marshalErr = nil
+	}
+	// An unsendable header is the outcome unless the handler reported its own.
+	if err == nil && c.headerErr != nil {
+		err = c.headerErr
+	}
+	if marshalErr == nil {
+		marshalErr = c.marshaler.writeEndStream(err, c.responseTrailer)
+	}
+	return c.terminalWriteError(marshalErr), err
+}
+
+// closeStatus picks the close code and reason that end the connection.
+func (c *websocketHandlerConn) closeStatus(
+	err error,
+	marshalErr *connect.Error,
+	goingAway bool,
+) (websocket.StatusCode, string) {
+	switch {
+	case marshalErr != nil:
+		return websocket.StatusInternalError, marshalErr.Message()
+	case c.unmarshaler.peerFaulted:
+		// The S message carries the verdict; the code says which kind of
+		// mistake it was to a peer that reads codes and not JSON — which is
+		// every browser script.
+		var closeMessage string
+		if connectErr, ok := errors.AsType[*connect.Error](err); ok {
+			closeMessage = connectErr.Message()
+		}
+		return serverCloseCode(c.unmarshaler.fault), closeMessage
+	case goingAway:
+		return websocket.StatusGoingAway, ""
+	}
+	return websocket.StatusNormalClosure, ""
 }
 
 // websocketBinarySender is the server's [messageSender]: it writes each
@@ -318,12 +401,24 @@ type websocketBinarySender struct {
 }
 
 func (s *websocketBinarySender) send(text bool, data []byte) (int64, error) {
-	// The library closes the connection when a write's context ends, which
-	// would leave no connection for the S message that reports why.
 	if err := s.ctx.Err(); err != nil {
 		return 0, err
 	}
-	return writeFrame(s.ctx, s.conn, text, data)
+	// Detached, because the library closes the connection when a write's
+	// context ends, even mid-write, leaving nowhere to send the S that says why.
+	written := make(chan struct{})
+	stop := context.AfterFunc(s.ctx, func() {
+		timer := time.NewTimer(abandonWriteAfter)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			_ = s.conn.CloseNow()
+		case <-written:
+		}
+	})
+	defer stop()
+	defer close(written)
+	return writeFrame(context.WithoutCancel(s.ctx), s.conn, text, data)
 }
 
 // writeFrame sends one already-encoded message as a single WebSocket frame.
@@ -351,6 +446,8 @@ func writeFrame(
 //
 // No read state carries between frames: the frame is the message boundary.
 type websocketUnmarshaler struct {
+	frameDecoder
+
 	ctx    context.Context //nolint:containedctx
 	reader *frameReader
 	// keeper is consulted only to say why the connection ended. Nil when
@@ -359,12 +456,7 @@ type websocketUnmarshaler struct {
 	// callInfo receives M messages. They arrive after the
 	// handshake, so this is the only way a browser's metadata reaches the
 	// handler.
-	callInfo     *connect.CallInfo
-	codecs       codecPair
-	readMaxBytes int
-	// bodyIsText is the frame type the subprotocol negotiated. A body in the
-	// other one is a protocol error even when this end holds both codecs.
-	bodyIsText bool
+	callInfo *connect.CallInfo
 	// infrastructureHeaders names what this deployment's own proxies set, and
 	// so what a client may not send in an M message.
 	infrastructureHeaders []string
@@ -372,26 +464,26 @@ type websocketUnmarshaler struct {
 	// produced it; its OnProtocolError is the monitor.
 	info SessionInfo
 
-	// fault classifies the most recent peer fault for OnProtocolError.
-	fault ProtocolFault
 	// eof stops the read path; sawEndOfClientStream says why it stopped. A
 	// client that sent C finished, and one whose connection died did not —
 	// the same condition at the same call site, told apart only by this.
 	eof                  bool
 	sawEndOfClientStream bool
 	peerFaulted          bool
+	// textEncodingErr ends the read path for good: §6.1 has invalid UTF-8 fail
+	// the connection outright, with 1007 and no S message, as RFC 6455 §8.1
+	// requires.
+	textEncodingErr *connect.Error
 	// discardOnce guards the post-C drain, which must not be started twice.
 	discardOnce sync.Once
-	// leftAfterEndOfStream is set by that drain when the connection ends. The
-	// handler has had its io.EOF and is not reading, so nothing else can tell
-	// it the caller is gone.
-	leftAfterEndOfStream atomic.Bool
-	// cancelCall ends the RPC when that happens, which is how §8.1 says the end
-	// of the connection reaches a handler.
+	// cancelCall ends the RPC when the drain finds a message after C.
 	cancelCall context.CancelFunc
-	// afterEndOfStream carries a post-C protocol error from the drain
-	// goroutine to Close, which is the only place it can still be reported.
-	afterEndOfStream atomic.Pointer[connect.Error]
+	// afterEndOfStreamMu orders the drain goroutine and Close, which both look
+	// for a message after C. afterEndOfStream and afterEndOfStreamFault record
+	// the first one found, which Close reports.
+	afterEndOfStreamMu    sync.Mutex
+	afterEndOfStream      *connect.Error
+	afterEndOfStreamFault ProtocolFault
 }
 
 // Unmarshal records whether a failure was the peer's doing, which decides how
@@ -415,7 +507,7 @@ func (u *websocketUnmarshaler) reportFault(err *connect.Error) {
 	if err == nil {
 		return
 	}
-	if peerFault(err) {
+	if u.fault != FaultUnknown || peerFault(err) {
 		u.peerFaulted = true
 	}
 	if u.fault != FaultUnknown && u.info.OnProtocolError != nil {
@@ -423,22 +515,10 @@ func (u *websocketUnmarshaler) reportFault(err *connect.Error) {
 	}
 }
 
-// fail records what kind of fault this is before building its error, so a
-// monitor can tell them apart without matching message strings.
-//
-// The code is always InvalidArgument: every fault built here is malformed
-// input from the peer. Faults with another code — a read limit, say — come
-// from elsewhere and set u.fault directly.
-func (u *websocketUnmarshaler) fail(
-	fault ProtocolFault,
-	format string,
-	args ...any,
-) *connect.Error {
-	u.fault = fault
-	return errorf(connect.CodeInvalidArgument, format, args...)
-}
-
 func (u *websocketUnmarshaler) unmarshal(message any) *connect.Error {
+	if u.textEncodingErr != nil {
+		return u.textEncodingErr
+	}
 	if u.eof {
 		return u.endOfStreamError()
 	}
@@ -476,6 +556,12 @@ func (u *websocketUnmarshaler) endOfStreamError() *connect.Error {
 // nextMessage reads one frame and returns the message it carries.
 func (u *websocketUnmarshaler) nextMessage() (wireMessage, *connect.Error) {
 	messageType, frame, readerErr := u.reader.next(u.ctx)
+	if readerErr != nil && errors.Is(readerErr, context.Canceled) && u.reader.hasEnded() {
+		// The reader canceled the call because the connection ended. What it
+		// read before the end is still delivered, in order, and then the end
+		// itself, so the handler hears why rather than a bare cancellation.
+		messageType, frame, readerErr = u.reader.nextAfterEnd()
+	}
 	if readerErr != nil {
 		u.eof = true
 		// The call ended, not the connection: a deadline is deadline_exceeded.
@@ -492,27 +578,11 @@ func (u *websocketUnmarshaler) nextMessage() (wireMessage, *connect.Error) {
 		}
 		return wireMessage{}, u.endOfStreamError()
 	}
-	text := messageType == websocket.MessageText
-	if !text && messageType != websocket.MessageBinary {
-		return wireMessage{}, u.fail(FaultFrameType, "unknown WebSocket message type %d", messageType)
+	wire, parseErr := u.parseFrame(messageType, frame)
+	if u.fault == FaultTextEncoding {
+		u.textEncodingErr = parseErr
 	}
-	wire, decodeErr := decodeMessage(frame, text)
-	if decodeErr != nil {
-		u.fault = FaultMarker
-		return wireMessage{}, decodeErr
-	}
-	if utf8Err := textEncodingError(frame, text); utf8Err != nil {
-		u.fault = FaultTextEncoding
-		return wireMessage{}, utf8Err
-	}
-	if len(wire.payload) > u.readMaxBytes && u.readMaxBytes > 0 {
-		u.fault = FaultSizeLimit
-		return wireMessage{}, errorf(
-			connect.CodeResourceExhausted,
-			"message size %d is larger than configured max %d", len(wire.payload), u.readMaxBytes,
-		)
-	}
-	return wire, nil
+	return wire, parseErr
 }
 
 // dispatch interprets one message and decodes its payload into message.
@@ -526,17 +596,30 @@ func (u *websocketUnmarshaler) dispatch(wire wireMessage, message any) *connect.
 			"client sent a second M message; a stream carries exactly one, and it opens the stream",
 		)
 	case markerClientEndStream:
-		// The last message from the client. If it carries a body, deliver it;
-		// mark EOF either way so the next Receive returns io.EOF.
+		// §6.1: C is a bare control message, always text. The last request
+		// message travels in a B before it.
+		if !wire.text {
+			return u.fail(FaultFrameType, "client sent C in a binary frame; expected a text frame")
+		}
+		if len(wire.payload) != 0 {
+			return u.fail(
+				FaultMarker,
+				"client sent C with a %d-byte payload; C carries none, so the last message goes in a B",
+				len(wire.payload),
+			)
+		}
 		u.eof = true
 		u.sawEndOfClientStream = true
 		u.discardAfterEndOfStream()
-		if len(wire.payload) == 0 {
-			return errorf(connect.CodeUnknown, "%w", io.EOF)
-		}
-		return u.decodeBody(wire, message)
+		return errorf(connect.CodeUnknown, "%w", io.EOF)
 	case markerBody:
-		return u.decodeBody(wire, message)
+		if err := u.decodeBody(u.ctx, wire, message); err != nil {
+			return err
+		}
+		if u.callInfo != nil {
+			u.callInfo.ReceiveStats = connect.MessageStats{Size: len(wire.payload)}
+		}
+		return nil
 	case markerServerEndStream:
 		return u.fail(
 			FaultMarker,
@@ -560,54 +643,69 @@ func (u *websocketUnmarshaler) dispatch(wire wireMessage, message any) *connect.
 // goroutine ends when the context is done or the connection closes, except
 // after a protocol error: then it reads until the connection closes.
 func (u *websocketUnmarshaler) discardAfterEndOfStream() {
-	u.discardOnce.Do(func() {
-		go func() {
-			if !u.discardUntilProtocolError() {
-				return
-			}
-			// Past the cancellation, so the peer reaches the verdict rather than
-			// stalling on a full buffer.
-			uncanceled := context.WithoutCancel(u.ctx)
-			for {
-				if _, _, err := u.reader.next(uncanceled); err != nil {
-					return
-				}
-			}
-		}()
-	})
+	u.discardOnce.Do(func() { go u.drainAfterEndOfStream() })
 }
 
-// discardUntilProtocolError reads after C until the connection or the call
-// ends, and reports whether it stopped instead on a message, which it has
-// made the RPC's outcome.
-func (u *websocketUnmarshaler) discardUntilProtocolError() bool {
-	if _, _, err := u.reader.next(u.ctx); err != nil {
-		// §8: the RPC is canceled once the connection ends, whether or not C
-		// arrived — the handler is otherwise computing a response for a peer
-		// that cannot receive it.
-		//
-		// Only when this end had not already given up: a read that failed
-		// because the deadline passed says nothing about the peer, and the
-		// server still owes it that verdict.
-		if u.ctx.Err() == nil {
-			u.leftAfterEndOfStream.Store(true)
+func (u *websocketUnmarshaler) drainAfterEndOfStream() {
+	for u.reader.await(u.ctx) {
+		if afterC, _ := u.checkAfterEndOfStream(); afterC != nil {
+			// §5 has a protocol error end the stream: canceling the call stops
+			// the handler, and Close sends the S.
 			if u.cancelCall != nil {
 				u.cancelCall()
 			}
+			u.readUntilClosed()
+			return
 		}
-		return false
+		// The connection ended. The reader has already canceled the call (§8).
+		if u.reader.drained() {
+			return
+		}
 	}
-	// §8: after C the only frames left are Close, Ping and Pong, so a message
-	// is a protocol error, and §5 has it end the stream: canceling the call
-	// stops the handler, and Close sends the S.
-	u.afterEndOfStream.Store(errorf(
-		connect.CodeInvalidArgument,
-		"client sent a message after its C message",
-	))
-	if u.cancelCall != nil {
-		u.cancelCall()
+}
+
+// readUntilClosed discards messages past the call's cancellation, so the peer
+// reaches the verdict rather than stalling on a full buffer.
+func (u *websocketUnmarshaler) readUntilClosed() {
+	uncanceled := context.WithoutCancel(u.ctx)
+	for {
+		if _, _, err := u.reader.next(uncanceled); err != nil {
+			return
+		}
 	}
-	return true
+}
+
+// checkAfterEndOfStream looks for a message the client sent after C, and
+// records the first one as the RPC's outcome (§8). It takes only what has
+// already arrived, so Close can call it without waiting.
+func (u *websocketUnmarshaler) checkAfterEndOfStream() (*connect.Error, ProtocolFault) {
+	u.afterEndOfStreamMu.Lock()
+	defer u.afterEndOfStreamMu.Unlock()
+	if u.afterEndOfStream != nil || u.reader == nil {
+		return u.afterEndOfStream, u.afterEndOfStreamFault
+	}
+	result, ok, _ := u.reader.pop()
+	if !ok {
+		return nil, FaultUnknown
+	}
+	switch {
+	case result.err == nil:
+		u.afterEndOfStream = errorf(
+			connect.CodeInternal,
+			"protocol error: client sent a message after its C message",
+		)
+		u.afterEndOfStreamFault = FaultMarker
+	case errors.Is(result.err, errMessageTooBig):
+		// Still a message after C, and one over the limit, which §12.1 closes
+		// with 1009.
+		u.afterEndOfStream = errorf(
+			connect.CodeResourceExhausted,
+			"protocol error: client sent a message after its C message, larger than the %d-byte limit",
+			u.readMaxBytes,
+		)
+		u.afterEndOfStreamFault = FaultSizeLimit
+	}
+	return u.afterEndOfStream, u.afterEndOfStreamFault
 }
 
 // drainLeadingMetadata consumes the single M message that opens
@@ -620,9 +718,9 @@ func (u *websocketUnmarshaler) discardUntilProtocolError() bool {
 // were metadata could only discover the end by blocking for a frame the client
 // may never send. A receive-only client sends its opening metadata and then
 // waits for the server, so the drain must know it is done after one frame.
-func (u *websocketUnmarshaler) drainLeadingMetadata() *connect.Error {
+func (u *websocketUnmarshaler) drainLeadingMetadata(ctx context.Context) *connect.Error {
 	u.fault = FaultUnknown
-	wire, readErr := u.nextMessage()
+	wire, readErr := u.nextOpeningMessage(ctx)
 	if readErr != nil {
 		u.reportFault(readErr)
 		return readErr
@@ -639,7 +737,7 @@ func (u *websocketUnmarshaler) drainLeadingMetadata() *connect.Error {
 	}
 	// §6.1: M is always JSON, and a binary frame says its payload is not.
 	if !wire.text {
-		failure := u.fail(FaultFrameType, "client sent M in a binary frame; M is always JSON")
+		failure := u.fail(FaultFrameType, "client sent M in a binary frame; expected a text frame")
 		u.reportFault(failure)
 		return failure
 	}
@@ -650,55 +748,31 @@ func (u *websocketUnmarshaler) drainLeadingMetadata() *connect.Error {
 	return mergeErr
 }
 
-// decodeBody decodes a body payload with the codec its frame type names.
-func (u *websocketUnmarshaler) decodeBody(wire wireMessage, message any) *connect.Error {
-	if wire.text != u.bodyIsText {
-		// The subprotocol named one encoding and the frame names another. This
-		// end may well hold a codec for what arrived, which is exactly why it
-		// has to be refused rather than decoded: accepting it would let a peer
-		// choose an encoding the handshake did not agree on (§6.1).
-		return u.fail(
-			FaultFrameType,
-			"client sent a %s body on a %s connection",
-			encodingForFrame(wire.text), encodingForFrame(u.bodyIsText),
+// nextOpeningMessage reads the client's first message, which must arrive
+// within the handshake timeout rather than the RPC's much longer deadline.
+// callCtx is the RPC's context, which u.ctx holds for every later read.
+func (u *websocketUnmarshaler) nextOpeningMessage(callCtx context.Context) (wireMessage, *connect.Error) {
+	timeout := u.info.HandshakeTimeout
+	if timeout <= 0 {
+		return u.nextMessage()
+	}
+	openingCtx, cancel := context.WithTimeoutCause(callCtx, timeout, errNoOpeningMessage)
+	defer cancel()
+	u.ctx = openingCtx
+	wire, readErr := u.nextMessage()
+	u.ctx = callCtx
+	if readErr != nil && callCtx.Err() == nil && errors.Is(context.Cause(openingCtx), errNoOpeningMessage) {
+		return wire, errorf(
+			connect.CodeDeadlineExceeded, "client sent no opening M message within %v", timeout,
 		)
 	}
-	if len(wire.payload) == 0 {
-		if wire.text {
-			// An empty JSON body is "{}", never zero bytes, so a text frame
-			// carrying only a marker says nothing the codec could decode.
-			return u.fail(FaultFrameType, "empty body in a text frame; an empty JSON message is {}")
-		}
-		// The empty Protobuf message: the zero value is correct.
-		return nil
-	}
-	codec := u.codecs.forFrame(wire.text)
-	if codec == nil {
-		return u.fail(
-			FaultFrameType,
-			"client sent a %s body, which this server was not configured to decode",
-			encodingForFrame(wire.text),
-		)
-	}
-	if err := codec.UnmarshalRead(u.ctx, bytes.NewReader(wire.payload), message); err != nil {
-		return u.fail(FaultMessageEncoding, "unmarshal message: %w", err)
-	}
-	return nil
+	return wire, readErr
 }
 
 func (u *websocketUnmarshaler) mergeLeadingMetadata(payload []byte) *connect.Error {
-	// The empty array, never null: an M carries a JSON array, and a
-	// bare marker is not one.
-	if len(payload) == 0 {
-		return u.fail(FaultMetadata, "empty M message; empty metadata is []")
-	}
-	var entries [][]string
-	if err := json.Unmarshal(payload, &entries); err != nil {
-		return u.fail(FaultMetadata, "unmarshal M message: %w", err)
-	}
-	// json.Unmarshal accepts null for a slice; [] decodes to an empty one.
-	if entries == nil {
-		return u.fail(FaultMetadata, "M message is null; empty metadata is []")
+	entries, parseErr := u.metadataEntries(payload)
+	if parseErr != nil {
+		return parseErr
 	}
 	// Checked against the keys as sent, before canonicalization, so the error
 	// names the spelling the client used rather than an internal form of it.
@@ -716,9 +790,8 @@ func (u *websocketUnmarshaler) mergeLeadingMetadata(payload []byte) *connect.Err
 			)
 		}
 	}
-	meta, decodeErr := decodeMetadata(entries)
+	meta, decodeErr := u.metadataHeader(entries)
 	if decodeErr != nil {
-		u.fault = FaultMetadata
 		return decodeErr
 	}
 	// An M key replaces the upgrade request's value, producing the effective
@@ -734,7 +807,7 @@ func (u *websocketUnmarshaler) mergeLeadingMetadata(payload []byte) *connect.Err
 // Helpers.
 
 // messageReadLimit turns a payload limit into a wire limit by allowing for the
-// marker that precedes it.
+// marker that precedes it, which §12 leaves out of the limit.
 //
 // The bound is per WebSocket message, not per frame: a message may be
 // fragmented across continuation frames, and both this package's reader and
@@ -747,7 +820,6 @@ func messageReadLimit(readMaxBytes int) int64 {
 	if readMaxBytes <= 0 {
 		return -1
 	}
-	// The marker is one byte; the payload limit is the rest.
 	return int64(readMaxBytes) + 1
 }
 
@@ -755,6 +827,10 @@ func messageReadLimit(readMaxBytes int) int64 {
 // enforces. The reader knows the wire limit; only the caller knows the
 // configured one worth naming, so the sentinel carries no number.
 var errMessageTooBig = errors.New("message exceeds read limit")
+
+// errNoOpeningMessage is the cause when a client's opening M does not arrive
+// within the handshake timeout.
+var errNoOpeningMessage = errors.New("no opening M message")
 
 // readBoundedMessage reads one WebSocket message, abandoning it as soon as it
 // passes limit rather than consuming it. Stopping early is what leaves the
@@ -768,6 +844,7 @@ func readBoundedMessage(
 	ctx context.Context,
 	conn *websocket.Conn,
 	limit int64,
+	wire *drainLimiter,
 ) (websocket.MessageType, []byte, error) {
 	messageType, reader, err := conn.Reader(ctx)
 	if err != nil {
@@ -777,6 +854,11 @@ func readBoundedMessage(
 		data, err := io.ReadAll(reader)
 		return messageType, data, err
 	}
+	// §12: the compressed bytes are bounded too. Counting starts once the
+	// message has begun, so the control frames of an idle connection do not
+	// count against the next message.
+	wire.beginMessage(limit)
+	defer wire.endMessage()
 	// One byte past the limit is all it takes to know the message overran, and
 	// reading more is what the limit exists to prevent.
 	var message bytes.Buffer
@@ -785,6 +867,8 @@ func readBoundedMessage(
 		return messageType, nil, errMessageTooBig
 	case errors.Is(err, io.EOF):
 		return messageType, message.Bytes(), nil
+	case errors.Is(err, errWireLimit):
+		return messageType, nil, errMessageTooBig
 	default:
 		return messageType, nil, err
 	}
@@ -821,24 +905,20 @@ func isCleanWebSocketClose(err error) bool {
 // marshaling outbound and websocketClientUnmarshaler reading inbound and
 // recognizing the server's S message.
 
-// subprotocolForCodec maps a codec to the token that names it. The client
-// always offers the explicit token, so the server's codec choice cannot drift
-// from the one the client is encoding with.
-func subprotocolForCodec(name string) string {
-	if name == connect.CodecNameJSON {
-		return wsSubprotocolJSON
-	}
-	return wsSubprotocolProto
-}
-
 // wsClientCall owns the lazy dial and is the [messageSender] the
 // writer sends through. Dialing on first use rather than at construction is
 // what lets a stream be created without a round trip.
 type wsClientCall struct {
-	ctx              context.Context //nolint:containedctx
-	dialOptions      *websocket.DialOptions
-	url              *url.URL
-	subprotocol      string
+	ctx         context.Context //nolint:containedctx
+	dialOptions *websocket.DialOptions
+	url         *url.URL
+	// offered is what the client put in Sec-WebSocket-Protocol, most preferred
+	// first. codec and bodyIsText start as the first choice and become the
+	// server's once the handshake completes.
+	offered          []string
+	codecs           registry[connect.Codec]
+	codec            connect.Codec
+	bodyIsText       bool
 	handshakeTimeout time.Duration
 
 	readLimit int64
@@ -850,8 +930,16 @@ type wsClientCall struct {
 	// WithKeepAliveTimeout.
 	keepAliveTimeout time.Duration
 
+	// heartbeat carries the server's PINGs and PONGs to reader; the dial
+	// options' callbacks hold it.
+	heartbeat *heartbeat
+
+	// stopCloseOnDone cancels the Close frame sent when ctx ends, once the
+	// connection is being closed anyway.
+	stopCloseOnDone func() bool
+
+	// dialOnce also makes concurrent callers wait for the dial in progress.
 	dialOnce sync.Once
-	dialDone chan struct{}
 	wsConn   *websocket.Conn
 	reader   *frameReader
 	keeper   *keepAlive
@@ -861,60 +949,114 @@ type wsClientCall struct {
 
 func (c *wsClientCall) ensureDialed() *connect.Error {
 	c.dialOnce.Do(func() {
-		defer close(c.dialDone)
-		// The handshake gets its own deadline; the connection outlives it.
-		dialCtx := c.ctx
-		if c.handshakeTimeout > 0 {
-			var cancelDial context.CancelFunc
-			dialCtx, cancelDial = context.WithTimeout(c.ctx, c.handshakeTimeout)
-			defer cancelDial()
-		}
-		conn, response, err := websocket.Dial(dialCtx, c.url.String(), c.dialOptions)
-		c.response = response
-		if response != nil && response.Body != nil {
-			// We only need the upgrade response's headers; close the body to
-			// avoid leaking it. The body is a buffered remainder, not the
-			// upgraded connection (that's returned separately as conn).
-			_ = response.Body.Close()
-		}
+		conn, err := c.handshake()
 		if err != nil {
-			c.dialErr = dialError(err, response)
+			c.dialErr = err
 			return
 		}
-		// CloseNow, not Close: the closing handshake waits for the peer's own
-		// close frame, and a server that just failed the handshake's terms is
-		// the last peer worth waiting five seconds on. Same policy as a peer
-		// that faults mid-stream.
-		if got := conn.Subprotocol(); got != c.subprotocol {
-			_ = conn.CloseNow()
-			c.dialErr = errorf(
-				connect.CodeInternal,
-				"server selected unexpected Sec-WebSocket-Protocol %q (want %q)",
-				got, c.subprotocol,
-			)
-			return
-		}
-		if takeoverErr := checkNoContextTakeover(response); takeoverErr != nil {
-			_ = closeClientWithError(
-				conn, c.drain,
-				"permessage-deflate requires client_no_context_takeover and server_no_context_takeover",
-			)
-			c.dialErr = takeoverErr
-			return
-		}
-		// The limit is enforced in readBoundedMessage, as on the server: coder's
-		// SetReadLimit closes with 1009, a code §13 does not let a client send.
-		conn.SetReadLimit(-1)
-		c.wsConn = conn
-		c.reader = newFrameReader(c.ctx, func(readCtx context.Context) (websocket.MessageType, []byte, error) {
-			return readBoundedMessage(readCtx, conn, c.readLimit)
-		})
-		c.keeper = startKeepAlive(
-			c.ctx, conn, c.reader, c.keepAliveInterval, c.keepAliveTimeout, wsStatusClientProtocolError,
-		)
+		c.start(conn)
 	})
-	<-c.dialDone
 	return c.dialErr
+}
+
+// handshake dials and checks what the server agreed to. A connection it
+// rejects is closed.
+func (c *wsClientCall) handshake() (*websocket.Conn, *connect.Error) {
+	// The handshake gets its own deadline; the connection outlives it.
+	dialCtx := c.ctx
+	if c.handshakeTimeout > 0 {
+		var cancelDial context.CancelFunc
+		dialCtx, cancelDial = context.WithTimeout(c.ctx, c.handshakeTimeout)
+		defer cancelDial()
+	}
+	conn, response, err := websocket.Dial(dialCtx, c.url.String(), c.dialOptions)
+	c.response = response
+	var failedBody []byte
+	if response != nil && response.Body != nil {
+		// We only need the upgrade response's headers; close the body to
+		// avoid leaking it. On a failed handshake the library has replaced
+		// it with the first KiB, which may hold a Connect error.
+		if err != nil {
+			failedBody, _ = io.ReadAll(response.Body)
+		}
+		_ = response.Body.Close()
+	}
+	if err != nil {
+		return nil, dialError(err, response, failedBody)
+	}
+	// The library has already failed a handshake that echoed a token this
+	// client did not offer (RFC 6455 §4.1). §4.3 fails one that echoed none
+	// the same way: the handshake failed, so no Close frame is sent.
+	token := c.selectedSubprotocol(conn.Subprotocol())
+	if token == "" {
+		_ = conn.CloseNow()
+		return nil, errorf(
+			connect.CodeInternal,
+			"server echoed no Sec-WebSocket-Protocol (offered %s)",
+			strings.Join(c.offered, ", "),
+		)
+	}
+	// Every offered token names a codec this client holds.
+	if codec, ok := c.codecs.get(codecForSubprotocol(token)); ok {
+		c.codec = codec
+		c.bodyIsText = codecIsText(codec)
+	}
+	if takeoverErr := checkNoContextTakeover(response); takeoverErr != nil {
+		_ = closeClientWithError(
+			conn, c.drain,
+			"permessage-deflate requires client_no_context_takeover and server_no_context_takeover",
+		)
+		return nil, takeoverErr
+	}
+	return conn, nil
+}
+
+// start begins reading and keeping alive an accepted connection.
+func (c *wsClientCall) start(conn *websocket.Conn) {
+	// The limit is enforced in readBoundedMessage, as on the server, so an
+	// oversized message is classified and closed like any other fault.
+	conn.SetReadLimit(-1)
+	c.wsConn = conn
+	// The library tears a connection down without a Close frame when a
+	// read's or write's context ends, so the connection runs detached from
+	// the call. §11.1 and §13 have a client whose call ends before S close
+	// with 1000, which the server takes as the cancellation (§8).
+	connCtx := context.WithoutCancel(c.ctx)
+	c.stopCloseOnDone = context.AfterFunc(c.ctx, func() {
+		_ = closeWithDrain(conn, c.drain, websocket.StatusNormalClosure, "")
+	})
+	c.reader = newFrameReader(
+		connCtx,
+		func(readCtx context.Context) (websocket.MessageType, []byte, error) {
+			return readBoundedMessage(readCtx, conn, c.readLimit, c.drain)
+		},
+		nil,
+	)
+	c.heartbeat.attach(c.reader)
+	c.keeper = startKeepAlive(
+		connCtx, conn, c.reader, c.keepAliveInterval, c.keepAliveTimeout, wsStatusClientProtocolError,
+	)
+}
+
+// preventDial makes sure this call never dials, and reports whether it already
+// had. A dial in progress is waited for.
+func (c *wsClientCall) preventDial() bool {
+	c.dialOnce.Do(func() {
+		c.dialErr = errorf(connect.CodeCanceled, "stream closed before it was used")
+	})
+	return c.wsConn != nil
+}
+
+// selectedSubprotocol maps the echoed token back to the one this client
+// offered, or "" when the server echoed none. Token matching is
+// case-insensitive, as the library's own check is.
+func (c *wsClientCall) selectedSubprotocol(echoed string) string {
+	for _, token := range c.offered {
+		if echoed != "" && strings.EqualFold(token, echoed) {
+			return token
+		}
+	}
+	return ""
 }
 
 // send implements [messageSender], writing one message as a single WebSocket
@@ -923,7 +1065,12 @@ func (c *wsClientCall) send(text bool, data []byte) (int64, error) {
 	if err := c.ensureDialed(); err != nil {
 		return 0, err
 	}
-	written, err := writeFrame(c.ctx, c.wsConn, text, data)
+	// Checked here and the write detached: a write under a context that ends
+	// would drop the connection without the Close frame §13 asks for.
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	written, err := writeFrame(context.WithoutCancel(c.ctx), c.wsConn, text, data)
 	if err != nil && c.ctx.Err() == nil {
 		// A server may end the RPC before reading every request, so a failed
 		// write is how this end learns the stream is over. As over HTTP, it
@@ -934,8 +1081,7 @@ func (c *wsClientCall) send(text bool, data []byte) (int64, error) {
 }
 
 type websocketClientConn struct {
-	call   *wsClientCall
-	codecs codecPair
+	call *wsClientCall
 	// localFault records the first failure this end produced rather than read
 	// off the wire; its message is the close reason.
 	localFault atomic.Pointer[connect.Error]
@@ -943,17 +1089,27 @@ type websocketClientConn struct {
 	marshaler messageWriter
 	// openOnce writes the M message that must precede every other message on
 	// the stream.
-	openOnce    sync.Once
-	openErr     *connect.Error
-	requestMeta http.Header
+	openOnce sync.Once
+	openErr  *connect.Error
+	// callInfo supplies the request headers when M is written, and learns the
+	// negotiated codec once the handshake completes. Nil when the caller
+	// supplied none.
+	callInfo    *connect.CallInfo
 	unmarshaler websocketClientUnmarshaler
 
+	// responseHeader and responseTrailer are guarded by the unmarshaler's
+	// metadataMu, since Close may read them while Receive writes them.
 	responseHeader  http.Header
 	responseTrailer http.Header
 
 	responseHeaderOnce sync.Once
-	sendCloseOnce      sync.Once
-	sendCloseErr       *connect.Error
+	// closeResponseOnce makes CloseResponse safe to call from Close and from
+	// the release that follows S.
+	closeResponseOnce sync.Once
+	closeResponseErr  error
+	releaseOnce       sync.Once
+	sendCloseOnce     sync.Once
+	sendCloseErr      *connect.Error
 	// Read by Send, which the contract allows to run concurrently with the
 	// CloseSend that sets it.
 	sendClosed atomic.Bool
@@ -965,9 +1121,56 @@ type websocketClientConn struct {
 // it to know the stream has begun, and waits for nothing else.
 func (c *websocketClientConn) open() *connect.Error {
 	c.openOnce.Do(func() {
-		c.openErr = c.marshaler.writeJSON(markerMetadata, encodeMetadata(c.requestMeta))
+		// §6.2: once the server's S has arrived, the client sends nothing more,
+		// not even the M it had not yet sent.
+		if c.unmarshaler.endStreamSeen.Load() {
+			return
+		}
+		// Checked before anything is written, so a header this client may not
+		// send fails the call here rather than as the server's protocol error.
+		requestMeta := c.requestMetadata()
+		if metadataErr := checkRequestMetadata(requestMeta); metadataErr != nil {
+			c.openErr = metadataErr
+			return
+		}
+		entries, encodeErr := encodeMetadata(requestMeta)
+		if encodeErr != nil {
+			c.openErr = encodeErr
+			return
+		}
+		c.openErr = c.marshaler.writeJSON(markerMetadata, entries)
+		// Writing M is what dials, so the server's codec choice is known now,
+		// and every later Send and Receive runs after this. A failed dial
+		// leaves nothing to encode or decode.
+		if c.call.wsConn == nil {
+			return
+		}
+		c.marshaler.codec = c.call.codec
+		c.marshaler.bodyIsText = c.call.bodyIsText
+		c.unmarshaler.codec = c.call.codec
+		c.unmarshaler.bodyIsText = c.call.bodyIsText
+		if c.callInfo != nil {
+			c.callInfo.Codec = c.call.codec.Name()
+		}
 	})
 	return c.openErr
+}
+
+// requestMetadata reads the caller's request headers as they stand when M is
+// written, which is the first Send as it is over HTTP.
+//
+// They travel in M and nowhere else. Copying them onto the handshake too would
+// put the same keys on two channels, and the client's own M would be shadowed
+// by its own headers the moment the two disagreed.
+func (c *websocketClientConn) requestMetadata() http.Header {
+	header := make(http.Header, 8)
+	if c.callInfo == nil {
+		return header
+	}
+	for key, values := range c.callInfo.RequestHeader().All() {
+		header[http.CanonicalHeaderKey(key)] = append(header[http.CanonicalHeaderKey(key)], values...)
+	}
+	return header
 }
 
 func (c *websocketClientConn) Send(msg any) error {
@@ -1009,10 +1212,9 @@ func (c *websocketClientConn) CloseRequest() error {
 	}
 	c.sendCloseOnce.Do(func() {
 		defer c.sendClosed.Store(true)
-		// A bare C carries no payload to encode, so its frame type is the one
-		// the subprotocol negotiated (§6.1) rather than the text a JSON payload
-		// would have implied.
-		c.sendCloseErr = c.marshaler.send(markerClientEndStream, c.marshaler.bodyIsText, nil)
+		// §6.1: C is a bare control message and always text, whatever the
+		// codec, so an empty final message is never mistaken for it.
+		c.sendCloseErr = c.marshaler.send(markerClientEndStream, true, nil)
 	})
 	if c.sendCloseErr != nil && !c.requestSideEnded(c.sendCloseErr) {
 		return c.sendCloseErr
@@ -1038,11 +1240,15 @@ func (c *websocketClientConn) Receive(msg any) error {
 	if err == nil {
 		return nil
 	}
-	// On EndStream, fold trailers and surface any server error. The trailers
-	// stay on the conn: v2 carries them on CallInfo, which the transport
-	// publishes, rather than attaching them to the error.
+	// The trailers go on the conn, which the transport publishes to CallInfo,
+	// rather than on the error.
 	if c.unmarshaler.endStreamSeen.Load() {
+		c.unmarshaler.metadataMu.Lock()
 		mergeHeaders(c.responseTrailer, c.unmarshaler.trailer)
+		c.unmarshaler.metadataMu.Unlock()
+		if c.unmarshaler.endStreamReceived.Load() {
+			c.releaseAfterEndOfStream()
+		}
 		if serverErr := c.unmarshaler.endStreamError; serverErr != nil {
 			return serverErr
 		}
@@ -1050,16 +1256,28 @@ func (c *websocketClientConn) Receive(msg any) error {
 	return err
 }
 
+// releaseAfterEndOfStream closes the connection once S has arrived. A caller
+// that reads to io.EOF need not call Close, so nothing else would release it
+// from a server that does not close first (§9.1 is only a SHOULD).
+func (c *websocketClientConn) releaseAfterEndOfStream() {
+	c.releaseOnce.Do(func() {
+		go func() { _ = c.CloseResponse() }()
+	})
+}
+
+// ResponseHeader returns a copy of the response headers, safe to read while
+// Receive runs.
 func (c *websocketClientConn) ResponseHeader() http.Header {
+	// Dialed before locking: the handshake can take as long as its timeout, and
+	// Receive and ResponseTrailer would wait behind it.
+	dialErr := c.call.ensureDialed()
+	c.unmarshaler.metadataMu.Lock()
+	defer c.unmarshaler.metadataMu.Unlock()
 	// Leading-Metadata replaces same-key handshake values rather than appending
 	// to them, so this runs after the 101's headers and assigns rather than
 	// merging — which also keeps a second call from duplicating them.
-	defer func() { maps.Copy(c.responseHeader, c.unmarshaler.header) }()
 	c.responseHeaderOnce.Do(func() {
-		if dialErr := c.call.ensureDialed(); dialErr != nil {
-			return
-		}
-		if c.call.response == nil {
+		if dialErr != nil || c.call.response == nil {
 			return
 		}
 		for key, values := range c.call.response.Header {
@@ -1069,11 +1287,16 @@ func (c *websocketClientConn) ResponseHeader() http.Header {
 			c.responseHeader[key] = values
 		}
 	})
-	return c.responseHeader
+	maps.Copy(c.responseHeader, c.unmarshaler.header)
+	return c.responseHeader.Clone()
 }
 
+// ResponseTrailer returns a copy of the response trailers, safe to read while
+// Receive runs.
 func (c *websocketClientConn) ResponseTrailer() http.Header {
-	return c.responseTrailer
+	c.unmarshaler.metadataMu.Lock()
+	defer c.unmarshaler.metadataMu.Unlock()
+	return c.responseTrailer.Clone()
 }
 
 // noteLocalFault records an error this end produced while encoding, as opposed
@@ -1092,8 +1315,16 @@ func (c *websocketClientConn) noteLocalFault(err *connect.Error) {
 }
 
 func (c *websocketClientConn) CloseResponse() error {
+	c.closeResponseOnce.Do(func() { c.closeResponseErr = c.closeResponse() })
+	return c.closeResponseErr
+}
+
+func (c *websocketClientConn) closeResponse() error {
 	if c.call.wsConn == nil {
 		return nil
+	}
+	if c.call.stopCloseOnDone != nil {
+		c.call.stopCloseOnDone()
 	}
 	c.call.keeper.stop()
 	// Deferred so it runs once the close below has ended the read in flight.
@@ -1110,14 +1341,22 @@ func (c *websocketClientConn) CloseResponse() error {
 	if c.unmarshaler.endStreamReceived.Load() {
 		return nil
 	}
-	return closeErr
+	if closeErr == nil {
+		return nil
+	}
+	// §13.1: the connection ended without S, so the RPC failed. It is
+	// Unavailable unless this end canceled it or its deadline passed.
+	if ctxErr := c.call.ctx.Err(); ctxErr != nil {
+		return wsContextError(ctxErr)
+	}
+	return errorf(connect.CodeUnavailable, "close WebSocket without EndStreamMessage: %v", closeErr)
 }
 
 func (c *websocketClientConn) closeConn() error {
 	drain := c.call.drain
 	// A peer fault wins over a local one: it is what the server can act on.
-	if peerErr := c.unmarshaler.peerFaultErr; peerErr != nil {
-		return closeClientWithError(c.call.wsConn, drain, peerErr.Message())
+	if fault := c.unmarshaler.serverFault.Load(); fault != nil {
+		return closeWithDrain(c.call.wsConn, drain, fault.code, closeReason(fault.err.Message()))
 	}
 	if localErr := c.localFault.Load(); localErr != nil {
 		// §13.1: the RPC ended on an unexpected condition at this end, not on
@@ -1137,16 +1376,16 @@ func (c *websocketClientConn) closeConn() error {
 // websocketUnmarshaler (server-side) but recognizes the server's S message
 // instead of the client's C and M.
 type websocketClientUnmarshaler struct {
-	call         *wsClientCall
-	codecs       codecPair
-	readMaxBytes int
-	// bodyIsText mirrors the server's; see websocketUnmarshaler.
-	bodyIsText bool
+	frameDecoder
+
+	call *wsClientCall
 	// spec and onProtocolError identify and report a server that frames its
 	// responses wrongly; see WithClientProtocolErrorHandler.
 	spec            connect.Spec
 	onProtocolError ClientProtocolErrorHandler
-	fault           ProtocolFault
+	// stats receives each decoded message's size. Nil when the caller
+	// supplied no CallInfo.
+	stats *connect.MessageStats
 
 	// endStreamSeen is atomic because Send and CloseSend, which may run
 	// concurrently with Receive, read it.
@@ -1154,12 +1393,15 @@ type websocketClientUnmarshaler struct {
 	// endStreamReceived is set only by a valid S, unlike endStreamSeen, which a
 	// failed read also sets. CloseResponse may run concurrently with Receive.
 	endStreamReceived atomic.Bool
-	// peerFaultErr is the first error the server's framing caused; its message
-	// is the close reason.
-	peerFaultErr   *connect.Error
+	// serverFault is set by Receive and read by Close, which the contract
+	// allows to run concurrently.
+	serverFault    atomic.Pointer[serverFault]
 	endStreamError *connect.Error
 	trailer        http.Header
-	header         http.Header
+	// header is written by Receive and read by Close, which the contract
+	// allows to run concurrently, so metadataMu guards it.
+	metadataMu sync.Mutex
+	header     http.Header
 	// sawData gates the ordering rule on the response side: server metadata is
 	// "leading" only while no body has arrived.
 	sawData bool
@@ -1171,6 +1413,13 @@ type websocketClientUnmarshaler struct {
 	metadataConsumed bool
 }
 
+// serverFault is the first failure the server's framing caused: its message is
+// the close reason, and code the close code.
+type serverFault struct {
+	err  *connect.Error
+	code websocket.StatusCode
+}
+
 // Unmarshal records whether a failure was the peer's doing, which decides how
 // the connection is torn down.
 func (u *websocketClientUnmarshaler) Unmarshal(message any) *connect.Error {
@@ -1178,13 +1427,10 @@ func (u *websocketClientUnmarshaler) Unmarshal(message any) *connect.Error {
 		u.metadataConsumed = false
 		u.fault = FaultUnknown
 		err := u.unmarshal(message)
-		if err != nil && u.fault != FaultUnknown && err.Code() == connect.CodeInvalidArgument {
-			err = asResponseProtocolError(err)
-		}
 		// A classified fault is a protocol error whatever its code: §5 has the
 		// client close with 3102 for it, not end the RPC with 1000.
-		if err != nil && (u.fault != FaultUnknown || peerFault(err)) && u.peerFaultErr == nil {
-			u.peerFaultErr = err
+		if err != nil && (u.fault != FaultUnknown || peerFault(err)) {
+			u.serverFault.CompareAndSwap(nil, &serverFault{err: err, code: clientCloseCode(u.fault)})
 		}
 		// Gated on the classification rather than peerFault; see the server
 		// side. Observation only — err is returned unchanged.
@@ -1196,24 +1442,6 @@ func (u *websocketClientUnmarshaler) Unmarshal(message any) *connect.Error {
 		}
 		return err
 	}
-}
-
-// fail records the kind of fault before building its error, so a monitor can
-// tell them apart without matching message strings. See the server-side twin.
-func (u *websocketClientUnmarshaler) fail(
-	fault ProtocolFault,
-	format string,
-	args ...any,
-) *connect.Error {
-	u.fault = fault
-	return errorf(connect.CodeInternal, format, args...)
-}
-
-// asResponseProtocolError recodes an InvalidArgument error from a decoder
-// shared with the server. On a client, InvalidArgument would blame the
-// caller's request; a malformed response is Internal, as in Connect over HTTP.
-func asResponseProtocolError(err *connect.Error) *connect.Error {
-	return connect.NewError(connect.CodeInternal, err.Message()).WithCause(err.Unwrap())
 }
 
 // readFailure turns a failed read into the RPC's error. Every failure ends the
@@ -1264,7 +1492,17 @@ func (u *websocketClientUnmarshaler) readFailure(readerErr error) *connect.Error
 		u.fault = FaultSizeLimit
 		return limitErr
 	}
-	return errorf(connect.CodeUnavailable, "read websocket message: %w", readerErr)
+	// §13: one of the two close codes a client may take an outcome from. The
+	// server failed the connection over a text message this client sent.
+	if websocket.CloseStatus(readerErr) == websocket.StatusInvalidFramePayloadData {
+		return errorf(
+			connect.CodeInternal,
+			"server rejected a text message from this client as invalid UTF-8: %w", readerErr,
+		)
+	}
+	// %v, not %w: the cause is often io.EOF, which callers read as a normal
+	// end of stream rather than a failure.
+	return errorf(connect.CodeUnavailable, "read websocket message: %v", readerErr)
 }
 
 func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
@@ -1276,32 +1514,28 @@ func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 	if u.endStreamSeen.Load() {
 		return errorf(connect.CodeUnknown, "%w", io.EOF)
 	}
+	wire, readErr := u.nextMessage()
+	if readErr != nil {
+		return readErr
+	}
+	return u.dispatch(wire, message)
+}
 
+// nextMessage reads one frame and returns the message it carries.
+func (u *websocketClientUnmarshaler) nextMessage() (wireMessage, *connect.Error) {
 	messageType, frame, readerErr := u.call.reader.next(u.call.ctx)
 	if readerErr != nil {
-		return u.readFailure(readerErr)
+		return wireMessage{}, u.readFailure(readerErr)
 	}
-	text := messageType == websocket.MessageText
-	if !text && messageType != websocket.MessageBinary {
-		return u.fail(FaultFrameType, "unknown WebSocket message type %d", messageType)
+	wire, parseErr := u.parseFrame(messageType, frame)
+	if u.fault == FaultTextEncoding {
+		u.endStreamSeen.Store(true)
 	}
-	wire, decodeErr := decodeMessage(frame, text)
-	if decodeErr != nil {
-		u.fault = FaultMarker
-		return decodeErr
-	}
-	if utf8Err := textEncodingError(frame, text); utf8Err != nil {
-		u.fault = FaultTextEncoding
-		return utf8Err
-	}
-	if u.readMaxBytes > 0 && len(wire.payload) > u.readMaxBytes {
-		u.fault = FaultSizeLimit
-		return errorf(
-			connect.CodeResourceExhausted,
-			"message size %d is larger than configured max %d", len(wire.payload), u.readMaxBytes,
-		)
-	}
+	return wire, parseErr
+}
 
+// dispatch interprets one message and decodes its payload into message.
+func (u *websocketClientUnmarshaler) dispatch(wire wireMessage, message any) *connect.Error {
 	// Every response stream opens with exactly one M, so anything else first
 	// means the peer is not speaking this protocol and there is no partial
 	// state worth keeping.
@@ -1314,16 +1548,12 @@ func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 
 	switch wire.marker {
 	case markerClientEndStream:
-		u.fault = FaultMarker
-		return errorf(
-			connect.CodeInternal,
-			"server sent %s, which only a client may send", markerName(wire.marker),
-		)
+		return u.fail(FaultMarker, "server sent %s, which only a client may send", markerName(wire.marker))
 	case markerMetadata:
 		// §6.1: M and S are always JSON, and a binary frame says the payload
 		// is not.
 		if !wire.text {
-			return u.fail(FaultFrameType, "server sent M in a binary frame; M is always JSON")
+			return u.fail(FaultFrameType, "server sent M in a binary frame; expected a text frame")
 		}
 		if mergeErr := u.mergeLeadingMetadata(wire.payload); mergeErr != nil {
 			return mergeErr
@@ -1332,57 +1562,47 @@ func (u *websocketClientUnmarshaler) unmarshal(message any) *connect.Error {
 		return nil
 	case markerServerEndStream:
 		if !wire.text {
-			return u.fail(FaultFrameType, "server sent S in a binary frame; S is always JSON")
+			return u.fail(FaultFrameType, "server sent S in a binary frame; expected a text frame")
 		}
-		// Parsed unconditionally, so a bare S fails here exactly as a
-		// zero-length end-of-stream payload fails in Connect's HTTP streaming
-		// protocol. The framing differs; the message does not.
-		var end connectwire.EndStreamMessage
-		if err := json.Unmarshal(wire.payload, &end); err != nil {
-			u.fault = FaultMetadata
-			return errorf(connect.CodeInternal, "unmarshal EndStreamMessage: %w", err)
-		}
-		trailer, decodeErr := decodeTrailer(end.Trailer)
-		if decodeErr != nil {
-			u.fault = FaultMetadata
-			return decodeErr
-		}
-		u.endStreamSeen.Store(true)
-		u.endStreamReceived.Store(true)
-		u.trailer = trailer
-		u.endStreamError = end.Error.AsError()
-		return errorf(connect.CodeUnknown, "%w", io.EOF)
+		return u.endStream(wire.payload)
 	case markerBody:
 		u.sawData = true
-		if wire.text != u.bodyIsText {
-			// The mirror of the server's check; see websocketUnmarshaler.
-			return u.fail(
-				FaultFrameType,
-				"server sent a %s body on a %s connection",
-				encodingForFrame(wire.text), encodingForFrame(u.bodyIsText),
-			)
+		if err := u.decodeBody(u.call.ctx, wire, message); err != nil {
+			return err
 		}
-		if len(wire.payload) == 0 {
-			if wire.text {
-				return u.fail(FaultFrameType, "empty body in a text frame; an empty JSON message is {}")
-			}
-			return nil
-		}
-		codec := u.codecs.forFrame(wire.text)
-		if codec == nil {
-			return u.fail(
-				FaultFrameType,
-				"server sent a %s body, which this client was not configured to decode",
-				encodingForFrame(wire.text),
-			)
-		}
-		if err := codec.UnmarshalRead(u.call.ctx, bytes.NewReader(wire.payload), message); err != nil {
-			return u.fail(FaultMessageEncoding, "unmarshal message: %w", err)
+		if u.stats != nil {
+			*u.stats = connect.MessageStats{Size: len(wire.payload)}
 		}
 		return nil
 	default:
 		return u.fail(FaultMarker, "server sent unknown marker %s", markerName(wire.marker))
 	}
+}
+
+// endStream records the verdict an S message carries, and returns io.EOF as
+// the end of the response stream.
+func (u *websocketClientUnmarshaler) endStream(payload []byte) *connect.Error {
+	// Parsed unconditionally, so a bare S fails here exactly as a zero-length
+	// end-of-stream payload fails in Connect's HTTP streaming protocol.
+	// §9: the payload is an EndStreamResponse, a JSON object. json accepts
+	// null for a struct, which would read as success.
+	if trimmed := bytes.TrimSpace(payload); len(trimmed) > 0 && trimmed[0] != '{' {
+		return u.fail(FaultMetadata, "S message is not a JSON EndStreamMessage object; the smallest is {}")
+	}
+	var end connectwire.EndStreamMessage
+	if err := json.Unmarshal(payload, &end); err != nil {
+		return u.fail(FaultMetadata, "unmarshal EndStreamMessage: %w", err)
+	}
+	trailer, decodeErr := decodeTrailer(end.Trailer)
+	if decodeErr != nil {
+		u.fault = FaultMetadata
+		return decodeErr
+	}
+	u.endStreamSeen.Store(true)
+	u.endStreamReceived.Store(true)
+	u.trailer = trailer
+	u.endStreamError = end.Error.AsError()
+	return errorf(connect.CodeUnknown, "%w", io.EOF)
 }
 
 // mergeLeadingMetadata folds the server's M message into the response headers.
@@ -1404,25 +1624,16 @@ func (u *websocketClientUnmarshaler) mergeLeadingMetadata(payload []byte) *conne
 		)
 	}
 	u.sawLeadingMetadata = true
-	if len(payload) == 0 {
-		u.fault = FaultMetadata
-		return errorf(connect.CodeInternal, "empty M message; empty metadata is []")
+	entries, parseErr := u.metadataEntries(payload)
+	if parseErr != nil {
+		return parseErr
 	}
-	var entries [][]string
-	if err := json.Unmarshal(payload, &entries); err != nil {
-		u.fault = FaultMetadata
-		return errorf(connect.CodeInternal, "unmarshal M message: %w", err)
-	}
-	// json.Unmarshal accepts null for a slice; [] decodes to an empty one.
-	if entries == nil {
-		u.fault = FaultMetadata
-		return errorf(connect.CodeInternal, "M message is null; empty metadata is []")
-	}
-	meta, decodeErr := decodeMetadata(entries)
+	meta, decodeErr := u.metadataHeader(entries)
 	if decodeErr != nil {
-		u.fault = FaultMetadata
 		return decodeErr
 	}
+	u.metadataMu.Lock()
+	defer u.metadataMu.Unlock()
 	if u.header == nil {
 		u.header = make(http.Header, len(meta))
 	}
@@ -1439,21 +1650,46 @@ func wsContextError(ctxErr error) *connect.Error {
 	return errorf(connect.CodeDeadlineExceeded, "%w", ctxErr)
 }
 
-func dialError(err error, response *http.Response) *connect.Error {
+// dialError turns a failed handshake into the RPC's error. §4.5: a Connect
+// error in the response body wins, then Connect-over-HTTP's status mapping. A
+// 101 that still failed broke the handshake's own rules, such as echoing a
+// token this client did not offer, which is the server's fault: Internal.
+func dialError(err error, response *http.Response, body []byte) *connect.Error {
 	switch {
 	case errors.Is(err, context.Canceled):
 		return errorf(connect.CodeCanceled, "WebSocket upgrade canceled: %w", err)
 	case errors.Is(err, context.DeadlineExceeded):
 		return errorf(connect.CodeDeadlineExceeded, "WebSocket upgrade deadline exceeded: %w", err)
 	}
-	if response != nil {
-		return errorf(
-			httpToCode(response.StatusCode),
-			"WebSocket upgrade failed: HTTP %s: %w",
-			response.Status, err,
-		)
+	if response == nil {
+		return errorf(connect.CodeUnavailable, "WebSocket upgrade failed: %w", err)
 	}
-	return errorf(connect.CodeUnavailable, "WebSocket upgrade failed: %w", err)
+	if response.StatusCode == http.StatusSwitchingProtocols {
+		return errorf(connect.CodeInternal, "WebSocket upgrade failed: %w", err)
+	}
+	if wireErr := handshakeWireError(response, body); wireErr != nil {
+		return wireErr
+	}
+	return errorf(
+		httpToCode(response.StatusCode),
+		"WebSocket upgrade failed: HTTP %s: %w",
+		response.Status, err,
+	)
+}
+
+// handshakeWireError reads a Connect error from a rejected handshake's body,
+// or returns nil if the body is not one. A body without a recognizable code
+// is not one either, so the status mapping still applies to it.
+func handshakeWireError(response *http.Response, body []byte) *connect.Error {
+	mediaType := strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0])
+	if !strings.EqualFold(mediaType, "application/json") || len(body) == 0 {
+		return nil
+	}
+	var wireErr connectwire.WireError
+	if json.Unmarshal(body, &wireErr) == nil && wireErr.Code != 0 {
+		return wireErr.AsError()
+	}
+	return nil
 }
 
 // httpToCode maps an HTTP status to a Connect code. Copied from connecthttp,

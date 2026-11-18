@@ -59,7 +59,8 @@ func TestMessageAfterEndOfClientStreamEndsTheStream(t *testing.T) {
 
 			data := readServerOpening(t, conn)
 			assert.Equal(t, data[0], wireServerEndStream)
-			assert.True(t, strings.Contains(string(data), "invalid_argument"))
+			assert.True(t, strings.Contains(string(data), "internal"))
+			assert.True(t, strings.Contains(string(data), "after its C message"))
 			ctx, cancel := readContext(t)
 			defer cancel()
 			_, _, err := conn.Read(ctx)

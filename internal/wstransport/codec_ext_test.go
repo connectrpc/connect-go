@@ -126,17 +126,15 @@ func assertProtoJSON(tb testing.TB, body []byte, sum int64) {
 	assert.Equal(tb, response.Sum, sum)
 }
 
-// A bare C has no payload to encode, so nothing about it implies text. §6.1
-// gives it the negotiated frame type, which is the only thing left to say what
-// the connection agreed on.
-func TestBareEndOfClientStreamFollowsTheNegotiatedFrameType(t *testing.T) {
+// §6.1: C is a control message like M and S, so it is a bare text frame
+// whatever the codec. Only bodies follow the negotiated frame type.
+func TestEndOfClientStreamIsAlwaysText(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
-		codec    string
-		wantText bool
+		codec string
 	}{
 		{codec: connect.CodecNameProto},
-		{codec: connect.CodecNameJSON, wantText: true},
+		{codec: connect.CodecNameJSON},
 	} {
 		t.Run(test.codec, func(t *testing.T) {
 			t.Parallel()
@@ -156,8 +154,8 @@ func TestBareEndOfClientStreamFollowsTheNegotiatedFrameType(t *testing.T) {
 			// has already sent are what the test reads.
 			go func() { _, _ = stream.CloseAndReceive() }()
 
-			assert.Equal(t, readFrameType(t, frames), true)          // opening M is JSON
-			assert.Equal(t, readFrameType(t, frames), test.wantText) // bare C is negotiated
+			assert.Equal(t, readFrameType(t, frames), true) // opening M is JSON
+			assert.Equal(t, readFrameType(t, frames), true) // bare C is text
 		})
 	}
 }
@@ -170,7 +168,7 @@ func closeCodeRecordingServer(tb testing.TB, codes chan<- websocket.CloseError) 
 	httpServer := httptest.NewServer(http.HandlerFunc(
 		func(responseWriter http.ResponseWriter, request *http.Request) {
 			conn, err := websocket.Accept(responseWriter, request, &websocket.AcceptOptions{
-				Subprotocols: []string{request.Header.Get("Sec-WebSocket-Protocol")},
+				Subprotocols: []string{firstOfferedSubprotocol(request)},
 			})
 			if err != nil {
 				return
@@ -279,7 +277,7 @@ func frameTypeRecordingServer(tb testing.TB, frames chan<- bool) *httptest.Serve
 	httpServer := httptest.NewServer(http.HandlerFunc(
 		func(responseWriter http.ResponseWriter, request *http.Request) {
 			conn, err := websocket.Accept(responseWriter, request, &websocket.AcceptOptions{
-				Subprotocols: []string{request.Header.Get("Sec-WebSocket-Protocol")},
+				Subprotocols: []string{firstOfferedSubprotocol(request)},
 			})
 			if err != nil {
 				return
@@ -307,19 +305,18 @@ func frameTypeRecordingServer(tb testing.TB, frames chan<- bool) *httptest.Serve
 func TestPartialCodecSetNegotiates(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
-		name    string
-		codecs  []connect.Codec
-		offer   string
-		status  int
-		echoed  string
-		mention string
+		name   string
+		codecs []connect.Codec
+		offer  string
+		status int
+		echoed string
 	}{
 		{
-			name:   "proto-only server takes the client's second choice",
+			name:   "server takes the client's second choice",
 			codecs: []connect.Codec{connectproto.NewBinaryCodec()},
-			// JSON first: a server that failed on the first recognized token
-			// would refuse a client it can in fact serve.
-			offer:  "connectrpc.1+json, connectrpc.1+proto",
+			// A codec the server lacks first: a server that failed on the
+			// first recognized token would refuse a client it can serve.
+			offer:  "connectrpc.1+msgpack, connectrpc.1+proto",
 			status: http.StatusSwitchingProtocols,
 			echoed: "connectrpc.1+proto",
 		},
@@ -332,9 +329,14 @@ func TestPartialCodecSetNegotiates(t *testing.T) {
 			status: http.StatusBadRequest,
 		},
 		{
-			name:   "an unrecognized token is not an encoding problem",
+			name:   "unrecognized tokens are not an encoding problem",
 			codecs: []connect.Codec{connectproto.NewBinaryCodec()},
-			offer:  "mqtt",
+			offer:  "mqtt, chat",
+			status: http.StatusBadRequest,
+		},
+		{
+			name:   "no Sec-WebSocket-Protocol at all",
+			codecs: []connect.Codec{connectproto.NewBinaryCodec()},
 			status: http.StatusBadRequest,
 		},
 	} {
@@ -348,26 +350,19 @@ func TestPartialCodecSetNegotiates(t *testing.T) {
 			t.Cleanup(httpServer.Close)
 
 			response := offerSubprotocol(t, httpServer, test.offer)
+			defer func() { _ = response.Body.Close() }()
 			assert.Equal(t, response.StatusCode, test.status)
 			if test.echoed != "" {
 				assert.Equal(t, response.Header.Get("Sec-WebSocket-Protocol"), test.echoed)
-				return
-			}
-			body, readErr := io.ReadAll(response.Body)
-			assert.Nil(t, readErr)
-			assert.Nil(t, response.Body.Close())
-			if test.mention != "" {
-				assert.True(t, strings.Contains(string(body), test.mention))
 			}
 		})
 	}
 }
 
-// A client that offered a Connect token is speaking this protocol; it just
-// named a codec this server lacks. That is an RPC failure, not a connection
-// failure, so the upgrade completes and the verdict travels in band — the only
-// channel a browser script can read.
-func TestUnsupportedCodecIsReportedInBand(t *testing.T) {
+// §4.3: a server that supports none of the offered tokens refuses the
+// handshake with 400, even when it recognizes them. The body names what it
+// does speak, for the non-browser clients and developer tools that can read it.
+func TestUnsupportedCodecIsRejectedWithBadRequest(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
 		name   string
@@ -376,16 +371,27 @@ func TestUnsupportedCodecIsReportedInBand(t *testing.T) {
 		speaks string
 	}{
 		{
-			name:   "proto-only server, JSON-only client",
+			// JSON is served even though the codecs name only proto (§4.3).
+			name:   "proto server, client offering only a codec it lacks",
 			codecs: []connect.Codec{connectproto.NewBinaryCodec()},
-			offer:  "connectrpc.1+json",
-			speaks: "proto",
+			offer:  "connectrpc.1+msgpack",
+			speaks: "connectrpc.1+proto, connectrpc.1+json",
 		},
 		{
 			name:   "JSON-only server, proto-only client",
 			codecs: []connect.Codec{connectproto.NewJSONCodec()},
 			offer:  "connectrpc.1+proto",
-			speaks: "json",
+			speaks: "connectrpc.1+json",
+		},
+		{
+			name: "custom codecs are listed too",
+			codecs: []connect.Codec{
+				connectproto.NewBinaryCodec(),
+				connectproto.NewJSONCodec(),
+				customTextCodec{connectproto.NewJSONCodec()},
+			},
+			offer:  "connectrpc.1+nope",
+			speaks: "connectrpc.1+customtext",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -397,40 +403,80 @@ func TestUnsupportedCodecIsReportedInBand(t *testing.T) {
 			httpServer := httptest.NewServer(mux)
 			t.Cleanup(httpServer.Close)
 
-			url := "ws" + strings.TrimPrefix(httpServer.URL, "http") +
-				pingv1connect.PingServiceCumSumProcedure
-			conn, response, err := websocket.Dial(t.Context(), url, &websocket.DialOptions{
-				HTTPClient:   httpServer.Client(),
-				Subprotocols: []string{test.offer},
-			})
-			if response != nil && response.Body != nil {
-				_ = response.Body.Close()
-			}
-			// The handshake succeeds, and the token comes back as offered.
-			assert.Nil(t, err)
-			t.Cleanup(func() { _ = conn.CloseNow() })
-			assert.Equal(t, response.StatusCode, http.StatusSwitchingProtocols)
-			assert.Equal(t, response.Header.Get("Sec-WebSocket-Protocol"), test.offer)
-
-			// Every response stream opens with M, even this one.
-			readCtx, cancelRead := readContext(t)
-			defer cancelRead()
-			_, opening, err := conn.Read(readCtx)
-			assert.Nil(t, err)
-			assert.Equal(t, string(opening), "M[]")
-
-			_, data, err := conn.Read(readCtx)
-			assert.Nil(t, err)
-			assert.Equal(t, data[0], wireServerEndStream)
-			assert.True(t, strings.Contains(string(data), "unimplemented"))
-			// The message names what to offer instead.
-			assert.True(t, strings.Contains(string(data), test.speaks))
-
-			// The RPC reached a verdict, so the close is ordinary.
-			_, _, err = conn.Read(readCtx)
-			assert.Equal(t, websocket.CloseStatus(err), websocket.StatusNormalClosure)
+			response := offerSubprotocol(t, httpServer, test.offer)
+			defer func() { _ = response.Body.Close() }()
+			assert.Equal(t, response.StatusCode, http.StatusBadRequest)
+			body, readErr := io.ReadAll(response.Body)
+			assert.Nil(t, readErr)
+			assert.True(t, strings.Contains(string(body), test.speaks))
 		})
 	}
+}
+
+// §4.3: the client offers its preferred codec and then the other, and encodes
+// with whichever the server echoes, and the call reports the codec actually
+// used.
+func TestClientFollowsServerCodecChoice(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name      string
+		server    connect.Codec
+		sendCodec string
+		echoed    string
+	}{
+		{
+			// §4.3: a server supports JSON whatever its codecs were narrowed
+			// to, so the client's first choice is honored.
+			name:      "client prefers JSON, server configured with only proto",
+			server:    connectproto.NewBinaryCodec(),
+			sendCodec: connect.CodecNameJSON,
+			echoed:    "connectrpc.1+json",
+		},
+		{
+			name:      "client prefers proto, server has only JSON",
+			server:    connectproto.NewJSONCodec(),
+			sendCodec: connect.CodecNameProto,
+			echoed:    "connectrpc.1+json",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			server := connect.NewServer()
+			pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+			mux := http.NewServeMux()
+			connecthttp.Mount(mux, server, connecthttp.WithCodecs(test.server))
+			httpServer := httptest.NewServer(mux)
+			t.Cleanup(httpServer.Close)
+
+			recorder := &recordingTransport{base: httpServer.Client().Transport}
+			transport := connecthttp.NewTransport(
+				&http.Client{Transport: recorder},
+				httpServer.URL,
+				connecthttp.WithWebSocket(connecthttp.SelectAll),
+				connecthttp.WithSendCodec(test.sendCodec),
+			)
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+			ctx, info := connect.NewClientContext(t.Context())
+			stream, err := client.CumSum(ctx)
+			assert.Nil(t, err)
+			assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 4}))
+			sum, err := stream.Receive()
+			assert.Nil(t, err)
+			assert.Equal(t, sum.Sum, int64(4))
+			assert.Nil(t, stream.CloseSend())
+			assert.Nil(t, stream.Close())
+			assert.Equal(t, *recorder.subprotocol.Load(), test.echoed)
+			assert.Equal(t, info.Codec, strings.TrimPrefix(test.echoed, "connectrpc.1+"))
+		})
+	}
+}
+
+// firstOfferedSubprotocol is the token a hand-built server echoes: the first
+// one the client offered, which is what negotiation picks against a server
+// holding both codecs.
+func firstOfferedSubprotocol(request *http.Request) string {
+	offer, _, _ := strings.Cut(request.Header.Get("Sec-WebSocket-Protocol"), ",")
+	return strings.TrimSpace(offer)
 }
 
 // offerSubprotocol sends one handshake with the given Sec-WebSocket-Protocol
@@ -445,7 +491,9 @@ func offerSubprotocol(tb testing.TB, server *httptest.Server, offer string) *htt
 	request.Header.Set("Upgrade", "websocket")
 	request.Header.Set("Sec-WebSocket-Version", "13")
 	request.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
-	request.Header.Set("Sec-WebSocket-Protocol", offer)
+	if offer != "" {
+		request.Header.Set("Sec-WebSocket-Protocol", offer)
+	}
 	response, err := server.Client().Do(request)
 	assert.Nil(tb, err)
 	tb.Cleanup(func() { _ = response.Body.Close() })
@@ -493,9 +541,10 @@ func TestBodyInTheWrongEncodingIsRejected(t *testing.T) {
 
 			data := readServerOpening(t, conn)
 			assert.Equal(t, data[0], wireServerEndStream)
-			assert.True(t, strings.Contains(string(data), "invalid_argument"))
-			// Names both encodings: which arrived, and which was agreed.
-			assert.True(t, strings.Contains(string(data), "json body on a proto connection"))
+			assert.True(t, strings.Contains(string(data), "internal"))
+			// §6.1: names the frame type that was expected.
+			assert.True(t, strings.Contains(string(data),
+				"body in a text frame; the negotiated proto codec expects a binary frame"))
 		})
 	}
 }

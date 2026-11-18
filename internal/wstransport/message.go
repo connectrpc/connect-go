@@ -26,6 +26,7 @@ package wstransport
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"maps"
 	"net/http"
@@ -48,11 +49,6 @@ const (
 	markerMetadata        byte = 'M' // JSON metadata entries, either direction
 	markerServerEndStream byte = 'S' // EndStreamMessage JSON, server -> client
 	markerClientEndStream byte = 'C' // end of the request stream, client -> server
-
-	// markerHighBit is reserved: every marker this revision defines is below
-	// it, so a later revision has a signal no conforming peer can already be
-	// emitting.
-	markerHighBit byte = 0x80
 )
 
 // markerName renders a marker for a diagnostic, printably where it can.
@@ -90,24 +86,18 @@ type wireMessage struct {
 }
 
 // decodeMessage splits a frame into the message it carries. text is the frame
-// type it arrived in, which the caller reads from the transport.
+// type it arrived in, which the caller reads from the transport. An unknown
+// marker is the dispatcher's to report; §5.1 reserves nothing else.
 func decodeMessage(frame []byte, text bool) (wireMessage, *connect.Error) {
 	if len(frame) == 0 {
-		return wireMessage{}, errorf(connect.CodeInvalidArgument, "protocol error: empty message carries no marker")
-	}
-	// The high bit is reserved for a later revision, so a byte that sets it is
-	// refused before anything behind it is interpreted.
-	if frame[0] >= markerHighBit {
-		return wireMessage{}, errorf(
-			connect.CodeInvalidArgument,
-			"protocol error: marker 0x%02x sets the reserved high bit", frame[0],
-		)
+		return wireMessage{}, errorf(connect.CodeInternal, "protocol error: empty message carries no marker")
 	}
 	return wireMessage{marker: frame[0], payload: frame[1:], text: text}, nil
 }
 
 // textEncodingError reports a text message that is not valid UTF-8, which
-// RFC 6455 §8.1 forbids and §6.1 makes a protocol error.
+// RFC 6455 §8.1 forbids. §6.1 has the receiver check it before reading the
+// marker and fail the connection with 1007, without an S message.
 //
 // Neither this package's WebSocket library nor the layers under it check this,
 // so a peer that emits invalid UTF-8 would otherwise have its bytes handed to
@@ -118,9 +108,18 @@ func textEncodingError(frame []byte, text bool) *connect.Error {
 		return nil
 	}
 	return errorf(
-		connect.CodeInvalidArgument,
+		connect.CodeInternal,
 		"protocol error: text message is not valid UTF-8",
 	)
+}
+
+// frameName names a frame type for a diagnostic, which §6.1 requires a
+// frame-type error to state.
+func frameName(text bool) string {
+	if text {
+		return "text"
+	}
+	return "binary"
 }
 
 // messageSender writes one encoded message as one WebSocket frame. text says
@@ -129,44 +128,13 @@ type messageSender interface {
 	send(text bool, data []byte) (int64, error)
 }
 
-// codecPair is the two codecs a connection may need. The frame type selects
-// between them per message, so both are live on every connection even though
-// most connections only ever use one.
-//
-// Either may be absent: a peer configured for one encoding is a supported
-// configuration, and negotiation never hands it a subprotocol it cannot serve.
-// A body arriving in the other frame type anyway is a peer that ignored the
-// negotiated subprotocol, and is reported rather than dereferenced.
-type codecPair struct {
-	binary connect.Codec // Protobuf
-	text   connect.Codec // JSON
-}
-
-// forFrame returns the codec a frame of this type carries, or nil when this
-// end was not configured with it.
-func (c codecPair) forFrame(text bool) connect.Codec {
-	if text {
-		return c.text
-	}
-	return c.binary
-}
-
-// encodingForFrame names the encoding a frame type carries, for a diagnostic.
-func encodingForFrame(text bool) string {
-	if text {
-		return connect.CodecNameJSON
-	}
-	return connect.CodecNameProto
-}
-
 // messageWriter encodes messages and hands them to a sender.
 type messageWriter struct {
 	ctx    context.Context //nolint:containedctx // bound to the RPC, as the sender is
 	sender messageSender
-	codecs codecPair
-	// bodyIsText is the negotiated default for outgoing bodies: JSON in text
-	// frames, or Protobuf in binary ones. Control messages ignore it, being
-	// always JSON.
+	codec  connect.Codec
+	// bodyIsText is the frame type codec's bodies go in. Control messages
+	// ignore it, being always JSON.
 	bodyIsText   bool
 	sendMaxBytes int
 	stats        *connect.MessageStats
@@ -176,15 +144,16 @@ type messageWriter struct {
 func (w *messageWriter) writeBody(message any) *connect.Error {
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
-	codec := w.codecs.forFrame(w.bodyIsText)
-	if codec == nil {
+	if err := w.codec.MarshalWrite(w.ctx, buffer, message); err != nil {
+		return errorf(connect.CodeInternal, "marshal message: %w", err)
+	}
+	// JSON is UTF-8 by construction; a custom text codec is checked, since
+	// the peer would otherwise fail the whole connection with 1007 (§6.1).
+	if w.bodyIsText && w.codec.Name() != connect.CodecNameJSON && !utf8.Valid(buffer.Bytes()) {
 		return errorf(
 			connect.CodeInternal,
-			"no %q codec to encode this body", encodingForFrame(w.bodyIsText),
+			"marshal message: codec %q produced invalid UTF-8 for a text frame", w.codec.Name(),
 		)
-	}
-	if err := codec.MarshalWrite(w.ctx, buffer, message); err != nil {
-		return errorf(connect.CodeInternal, "marshal message: %w", err)
 	}
 	if err := w.send(markerBody, w.bodyIsText, buffer.Bytes()); err != nil {
 		return err
@@ -208,7 +177,16 @@ func (w *messageWriter) writeJSON(marker byte, value any) *connect.Error {
 // writeEndStream sends the terminal message. Its EndStreamMessage schema is
 // shared with Connect over HTTP; only the framing around it differs.
 func (w *messageWriter) writeEndStream(err error, trailer http.Header) *connect.Error {
-	end := &connectwire.EndStreamMessage{Trailer: encodeTrailer(trailer)}
+	encoded, trailerErr := encodeTrailer(trailer)
+	if trailerErr != nil {
+		// As with an unsendable header: the trailers are dropped, and the
+		// unsendable one is the outcome unless the handler reported its own.
+		encoded = nil
+		if err == nil {
+			err = trailerErr
+		}
+	}
+	end := &connectwire.EndStreamMessage{Trailer: encoded}
 	if err != nil {
 		end.Error = connectwire.NewWireError(err)
 	}
@@ -217,7 +195,11 @@ func (w *messageWriter) writeEndStream(err error, trailer http.Header) *connect.
 
 // send encodes one message and hands it to the sender.
 func (w *messageWriter) send(marker byte, text bool, payload []byte) *connect.Error {
-	if w.sendMaxBytes > 0 && len(payload) > w.sendMaxBytes {
+	// §12 leaves the marker out of the limit, as Connect over HTTP leaves out
+	// its envelope, so one configured size means the same on both transports.
+	// Only an RPC message is limited: an M or S over it would leave the stream
+	// without its opening or its verdict, which §9 requires.
+	if marker == markerBody && w.sendMaxBytes > 0 && len(payload) > w.sendMaxBytes {
 		return errorf(
 			connect.CodeResourceExhausted,
 			"message size %d exceeds sendMaxBytes %d", len(payload), w.sendMaxBytes,
@@ -236,23 +218,6 @@ func (w *messageWriter) send(marker byte, text bool, payload []byte) *connect.Er
 	return nil
 }
 
-// newCodecPair resolves the codecs the frame type selects between. Either may
-// be missing — one encoding is a legitimate configuration — but not both, which
-// leaves no body this end could decode and no subprotocol it could negotiate.
-func newCodecPair(codecs []connect.Codec) (codecPair, *connect.Error) {
-	registry := newCodecRegistry(codecs)
-	binary, _ := registry.get(connect.CodecNameProto)
-	text, _ := registry.get(connect.CodecNameJSON)
-	if binary == nil && text == nil {
-		return codecPair{}, errorf(
-			connect.CodeUnknown,
-			"no %q or %q codec registered; WebSocket bodies carry one or the other",
-			connect.CodecNameProto, connect.CodecNameJSON,
-		)
-	}
-	return codecPair{binary: binary, text: text}, nil
-}
-
 // An M message's metadata is a JSON array of entries, each a key followed by
 // all of that key's values: [["acme-tenant","42"],["accept","a","b"]]. An
 // array is used instead of an object because some JSON parsers automatically
@@ -269,51 +234,127 @@ func newCodecPair(codecs []connect.Codec) (codecPair, *connect.Error) {
 const metadataBinarySuffix = "-bin"
 
 // encodeMetadata renders headers as M message entries, in key order so the
-// wire form is deterministic. Keys must be canonical, so no two collide.
-func encodeMetadata(header http.Header) [][]string {
+// wire form is deterministic. Keys must be canonical, so no two collide. A key
+// with no values is left out: §7.3.1 gives every entry at least one value.
+//
+// §7.3.1 binds the sender too, so a header that breaks its rules is refused
+// rather than sent for the peer to reject. Values are trimmed of surrounding
+// space and tab, which a sender should not send, and -bin values are sent
+// unpadded.
+func encodeMetadata(header http.Header) ([][]string, *connect.Error) {
 	entries := make([][]string, 0, len(header))
 	for _, key := range slices.Sorted(maps.Keys(header)) {
-		entries = append(entries, append([]string{strings.ToLower(key)}, header[key]...))
+		if len(header[key]) == 0 {
+			continue
+		}
+		lower := strings.ToLower(key)
+		if !validHeaderFieldName(lower) {
+			return nil, errorf(connect.CodeInternal, "metadata key %q is not a valid HTTP field name", key)
+		}
+		binary := strings.HasSuffix(lower, metadataBinarySuffix)
+		entry := make([]string, 0, 1+len(header[key]))
+		entry = append(entry, lower)
+		for _, value := range header[key] {
+			value = strings.Trim(value, " \t")
+			if binary {
+				value = strings.TrimRight(value, "=")
+				if _, err := base64.RawStdEncoding.DecodeString(value); err != nil {
+					return nil, errorf(
+						connect.CodeInternal, "metadata %q has a value that is not base64: %w", key, err,
+					)
+				}
+			} else if !validHeaderFieldValue(value) {
+				return nil, errorf(
+					connect.CodeInternal,
+					"metadata %q has a value that is not a valid HTTP field value; values are visible "+
+						"ASCII, space, and tab, and anything else goes base64-encoded under a -bin key", key,
+				)
+			}
+			entry = append(entry, value)
+		}
+		entries = append(entries, entry)
 	}
-	return entries
+	return entries, nil
+}
+
+// checkRequestMetadata refuses a header a client may not send in its M
+// message (§7.3.2). The server's deny list is its own, so only the default
+// one is known here.
+func checkRequestMetadata(header http.Header) *connect.Error {
+	for _, key := range slices.Sorted(maps.Keys(header)) {
+		if reason, reserved := reservedHeaderReason(key, defaultInfrastructureHeaders()); reserved {
+			return errorf(
+				connect.CodeInternal,
+				"request header %q cannot be sent over WebSocket: %s", key, reason,
+			)
+		}
+	}
+	return nil
 }
 
 // encodeTrailer renders trailers for an S message, whose EndStreamMessage
-// schema is shared with Connect over HTTP and so remains a JSON object.
-func encodeTrailer(trailer http.Header) http.Header {
-	encoded := make(http.Header, len(trailer))
+// schema is shared with Connect over HTTP and so remains a JSON object. Only a
+// server sends one, and §9 keeps connect- keys out of it. Names and values are
+// held to the rules an M message's are, so a receiver never sees a trailer it
+// would have to reject.
+func encodeTrailer(trailer http.Header) (http.Header, *connect.Error) {
+	sendable := make(http.Header, len(trailer))
 	for key, values := range trailer {
-		encoded[strings.ToLower(key)] = values
+		if !isConnectReserved(strings.ToLower(key)) {
+			sendable[key] = values
+		}
 	}
-	return encoded
+	entries, err := encodeMetadata(sendable)
+	if err != nil {
+		return nil, err
+	}
+	encoded := make(http.Header, len(entries))
+	for _, entry := range entries {
+		encoded[entry[0]] = entry[1:]
+	}
+	return encoded, nil
 }
 
-// decodeTrailer reads an S message's trailers, holding them to the same rules
-// as M metadata.
+// decodeTrailer reads an S message's trailers. They keep Connect-over-HTTP's
+// object form and its rules (§9), so they are held to the shared rules for
+// names and values but not to the M message's lower-case and non-empty ones.
 func decodeTrailer(trailer http.Header) (http.Header, *connect.Error) {
 	entries := make([][]string, 0, len(trailer))
 	for key, values := range trailer {
 		entries = append(entries, append([]string{key}, values...))
 	}
-	return decodeMetadata(entries)
+	return decodeEntries(entries, false)
 }
 
-// decodeMetadata reads metadata entries into an http.Header. Keys are
-// canonical MIME form in memory so that Go's own case-insensitive accessors
-// work; the case-insensitivity the protocol requires is theirs.
+// decodeMetadata reads an M message's entries into an http.Header, enforcing
+// §7.3.1: every key is lower-case and has at least one value, and no key
+// appears twice. Keys are canonical MIME form in memory so that Go's own
+// accessors work.
 func decodeMetadata(entries [][]string) (http.Header, *connect.Error) {
+	return decodeEntries(entries, true)
+}
+
+// decodeEntries holds entries to the rules every metadata key and value
+// shares; strict adds the M message's own. A -bin value is passed through as
+// base64 without being decoded: as over HTTP, a bad value surfaces when the
+// application decodes it (§7.3.1).
+func decodeEntries(entries [][]string, strict bool) (http.Header, *connect.Error) {
 	header := make(http.Header, len(entries))
-	// Keys that differ only in case are one key, so two of them collide here,
-	// as do two spelled identically.
 	spelling := make(map[string]string, len(entries))
 	for _, entry := range entries {
 		if len(entry) == 0 {
 			return nil, errorf(
-				connect.CodeInvalidArgument,
+				connect.CodeInternal,
 				"metadata entry is empty; an entry is a key followed by its values",
 			)
 		}
 		key, values := entry[0], entry[1:]
+		if strict && len(values) == 0 {
+			return nil, errorf(
+				connect.CodeInternal,
+				"metadata %q has no values; every key carries at least one, which may be empty", key,
+			)
+		}
 		canonical := http.CanonicalHeaderKey(key)
 		if first, duplicate := spelling[canonical]; duplicate {
 			return nil, duplicateMetadataKeyError(first, key)
@@ -321,33 +362,31 @@ func decodeMetadata(entries [][]string) (http.Header, *connect.Error) {
 		spelling[canonical] = key
 		if !validHeaderFieldName(key) {
 			return nil, errorf(
-				connect.CodeInvalidArgument,
+				connect.CodeInternal,
 				"metadata key %q is not a valid HTTP field name", key,
 			)
 		}
-		if !strings.HasSuffix(strings.ToLower(key), metadataBinarySuffix) {
-			for _, value := range values {
-				if !validHeaderFieldValue(value) {
-					return nil, errorf(
-						connect.CodeInvalidArgument,
-						"metadata %q has a value that is not a valid HTTP field value", key,
-					)
-				}
-			}
-			header[canonical] = values
-			continue
+		if strict && key != strings.ToLower(key) {
+			return nil, errorf(
+				connect.CodeInternal,
+				"metadata key %q is not lower-case; keys are lower-case on the wire", key,
+			)
 		}
-		for _, value := range values {
-			// §7.3.1: validated, not decoded. Senders must not pad, but
-			// receivers accept both forms.
-			if _, err := connect.DecodeBinaryHeader(value); err != nil {
+		// §7.3.1: every value is trimmed before delivery, -bin ones included;
+		// only the character rules are for text values alone.
+		binary := strings.HasSuffix(strings.ToLower(key), metadataBinarySuffix)
+		trimmed := make([]string, len(values))
+		for index, value := range values {
+			if !binary && !validHeaderFieldValue(value) {
 				return nil, errorf(
-					connect.CodeInvalidArgument,
-					"metadata %q is not base64: %w", key, err,
+					connect.CodeInternal,
+					"metadata %q has a value that is not a valid HTTP field value; "+
+						"values are visible ASCII, space, and tab", key,
 				)
 			}
+			trimmed[index] = strings.Trim(value, " \t")
 		}
-		header[canonical] = values
+		header[canonical] = trimmed
 	}
 	return header, nil
 }
@@ -375,13 +414,13 @@ func isTokenByte(char byte) bool {
 	return strings.IndexByte("!#$%&'*+-.^_`|~", char) >= 0
 }
 
-// validHeaderFieldValue rejects the bytes that would end or split a header
-// line downstream. A value carrying CR or LF is a header injection wherever
-// this metadata is forwarded as HTTP; NUL truncates it.
+// validHeaderFieldValue reports whether value holds only visible ASCII, space,
+// and tab (§7.3.1). RFC 9110's obs-text is excluded because a JSON string has
+// no byte form for it, and control bytes would end or split a forwarded header.
 func validHeaderFieldValue(value string) bool {
 	for index := range len(value) {
-		switch char := value[index]; char {
-		case '\r', '\n', 0:
+		char := value[index]
+		if char != '\t' && (char < ' ' || char > '~') {
 			return false
 		}
 	}
@@ -396,7 +435,7 @@ func duplicateMetadataKeyError(one, other string) *connect.Error {
 		one, other = other, one
 	}
 	return errorf(
-		connect.CodeInvalidArgument,
+		connect.CodeInternal,
 		"metadata keys %q and %q are the same key; a key carries all its values in one entry",
 		one, other,
 	)

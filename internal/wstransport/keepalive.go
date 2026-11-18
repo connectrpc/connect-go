@@ -32,10 +32,11 @@ const keepAliveMisses = 2
 // for the timeout.
 //
 // Silence is judged by the frameReader: any message or Pong is a sign of
-// life, and time spent holding a message this end has not yet taken does not
-// count against the peer.
+// life, and time spent with read-ahead full of messages this end has not yet
+// taken does not count against the peer.
 //
-// Every method is a no-op on a nil keepAlive, which is what a disabled one is.
+// stop and timedOut are no-ops on a nil keepAlive, which is what a disabled one
+// is.
 type keepAlive struct {
 	conn      *websocket.Conn
 	reader    *frameReader
@@ -104,6 +105,9 @@ func (k *keepAlive) timeout() time.Duration {
 func (k *keepAlive) run(ctx context.Context) {
 	defer close(k.done)
 	defer k.pings.Wait()
+	// Runs before the Wait above, so a Ping in flight on a dead connection
+	// ends now rather than at its timeout.
+	defer k.cancel()
 	ticker := time.NewTicker(k.interval)
 	defer ticker.Stop()
 	// A late tick can find the timeout already passed. Requiring a Ping an
@@ -112,6 +116,10 @@ func (k *keepAlive) run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-k.reader.ended:
+			// Nothing left to keep alive, and a caller that read to io.EOF
+			// will never call stop.
 			return
 		case now := <-ticker.C:
 			pinged := !lastPing.IsZero() && now.Sub(lastPing) >= k.interval

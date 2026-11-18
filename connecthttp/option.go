@@ -303,29 +303,6 @@ type withoutWebSocketOption struct{}
 
 func (withoutWebSocketOption) apply(o *options) { o.websocketDisabled = true }
 
-// WithWebSocketPrefix serves the WebSocket transport under prefix instead of
-// alongside HTTP on the same paths, so an upgrade is distinguishable from an
-// ordinary RPC by URL alone. Some load balancers need that to route WebSocket
-// traffic differently: sticky backends, longer idle timeouts, upgrade support
-// enabled.
-//
-// The bare procedure paths then stop accepting upgrades, and the prefixed ones
-// accept nothing else — a plain request to one is answered 426 Upgrade
-// Required. Both peers must agree on the value; a client passes the same
-// prefix to [NewTransport].
-func WithWebSocketPrefix(prefix string) Option {
-	return webSocketPrefixOption(prefix)
-}
-
-type webSocketPrefixOption string
-
-func (o webSocketPrefixOption) apply(opts *options) {
-	// Normalized here as well as in connectwebsocket: this package routes on
-	// the prefix and passes it there, so a difference in spelling would split
-	// the mux at one path and dial another.
-	opts.websocketPrefix = wstransport.NormalizePathPrefix(string(o))
-}
-
 // WithWebSocket routes the RPCs selector picks over WebSocket, and everything
 // else over HTTP. Without it a transport is HTTP-only.
 //

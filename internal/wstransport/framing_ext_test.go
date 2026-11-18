@@ -113,7 +113,7 @@ func pingOverRawFrames(tb testing.TB, text string, options ...wstransport.Server
 	// The request goes uncompressed: RSV1 is per message, so a peer may send
 	// plain frames even once the extension is negotiated.
 	assert.Nil(tb, writeClientFrame(conn, bodyFor(tb, &pingv1.PingRequest{Text: text}), false, false))
-	assert.Nil(tb, writeClientFrame(conn, []byte{wireClientEndStream}, false, false))
+	assert.Nil(tb, writeClientFrame(conn, []byte{wireClientEndStream}, false, true))
 
 	// Past the server's opening M, which is tiny and says nothing about how
 	// the response body was framed.
@@ -133,31 +133,33 @@ func openMessage() []byte {
 	return append([]byte{wireMetadata}, []byte("[]")...)
 }
 
-// A response comfortably over the threshold must actually go out compressed.
-func TestServerCompressesLargeResponse(t *testing.T) {
+// The server compresses a response comfortably over the threshold and skips
+// one under it, since deflate on a tiny payload costs bytes. Raising the
+// threshold, or WithoutCompression, turns it off for a payload that would
+// otherwise be compressed.
+func TestServerCompressionFollowsTheThreshold(t *testing.T) {
 	t.Parallel()
-	assert.True(t, pingOverRawFrames(t, strings.Repeat("compress me ", 1024)))
-}
-
-// One comfortably under it must not: deflate on a tiny payload costs bytes.
-func TestServerSkipsCompressionBelowThreshold(t *testing.T) {
-	t.Parallel()
-	assert.False(t, pingOverRawFrames(t, "tiny"))
-}
-
-// The threshold is the knob that decides, so raising it past a payload that
-// would otherwise be compressed must turn compression off for it.
-func TestCompressMinBytesMovesTheThreshold(t *testing.T) {
-	t.Parallel()
-	text := strings.Repeat("compress me ", 1024) // ~12KiB, compressed by default
-	assert.False(t, pingOverRawFrames(t, text, wstransport.WithCompressMinBytes(1<<20)))
-}
-
-// And WithoutCompression must stop it regardless of size.
-func TestWithoutCompressionLeavesRSV1Clear(t *testing.T) {
-	t.Parallel()
-	text := strings.Repeat("compress me ", 1024)
-	assert.False(t, pingOverRawFrames(t, text, wstransport.WithoutCompression()))
+	large := strings.Repeat("compress me ", 1024) // ~12KiB, compressed by default
+	for _, test := range []struct {
+		name    string
+		text    string
+		options []wstransport.ServerOption
+		want    bool
+	}{
+		{name: "over the threshold", text: large, want: true},
+		{name: "under the threshold", text: "tiny"},
+		{name: "threshold raised past it", text: large, options: []wstransport.ServerOption{
+			wstransport.WithCompressMinBytes(1 << 20),
+		}},
+		{name: "compression off", text: large, options: []wstransport.ServerOption{
+			wstransport.WithoutCompression(),
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, pingOverRawFrames(t, test.text, test.options...), test.want)
+		})
+	}
 }
 
 // A marker that belongs to the other direction is a different mistake from one
@@ -182,15 +184,15 @@ func TestWrongDirectionMarkerIsNamedAsSuch(t *testing.T) {
 
 			data := readServerOpening(t, conn)
 			assert.True(t, strings.Contains(string(data), test.want))
-			assert.True(t, strings.Contains(string(data), "invalid_argument"))
+			assert.True(t, strings.Contains(string(data), "internal"))
 		})
 	}
 }
 
-// RFC 6455 §8.1 requires every text message to be valid UTF-8, and §6.1 makes a
-// violation a protocol error. Nothing below this layer checks: a browser peer
-// would sever the connection itself, so a server that passed the bytes to a
-// codec would only ever see the bug in production.
+// RFC 6455 §8.1 requires every text message to be valid UTF-8, and §6.1 has
+// the receiver fail the connection with 1007 and no S message. Nothing below
+// this layer checks: a browser peer would sever the connection itself, so a
+// server that passed the bytes to a codec would only see the bug in production.
 func TestInvalidUTF8InATextMessageIsRejected(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
@@ -211,10 +213,12 @@ func TestInvalidUTF8InATextMessageIsRejected(t *testing.T) {
 			conn := dialCumSum(t, httpServer, "")
 			assert.Nil(t, conn.Write(t.Context(), websocket.MessageText, test.frame))
 
-			data := readServerOpening(t, conn)
-			assert.Equal(t, data[0], wireServerEndStream)
-			assert.True(t, strings.Contains(string(data), "invalid_argument"))
-			assert.True(t, strings.Contains(string(data), "not valid UTF-8"))
+			// No M and no S: the first thing back is the close.
+			readCtx, cancelRead := readContext(t)
+			defer cancelRead()
+			_, _, err := conn.Read(readCtx)
+			assert.Equal(t, websocket.CloseStatus(err), websocket.StatusInvalidFramePayloadData)
+			assert.True(t, strings.Contains(err.Error(), "not valid UTF-8"))
 
 			faults, _ := recorder.seen()
 			assert.Equal(t, len(faults), 1)
@@ -227,14 +231,48 @@ func TestInvalidUTF8InATextMessageIsRejected(t *testing.T) {
 // rejecting every text frame.
 func TestValidUTF8InATextMessageIsAccepted(t *testing.T) {
 	t.Parallel()
-	observations := make(chan string, 4)
-	httpServer := newObservationServer(t, observations)
-	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
-	// Multi-byte runes throughout: a snowman and an accented vowel.
-	sendJSONMessage(t, conn, wireMetadata, []byte(`[["acme-tenant","\u2603 caf\u00e9"]]`))
-	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+	httpServer := newHybridServer(t, pingServer{})
+	client := dialBrowserClientWithToken(
+		t, httpServer, pingv1connect.PingServicePingProcedure, "connectrpc.1+json")
+	// Multi-byte runes in a JSON body, since metadata values are ASCII
+	// (§7.3.1): a snowman and an accented vowel.
+	client.writeMessage(t, wireBody, true, []byte(`{"text":"☃ café"}`))
+	client.writeJSON(t, wireClientEndStream, nil)
 
-	assert.Equal(t, <-observations, "☃ café")
+	marker, _, _ := client.readMessage(t)
+	assert.Equal(t, marker, wireMetadata)
+	marker, body, text := client.readMessage(t)
+	assert.Equal(t, marker, wireBody)
+	assert.True(t, text)
+	assert.True(t, strings.Contains(string(body), "☃ café"))
+}
+
+// §6.1: an empty B payload goes to the codec like any other. Under JSON it
+// fails to decode, so it gets the same error as any malformed body.
+func TestEmptyJSONBodyIsADecodeFailure(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name    string
+		payload []byte
+	}{
+		{name: "empty", payload: nil},
+		{name: "truncated", payload: []byte("{")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			httpServer := newHybridServer(t, pingServer{})
+			client := dialBrowserClientWithToken(
+				t, httpServer, pingv1connect.PingServicePingProcedure, "connectrpc.1+json")
+			client.writeMessage(t, wireBody, true, test.payload)
+
+			marker, _, _ := client.readMessage(t)
+			assert.Equal(t, marker, wireMetadata)
+			marker, end, _ := client.readMessage(t)
+			assert.Equal(t, marker, wireServerEndStream)
+			assert.True(t, strings.Contains(string(end), "invalid_argument"))
+			assert.True(t, strings.Contains(string(end), "unmarshal message"))
+		})
+	}
 }
 
 // §13 assigns each fault a close code, and it is the only part of a verdict a
@@ -246,6 +284,8 @@ func TestFaultCloseCodeNamesTheFault(t *testing.T) {
 		name string
 		send func(testing.TB, *websocket.Conn)
 		want websocket.StatusCode
+		// noEndStream marks the one fault §6.1 closes on without a verdict.
+		noEndStream bool
 	}{
 		{
 			name: "unknown marker is a protocol error",
@@ -269,7 +309,8 @@ func TestFaultCloseCodeNamesTheFault(t *testing.T) {
 				tb.Helper()
 				sendJSONMessage(tb, conn, wireMetadata, []byte{'[', 0x80, ']'})
 			},
-			want: websocket.StatusInvalidFramePayloadData, // 1007
+			want:        websocket.StatusInvalidFramePayloadData, // 1007
+			noEndStream: true,
 		},
 		{
 			name: "an oversized message is too big",
@@ -293,8 +334,10 @@ func TestFaultCloseCodeNamesTheFault(t *testing.T) {
 			test.send(t, conn)
 
 			// The verdict comes first; the code only says which kind it was.
-			data := readServerOpening(t, conn)
-			assert.Equal(t, data[0], wireServerEndStream)
+			if !test.noEndStream {
+				data := readServerOpening(t, conn)
+				assert.Equal(t, data[0], wireServerEndStream)
+			}
 
 			readCtx, cancelRead := readContext(t)
 			defer cancelRead()
@@ -314,7 +357,7 @@ func TestMetadataInABinaryFrameIsRejected(t *testing.T) {
 
 	data := readServerOpening(t, conn)
 	assert.Equal(t, data[0], wireServerEndStream)
-	assert.True(t, strings.Contains(string(data), "invalid_argument"))
+	assert.True(t, strings.Contains(string(data), "internal"))
 	assert.True(t, strings.Contains(string(data), "binary frame"))
 	readCtx, cancelRead := readContext(t)
 	defer cancelRead()
@@ -414,7 +457,7 @@ func handshakeWithExtension(
 	sum := sha1.Sum([]byte(request.Header.Get("Sec-WebSocket-Key") + websocketGUID))
 	response := "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
 		"Sec-WebSocket-Accept: " + base64.StdEncoding.EncodeToString(sum[:]) + "\r\n" +
-		"Sec-WebSocket-Protocol: " + request.Header.Get("Sec-WebSocket-Protocol") + "\r\n"
+		"Sec-WebSocket-Protocol: " + firstOfferedSubprotocol(request) + "\r\n"
 	if extension != "" {
 		response += "Sec-WebSocket-Extensions: " + extension + "\r\n"
 	}
@@ -427,45 +470,24 @@ func handshakeWithExtension(
 	closes <- websocket.CloseError{Code: websocket.StatusCode(code), Reason: reason}
 }
 
-// The high bit is reserved for a later revision of the protocol, so a first
-// byte at or above 0x80 is refused before anything behind it is interpreted.
-// Holding it back is only worth anything if this revision actually rejects it:
-// a peer that accepted 0x80 today would make the signal unusable tomorrow.
-func TestMarkerHighBitIsReserved(t *testing.T) {
-	t.Parallel()
-	for _, first := range []byte{0x80, 0xC3, 0xF0, 0xFF} {
-		t.Run(fmt.Sprintf("0x%02x", first), func(t *testing.T) {
-			t.Parallel()
-			httpServer := newHybridServer(t, pingServer{})
-			conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
-			// Written as raw bytes: encoding this through a string would
-			// UTF-8 it into two bytes and test something else entirely.
-			assert.Nil(t, conn.Write(t.Context(), websocket.MessageBinary,
-				append([]byte{first}, 0x01, 0x02)))
-
-			data := readServerOpening(t, conn)
-			assert.Equal(t, data[0], wireServerEndStream)
-			assert.True(t, strings.Contains(string(data), "invalid_argument"))
-			assert.True(t, strings.Contains(string(data), "reserved high bit"))
-		})
-	}
-}
-
-// Every value below the high bit is a marker this revision has not assigned,
-// and an unassigned one is an unknown marker rather than something to skip.
+// §5.1: every byte but the four markers is unknown, and an unknown marker is a
+// protocol error rather than something to skip. Bytes with the high bit set get
+// no special treatment; in a binary frame they are simply unknown.
 func TestUnassignedMarkersAreUnknown(t *testing.T) {
 	t.Parallel()
-	for _, marker := range []byte{0x00, 0x01, 'A', 'Z', 0x7F} {
+	// One of each class: control, letter, DEL, and the high-bit range's ends.
+	for _, marker := range []byte{0x00, 'A', 0x7F, 0x80, 0xFF} {
 		t.Run(fmt.Sprintf("0x%02x", marker), func(t *testing.T) {
 			t.Parallel()
 			httpServer := newHybridServer(t, pingServer{})
-			conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
+			conn := dialCumSum(t, httpServer, "")
 			assert.Nil(t, conn.Write(t.Context(), websocket.MessageBinary,
 				append([]byte{marker}, 0x01)))
 
 			data := readServerOpening(t, conn)
 			assert.Equal(t, data[0], wireServerEndStream)
-			assert.True(t, strings.Contains(string(data), "invalid_argument"))
+			assert.True(t, strings.Contains(string(data), "internal"))
+			assert.True(t, strings.Contains(string(data), "unknown marker"))
 		})
 	}
 }

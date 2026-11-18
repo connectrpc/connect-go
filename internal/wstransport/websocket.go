@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package wstransport carries Connect RPCs over WebSocket. It multiplexes
-// every stream of a call onto one connection instead of the request per RPC
-// that HTTP forces, which is what makes bidirectional streaming work on
-// HTTP/1.1 and in browsers.
+// Package wstransport carries Connect RPCs over WebSocket, one RPC per
+// connection. Both directions stream at once, which is what makes
+// bidirectional streaming work on HTTP/1.1 and in browsers.
 //
 // The package is internal: Connect is protobuf-first, so which wire carries an
 // RPC is an implementation detail. [connectrpc.com/connect/v2/connecthttp]
@@ -26,11 +25,9 @@ package wstransport
 import (
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connectgzip"
 	"connectrpc.com/connect/v2/connectproto"
 	"github.com/coder/websocket"
 )
@@ -70,7 +67,7 @@ type ClientOption interface {
 	applyToClient(*options)
 }
 
-// ServerOption configures [Upgrade], [Mux], and [Mount].
+// ServerOption configures [Upgrade].
 type ServerOption interface {
 	applyToServer(*options)
 }
@@ -98,9 +95,25 @@ func WithEagerDial() ClientOption {
 	return clientOptionFunc(func(o *options) { o.eagerDial = true })
 }
 
-// WithHandshakeTimeout bounds the WebSocket handshake. Zero means no timeout.
-func WithHandshakeTimeout(timeout time.Duration) ClientOption {
-	return clientOptionFunc(func(o *options) { o.handshakeTimeout = timeout })
+// WithHandshakeTimeout bounds the WebSocket handshake. A server applies it to
+// the client's opening M message, which completes the handshake at the
+// protocol level: without it, a client that upgrades and then sends nothing
+// holds the connection until [WithMaxTimeout]. Zero means no timeout.
+func WithHandshakeTimeout(timeout time.Duration) Option {
+	return optionFunc(func(o *options) { o.handshakeTimeout = timeout })
+}
+
+// WithProcedure fixes the procedure an [Upgrade] handler serves, as a route
+// registered for one procedure does over HTTP. Without it the procedure is the
+// request path, which is wrong once a mux serves the route under a prefix.
+func WithProcedure(procedure string) ServerOption {
+	return serverOptionFunc(func(o *options) { o.procedure = procedure })
+}
+
+// WithTransportInfo sets what [connect.CallInfo.TransportInfo] carries for each
+// RPC, built from the handshake request.
+func WithTransportInfo(transportInfo func(*http.Request) any) ServerOption {
+	return serverOptionFunc(func(o *options) { o.transportInfo = transportInfo })
 }
 
 // WithCheckOrigin replaces the default origin check.
@@ -138,15 +151,15 @@ func WithSession(session Session) ServerOption {
 
 // ProtocolFault classifies a peer's framing mistake, so a monitor can tell a
 // client that consistently sends unknown markers from one that mismatches a
-// frame type once. The Connect code alone cannot: most framing faults are
-// InvalidArgument, separable only by matching message strings.
+// frame type once. The Connect code alone cannot: every framing fault is
+// Internal, separable only by matching message strings.
 type ProtocolFault int
 
 const (
 	// FaultUnknown is a peer fault this package has not classified.
 	FaultUnknown ProtocolFault = iota
-	// FaultMarker is a marker that is unknown, belongs to the other direction,
-	// or sets the reserved high bit.
+	// FaultMarker is a message that is empty, has an unknown marker or one for
+	// the other direction, or breaks the rules for C.
 	FaultMarker
 	// FaultFrameType is a frame whose type does not match its payload: an
 	// empty body in a text frame, or a message type that is neither.
@@ -213,51 +226,13 @@ func WithServerProtocolErrorHandler(handler ServerProtocolErrorHandler) ServerOp
 // mirror of [WithServerProtocolErrorHandler]: it reports a server that frames
 // its responses wrongly. A client has no equivalent of the logger or the
 // session wrapper, so without this a framing fault is visible only as the
-// InvalidArgument the RPC fails with.
+// Internal error the RPC fails with.
 func WithClientProtocolErrorHandler(handler ClientProtocolErrorHandler) ClientOption {
 	return clientOptionFunc(func(o *options) {
 		if handler != nil {
 			o.onClientProtocolError = handler
 		}
 	})
-}
-
-// WithPathPrefix serves WebSocket RPCs under a path prefix, so that every
-// upgrade on the wire is distinguishable by URL alone. Some load balancers
-// need that to route WebSocket traffic differently from ordinary requests —
-// sticky backends, longer idle timeouts, upgrade support enabled.
-//
-// Both ends need the same value: the client dials
-// baseURL + prefix + procedure, and the server registers its WebSocket
-// handlers there. Plain HTTP RPCs keep the bare procedure paths, and when a
-// prefix is set the bare paths no longer accept upgrades — a split the load
-// balancer can rely on is the entire point.
-//
-// A request under the prefix that is not an upgrade is answered
-// 426 Upgrade Required.
-//
-// The prefix is normalized to a single leading slash and no trailing slash, so
-// "ws", "/ws" and "/ws/" are the same. The empty string disables it, which is
-// the default.
-func WithPathPrefix(prefix string) Option {
-	return optionFunc(func(o *options) { o.pathPrefix = normalizePathPrefix(prefix) })
-}
-
-// NormalizePathPrefix makes a prefix safe to concatenate with a procedure,
-// which always begins with a slash. It is exported because connecthttp routes
-// on the same prefix it passes here, and the two must agree on the spelling.
-func NormalizePathPrefix(prefix string) string {
-	return normalizePathPrefix(prefix)
-}
-
-// normalizePathPrefix makes a prefix safe to concatenate with a procedure,
-// which always begins with a slash.
-func normalizePathPrefix(prefix string) string {
-	prefix = strings.Trim(prefix, "/")
-	if prefix == "" {
-		return ""
-	}
-	return "/" + prefix
 }
 
 // WithMaxTimeout bounds every RPC the handler serves. It is both the default
@@ -288,26 +263,11 @@ func WithCodecs(codecs ...connect.Codec) Option {
 	return optionFunc(func(o *options) { o.codecs = codecs })
 }
 
-// WithCompressors replaces the default gzip compressor on the HTTP half: the
-// client's fallback transport, and the handlers [Mount] registers. It has no
-// effect on WebSocket traffic, which uses the transport's own
-// permessage-deflate rather than a Connect content encoding.
-func WithCompressors(compressors ...connect.Compressor) Option {
-	return optionFunc(func(o *options) { o.compressors = compressors })
-}
-
 // WithSendCodec selects the codec for outgoing messages by name. It must name
 // one of the codecs in the set, and it also selects the WebSocket subprotocol
 // the client offers.
 func WithSendCodec(name string) ClientOption {
 	return clientOptionFunc(func(o *options) { o.sendCodec = name })
-}
-
-// WithSendCompression selects the compressor for outgoing messages on the HTTP
-// fallback. The empty string and [connect.CompressionNameIdentity] both mean
-// uncompressed. It has no effect on WebSocket traffic.
-func WithSendCompression(name string) ClientOption {
-	return clientOptionFunc(func(o *options) { o.sendCompression = name })
 }
 
 // WithoutCompression disables permessage-deflate on this side of the
@@ -365,7 +325,7 @@ func WithInfrastructureHeaders(names ...string) ServerOption {
 // See connecthttp.WithWebSocketKeepAlive.
 //
 // A peer heard nothing from for the timeout set by [WithKeepAliveTimeout] is
-// hung up on: 1011 from a server, 3102 from a client (§13.2). The RPC fails as
+// hung up on: 1011 from a server, 3102 from a client (§4.6). The RPC fails as
 // Unavailable on the client and Canceled on the server.
 //
 // Pongs are sent regardless of this setting. Either side may enable it alone.
@@ -416,15 +376,12 @@ type options struct {
 	onProtocolError       ServerProtocolErrorHandler
 	onClientProtocolError ClientProtocolErrorHandler
 	maxTimeout            time.Duration
-	pathPrefix            string
 	handshakeTimeout      time.Duration
 	checkOrigin           func(*http.Request) bool
 	eagerDial             bool
 	logger                *slog.Logger
 	codecs                []connect.Codec
-	compressors           []connect.Compressor
 	sendCodec             string
-	sendCompression       string
 	compressMinBytes      int
 	compressionDisabled   bool
 	readMaxBytes          int
@@ -433,13 +390,15 @@ type options struct {
 	keepAliveTimeout      time.Duration
 	infrastructureHeaders []string
 	httpClient            *http.Client
+	procedure             string
+	transportInfo         func(*http.Request) any
 }
 
 func defaultOptions() options {
 	return options{
 		handshakeTimeout: defaultHandshakeTimeout,
 		maxTimeout:       defaultMaxTimeout,
-		// nil defers to the WebSocket library's own same-origin check; see
+		// nil selects isSameOrigin, the RFC's default policy; see
 		// WithCheckOrigin.
 		checkOrigin:           nil,
 		logger:                slog.Default(),
@@ -448,7 +407,6 @@ func defaultOptions() options {
 			connectproto.NewBinaryCodec(),
 			connectproto.NewJSONCodec(),
 		},
-		compressors:       []connect.Compressor{connectgzip.New()},
 		sendCodec:         connect.CodecNameProto,
 		readMaxBytes:      defaultReadMaxBytes,
 		compressMinBytes:  defaultCompressMinBytes,

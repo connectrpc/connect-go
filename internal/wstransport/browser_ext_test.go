@@ -192,7 +192,7 @@ func newMetadataServer(tb testing.TB, seen chan http.Header) *httptest.Server {
 func TestBrowserLeadingMetadataMessage(t *testing.T) {
 	t.Parallel()
 	seen := make(chan http.Header, 1)
-	metadata, err := json.Marshal([][]string{{"Acme-Tenant", "tenant-42"}})
+	metadata, err := json.Marshal([][]string{{"acme-tenant", "tenant-42"}})
 	assert.Nil(t, err)
 	client := dialBrowserClientOpening(t, newMetadataServer(t, seen), pingProcedure, metadata)
 
@@ -246,11 +246,4 @@ func TestBrowserEndOfClientStreamMessage(t *testing.T) {
 	// A clean finish carries no error member.
 	_, hasError := end["error"]
 	assert.False(t, hasError)
-}
-
-// writeProtoEnd sends the final client message carrying a Protobuf body, which
-// follows the codec and is therefore a binary frame.
-func (c *browserClient) writeProtoEnd(tb testing.TB, payload []byte) {
-	tb.Helper()
-	c.writeMessage(tb, wireClientEndStream, false, payload)
 }

@@ -146,68 +146,73 @@ func (s trailerWritingServer) CumSum(
 	return nil
 }
 
-// A key differing only in case is the same key, so a client cannot use casing
-// to slip past the handshake's precedence.
-func TestMetadataKeysAreCaseInsensitive(t *testing.T) {
+// §7.3.1: keys are lower-case on the wire, as in HTTP/2, so a key with an
+// upper-case character is a protocol error rather than a second spelling.
+func TestUpperCaseMetadataKeyIsRejected(t *testing.T) {
 	t.Parallel()
-	observations := make(chan string, 4)
-	httpServer := newObservationServer(t, observations)
-	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
-	sendJSONMessage(t, conn, wireMetadata, []byte(`[["acme-tenant","lower-case-key"]]`))
-	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+	for _, key := range []string{"Acme-Tenant", "ACME-TENANT", "acme-Tenant"} {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+			httpServer := newHybridServer(t, pingServer{})
+			conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
+			sendJSONMessage(t, conn, wireMetadata, []byte(`[["`+key+`","x"]]`))
 
-	// observationServer reads "Acme-Tenant"; the client sent "acme-tenant".
-	assert.Equal(t, <-observations, "lower-case-key")
-}
-
-// A -bin value that is not base64 is a protocol error, not a value to pass
-// through: a receiver that accepted it would hand the application bytes the
-// sender never wrote.
-func TestUndecodableBinaryMetadataIsRejected(t *testing.T) {
-	t.Parallel()
-	httpServer := newHybridServer(t, pingServer{})
-	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
-	sendJSONMessage(t, conn, wireMetadata, []byte(`[["acme-token-bin","not!base64"]]`))
-
-	data := readServerOpening(t, conn)
-	assert.Equal(t, data[0], wireServerEndStream)
-	assert.True(t, strings.Contains(string(data), "invalid_argument"))
-	assert.True(t, strings.Contains(string(data), "base64"))
-}
-
-// Senders must not pad, but a receiver has to take both: the padding is
-// unambiguous, and refusing it fails an RPC over a value that decodes fine.
-func TestPaddedBinaryMetadataIsAccepted(t *testing.T) {
-	t.Parallel()
-	raw := []byte{0x00, 0xff}
-	server := connect.NewServer()
-	pingv1connect.RegisterPingServiceHandler(server, echoMetadataServer{
-		readKey: "Acme-Token-Bin", writeKey: "Acme-Echo-Bin",
-	})
-	mux := http.NewServeMux()
-	connecthttp.Mount(mux, server)
-	httpServer := httptest.NewServer(mux)
-	t.Cleanup(httpServer.Close)
-
-	// StdEncoding, so the value carries "=" padding a sender should not emit.
-	padded := base64.StdEncoding.EncodeToString(raw)
-	assert.True(t, strings.HasSuffix(padded, "="))
-
-	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
-	sendJSONMessage(t, conn, wireMetadata, []byte(`[["acme-token-bin","`+padded+`"]]`))
-	sendJSONMessage(t, conn, wireClientEndStream, nil)
-
-	data := readServerOpening(t, conn)
-	assert.Equal(t, data[0], wireServerEndStream)
-	var end struct {
-		Metadata map[string][]string `json:"metadata"`
+			data := readServerOpening(t, conn)
+			assert.Equal(t, data[0], wireServerEndStream)
+			assert.True(t, strings.Contains(string(data), "internal"))
+			assert.True(t, strings.Contains(string(data), "not lower-case"))
+		})
 	}
-	assert.Nil(t, json.Unmarshal(data[1:], &end))
-	echoed, ok := end.Metadata["acme-echo-bin"]
-	assert.True(t, ok)
-	assert.Equal(t, len(echoed), 1)
-	// The handler saw the value as sent, padding and all, and echoed it.
-	assert.Equal(t, echoed[0], padded)
+}
+
+// §7.3.1: as over HTTP, a -bin value is not decoded on arrival. It reaches the
+// application as sent, and fails, if at all, only when decoded there.
+func TestBinaryMetadataPassesThroughUndecoded(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		value string
+	}{
+		{
+			// Senders must not pad, but the padding is unambiguous, and refusing
+			// it would fail an RPC over a value that decodes fine.
+			name:  "padded",
+			value: base64.StdEncoding.EncodeToString([]byte{0x00, 0xff}),
+		},
+		{name: "not base64", value: "not!base64"},
+		{
+			// What a -bin value decodes to is not a field value, so the
+			// field-value rule cannot apply to it.
+			name:  "decodes to bytes no field value may hold",
+			value: base64.RawStdEncoding.EncodeToString([]byte{'\r', '\n', 0x00, 0xff}),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			server := connect.NewServer()
+			pingv1connect.RegisterPingServiceHandler(server, echoMetadataServer{
+				readKey: "Acme-Token-Bin", writeKey: "Acme-Echo",
+			})
+			mux := http.NewServeMux()
+			connecthttp.Mount(mux, server)
+			httpServer := httptest.NewServer(mux)
+			t.Cleanup(httpServer.Close)
+
+			conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
+			sendJSONMessage(t, conn, wireMetadata, []byte(`[["acme-token-bin","`+test.value+`"]]`))
+			sendJSONMessage(t, conn, wireClientEndStream, nil)
+
+			data := readServerOpening(t, conn)
+			assert.Equal(t, data[0], wireServerEndStream)
+			var end struct {
+				Error    json.RawMessage     `json:"error"`
+				Metadata map[string][]string `json:"metadata"`
+			}
+			assert.Nil(t, json.Unmarshal(data[1:], &end))
+			assert.Equal(t, len(end.Error), 0)
+			assert.Equal(t, end.Metadata["acme-echo"], []string{test.value})
+		})
+	}
 }
 
 // Two entries whose keys fold to one would leave the receiver to choose between
@@ -229,7 +234,7 @@ func TestDuplicateMetadataKeysAreRejected(t *testing.T) {
 
 			data := readServerOpening(t, conn)
 			assert.Equal(t, data[0], wireServerEndStream)
-			assert.True(t, strings.Contains(string(data), "invalid_argument"))
+			assert.True(t, strings.Contains(string(data), "internal"))
 			assert.True(t, strings.Contains(string(data), "same key"))
 		})
 	}
@@ -271,6 +276,17 @@ func TestMalformedMetadataNamesAndValuesAreRejected(t *testing.T) {
 			payload: `[["acme-tenant","a\u0000b"]]`,
 			mention: "field value",
 		},
+		{
+			// RFC 9110 allows obs-text, but a JSON string has no byte form for it.
+			name:    "non-ASCII in the value",
+			payload: `[["acme-tenant","café"]]`,
+			mention: "field value",
+		},
+		{
+			name:    "DEL in the value",
+			payload: `[["acme-tenant","a\u007fb"]]`,
+			mention: "field value",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -280,38 +296,10 @@ func TestMalformedMetadataNamesAndValuesAreRejected(t *testing.T) {
 
 			data := readServerOpening(t, conn)
 			assert.Equal(t, data[0], wireServerEndStream)
-			assert.True(t, strings.Contains(string(data), "invalid_argument"))
+			assert.True(t, strings.Contains(string(data), "internal"))
 			assert.True(t, strings.Contains(string(data), test.mention))
 		})
 	}
-}
-
-// A -bin value holds arbitrary bytes, so the field-value rule cannot apply to
-// it: base64 is what carries them, and what it decodes to is not a field value.
-func TestBinaryMetadataMayDecodeToAnyBytes(t *testing.T) {
-	t.Parallel()
-	raw := string([]byte{'\r', '\n', 0x00, 0xff})
-	server := connect.NewServer()
-	pingv1connect.RegisterPingServiceHandler(server, echoMetadataServer{
-		readKey: "Acme-Token-Bin", writeKey: "Acme-Echo-Bin",
-	})
-	mux := http.NewServeMux()
-	connecthttp.Mount(mux, server)
-	httpServer := httptest.NewServer(mux)
-	t.Cleanup(httpServer.Close)
-
-	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
-	encoded := base64.RawStdEncoding.EncodeToString([]byte(raw))
-	sendJSONMessage(t, conn, wireMetadata, []byte(`[["acme-token-bin","`+encoded+`"]]`))
-	sendJSONMessage(t, conn, wireClientEndStream, nil)
-
-	data := readServerOpening(t, conn)
-	assert.Equal(t, data[0], wireServerEndStream)
-	var end struct {
-		Metadata map[string][]string `json:"metadata"`
-	}
-	assert.Nil(t, json.Unmarshal(data[1:], &end))
-	assert.Equal(t, end.Metadata["acme-echo-bin"], []string{encoded})
 }
 
 // An entry is an array of strings, the key first. Anything else, including the
@@ -343,8 +331,9 @@ func TestMalformedMetadataEntriesAreRejected(t *testing.T) {
 	}
 }
 
-// One entry carries every value of its key, and a key with no values is
-// valid metadata.
+// One entry carries every value of its key. §7.3.1 gives every key at least
+// one value, and an empty string is one. Leading and trailing whitespace is
+// not part of a value, as in RFC 9110 §5.5.
 func TestMetadataEntryCarriesAllItsValues(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
@@ -353,7 +342,10 @@ func TestMetadataEntryCarriesAllItsValues(t *testing.T) {
 		want    []string
 	}{
 		{name: "several values", payload: `[["acme-tenant","a","b"]]`, want: []string{"a", "b"}},
-		{name: "no values", payload: `[["acme-tenant"]]`, want: []string{}},
+		{name: "one empty value", payload: `[["acme-tenant",""]]`, want: []string{""}},
+		{name: "tab inside a value", payload: `[["acme-tenant","a\tb"]]`, want: []string{"a\tb"}},
+		{name: "surrounding whitespace", payload: `[["acme-tenant"," \ta b\t ","c "]]`, want: []string{"a b", "c"}},
+		{name: "whitespace only", payload: `[["acme-tenant"," \t "]]`, want: []string{""}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -384,6 +376,20 @@ func TestMetadataEntryCarriesAllItsValues(t *testing.T) {
 			}
 		})
 	}
+}
+
+// §7.3.1: an entry that holds only a key is a protocol error. A sender that
+// means "present but empty" sends an empty string.
+func TestMetadataKeyWithoutValuesIsRejected(t *testing.T) {
+	t.Parallel()
+	httpServer := newHybridServer(t, pingServer{})
+	conn := dialRaw(t, httpServer, pingv1connect.PingServiceCumSumProcedure)
+	sendJSONMessage(t, conn, wireMetadata, []byte(`[["acme-tenant"]]`))
+
+	data := readServerOpening(t, conn)
+	assert.Equal(t, data[0], wireServerEndStream)
+	assert.True(t, strings.Contains(string(data), "internal"))
+	assert.True(t, strings.Contains(string(data), "has no values"))
 }
 
 // A sender puts every value of a key in one entry, with the key lower-case.
