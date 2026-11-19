@@ -16,14 +16,11 @@ package wstransport
 
 import (
 	"context"
-	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"connectrpc.com/connect/v2"
@@ -77,28 +74,31 @@ func NewTransport(baseURL string, options ...ClientOption) (connect.Transport, e
 	return &clientTransport{
 		baseURL:    parsed,
 		httpClient: opts.httpClient,
-		codecs:     codecs,
 		sendCodec:  sendCodec,
-		offered:    offered,
-		opts:       &opts,
+		dial: &dialConfig{
+			offered:           offered,
+			codecs:            codecs,
+			handshakeTimeout:  opts.handshakeTimeout,
+			readLimit:         messageReadLimit(opts.readMaxBytes),
+			keepAliveInterval: opts.keepAliveInterval,
+			keepAliveTimeout:  opts.keepAliveTimeout,
+		},
+		opts: &opts,
 	}, nil
 }
 
 type clientTransport struct {
 	baseURL    *url.URL
 	httpClient *http.Client
-	codecs     registry[connect.Codec]
 	sendCodec  connect.Codec
-	// offered lists the tokens to offer, most preferred first: the send
-	// codec's, then every other registered codec's in registration order.
-	offered []string
-	opts    *options
+	dial       *dialConfig
+	opts       *options
 }
 
 // offeredSubprotocols returns a copy of the tokens to offer, for a call's dial
 // options to keep without sharing the transport's slice.
 func (t *clientTransport) offeredSubprotocols() []string {
-	return slices.Clone(t.offered)
+	return slices.Clone(t.dial.offered)
 }
 
 // encodeTimeout renders the context's deadline for the connect-timeout-ms
@@ -128,8 +128,13 @@ func encodeTimeout(ctx context.Context) (string, bool) {
 func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec) (connect.ClientStream, error) {
 	info, _ := connect.CallInfoForClientContext(ctx)
 	dialURL := t.dialURL(ctx, spec)
-	call := t.newCall(ctx, dialURL)
+	call := t.newCall(dialURL)
 	conn := &websocketClientConn{
+		ctx: ctx,
+		frameDecoder: frameDecoder{
+			fromServer:   true,
+			readMaxBytes: t.opts.readMaxBytes,
+		},
 		call: call,
 		marshaler: messageWriter{
 			// No compression here: permessage-deflate compresses whole messages
@@ -137,15 +142,8 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 			sender:       call,
 			sendMaxBytes: t.opts.sendMaxBytes,
 		},
-		unmarshaler: websocketClientUnmarshaler{
-			frameDecoder: frameDecoder{
-				fromServer:   true,
-				readMaxBytes: t.opts.readMaxBytes,
-			},
-			call:            call,
-			spec:            spec,
-			onProtocolError: t.opts.onClientProtocolError,
-		},
+		spec:            spec,
+		onProtocolError: t.opts.onClientProtocolError,
 		callInfo:        info,
 		responseHeader:  make(http.Header),
 		responseTrailer: make(http.Header),
@@ -153,7 +151,7 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 	if info != nil {
 		info.Spec = spec
 		conn.marshaler.stats = &info.SendStats
-		conn.unmarshaler.stats = &info.ReceiveStats
+		conn.receiveStats = &info.ReceiveStats
 		info.PeerAddr = dialURL.Host
 		info.Protocol = ProtocolConnectWebSocket
 		info.Codec = t.opts.sendCodec
@@ -164,7 +162,7 @@ func (t *clientTransport) NewClientStream(ctx context.Context, spec connect.Spec
 		// somewhere else to send the RPC and needs the answer here, while that
 		// choice is still open: once this returns a stream, the upgrade error
 		// would surface from Send and the choice would be gone.
-		if err := call.ensureDialed(); err != nil {
+		if err := call.ensureDialed(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -189,13 +187,12 @@ func (t *clientTransport) dialURL(ctx context.Context, spec connect.Spec) *url.U
 }
 
 // newCall prepares, but does not dial, the connection for one RPC.
-func (t *clientTransport) newCall(ctx context.Context, dialURL *url.URL) *wsClientCall {
-	drain := newDrainLimiter(messageReadLimit(t.opts.readMaxBytes))
+func (t *clientTransport) newCall(dialURL *url.URL) *wsClientCall {
+	drain := newDrainLimiter(t.dial.readLimit)
 	beat := &heartbeat{}
 	return &wsClientCall{
 		heartbeat: beat,
-		ctx:       ctx,
-		transport: t,
+		config:    t.dial,
 		drain:     drain,
 		dialOptions: &websocket.DialOptions{
 			HTTPClient: withDrainLimiter(t.httpClient, drain),
@@ -214,117 +211,4 @@ func (t *clientTransport) newCall(ctx context.Context, dialURL *url.URL) *wsClie
 		url:   dialURL,
 		codec: t.sendCodec,
 	}
-}
-
-// clientStream adapts [websocketClientConn] to [connect.ClientStream].
-type clientStream struct {
-	conn           *websocketClientConn
-	singleResponse bool
-	// received marks the one response a single-response call has read.
-	received bool
-	// Close may run concurrently with Receive by contract, and both publish.
-	// A sync.Once rather than a flag: the ordering that makes a plain bool
-	// safe today is incidental — Close publishes before touching the conn and
-	// Receive after — and moving either call would break it silently.
-	publishOnce        sync.Once
-	publishHeadersOnce sync.Once
-}
-
-// SendHeaders dials and writes the M message that opens the
-// stream, which is what actually transmits the request metadata.
-func (s *clientStream) SendHeaders() error {
-	if err := s.conn.call.ensureDialed(); err != nil {
-		return err
-	}
-	if err := s.conn.open(); err != nil {
-		return err
-	}
-	return nil // literal nil; a nil *connect.Error is a non-nil error
-}
-
-func (s *clientStream) Send(msg any) error {
-	return s.conn.Send(msg)
-}
-
-func (s *clientStream) CloseSend() error {
-	return s.conn.CloseRequest()
-}
-
-func (s *clientStream) Receive(msg any) error {
-	err := s.conn.Receive(msg)
-	if err != nil {
-		// Reading to completion is what makes response metadata available.
-		s.publishMetadata()
-		// §6.2: a unary or client-streaming call returns exactly one message,
-		// so a successful end with none is a cardinality error, as over HTTP.
-		if s.singleResponse && !s.received && errors.Is(err, io.EOF) {
-			return connect.Errorf(connect.CodeUnimplemented, "unary stream has zero messages")
-		}
-		return err
-	}
-	// Leading metadata has arrived by now, and connecthttp makes it readable at
-	// exactly this point: after the first Receive, not before.
-	s.publishHeadersOnce.Do(s.publishHeaders)
-	if s.singleResponse {
-		s.received = true
-		// Such a caller receives exactly once, so nothing would ever read the
-		// end-of-stream message — and the trailers it carries would be lost. A
-		// server-streaming caller reaches it by reading to io.EOF. A second
-		// message where the S belongs is decoded into msg only to be refused.
-		endErr := s.conn.Receive(msg)
-		s.publishMetadata()
-		if endErr == nil {
-			return connect.Errorf(connect.CodeUnimplemented, "unary stream has multiple messages")
-		}
-		if !errors.Is(endErr, io.EOF) {
-			return endErr
-		}
-	}
-	return nil
-}
-
-// Close ends the stream without sending C: a client that closes before S
-// without sending C cancels the RPC (§8), and one that has S needs no C. A
-// stream that never dialed is closed without dialing.
-func (s *clientStream) Close() error {
-	dialed := s.conn.call.preventDial()
-	s.publishMetadata()
-	if !dialed {
-		return nil
-	}
-	return s.conn.CloseResponse()
-}
-
-// publishMetadata copies the response metadata onto the call's [connect.CallInfo],
-// where callers read it. It runs once.
-//
-// The write happens during Receive, so a caller reading CallInfo from another
-// goroutine while receiving on the same stream races it. That is not specific
-// to this transport — connecthttp writes the same object from inside its own
-// Receive — so it is left to be fixed where connect.Header is defined rather
-// than papered over here; see "Current limitations" in
-// docs/websocket-transport-design.md.
-func (s *clientStream) publishMetadata() {
-	if s.conn.callInfo == nil {
-		return
-	}
-	s.publishOnce.Do(s.publish)
-}
-
-func (s *clientStream) publishHeaders() {
-	if s.conn.callInfo == nil {
-		return
-	}
-	for key, values := range s.conn.ResponseHeader() {
-		s.conn.callInfo.ResponseHeader().SetValues(key, values)
-	}
-}
-
-func (s *clientStream) publish() {
-	s.publishHeadersOnce.Do(s.publishHeaders)
-	for key, values := range s.conn.ResponseTrailer() {
-		s.conn.callInfo.ResponseTrailer().SetValues(key, values)
-	}
-	// Identity at the Connect layer: permessage-deflate is below the protocol.
-	s.conn.callInfo.ResponseEncoding = connect.CompressionNameIdentity
 }

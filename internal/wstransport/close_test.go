@@ -77,10 +77,8 @@ func TestCloseSwallowsTheWriteErrorWhenThePeerIsGone(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			conn := &websocketHandlerConn{
-				unmarshaler: websocketUnmarshaler{
-					eof:                  test.eof,
-					sawEndOfClientStream: test.sawEnd,
-				},
+				eof:                  test.eof,
+				sawEndOfClientStream: test.sawEnd,
 			}
 			writeErr := errorf(connect.CodeUnknown, "write message: %s", deadSender{}.reason())
 			got := conn.terminalWriteError(writeErr)
@@ -211,9 +209,7 @@ func TestSendReportsAFailedBodyWrite(t *testing.T) {
 		marshaler: messageWriter{
 			sender: deadSender{},
 		},
-		unmarshaler: websocketUnmarshaler{
-			info: SessionInfo{Codec: connectproto.NewBinaryCodec()},
-		},
+		info:        SessionInfo{Codec: connectproto.NewBinaryCodec()},
 		leadingSent: true, // isolate the body write from the metadata write
 	}
 
@@ -243,16 +239,14 @@ func TestReadFailureAtTheDeadlineIsDeadlineExceeded(t *testing.T) {
 	// Closed before the read, so the failure needs no timing of its own.
 	_ = clientConn.CloseNow()
 
-	call := &wsClientCall{
-		ctx:    pastDeadlineContext{Context: t.Context()},
-		wsConn: clientConn,
-	}
+	ctx := pastDeadlineContext{Context: t.Context()}
+	call := &wsClientCall{wsConn: clientConn}
 	call.dialOnce.Do(func() {}) // consume it, so ensureDialed will not dial
-	call.reader = newFrameReader(call.ctx, clientConn.Read, nil)
+	call.reader = newFrameReader(ctx, clientConn.Read, nil)
 	t.Cleanup(call.reader.close)
 
-	unmarshaler := &websocketClientUnmarshaler{call: call}
-	_, err := unmarshaler.unmarshal(&pingv1.CumSumResponse{})
+	conn := &websocketClientConn{ctx: ctx, call: call}
+	_, err := conn.unmarshal(&pingv1.CumSumResponse{})
 
 	assert.NotNil(t, err)
 	assert.Equal(t, err.Code(), connect.CodeDeadlineExceeded)

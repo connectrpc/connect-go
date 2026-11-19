@@ -156,8 +156,9 @@ func WithSession(session Session) ServerOption {
 type ProtocolFault int
 
 const (
-	// FaultUnknown is a peer fault this package has not classified.
-	FaultUnknown ProtocolFault = iota
+	// faultNone is the zero value: nothing has been classified. A protocol
+	// error handler never receives it.
+	faultNone ProtocolFault = iota
 	// FaultMarker is a message that is empty, has an unknown marker or one for
 	// the other direction, or breaks the rules for C.
 	FaultMarker
@@ -188,7 +189,7 @@ func (f ProtocolFault) String() string {
 		return "message_encoding"
 	case FaultTextEncoding:
 		return "text_encoding"
-	case FaultUnknown:
+	case faultNone:
 		return "unknown"
 	default:
 		return "unknown"

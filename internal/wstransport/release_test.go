@@ -108,17 +108,17 @@ func TestResponseMetadataIsSafeDuringReceive(t *testing.T) {
 	call := &wsClientCall{}
 	call.preventDial()
 	conn := &websocketClientConn{
+		ctx:             t.Context(),
 		call:            call,
-		unmarshaler:     websocketClientUnmarshaler{call: call},
+		trailer:         http.Header{"Trail": {"value"}},
 		responseHeader:  make(http.Header),
 		responseTrailer: make(http.Header),
 	}
-	conn.unmarshaler.trailer = http.Header{"Trail": {"value"}}
 	receiveDone := make(chan struct{})
 	go func() {
 		defer close(receiveDone)
-		assert.Nil(t, conn.unmarshaler.mergeLeadingMetadata([]byte(`[["lead","value"]]`)))
-		conn.unmarshaler.endStreamSeen.Store(true)
+		assert.Nil(t, conn.mergeLeadingMetadata([]byte(`[["lead","value"]]`)))
+		conn.endStreamSeen.Store(true)
 		_ = conn.Receive(nil)
 	}()
 	for key := range conn.ResponseHeader() {

@@ -96,13 +96,11 @@ func TestCloseReportsAMessageReadAfterEndOfClientStream(t *testing.T) {
 				marshaler: messageWriter{
 					sender: sender,
 				},
-				unmarshaler: websocketUnmarshaler{
-					frameDecoder:         frameDecoder{readMaxBytes: 1024},
-					reader:               reader,
-					eof:                  true,
-					sawEndOfClientStream: true,
-				},
-				leadingSent: true,
+				frameDecoder:         frameDecoder{readMaxBytes: 1024},
+				reader:               reader,
+				eof:                  true,
+				sawEndOfClientStream: true,
+				leadingSent:          true,
 			}
 			closed := make(chan error, 1)
 			go func() { closed <- conn.Close(t.Context(), nil) }()

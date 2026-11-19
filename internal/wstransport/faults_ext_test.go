@@ -64,8 +64,18 @@ func (r *faultRecorder) seen() ([]connecthttp.ProtocolFault, []string) {
 // newFaultServer mounts a server whose framing faults are reported to recorder.
 func newFaultServer(tb testing.TB, recorder *faultRecorder) *httptest.Server {
 	tb.Helper()
+	return newFaultServerFor(tb, recorder, pingServer{})
+}
+
+// newFaultServerFor is newFaultServer with the given handler.
+func newFaultServerFor(
+	tb testing.TB,
+	recorder *faultRecorder,
+	handler pingv1connect.PingServiceHandler,
+) *httptest.Server {
+	tb.Helper()
 	server := connect.NewServer()
-	pingv1connect.RegisterPingServiceHandler(server, pingServer{})
+	pingv1connect.RegisterPingServiceHandler(server, handler)
 	mux := http.NewServeMux()
 	connecthttp.Mount(mux, server,
 		connecthttp.WithReadMaxBytes(1024),
@@ -172,9 +182,55 @@ func TestProtocolFaultsAreClassified(t *testing.T) {
 			_ = readErr
 
 			faults, peers := recorder.seen()
-			assert.Equal(t, len(faults), 1)
-			assert.Equal(t, faults[0], test.want)
-			assert.True(t, strings.HasPrefix(peers[0], "127.0.0.1:"))
+			assert.Equal(t, faults, []connecthttp.ProtocolFault{test.want})
+			for _, peer := range peers {
+				assert.True(t, strings.HasPrefix(peer, "127.0.0.1:"))
+			}
+		})
+	}
+}
+
+// §8: a message after C is the client's framing mistake, so the monitor hears
+// of it like any other, under the classification its close code reflects.
+func TestMessageAfterEndOfClientStreamIsReported(t *testing.T) {
+	t.Parallel()
+	message, err := proto.Marshal(&pingv1.CumSumRequest{Number: 2})
+	assert.Nil(t, err)
+	for _, test := range []struct {
+		name      string
+		payload   []byte
+		want      connecthttp.ProtocolFault
+		wantClose websocket.StatusCode
+	}{
+		{
+			name:      "message",
+			payload:   message,
+			want:      connecthttp.FaultMarker,
+			wantClose: websocket.StatusProtocolError,
+		},
+		{
+			name:      "message past the read limit",
+			payload:   make([]byte, 4096),
+			want:      connecthttp.FaultSizeLimit,
+			wantClose: websocket.StatusMessageTooBig,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			recorder := &faultRecorder{}
+			// The late answer keeps the RPC open until the message after C has
+			// arrived, so Close is certain to find it.
+			httpServer := newFaultServerFor(t, recorder, lateAnswerServer{delay: 300 * time.Millisecond})
+			conn := dialCumSum(t, httpServer, "")
+			sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+			sendJSONMessage(t, conn, wireClientEndStream, nil)
+			// The server may hang up before an oversized write finishes.
+			_ = conn.Write(t.Context(), websocket.MessageBinary, append([]byte{wireBody}, test.payload...))
+
+			// The close follows the S, which follows the report.
+			assert.Equal(t, readCloseStatus(t, conn), test.wantClose)
+			faults, _ := recorder.seen()
+			assert.Equal(t, faults, []connecthttp.ProtocolFault{test.want})
 		})
 	}
 }
@@ -358,9 +414,8 @@ func TestClientProtocolFaultsAreClassified(t *testing.T) {
 			assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
 
 			faults, procedures := recorder.seen()
-			assert.Equal(t, len(faults), 1)
-			assert.Equal(t, faults[0], test.want)
-			assert.Equal(t, procedures[0], pingv1connect.PingServiceCumSumProcedure)
+			assert.Equal(t, faults, []connecthttp.ProtocolFault{test.want})
+			assert.Equal(t, procedures, []string{pingv1connect.PingServiceCumSumProcedure})
 		})
 	}
 }

@@ -16,8 +16,6 @@ package wstransport
 
 import (
 	"context"
-	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -106,6 +104,9 @@ func (s *session) Serve(
 	)
 	defer keeper.stop()
 	handlerConn := &websocketHandlerConn{
+		frameDecoder: frameDecoder{
+			readMaxBytes: info.ReadMaxBytes,
+		},
 		ctx:    ctx,
 		wsConn: conn,
 		marshaler: messageWriter{
@@ -115,16 +116,11 @@ func (s *session) Serve(
 			sendMaxBytes: info.SendMaxBytes,
 			stats:        &callInfo.SendStats,
 		},
-		unmarshaler: websocketUnmarshaler{
-			frameDecoder: frameDecoder{
-				readMaxBytes: info.ReadMaxBytes,
-			},
-			reader:     reader,
-			keeper:     keeper,
-			callInfo:   callInfo,
-			cancelCall: cancelCall,
-			info:       info,
-		},
+		reader:       reader,
+		keeper:       keeper,
+		callInfo:     callInfo,
+		cancelCall:   cancelCall,
+		info:         info,
 		shuttingDown: func() bool { return isShuttingDown(serveCtx) },
 	}
 
@@ -150,7 +146,7 @@ func (s *session) Serve(
 	// Consume the client's Leading-Metadata before the handler exists, so
 	// CallInfo is complete for interceptors and frozen for the handler. See
 	// drainLeadingMetadata.
-	if drainErr := handlerConn.unmarshaler.drainLeadingMetadata(ctx); drainErr != nil {
+	if drainErr := handlerConn.drainLeadingMetadata(ctx); drainErr != nil {
 		return handlerConn.Close(ctx, drainErr)
 	}
 
@@ -213,52 +209,6 @@ func registeredSpec(server *connect.Server, procedure string) (connect.Spec, boo
 		}
 	}
 	return connect.Spec{}, false
-}
-
-// serverStream adapts [websocketHandlerConn] to [connect.ServerStream].
-type serverStream struct {
-	conn *websocketHandlerConn
-	// singleRequest marks a unary or server-streaming call, whose one request
-	// Receive checks is followed by C, as connecthttp does.
-	singleRequest bool
-	received      bool
-}
-
-func (s *serverStream) Receive(msg any) error {
-	if !s.singleRequest {
-		return s.conn.Receive(msg)
-	}
-	if s.received {
-		return io.EOF
-	}
-	s.received = true
-	if err := s.conn.Receive(msg); err != nil {
-		if errors.Is(err, io.EOF) {
-			return connect.Errorf(connect.CodeUnimplemented, "unary request has zero messages")
-		}
-		return err
-	}
-	// Reading on to C is also what starts the post-C reads that §8.1 requires,
-	// since the handler never reads again.
-	if err := s.conn.Receive(msg); err == nil {
-		return connect.Errorf(connect.CodeUnimplemented, "unary request has multiple messages")
-	} else if !errors.Is(err, io.EOF) {
-		return err
-	}
-	return nil
-}
-
-// SendHeaders sends the M message now, before any body (§7.4). Headers set
-// after it are late and are not sent.
-func (s *serverStream) SendHeaders() error {
-	if err := s.conn.flushLeadingMetadata(s.conn.ctx); err != nil {
-		return err
-	}
-	return nil // literal nil; a nil *connect.Error is a non-nil error
-}
-
-func (s *serverStream) Send(msg any) error {
-	return s.conn.Send(msg)
 }
 
 // rawQueryValues returns every value of name in a raw query string. Unlike

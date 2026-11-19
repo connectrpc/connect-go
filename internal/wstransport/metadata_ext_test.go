@@ -268,6 +268,5 @@ func TestSecondServerLeadingMetadataIsRejected(t *testing.T) {
 	assert.True(t, strings.Contains(receiveErr.Error(), "second M message"))
 
 	faults, _ := recorder.seen()
-	assert.Equal(t, len(faults), 1)
-	assert.Equal(t, faults[0], wstransport.FaultMetadata)
+	assert.Equal(t, faults, []wstransport.ProtocolFault{wstransport.FaultMetadata})
 }

@@ -141,8 +141,7 @@ func TestClientReportsSizeLimitFaults(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), "configured max of 1024 bytes"))
 
 	faults, _ := recorder.seen()
-	assert.Equal(t, len(faults), 1)
-	assert.Equal(t, faults[0], wstransport.FaultSizeLimit)
+	assert.Equal(t, faults, []wstransport.ProtocolFault{wstransport.FaultSizeLimit})
 }
 
 // §12: the limit covers the payload, not the marker, as Connect over HTTP

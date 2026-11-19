@@ -221,8 +221,7 @@ func TestInvalidUTF8InATextMessageIsRejected(t *testing.T) {
 			assert.True(t, strings.Contains(err.Error(), "not valid UTF-8"))
 
 			faults, _ := recorder.seen()
-			assert.Equal(t, len(faults), 1)
-			assert.Equal(t, faults[0], connecthttp.FaultTextEncoding)
+			assert.Equal(t, faults, []connecthttp.ProtocolFault{connecthttp.FaultTextEncoding})
 		})
 	}
 }
@@ -301,7 +300,7 @@ func TestFaultCloseCodeNamesTheFault(t *testing.T) {
 				tb.Helper()
 				sendJSONMessage(tb, conn, wireBody, nil)
 			},
-			want: websocket.StatusUnsupportedData, // 1003
+			want: websocket.StatusProtocolError, // 1002
 		},
 		{
 			name: "invalid UTF-8 in a text message is invalid payload data",
@@ -393,7 +392,7 @@ func TestMetadataInABinaryFrameIsRejected(t *testing.T) {
 	readCtx, cancelRead := readContext(t)
 	defer cancelRead()
 	_, _, err := conn.Read(readCtx)
-	assert.Equal(t, websocket.CloseStatus(err), websocket.StatusUnsupportedData)
+	assert.Equal(t, websocket.CloseStatus(err), websocket.StatusProtocolError)
 }
 
 // A server that negotiates permessage-deflate without no-context-takeover is

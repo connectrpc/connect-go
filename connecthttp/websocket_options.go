@@ -78,8 +78,6 @@ type ProtocolFault = wstransport.ProtocolFault
 
 // The framing mistakes a peer can make. See [ProtocolFault].
 const (
-	// FaultUnknown is a peer fault this package has not classified.
-	FaultUnknown = wstransport.FaultUnknown
 	// FaultMarker is a message that is empty, has an unknown marker or one for
 	// the other direction, or breaks the rules for C.
 	FaultMarker = wstransport.FaultMarker
