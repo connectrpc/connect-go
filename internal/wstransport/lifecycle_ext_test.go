@@ -1,0 +1,324 @@
+// Copyright 2021-2026 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package wstransport_test
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"testing"
+	"time"
+
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
+	"connectrpc.com/connect/v2/internal/assert"
+	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
+	"connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
+	"github.com/coder/websocket"
+)
+
+// openBlockedStream leaves a stream where the next Receive blocks: the client
+// has had its reply and the server is waiting for more input that never comes.
+// That is the state a mid-stream cancellation has to interrupt.
+func openBlockedStream(ctx context.Context, tb testing.TB) interface {
+	Receive() (*pingv1.CumSumResponse, error)
+	Close() error
+} {
+	tb.Helper()
+	client := newBidiClient(tb)
+	stream, err := client.CumSum(ctx)
+	assert.Nil(tb, err)
+	assert.Nil(tb, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+	_, err = stream.Receive()
+	assert.Nil(tb, err)
+	return stream
+}
+
+// Cancelling mid-stream must surface as Canceled, not as a transport failure a
+// caller might retry.
+func TestCancelDuringBlockedReceive(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	stream := openBlockedStream(ctx, t)
+	t.Cleanup(func() { _ = stream.Close() })
+
+	received := make(chan error, 1)
+	go func() {
+		_, err := stream.Receive()
+		received <- err
+	}()
+	time.Sleep(50 * time.Millisecond) // let the read block
+	cancel()
+
+	select {
+	case err := <-received:
+		assert.NotNil(t, err)
+		assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Receive did not unblock when the context was canceled")
+	}
+}
+
+// The same for a deadline, which must not be reported as cancellation.
+func TestDeadlineDuringBlockedReceive(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	stream := openBlockedStream(ctx, t)
+	t.Cleanup(func() { _ = stream.Close() })
+
+	received := make(chan error, 1)
+	go func() {
+		_, err := stream.Receive()
+		received <- err
+	}()
+
+	select {
+	case err := <-received:
+		assert.NotNil(t, err)
+		assert.Equal(t, connect.CodeOf(err), connect.CodeDeadlineExceeded)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Receive did not unblock when the deadline passed")
+	}
+}
+
+// panicServer models the handler nobody means to write.
+type panicServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (panicServer) CumSum(_ context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
+	if _, err := stream.Receive(); err != nil {
+		return err
+	}
+	panic("handler exploded")
+}
+
+// A panicking handler must not strand the caller. net/http recovers the panic
+// but deliberately leaves a hijacked connection open — "if !c.hijacked()" — so
+// unlike an HTTP handler, nothing closes the socket on the way out.
+func TestHandlerPanicDoesNotStrandTheClient(t *testing.T) {
+	t.Parallel()
+	httpServer := newHybridServer2(t, panicServer{})
+	// The panic trace net/http prints is expected here, so discard it.
+	httpServer.Config.ErrorLog = slog.NewLogLogger(slog.DiscardHandler, slog.LevelError)
+	transport := connecthttp.NewTransport(
+		httpServer.Client(),
+		httpServer.URL,
+		connecthttp.WithWebSocket(connecthttp.SelectStreaming),
+	)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+
+	stream, err := client.CumSum(t.Context())
+	assert.Nil(t, err)
+	t.Cleanup(func() { _ = stream.Close() })
+	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+
+	received := make(chan error, 1)
+	go func() {
+		_, err = stream.Receive()
+		received <- err
+	}()
+	select {
+	case err := <-received:
+		t.Logf("client saw: %v", err)
+		assert.NotNil(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("client hung: the panicking handler left the connection open")
+	}
+}
+
+// Once the client has said it is done sending, a further Send has nowhere to
+// go: the peer has stopped reading body messages. Reporting it keeps the
+// caller from believing the message was delivered, and matches connecthttp.
+func TestSendAfterCloseSendFails(t *testing.T) {
+	t.Parallel()
+	httpServer := newHybridServer(t, pingServer{})
+	transport := connecthttp.NewTransport(
+		httpServer.Client(),
+		httpServer.URL,
+		connecthttp.WithWebSocket(connecthttp.SelectStreaming),
+	)
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(transport))
+
+	stream, err := client.CumSum(t.Context())
+	assert.Nil(t, err)
+	t.Cleanup(func() { _ = stream.Close() })
+	assert.Nil(t, stream.Send(&pingv1.CumSumRequest{Number: 1}))
+	_, err = stream.Receive()
+	assert.Nil(t, err)
+	assert.Nil(t, stream.CloseSend())
+
+	assert.NotNil(t, stream.Send(&pingv1.CumSumRequest{Number: 2}))
+	// CloseSend stays idempotent: only Send is affected.
+	assert.Nil(t, stream.CloseSend())
+}
+
+// endOfStreamReporter reports how its Receive loop ended: the code, and
+// whether the error reads as a clean end of stream.
+type endOfStreamReporter struct {
+	pingv1connect.UnimplementedPingServiceHandler
+
+	outcome chan endOfStreamOutcome
+}
+
+type endOfStreamOutcome struct {
+	code    connect.Code
+	sawEOF  bool
+	message string
+}
+
+func (s endOfStreamReporter) CumSum(
+	_ context.Context,
+	stream pingv1connect.PingServiceCumSumServerStream,
+) error {
+	for {
+		_, err := stream.Receive()
+		if err == nil {
+			continue
+		}
+		s.outcome <- endOfStreamOutcome{
+			code:    connect.CodeOf(err),
+			sawEOF:  errors.Is(err, io.EOF),
+			message: err.Error(),
+		}
+		return nil
+	}
+}
+
+// A client that finished and a client that died are different outcomes, and a
+// handler has to be able to tell them apart. Both stop the read at the same
+// call site, so only the record of a C message separates them.
+//
+// The io.EOF assertion is the load-bearing one: `errors.Is(err, io.EOF)` is
+// how every handler in this repo — and in connecthttp — learns that a stream
+// ended cleanly. A cancellation that wrapped the transport's own error would
+// satisfy it too, since a read on a closed connection reports io.EOF at the
+// bottom of its chain, and a truncated stream would look finished.
+// watchingServer reads to EOF, then waits on the call's own context and
+// reports what ended it.
+type watchingServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+
+	ended chan error
+}
+
+func (s watchingServer) CumSum(
+	ctx context.Context,
+	stream pingv1connect.PingServiceCumSumServerStream,
+) error {
+	for {
+		request, err := stream.Receive()
+		if err != nil {
+			break // io.EOF once C has arrived
+		}
+		// Answered, so the test can tell that the handler is past its reads and
+		// into the wait below.
+		if sendErr := stream.Send(&pingv1.CumSumResponse{Sum: request.Number}); sendErr != nil {
+			s.ended <- sendErr
+			return sendErr
+		}
+	}
+	select {
+	case <-ctx.Done():
+		s.ended <- ctx.Err()
+	case <-time.After(20 * time.Second):
+		s.ended <- nil
+	}
+	return ctx.Err()
+}
+
+// §8: the RPC is canceled once the connection ends before S, whether or not C
+// arrived. A handler that has had its io.EOF is no longer reading, so without
+// the drain reporting the connection's end it would compute a whole response
+// for a peer that left — and the server would then try to send it, which §8
+// forbids.
+func TestConnectionEndingAfterEndOfClientStreamCancelsTheCall(t *testing.T) {
+	t.Parallel()
+	ended := make(chan error, 1)
+	httpServer := newHybridServer2(t, watchingServer{ended: ended})
+	conn := dialCumSum(t, httpServer, "")
+	sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+	sendJSONMessage(t, conn, wireClientEndStream, nil)
+
+	// Read the reply, so the handler is past its Receive loop and waiting.
+	reply := readServerOpening(t, conn)
+	assert.Equal(t, reply[0], wireBody)
+
+	// Now vanish, without a closing handshake.
+	assert.Nil(t, conn.CloseNow())
+
+	select {
+	case err := <-ended:
+		assert.NotNil(t, err)
+		assert.True(t, errors.Is(err, context.Canceled))
+	case <-time.After(20 * time.Second):
+		t.Fatal("the handler never learned the connection had ended")
+	}
+}
+
+func TestEndOfClientStreamIsDistinguishableFromADeadClient(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name     string
+		finish   func(testing.TB, *websocket.Conn)
+		wantCode connect.Code
+		wantEOF  bool
+	}{
+		{
+			name: "client sends C",
+			finish: func(tb testing.TB, conn *websocket.Conn) {
+				tb.Helper()
+				sendJSONMessage(tb, conn, wireClientEndStream, nil)
+			},
+			wantCode: connect.CodeUnknown,
+			wantEOF:  true,
+		},
+		{
+			name: "client closes cleanly without C",
+			finish: func(_ testing.TB, conn *websocket.Conn) {
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+			},
+			wantCode: connect.CodeCanceled,
+			wantEOF:  false,
+		},
+		{
+			name: "client vanishes without C",
+			finish: func(_ testing.TB, conn *websocket.Conn) {
+				_ = conn.CloseNow()
+			},
+			wantCode: connect.CodeCanceled,
+			wantEOF:  false,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			outcome := make(chan endOfStreamOutcome, 1)
+			httpServer := newHybridServer2(t, endOfStreamReporter{outcome: outcome})
+			conn := dialCumSum(t, httpServer, "")
+			sendProtoBody(t, conn, &pingv1.CumSumRequest{Number: 1})
+			test.finish(t, conn)
+
+			select {
+			case got := <-outcome:
+				assert.Equal(t, got.code, test.wantCode)
+				assert.Equal(t, got.sawEOF, test.wantEOF)
+			case <-time.After(5 * time.Second):
+				t.Fatal("the handler never finished its receive loop")
+			}
+		})
+	}
+}

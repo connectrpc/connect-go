@@ -1,0 +1,453 @@
+// Copyright 2021-2026 The Connect Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package wstransport carries Connect RPCs over WebSocket, one RPC per
+// connection. Both directions stream at once, which is what makes
+// bidirectional streaming work on HTTP/1.1 and in browsers.
+//
+// The package is internal: Connect is protobuf-first, so which wire carries an
+// RPC is an implementation detail. [connectrpc.com/connect/v2/connecthttp]
+// owns the public surface — Mount registers this transport alongside HTTP by
+// default, and NewTransport routes to it when given a selector.
+package wstransport
+
+import (
+	"log/slog"
+	"net/http"
+	"time"
+
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connectproto"
+	"github.com/coder/websocket"
+)
+
+const defaultHandshakeTimeout = 10 * time.Second
+
+// defaultMaxTimeout bounds an RPC that requested no deadline of its own. It is
+// generous because a long-lived subscription is the transport's whole point; it
+// exists so that a peer cannot hold a connection open forever — including one
+// that upgrades and never sends the metadata that opens the stream. Override it
+// with [WithMaxTimeout].
+const defaultMaxTimeout = time.Hour
+
+// defaultReadMaxBytes matches connecthttp's default so that one set of options
+// gives both transports the same limit. A stream-type-dependent limit is a
+// bug waiting to happen.
+const defaultReadMaxBytes = 1024 * 1024 * 4 // 4MiB
+
+// defaultCompressMinBytes is set for the same reason, and to the value the
+// WebSocket library would otherwise pick for itself. Left unset, the two halves
+// disagree: the library treats zero as "use my default" and skips messages
+// under 512 bytes, while the message writer treats zero as "no minimum" and
+// compresses everything. Small payloads usually grow under deflate, so 512 is
+// the better answer for both.
+const defaultCompressMinBytes = 512
+
+// defaultKeepAliveInterval sits at the low end of the 30-60 second idle
+// timeout common among proxies and load balancers.
+const defaultKeepAliveInterval = 30 * time.Second
+
+// defaultKeepAliveTimeout is long because a peer whose application stops taking
+// messages stops answering Pings too. It still beats TCP's ~15 minutes.
+const defaultKeepAliveTimeout = 5 * time.Minute
+
+// ClientOption configures [NewTransport].
+type ClientOption interface {
+	applyToClient(*options)
+}
+
+// ServerOption configures [Upgrade].
+type ServerOption interface {
+	applyToServer(*options)
+}
+
+// Option configures either side. Size limits, codecs, and compression settings
+// are Options because both ends of a connection need them; anything meaningful
+// to only one side is a [ClientOption] or a [ServerOption], so passing it to
+// the wrong constructor is a compile error rather than a setting that is
+// silently ignored.
+type Option interface {
+	ClientOption
+	ServerOption
+}
+
+// WithEagerDial makes NewClientStream complete the handshake before it
+// returns, rather than dialing on first use.
+//
+// Lazy dialing is the default because it lets a stream be created without a
+// round trip. A caller that has somewhere else to send the RPC needs the
+// handshake's outcome while that choice is still open, though: once a stream
+// is returned, an upgrade failure surfaces from Send, by which point falling
+// back is no longer possible. connecthttp.WithFallbackOnUpgradeError sets
+// this for exactly that reason.
+func WithEagerDial() ClientOption {
+	return clientOptionFunc(func(o *options) { o.eagerDial = true })
+}
+
+// WithHandshakeTimeout bounds the WebSocket handshake. A server applies it to
+// the client's opening M message, which completes the handshake at the
+// protocol level: without it, a client that upgrades and then sends nothing
+// holds the connection until [WithMaxTimeout]. Zero means no timeout.
+func WithHandshakeTimeout(timeout time.Duration) Option {
+	return optionFunc(func(o *options) { o.handshakeTimeout = timeout })
+}
+
+// WithProcedure fixes the procedure an [Upgrade] handler serves, as a route
+// registered for one procedure does over HTTP. Without it the procedure is the
+// request path, which is wrong once a mux serves the route under a prefix.
+func WithProcedure(procedure string) ServerOption {
+	return serverOptionFunc(func(o *options) { o.procedure = procedure })
+}
+
+// WithTransportInfo sets what [connect.CallInfo.TransportInfo] carries for each
+// RPC, built from the handshake request.
+func WithTransportInfo(transportInfo func(*http.Request) any) ServerOption {
+	return serverOptionFunc(func(o *options) { o.transportInfo = transportInfo })
+}
+
+// WithCheckOrigin replaces the default origin check.
+//
+// By default a cross-origin handshake is refused: a browser attaches the
+// user's cookies to a WebSocket handshake and, unlike fetch, no CORS
+// preflight stands in the way, so any page on any site could otherwise open
+// an authenticated stream (cross-site WebSocket hijacking). A request with no
+// Origin header is allowed, which covers every non-browser client.
+//
+// Pass a function returning true to accept every origin — appropriate only
+// when the endpoint carries no ambient credentials.
+func WithCheckOrigin(check func(*http.Request) bool) ServerOption {
+	return serverOptionFunc(func(o *options) {
+		if check != nil {
+			o.checkOrigin = check
+		}
+	})
+}
+
+// WithSession replaces the [Session] that serves RPCs on an upgraded
+// connection. The default is built from the same options as the handshake, so
+// it needs no configuring; supply one only to change how streams are served —
+// to instrument them, or to dispatch differently. Wrapping [NewSession] keeps
+// the default behavior underneath.
+//
+// A nil Session is ignored.
+func WithSession(session Session) ServerOption {
+	return serverOptionFunc(func(o *options) {
+		if session != nil {
+			o.session = session
+		}
+	})
+}
+
+// ProtocolFault classifies a peer's framing mistake, so a monitor can tell a
+// client that consistently sends unknown markers from one that mismatches a
+// frame type once. The Connect code alone cannot: every framing fault is
+// Internal, separable only by matching message strings.
+type ProtocolFault int
+
+const (
+	// faultNone is the zero value: nothing has been classified. A protocol
+	// error handler never receives it.
+	faultNone ProtocolFault = iota
+	// FaultMarker is a message that is empty, has an unknown marker or one for
+	// the other direction, or breaks the rules for C.
+	FaultMarker
+	// FaultFrameType is a frame whose type does not match its payload: an
+	// empty body in a text frame, or a message type that is neither.
+	FaultFrameType
+	// FaultSizeLimit is a message past the configured read limit.
+	FaultSizeLimit
+	// FaultMetadata is a malformed, missing, or repeated M message.
+	FaultMetadata
+	// FaultMessageEncoding is a payload the negotiated codec cannot decode.
+	FaultMessageEncoding
+	// FaultTextEncoding is a text message that is not valid UTF-8.
+	FaultTextEncoding
+)
+
+func (f ProtocolFault) String() string {
+	switch f {
+	case FaultMarker:
+		return "marker"
+	case FaultFrameType:
+		return "frame_type"
+	case FaultSizeLimit:
+		return "size_limit"
+	case FaultMetadata:
+		return "metadata"
+	case FaultMessageEncoding:
+		return "message_encoding"
+	case FaultTextEncoding:
+		return "text_encoding"
+	case faultNone:
+		return "unknown"
+	default:
+		return "unknown"
+	}
+}
+
+// ServerProtocolErrorHandler observes a client's framing mistake. It cannot
+// change the outcome: the error is reported to the peer and returned to the
+// handler either way, so this is for logging, metrics, and rate limiting only.
+//
+// It runs on the connection's read path, so it must not block or panic.
+type ServerProtocolErrorHandler func(SessionInfo, ProtocolFault, *connect.Error)
+
+// ClientProtocolErrorHandler observes a server's framing mistake. Like its
+// server-side twin it cannot change the outcome; the [connect.Spec] says which
+// RPC was in flight, the peer being whichever server the transport dials.
+//
+// It runs on the connection's read path, so it must not block or panic.
+type ClientProtocolErrorHandler func(connect.Spec, ProtocolFault, *connect.Error)
+
+// WithServerProtocolErrorHandler registers a [ServerProtocolErrorHandler]. Use
+// it to attribute framing faults to a client — [SessionInfo] carries the
+// upgrade request, and so the client's address — which the logger cannot do: a framing fault is
+// reported to the peer in the S message and is a successful outcome from the
+// session's point of view, so it never reaches [WithLogger].
+func WithServerProtocolErrorHandler(handler ServerProtocolErrorHandler) ServerOption {
+	return serverOptionFunc(func(o *options) {
+		if handler != nil {
+			o.onProtocolError = handler
+		}
+	})
+}
+
+// WithClientProtocolErrorHandler registers a [ClientProtocolErrorHandler], the
+// mirror of [WithServerProtocolErrorHandler]: it reports a server that frames
+// its responses wrongly. A client has no equivalent of the logger or the
+// session wrapper, so without this a framing fault is visible only as the
+// Internal error the RPC fails with.
+func WithClientProtocolErrorHandler(handler ClientProtocolErrorHandler) ClientOption {
+	return clientOptionFunc(func(o *options) {
+		if handler != nil {
+			o.onClientProtocolError = handler
+		}
+	})
+}
+
+// WithMaxTimeout bounds every RPC the handler serves. It is both the default
+// when a client requests no deadline and the ceiling on one that does: the
+// effective deadline is the shorter of the two, so a client may ask for less
+// time but never more.
+//
+// Zero means no bound, which lets a peer that opens a connection and then goes
+// silent hold it indefinitely.
+func WithMaxTimeout(timeout time.Duration) ServerOption {
+	return serverOptionFunc(func(o *options) { o.maxTimeout = timeout })
+}
+
+// WithLogger replaces [slog.Default] as the destination for errors that
+// surface after the HTTP response is committed.
+func WithLogger(logger *slog.Logger) ServerOption {
+	return serverOptionFunc(func(o *options) {
+		if logger != nil {
+			o.logger = logger
+		}
+	})
+}
+
+// WithCodecs replaces the default protobuf binary and JSON codecs. The set is
+// replaced entirely, so list every codec you need in one call. A codec is
+// reachable only if a WebSocket subprotocol names it.
+func WithCodecs(codecs ...connect.Codec) Option {
+	return optionFunc(func(o *options) { o.codecs = codecs })
+}
+
+// WithSendCodec selects the codec for outgoing messages by name. It must name
+// one of the codecs in the set, and it also selects the WebSocket subprotocol
+// the client offers.
+func WithSendCodec(name string) ClientOption {
+	return clientOptionFunc(func(o *options) { o.sendCodec = name })
+}
+
+// WithoutCompression disables permessage-deflate on this side of the
+// connection. Either side can disable it unilaterally, so one call is enough.
+//
+// The usual reason is security rather than performance. Per-message contexts
+// stop a compressed message from leaking the content of earlier ones, but they
+// do not stop a single message from leaking: caller-influenced data sitting
+// beside a secret still shows up in the compressed length. A service whose
+// responses mix the two should turn compression off rather than rely on the
+// narrower guarantee.
+//
+// It is also worth turning off for payloads that do not compress — already
+// encoded media, or protobuf binary — where deflate costs CPU for no gain.
+func WithoutCompression() Option {
+	return optionFunc(func(o *options) { o.compressionDisabled = true })
+}
+
+// WithCompressMinBytes sets the size below which messages are sent
+// uncompressed, since compressing a small payload usually makes it bigger. It
+// applies to both halves: permessage-deflate's threshold on WebSocket, and the
+// Connect content encoding on the HTTP fallback.
+//
+// The default is 512 bytes. Zero means no minimum — compress everything.
+func WithCompressMinBytes(minBytes int) Option {
+	return optionFunc(func(o *options) { o.compressMinBytes = minBytes })
+}
+
+// WithInfrastructureHeaders replaces the request headers a client may not set
+// in its Leading-Metadata message because this deployment's own infrastructure
+// sets them. A trailing "*" matches any suffix, so "X-Forwarded-*" covers the
+// family. Matching is case-insensitive.
+//
+// The default is Forwarded, X-Forwarded-*, and X-Real-IP: what a proxy in
+// front of the server sets, and what a client must not be able to forge. Which
+// names a deployment's infrastructure actually controls is a property of that
+// deployment, so this replaces the list rather than adding to it — pass no
+// names to allow all of them.
+//
+// It does not affect the names the Fetch standard forbids as request headers,
+// or the ones this protocol controls. Those are reserved whatever a deployment
+// configures.
+func WithInfrastructureHeaders(names ...string) ServerOption {
+	return serverOptionFunc(func(o *options) {
+		o.infrastructureHeaders = names
+	})
+}
+
+// WithKeepAlive sends a WebSocket Ping every interval for as long as the
+// connection is open. The interval must be clearly shorter than the idle
+// timeout of every proxy and load balancer in the path, or one of them will
+// drop a quiet stream; an interval equal to it races the proxy's timer. Common
+// idle timeouts are 60 to 100 seconds. The default is 30 seconds; zero or less
+// sends no Pings.
+// See connecthttp.WithWebSocketKeepAlive.
+//
+// A peer heard nothing from for the timeout set by [WithKeepAliveTimeout] is
+// hung up on: 1011 from a server, 3102 from a client (§4.6). The RPC fails as
+// Unavailable on the client and Canceled on the server.
+//
+// Pongs are sent regardless of this setting. Either side may enable it alone.
+func WithKeepAlive(interval time.Duration) Option {
+	return optionFunc(func(o *options) { o.keepAliveInterval = interval })
+}
+
+// WithKeepAliveTimeout sets how long a peer may send nothing, neither a message
+// nor a Pong, before this side hangs up on it. It applies only while
+// [WithKeepAlive] is on. The default is five minutes; a timeout shorter than
+// two intervals is raised to that, so a slow Pong is not taken for a dead peer.
+//
+// A peer whose application has stopped taking messages stops reading its
+// connection, and so stops answering Pings. The timeout is how long such a
+// stall may last.
+func WithKeepAliveTimeout(timeout time.Duration) Option {
+	return optionFunc(func(o *options) { o.keepAliveTimeout = timeout })
+}
+
+// WithReadMaxBytes bounds the size of a message this side will accept. Zero
+// means no limit.
+func WithReadMaxBytes(maxBytes int) Option {
+	return optionFunc(func(o *options) { o.readMaxBytes = maxBytes })
+}
+
+// WithSendMaxBytes bounds the size of a message this side will send. Zero
+// means no limit.
+func WithSendMaxBytes(maxBytes int) Option {
+	return optionFunc(func(o *options) { o.sendMaxBytes = maxBytes })
+}
+
+// WithHTTPClient replaces [http.DefaultClient] for the WebSocket handshake,
+// which is where TLS, proxy, and dialer settings take effect.
+//
+// A caller going through [connectrpc.com/connect/v2/connecthttp.NewTransport]
+// does not need this: the HTTPClient given there reaches both halves, so their
+// settings cannot diverge.
+func WithHTTPClient(httpClient *http.Client) ClientOption {
+	return clientOptionFunc(func(o *options) {
+		if httpClient != nil {
+			o.httpClient = httpClient
+		}
+	})
+}
+
+type options struct {
+	session               Session
+	onProtocolError       ServerProtocolErrorHandler
+	onClientProtocolError ClientProtocolErrorHandler
+	maxTimeout            time.Duration
+	handshakeTimeout      time.Duration
+	checkOrigin           func(*http.Request) bool
+	eagerDial             bool
+	logger                *slog.Logger
+	codecs                []connect.Codec
+	sendCodec             string
+	compressMinBytes      int
+	compressionDisabled   bool
+	readMaxBytes          int
+	sendMaxBytes          int
+	keepAliveInterval     time.Duration
+	keepAliveTimeout      time.Duration
+	infrastructureHeaders []string
+	httpClient            *http.Client
+	procedure             string
+	transportInfo         func(*http.Request) any
+}
+
+func defaultOptions() options {
+	return options{
+		handshakeTimeout: defaultHandshakeTimeout,
+		maxTimeout:       defaultMaxTimeout,
+		// nil selects isSameOrigin, the RFC's default policy; see
+		// WithCheckOrigin.
+		checkOrigin:           nil,
+		logger:                slog.Default(),
+		infrastructureHeaders: defaultInfrastructureHeaders(),
+		codecs: []connect.Codec{
+			connectproto.NewBinaryCodec(),
+			connectproto.NewJSONCodec(),
+		},
+		sendCodec:         connect.CodecNameProto,
+		readMaxBytes:      defaultReadMaxBytes,
+		compressMinBytes:  defaultCompressMinBytes,
+		keepAliveInterval: defaultKeepAliveInterval,
+		keepAliveTimeout:  defaultKeepAliveTimeout,
+		httpClient:        http.DefaultClient,
+	}
+}
+
+// compressionThreshold is the deflate threshold to hand the WebSocket library.
+// Zero is that library's sentinel for "use my default", so an explicit request
+// for no minimum has to be expressed as one byte to mean the same thing on both
+// halves of the transport.
+func (o *options) compressionThreshold() int {
+	if o.compressMinBytes <= 0 {
+		return 1
+	}
+	return o.compressMinBytes
+}
+
+// compressionMode is the permessage-deflate setting these options ask for.
+// NoContextTakeover is the only enabled mode: a context shared across messages
+// is the CRIME/BREACH exposure, so it is not offered.
+func (o *options) compressionMode() websocket.CompressionMode {
+	if o.compressionDisabled {
+		return websocket.CompressionDisabled
+	}
+	return websocket.CompressionNoContextTakeover
+}
+
+// optionFunc satisfies both sides, so a shared option is one function value.
+type optionFunc func(*options)
+
+func (f optionFunc) applyToClient(o *options) { f(o) }
+func (f optionFunc) applyToServer(o *options) { f(o) }
+
+type clientOptionFunc func(*options)
+
+func (f clientOptionFunc) applyToClient(o *options) { f(o) }
+
+type serverOptionFunc func(*options)
+
+func (f serverOptionFunc) applyToServer(o *options) { f(o) }

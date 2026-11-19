@@ -32,6 +32,7 @@ import (
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectgzip"
 	"connectrpc.com/connect/v2/connectproto"
+	"connectrpc.com/connect/v2/internal/wstransport"
 )
 
 // HTTPClient is the HTTP client surface the transport drives. The
@@ -44,6 +45,7 @@ type HTTPClient interface {
 // ClientInfo is the HTTP metadata for a client RPC, carried on
 // [connect.CallInfo.TransportInfo]. Its methods are safe for concurrent use.
 // They return zero values until the request is sent or the response arrives.
+// For an RPC over WebSocket, the request and response are the handshake's.
 type ClientInfo struct {
 	request  atomic.Pointer[http.Request]
 	response atomic.Pointer[http.Response]
@@ -129,7 +131,8 @@ func (c *ClientInfo) loadResponse() *http.Response {
 }
 
 // ServerInfo is the HTTP metadata for a server RPC, carried on
-// [connect.CallInfo.TransportInfo].
+// [connect.CallInfo.TransportInfo]. For an RPC over WebSocket, the request is
+// the handshake's.
 type ServerInfo struct {
 	request *http.Request
 }
@@ -216,11 +219,29 @@ func NewTransport(httpClient HTTPClient, baseURL string, options ...Option) conn
 	for _, opt := range options {
 		opt.apply(&opts)
 	}
-	return &transport{
+	httpTransport := &transport{
 		httpClient: httpClient,
 		baseURLPtr: parsed,
 		baseURLErr: err,
 		options:    opts,
+	}
+	if opts.websocketSelector == nil && len(opts.conditional) == 0 {
+		return httpTransport
+	}
+	websocketClient := websocketHTTPClient(httpClient)
+	base := newWebSocketRoute(&opts, websocketClient, baseURL)
+	if base.err != nil {
+		// The URL or codec set is unusable for WebSocket. Reporting it from
+		// every RPC beats returning an HTTP-only transport that silently
+		// ignores the selector the caller supplied.
+		return &brokenTransport{err: base.err}
+	}
+	return &hybridTransport{
+		fallback:   httpTransport,
+		options:    &opts,
+		httpClient: websocketClient,
+		baseURL:    baseURL,
+		base:       base,
 	}
 }
 
@@ -254,6 +275,14 @@ func defaultCompressors() []connect.Compressor {
 // plus a per-service catch-all that routes RPC requests for unknown methods
 // through [connect.Server.Call]. Non-RPC requests get a plain 404, and
 // requests for unknown services fall through to mux.
+//
+// Every route also serves Connect over WebSocket unless [WithoutWebSocket] is
+// given, because which transport carries an RPC is the client's choice. A
+// WebSocket client sends its request headers in a message after the
+// handshake, so a header that this deployment's own proxies set, and that a
+// client must not be able to forge, belongs on the deny list that
+// [WithWebSocketInfrastructureHeaders] configures; identity headers added by
+// an authenticating proxy are the usual example.
 func Mount(mux ServeMux, server *connect.Server, options ...Option) {
 	opts := defaultOptions()
 	for _, opt := range options {
@@ -265,14 +294,16 @@ func Mount(mux ServeMux, server *connect.Server, options ...Option) {
 		if spec.StreamType == connect.StreamTypeBidi {
 			procedureHandler = requireHTTP2(procedureHandler)
 		}
-		mux.Handle(spec.Procedure, procedureHandler)
+		mux.Handle(spec.Procedure, withWebSocket(
+			server, procedureHandler, opts.forSpec(spec), wstransport.WithProcedure(spec.Procedure),
+		))
 		// "/package.Service/Method" -> subtree pattern "/package.Service/".
 		if idx := strings.LastIndexByte(spec.Procedure, '/'); idx > 0 {
 			services[spec.Procedure[:idx+1]] = struct{}{}
 		}
 	}
 	for service := range services {
-		mux.Handle(service, newUnknownMethodHandler(server, &opts))
+		mux.Handle(service, withWebSocket(server, newUnknownMethodHandler(server, &opts), &opts))
 	}
 }
 
@@ -401,24 +432,24 @@ func (t *transport) newClientState(spec connect.Spec) *clientState {
 		if !slices.ContainsFunc(opts.compressors, func(c connect.Compressor) bool {
 			return c.Name() == opts.sendCompressor
 		}) {
-			return &clientState{err: connect.Errorf(connect.CodeUnknown, "unknown compression %q", opts.sendCompressor)}
+			return &clientState{opts: opts, err: connect.Errorf(connect.CodeUnknown, "unknown compression %q", opts.sendCompressor)}
 		}
 	}
 	sendCodecName := opts.getSendCodecName()
 	if sendCodecName == "" {
-		return &clientState{err: connect.Errorf(connect.CodeUnknown, "no codecs registered")}
+		return &clientState{opts: opts, err: connect.Errorf(connect.CodeUnknown, "no codecs registered")}
 	}
 	if !slices.ContainsFunc(opts.codecs, func(c connect.Codec) bool {
 		return c.Name() == sendCodecName
 	}) {
-		return &clientState{err: connect.Errorf(connect.CodeUnknown, "unknown codec %q", sendCodecName)}
+		return &clientState{opts: opts, err: connect.Errorf(connect.CodeUnknown, "unknown codec %q", sendCodecName)}
 	}
 	if t.baseURLErr != nil {
-		return &clientState{err: connect.Errorf(connect.CodeUnavailable, "invalid base URL: %v", t.baseURLErr)}
+		return &clientState{opts: opts, err: connect.Errorf(connect.CodeUnavailable, "invalid base URL: %v", t.baseURLErr)}
 	}
 	client, err := t.newProtocolClient(spec, opts)
 	if err != nil {
-		return &clientState{err: err}
+		return &clientState{opts: opts, err: err}
 	}
 	return &clientState{opts: opts, sendCodecName: sendCodecName, client: client}
 }
@@ -444,6 +475,14 @@ type options struct {
 
 	// Server-only ([NewTransport] ignores these).
 	requireConnectProtocolHeader bool
+	websocketDisabled            bool
+
+	// Client-only, and the switch that turns WebSocket on there: a nil
+	// selector means every RPC goes over HTTP.
+	websocketSelector      Selector
+	websocketFallbackOnErr bool
+	websocketClientOptions []wstransport.ClientOption
+	websocketServerOptions []wstransport.ServerOption
 
 	// conditional holds per-procedure option functions registered with
 	// WithConditionalOptions. They are evaluated against each spec by forSpec.
@@ -484,6 +523,8 @@ func (o *options) clone() *options {
 	opts := *o
 	opts.codecs = slices.Clone(o.codecs)
 	opts.compressors = slices.Clone(o.compressors)
+	opts.websocketClientOptions = slices.Clone(o.websocketClientOptions)
+	opts.websocketServerOptions = slices.Clone(o.websocketServerOptions)
 	opts.conditional = nil
 	return &opts
 }

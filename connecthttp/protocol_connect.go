@@ -31,8 +31,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connectproto"
 	"connectrpc.com/connect/v2/internal/bufferpool"
+	"connectrpc.com/connect/v2/internal/connectwire"
 )
 
 const (
@@ -593,7 +593,7 @@ func (cc *connectUnaryClientConn) unmarshalResponseError(response *http.Response
 		// code not set? default to one implied by HTTP status
 		wireErr.Code = httpToCode(response.StatusCode)
 	}
-	return wireErr.asError()
+	return wireErr.AsError()
 }
 
 type connectStreamingClientConn struct {
@@ -954,7 +954,7 @@ func (u *connectStreamingUnmarshaler) Unmarshal(message any) *connect.Error {
 		}
 	}
 	u.trailer = end.Trailer
-	u.endStreamErr = end.Error.asError()
+	u.endStreamErr = end.Error.AsError()
 	return errSpecialEnvelope
 }
 
@@ -1214,115 +1214,17 @@ func (u *connectUnaryUnmarshaler) UnmarshalFunc(message any, unmarshal func(cont
 	return nil
 }
 
-// connectWireDetail adapts a [connect.ErrorDetail] to the Connect protocol's
-// error detail object.
-type connectWireDetail connect.ErrorDetail
-
-func (d *connectWireDetail) MarshalJSON() ([]byte, error) {
-	wire := struct {
-		Type  string          `json:"type"`
-		Value string          `json:"value"`
-		Debug json.RawMessage `json:"debug,omitempty"`
-	}{
-		Type:  d.Type,
-		Value: base64.RawStdEncoding.EncodeToString(d.Value),
-	}
-	if json.Valid(d.Debug) {
-		wire.Debug = json.RawMessage(d.Debug)
-	} else if msg, err := connectproto.ErrorDetailToAny((*connect.ErrorDetail)(d)).UnmarshalNew(); err == nil {
-		var buffer bytes.Buffer
-		var codec connectproto.JSONCodec
-		if err := codec.MarshalWrite(context.Background(), &buffer, msg); err == nil {
-			wire.Debug = buffer.Bytes()
-		}
-	}
-	return json.Marshal(wire)
-}
-
-func (d *connectWireDetail) UnmarshalJSON(data []byte) error {
-	var wire struct {
-		Type  string          `json:"type"`
-		Value string          `json:"value"`
-		Debug json.RawMessage `json:"debug,omitempty"`
-	}
-	if err := json.Unmarshal(data, &wire); err != nil {
-		return err
-	}
-	value, err := connect.DecodeBinaryHeader(wire.Value)
-	if err != nil {
-		return fmt.Errorf("decode base64: %w", err)
-	}
-	*d = connectWireDetail{
-		Type:  wire.Type,
-		Value: value,
-		Debug: wire.Debug,
-	}
-	return nil
-}
-
-type connectWireError struct {
-	Code    connect.Code         `json:"code"`
-	Message string               `json:"message,omitempty"`
-	Details []*connectWireDetail `json:"details,omitempty"`
-}
+// The Connect protocol's wire error and end-of-stream envelope live in
+// internal/connectwire so that non-HTTP transports can share them. These
+// aliases keep the in-package spellings.
+type (
+	connectWireDetail       = connectwire.WireDetail
+	connectWireError        = connectwire.WireError
+	connectEndStreamMessage = connectwire.EndStreamMessage
+)
 
 func newConnectWireError(err error) *connectWireError {
-	wire := &connectWireError{
-		Code:    connect.CodeUnknown,
-		Message: err.Error(),
-	}
-	if connectErr, ok := asError(err); ok {
-		wire.Code = connectErr.Code()
-		wire.Message = connectErr.Message()
-		if details := connectErr.Details(); len(details) > 0 {
-			wire.Details = make([]*connectWireDetail, len(details))
-			for i, detail := range details {
-				wire.Details[i] = (*connectWireDetail)(detail)
-			}
-		}
-	}
-	return wire
-}
-
-func (e *connectWireError) asError() *connect.Error {
-	if e == nil {
-		return nil
-	}
-	if e.Code < connect.CodeCanceled || e.Code > connect.CodeUnauthenticated {
-		e.Code = connect.CodeUnknown
-	}
-	err := connect.NewError(e.Code, e.Message).WithRemote()
-	if len(e.Details) > 0 {
-		for _, detail := range e.Details {
-			err = err.WithDetail((*connect.ErrorDetail)(detail))
-		}
-	}
-	return err
-}
-
-func (e *connectWireError) UnmarshalJSON(data []byte) error {
-	// We want to be lenient if the JSON has an unrecognized or invalid code.
-	// So if that occurs, we leave the code unset but can still de-serialize
-	// the other fields from the input JSON.
-	var wireError struct {
-		Code    string               `json:"code"`
-		Message string               `json:"message"`
-		Details []*connectWireDetail `json:"details"`
-	}
-	err := json.Unmarshal(data, &wireError)
-	if err != nil {
-		return err
-	}
-	e.Message = wireError.Message
-	e.Details = wireError.Details
-	// This will leave e.Code unset if we can't unmarshal the given string.
-	_ = e.Code.UnmarshalText([]byte(wireError.Code))
-	return nil
-}
-
-type connectEndStreamMessage struct {
-	Error   *connectWireError `json:"error,omitempty"`
-	Trailer http.Header       `json:"metadata,omitempty"`
+	return connectwire.NewWireError(err)
 }
 
 func connectCodeToHTTP(code connect.Code) int {
