@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"slices"
 	"sync"
 
@@ -333,7 +334,7 @@ func asClientErr(err error) error {
 	switch {
 	case errors.Is(err, context.Canceled):
 		code = connect.CodeCanceled
-	case errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, os.ErrDeadlineExceeded):
 		code = connect.CodeDeadlineExceeded
 	}
 	return connect.NewError(code, "").WithRemote()
