@@ -266,9 +266,7 @@ func Mount(mux ServeMux, server *connect.Server, options ...Option) {
 			procedureHandler = requireHTTP2(procedureHandler)
 		}
 		// Outermost because the WebSocket handshake is HTTP/1.1.
-		if specOpts := opts.forSpec(spec); specOpts.websocket {
-			procedureHandler = newWebSocketHandler(server, spec, specOpts, procedureHandler)
-		}
+		procedureHandler = newWebSocketHandler(server, spec, opts.forSpec(spec), procedureHandler)
 		mux.Handle(spec.Procedure, procedureHandler)
 		// "/package.Service/Method" -> subtree pattern "/package.Service/".
 		if idx := strings.LastIndexByte(spec.Procedure, '/'); idx > 0 {
