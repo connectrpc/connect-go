@@ -388,6 +388,70 @@ func TestHandlerContentTypeParameters(t *testing.T) {
 	}
 }
 
+func TestHandlerRepeatedAcceptEncoding(t *testing.T) {
+	// A client may split the list of encodings it accepts over several header
+	// lines. They mean the same as one comma-separated line (RFC 9110
+	// Section 5.3), so the handler must consider all of them.
+	t.Parallel()
+	srv := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(srv, successPingServer{})
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, srv)
+	server := memhttptest.NewServer(t, mux)
+	testCases := []struct {
+		name                   string
+		procedure              string
+		contentType            string
+		body                   string
+		acceptEncodingHeader   string
+		responseEncodingHeader string
+	}{
+		{
+			name:                   "connect_unary",
+			procedure:              pingv1connect.PingServicePingProcedure,
+			contentType:            "application/json",
+			body:                   "{}",
+			acceptEncodingHeader:   "Accept-Encoding",
+			responseEncodingHeader: "Content-Encoding",
+		},
+		{
+			name:                   "connect_stream",
+			procedure:              pingv1connect.PingServiceSumProcedure,
+			contentType:            "application/connect+proto",
+			acceptEncodingHeader:   "Connect-Accept-Encoding",
+			responseEncodingHeader: "Connect-Content-Encoding",
+		},
+		{
+			name:                   "grpc",
+			procedure:              pingv1connect.PingServicePingProcedure,
+			contentType:            "application/grpc",
+			acceptEncodingHeader:   "Grpc-Accept-Encoding",
+			responseEncodingHeader: "Grpc-Encoding",
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			request, err := http.NewRequestWithContext(
+				t.Context(),
+				http.MethodPost,
+				server.URL()+testCase.procedure,
+				strings.NewReader(testCase.body),
+			)
+			assert.Nil(t, err)
+			request.Header.Set("Content-Type", testCase.contentType)
+			// The handler supports gzip but not br. Use the header map directly to
+			// send two separate header lines.
+			request.Header[testCase.acceptEncodingHeader] = []string{"br", "gzip"}
+			response, err := server.Client().Do(request)
+			assert.Nil(t, err)
+			defer response.Body.Close()
+			assert.Equal(t, response.StatusCode, http.StatusOK)
+			assert.Equal(t, response.Header.Get(testCase.responseEncodingHeader), "gzip")
+		})
+	}
+}
+
 func TestHandlerExpiredDeadline(t *testing.T) {
 	t.Parallel()
 	var calls atomic.Int32

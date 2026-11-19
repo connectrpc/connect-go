@@ -98,6 +98,22 @@ func Test_getHeaderCanonical(t *testing.T) {
 	}
 }
 
+func Test_getHeaderCanonicalJoined(t *testing.T) {
+	t.Parallel()
+	header := http.Header{
+		"One":   []string{"br"},
+		"Two":   []string{"br", "gzip"},
+		"Three": []string{"br, zstd", "gzip"},
+		"Empty": []string{},
+	}
+	assert.Equal(t, getHeaderCanonicalJoined(header, "One"), "br")
+	assert.Equal(t, getHeaderCanonicalJoined(header, "Two"), "br,gzip")
+	assert.Equal(t, getHeaderCanonicalJoined(header, "Three"), "br, zstd,gzip")
+	assert.Equal(t, getHeaderCanonicalJoined(header, "Empty"), "")
+	assert.Equal(t, getHeaderCanonicalJoined(header, "Missing"), "")
+	assert.Equal(t, getHeaderCanonicalJoined(nil, "Missing"), "")
+}
+
 func TestFromHTTPHeaderSkipsEmptyValues(t *testing.T) {
 	t.Parallel()
 	var header connect.Header

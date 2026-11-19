@@ -17,6 +17,7 @@ package connecthttp
 import (
 	"iter"
 	"net/http"
+	"strings"
 
 	"connectrpc.com/connect/v2"
 )
@@ -69,6 +70,21 @@ func getHeaderCanonical(h http.Header, key string) string {
 		return ""
 	}
 	return v[0]
+}
+
+// getHeaderCanonicalJoined is like getHeaderCanonical, but for headers that
+// carry a comma-separated list, like Accept-Encoding. Recipients must treat
+// several header lines with the same key as one comma-separated line (RFC 9110
+// Section 5.3), so it returns all of the values joined with commas.
+func getHeaderCanonicalJoined(h http.Header, key string) string {
+	values := h[key]
+	switch len(values) {
+	case 0:
+		return ""
+	case 1:
+		return values[0]
+	}
+	return strings.Join(values, ",")
 }
 
 // getHeaderCanonicalValid is a shortcut for Header.Get() which

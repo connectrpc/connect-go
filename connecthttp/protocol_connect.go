@@ -172,10 +172,10 @@ func (h *connectHandler) NewConn(
 		} else {
 			contentEncoding = getHeaderCanonical(request.Header, connectUnaryHeaderCompression)
 		}
-		acceptEncoding = getHeaderCanonical(request.Header, connectUnaryHeaderAcceptCompression)
+		acceptEncoding = getHeaderCanonicalJoined(request.Header, connectUnaryHeaderAcceptCompression)
 	} else {
 		contentEncoding = getHeaderCanonical(request.Header, connectStreamingHeaderCompression)
-		acceptEncoding = getHeaderCanonical(request.Header, connectStreamingHeaderAcceptCompression)
+		acceptEncoding = getHeaderCanonicalJoined(request.Header, connectStreamingHeaderAcceptCompression)
 	}
 	requestCompression, responseCompression, failed := negotiateCompression(
 		h.CompressionPools,

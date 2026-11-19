@@ -166,7 +166,7 @@ func (g *grpcHandler) NewConn(
 	requestCompression, responseCompression, failed := negotiateCompression(
 		g.CompressionPools,
 		getHeaderCanonical(request.Header, grpcHeaderCompression),
-		getHeaderCanonical(request.Header, grpcHeaderAcceptCompression),
+		getHeaderCanonicalJoined(request.Header, grpcHeaderAcceptCompression),
 	)
 	if failed == nil {
 		failed = checkServerStreamsCanFlush(g.spec, responseWriter)
