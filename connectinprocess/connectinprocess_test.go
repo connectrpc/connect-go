@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -859,6 +860,11 @@ func TestServerErrorDropsCause(t *testing.T) {
 			wantCode:    connect.CodeDataLoss,
 			wantMessage: "truncated",
 			wantDetails: 1,
+		},
+		{
+			name:     "os_deadline_exceeded",
+			err:      fmt.Errorf("read from backend: %w", os.ErrDeadlineExceeded),
+			wantCode: connect.CodeDeadlineExceeded,
 		},
 		{
 			name:     "remote_error_with_eof_cause",
