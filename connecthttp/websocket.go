@@ -65,8 +65,8 @@ var (
 // protocol. Use [WithConditionalOptions] to enable it for some procedures
 // only.
 //
-// Request metadata travels in the first WebSocket message and replaces
-// handshake headers with the same name. Authenticate RPCs in an interceptor
+// Request metadata travels in the first WebSocket message, and a key that is
+// also a handshake header fails the RPC. Authenticate RPCs in an interceptor
 // or handler, not in HTTP middleware that only sees the handshake.
 //
 // An [*http.Client] works as is, and its Timeout only bounds the handshake.
@@ -137,9 +137,17 @@ func websocketMetadata(header *connect.Header) http.Header {
 		if len(values) == 0 || strings.HasPrefix(key, "connect-") {
 			continue
 		}
-		metadata[key] = append(metadata[key], values...)
+		for _, value := range values {
+			metadata[key] = append(metadata[key], trimWebSocketMetadataValue(value))
+		}
 	}
 	return metadata
+}
+
+// trimWebSocketMetadataValue removes what RFC 9110 Section 5.5 says is not
+// part of a field value.
+func trimWebSocketMetadataValue(value string) string {
+	return strings.Trim(value, " \t")
 }
 
 func encodeWebSocketMetadata(metadata http.Header) []byte {
@@ -152,8 +160,8 @@ func encodeWebSocketMetadata(metadata http.Header) []byte {
 	return payload
 }
 
-// decodeWebSocketMetadata canonicalizes keys so they replace handshake headers
-// of the same name.
+// decodeWebSocketMetadata canonicalizes keys so they can be compared with
+// handshake headers.
 func decodeWebSocketMetadata(payload []byte, fromClient bool) (http.Header, *connect.Error) {
 	// Pointers tell a JSON null apart from an empty string.
 	var entries [][]*string
@@ -174,7 +182,7 @@ func decodeWebSocketMetadata(payload []byte, fromClient bool) (http.Header, *con
 		key := *entry[0]
 		values := make([]string, len(entry)-1)
 		for i, value := range entry[1:] {
-			values[i] = *value
+			values[i] = trimWebSocketMetadataValue(*value)
 		}
 		if err := validateWebSocketMetadata(key, values, fromClient); err != nil {
 			return nil, err
@@ -197,7 +205,7 @@ func dropInvalidWebSocketMetadata(metadata http.Header) http.Header {
 			continue
 		}
 		if !strings.HasSuffix(key, "-bin") {
-			values = slices.DeleteFunc(values, func(value string) bool { return !isHTTPFieldValue(value) })
+			values = slices.DeleteFunc(values, func(value string) bool { return !isWebSocketMetadataValue(value) })
 		}
 		if len(values) == 0 {
 			delete(metadata, key)
@@ -230,7 +238,7 @@ func validateWebSocketMetadata(key string, values []string, fromClient bool) *co
 		return nil
 	}
 	for _, value := range values {
-		if !isHTTPFieldValue(value) {
+		if !isWebSocketMetadataValue(value) {
 			return newWebSocketProtocolError("M message value for key %q is not a valid header value", key)
 		}
 	}
@@ -268,10 +276,11 @@ func isHTTPTokenByte(char byte) bool {
 	}
 }
 
-// isHTTPFieldValue follows RFC 9110 Section 5.5.
-func isHTTPFieldValue(value string) bool {
+// isWebSocketMetadataValue follows RFC 9110 Section 5.5 without obs-text, the
+// bytes 0x80-0xFF, which a JSON string can't carry as bytes.
+func isWebSocketMetadataValue(value string) bool {
 	for i := range len(value) {
-		if char := value[i]; (char < ' ' && char != '\t') || char == 0x7f {
+		if char := value[i]; (char < ' ' && char != '\t') || char > '~' {
 			return false
 		}
 	}

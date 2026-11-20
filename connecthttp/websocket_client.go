@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -82,6 +83,7 @@ type websocketClientStream struct {
 	sendClosed     bool
 	receivedHeader bool
 	receiveErr     error
+	released       bool
 }
 
 func newWebSocketClientStream(
@@ -154,6 +156,13 @@ func (s *websocketClientStream) CloseSend() error {
 	if s.sendClosed {
 		return nil
 	}
+	select {
+	case <-s.ctx.Done():
+		// After S, or once the stream is canceled or failed, a client may
+		// send only a Close frame.
+		return nil
+	default:
+	}
 	s.sendClosed = true
 	_ = writeWebSocketText(s.ioCtx, conn, websocketMarkerClientEndStream, nil)
 	return nil
@@ -210,8 +219,10 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 	if s.closed.Load() {
 		return nil, connect.NewError(connect.CodeCanceled, "stream closed")
 	}
+	requestMetadata := websocketMetadata(s.info.RequestHeader())
+	handshakeHeader := websocketHandshakeHeader(s.info.RequestHeader(), requestMetadata)
 	// Check the metadata before dialing, so a bad key sends nothing.
-	metadata := encodeWebSocketMetadata(websocketMetadata(s.info.RequestHeader()))
+	metadata := encodeWebSocketMetadata(requestMetadata)
 	if _, err := decodeWebSocketMetadata(metadata, true); err != nil {
 		return nil, err
 	}
@@ -224,10 +235,11 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 	// Copy so the caller's client is left unchanged.
 	httpClient := *s.config.httpClient
 	httpClient.Transport = &websocketRecordingTransport{next: httpClient.Transport, info: s.clientInfo}
+	subprotocol := websocketSubprotocolPrefix + s.config.codec.Name()
 	conn, response, err := websocket.Dial(s.ctx, requestURL.String(), &websocket.DialOptions{
 		HTTPClient:   &httpClient,
-		HTTPHeader:   http.Header{headerUserAgent: {defaultConnectUserAgent}},
-		Subprotocols: []string{websocketSubprotocolPrefix + s.config.codec.Name()},
+		HTTPHeader:   handshakeHeader,
+		Subprotocols: []string{subprotocol},
 	})
 	if response != nil && response.Body != nil {
 		defer response.Body.Close()
@@ -235,10 +247,11 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 	if err != nil {
 		return nil, s.dialError(response, err)
 	}
-	if conn.Subprotocol() == "" {
-		const message = "server accepted the WebSocket without a subprotocol"
-		_ = conn.Close(websocketStatusClientError, message)
-		return nil, connect.NewError(connect.CodeInternal, message)
+	// coder accepts no echo, or an echo that differs only in case.
+	if echoed := conn.Subprotocol(); echoed != subprotocol {
+		// The handshake failed, so there's no WebSocket to send a Close frame on.
+		_ = conn.CloseNow()
+		return nil, connect.Errorf(connect.CodeInternal, "server echoed subprotocol %q, expected %q", echoed, subprotocol)
 	}
 	conn.SetReadLimit(s.config.readLimit)
 	s.stopWatching = context.AfterFunc(s.ctx, func() {
@@ -250,6 +263,18 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 		return nil, s.readError(err)
 	}
 	return conn, nil
+}
+
+// websocketHandshakeHeader moves the caller's User-Agent from metadata to the
+// handshake, since the server rejects a metadata key that is also a handshake
+// header. As on Connect, a key without values sends no User-Agent at all.
+func websocketHandshakeHeader(requestHeader *connect.Header, metadata http.Header) http.Header {
+	if !requestHeader.Has(headerUserAgent) {
+		return http.Header{headerUserAgent: {defaultConnectUserAgent}}
+	}
+	// Metadata keys are lower-case, not canonical.
+	delete(metadata, strings.ToLower(headerUserAgent))
+	return http.Header{headerUserAgent: requestHeader.Values(headerUserAgent)}
 }
 
 func (s *websocketClientStream) dialError(response *http.Response, err error) error {
@@ -305,7 +330,7 @@ func (s *websocketClientStream) receive(conn *websocket.Conn, msg any) error {
 			fromHTTPHeader(s.info.ResponseHeader(), header)
 		case websocketMarkerBody:
 			if err := s.config.codec.UnmarshalRead(s.ctx, bytes.NewReader(message.payload), msg); err != nil {
-				return connect.Errorf(connect.CodeInvalidArgument, "unmarshal message: %s", err).WithCause(err)
+				return newWebSocketProtocolError("unmarshal message: %v", err)
 			}
 			return nil
 		case websocketMarkerServerEndStream:
@@ -337,7 +362,13 @@ func (s *websocketClientStream) receiveEnd(payload []byte) error {
 	return io.EOF
 }
 
+// release closes with the first code it's given. After S, Receive releases
+// again with the RPC's outcome, which must not replace 1000.
 func (s *websocketClientStream) release(closeCode websocket.StatusCode, reason string) {
+	if s.released {
+		return
+	}
+	s.released = true
 	// Stop the context watcher first, so it can't close with 1000 instead.
 	s.stopWatching()
 	// Don't make the caller wait for the close handshake, up to 5s in coder.

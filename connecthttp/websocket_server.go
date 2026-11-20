@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -109,20 +108,23 @@ func (s *websocketServerStream) receive(msg any) error {
 	case <-s.ctx.Done():
 		return wrapIfContextError(context.Cause(s.ctx))
 	}
-	switch message.marker {
-	case websocketMarkerBody:
-		if err := s.codec.UnmarshalRead(s.ctx, bytes.NewReader(message.payload), msg); err != nil {
-			return connect.Errorf(connect.CodeInvalidArgument, "unmarshal message: %s", err).WithCause(err)
-		}
-		return nil
-	case websocketMarkerClientEndStream:
+	if message.marker == websocketMarkerClientEndStream {
 		s.receivedEnd = true
 		return io.EOF
-	default:
+	}
+	// The reader passes on only B and C after M, so this guards against a
+	// change there, not against a client.
+	if message.marker != websocketMarkerBody {
 		err := newWebSocketProtocolError("unexpected %c message from client", message.marker)
 		s.reader.fail(err)
 		return err
 	}
+	if err := s.codec.UnmarshalRead(s.ctx, bytes.NewReader(message.payload), msg); err != nil {
+		protocolErr := newWebSocketProtocolError("unmarshal message: %v", err)
+		s.reader.fail(protocolErr)
+		return protocolErr
+	}
+	return nil
 }
 
 func (s *websocketServerStream) writeHeader(ctx context.Context) error {
@@ -223,7 +225,7 @@ func newWebSocketServerReader(conn *websocket.Conn, bodyIsText bool, cancel cont
 
 func (r *websocketServerReader) run(ctx context.Context) {
 	defer close(r.messages)
-	var sawEnd bool
+	var sawMetadata, sawEnd bool
 	for {
 		// coder drops the connection without a close frame when a read
 		// context ends. finish closes the connection, which ends the read.
@@ -241,15 +243,33 @@ func (r *websocketServerReader) run(ctx context.Context) {
 			r.fail(parseErr)
 			return
 		}
-		if sawEnd {
-			r.fail(newWebSocketProtocolError("%c message after C", message.marker))
+		// Checked here, not in Receive, so a handler that never reads still
+		// gets the protocol error.
+		if err := websocketClientOrderError(message.marker, sawMetadata, sawEnd); err != nil {
+			r.fail(err)
 			return
 		}
+		sawMetadata = true
 		sawEnd = message.marker == websocketMarkerClientEndStream
 		select {
 		case r.messages <- message:
 		case <-r.done:
 		}
+	}
+}
+
+// websocketClientOrderError follows the server's state table in RFC 008
+// Section 6.2.
+func websocketClientOrderError(marker byte, sawMetadata, sawEnd bool) *connect.Error {
+	switch {
+	case sawEnd:
+		return newWebSocketProtocolError("%c message after C", marker)
+	case !sawMetadata && marker != websocketMarkerLeadingMetadata:
+		return newWebSocketProtocolError("first message is %c, expected M", marker)
+	case sawMetadata && marker != websocketMarkerBody && marker != websocketMarkerClientEndStream:
+		return newWebSocketProtocolError("unexpected %c message from client", marker)
+	default:
+		return nil
 	}
 }
 
@@ -309,11 +329,14 @@ func (r *websocketServerReader) isStopped() bool {
 
 func newWebSocketHandler(server *connect.Server, spec connect.Spec, opts *options, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
-		if !isWebSocketUpgrade(request) {
+		switch {
+		case !isWebSocketUpgrade(request):
 			next.ServeHTTP(responseWriter, request)
-			return
+		case !opts.websocket:
+			http.Error(responseWriter, "WebSocket is not enabled for this procedure", http.StatusBadRequest)
+		default:
+			serveWebSocket(server, spec, opts, responseWriter, request)
 		}
-		serveWebSocket(server, spec, opts, responseWriter, request)
 	})
 }
 
@@ -373,7 +396,13 @@ func serveWebSocket(server *connect.Server, spec connect.Spec, opts *options, re
 		stream.finish(ctx, err)
 		return
 	}
-	fromHTTPHeader(info.RequestHeader(), websocketRequestHeader(request, metadata))
+	header, headerErr := websocketRequestHeader(request, metadata)
+	if headerErr != nil {
+		reader.fail(headerErr)
+		stream.finish(ctx, headerErr)
+		return
+	}
+	fromHTTPHeader(info.RequestHeader(), header)
 	stream.finish(ctx, scrubHandlerError(server.Call(ctx, spec.Procedure, info, stream)))
 }
 
@@ -393,11 +422,6 @@ func receiveWebSocketMetadata(ctx context.Context, reader *websocketServerReader
 		if !ok {
 			return nil, reader.failure()
 		}
-		if message.marker != websocketMarkerLeadingMetadata {
-			err := newWebSocketProtocolError("first message is %c, expected M", message.marker)
-			reader.fail(err)
-			return nil, err
-		}
 		metadata, err := decodeWebSocketMetadata(message.payload, true)
 		if err != nil {
 			reader.fail(err)
@@ -407,7 +431,9 @@ func receiveWebSocketMetadata(ctx context.Context, reader *websocketServerReader
 	}
 }
 
-func websocketRequestHeader(request *http.Request, metadata http.Header) http.Header {
+// websocketRequestHeader builds the RPC's effective headers. Metadata can't
+// replace a handshake header, which a proxy may have set.
+func websocketRequestHeader(request *http.Request, metadata http.Header) (http.Header, *connect.Error) {
 	header := make(http.Header, len(request.Header)+len(metadata)+1)
 	for key, values := range request.Header {
 		if key == "Connection" || key == "Upgrade" ||
@@ -417,8 +443,13 @@ func websocketRequestHeader(request *http.Request, metadata http.Header) http.He
 		header[key] = values
 	}
 	header.Set(headerHost, request.Host)
-	maps.Copy(header, metadata)
-	return header
+	for key, values := range metadata {
+		if _, ok := request.Header[key]; ok {
+			return nil, newWebSocketProtocolError("M message key %q is also a handshake header", strings.ToLower(key))
+		}
+		header[key] = values
+	}
+	return header, nil
 }
 
 func negotiateWebSocketCodec(header http.Header, codecs readOnlyCodecs) (connect.Codec, string) {
