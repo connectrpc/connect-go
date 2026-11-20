@@ -53,6 +53,8 @@ var (
 	errWebSocketProtocol = errors.New("protocol error")
 	// Both sides close with 1007, and a server sends no S.
 	errWebSocketInvalidUTF8 = errors.New("invalid UTF-8 in text message")
+	// A server leaves the key out of M, then sends S and closes with 1000.
+	errWebSocketConnectKey = errors.New("connect- key in response metadata")
 	// An HTTPClient with a Timeout, or one that buffers or wraps the
 	// response body, can't carry a WebSocket.
 	errWebSocketHTTPClient = errors.New("HTTP client can't carry a WebSocket")
@@ -109,10 +111,6 @@ func parseWebSocketMessage(messageType websocket.MessageType, data []byte, bodyI
 	case websocketMarkerBody:
 		if text != bodyIsText {
 			return websocketMessage{}, newWebSocketProtocolError("B message in a %s frame, expected a %s frame", websocketFrameName(text), websocketFrameName(bodyIsText))
-		}
-		// Only JSON is sent as text, and an empty JSON message is "{}".
-		if text && len(message.payload) == 0 {
-			return websocketMessage{}, newWebSocketProtocolError("B message has no payload")
 		}
 	case websocketMarkerLeadingMetadata, websocketMarkerServerEndStream, websocketMarkerClientEndStream:
 		if !text {
@@ -357,6 +355,24 @@ func websocketGraceContext(ctx context.Context) (context.Context, context.Cancel
 func newWebSocketProtocolError(format string, args ...any) *connect.Error {
 	message := fmt.Sprintf(format, args...)
 	return connect.NewError(connect.CodeInternal, "protocol error: "+message).WithCause(errWebSocketProtocol)
+}
+
+// newWebSocketDecodeError is a protocol error, but it uses invalid_argument to
+// match Connect-over-HTTP.
+func newWebSocketDecodeError(err error) *connect.Error {
+	return connect.NewError(connect.CodeInvalidArgument, "protocol error: unmarshal message: "+err.Error()).WithCause(errWebSocketProtocol)
+}
+
+// websocketConnectKeyError reports a key the handler set that begins with
+// connect-, which a server must not send in M or S.
+func websocketConnectKeyError(header *connect.Header, kind string) error {
+	for key, values := range header.All() {
+		key = strings.ToLower(key)
+		if len(values) > 0 && strings.HasPrefix(key, "connect-") {
+			return connect.Errorf(connect.CodeInternal, "response %s %q is reserved for the protocol", kind, key).WithCause(errWebSocketConnectKey)
+		}
+	}
+	return nil
 }
 
 func websocketFrameName(text bool) string {

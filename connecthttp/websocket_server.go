@@ -120,7 +120,7 @@ func (s *websocketServerStream) receive(msg any) error {
 		return err
 	}
 	if err := s.codec.UnmarshalRead(s.ctx, bytes.NewReader(message.payload), msg); err != nil {
-		protocolErr := newWebSocketProtocolError("unmarshal message: %v", err)
+		protocolErr := newWebSocketDecodeError(err)
 		s.reader.fail(protocolErr)
 		return protocolErr
 	}
@@ -136,7 +136,7 @@ func (s *websocketServerStream) writeHeader(ctx context.Context) error {
 		return s.writeError(err)
 	}
 	s.sentHeader = true
-	return nil
+	return websocketConnectKeyError(s.info.ResponseHeader(), "header")
 }
 
 func (s *websocketServerStream) writeError(err error) error {
@@ -164,9 +164,17 @@ func (s *websocketServerStream) finish(ctx context.Context, err error) {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), websocketCloseTimeout)
 	defer cancel()
-	if writeErr := s.writeHeader(ctx); writeErr != nil {
+	headerErr := s.writeHeader(ctx)
+	if headerErr != nil && !errors.Is(headerErr, errWebSocketConnectKey) {
 		_ = s.conn.CloseNow()
 		return
+	}
+	if closeCode == websocket.StatusNormalClosure {
+		if headerErr != nil {
+			err = headerErr
+		} else if trailerErr := websocketConnectKeyError(s.info.ResponseTrailer(), "trailer"); trailerErr != nil {
+			err = trailerErr
+		}
 	}
 	payload, marshalErr := s.endStreamPayload(err)
 	if marshalErr != nil {

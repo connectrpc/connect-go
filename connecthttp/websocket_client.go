@@ -330,7 +330,7 @@ func (s *websocketClientStream) receive(conn *websocket.Conn, msg any) error {
 			fromHTTPHeader(s.info.ResponseHeader(), header)
 		case websocketMarkerBody:
 			if err := s.config.codec.UnmarshalRead(s.ctx, bytes.NewReader(message.payload), msg); err != nil {
-				return newWebSocketProtocolError("unmarshal message: %v", err)
+				return newWebSocketDecodeError(err)
 			}
 			return nil
 		case websocketMarkerServerEndStream:
