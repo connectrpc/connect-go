@@ -125,21 +125,11 @@ func (*connectHandler) SetTimeout(request *http.Request) (context.Context, conte
 		// no key
 		return request.Context(), nil, nil
 	}
-	if len(timeout) > 10 {
-		return nil, nil, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %q has >10 digits", timeout)
+	duration, err := connectParseTimeout(timeout)
+	if err != nil {
+		return nil, nil, err
 	}
-	// Ten digits overflow a 32-bit int, so accumulate in an int64.
-	var millis int64
-	for _, v := range timeout {
-		if v < '0' || v > '9' {
-			return nil, nil, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %q has non-digit characters", timeout)
-		}
-		millis = millis*10 + int64(v-'0')
-	}
-	ctx, cancel := context.WithTimeout(
-		request.Context(),
-		time.Duration(millis)*time.Millisecond,
-	)
+	ctx, cancel := context.WithTimeout(request.Context(), duration)
 	return ctx, cancel, nil
 }
 
@@ -1364,6 +1354,23 @@ func connectCodeToHTTP(code connect.Code) int {
 	default:
 		return 500 // same as connect.CodeUnknown
 	}
+}
+
+// connectParseTimeout parses a Connect timeout, a number of milliseconds
+// with at most ten digits.
+func connectParseTimeout(timeout string) (time.Duration, error) {
+	if len(timeout) > 10 {
+		return 0, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %q has >10 digits", timeout)
+	}
+	// Ten digits overflow a 32-bit int, so accumulate in an int64.
+	var millis int64
+	for _, v := range timeout {
+		if v < '0' || v > '9' {
+			return 0, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %q has non-digit characters", timeout)
+		}
+		millis = millis*10 + int64(v-'0')
+	}
+	return time.Duration(millis) * time.Millisecond, nil
 }
 
 // connectEncodeTimeout encodes timeout as a positive number of milliseconds.

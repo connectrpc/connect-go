@@ -261,10 +261,12 @@ func Mount(mux ServeMux, server *connect.Server, options ...Option) {
 	}
 	services := make(map[string]struct{})
 	for spec := range server.Specs() {
-		procedureHandler := newProcedureHandler(server, spec, &opts)
+		specOpts := opts.forSpec(spec)
+		procedureHandler := newProcedureHandler(server, spec, specOpts)
 		if spec.StreamType == connect.StreamTypeBidi {
 			procedureHandler = requireHTTP2(procedureHandler)
 		}
+		procedureHandler = newWebSocketHandler(server, spec, specOpts, procedureHandler)
 		mux.Handle(spec.Procedure, procedureHandler)
 		// "/package.Service/Method" -> subtree pattern "/package.Service/".
 		if idx := strings.LastIndexByte(spec.Procedure, '/'); idx > 0 {
@@ -327,7 +329,7 @@ func newUnknownMethodHandler(server *connect.Server, opts *options) http.Handler
 		}
 		// Cold path: build the handler per request to reuse the
 		// registered-procedure machinery.
-		newProcedureHandler(server, spec, opts).ServeHTTP(responseWriter, request)
+		newProcedureHandler(server, spec, opts.forSpec(spec)).ServeHTTP(responseWriter, request)
 	})
 }
 
@@ -347,6 +349,7 @@ type clientState struct {
 	opts          *options
 	sendCodecName string
 	client        protocolClient
+	websocket     *websocketClientConfig
 	err           error
 }
 
@@ -361,6 +364,9 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 	state := t.clientStateForSpec(spec)
 	if state.err != nil {
 		return nil, state.err
+	}
+	if state.websocket != nil {
+		return newWebSocketClientStream(ctx, spec, state.websocket, info), nil
 	}
 	opts, sendCodecName, protocolClient := state.opts, state.sendCodecName, state.client
 	conn := protocolClient.NewConn(ctx, spec, make(http.Header, 8))
@@ -408,13 +414,20 @@ func (t *transport) newClientState(spec connect.Spec) *clientState {
 	if sendCodecName == "" {
 		return &clientState{err: connect.Errorf(connect.CodeUnknown, "no codecs registered")}
 	}
-	if !slices.ContainsFunc(opts.codecs, func(c connect.Codec) bool {
+	codecIndex := slices.IndexFunc(opts.codecs, func(c connect.Codec) bool {
 		return c.Name() == sendCodecName
-	}) {
+	})
+	if codecIndex < 0 {
 		return &clientState{err: connect.Errorf(connect.CodeUnknown, "unknown codec %q", sendCodecName)}
 	}
 	if t.baseURLErr != nil {
 		return &clientState{err: connect.Errorf(connect.CodeUnavailable, "invalid base URL: %v", t.baseURLErr)}
+	}
+	if opts.protocol == protocolNameWebSocket {
+		procedureURL := *t.baseURLPtr
+		procedureURL.Path = joinURLPath(t.baseURLPtr.Path, spec.Procedure)
+		config := newWebSocketClientConfig(t.httpClient, procedureURL, opts.codecs[codecIndex], opts)
+		return &clientState{websocket: config}
 	}
 	client, err := t.newProtocolClient(spec, opts)
 	if err != nil {
@@ -444,6 +457,7 @@ type options struct {
 
 	// Server-only ([NewTransport] ignores these).
 	requireConnectProtocolHeader bool
+	websocket                    bool
 
 	// conditional holds per-procedure option functions registered with
 	// WithConditionalOptions. They are evaluated against each spec by forSpec.
