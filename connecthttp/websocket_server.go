@@ -53,9 +53,6 @@ type websocketServerStream struct {
 	receivedEnd    bool
 	receivedSingle bool
 	sentHeader     bool
-	// Kept so a handler that ignores the error still can't send B or a
-	// successful S.
-	headerKeyErr error
 }
 
 func (s *websocketServerStream) Receive(msg any) error {
@@ -73,14 +70,14 @@ func (s *websocketServerStream) Receive(msg any) error {
 // SendHeaders and Send write with writeCtx so S can still follow a write in
 // progress when the RPC ends, without a stalled client holding the handler.
 func (s *websocketServerStream) SendHeaders() error {
-	if err := s.ctx.Err(); err != nil {
+	if err := context.Cause(s.ctx); err != nil {
 		return wrapIfContextError(err)
 	}
 	return s.writeHeader(s.writeCtx)
 }
 
 func (s *websocketServerStream) Send(msg any) error {
-	if err := s.ctx.Err(); err != nil {
+	if err := context.Cause(s.ctx); err != nil {
 		return wrapIfContextError(err)
 	}
 	body, err := marshalWebSocketBody(s.ctx, s.codec, msg, s.sendMaxBytes)
@@ -115,13 +112,7 @@ func (s *websocketServerStream) receive(msg any) error {
 		s.receivedEnd = true
 		return io.EOF
 	}
-	// The reader passes on only B and C after M, so this guards against a
-	// change there, not against a client.
-	if message.marker != websocketMarkerBody {
-		err := newWebSocketProtocolError("unexpected %c message from client", message.marker)
-		s.reader.fail(err)
-		return err
-	}
+	// The reader passes on only B and C after M.
 	if err := s.codec.UnmarshalRead(s.ctx, bytes.NewReader(message.payload), msg); err != nil {
 		protocolErr := newWebSocketDecodeError(err)
 		s.reader.fail(protocolErr)
@@ -130,17 +121,21 @@ func (s *websocketServerStream) receive(msg any) error {
 	return nil
 }
 
+// writeHeader fails the RPC for a connect- header, after sending M without it.
 func (s *websocketServerStream) writeHeader(ctx context.Context) error {
 	if s.sentHeader {
-		return s.headerKeyErr
+		return nil
 	}
 	metadata := encodeWebSocketMetadata(dropInvalidWebSocketMetadata(websocketMetadata(s.info.ResponseHeader())))
 	if err := writeWebSocketText(ctx, s.conn, websocketMarkerLeadingMetadata, metadata); err != nil {
 		return s.writeError(err)
 	}
 	s.sentHeader = true
-	s.headerKeyErr = websocketConnectKeyError(s.info.ResponseHeader(), "header")
-	return s.headerKeyErr
+	if err := websocketValidateResponseMetadata(s.info.ResponseHeader(), "header"); err != nil {
+		s.reader.fail(err)
+		return err
+	}
+	return nil
 }
 
 func (s *websocketServerStream) writeError(err error) error {
@@ -163,21 +158,19 @@ func (s *websocketServerStream) finish(ctx context.Context, err error) {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), websocketCloseTimeout)
 	defer cancel()
-	headerErr := s.writeHeader(ctx)
-	if headerErr != nil && !errors.Is(headerErr, errWebSocketConnectKey) {
+	if s.writeHeader(ctx) != nil && !s.sentHeader {
 		_ = s.conn.CloseNow()
 		return
 	}
 	closeCode := websocket.StatusNormalClosure
-	switch {
-	case errors.Is(failure, errWebSocketProtocol):
-		err, closeCode = failure, websocket.StatusProtocolError
-	case headerErr != nil:
-		err = headerErr
-	default:
-		if trailerErr := websocketConnectKeyError(s.info.ResponseTrailer(), "trailer"); trailerErr != nil {
-			err = trailerErr
+	// Read again, since writeHeader can fail the RPC.
+	if failure := s.reader.failure(); failure != nil {
+		err = failure
+		if errors.Is(failure, errWebSocketProtocol) {
+			closeCode = websocket.StatusProtocolError
 		}
+	} else if trailerErr := websocketValidateResponseMetadata(s.info.ResponseTrailer(), "trailer"); trailerErr != nil {
+		err = trailerErr
 	}
 	payload, marshalErr := s.endStreamPayload(err)
 	if marshalErr != nil {
@@ -213,25 +206,15 @@ func (s *websocketServerStream) endStreamPayload(err error) ([]byte, error) {
 // websocketServerReader keeps reading after C to notice the client going
 // away, which cancels the RPC.
 type websocketServerReader struct {
-	conn       *websocket.Conn
-	bodyIsText bool
-	cancel     context.CancelCauseFunc
-	messages   chan websocketMessage
-	done       chan struct{}
+	conn     *websocket.Conn
+	bodyType websocket.MessageType
+	cancel   context.CancelCauseFunc
+	messages chan websocketMessage
+	done     chan struct{}
 
 	mu       sync.Mutex
 	err      error
 	peerGone bool
-}
-
-func newWebSocketServerReader(conn *websocket.Conn, bodyIsText bool, cancel context.CancelCauseFunc) *websocketServerReader {
-	return &websocketServerReader{
-		conn:       conn,
-		bodyIsText: bodyIsText,
-		cancel:     cancel,
-		messages:   make(chan websocketMessage),
-		done:       make(chan struct{}),
-	}
 }
 
 func (r *websocketServerReader) run(ctx context.Context) {
@@ -249,7 +232,7 @@ func (r *websocketServerReader) run(ctx context.Context) {
 			// The RFC requires discarding client messages in flight after S.
 			continue
 		}
-		message, parseErr := parseWebSocketMessage(messageType, data, r.bodyIsText)
+		message, parseErr := parseWebSocketMessage(messageType, data, r.bodyType)
 		if parseErr != nil {
 			r.fail(parseErr)
 			return
@@ -378,7 +361,13 @@ func serveWebSocket(server *connect.Server, spec connect.Spec, opts *options, re
 	}
 	writeCtx, cancelWrite := websocketGraceContext(ctx)
 	defer cancelWrite()
-	reader := newWebSocketServerReader(conn, websocketBodyIsText(codec.Name()), cancel)
+	reader := &websocketServerReader{
+		conn:     conn,
+		bodyType: websocketBodyType(codec.Name()),
+		cancel:   cancel,
+		messages: make(chan websocketMessage),
+		done:     make(chan struct{}),
+	}
 	go reader.run(ctx)
 
 	info := &connect.CallInfo{TransportInfo: &ServerInfo{request: request}}
@@ -396,7 +385,7 @@ func serveWebSocket(server *connect.Server, spec connect.Spec, opts *options, re
 		codec:         codec,
 		info:          info,
 		reader:        reader,
-		singleRequest: spec.StreamType == connect.StreamTypeUnary || spec.StreamType == connect.StreamTypeServer,
+		singleRequest: spec.StreamType&connect.StreamTypeClient == 0,
 	}
 	if timeoutErr != nil {
 		stream.finish(ctx, timeoutErr)

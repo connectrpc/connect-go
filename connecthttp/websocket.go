@@ -53,8 +53,6 @@ var (
 	errWebSocketProtocol = errors.New("protocol error")
 	// Both sides close with 1007, and a server sends no S.
 	errWebSocketInvalidUTF8 = errors.New("invalid UTF-8 in text message")
-	// A server leaves the key out of M, then sends S and closes with 1000.
-	errWebSocketConnectKey = errors.New("connect- key in response metadata")
 	// An HTTPClient with a Timeout, or one that buffers or wraps the
 	// response body, can't carry a WebSocket.
 	errWebSocketHTTPClient = errors.New("HTTP client can't carry a WebSocket")
@@ -79,8 +77,6 @@ var (
 // It follows redirects with its own policy, so it can't follow a redirect to
 // a ws or wss URL.
 // The handshake is HTTP/1.1, so a client that only speaks HTTP/2 can't dial.
-// A server that answers with a bad upgrade can delay the dial error by up to
-// three seconds.
 func WithWebSocket() Option {
 	return websocketOption{}
 }
@@ -98,7 +94,7 @@ type websocketMessage struct {
 }
 
 // parseWebSocketMessage leaves ordering and direction checks to the caller.
-func parseWebSocketMessage(messageType websocket.MessageType, data []byte, bodyIsText bool) (websocketMessage, *connect.Error) {
+func parseWebSocketMessage(messageType websocket.MessageType, data []byte, bodyType websocket.MessageType) (websocketMessage, *connect.Error) {
 	text := messageType == websocket.MessageText
 	if text && !utf8.Valid(data) {
 		return websocketMessage{}, connect.NewError(connect.CodeInternal, errWebSocketInvalidUTF8.Error()).WithCause(errWebSocketInvalidUTF8)
@@ -109,8 +105,8 @@ func parseWebSocketMessage(messageType websocket.MessageType, data []byte, bodyI
 	message := websocketMessage{marker: data[0], payload: data[1:]}
 	switch message.marker {
 	case websocketMarkerBody:
-		if text != bodyIsText {
-			return websocketMessage{}, newWebSocketProtocolError("B message in a %s frame, expected a %s frame", websocketFrameName(text), websocketFrameName(bodyIsText))
+		if messageType != bodyType {
+			return websocketMessage{}, newWebSocketProtocolError("B message in a %s frame, expected a %s frame", websocketFrameName(messageType), websocketFrameName(bodyType))
 		}
 	case websocketMarkerLeadingMetadata, websocketMarkerServerEndStream, websocketMarkerClientEndStream:
 		if !text {
@@ -285,10 +281,6 @@ func isWebSocketMetadataValue(value string) bool {
 	return true
 }
 
-func websocketBodyIsText(codecName string) bool {
-	return codecName == connect.CodecNameJSON
-}
-
 // websocketReadLimit doesn't count the marker byte. -1 lifts coder's 32 KiB
 // default.
 func websocketReadLimit(readMaxBytes int) int64 {
@@ -314,8 +306,9 @@ func marshalWebSocketBody(ctx context.Context, codec connect.Codec, msg any, sen
 	return buffer, nil
 }
 
+// websocketBodyType sends only JSON as text.
 func websocketBodyType(codecName string) websocket.MessageType {
-	if websocketBodyIsText(codecName) {
+	if codecName == connect.CodecNameJSON {
 		return websocket.MessageText
 	}
 	return websocket.MessageBinary
@@ -363,19 +356,19 @@ func newWebSocketDecodeError(err error) *connect.Error {
 	return connect.NewError(connect.CodeInvalidArgument, "protocol error: unmarshal message: "+err.Error()).WithCause(errWebSocketProtocol)
 }
 
-// websocketConnectKeyError reports a key the handler set that begins with
-// connect-, which a server must not send in M or S.
-func websocketConnectKeyError(header *connect.Header, kind string) error {
+// websocketValidateResponseMetadata rejects a connect- key, which a server
+// must not send in M or S.
+func websocketValidateResponseMetadata(header *connect.Header, kind string) error {
 	for key, values := range header.All() {
 		if len(values) > 0 && strings.HasPrefix(key, "Connect-") {
-			return connect.Errorf(connect.CodeInternal, "response %s %q is reserved for the protocol", kind, strings.ToLower(key)).WithCause(errWebSocketConnectKey)
+			return connect.Errorf(connect.CodeInternal, "response %s %q is reserved for the protocol", kind, strings.ToLower(key))
 		}
 	}
 	return nil
 }
 
-func websocketFrameName(text bool) string {
-	if text {
+func websocketFrameName(messageType websocket.MessageType) string {
+	if messageType == websocket.MessageText {
 		return "text"
 	}
 	return "binary"

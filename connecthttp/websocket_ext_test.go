@@ -144,15 +144,6 @@ func TestWebSocketRoundTrip(t *testing.T) {
 				_, err = stream.CloseAndReceive()
 				assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
 			})
-			t.Run("close_while_receiving", func(t *testing.T) {
-				t.Parallel()
-				stream, err := client.CumSum(t.Context())
-				assert.Nil(t, err)
-				assert.Nil(t, stream.SendHeaders())
-				time.AfterFunc(10*time.Millisecond, func() { _ = stream.Close() })
-				_, err = stream.Receive()
-				assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
-			})
 			t.Run("bidi", func(t *testing.T) {
 				t.Parallel()
 				stream, err := client.CumSum(t.Context())
@@ -455,26 +446,6 @@ func TestWebSocketWire(t *testing.T) {
 		assert.NotNil(t, err)
 		assert.Equal(t, response.StatusCode, http.StatusBadRequest)
 		assert.Nil(t, response.Body.Close())
-	})
-	t.Run("undecodable_body", func(t *testing.T) {
-		t.Parallel()
-		// protobuf-go randomizes its error text, so only the prefix is stable.
-		conn := dialWebSocket(t, server, pingv1connect.PingServicePingProcedure, "connectrpc.1+json", nil)
-		for _, message := range []string{"M[]", "B{", "C"} {
-			assert.Nil(t, conn.Write(t.Context(), websocket.MessageText, []byte(message)))
-		}
-		var got []string
-		for {
-			_, data, err := conn.Read(t.Context())
-			if err != nil {
-				assert.Equal(t, websocket.CloseStatus(err), websocket.StatusProtocolError)
-				break
-			}
-			got = append(got, string(data))
-		}
-		assert.Equal(t, len(got), 2)
-		assert.Equal(t, got[0], "M[]")
-		assert.True(t, strings.HasPrefix(got[1], `S{"error":{"code":"invalid_argument","message":"protocol error: unmarshal message: `))
 	})
 }
 

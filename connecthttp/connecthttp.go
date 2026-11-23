@@ -438,7 +438,7 @@ func (t *transport) newClientState(spec connect.Spec) *clientState {
 		procedureURL := *t.baseURLPtr
 		procedureURL.Path = joinURLPath(t.baseURLPtr.Path, spec.Procedure)
 		config := newWebSocketClientConfig(t.httpClient, procedureURL, opts)
-		return &clientState{opts: opts, sendCodecName: sendCodecName, websocket: config}
+		return &clientState{websocket: config}
 	}
 	client, err := t.newProtocolClient(spec, opts)
 	if err != nil {

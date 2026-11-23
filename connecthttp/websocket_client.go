@@ -25,7 +25,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"connectrpc.com/connect/v2"
@@ -72,7 +71,6 @@ type websocketClientStream struct {
 	clientInfo     *ClientInfo
 	singleRequest  bool
 	singleResponse bool
-	closed         atomic.Bool
 
 	dialMu       sync.Mutex
 	conn         *websocket.Conn
@@ -83,7 +81,6 @@ type websocketClientStream struct {
 	sendClosed     bool
 	receivedHeader bool
 	receiveErr     error
-	released       bool
 }
 
 func newWebSocketClientStream(
@@ -108,8 +105,8 @@ func newWebSocketClientStream(
 		config:         config,
 		info:           info,
 		clientInfo:     clientInfo,
-		singleRequest:  spec.StreamType == connect.StreamTypeUnary || spec.StreamType == connect.StreamTypeServer,
-		singleResponse: spec.StreamType == connect.StreamTypeUnary || spec.StreamType == connect.StreamTypeClient,
+		singleRequest:  spec.StreamType&connect.StreamTypeClient == 0,
+		singleResponse: spec.StreamType&connect.StreamTypeServer == 0,
 	}
 }
 
@@ -142,8 +139,7 @@ func (s *websocketClientStream) Send(msg any) error {
 	}
 	if s.singleRequest {
 		// A unary request is always followed by C.
-		s.sendClosed = true
-		_ = writeWebSocketText(s.ioCtx, conn, websocketMarkerClientEndStream, nil)
+		_ = s.CloseSend()
 	}
 	return nil
 }
@@ -172,19 +168,18 @@ func (s *websocketClientStream) Receive(msg any) error {
 	if s.receiveErr != nil {
 		return s.receiveErr
 	}
-	conn, err := s.dial()
-	if err != nil {
+	if _, err := s.dial(); err != nil {
 		s.receiveErr = err
 		return err
 	}
-	receive := func(msg any) error { return s.receive(conn, msg) }
+	var err error
 	if s.singleResponse {
-		err = receiveExactlyOne(receive, msg, "response")
+		err = receiveExactlyOne(s.receive, msg, "response")
 		if err == nil {
 			s.receiveErr = io.EOF
 		}
 	} else {
-		err = receive(msg)
+		err = s.receive(msg)
 	}
 	if err != nil {
 		s.receiveErr = err
@@ -198,7 +193,6 @@ func (s *websocketClientStream) Receive(msg any) error {
 }
 
 func (s *websocketClientStream) Close() error {
-	s.closed.Store(true)
 	s.cancel()
 	return nil
 }
@@ -216,15 +210,13 @@ func (s *websocketClientStream) dial() (*websocket.Conn, error) {
 }
 
 func (s *websocketClientStream) connect() (*websocket.Conn, error) {
-	if s.closed.Load() {
-		return nil, connect.NewError(connect.CodeCanceled, "stream closed")
-	}
-	requestMetadata := websocketMetadata(s.info.RequestHeader())
-	handshakeHeader := websocketHandshakeHeader(s.info.RequestHeader(), requestMetadata)
+	metadata := websocketMetadata(s.info.RequestHeader())
+	handshakeHeader := websocketHandshakeHeader(s.info.RequestHeader(), metadata)
 	// Check the metadata before dialing, so a bad key sends nothing.
-	metadata := encodeWebSocketMetadata(requestMetadata)
-	if _, err := decodeWebSocketMetadata(metadata, true); err != nil {
-		return nil, err
+	for key, values := range metadata {
+		if err := validateWebSocketMetadata(key, values, true); err != nil {
+			return nil, err
+		}
 	}
 	requestURL := s.config.url
 	if deadline, ok := s.ctx.Deadline(); ok {
@@ -257,7 +249,7 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 	s.stopWatching = context.AfterFunc(s.ctx, func() {
 		_ = conn.Close(websocket.StatusNormalClosure, "")
 	})
-	if err := writeWebSocketText(s.ioCtx, conn, websocketMarkerLeadingMetadata, metadata); err != nil {
+	if err := writeWebSocketText(s.ioCtx, conn, websocketMarkerLeadingMetadata, encodeWebSocketMetadata(metadata)); err != nil {
 		s.stopWatching()
 		_ = conn.CloseNow()
 		return nil, s.readError(err)
@@ -278,7 +270,9 @@ func websocketHandshakeHeader(requestHeader *connect.Header, metadata http.Heade
 }
 
 func (s *websocketClientStream) dialError(response *http.Response, err error) error {
-	if errors.Is(err, errWebSocketHTTPClient) {
+	// A 101 means coder rejected the upgrade, such as for an unoffered
+	// subprotocol.
+	if errors.Is(err, errWebSocketHTTPClient) || (response != nil && response.StatusCode == http.StatusSwitchingProtocols) {
 		return connect.Errorf(connect.CodeInternal, "dial WebSocket: %s", err).WithCause(err)
 	}
 	if response == nil {
@@ -286,10 +280,6 @@ func (s *websocketClientStream) dialError(response *http.Response, err error) er
 			return connectErr
 		}
 		return connect.Errorf(connect.CodeUnavailable, "dial WebSocket: %s", err).WithCause(err)
-	}
-	if response.StatusCode == http.StatusSwitchingProtocols {
-		// coder rejected the upgrade, such as for an unoffered subprotocol.
-		return connect.Errorf(connect.CodeInternal, "dial WebSocket: %s", err).WithCause(err)
 	}
 	// coder keeps the first 1024 bytes of the body.
 	var wireErr connectWireError
@@ -299,10 +289,11 @@ func (s *websocketClientStream) dialError(response *http.Response, err error) er
 	return connect.Errorf(httpToCode(response.StatusCode), "dial WebSocket: HTTP status %d", response.StatusCode).WithCause(err)
 }
 
-func (s *websocketClientStream) receive(conn *websocket.Conn, msg any) error {
-	bodyIsText := websocketBodyIsText(s.config.codec.Name())
+// receive runs after dial, which publishes s.conn under dialMu.
+func (s *websocketClientStream) receive(msg any) error {
+	bodyType := websocketBodyType(s.config.codec.Name())
 	for {
-		messageType, data, err := conn.Read(s.ioCtx)
+		messageType, data, err := s.conn.Read(s.ioCtx)
 		if err == nil {
 			// ioCtx outlives ctx, so a message can still arrive after cancel.
 			err = s.ctx.Err()
@@ -310,7 +301,7 @@ func (s *websocketClientStream) receive(conn *websocket.Conn, msg any) error {
 		if err != nil {
 			return s.readError(err)
 		}
-		message, parseErr := parseWebSocketMessage(messageType, data, bodyIsText)
+		message, parseErr := parseWebSocketMessage(messageType, data, bodyType)
 		if parseErr != nil {
 			return parseErr
 		}
@@ -365,22 +356,15 @@ func (s *websocketClientStream) receiveEnd(payload []byte) error {
 // release closes with the first code it's given. After S, Receive releases
 // again with the RPC's outcome, which must not replace 1000.
 func (s *websocketClientStream) release(closeCode websocket.StatusCode, reason string) {
-	if s.released {
-		return
+	// False once the context watcher or an earlier release has closed.
+	if s.stopWatching() {
+		// Don't make the caller wait for the close handshake, up to 5s in coder.
+		go func() { _ = s.conn.Close(closeCode, reason) }()
 	}
-	s.released = true
-	// Stop the context watcher first, so it can't close with 1000 instead.
-	s.stopWatching()
-	// Don't make the caller wait for the close handshake, up to 5s in coder.
-	conn := s.conn
-	go func() { _ = conn.Close(closeCode, reason) }()
 	s.cancel()
 }
 
 func (s *websocketClientStream) readError(err error) error {
-	if s.closed.Load() {
-		return connect.NewError(connect.CodeCanceled, "stream closed")
-	}
 	if ctxErr := s.ctx.Err(); ctxErr != nil {
 		return wrapIfContextError(ctxErr)
 	}
