@@ -95,6 +95,7 @@ func newWebSocketClientStream(
 	info.Protocol = protocolNameWebSocket
 	info.Codec = config.codec.Name()
 	info.RequestEncoding = connect.CompressionNameIdentity
+	info.ResponseEncoding = connect.CompressionNameIdentity
 	// Every path cancels ctx, which ends ioCtx, so its cancel is unneeded.
 	ctx, cancel := context.WithCancel(ctx)
 	ioCtx, _ := websocketGraceContext(ctx)
@@ -270,23 +271,24 @@ func websocketHandshakeHeader(requestHeader *connect.Header, metadata http.Heade
 }
 
 func (s *websocketClientStream) dialError(response *http.Response, err error) error {
+	cause := websocketCause(err)
 	// A 101 means coder rejected the upgrade, such as for an unoffered
 	// subprotocol.
 	if errors.Is(err, errWebSocketHTTPClient) || (response != nil && response.StatusCode == http.StatusSwitchingProtocols) {
-		return connect.Errorf(connect.CodeInternal, "dial WebSocket: %s", err).WithCause(err)
+		return connect.Errorf(connect.CodeInternal, "dial WebSocket: %s", err).WithCause(cause)
 	}
 	if response == nil {
 		if connectErr, ok := asError(wrapIfContextDone(s.ctx, err)); ok {
 			return connectErr
 		}
-		return connect.Errorf(connect.CodeUnavailable, "dial WebSocket: %s", err).WithCause(err)
+		return connect.Errorf(connect.CodeUnavailable, "dial WebSocket: %s", err).WithCause(cause)
 	}
 	// coder keeps the first 1024 bytes of the body.
 	var wireErr connectWireError
 	if body, readErr := io.ReadAll(response.Body); readErr == nil && json.Unmarshal(body, &wireErr) == nil && wireErr.Code != 0 {
 		return wireErr.asError()
 	}
-	return connect.Errorf(httpToCode(response.StatusCode), "dial WebSocket: HTTP status %d", response.StatusCode).WithCause(err)
+	return connect.Errorf(httpToCode(response.StatusCode), "dial WebSocket: HTTP status %d", response.StatusCode).WithCause(cause)
 }
 
 // receive runs after dial, which publishes s.conn under dialMu.
@@ -368,10 +370,7 @@ func (s *websocketClientStream) readError(err error) error {
 	if ctxErr := s.ctx.Err(); ctxErr != nil {
 		return wrapIfContextError(ctxErr)
 	}
-	// A cause that wraps io.EOF would read as a clean end of stream.
-	if errors.Is(err, io.EOF) {
-		err = io.ErrUnexpectedEOF
-	}
+	err = websocketCause(err)
 	switch {
 	case errors.Is(err, websocket.ErrMessageTooBig), websocket.CloseStatus(err) == websocket.StatusMessageTooBig:
 		return connect.Errorf(connect.CodeResourceExhausted, "message too big: %s", err).WithCause(err)

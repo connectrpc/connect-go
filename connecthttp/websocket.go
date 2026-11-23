@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -348,6 +349,15 @@ func websocketGraceContext(ctx context.Context) (context.Context, context.Cancel
 func newWebSocketProtocolError(format string, args ...any) *connect.Error {
 	message := fmt.Sprintf(format, args...)
 	return connect.NewError(connect.CodeInternal, "protocol error: "+message).WithCause(errWebSocketProtocol)
+}
+
+// websocketCause stops a cause that wraps io.EOF from reading as a clean end
+// of stream.
+func websocketCause(err error) error {
+	if errors.Is(err, io.EOF) {
+		return io.ErrUnexpectedEOF
+	}
+	return err
 }
 
 // newWebSocketDecodeError is a protocol error, but it uses invalid_argument to

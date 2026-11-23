@@ -98,6 +98,10 @@ func (s *websocketServerStream) receive(msg any) error {
 	if s.receivedEnd {
 		return io.EOF
 	}
+	// Checked first, since select picks at random and a message may be queued.
+	if err := context.Cause(s.ctx); err != nil {
+		return wrapIfContextError(err)
+	}
 	var message websocketMessage
 	select {
 	case received, open := <-s.reader.messages:
@@ -105,14 +109,13 @@ func (s *websocketServerStream) receive(msg any) error {
 			return s.reader.failure()
 		}
 		message = received
+	case <-s.reader.endStream:
+		s.receivedEnd = true
+		return io.EOF
 	case <-s.ctx.Done():
 		return wrapIfContextError(context.Cause(s.ctx))
 	}
-	if message.marker == websocketMarkerClientEndStream {
-		s.receivedEnd = true
-		return io.EOF
-	}
-	// The reader passes on only B and C after M.
+	// The reader passes on only B after M.
 	if err := s.codec.UnmarshalRead(s.ctx, bytes.NewReader(message.payload), msg); err != nil {
 		protocolErr := newWebSocketDecodeError(err)
 		s.reader.fail(protocolErr)
@@ -149,6 +152,11 @@ func (s *websocketServerStream) writeError(err error) error {
 func (s *websocketServerStream) finish(ctx context.Context, err error) {
 	peerGone, failure := s.reader.beginEndStream()
 	switch {
+	case errors.Is(failure, websocket.ErrMessageTooBig):
+		// coder already sent 1009. Close drains the rest of the message, so
+		// the socket isn't reset with the Close frame unread.
+		_ = s.conn.Close(websocket.StatusMessageTooBig, "")
+		return
 	case peerGone:
 		_ = s.conn.CloseNow()
 		return
@@ -210,7 +218,9 @@ type websocketServerReader struct {
 	bodyType websocket.MessageType
 	cancel   context.CancelCauseFunc
 	messages chan websocketMessage
-	done     chan struct{}
+	// endStream closes on C, so the reader doesn't wait for the handler.
+	endStream chan struct{}
+	done      chan struct{}
 
 	mu       sync.Mutex
 	err      error
@@ -237,14 +247,18 @@ func (r *websocketServerReader) run(ctx context.Context) {
 			r.fail(parseErr)
 			return
 		}
-		// Checked here, not in Receive, so a handler that never reads still
-		// gets the protocol error.
+		// Checked here, so a message after C fails the RPC even if the
+		// handler stopped reading.
 		if err := websocketClientOrderError(message.marker, sawMetadata, sawEnd); err != nil {
 			r.fail(err)
 			return
 		}
 		sawMetadata = true
-		sawEnd = message.marker == websocketMarkerClientEndStream
+		if message.marker == websocketMarkerClientEndStream {
+			sawEnd = true
+			close(r.endStream)
+			continue
+		}
 		select {
 		case r.messages <- message:
 		case <-r.done:
@@ -285,10 +299,7 @@ func (r *websocketServerReader) connectionEnded(err error) {
 		return
 	}
 	r.peerGone = true
-	// A cause that wraps io.EOF would read as a clean end of stream.
-	if errors.Is(err, io.EOF) {
-		err = io.ErrUnexpectedEOF
-	}
+	err = websocketCause(err)
 	if r.err == nil {
 		r.err = connect.Errorf(connect.CodeCanceled, "client closed the connection: %s", err).WithCause(err)
 		if errors.Is(err, websocket.ErrMessageTooBig) {
@@ -362,11 +373,12 @@ func serveWebSocket(server *connect.Server, spec connect.Spec, opts *options, re
 	writeCtx, cancelWrite := websocketGraceContext(ctx)
 	defer cancelWrite()
 	reader := &websocketServerReader{
-		conn:     conn,
-		bodyType: websocketBodyType(codec.Name()),
-		cancel:   cancel,
-		messages: make(chan websocketMessage),
-		done:     make(chan struct{}),
+		conn:      conn,
+		bodyType:  websocketBodyType(codec.Name()),
+		cancel:    cancel,
+		messages:  make(chan websocketMessage),
+		endStream: make(chan struct{}),
+		done:      make(chan struct{}),
 	}
 	go reader.run(ctx)
 
@@ -469,13 +481,21 @@ func negotiateWebSocketCodec(header http.Header, codecs readOnlyCodecs) (connect
 }
 
 func parseWebSocketTimeout(rawQuery string) (time.Duration, bool, error) {
-	// ParseQuery skips pairs it can't parse, possibly the timeout.
-	query, err := url.ParseQuery(rawQuery)
-	values, ok := query[websocketTimeoutQueryParameter]
+	// Scanned by hand, since ParseQuery skips a pair it can't unescape.
+	var values []string
+	for pair := range strings.SplitSeq(rawQuery, "&") {
+		key, value, _ := strings.Cut(pair, "=")
+		if key != websocketTimeoutQueryParameter {
+			continue
+		}
+		value, err := url.QueryUnescape(value)
+		if err != nil {
+			return 0, false, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %s", err)
+		}
+		values = append(values, value)
+	}
 	switch {
-	case !ok && err != nil && strings.Contains(rawQuery, websocketTimeoutQueryParameter):
-		return 0, false, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %s", err)
-	case !ok:
+	case len(values) == 0:
 		return 0, false, nil
 	case len(values) > 1:
 		return 0, false, connect.NewError(connect.CodeInvalidArgument, "parse timeout: more than one value supplied")
