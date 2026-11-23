@@ -128,6 +128,14 @@ func (c *ClientInfo) loadResponse() *clientResponseInfo {
 	return c.response.Load()
 }
 
+func (c *ClientInfo) storeResponse(response *http.Response) {
+	c.response.Store(&clientResponseInfo{
+		status: response.StatusCode,
+		proto:  response.Proto,
+		tls:    response.TLS,
+	})
+}
+
 // ServerInfo is the HTTP metadata for a server RPC, carried on
 // [connect.CallInfo.TransportInfo].
 type ServerInfo struct {
@@ -261,12 +269,13 @@ func Mount(mux ServeMux, server *connect.Server, options ...Option) {
 	}
 	services := make(map[string]struct{})
 	for spec := range server.Specs() {
-		procedureHandler := newProcedureHandler(server, spec, &opts)
+		specOpts := opts.forSpec(spec)
+		procedureHandler := newProcedureHandler(server, spec, specOpts)
 		if spec.StreamType == connect.StreamTypeBidi {
 			procedureHandler = requireHTTP2(procedureHandler)
 		}
 		// Outermost because the WebSocket handshake is HTTP/1.1.
-		procedureHandler = newWebSocketHandler(server, spec, opts.forSpec(spec), procedureHandler)
+		procedureHandler = newWebSocketHandler(server, spec, specOpts, procedureHandler)
 		mux.Handle(spec.Procedure, procedureHandler)
 		// "/package.Service/Method" -> subtree pattern "/package.Service/".
 		if idx := strings.LastIndexByte(spec.Procedure, '/'); idx > 0 {
@@ -329,7 +338,7 @@ func newUnknownMethodHandler(server *connect.Server, opts *options) http.Handler
 		}
 		// Cold path: build the handler per request to reuse the
 		// registered-procedure machinery.
-		newProcedureHandler(server, spec, opts).ServeHTTP(responseWriter, request)
+		newProcedureHandler(server, spec, opts.forSpec(spec)).ServeHTTP(responseWriter, request)
 	})
 }
 
@@ -374,7 +383,7 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 		return nil, state.err
 	}
 	if state.websocket != nil {
-		return newWebSocketClientStream(ctx, spec, state.websocket, info, clientInfo), nil
+		return newWebSocketClientStream(ctx, spec, state.websocket, info), nil
 	}
 	opts, sendCodecName, protocolClient := state.opts, state.sendCodecName, state.client
 	conn := protocolClient.NewConn(ctx, spec, make(http.Header, 8))
@@ -387,13 +396,7 @@ func (t *transport) NewClientStream(ctx context.Context, spec connect.Spec) (con
 	conn.onRequestSend(func(request *http.Request) {
 		clientInfo.request.Store(request)
 	})
-	conn.onResponseReceive(func(response *http.Response) {
-		clientInfo.response.Store(&clientResponseInfo{
-			status: response.StatusCode,
-			proto:  response.Proto,
-			tls:    response.TLS,
-		})
-	})
+	conn.onResponseReceive(clientInfo.storeResponse)
 	if spec.StreamType == connect.StreamTypeUnary {
 		return &connectUnaryClientStream{conn: conn, info: info, protoClient: protocolClient, streamType: spec.StreamType}, nil
 	}
@@ -426,9 +429,10 @@ func (t *transport) newClientState(spec connect.Spec) *clientState {
 	if sendCodecName == "" {
 		return &clientState{err: connect.Errorf(connect.CodeUnknown, "no codecs registered")}
 	}
-	if !slices.ContainsFunc(opts.codecs, func(c connect.Codec) bool {
+	codecIndex := slices.IndexFunc(opts.codecs, func(c connect.Codec) bool {
 		return c.Name() == sendCodecName
-	}) {
+	})
+	if codecIndex < 0 {
 		return &clientState{err: connect.Errorf(connect.CodeUnknown, "unknown codec %q", sendCodecName)}
 	}
 	if t.baseURLErr != nil {
@@ -437,7 +441,7 @@ func (t *transport) newClientState(spec connect.Spec) *clientState {
 	if opts.protocol == protocolNameWebSocket {
 		procedureURL := *t.baseURLPtr
 		procedureURL.Path = joinURLPath(t.baseURLPtr.Path, spec.Procedure)
-		config := newWebSocketClientConfig(t.httpClient, procedureURL, opts)
+		config := newWebSocketClientConfig(t.httpClient, procedureURL, opts.codecs[codecIndex], opts)
 		return &clientState{websocket: config}
 	}
 	client, err := t.newProtocolClient(spec, opts)

@@ -16,7 +16,6 @@ package connecthttp
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 
@@ -65,21 +64,6 @@ func (s *handlerStream) Receive(dst any) error {
 	return receiveExactlyOne(s.conn.Receive, dst, "request")
 }
 
-func receiveExactlyOne(receive func(any) error, msg any, messageName string) error {
-	err := receive(msg)
-	if errors.Is(err, io.EOF) {
-		return connect.Errorf(connect.CodeUnimplemented, "unary %s has zero messages", messageName)
-	} else if err != nil {
-		return err
-	}
-	if err := receive(msg); err == nil {
-		return connect.Errorf(connect.CodeUnimplemented, "unary %s has multiple messages", messageName)
-	} else if !errors.Is(err, io.EOF) {
-		return err
-	}
-	return nil
-}
-
 func (s *handlerStream) SendHeaders() error {
 	// Unary responses defer headers to Send or handler return. The Connect
 	// unary protocol encodes errors in the HTTP status, so flushing now would
@@ -118,9 +102,10 @@ func newServerHandlerConfig(spec connect.Spec, opts *options) *handlerConfig {
 
 // newProcedureHandler returns an [http.Handler] for a single procedure that
 // negotiates the wire protocol (reusing the v1 [Handler.ServeHTTP] skeleton)
-// and dispatches through [connect.Server.Call].
+// and dispatches through [connect.Server.Call]. opts are already resolved for
+// spec.
 func newProcedureHandler(server *connect.Server, spec connect.Spec, opts *options) http.Handler {
-	handlerCfg := newServerHandlerConfig(spec, opts.forSpec(spec))
+	handlerCfg := newServerHandlerConfig(spec, opts)
 	protocolHandlers := handlerCfg.newProtocolHandlers()
 	unary := spec.StreamType == connect.StreamTypeUnary
 	singleRequest := unary || spec.StreamType == connect.StreamTypeServer

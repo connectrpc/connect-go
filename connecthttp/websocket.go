@@ -105,9 +105,11 @@ func websocketReadMessage(ctx context.Context, conn *websocket.Conn, dst *bytes.
 	return messageType, nil
 }
 
-// websocketParseMarker returns the marker of a message, leaving ordering and
-// direction checks to the caller.
-func websocketParseMarker(messageType websocket.MessageType, data []byte, bodyType websocket.MessageType) (byte, *connect.Error) {
+// websocketParseMarker returns the marker of the message in buffer and
+// consumes it, leaving the payload. Ordering and direction checks are left to
+// the caller.
+func websocketParseMarker(messageType websocket.MessageType, buffer *bytes.Buffer, codecName string) (byte, *connect.Error) {
+	data := buffer.Bytes()
 	text := messageType == websocket.MessageText
 	if text && !utf8.Valid(data) {
 		return 0, connect.NewError(connect.CodeInternal, errWebSocketInvalidUTF8.Error()).WithCause(errWebSocketInvalidUTF8)
@@ -118,7 +120,7 @@ func websocketParseMarker(messageType websocket.MessageType, data []byte, bodyTy
 	marker, payload := data[0], data[1:]
 	switch marker {
 	case websocketMarkerBody:
-		if messageType != bodyType {
+		if bodyType := websocketBodyType(codecName); messageType != bodyType {
 			return 0, newWebSocketProtocolError("B message in a %s frame, expected a %s frame", websocketFrameName(messageType), websocketFrameName(bodyType))
 		}
 	case websocketMarkerLeadingMetadata, websocketMarkerServerEndStream, websocketMarkerClientEndStream:
@@ -134,21 +136,8 @@ func websocketParseMarker(messageType websocket.MessageType, data []byte, bodyTy
 	default:
 		return 0, newWebSocketProtocolError("unknown marker 0x%02x", marker)
 	}
+	buffer.Next(1)
 	return marker, nil
-}
-
-func websocketMetadata(header *connect.Header) http.Header {
-	metadata := make(http.Header)
-	for key, values := range userHeaders(header) {
-		key = strings.ToLower(key)
-		if len(values) == 0 || strings.HasPrefix(key, "connect-") {
-			continue
-		}
-		for _, value := range values {
-			metadata[key] = append(metadata[key], websocketTrimMetadataValue(value))
-		}
-	}
-	return metadata
 }
 
 // websocketTrimMetadataValue removes what RFC 9110 Section 5.5 says is not
@@ -157,7 +146,9 @@ func websocketTrimMetadataValue(value string) string {
 	return strings.Trim(value, " \t")
 }
 
-func websocketEncodeMetadata(buffer *bytes.Buffer, metadata http.Header) {
+// websocketMarshalMetadata writes an M message into buffer.
+func websocketMarshalMetadata(buffer *bytes.Buffer, metadata http.Header) {
+	buffer.WriteByte(websocketMarkerLeadingMetadata)
 	entries := make([][]string, 0, len(metadata))
 	for key, values := range metadata {
 		entries = append(entries, append([]string{key}, values...))
@@ -213,38 +204,14 @@ func websocketDecodeMetadata(payload []byte, fromClient bool) (http.Header, *con
 	return header, nil
 }
 
-// websocketDropInvalidMetadata drops entries a peer would reject, as net/http
-// drops invalid header fields.
-func websocketDropInvalidMetadata(metadata http.Header) http.Header {
-	for key, values := range metadata {
-		if websocketValidateMetadata(key, nil, false) != nil {
-			delete(metadata, key)
-			continue
-		}
-		if !strings.HasSuffix(key, "-bin") {
-			values = slices.DeleteFunc(values, func(value string) bool { return !websocketIsMetadataValue(value) })
-		}
-		if len(values) == 0 {
-			delete(metadata, key)
-		} else {
-			metadata[key] = values
-		}
-	}
-	return metadata
-}
-
 func websocketValidateMetadata(key string, values []string, fromClient bool) *connect.Error {
-	if key == "" {
+	switch {
+	case key == "":
 		return newWebSocketProtocolError("M message has an empty key")
-	}
-	for i := range len(key) {
-		char := key[i]
-		if char >= 'A' && char <= 'Z' {
-			return newWebSocketProtocolError("M message key %q is not lower-case", key)
-		}
-		if !isHTTPTokenByte(char) {
-			return newWebSocketProtocolError("M message key %q is not a valid header name", key)
-		}
+	case !websocketIsMetadataKey(key):
+		return newWebSocketProtocolError("M message key %q is not a valid header name", key)
+	case strings.ToLower(key) != key:
+		return newWebSocketProtocolError("M message key %q is not lower-case", key)
 	}
 	if fromClient && websocketIsReservedKey(key) {
 		return newWebSocketProtocolError("M message key %q is reserved", key)
@@ -262,25 +229,46 @@ func websocketValidateMetadata(key string, values []string, fromClient bool) *co
 	return nil
 }
 
-// websocketIsReservedKey lists the Fetch standard's forbidden request headers,
-// headers this protocol controls and headers proxies set.
+// websocketIsReservedKey follows the three lists in spec Section 7.3.2.
 func websocketIsReservedKey(key string) bool {
 	switch key {
-	case "accept-charset", "accept-encoding", "access-control-request-headers",
+	case
+		// 1. Fetch forbidden request headers.
+		"accept-charset", "accept-encoding", "access-control-request-headers",
 		"access-control-request-method", "connection", "content-length", "cookie",
 		"cookie2", "date", "dnt", "expect", "host", "keep-alive", "origin",
 		"referer", "set-cookie", "te", "trailer", "transfer-encoding", "upgrade",
 		"via", "x-http-method", "x-http-method-override", "x-method-override",
-		"content-type", "content-encoding",
-		"forwarded", "x-real-ip":
+		// 2. Infrastructure deny list.
+		"forwarded", "x-real-ip",
+		// 3. Controlled by this protocol.
+		"content-type", "content-encoding":
 		return true
 	}
-	for _, prefix := range []string{"proxy-", "sec-", "connect-", "x-forwarded-"} {
+	for _, prefix := range []string{
+		"proxy-", "sec-", // 1. Fetch forbidden request headers.
+		"x-forwarded-", // 2. Infrastructure deny list.
+		"connect-",     // 3. Controlled by this protocol.
+	} {
 		if strings.HasPrefix(key, prefix) {
 			return true
 		}
 	}
 	return false
+}
+
+// websocketIsMetadataKey reports whether key is a valid HTTP field name. It
+// doesn't check case.
+func websocketIsMetadataKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for i := range len(key) {
+		if !isHTTPTokenByte(key[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // isHTTPTokenByte follows RFC 9110 Section 5.6.2.
@@ -331,16 +319,6 @@ func websocketBodyType(codecName string) websocket.MessageType {
 	return websocket.MessageBinary
 }
 
-// websocketCloseReason truncates reason to fit a Close frame. coder sends no
-// Close frame for a reason over 123 bytes.
-func websocketCloseReason(reason string) string {
-	const maxReasonBytes = 123
-	if len(reason) <= maxReasonBytes {
-		return reason
-	}
-	return strings.ToValidUTF8(reason[:maxReasonBytes], "")
-}
-
 // websocketGraceContext ends [websocketCloseGrace] after ctx. coder drops the
 // connection when a read or write context ends, so a nearly done write or
 // close handshake gets time to finish. coder bounds Close at 5s on its own.
@@ -373,17 +351,6 @@ func websocketCause(err error) error {
 // match Connect-over-HTTP.
 func newWebSocketDecodeError(err error) *connect.Error {
 	return connect.NewError(connect.CodeInvalidArgument, "protocol error: unmarshal message: "+err.Error()).WithCause(errWebSocketProtocol)
-}
-
-// websocketValidateResponseMetadata rejects a connect- key, which a server
-// must not send in M or S.
-func websocketValidateResponseMetadata(header *connect.Header, kind string) error {
-	for key, values := range header.All() {
-		if len(values) > 0 && strings.HasPrefix(key, "Connect-") {
-			return connect.Errorf(connect.CodeInternal, "response %s %q is reserved for the protocol", kind, strings.ToLower(key))
-		}
-	}
-	return nil
 }
 
 func websocketFrameName(messageType websocket.MessageType) string {

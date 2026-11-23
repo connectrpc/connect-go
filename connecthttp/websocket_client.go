@@ -39,22 +39,35 @@ type websocketClientConfig struct {
 	sendMaxBytes int
 }
 
-func newWebSocketClientConfig(httpClient HTTPClient, procedureURL url.URL, opts *options) *websocketClientConfig {
-	client, ok := httpClient.(*http.Client)
-	if !ok {
+func newWebSocketClientConfig(
+	httpClient HTTPClient,
+	procedureURL url.URL,
+	codec connect.Codec,
+	opts *options,
+) *websocketClientConfig {
+	var client http.Client
+	if stdClient, ok := httpClient.(*http.Client); ok {
+		// Copy so the caller's client is left unchanged.
+		client = *stdClient
+	} else {
 		// coder only takes an *http.Client. The wrapped client follows
 		// redirects with its own policy.
-		client = &http.Client{
+		client = http.Client{
 			Transport: &websocketDoTransport{httpClient: httpClient},
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
 		}
 	}
+	next := client.Transport
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	client.Transport = &websocketRecordingTransport{next: next}
 	return &websocketClientConfig{
-		httpClient:   client,
+		httpClient:   &client,
 		url:          procedureURL,
-		codec:        newReadOnlyCodecs(opts.codecs).Get(opts.getSendCodecName()),
+		codec:        codec,
 		readLimit:    websocketReadLimit(opts.readMaxBytes),
 		sendMaxBytes: opts.sendMaxBytes,
 	}
@@ -67,13 +80,11 @@ type websocketClientStream struct {
 	cancel         context.CancelFunc
 	config         *websocketClientConfig
 	info           *connect.CallInfo
-	clientInfo     *ClientInfo
 	singleRequest  bool
 	singleResponse bool
 
-	dialMu       sync.Mutex
-	conn         *websocket.Conn
-	dialErr      error
+	// dial runs the handshake once. It also publishes stopWatching.
+	dial         func() (*websocket.Conn, error)
 	stopWatching func() bool
 
 	sent           bool
@@ -87,7 +98,6 @@ func newWebSocketClientStream(
 	spec connect.Spec,
 	config *websocketClientConfig,
 	info *connect.CallInfo,
-	clientInfo *ClientInfo,
 ) *websocketClientStream {
 	info.Spec = spec
 	info.PeerAddr = config.url.Host
@@ -98,16 +108,23 @@ func newWebSocketClientStream(
 	// Every path cancels ctx, which ends ioCtx, so its cancel is unneeded.
 	ctx, cancel := context.WithCancel(ctx)
 	ioCtx, _ := websocketGraceContext(ctx)
-	return &websocketClientStream{
+	stream := &websocketClientStream{
 		ctx:            ctx,
 		ioCtx:          ioCtx,
 		cancel:         cancel,
 		config:         config,
 		info:           info,
-		clientInfo:     clientInfo,
 		singleRequest:  spec.StreamType&connect.StreamTypeClient == 0,
 		singleResponse: spec.StreamType&connect.StreamTypeServer == 0,
 	}
+	stream.dial = sync.OnceValues(func() (*websocket.Conn, error) {
+		conn, err := stream.handshake()
+		if err != nil {
+			cancel()
+		}
+		return conn, err
+	})
+	return stream
 }
 
 func (s *websocketClientStream) SendHeaders() error {
@@ -149,15 +166,10 @@ func (s *websocketClientStream) CloseSend() error {
 	if err != nil {
 		return err
 	}
-	if s.sendClosed {
-		return nil
-	}
-	select {
-	case <-s.ctx.Done():
-		// After S, or once the stream is canceled or failed, a client may
-		// send only a Close frame.
-		return nil
-	default:
+	// After S, or once the stream is canceled or failed, a client may send
+	// only a Close frame.
+	if s.sendClosed || s.ctx.Err() != nil {
+		return nil //nolint:nilerr // the context error is reported by Receive
 	}
 	s.sendClosed = true
 	_ = conn.Write(s.ioCtx, websocket.MessageText, []byte{websocketMarkerClientEndStream})
@@ -197,19 +209,7 @@ func (s *websocketClientStream) Close() error {
 	return nil
 }
 
-func (s *websocketClientStream) dial() (*websocket.Conn, error) {
-	s.dialMu.Lock()
-	defer s.dialMu.Unlock()
-	if s.conn == nil && s.dialErr == nil {
-		s.conn, s.dialErr = s.connect()
-		if s.dialErr != nil {
-			s.cancel()
-		}
-	}
-	return s.conn, s.dialErr
-}
-
-func (s *websocketClientStream) connect() (*websocket.Conn, error) {
+func (s *websocketClientStream) handshake() (*websocket.Conn, error) {
 	metadata := websocketMetadata(s.info.RequestHeader())
 	handshakeHeader := websocketHandshakeHeader(s.info.RequestHeader(), metadata)
 	// Check the metadata before dialing, so a bad key sends nothing.
@@ -224,12 +224,9 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 			requestURL.RawQuery = url.Values{websocketTimeoutQueryParameter: {timeout}}.Encode()
 		}
 	}
-	// Copy so the caller's client is left unchanged.
-	httpClient := *s.config.httpClient
-	httpClient.Transport = &websocketRecordingTransport{next: httpClient.Transport, info: s.clientInfo}
 	subprotocol := websocketSubprotocolPrefix + s.config.codec.Name()
 	conn, response, err := websocket.Dial(s.ctx, requestURL.String(), &websocket.DialOptions{
-		HTTPClient:   &httpClient,
+		HTTPClient:   s.config.httpClient,
 		HTTPHeader:   handshakeHeader,
 		Subprotocols: []string{subprotocol},
 	})
@@ -241,7 +238,8 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 	}
 	// coder accepts no echo, or an echo that differs only in case.
 	if echoed := conn.Subprotocol(); echoed != subprotocol {
-		// The handshake failed, so there's no WebSocket to send a Close frame on.
+		// A missing or unoffered echo fails the handshake. Spec §4.3 has a
+		// non-browser client fail the connection without a Close frame.
 		_ = conn.CloseNow()
 		return nil, connect.Errorf(connect.CodeInternal, "server echoed subprotocol %q, expected %q", echoed, subprotocol)
 	}
@@ -251,8 +249,7 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 	})
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
-	buffer.WriteByte(websocketMarkerLeadingMetadata)
-	websocketEncodeMetadata(buffer, metadata)
+	websocketMarshalMetadata(buffer, metadata)
 	if err := conn.Write(s.ioCtx, websocket.MessageText, buffer.Bytes()); err != nil {
 		s.stopWatching()
 		_ = conn.CloseNow()
@@ -294,58 +291,50 @@ func (s *websocketClientStream) dialError(response *http.Response, err error) er
 	return connect.Errorf(httpToCode(response.StatusCode), "dial WebSocket: HTTP status %d", response.StatusCode).WithCause(cause)
 }
 
-// receive runs after dial, which publishes s.conn under dialMu.
+// receive runs after a successful dial.
 func (s *websocketClientStream) receive(msg any) error {
-	for {
-		marker, err := s.receiveMessage(msg)
-		if err != nil || marker != websocketMarkerLeadingMetadata {
-			return err
-		}
-	}
-}
-
-// receiveMessage handles one message and returns its marker.
-func (s *websocketClientStream) receiveMessage(msg any) (byte, error) {
+	conn, _ := s.dial()
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
-	messageType, err := websocketReadMessage(s.ioCtx, s.conn, buffer)
-	if err != nil {
-		return 0, s.readError(err)
-	}
-	// ioCtx outlives ctx, so a message can still arrive after cancel.
-	if err := s.ctx.Err(); err != nil {
-		return 0, s.readError(err)
-	}
-	marker, parseErr := websocketParseMarker(messageType, buffer.Bytes(), websocketBodyType(s.config.codec.Name()))
-	if parseErr != nil {
-		return 0, parseErr
-	}
-	if !s.receivedHeader && marker != websocketMarkerLeadingMetadata {
-		return 0, newWebSocketProtocolError("first message is %c, expected M", marker)
-	}
-	// Skip the marker, leaving the payload.
-	buffer.Next(1)
-	switch marker {
-	case websocketMarkerLeadingMetadata:
-		if s.receivedHeader {
-			return 0, newWebSocketProtocolError("second M message")
-		}
-		s.receivedHeader = true
-		header, err := websocketDecodeMetadata(buffer.Bytes(), false)
+	for {
+		buffer.Reset()
+		messageType, err := websocketReadMessage(s.ioCtx, conn, buffer)
 		if err != nil {
-			return 0, err
+			return s.readError(err)
 		}
-		fromHTTPHeader(s.info.ResponseHeader(), header)
-	case websocketMarkerBody:
-		if err := s.config.codec.UnmarshalRead(s.ctx, buffer, msg); err != nil {
-			return 0, newWebSocketDecodeError(err)
+		// ioCtx outlives ctx, so a message can still arrive after cancel.
+		if err := s.ctx.Err(); err != nil {
+			return wrapIfContextError(err)
 		}
-	case websocketMarkerServerEndStream:
-		return 0, s.receiveEnd(buffer.Bytes())
-	default:
-		return 0, newWebSocketProtocolError("unexpected %c message from server", marker)
+		marker, parseErr := websocketParseMarker(messageType, buffer, s.config.codec.Name())
+		if parseErr != nil {
+			return parseErr
+		}
+		if !s.receivedHeader && marker != websocketMarkerLeadingMetadata {
+			return newWebSocketProtocolError("first message is %c, expected M", marker)
+		}
+		switch marker {
+		case websocketMarkerLeadingMetadata:
+			if s.receivedHeader {
+				return newWebSocketProtocolError("second M message")
+			}
+			s.receivedHeader = true
+			header, decodeErr := websocketDecodeMetadata(buffer.Bytes(), false)
+			if decodeErr != nil {
+				return decodeErr
+			}
+			fromHTTPHeader(s.info.ResponseHeader(), header)
+		case websocketMarkerBody:
+			if err := s.config.codec.UnmarshalRead(s.ctx, buffer, msg); err != nil {
+				return newWebSocketDecodeError(err)
+			}
+			return nil
+		case websocketMarkerServerEndStream:
+			return s.receiveEnd(buffer.Bytes())
+		default:
+			return newWebSocketProtocolError("unexpected %c message from server", marker)
+		}
 	}
-	return marker, nil
 }
 
 func (s *websocketClientStream) receiveEnd(payload []byte) error {
@@ -374,8 +363,9 @@ func (s *websocketClientStream) receiveEnd(payload []byte) error {
 func (s *websocketClientStream) release(closeCode websocket.StatusCode, reason string) {
 	// False once the context watcher or an earlier release has closed.
 	if s.stopWatching() {
+		conn, _ := s.dial()
 		// Don't make the caller wait for the close handshake, up to 5s in coder.
-		go func() { _ = s.conn.Close(closeCode, reason) }()
+		go func() { _ = conn.Close(closeCode, reason) }()
 	}
 	s.cancel()
 }
@@ -395,24 +385,20 @@ func (s *websocketClientStream) readError(err error) error {
 	}
 }
 
+// websocketRecordingTransport records the handshake on the [ClientInfo] of
+// the RPC that dials, found through the request's context.
 type websocketRecordingTransport struct {
 	next http.RoundTripper
-	info *ClientInfo
 }
 
 func (t *websocketRecordingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	t.info.request.Store(request)
-	next := t.next
-	if next == nil {
-		next = http.DefaultTransport
+	info, _ := ClientInfoForContext(request.Context())
+	if info != nil {
+		info.request.Store(request)
 	}
-	response, err := next.RoundTrip(request)
-	if response != nil {
-		t.info.response.Store(&clientResponseInfo{
-			status: response.StatusCode,
-			proto:  response.Proto,
-			tls:    response.TLS,
-		})
+	response, err := t.next.RoundTrip(request)
+	if info != nil && response != nil {
+		info.storeResponse(response)
 	}
 	return response, err
 }
@@ -446,4 +432,30 @@ func (t *websocketDoTransport) RoundTrip(request *http.Request) (*http.Response,
 		return nil, fmt.Errorf("%w: the 101 response body %T can't be written", errWebSocketHTTPClient, response.Body)
 	}
 	return response, nil
+}
+
+// websocketMetadata converts request headers to M metadata. The caller
+// validates it.
+func websocketMetadata(header *connect.Header) http.Header {
+	metadata := make(http.Header)
+	for key, values := range userHeaders(header) {
+		key = strings.ToLower(key)
+		if len(values) == 0 || strings.HasPrefix(key, "connect-") {
+			continue
+		}
+		for _, value := range values {
+			metadata[key] = append(metadata[key], websocketTrimMetadataValue(value))
+		}
+	}
+	return metadata
+}
+
+// websocketCloseReason truncates reason to fit a Close frame. coder sends no
+// Close frame for a reason over 123 bytes.
+func websocketCloseReason(reason string) string {
+	const maxReasonBytes = 123
+	if len(reason) <= maxReasonBytes {
+		return reason
+	}
+	return strings.ToValidUTF8(reason[:maxReasonBytes], "")
 }

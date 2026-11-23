@@ -50,7 +50,8 @@ type websocketServerStream struct {
 	info          *connect.CallInfo
 	singleRequest bool
 
-	// finish closes done, so closeRead discards what arrives after S.
+	// finish closes done, so closeRead doesn't fail the RPC for a message
+	// that arrives after S. finish's Close discards the rest.
 	done chan struct{}
 
 	// writeMu orders Send against finish, which can run from a context
@@ -58,7 +59,6 @@ type websocketServerStream struct {
 	writeMu sync.Mutex
 	ended   bool
 
-	sawMetadata bool
 	receivedEnd bool
 	sentHeader  bool
 }
@@ -118,21 +118,20 @@ func (s *websocketServerStream) receive(msg any) error {
 	}
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
-	marker, err := s.readMessage(s.ctx, buffer)
+	marker, err := s.readMessage(buffer)
 	if err != nil {
 		return err
 	}
 	if marker == websocketMarkerClientEndStream {
 		s.receivedEnd = true
-		go s.closeRead(s.ctx)
+		go s.closeRead()
 		return io.EOF
 	}
-	// Skip the marker, leaving the payload.
-	buffer.Next(1)
+	if marker != websocketMarkerBody {
+		return s.fail(newWebSocketProtocolError("unexpected %c message from client", marker))
+	}
 	if err := s.codec.UnmarshalRead(s.ctx, buffer, msg); err != nil {
-		protocolErr := newWebSocketDecodeError(err)
-		s.cancel(protocolErr)
-		return protocolErr
+		return s.fail(newWebSocketDecodeError(err))
 	}
 	return nil
 }
@@ -142,17 +141,16 @@ func (s *websocketServerStream) writeHeader(ctx context.Context) error {
 	if s.sentHeader {
 		return nil
 	}
+	header, headerErr := websocketResponseMetadata(s.info.ResponseHeader(), "header")
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
-	buffer.WriteByte(websocketMarkerLeadingMetadata)
-	websocketEncodeMetadata(buffer, websocketDropInvalidMetadata(websocketMetadata(s.info.ResponseHeader())))
+	websocketMarshalMetadata(buffer, header)
 	if err := s.conn.Write(ctx, websocket.MessageText, buffer.Bytes()); err != nil {
 		return s.writeError(err)
 	}
 	s.sentHeader = true
-	if err := websocketValidateResponseMetadata(s.info.ResponseHeader(), "header"); err != nil {
-		s.cancel(err)
-		return err
+	if headerErr != nil {
+		return s.fail(headerErr)
 	}
 	return nil
 }
@@ -194,18 +192,19 @@ func (s *websocketServerStream) finish(ctx context.Context, err error) {
 		return
 	}
 	closeCode := websocket.StatusNormalClosure
+	trailer, trailerErr := websocketResponseMetadata(s.info.ResponseTrailer(), "trailer")
 	// Read after writeHeader, which can fail the RPC.
 	if cause, ok := asError(context.Cause(ctx)); ok {
 		err = cause
 		if errors.Is(cause, errWebSocketProtocol) {
 			closeCode = websocket.StatusProtocolError
 		}
-	} else if trailerErr := websocketValidateResponseMetadata(s.info.ResponseTrailer(), "trailer"); trailerErr != nil {
+	} else if trailerErr != nil {
 		err = trailerErr
 	}
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
-	if s.encodeEndStream(buffer, err) != nil {
+	if s.encodeEndStream(buffer, trailer, err) != nil {
 		_ = s.conn.Close(websocket.StatusInternalError, "")
 		return
 	}
@@ -218,77 +217,69 @@ func (s *websocketServerStream) finish(ctx context.Context, err error) {
 
 // encodeEndStream writes S into buffer. Over sendMaxBytes it falls back to
 // only the error code and message, as on Connect.
-func (s *websocketServerStream) encodeEndStream(buffer *bytes.Buffer, err error) error {
-	end := &connectEndStreamMessage{Trailer: websocketDropInvalidMetadata(websocketMetadata(s.info.ResponseTrailer()))}
-	if err != nil {
-		end.Error = newConnectWireError(err)
+func (s *websocketServerStream) encodeEndStream(buffer *bytes.Buffer, trailer http.Header, rpcErr error) error {
+	end := &connectEndStreamMessage{Trailer: trailer}
+	if rpcErr != nil {
+		end.Error = newConnectWireError(rpcErr)
 	}
 	buffer.WriteByte(websocketMarkerServerEndStream)
-	marshalErr := websocketAppendJSON(buffer, end)
-	if size := buffer.Len() - 1; marshalErr != nil || s.sendMaxBytes <= 0 || size <= s.sendMaxBytes {
-		return marshalErr
-	} else if err == nil {
-		err = connect.Errorf(connect.CodeResourceExhausted, "end of stream size %d exceeds sendMaxBytes %d", size, s.sendMaxBytes)
+	if err := websocketAppendJSON(buffer, end); err != nil {
+		return err
 	}
-	end = &connectEndStreamMessage{Error: newConnectWireError(err)}
+	size := buffer.Len() - 1
+	if s.sendMaxBytes <= 0 || size <= s.sendMaxBytes {
+		return nil
+	}
+	if rpcErr == nil {
+		rpcErr = connect.Errorf(connect.CodeResourceExhausted, "end of stream size %d exceeds sendMaxBytes %d", size, s.sendMaxBytes)
+	}
+	end = &connectEndStreamMessage{Error: newConnectWireError(rpcErr)}
 	end.Error.Details = nil
 	buffer.Truncate(1)
 	return websocketAppendJSON(buffer, end)
 }
 
-// readMessage reads one message into buffer and checks it against the
-// server's state table.
-func (s *websocketServerStream) readMessage(ctx context.Context, buffer *bytes.Buffer) (byte, error) {
+// readMessage reads one message into buffer and returns its marker. Callers
+// check the marker against the server's state table.
+func (s *websocketServerStream) readMessage(buffer *bytes.Buffer) (byte, error) {
 	// coder drops the connection when a read's context ends. The end of ctx
 	// runs finish instead, which closes the connection and ends the read.
-	messageType, err := websocketReadMessage(context.WithoutCancel(ctx), s.conn, buffer)
+	messageType, err := websocketReadMessage(context.WithoutCancel(s.ctx), s.conn, buffer)
 	if err != nil {
-		if ctxErr := context.Cause(ctx); ctxErr != nil {
+		if ctxErr := context.Cause(s.ctx); ctxErr != nil {
 			return 0, wrapIfContextError(ctxErr)
 		}
 		return 0, s.connectionEnded(err)
 	}
-	marker, parseErr := websocketParseMarker(messageType, buffer.Bytes(), websocketBodyType(s.codec.Name()))
-	if parseErr == nil {
-		parseErr = websocketClientOrderError(marker, s.sawMetadata, s.receivedEnd)
-	}
+	marker, parseErr := websocketParseMarker(messageType, buffer, s.codec.Name())
 	if parseErr != nil {
-		s.cancel(parseErr)
-		return 0, parseErr
+		return 0, s.fail(parseErr)
 	}
-	s.sawMetadata = true
 	return marker, nil
 }
 
 // closeRead reads after C until S, as RFC 008 Section 8.1 requires, so the
 // end of the connection or a message after C fails the RPC.
-func (s *websocketServerStream) closeRead(ctx context.Context) {
+func (s *websocketServerStream) closeRead() {
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
-	for {
-		buffer.Reset()
-		// finish closes the connection, which ends the read.
-		messageType, err := websocketReadMessage(context.WithoutCancel(ctx), s.conn, buffer)
-		select {
-		case <-s.done:
-			// The RFC requires discarding client messages in flight after S.
-			if err == nil {
-				continue
-			}
-			return
-		default:
-		}
-		if err != nil {
-			_ = s.connectionEnded(err)
-			return
-		}
-		marker, parseErr := websocketParseMarker(messageType, buffer.Bytes(), websocketBodyType(s.codec.Name()))
-		if parseErr == nil {
-			parseErr = websocketClientOrderError(marker, true, true)
-		}
-		s.cancel(parseErr)
+	// finish closes the connection, which ends the read.
+	messageType, err := websocketReadMessage(context.WithoutCancel(s.ctx), s.conn, buffer)
+	select {
+	case <-s.done:
+		// S is sent. finish's Close discards client messages in flight.
+		return
+	default:
+	}
+	if err != nil {
+		_ = s.connectionEnded(err)
 		return
 	}
+	marker, parseErr := websocketParseMarker(messageType, buffer, s.codec.Name())
+	if parseErr == nil {
+		parseErr = newWebSocketProtocolError("%c message after C", marker)
+	}
+	s.cancel(parseErr)
 }
 
 // connectionEnded before S means the client canceled, or coder closed with
@@ -300,52 +291,40 @@ func (s *websocketServerStream) connectionEnded(err error) error {
 	} else {
 		err = connect.Errorf(connect.CodeCanceled, "client closed the connection: %s", err).WithCause(err)
 	}
-	s.cancel(err)
-	return err
+	return s.fail(err)
 }
 
-func (s *websocketServerStream) receiveMetadata(ctx context.Context) (http.Header, error) {
-	if err := ctx.Err(); err != nil {
+// receiveMetadata reads M. The timer fails the RPC, whose context callback
+// writes S, when a client upgrades and goes quiet.
+func (s *websocketServerStream) receiveMetadata() (http.Header, error) {
+	if err := s.ctx.Err(); err != nil {
 		return nil, wrapIfContextError(err)
 	}
-	readCtx, cancel := context.WithTimeoutCause(ctx, websocketFirstMessageTimeout,
-		connect.Errorf(connect.CodeDeadlineExceeded, "no M message within %s", websocketFirstMessageTimeout))
-	defer cancel()
-	stop := context.AfterFunc(readCtx, func() {
-		s.finish(ctx, wrapIfContextError(context.Cause(readCtx)))
+	timer := time.AfterFunc(websocketFirstMessageTimeout, func() {
+		s.cancel(connect.Errorf(connect.CodeDeadlineExceeded, "no M message within %s", websocketFirstMessageTimeout))
 	})
-	defer stop()
+	defer timer.Stop()
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
-	if _, err := s.readMessage(readCtx, buffer); err != nil {
-		if cause := context.Cause(readCtx); cause != nil && ctx.Err() == nil {
-			return nil, cause
-		}
+	marker, err := s.readMessage(buffer)
+	if err != nil {
 		return nil, err
 	}
-	// Skip the marker, leaving the payload.
-	buffer.Next(1)
-	metadata, err := websocketDecodeMetadata(buffer.Bytes(), true)
-	if err != nil {
-		s.cancel(err)
-		return nil, err
+	if marker != websocketMarkerLeadingMetadata {
+		return nil, s.fail(newWebSocketProtocolError("first message is %c, expected M", marker))
+	}
+	metadata, decodeErr := websocketDecodeMetadata(buffer.Bytes(), true)
+	if decodeErr != nil {
+		return nil, s.fail(decodeErr)
 	}
 	return metadata, nil
 }
 
-// websocketClientOrderError follows the server's state table in RFC 008
-// Section 6.2.
-func websocketClientOrderError(marker byte, sawMetadata, sawEnd bool) *connect.Error {
-	switch {
-	case sawEnd:
-		return newWebSocketProtocolError("%c message after C", marker)
-	case !sawMetadata && marker != websocketMarkerLeadingMetadata:
-		return newWebSocketProtocolError("first message is %c, expected M", marker)
-	case sawMetadata && marker != websocketMarkerBody && marker != websocketMarkerClientEndStream:
-		return newWebSocketProtocolError("unexpected %c message from client", marker)
-	default:
-		return nil
-	}
+// fail records err as the RPC's cause. The context callback then runs finish,
+// which writes err in S.
+func (s *websocketServerStream) fail(err error) error {
+	s.cancel(err)
+	return err
 }
 
 func newWebSocketHandler(server *connect.Server, spec connect.Spec, opts *options, next http.Handler) http.Handler {
@@ -415,7 +394,7 @@ func websocketServe(server *connect.Server, spec connect.Spec, opts *options, re
 		stream.finish(ctx, timeoutErr)
 		return
 	}
-	metadata, err := stream.receiveMetadata(ctx)
+	metadata, err := stream.receiveMetadata() //nolint:contextcheck // the stream holds ctx
 	if err != nil {
 		stream.finish(ctx, err)
 		return
@@ -449,6 +428,37 @@ func websocketRequestHeader(request *http.Request, metadata http.Header) (http.H
 		header[key] = values
 	}
 	return header, nil
+}
+
+// websocketResponseMetadata builds M or S metadata. It drops entries a client
+// would reject, as net/http drops invalid header fields. A connect- key is
+// left out and fails the RPC, as spec Sections 7.4 and 9 require.
+func websocketResponseMetadata(header *connect.Header, kind string) (http.Header, error) {
+	metadata := make(http.Header)
+	var err error
+	for key, values := range header.All() {
+		if len(values) == 0 {
+			continue
+		}
+		lowerKey := strings.ToLower(key)
+		// Checked before protocolHeaders, so a set Connect-Timeout-Ms fails.
+		if strings.HasPrefix(lowerKey, "connect-") {
+			if err == nil {
+				err = connect.Errorf(connect.CodeInternal, "response %s %q is reserved for the protocol", kind, lowerKey)
+			}
+			continue
+		}
+		if _, ok := protocolHeaders[key]; ok || !websocketIsMetadataKey(lowerKey) {
+			continue
+		}
+		for _, value := range values {
+			value = websocketTrimMetadataValue(value)
+			if strings.HasSuffix(lowerKey, "-bin") || websocketIsMetadataValue(value) {
+				metadata[lowerKey] = append(metadata[lowerKey], value)
+			}
+		}
+	}
+	return metadata, err
 }
 
 func websocketNegotiateCodec(header http.Header, codecs readOnlyCodecs) (connect.Codec, string) {
