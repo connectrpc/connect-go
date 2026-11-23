@@ -178,7 +178,6 @@ func TestWebSocketWire(t *testing.T) {
 	t.Parallel()
 	server := newWebSocketServer(t, &websocketPingServer{})
 	limitedServer := newWebSocketServer(t, &websocketPingServer{}, connecthttp.WithSendMaxBytes(8))
-	idleServer := newWebSocketServer(t, websocketIdleServer{})
 	ignoreSendErrorServer := newWebSocketServer(t, websocketIgnoreSendErrorServer{})
 	pingRequest := `{"number":"7"}`
 	tests := []struct {
@@ -293,7 +292,6 @@ func TestWebSocketWire(t *testing.T) {
 		},
 		{
 			name:        "end_stream_from_client",
-			server:      idleServer,
 			procedure:   pingv1connect.PingServiceCumSumProcedure,
 			subprotocol: "connectrpc.1+json",
 			send:        []websocketFrame{textFrame("M[]"), textFrame("S{}")},
@@ -305,7 +303,6 @@ func TestWebSocketWire(t *testing.T) {
 		},
 		{
 			name:        "second_metadata",
-			server:      idleServer,
 			procedure:   pingv1connect.PingServiceCumSumProcedure,
 			subprotocol: "connectrpc.1+json",
 			send:        []websocketFrame{textFrame("M[]"), textFrame("M[]")},
@@ -316,11 +313,10 @@ func TestWebSocketWire(t *testing.T) {
 			wantStatus: websocket.StatusProtocolError,
 		},
 		{
-			name:        "message_after_unread_end_stream",
-			server:      idleServer,
-			procedure:   pingv1connect.PingServiceCumSumProcedure,
+			// Ping has read C and is still running.
+			name:        "message_after_end_stream",
 			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M[]"), textFrame("C"), textFrame(`B{}`)},
+			send:        []websocketFrame{textFrame("M[]"), textFrame(`B{"text":"sleep"}`), textFrame("C"), textFrame(`B{}`)},
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"internal","message":"protocol error: B message after C"}}`),
@@ -377,6 +373,16 @@ func TestWebSocketWire(t *testing.T) {
 			subprotocol: "connectrpc.1+json",
 			query:       "?connect-timeout-ms=50",
 			send:        []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest)},
+			want: []websocketFrame{
+				textFrame("M[]"),
+				textFrame(`S{"error":{"code":"deadline_exceeded","message":"context deadline exceeded"}}`),
+			},
+			wantStatus: websocket.StatusNormalClosure,
+		},
+		{
+			name:        "deadline_before_metadata",
+			subprotocol: "connectrpc.1+json",
+			query:       "?connect-timeout-ms=50",
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"deadline_exceeded","message":"context deadline exceeded"}}`),
@@ -808,22 +814,6 @@ func TestWebSocketClientDisconnect(t *testing.T) {
 			t.Fatal("handler saw a clean end of stream")
 		}
 	})
-	t.Run("after_unread_end_stream", func(t *testing.T) {
-		t.Parallel()
-		canceled := make(chan error, 1)
-		server := newWebSocketServer(t, websocketIdleServer{canceled: canceled})
-		conn := dialWebSocket(t, server, pingv1connect.PingServiceCumSumProcedure, "connectrpc.1+json", nil)
-		for _, message := range []string{"M[]", "C"} {
-			assert.Nil(t, conn.Write(t.Context(), websocket.MessageText, []byte(message)))
-		}
-		assert.Nil(t, conn.CloseNow())
-		select {
-		case err := <-canceled:
-			assert.Equal(t, connect.CodeOf(err), connect.CodeCanceled)
-		case <-time.After(5 * time.Second):
-			t.Fatal("handler was not canceled")
-		}
-	})
 }
 
 func TestWebSocketServerReceiveAfterDecodeError(t *testing.T) {
@@ -833,9 +823,14 @@ func TestWebSocketServerReceiveAfterDecodeError(t *testing.T) {
 	// Receive's select picks at random, so repeat to catch a queued message.
 	for range 50 {
 		conn := dialWebSocket(t, server, pingv1connect.PingServiceCumSumProcedure, "connectrpc.1+json", nil)
-		for _, message := range []string{"M[]", `B{"number":"x"}`, `B{"number":"1"}`, "C"} {
-			assert.Nil(t, conn.Write(t.Context(), websocket.MessageText, []byte(message)))
-		}
+		// memhttp pipes have no buffer, so write while the server replies.
+		go func() {
+			for _, message := range []string{"M[]", `B{"number":"x"}`, `B{"number":"1"}`, "C"} {
+				if conn.Write(t.Context(), websocket.MessageText, []byte(message)) != nil {
+					return
+				}
+			}
+		}()
 		for range 3 {
 			select {
 			case err := <-results:
@@ -977,22 +972,6 @@ func (p *websocketPingServer) CumSum(_ context.Context, stream pingv1connect.Pin
 			return err
 		}
 	}
-}
-
-// websocketIdleServer's CumSum never reads, so only the connection's reader
-// sees what the client sends.
-type websocketIdleServer struct {
-	pingv1connect.UnimplementedPingServiceHandler
-
-	canceled chan error
-}
-
-func (s websocketIdleServer) CumSum(ctx context.Context, _ pingv1connect.PingServiceCumSumServerStream) error {
-	<-ctx.Done()
-	if s.canceled != nil {
-		s.canceled <- context.Cause(ctx)
-	}
-	return ctx.Err()
 }
 
 // websocketKeepReceivingServer's CumSum ignores Receive errors and reports
