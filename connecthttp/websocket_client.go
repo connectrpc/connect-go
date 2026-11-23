@@ -15,7 +15,6 @@
 package connecthttp
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -125,7 +124,7 @@ func (s *websocketClientStream) Send(msg any) error {
 		return io.EOF
 	}
 	// Marshal before dialing, so a message over the limit sends nothing.
-	body, err := marshalWebSocketBody(s.ctx, s.config.codec, msg, s.config.sendMaxBytes)
+	body, err := websocketMarshalBody(s.ctx, s.config.codec, msg, s.config.sendMaxBytes)
 	if err != nil {
 		return err
 	}
@@ -161,7 +160,7 @@ func (s *websocketClientStream) CloseSend() error {
 	default:
 	}
 	s.sendClosed = true
-	_ = writeWebSocketText(s.ioCtx, conn, websocketMarkerClientEndStream, nil)
+	_ = conn.Write(s.ioCtx, websocket.MessageText, []byte{websocketMarkerClientEndStream})
 	return nil
 }
 
@@ -215,7 +214,7 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 	handshakeHeader := websocketHandshakeHeader(s.info.RequestHeader(), metadata)
 	// Check the metadata before dialing, so a bad key sends nothing.
 	for key, values := range metadata {
-		if err := validateWebSocketMetadata(key, values, true); err != nil {
+		if err := websocketValidateMetadata(key, values, true); err != nil {
 			return nil, err
 		}
 	}
@@ -250,7 +249,11 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 	s.stopWatching = context.AfterFunc(s.ctx, func() {
 		_ = conn.Close(websocket.StatusNormalClosure, "")
 	})
-	if err := writeWebSocketText(s.ioCtx, conn, websocketMarkerLeadingMetadata, encodeWebSocketMetadata(metadata)); err != nil {
+	buffer := bufferpool.Get()
+	defer bufferpool.Put(buffer)
+	buffer.WriteByte(websocketMarkerLeadingMetadata)
+	websocketEncodeMetadata(buffer, metadata)
+	if err := conn.Write(s.ioCtx, websocket.MessageText, buffer.Bytes()); err != nil {
 		s.stopWatching()
 		_ = conn.CloseNow()
 		return nil, s.readError(err)
@@ -293,45 +296,56 @@ func (s *websocketClientStream) dialError(response *http.Response, err error) er
 
 // receive runs after dial, which publishes s.conn under dialMu.
 func (s *websocketClientStream) receive(msg any) error {
-	bodyType := websocketBodyType(s.config.codec.Name())
 	for {
-		messageType, data, err := s.conn.Read(s.ioCtx)
-		if err == nil {
-			// ioCtx outlives ctx, so a message can still arrive after cancel.
-			err = s.ctx.Err()
-		}
-		if err != nil {
-			return s.readError(err)
-		}
-		message, parseErr := parseWebSocketMessage(messageType, data, bodyType)
-		if parseErr != nil {
-			return parseErr
-		}
-		if !s.receivedHeader && message.marker != websocketMarkerLeadingMetadata {
-			return newWebSocketProtocolError("first message is %c, expected M", message.marker)
-		}
-		switch message.marker {
-		case websocketMarkerLeadingMetadata:
-			if s.receivedHeader {
-				return newWebSocketProtocolError("second M message")
-			}
-			s.receivedHeader = true
-			header, err := decodeWebSocketMetadata(message.payload, false)
-			if err != nil {
-				return err
-			}
-			fromHTTPHeader(s.info.ResponseHeader(), header)
-		case websocketMarkerBody:
-			if err := s.config.codec.UnmarshalRead(s.ctx, bytes.NewReader(message.payload), msg); err != nil {
-				return newWebSocketDecodeError(err)
-			}
-			return nil
-		case websocketMarkerServerEndStream:
-			return s.receiveEnd(message.payload)
-		default:
-			return newWebSocketProtocolError("unexpected %c message from server", message.marker)
+		marker, err := s.receiveMessage(msg)
+		if err != nil || marker != websocketMarkerLeadingMetadata {
+			return err
 		}
 	}
+}
+
+// receiveMessage handles one message and returns its marker.
+func (s *websocketClientStream) receiveMessage(msg any) (byte, error) {
+	buffer := bufferpool.Get()
+	defer bufferpool.Put(buffer)
+	messageType, err := websocketReadMessage(s.ioCtx, s.conn, buffer)
+	if err != nil {
+		return 0, s.readError(err)
+	}
+	// ioCtx outlives ctx, so a message can still arrive after cancel.
+	if err := s.ctx.Err(); err != nil {
+		return 0, s.readError(err)
+	}
+	marker, parseErr := websocketParseMarker(messageType, buffer.Bytes(), websocketBodyType(s.config.codec.Name()))
+	if parseErr != nil {
+		return 0, parseErr
+	}
+	if !s.receivedHeader && marker != websocketMarkerLeadingMetadata {
+		return 0, newWebSocketProtocolError("first message is %c, expected M", marker)
+	}
+	// Skip the marker, leaving the payload.
+	buffer.Next(1)
+	switch marker {
+	case websocketMarkerLeadingMetadata:
+		if s.receivedHeader {
+			return 0, newWebSocketProtocolError("second M message")
+		}
+		s.receivedHeader = true
+		header, err := websocketDecodeMetadata(buffer.Bytes(), false)
+		if err != nil {
+			return 0, err
+		}
+		fromHTTPHeader(s.info.ResponseHeader(), header)
+	case websocketMarkerBody:
+		if err := s.config.codec.UnmarshalRead(s.ctx, buffer, msg); err != nil {
+			return 0, newWebSocketDecodeError(err)
+		}
+	case websocketMarkerServerEndStream:
+		return 0, s.receiveEnd(buffer.Bytes())
+	default:
+		return 0, newWebSocketProtocolError("unexpected %c message from server", marker)
+	}
+	return marker, nil
 }
 
 func (s *websocketClientStream) receiveEnd(payload []byte) error {
