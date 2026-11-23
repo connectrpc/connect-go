@@ -187,6 +187,7 @@ func TestWebSocketWire(t *testing.T) {
 	server := newWebSocketServer(t, &websocketPingServer{})
 	limitedServer := newWebSocketServer(t, &websocketPingServer{}, connecthttp.WithSendMaxBytes(8))
 	idleServer := newWebSocketServer(t, websocketIdleServer{})
+	ignoreSendErrorServer := newWebSocketServer(t, websocketIgnoreSendErrorServer{})
 	pingRequest := `{"number":"7"}`
 	tests := []struct {
 		name        string
@@ -240,6 +241,18 @@ func TestWebSocketWire(t *testing.T) {
 			send:        []websocketFrame{textFrame("M[]"), textFrame(`B{"text":"connect-header"}`), textFrame("C")},
 			want: []websocketFrame{
 				textFrame(`M[["x-ok","1"]]`),
+				textFrame(`S{"error":{"code":"internal","message":"response header \"connect-custom\" is reserved for the protocol"}}`),
+			},
+			wantStatus: websocket.StatusNormalClosure,
+		},
+		{
+			name:        "connect_response_header_send_error_ignored",
+			server:      ignoreSendErrorServer,
+			procedure:   pingv1connect.PingServiceCountUpProcedure,
+			subprotocol: "connectrpc.1+json",
+			send:        []websocketFrame{textFrame("M[]"), textFrame(`B{"number":"2"}`), textFrame("C")},
+			want: []websocketFrame{
+				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"internal","message":"response header \"connect-custom\" is reserved for the protocol"}}`),
 			},
 			wantStatus: websocket.StatusNormalClosure,
@@ -913,6 +926,21 @@ type websocketIdleServer struct {
 func (websocketIdleServer) CumSum(ctx context.Context, _ pingv1connect.PingServiceCumSumServerStream) error {
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+// websocketIgnoreSendErrorServer's CountUp sets a reserved header and ignores
+// the errors Send returns because of it.
+type websocketIgnoreSendErrorServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (websocketIgnoreSendErrorServer) CountUp(ctx context.Context, request *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
+	info, _ := connect.CallInfoForServerContext(ctx)
+	info.ResponseHeader().Set("Connect-Custom", "1")
+	for i := range request.GetNumber() {
+		_ = stream.Send(&pingv1.CountUpResponse{Number: i + 1})
+	}
+	return nil
 }
 
 type websocketFrame struct {

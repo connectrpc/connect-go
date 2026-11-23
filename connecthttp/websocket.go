@@ -367,9 +367,8 @@ func newWebSocketDecodeError(err error) *connect.Error {
 // connect-, which a server must not send in M or S.
 func websocketConnectKeyError(header *connect.Header, kind string) error {
 	for key, values := range header.All() {
-		key = strings.ToLower(key)
-		if len(values) > 0 && strings.HasPrefix(key, "connect-") {
-			return connect.Errorf(connect.CodeInternal, "response %s %q is reserved for the protocol", kind, key).WithCause(errWebSocketConnectKey)
+		if len(values) > 0 && strings.HasPrefix(key, "Connect-") {
+			return connect.Errorf(connect.CodeInternal, "response %s %q is reserved for the protocol", kind, strings.ToLower(key)).WithCause(errWebSocketConnectKey)
 		}
 	}
 	return nil

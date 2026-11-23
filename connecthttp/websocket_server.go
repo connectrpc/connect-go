@@ -53,6 +53,9 @@ type websocketServerStream struct {
 	receivedEnd    bool
 	receivedSingle bool
 	sentHeader     bool
+	// Kept so a handler that ignores the error still can't send B or a
+	// successful S.
+	headerKeyErr error
 }
 
 func (s *websocketServerStream) Receive(msg any) error {
@@ -129,14 +132,15 @@ func (s *websocketServerStream) receive(msg any) error {
 
 func (s *websocketServerStream) writeHeader(ctx context.Context) error {
 	if s.sentHeader {
-		return nil
+		return s.headerKeyErr
 	}
 	metadata := encodeWebSocketMetadata(dropInvalidWebSocketMetadata(websocketMetadata(s.info.ResponseHeader())))
 	if err := writeWebSocketText(ctx, s.conn, websocketMarkerLeadingMetadata, metadata); err != nil {
 		return s.writeError(err)
 	}
 	s.sentHeader = true
-	return websocketConnectKeyError(s.info.ResponseHeader(), "header")
+	s.headerKeyErr = websocketConnectKeyError(s.info.ResponseHeader(), "header")
+	return s.headerKeyErr
 }
 
 func (s *websocketServerStream) writeError(err error) error {
@@ -157,11 +161,6 @@ func (s *websocketServerStream) finish(ctx context.Context, err error) {
 		_ = s.conn.Close(websocket.StatusInvalidFramePayloadData, "")
 		return
 	}
-	closeCode := websocket.StatusNormalClosure
-	if errors.Is(failure, errWebSocketProtocol) {
-		err = failure
-		closeCode = websocket.StatusProtocolError
-	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), websocketCloseTimeout)
 	defer cancel()
 	headerErr := s.writeHeader(ctx)
@@ -169,10 +168,14 @@ func (s *websocketServerStream) finish(ctx context.Context, err error) {
 		_ = s.conn.CloseNow()
 		return
 	}
-	if closeCode == websocket.StatusNormalClosure {
-		if headerErr != nil {
-			err = headerErr
-		} else if trailerErr := websocketConnectKeyError(s.info.ResponseTrailer(), "trailer"); trailerErr != nil {
+	closeCode := websocket.StatusNormalClosure
+	switch {
+	case errors.Is(failure, errWebSocketProtocol):
+		err, closeCode = failure, websocket.StatusProtocolError
+	case headerErr != nil:
+		err = headerErr
+	default:
+		if trailerErr := websocketConnectKeyError(s.info.ResponseTrailer(), "trailer"); trailerErr != nil {
 			err = trailerErr
 		}
 	}
