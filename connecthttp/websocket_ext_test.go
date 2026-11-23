@@ -187,6 +187,7 @@ func TestWebSocketWire(t *testing.T) {
 	server := newWebSocketServer(t, &websocketPingServer{})
 	limitedServer := newWebSocketServer(t, &websocketPingServer{}, connecthttp.WithSendMaxBytes(8))
 	idleServer := newWebSocketServer(t, websocketIdleServer{})
+	ignoreSendErrorServer := newWebSocketServer(t, websocketIgnoreSendErrorServer{})
 	pingRequest := `{"number":"7"}`
 	tests := []struct {
 		name        string
@@ -221,6 +222,49 @@ func TestWebSocketWire(t *testing.T) {
 				textFrame(`M[["x-ok","1"]]`),
 				textFrame(`B{"text":"bad-metadata"}`),
 				textFrame(`S{"metadata":{"x-ok":["1"]}}`),
+			},
+			wantStatus: websocket.StatusNormalClosure,
+		},
+		{
+			name:        "empty_json_body",
+			subprotocol: "connectrpc.1+json",
+			send:        []websocketFrame{textFrame("M[]"), textFrame("B"), textFrame("C")},
+			want: []websocketFrame{
+				textFrame("M[]"),
+				textFrame(`S{"error":{"code":"invalid_argument","message":"protocol error: unmarshal message: zero-length payload is not a valid JSON object"}}`),
+			},
+			wantStatus: websocket.StatusProtocolError,
+		},
+		{
+			name:        "connect_response_header",
+			subprotocol: "connectrpc.1+json",
+			send:        []websocketFrame{textFrame("M[]"), textFrame(`B{"text":"connect-header"}`), textFrame("C")},
+			want: []websocketFrame{
+				textFrame(`M[["x-ok","1"]]`),
+				textFrame(`S{"error":{"code":"internal","message":"response header \"connect-custom\" is reserved for the protocol"}}`),
+			},
+			wantStatus: websocket.StatusNormalClosure,
+		},
+		{
+			name:        "connect_response_header_send_error_ignored",
+			server:      ignoreSendErrorServer,
+			procedure:   pingv1connect.PingServiceCountUpProcedure,
+			subprotocol: "connectrpc.1+json",
+			send:        []websocketFrame{textFrame("M[]"), textFrame(`B{"number":"2"}`), textFrame("C")},
+			want: []websocketFrame{
+				textFrame("M[]"),
+				textFrame(`S{"error":{"code":"internal","message":"response header \"connect-custom\" is reserved for the protocol"}}`),
+			},
+			wantStatus: websocket.StatusNormalClosure,
+		},
+		{
+			name:        "connect_response_trailer",
+			subprotocol: "connectrpc.1+json",
+			send:        []websocketFrame{textFrame("M[]"), textFrame(`B{"text":"connect-trailer"}`), textFrame("C")},
+			want: []websocketFrame{
+				textFrame("M[]"),
+				textFrame(`B{"text":"connect-trailer"}`),
+				textFrame(`S{"error":{"code":"internal","message":"response trailer \"connect-custom\" is reserved for the protocol"},"metadata":{"x-ok":["1"]}}`),
 			},
 			wantStatus: websocket.StatusNormalClosure,
 		},
@@ -430,7 +474,7 @@ func TestWebSocketWire(t *testing.T) {
 		}
 		assert.Equal(t, len(got), 2)
 		assert.Equal(t, got[0], "M[]")
-		assert.True(t, strings.HasPrefix(got[1], `S{"error":{"code":"internal","message":"protocol error: unmarshal message: `))
+		assert.True(t, strings.HasPrefix(got[1], `S{"error":{"code":"invalid_argument","message":"protocol error: unmarshal message: `))
 	})
 }
 
@@ -455,7 +499,7 @@ func TestWebSocketClientProtocolErrors(t *testing.T) {
 		{name: "invalid_utf8", send: []websocketFrame{textFrame("M\xff")}, wantStatus: websocket.StatusInvalidFramePayloadData},
 		{name: "long_reason", send: []websocketFrame{textFrame(`M[["` + strings.Repeat("X", 200) + `","v"]]`)}, wantStatus: 3102},
 		{name: "non_ascii_metadata", send: []websocketFrame{textFrame(`M[["x-test","café"]]`), binaryFrame("B"), textFrame("S{}")}, wantStatus: 3102},
-		{name: "undecodable_body", send: []websocketFrame{textFrame("M[]"), binaryFrame("B\xff")}, wantStatus: 3102},
+		{name: "undecodable_body", send: []websocketFrame{textFrame("M[]"), binaryFrame("B\xff")}, wantCode: connect.CodeInvalidArgument, wantStatus: 3102},
 		{name: "dropped_after_body", send: []websocketFrame{textFrame("M[]"), binaryFrame("B")}, drop: true, wantCode: connect.CodeUnavailable, wantStatus: -1},
 	}
 	for _, test := range tests {
@@ -804,6 +848,12 @@ func (p *websocketPingServer) Ping(ctx context.Context, request *pingv1.PingRequ
 			p.sleepCause <- context.Cause(ctx)
 		}
 		return nil, ctx.Err()
+	case "connect-header":
+		info.ResponseHeader().Set("X-Ok", "1")
+		info.ResponseHeader().Set("Connect-Custom", "1")
+	case "connect-trailer":
+		info.ResponseTrailer().Set("X-Ok", "1")
+		info.ResponseTrailer().Set("Connect-Custom", "1")
 	case "bad-metadata":
 		for _, header := range []*connect.Header{info.ResponseHeader(), info.ResponseTrailer()} {
 			header.Add("X-Ok", "1")
@@ -876,6 +926,21 @@ type websocketIdleServer struct {
 func (websocketIdleServer) CumSum(ctx context.Context, _ pingv1connect.PingServiceCumSumServerStream) error {
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+// websocketIgnoreSendErrorServer's CountUp sets a reserved header and ignores
+// the errors Send returns because of it.
+type websocketIgnoreSendErrorServer struct {
+	pingv1connect.UnimplementedPingServiceHandler
+}
+
+func (websocketIgnoreSendErrorServer) CountUp(ctx context.Context, request *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
+	info, _ := connect.CallInfoForServerContext(ctx)
+	info.ResponseHeader().Set("Connect-Custom", "1")
+	for i := range request.GetNumber() {
+		_ = stream.Send(&pingv1.CountUpResponse{Number: i + 1})
+	}
+	return nil
 }
 
 type websocketFrame struct {
