@@ -28,7 +28,6 @@ import (
 	"unicode/utf8"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/internal/bufferpool"
 	"github.com/coder/websocket"
 )
 
@@ -312,20 +311,16 @@ func websocketReadLimit(readMaxBytes int) int64 {
 	return int64(readMaxBytes) + 1
 }
 
-// websocketMarshalBody returns a pooled buffer. The caller must
-// bufferpool.Put it.
-func websocketMarshalBody(ctx context.Context, codec connect.Codec, msg any, sendMaxBytes int) (*bytes.Buffer, error) {
-	buffer := bufferpool.Get()
-	buffer.WriteByte(websocketMarkerBody)
-	if err := codec.MarshalWrite(ctx, buffer, msg); err != nil {
-		bufferpool.Put(buffer)
-		return nil, connect.Errorf(connect.CodeInternal, "marshal message: %s", err).WithCause(err)
+// websocketMarshalBody writes a B message into dst.
+func websocketMarshalBody(ctx context.Context, dst *bytes.Buffer, codec connect.Codec, msg any, sendMaxBytes int) error {
+	dst.WriteByte(websocketMarkerBody)
+	if err := codec.MarshalWrite(ctx, dst, msg); err != nil {
+		return connect.Errorf(connect.CodeInternal, "marshal message: %s", err).WithCause(err)
 	}
-	if size := buffer.Len() - 1; sendMaxBytes > 0 && size > sendMaxBytes {
-		bufferpool.Put(buffer)
-		return nil, connect.Errorf(connect.CodeResourceExhausted, "message size %d exceeds sendMaxBytes %d", size, sendMaxBytes)
+	if size := dst.Len() - 1; sendMaxBytes > 0 && size > sendMaxBytes {
+		return connect.Errorf(connect.CodeResourceExhausted, "message size %d exceeds sendMaxBytes %d", size, sendMaxBytes)
 	}
-	return buffer, nil
+	return nil
 }
 
 // websocketBodyType sends only JSON as text.

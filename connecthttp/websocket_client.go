@@ -124,11 +124,11 @@ func (s *websocketClientStream) Send(msg any) error {
 		return io.EOF
 	}
 	// Marshal before dialing, so a message over the limit sends nothing.
-	body, err := websocketMarshalBody(s.ctx, s.config.codec, msg, s.config.sendMaxBytes)
-	if err != nil {
+	body := bufferpool.Get()
+	defer bufferpool.Put(body)
+	if err := websocketMarshalBody(s.ctx, body, s.config.codec, msg, s.config.sendMaxBytes); err != nil {
 		return err
 	}
-	defer bufferpool.Put(body)
 	conn, err := s.dial()
 	if err != nil {
 		return err

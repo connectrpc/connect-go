@@ -79,11 +79,11 @@ func (s *websocketServerStream) Send(msg any) error {
 	if err := context.Cause(s.ctx); err != nil {
 		return wrapIfContextError(err)
 	}
-	body, err := websocketMarshalBody(s.ctx, s.codec, msg, s.sendMaxBytes)
-	if err != nil {
+	body := bufferpool.Get()
+	defer bufferpool.Put(body)
+	if err := websocketMarshalBody(s.ctx, body, s.codec, msg, s.sendMaxBytes); err != nil {
 		return err
 	}
-	defer bufferpool.Put(body)
 	if err := s.writeHeader(s.writeCtx); err != nil {
 		return err
 	}
@@ -278,21 +278,6 @@ func (r *websocketServerReader) run(ctx context.Context) {
 	}
 }
 
-// websocketClientOrderError follows the server's state table in RFC 008
-// Section 6.2.
-func websocketClientOrderError(marker byte, sawMetadata, sawEnd bool) *connect.Error {
-	switch {
-	case sawEnd:
-		return newWebSocketProtocolError("%c message after C", marker)
-	case !sawMetadata && marker != websocketMarkerLeadingMetadata:
-		return newWebSocketProtocolError("first message is %c, expected M", marker)
-	case sawMetadata && marker != websocketMarkerBody && marker != websocketMarkerClientEndStream:
-		return newWebSocketProtocolError("unexpected %c message from client", marker)
-	default:
-		return nil
-	}
-}
-
 func (r *websocketServerReader) fail(err error) {
 	r.mu.Lock()
 	if r.err == nil {
@@ -341,6 +326,21 @@ func (r *websocketServerReader) isStopped() bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// websocketClientOrderError follows the server's state table in RFC 008
+// Section 6.2.
+func websocketClientOrderError(marker byte, sawMetadata, sawEnd bool) *connect.Error {
+	switch {
+	case sawEnd:
+		return newWebSocketProtocolError("%c message after C", marker)
+	case !sawMetadata && marker != websocketMarkerLeadingMetadata:
+		return newWebSocketProtocolError("first message is %c, expected M", marker)
+	case sawMetadata && marker != websocketMarkerBody && marker != websocketMarkerClientEndStream:
+		return newWebSocketProtocolError("unexpected %c message from client", marker)
+	default:
+		return nil
 	}
 }
 
