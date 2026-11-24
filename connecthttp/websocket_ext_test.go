@@ -846,6 +846,80 @@ func TestWebSocketClientDisconnect(t *testing.T) {
 	}
 }
 
+func TestWebSocketServerContextEndsWhileHandlerRuns(t *testing.T) {
+	t.Parallel()
+	// The handler sets metadata after its context ends, while S is written
+	// on another goroutine. Run with -race.
+	newServer := func(t *testing.T, handlerDone chan<- struct{}) *memhttp.Server {
+		t.Helper()
+		return newWebSocketServer(t, &pluggablePingServer{
+			cumSum: func(ctx context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
+				defer close(handlerDone)
+				if _, err := stream.Receive(); !errors.Is(err, io.EOF) {
+					return err
+				}
+				<-ctx.Done()
+				info, _ := connect.CallInfoForServerContext(ctx)
+				info.ResponseHeader().Set("X-Late", "header")
+				info.ResponseTrailer().Set("X-Late", "trailer")
+				return nil
+			},
+		})
+	}
+	t.Run("client_drops", func(t *testing.T) {
+		t.Parallel()
+		handlerDone := make(chan struct{})
+		server := newServer(t, handlerDone)
+		conn := dialWebSocket(t, server, pingv1connect.PingServiceCumSumProcedure, "connectrpc.1+json", nil)
+		assert.Nil(t, writeFrames(t.Context(), conn, textFrame("M[]"), textFrame("C")))
+		_ = conn.CloseNow()
+		<-handlerDone
+	})
+	t.Run("deadline", func(t *testing.T) {
+		t.Parallel()
+		handlerDone := make(chan struct{})
+		server := newServer(t, handlerDone)
+		conn := dialWebSocket(t, server, pingv1connect.PingServiceCumSumProcedure+"?connect-timeout-ms=10", "connectrpc.1+json", nil)
+		assert.Nil(t, writeFrames(t.Context(), conn, textFrame("M[]"), textFrame("C")))
+		frames, closeErr := readFrames(t.Context(), conn)
+		<-handlerDone
+		assert.Equal(t, closeErr.Code, websocket.StatusNormalClosure)
+		assert.Equal(t, len(frames), 2)
+		assert.True(t, strings.HasPrefix(frames[0].Data, "M"))
+		assert.True(t, strings.HasPrefix(frames[1].Data, "S"))
+	})
+}
+
+func TestWebSocketServerMetadataLimit(t *testing.T) {
+	t.Parallel()
+	// M is bounded like HTTP headers, whatever the message read limit.
+	tooBig := `M[["x-big","` + strings.Repeat("a", http.DefaultMaxHeaderBytes) + `"]]`
+	tests := []struct {
+		name    string
+		options []connecthttp.Option
+	}{
+		{name: "default"},
+		{name: "unlimited_messages", options: []connecthttp.Option{connecthttp.WithReadMaxBytes(0)}},
+		{name: "large_messages", options: []connecthttp.Option{connecthttp.WithReadMaxBytes(4 * http.DefaultMaxHeaderBytes)}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			server := newWebSocketServer(t, &pluggablePingServer{
+				cumSum: func(context.Context, pingv1connect.PingServiceCumSumServerStream) error {
+					t.Error("handler ran")
+					return nil
+				},
+			}, test.options...)
+			conn := dialWebSocket(t, server, pingv1connect.PingServiceCumSumProcedure, "connectrpc.1+json", nil)
+			go func() { _ = writeFrames(t.Context(), conn, textFrame(tooBig)) }()
+			frames, closeErr := readFrames(t.Context(), conn)
+			assert.Equal(t, len(frames), 0)
+			assert.Equal(t, closeErr.Code, websocket.StatusMessageTooBig)
+		})
+	}
+}
+
 func TestWebSocketServerReceiveAfterDecodeError(t *testing.T) {
 	t.Parallel()
 	results := make(chan error, 3)

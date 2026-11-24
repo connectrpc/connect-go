@@ -75,7 +75,7 @@ func (s *websocketServerStream) SendHeaders() error {
 	if err := context.Cause(s.ctx); err != nil || s.ended {
 		return wrapIfContextError(err)
 	}
-	return s.writeHeader(s.writeCtx)
+	return s.writeHeader(s.writeCtx, s.info.ResponseHeader())
 }
 
 func (s *websocketServerStream) Send(msg any) error {
@@ -92,7 +92,7 @@ func (s *websocketServerStream) Send(msg any) error {
 	if err := context.Cause(s.ctx); err != nil || s.ended {
 		return wrapIfContextError(err)
 	}
-	if err := s.writeHeader(s.writeCtx); err != nil {
+	if err := s.writeHeader(s.writeCtx, s.info.ResponseHeader()); err != nil {
 		return err
 	}
 	if err := s.conn.Write(s.writeCtx, websocketBodyType(s.codec.Name()), body.Bytes()); err != nil {
@@ -129,11 +129,11 @@ func (s *websocketServerStream) receive(msg any) error {
 }
 
 // writeHeader fails the RPC for a connect- header, after sending M without it.
-func (s *websocketServerStream) writeHeader(ctx context.Context) error {
+func (s *websocketServerStream) writeHeader(ctx context.Context, responseHeader *connect.Header) error {
 	if s.sentHeader {
 		return nil
 	}
-	header, headerErr := websocketResponseMetadata(s.info.ResponseHeader(), "header")
+	header, headerErr := websocketResponseMetadata(responseHeader, "header")
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
 	websocketMarshalMetadata(buffer, header)
@@ -157,8 +157,9 @@ func (s *websocketServerStream) writeError(err error) error {
 
 // finish writes the RPC's outcome. A failure recorded as the context's cause
 // replaces the handler's error. A deadline is only a cause, so the handler's
-// error stands.
-func (s *websocketServerStream) finish(ctx context.Context, err error) {
+// error stands. While the handler runs it owns the response headers and
+// trailers, so finish sends neither.
+func (s *websocketServerStream) finish(ctx context.Context, err error, handlerRunning bool) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	if s.ended {
@@ -178,12 +179,16 @@ func (s *websocketServerStream) finish(ctx context.Context, err error) {
 	}
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), websocketCloseTimeout)
 	defer cancel()
-	if s.writeHeader(writeCtx) != nil && !s.sentHeader {
+	responseHeader, responseTrailer := s.info.ResponseHeader(), s.info.ResponseTrailer()
+	if handlerRunning {
+		responseHeader, responseTrailer = nil, nil
+	}
+	if s.writeHeader(writeCtx, responseHeader) != nil && !s.sentHeader {
 		_ = s.conn.CloseNow()
 		return
 	}
 	closeCode := websocket.StatusNormalClosure
-	trailer, trailerErr := websocketResponseMetadata(s.info.ResponseTrailer(), "trailer")
+	trailer, trailerErr := websocketResponseMetadata(responseTrailer, "trailer")
 	if cause, ok := asError(context.Cause(ctx)); ok {
 		err = cause
 		if errors.Is(cause, errWebSocketProtocol) {
@@ -342,7 +347,8 @@ func websocketServe(server *connect.Server, spec connect.Spec, opts *options, re
 	}
 	// net/http doesn't close hijacked connections, even after a panic.
 	defer func() { _ = conn.CloseNow() }()
-	conn.SetReadLimit(websocketReadLimit(opts.readMaxBytes))
+	// M is bounded like HTTP headers, whatever the message read limit.
+	conn.SetReadLimit(websocketReadLimit(http.DefaultMaxHeaderBytes))
 
 	ctx, cancel := context.WithCancelCause(request.Context())
 	defer cancel(nil)
@@ -373,26 +379,27 @@ func websocketServe(server *connect.Server, spec connect.Spec, opts *options, re
 		done:          make(chan struct{}),
 	}
 	stop := context.AfterFunc(ctx, func() {
-		stream.finish(ctx, wrapIfContextError(context.Cause(ctx)))
+		stream.finish(ctx, wrapIfContextError(context.Cause(ctx)), true)
 	})
 	defer stop()
 	if timeoutErr != nil {
-		stream.finish(ctx, timeoutErr)
+		stream.finish(ctx, timeoutErr, false)
 		return
 	}
 	metadata, err := stream.receiveMetadata() //nolint:contextcheck // the stream holds ctx
 	if err != nil {
-		stream.finish(ctx, err)
+		stream.finish(ctx, err, false)
 		return
 	}
+	conn.SetReadLimit(websocketReadLimit(opts.readMaxBytes))
 	header, headerErr := websocketRequestHeader(request, metadata)
 	if headerErr != nil {
 		stream.cancel(headerErr)
-		stream.finish(ctx, headerErr)
+		stream.finish(ctx, headerErr, false)
 		return
 	}
 	fromHTTPHeader(info.RequestHeader(), header)
-	stream.finish(ctx, scrubHandlerError(server.Call(ctx, spec.Procedure, info, stream)))
+	stream.finish(ctx, scrubHandlerError(server.Call(ctx, spec.Procedure, info, stream)), false)
 }
 
 // websocketRequestHeader builds the RPC's effective headers. Metadata can't
