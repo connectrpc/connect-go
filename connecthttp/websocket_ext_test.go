@@ -848,8 +848,7 @@ func TestWebSocketClientDisconnect(t *testing.T) {
 
 func TestWebSocketServerContextEndsWhileHandlerRuns(t *testing.T) {
 	t.Parallel()
-	// The handler sets metadata after its context ends, while S is written
-	// on another goroutine. Run with -race.
+	// The handler sets metadata after its context ends. Run with -race.
 	newServer := func(t *testing.T, handlerDone chan<- struct{}) *memhttp.Server {
 		t.Helper()
 		return newWebSocketServer(t, &pluggablePingServer{
@@ -884,10 +883,49 @@ func TestWebSocketServerContextEndsWhileHandlerRuns(t *testing.T) {
 		frames, closeErr := readFrames(t.Context(), conn)
 		<-handlerDone
 		assert.Equal(t, closeErr.Code, websocket.StatusNormalClosure)
-		assert.Equal(t, len(frames), 2)
-		assert.True(t, strings.HasPrefix(frames[0].Data, "M"))
-		assert.True(t, strings.HasPrefix(frames[1].Data, "S"))
+		assert.Equal(t, frames, []websocketFrame{
+			textFrame(`M[["x-late","header"]]`),
+			textFrame(`S{"error":{"code":"deadline_exceeded","message":"context deadline exceeded"},"metadata":{"x-late":["trailer"]}}`),
+		})
 	})
+}
+
+func TestWebSocketServerClientDropsBeforeReceive(t *testing.T) {
+	t.Parallel()
+	// The handler never calls Receive. Its context still ends when the client
+	// leaves, whether or not a B is waiting.
+	tests := []struct {
+		name   string
+		frames []websocketFrame
+		send   bool
+	}{
+		{name: "after_C", frames: []websocketFrame{textFrame("M[]"), textFrame("C")}},
+		{name: "after_B_while_sending", frames: []websocketFrame{textFrame("M[]"), textFrame(`B{"number":1}`)}, send: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			clientGone := make(chan struct{})
+			canceled := make(chan struct{})
+			server := newWebSocketServer(t, &pluggablePingServer{
+				cumSum: func(ctx context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
+					<-clientGone
+					var err error
+					for test.send && err == nil {
+						err = stream.Send(&pingv1.CumSumResponse{})
+					}
+					<-ctx.Done()
+					close(canceled)
+					return nil
+				},
+			})
+			conn := dialWebSocket(t, server, pingv1connect.PingServiceCumSumProcedure, "connectrpc.1+json", nil)
+			assert.Nil(t, writeFrames(t.Context(), conn, test.frames...))
+			_ = conn.CloseNow()
+			close(clientGone)
+			<-canceled
+		})
+	}
 }
 
 func TestWebSocketServerMetadataLimit(t *testing.T) {

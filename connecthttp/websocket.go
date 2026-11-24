@@ -51,8 +51,9 @@ var (
 	// A server closes with 1002 after a protocol error and a client with 3102.
 	errWebSocketProtocol = errors.New("protocol error")
 	// Both sides close with 1007, and a server sends no S.
-	errWebSocketInvalidUTF8 = errors.New("invalid UTF-8 in text message")
+	errWebSocketInvalidUTF8 = connect.NewError(connect.CodeInternal, "invalid UTF-8 in text message")
 	errWebSocketHTTPClient  = errors.New("HTTP client can't carry a WebSocket")
+	errWebSocketFinished    = connect.NewError(connect.CodeCanceled, "stream finished")
 )
 
 // WithWebSocket enables Connect over WebSocket.
@@ -108,7 +109,7 @@ func websocketParseMarker(messageType websocket.MessageType, buffer *bytes.Buffe
 	data := buffer.Bytes()
 	text := messageType == websocket.MessageText
 	if text && !utf8.Valid(data) {
-		return 0, connect.NewError(connect.CodeInternal, errWebSocketInvalidUTF8.Error()).WithCause(errWebSocketInvalidUTF8)
+		return 0, errWebSocketInvalidUTF8
 	}
 	if len(data) == 0 {
 		return 0, newWebSocketProtocolError("empty message")
