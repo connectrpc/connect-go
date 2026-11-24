@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -926,6 +927,38 @@ func TestWebSocketServerClientDropsBeforeReceive(t *testing.T) {
 			<-canceled
 		})
 	}
+}
+
+func TestWebSocketServerPings(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		server := newWebSocketServer(t, &pluggablePingServer{
+			cumSum: func(ctx context.Context, _ pingv1connect.PingServiceCumSumServerStream) error {
+				<-ctx.Done()
+				return nil
+			},
+		})
+		var pings atomic.Int32
+		conn, response, err := websocket.Dial(t.Context(), server.URL()+pingv1connect.PingServiceCumSumProcedure, &websocket.DialOptions{
+			HTTPClient:   &http.Client{Transport: server.TransportHTTP1()},
+			Subprotocols: []string{"connectrpc.1+json"},
+			OnPingReceived: func(context.Context, []byte) bool {
+				pings.Add(1)
+				return true
+			},
+		})
+		assert.Nil(t, err)
+		if response.Body != nil {
+			_ = response.Body.Close()
+		}
+		assert.Nil(t, writeFrames(t.Context(), conn, textFrame("M[]")))
+		go func() { _, _, _ = conn.Read(context.Background()) }()
+		time.Sleep(65 * time.Second)
+		assert.Equal(t, pings.Load(), 2)
+		_ = conn.CloseNow()
+		// Outlast coder's 5s close handshake before the bubble ends.
+		time.Sleep(10 * time.Second)
+	})
 }
 
 func TestWebSocketServerMetadataLimit(t *testing.T) {

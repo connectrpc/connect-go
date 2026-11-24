@@ -33,6 +33,8 @@ import (
 const (
 	websocketFirstMessageTimeout = 10 * time.Second
 	websocketCloseTimeout        = 5 * time.Second
+	// Below the common 60s idle timeout of proxies and load balancers.
+	websocketPingInterval = 30 * time.Second
 )
 
 // websocketServerStream's Receive and Send may run concurrently. read owns
@@ -401,8 +403,29 @@ func websocketServe(server *connect.Server, spec connect.Spec, opts *options, re
 		stream.finish(ctx, headerErr)
 		return
 	}
+	go websocketHeartbeat(ioCtx, conn)
 	fromHTTPHeader(info.RequestHeader(), header)
 	stream.finish(ctx, scrubHandlerError(server.Call(ctx, spec.Procedure, info, stream)))
+}
+
+// websocketHeartbeat pings the client at websocketPingInterval intervals.
+func websocketHeartbeat(ctx context.Context, conn *websocket.Conn) {
+	ticker := time.NewTicker(websocketPingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		// A PONG goes unread while read waits on Receive.
+		pingCtx, cancel := context.WithTimeout(ctx, websocketPingInterval)
+		err := conn.Ping(pingCtx)
+		cancel()
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+	}
 }
 
 // websocketRequestHeader builds the RPC's effective headers. Metadata can't
