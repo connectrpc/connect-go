@@ -82,7 +82,9 @@ type websocketClientStream struct {
 	singleRequest  bool
 	singleResponse bool
 
-	dial         func() (*websocket.Conn, error)
+	dialOnce     sync.Once
+	conn         *websocket.Conn
+	dialErr      error
 	stopWatching func() bool
 
 	sent           bool
@@ -105,7 +107,7 @@ func newWebSocketClientStream(
 	info.ResponseEncoding = connect.CompressionNameIdentity
 	ctx, cancel := context.WithCancel(ctx)
 	ioCtx, _ := websocketGraceContext(ctx)
-	stream := &websocketClientStream{
+	return &websocketClientStream{
 		ctx:            ctx,
 		ioCtx:          ioCtx,
 		cancel:         cancel,
@@ -114,14 +116,6 @@ func newWebSocketClientStream(
 		singleRequest:  spec.StreamType&connect.StreamTypeClient == 0,
 		singleResponse: spec.StreamType&connect.StreamTypeServer == 0,
 	}
-	stream.dial = sync.OnceValues(func() (*websocket.Conn, error) {
-		conn, err := stream.handshake()
-		if err != nil {
-			cancel()
-		}
-		return conn, err
-	})
-	return stream
 }
 
 func (s *websocketClientStream) SendHeaders() error {
@@ -200,6 +194,17 @@ func (s *websocketClientStream) Receive(msg any) error {
 func (s *websocketClientStream) Close() error {
 	s.cancel()
 	return nil
+}
+
+// dial runs the handshake once.
+func (s *websocketClientStream) dial() (*websocket.Conn, error) {
+	s.dialOnce.Do(func() {
+		s.conn, s.dialErr = s.handshake()
+		if s.dialErr != nil {
+			s.cancel()
+		}
+	})
+	return s.conn, s.dialErr
 }
 
 func (s *websocketClientStream) handshake() (*websocket.Conn, error) {
