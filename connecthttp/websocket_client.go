@@ -414,9 +414,9 @@ func (t *websocketRecordingTransport) RoundTrip(request *http.Request) (*http.Re
 }
 
 // websocketDoTransport adapts an [HTTPClient] that isn't an [*http.Client].
-// The upgrade needs the 101 response body to be writable. A client with a
-// Timeout, or one that buffers or wraps the body, breaks that, so it fails
-// here with a clear error rather than inside coder.
+// The upgrade writes to the 101 response body. A client that buffers or wraps
+// the body fails here with a clear error. coder would fail later with a less
+// clear one.
 type websocketDoTransport struct {
 	httpClient HTTPClient
 }

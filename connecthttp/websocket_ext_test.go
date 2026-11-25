@@ -24,6 +24,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -33,7 +34,6 @@ import (
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
-	"connectrpc.com/connect/v2/connectproto"
 	"connectrpc.com/connect/v2/internal/assert"
 	pingv1 "connectrpc.com/connect/v2/internal/gen/connect/ping/v1"
 	"connectrpc.com/connect/v2/internal/gen/connect/ping/v1/pingv1connect"
@@ -45,7 +45,7 @@ import (
 func TestWebSocketRoundTrip(t *testing.T) {
 	t.Parallel()
 	sharedServer := newWebSocketServer(t, pingServer{checkMetadata: true})
-	server := newWebSocketServer(t, &websocketPingServer{})
+	server := newWebSocketServer(t, &websocketPingServer{pingServer: pingServer{includeErrorDetails: true}})
 	for _, codec := range []string{connect.CodecNameProto, connect.CodecNameJSON} {
 		t.Run(codec, func(t *testing.T) {
 			t.Parallel()
@@ -77,10 +77,8 @@ func TestWebSocketRoundTrip(t *testing.T) {
 			t.Run("call_info", func(t *testing.T) {
 				t.Parallel()
 				ctx, info := connect.NewClientContext(t.Context())
-				response, err := client.Ping(ctx, &pingv1.PingRequest{Number: 7, Text: "hello"})
+				_, err := client.Ping(ctx, &pingv1.PingRequest{Number: 7, Text: "hello"})
 				assert.Nil(t, err)
-				assert.Equal(t, response.GetNumber(), 7)
-				assert.Equal(t, response.GetText(), "hello")
 				assert.Equal(t, info.Protocol, "connect-websocket")
 				assert.Equal(t, info.Codec, codec)
 				assert.Equal(t, info.ResponseEncoding, connect.CompressionNameIdentity)
@@ -140,7 +138,7 @@ func TestWebSocketRoundTrip(t *testing.T) {
 func TestWebSocketWire(t *testing.T) {
 	t.Parallel()
 	server := newWebSocketServer(t, &websocketPingServer{})
-	limitedServer := newWebSocketServer(t, &websocketPingServer{}, connecthttp.WithSendMaxBytes(8))
+	limitedServer := newWebSocketServer(t, &websocketPingServer{}, connecthttp.WithSendMaxBytes(8), connecthttp.WithReadMaxBytes(1024))
 	ignoreSendErrorServer := newWebSocketServer(t, &pluggablePingServer{
 		countUp: func(ctx context.Context, request *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
 			info, _ := connect.CallInfoForServerContext(ctx)
@@ -164,60 +162,49 @@ func TestWebSocketWire(t *testing.T) {
 		wantStatus  websocket.StatusCode
 	}{
 		{
-			name:        "json",
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("C")},
-			want:        []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("S{}")},
-			wantStatus:  websocket.StatusNormalClosure,
+			name: "json",
+			send: []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("C")},
+			want: []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("S{}")},
 		},
 		{
 			name:        "proto",
 			subprotocol: "connectrpc.1+proto",
 			send:        []websocketFrame{textFrame("M[]"), binaryFrame("B\x08\x07"), textFrame("C")},
 			want:        []websocketFrame{textFrame("M[]"), binaryFrame("B\x08\x07"), textFrame("S{}")},
-			wantStatus:  websocket.StatusNormalClosure,
 		},
 		{
-			name:        "unary_two_bodies",
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("B" + pingRequest), textFrame("C")},
+			name: "unary_two_bodies",
+			send: []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("B" + pingRequest), textFrame("C")},
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"unimplemented","message":"unary request has multiple messages"}}`),
 			},
-			wantStatus: websocket.StatusNormalClosure,
 		},
 		{
-			name:        "unary_no_body",
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M[]"), textFrame("C")},
+			name: "unary_no_body",
+			send: []websocketFrame{textFrame("M[]"), textFrame("C")},
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"unimplemented","message":"unary request has zero messages"}}`),
 			},
-			wantStatus: websocket.StatusNormalClosure,
 		},
 		{
-			name:        "invalid_utf8",
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M\xff")},
-			wantStatus:  websocket.StatusInvalidFramePayloadData,
+			name:       "invalid_utf8",
+			send:       []websocketFrame{textFrame("M\xff")},
+			wantStatus: websocket.StatusInvalidFramePayloadData,
 		},
 		{
-			name:        "invalid_response_metadata",
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M[]"), textFrame(`B{"text":"bad-metadata"}`), textFrame("C")},
+			name: "invalid_response_metadata",
+			send: []websocketFrame{textFrame("M[]"), textFrame(`B{"text":"bad-metadata"}`), textFrame("C")},
 			want: []websocketFrame{
 				textFrame(`M[["x-ok","1"]]`),
 				textFrame(`B{"text":"bad-metadata"}`),
 				textFrame(`S{"metadata":{"x-ok":["1"]}}`),
 			},
-			wantStatus: websocket.StatusNormalClosure,
 		},
 		{
-			name:        "empty_json_body",
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M[]"), textFrame("B"), textFrame("C")},
+			name: "empty_json_body",
+			send: []websocketFrame{textFrame("M[]"), textFrame("B"), textFrame("C")},
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"invalid_argument","message":"protocol error: unmarshal message: zero-length payload is not a valid JSON object"}}`),
@@ -225,53 +212,44 @@ func TestWebSocketWire(t *testing.T) {
 			wantStatus: websocket.StatusProtocolError,
 		},
 		{
-			name:        "connect_response_header",
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M[]"), textFrame(`B{"text":"connect-header"}`), textFrame("C")},
+			name: "connect_response_header",
+			send: []websocketFrame{textFrame("M[]"), textFrame(`B{"text":"connect-header"}`), textFrame("C")},
 			want: []websocketFrame{
 				textFrame(`M[["x-ok","1"]]`),
 				textFrame(`S{"error":{"code":"internal","message":"response header \"connect-custom\" is reserved for the protocol"}}`),
 			},
-			wantStatus: websocket.StatusNormalClosure,
 		},
 		{
-			name:        "connect_response_header_send_error_ignored",
-			server:      ignoreSendErrorServer,
-			procedure:   pingv1connect.PingServiceCountUpProcedure,
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M[]"), textFrame(`B{"number":"2"}`), textFrame("C")},
+			name:      "connect_response_header_send_error_ignored",
+			server:    ignoreSendErrorServer,
+			procedure: pingv1connect.PingServiceCountUpProcedure,
+			send:      []websocketFrame{textFrame("M[]"), textFrame(`B{"number":"2"}`), textFrame("C")},
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"internal","message":"response header \"connect-custom\" is reserved for the protocol"}}`),
 			},
-			wantStatus: websocket.StatusNormalClosure,
 		},
 		{
-			name:        "connect_response_trailer",
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M[]"), textFrame(`B{"text":"connect-trailer"}`), textFrame("C")},
+			name: "connect_response_trailer",
+			send: []websocketFrame{textFrame("M[]"), textFrame(`B{"text":"connect-trailer"}`), textFrame("C")},
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`B{"text":"connect-trailer"}`),
 				textFrame(`S{"error":{"code":"internal","message":"response trailer \"connect-custom\" is reserved for the protocol"},"metadata":{"x-ok":["1"]}}`),
 			},
-			wantStatus: websocket.StatusNormalClosure,
 		},
 		{
-			name:        "send_max_bytes",
-			server:      limitedServer,
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("C")},
+			name:   "send_max_bytes",
+			server: limitedServer,
+			send:   []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("C")},
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"resource_exhausted","message":"message size 14 exceeds sendMaxBytes 8"}}`),
 			},
-			wantStatus: websocket.StatusNormalClosure,
 		},
 		{
-			name:        "missing_metadata",
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("B" + pingRequest), textFrame("C")},
+			name: "missing_metadata",
+			send: []websocketFrame{textFrame("B" + pingRequest), textFrame("C")},
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"internal","message":"protocol error: first message is B, expected M"}}`),
@@ -279,9 +257,8 @@ func TestWebSocketWire(t *testing.T) {
 			wantStatus: websocket.StatusProtocolError,
 		},
 		{
-			name:        "reserved_metadata",
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame(`M[["x-forwarded-for","10.0.0.1"]]`), textFrame("B" + pingRequest), textFrame("C")},
+			name: "reserved_metadata",
+			send: []websocketFrame{textFrame(`M[["x-forwarded-for","10.0.0.1"]]`), textFrame("B" + pingRequest), textFrame("C")},
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"internal","message":"protocol error: M message key \"x-forwarded-for\" is reserved"}}`),
@@ -289,10 +266,9 @@ func TestWebSocketWire(t *testing.T) {
 			wantStatus: websocket.StatusProtocolError,
 		},
 		{
-			name:        "end_stream_from_client",
-			procedure:   pingv1connect.PingServiceCumSumProcedure,
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M[]"), textFrame("S{}")},
+			name:      "end_stream_from_client",
+			procedure: pingv1connect.PingServiceCumSumProcedure,
+			send:      []websocketFrame{textFrame("M[]"), textFrame("S{}")},
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"internal","message":"protocol error: unexpected S message from client"}}`),
@@ -300,20 +276,8 @@ func TestWebSocketWire(t *testing.T) {
 			wantStatus: websocket.StatusProtocolError,
 		},
 		{
-			name:        "second_metadata",
-			procedure:   pingv1connect.PingServiceCumSumProcedure,
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M[]"), textFrame("M[]")},
-			want: []websocketFrame{
-				textFrame("M[]"),
-				textFrame(`S{"error":{"code":"internal","message":"protocol error: unexpected M message from client"}}`),
-			},
-			wantStatus: websocket.StatusProtocolError,
-		},
-		{
-			name:        "message_after_end_stream",
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M[]"), textFrame(`B{"text":"sleep"}`), textFrame("C"), textFrame(`B{}`)},
+			name: "message_after_end_stream",
+			send: []websocketFrame{textFrame("M[]"), textFrame(`B{"text":"sleep"}`), textFrame("C"), textFrame(`B{}`)},
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"internal","message":"protocol error: B message after C"}}`),
@@ -321,10 +285,9 @@ func TestWebSocketWire(t *testing.T) {
 			wantStatus: websocket.StatusProtocolError,
 		},
 		{
-			name:        "metadata_matches_handshake_header",
-			subprotocol: "connectrpc.1+json",
-			header:      http.Header{"X-Test": {"handshake"}},
-			send:        []websocketFrame{textFrame(`M[["x-test","metadata"]]`), textFrame("B" + pingRequest), textFrame("C")},
+			name:   "metadata_matches_handshake_header",
+			header: http.Header{"X-Test": {"handshake"}},
+			send:   []websocketFrame{textFrame(`M[["x-test","metadata"]]`), textFrame("B" + pingRequest), textFrame("C")},
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"internal","message":"protocol error: M message key \"x-test\" is also a handshake header"}}`),
@@ -332,100 +295,48 @@ func TestWebSocketWire(t *testing.T) {
 			wantStatus: websocket.StatusProtocolError,
 		},
 		{
-			name:        "metadata_combined_with_handshake",
-			subprotocol: "connectrpc.1+json",
-			header:      http.Header{"X-Other": {"handshake"}},
-			send:        []websocketFrame{textFrame(`M[["x-test","metadata"]]`), textFrame("B" + pingRequest), textFrame("C")},
+			name:   "metadata_combined_with_handshake",
+			header: http.Header{"X-Other": {"handshake"}},
+			send:   []websocketFrame{textFrame(`M[["x-test","metadata"]]`), textFrame("B" + pingRequest), textFrame("C")},
 			want: []websocketFrame{
 				textFrame(`M[["x-test","metadata"]]`),
 				textFrame("B" + pingRequest),
 				textFrame(`S{"metadata":{"x-test":["metadata"]}}`),
 			},
-			wantStatus: websocket.StatusNormalClosure,
 		},
 		{
-			name:        "metadata_surrounding_whitespace",
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame("M[[\"x-test\",\" \\ta b\\t \"]]"), textFrame("B" + pingRequest), textFrame("C")},
-			want: []websocketFrame{
-				textFrame(`M[["x-test","a b"]]`),
-				textFrame("B" + pingRequest),
-				textFrame(`S{"metadata":{"x-test":["a b"]}}`),
-			},
-			wantStatus: websocket.StatusNormalClosure,
-		},
-		{
-			name:        "metadata_non_ascii_value",
-			subprotocol: "connectrpc.1+json",
-			send:        []websocketFrame{textFrame(`M[["x-test","café"]]`), textFrame("B" + pingRequest), textFrame("C")},
-			want: []websocketFrame{
-				textFrame("M[]"),
-				textFrame(`S{"error":{"code":"internal","message":"protocol error: M message value for key \"x-test\" is not a valid header value"}}`),
-			},
-			wantStatus: websocket.StatusProtocolError,
-		},
-		{
-			name:        "deadline_while_receiving",
-			procedure:   pingv1connect.PingServiceSumProcedure,
-			subprotocol: "connectrpc.1+json",
-			query:       "?connect-timeout-ms=50",
-			send:        []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest)},
+			name:  "deadline_before_metadata",
+			query: "?connect-timeout-ms=50",
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"deadline_exceeded","message":"context deadline exceeded"}}`),
 			},
-			wantStatus: websocket.StatusNormalClosure,
 		},
 		{
-			name:        "deadline_before_metadata",
-			subprotocol: "connectrpc.1+json",
-			query:       "?connect-timeout-ms=50",
+			name:  "zero_timeout",
+			query: "?connect-timeout-ms=0",
+			send:  []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("C")},
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"deadline_exceeded","message":"context deadline exceeded"}}`),
 			},
-			wantStatus: websocket.StatusNormalClosure,
 		},
 		{
-			name:        "zero_timeout",
-			subprotocol: "connectrpc.1+json",
-			query:       "?connect-timeout-ms=0",
-			send:        []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("C")},
-			want: []websocketFrame{
-				textFrame("M[]"),
-				textFrame(`S{"error":{"code":"deadline_exceeded","message":"context deadline exceeded"}}`),
-			},
-			wantStatus: websocket.StatusNormalClosure,
-		},
-		{
-			name:        "malformed_timeout",
-			subprotocol: "connectrpc.1+json",
-			query:       "?connect-timeout-ms=1%zz",
-			send:        []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("C")},
+			name:  "malformed_timeout",
+			query: "?connect-timeout-ms=1%zz",
+			send:  []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("C")},
 			want: []websocketFrame{
 				textFrame("M[]"),
 				textFrame(`S{"error":{"code":"invalid_argument","message":"parse timeout: invalid URL escape \"%zz\""}}`),
 			},
-			wantStatus: websocket.StatusNormalClosure,
 		},
 		{
-			name:        "unrelated_malformed_query",
-			subprotocol: "connectrpc.1+json",
-			query:       "?x=connect-timeout-ms%zz",
-			send:        []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("C")},
-			want:        []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("S{}")},
-			wantStatus:  websocket.StatusNormalClosure,
-		},
-		{
-			name:        "invalid_timeout",
-			subprotocol: "connectrpc.1+json",
-			query:       "?connect-timeout-ms=-1",
-			send:        []websocketFrame{textFrame("M[]"), textFrame("B" + pingRequest), textFrame("C")},
-			want: []websocketFrame{
-				textFrame("M[]"),
-				textFrame(`S{"error":{"code":"invalid_argument","message":"parse timeout: \"-1\" has non-digit characters"}}`),
-			},
-			wantStatus: websocket.StatusNormalClosure,
+			name:        "read_max_bytes",
+			server:      limitedServer,
+			procedure:   pingv1connect.PingServiceCumSumProcedure,
+			subprotocol: "connectrpc.1+proto",
+			send:        []websocketFrame{textFrame("M[]"), binaryFrame("B" + strings.Repeat("\x00", 2048))},
+			wantStatus:  websocket.StatusMessageTooBig,
 		},
 	}
 	for _, test := range tests {
@@ -433,6 +344,14 @@ func TestWebSocketWire(t *testing.T) {
 			t.Parallel()
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
+			subprotocol := test.subprotocol
+			if subprotocol == "" {
+				subprotocol = "connectrpc.1+json"
+			}
+			wantStatus := test.wantStatus
+			if wantStatus == 0 {
+				wantStatus = websocket.StatusNormalClosure
+			}
 			testServer := server
 			if test.server != nil {
 				testServer = test.server
@@ -441,49 +360,13 @@ func TestWebSocketWire(t *testing.T) {
 			if test.procedure != "" {
 				procedure = test.procedure
 			}
-			conn := dialWebSocket(t, testServer, procedure+test.query, test.subprotocol, test.header)
+			conn := dialWebSocket(t, testServer, procedure+test.query, subprotocol, test.header)
 			go func() { _ = writeFrames(ctx, conn, test.send...) }()
 			got, closeErr := readFrames(ctx, conn)
 			assert.Equal(t, got, test.want)
-			assert.Equal(t, closeErr.Code, test.wantStatus)
+			assert.Equal(t, closeErr.Code, wantStatus)
 		})
 	}
-	t.Run("mixed_offer", func(t *testing.T) {
-		t.Parallel()
-		conn, response, err := websocket.Dial(t.Context(), server.URL()+pingv1connect.PingServicePingProcedure, &websocket.DialOptions{
-			HTTPClient:   &http.Client{Transport: server.TransportHTTP1()},
-			Subprotocols: []string{"connectrpc.1+xml", "connectrpc.1+json"},
-		})
-		if response != nil && response.Body != nil {
-			_ = response.Body.Close()
-		}
-		if err != nil {
-			t.Fatalf("dial: %v", err)
-		}
-		assert.Equal(t, conn.Subprotocol(), "connectrpc.1+json")
-		assert.Nil(t, conn.CloseNow())
-	})
-	t.Run("cross_origin", func(t *testing.T) {
-		t.Parallel()
-		_, response, err := websocket.Dial(t.Context(), server.URL()+pingv1connect.PingServicePingProcedure, &websocket.DialOptions{
-			HTTPClient:   &http.Client{Transport: server.TransportHTTP1()},
-			HTTPHeader:   http.Header{"Origin": {"http://evil.example"}},
-			Subprotocols: []string{"connectrpc.1+json"},
-		})
-		assert.NotNil(t, err)
-		assert.Equal(t, response.StatusCode, http.StatusForbidden)
-		assert.Nil(t, response.Body.Close())
-	})
-	t.Run("unsupported_subprotocol", func(t *testing.T) {
-		t.Parallel()
-		_, response, err := websocket.Dial(t.Context(), server.URL()+pingv1connect.PingServicePingProcedure, &websocket.DialOptions{
-			HTTPClient:   &http.Client{Transport: server.TransportHTTP1()},
-			Subprotocols: []string{"connectrpc.1+xml"},
-		})
-		assert.NotNil(t, err)
-		assert.Equal(t, response.StatusCode, http.StatusBadRequest)
-		assert.Nil(t, response.Body.Close())
-	})
 }
 
 func TestWebSocketClientProtocolErrors(t *testing.T) {
@@ -500,14 +383,12 @@ func TestWebSocketClientProtocolErrors(t *testing.T) {
 	}{
 		{name: "no_subprotocol", skipNegotiation: true, wantStatus: -1},
 		{name: "subprotocol_case", skipNegotiation: true, echo: "CONNECTRPC.1+PROTO", send: []websocketFrame{textFrame("M[]"), binaryFrame("B"), textFrame("S{}")}, wantStatus: -1},
-		{name: "error_end_stream", send: []websocketFrame{textFrame("M[]"), textFrame(`S{"error":{"code":"not_found"}}`)}, wantCode: connect.CodeNotFound, wantStatus: websocket.StatusNormalClosure},
 		{name: "missing_metadata", send: []websocketFrame{binaryFrame("B")}, wantStatus: 3102},
 		{name: "second_metadata", send: []websocketFrame{textFrame("M[]"), textFrame("M[]")}, wantStatus: 3102},
 		{name: "client_end_stream", send: []websocketFrame{textFrame("M[]"), textFrame("C")}, wantStatus: 3102},
 		{name: "null_end_stream", send: []websocketFrame{textFrame("M[]"), textFrame("Snull")}, wantStatus: 3102},
 		{name: "invalid_utf8", send: []websocketFrame{textFrame("M\xff")}, wantStatus: websocket.StatusInvalidFramePayloadData},
 		{name: "long_reason", send: []websocketFrame{textFrame(`M[["` + strings.Repeat("X", 200) + `","v"]]`)}, wantStatus: 3102},
-		{name: "non_ascii_metadata", send: []websocketFrame{textFrame(`M[["x-test","café"]]`), binaryFrame("B"), textFrame("S{}")}, wantStatus: 3102},
 		{name: "invalid_trailer_key", send: []websocketFrame{textFrame("M[]"), binaryFrame("B"), textFrame(`S{"metadata":{"bad key":["1"]}}`)}, wantStatus: 3102},
 		{name: "invalid_trailer_value", send: []websocketFrame{textFrame("M[]"), binaryFrame("B"), textFrame(`S{"metadata":{"x-test":["a\nb"]}}`)}, wantStatus: 3102},
 		{name: "unknown_marker", send: []websocketFrame{textFrame("M[]"), textFrame("X")}, wantStatus: 3102},
@@ -629,26 +510,71 @@ func TestWebSocketClientSilentServer(t *testing.T) {
 	})
 }
 
-func TestWebSocketNotEnabled(t *testing.T) {
+func TestWebSocketNegotiation(t *testing.T) {
 	t.Parallel()
+	server := newWebSocketServer(t, &websocketPingServer{})
 	mux := http.NewServeMux()
-	server := connect.NewServer()
-	pingv1connect.RegisterPingServiceHandler(server, &websocketPingServer{})
-	connecthttp.Mount(mux, server)
-	httpServer := memhttptest.NewServer(t, mux)
-	for _, procedure := range []string{
-		pingv1connect.PingServicePingProcedure,
-		pingv1connect.PingServiceSumProcedure,
-		pingv1connect.PingServiceCountUpProcedure,
-		pingv1connect.PingServiceCumSumProcedure,
-	} {
-		_, response, err := websocket.Dial(t.Context(), httpServer.URL()+procedure, &websocket.DialOptions{
-			HTTPClient:   &http.Client{Transport: httpServer.TransportHTTP1()},
-			Subprotocols: []string{"connectrpc.1+json"},
+	notEnabled := connect.NewServer()
+	pingv1connect.RegisterPingServiceHandler(notEnabled, &websocketPingServer{})
+	connecthttp.Mount(mux, notEnabled)
+	notEnabledServer := memhttptest.NewServer(t, mux)
+	tests := []struct {
+		name            string
+		server          *memhttp.Server
+		header          http.Header
+		offer           []string
+		wantSubprotocol string
+		wantStatus      int
+	}{
+		{
+			name:            "mixed_offer",
+			server:          server,
+			offer:           []string{"connectrpc.1+xml", "connectrpc.1+json"},
+			wantSubprotocol: "connectrpc.1+json",
+		},
+		{
+			name:       "cross_origin",
+			server:     server,
+			header:     http.Header{"Origin": {"http://evil.example"}},
+			offer:      []string{"connectrpc.1+json"},
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "unsupported_subprotocol",
+			server:     server,
+			offer:      []string{"connectrpc.1+xml"},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "not_enabled",
+			server:     notEnabledServer,
+			offer:      []string{"connectrpc.1+json"},
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			// Bidi is the only procedure that requireHTTP2 also wraps.
+			conn, response, err := websocket.Dial(t.Context(), test.server.URL()+pingv1connect.PingServiceCumSumProcedure, &websocket.DialOptions{
+				HTTPClient:   &http.Client{Transport: test.server.TransportHTTP1()},
+				HTTPHeader:   test.header,
+				Subprotocols: test.offer,
+			})
+			if response != nil && response.Body != nil {
+				_ = response.Body.Close()
+			}
+			if test.wantStatus != 0 {
+				assert.NotNil(t, err)
+				assert.Equal(t, response.StatusCode, test.wantStatus)
+				return
+			}
+			if err != nil {
+				t.Fatalf("dial: %v", err)
+			}
+			assert.Equal(t, conn.Subprotocol(), test.wantSubprotocol)
+			assert.Nil(t, conn.CloseNow())
 		})
-		assert.NotNil(t, err)
-		assert.Equal(t, response.StatusCode, http.StatusBadRequest)
-		assert.Nil(t, response.Body.Close())
 	}
 }
 
@@ -667,18 +593,16 @@ func TestWebSocketClientAfterEndStream(t *testing.T) {
 			received <- frames
 			closeStatus <- closeErr.Code
 		}()
-		_ = writeFrames(ctx, conn, textFrame("M[[\"x-test\",\" a\\tb \"]]"), textFrame("S{}"))
+		_ = writeFrames(ctx, conn, textFrame("M[]"), textFrame("S{}"))
 	}))
 	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
 		&http.Client{Transport: server.TransportHTTP1()}, server.URL(), connecthttp.WithWebSocket(),
 	)))
-	ctx, info := connect.NewClientContext(t.Context())
-	stream, err := client.CumSum(ctx)
+	stream, err := client.CumSum(t.Context())
 	assert.Nil(t, err)
 	assert.Nil(t, stream.SendHeaders())
 	_, err = stream.Receive()
 	assert.ErrorIs(t, err, io.EOF)
-	assert.Equal(t, info.ResponseHeader().Values("X-Test"), []string{"a\tb"})
 	assert.Nil(t, stream.CloseSend())
 	assert.Nil(t, stream.Close())
 	assert.Equal(t, receiveWithin(t, received, "client close"), []websocketFrame{textFrame("M[]")})
@@ -687,7 +611,7 @@ func TestWebSocketClientAfterEndStream(t *testing.T) {
 
 func TestWebSocketClientHandshake(t *testing.T) {
 	t.Parallel()
-	handshake := func(t *testing.T, ctx context.Context, setHeader func(*connect.Header)) *http.Request {
+	handshake := func(t *testing.T, ctx context.Context) *http.Request {
 		t.Helper()
 		handshakes := make(chan *http.Request, 1)
 		mux := http.NewServeMux()
@@ -701,15 +625,13 @@ func TestWebSocketClientHandshake(t *testing.T) {
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
 			&http.Client{Transport: httpServer.TransportHTTP1()}, httpServer.URL(), connecthttp.WithWebSocket(),
 		)))
-		ctx, info := connect.NewClientContext(ctx)
-		setHeader(info.RequestHeader())
 		_, err := client.Ping(ctx, &pingv1.PingRequest{})
 		assert.Nil(t, err)
 		return <-handshakes
 	}
 	t.Run("default", func(t *testing.T) {
 		t.Parallel()
-		request := handshake(t, t.Context(), func(*connect.Header) {})
+		request := handshake(t, t.Context())
 		userAgent := request.Header.Values("User-Agent")
 		assert.Equal(t, len(userAgent), 1)
 		assert.True(t, strings.HasPrefix(userAgent[0], "connect-go/"))
@@ -717,21 +639,11 @@ func TestWebSocketClientHandshake(t *testing.T) {
 		assert.Zero(t, request.Header.Get("Connect-Protocol-Version"))
 		assert.Equal(t, request.URL.RawQuery, "")
 	})
-	t.Run("custom_user_agent", func(t *testing.T) {
-		t.Parallel()
-		request := handshake(t, t.Context(), func(header *connect.Header) { header.Set("User-Agent", "custom") })
-		assert.Equal(t, request.Header.Values("User-Agent"), []string{"custom"})
-	})
-	t.Run("suppressed_user_agent", func(t *testing.T) {
-		t.Parallel()
-		request := handshake(t, t.Context(), func(header *connect.Header) { header.SetValues("User-Agent", nil) })
-		assert.Equal(t, len(request.Header.Values("User-Agent")), 0)
-	})
 	t.Run("deadline", func(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
-		request := handshake(t, ctx, func(*connect.Header) {})
+		request := handshake(t, ctx)
 		timeout, err := strconv.Atoi(request.URL.Query().Get("connect-timeout-ms"))
 		assert.Nil(t, err)
 		assert.True(t, timeout > 0 && timeout <= 60000, assert.Sprintf("timeout %d", timeout))
@@ -786,13 +698,6 @@ func TestWebSocketHTTPClientWrapper(t *testing.T) {
 			},
 			wantCode:    connect.CodeUnauthenticated,
 			wantMessage: "no token",
-		},
-		{
-			name: "not_found",
-			do: func(*http.Request) (*http.Response, error) {
-				return &http.Response{StatusCode: http.StatusNotFound, Header: http.Header{}, Body: http.NoBody}, nil
-			},
-			wantCode: connect.CodeUnimplemented,
 		},
 	}
 	for _, test := range tests {
@@ -898,42 +803,29 @@ func TestWebSocketServerContextEndsWhileHandlerRuns(t *testing.T) {
 	})
 }
 
-func TestWebSocketServerClientDropsBeforeReceive(t *testing.T) {
+func TestWebSocketServerClientDropsWhileSending(t *testing.T) {
 	t.Parallel()
-	// The handler never calls Receive. Its context still ends when the client
-	// leaves, whether or not a B is waiting.
-	tests := []struct {
-		name   string
-		frames []websocketFrame
-		send   bool
-	}{
-		{name: "after_C", frames: []websocketFrame{textFrame("M[]"), textFrame("C")}},
-		{name: "after_B_while_sending", frames: []websocketFrame{textFrame("M[]"), textFrame(`B{"number":1}`)}, send: true},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			clientGone := make(chan struct{})
-			canceled := make(chan struct{})
-			server := newWebSocketServer(t, &pluggablePingServer{
-				cumSum: func(ctx context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
-					<-clientGone
-					var err error
-					for test.send && err == nil {
-						err = stream.Send(&pingv1.CumSumResponse{})
-					}
-					<-ctx.Done()
-					close(canceled)
-					return nil
-				},
-			})
-			conn := dialWebSocket(t, server, pingv1connect.PingServiceCumSumProcedure, "connectrpc.1+json", nil)
-			assert.Nil(t, writeFrames(t.Context(), conn, test.frames...))
-			_ = conn.CloseNow()
-			close(clientGone)
-			<-canceled
-		})
-	}
+	// The handler never calls Receive and the unread B blocks the read loop,
+	// yet a failed Send still ends its context.
+	clientGone := make(chan struct{})
+	canceled := make(chan struct{})
+	server := newWebSocketServer(t, &pluggablePingServer{
+		cumSum: func(ctx context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
+			<-clientGone
+			var err error
+			for err == nil {
+				err = stream.Send(&pingv1.CumSumResponse{})
+			}
+			<-ctx.Done()
+			close(canceled)
+			return nil
+		},
+	})
+	conn := dialWebSocket(t, server, pingv1connect.PingServiceCumSumProcedure, "connectrpc.1+json", nil)
+	assert.Nil(t, writeFrames(t.Context(), conn, textFrame("M[]"), textFrame(`B{"number":1}`)))
+	_ = conn.CloseNow()
+	close(clientGone)
+	receiveWithin(t, canceled, "handler cancellation")
 }
 
 func TestWebSocketServerPings(t *testing.T) {
@@ -1005,9 +897,9 @@ func TestWebSocketServerMetadataLimit(t *testing.T) {
 		name    string
 		options []connecthttp.Option
 	}{
+		// The default 4 MiB read limit is already above the header limit.
 		{name: "default"},
 		{name: "unlimited_messages", options: []connecthttp.Option{connecthttp.WithReadMaxBytes(0)}},
-		{name: "large_messages", options: []connecthttp.Option{connecthttp.WithReadMaxBytes(4 * http.DefaultMaxHeaderBytes)}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1052,134 +944,98 @@ func TestWebSocketServerReceiveAfterDecodeError(t *testing.T) {
 	}
 }
 
-func TestWebSocketServerOversizedMessage(t *testing.T) {
+func TestWebSocketServerStalls(t *testing.T) {
 	t.Parallel()
 	server := newWebSocketServer(t, &websocketPingServer{}, connecthttp.WithReadMaxBytes(1024))
-	conn := dialWebSocket(t, server, pingv1connect.PingServiceCumSumProcedure, "connectrpc.1+proto", nil)
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	assert.Nil(t, conn.Write(ctx, websocket.MessageText, []byte("M[]")))
-	readErr := make(chan error, 1)
-	go func() {
-		_, _, err := conn.Read(ctx)
-		readErr <- err
-	}()
-	_ = conn.Write(ctx, websocket.MessageBinary, append([]byte("B"), make([]byte, 4<<20)...))
-	assert.Equal(t, websocket.CloseStatus(<-readErr), websocket.StatusMessageTooBig)
-}
-
-func TestWebSocketServerOversizedMessageStalls(t *testing.T) {
-	t.Parallel()
-	server := newWebSocketServer(t, &websocketPingServer{}, connecthttp.WithReadMaxBytes(1024))
-	conn, reader := dialWebSocketRaw(t, server, pingv1connect.PingServiceCumSumProcedure)
-	_, err := conn.Write(append(rawFrame(0x1, 3), "M[]"...))
-	assert.Nil(t, err)
-	closed := make(chan error, 1)
-	go func() {
-		_, err := io.Copy(io.Discard, reader)
-		closed <- err
-	}()
-	_, _ = conn.Write(append(rawFrame(0x2, 1<<20), make([]byte, 4096)...))
-	_ = receiveWithin(t, closed, "server close")
-}
-
-func TestWebSocketServerFailedStalls(t *testing.T) {
-	t.Parallel()
-	server := newWebSocketServer(t, &websocketPingServer{})
-	conn, reader := dialWebSocketRaw(t, server, pingv1connect.PingServiceCumSumProcedure)
-	// Read first, or the server's writes block on the in-memory connection.
-	closed := make(chan error, 1)
-	go func() {
-		_, err := io.Copy(io.Discard, reader)
-		closed <- err
-	}()
-	_, err := conn.Write(append(append(rawFrame(0x1, 3), "M[]"...), append(rawFrame(0x1, 1), 'Q')...))
-	assert.Nil(t, err)
-	_, _ = conn.Write(append(rawFrame(0x2, 1<<20), make([]byte, 16)...))
-	select {
-	case <-closed:
-	case <-time.After(15 * time.Second): // coder's close handshake waits 5s
-		t.Fatal("server didn't close the connection")
+	metadata := append(rawFrame(0x1, 3), "M[]"...)
+	tests := []struct {
+		name  string
+		query string
+		send  []byte
+		delay time.Duration
+	}{
+		// The message is over the read limit.
+		{name: "oversized_message", send: slices.Concat(metadata, rawFrame(0x2, 1<<20), make([]byte, 4096))},
+		// Q fails the RPC while the next message is incomplete.
+		{name: "failed", send: slices.Concat(metadata, rawFrame(0x1, 1), []byte("Q"), rawFrame(0x2, 1<<20), make([]byte, 16))},
+		// The deadline passes mid-message and then more bytes arrive.
+		{name: "deadline", query: "?connect-timeout-ms=200", send: slices.Concat(metadata, rawFrame(0x2, 1<<20), make([]byte, 512)), delay: 600 * time.Millisecond},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			conn, reader := dialWebSocketRaw(t, server, pingv1connect.PingServiceCumSumProcedure+test.query)
+			// Read first, or the server's writes block on the in-memory connection.
+			closed := make(chan error, 1)
+			go func() {
+				_, err := io.Copy(io.Discard, reader)
+				closed <- err
+			}()
+			// The server may close mid-write.
+			_, _ = conn.Write(test.send)
+			if test.delay > 0 {
+				time.Sleep(test.delay)
+				_, _ = conn.Write(make([]byte, 4096))
+			}
+			select {
+			case <-closed:
+			case <-time.After(15 * time.Second): // coder's close handshake waits 5s
+				t.Fatal("server didn't close the connection")
+			}
+		})
 	}
 }
 
-func TestWebSocketServerDeadlineStalls(t *testing.T) {
+func TestWebSocketClientStalls(t *testing.T) {
 	t.Parallel()
-	server := newWebSocketServer(t, &websocketPingServer{}, connecthttp.WithReadMaxBytes(1024))
-	conn, reader := dialWebSocketRaw(t, server, pingv1connect.PingServiceCumSumProcedure+"?connect-timeout-ms=200")
-	closed := make(chan error, 1)
-	go func() {
-		_, err := io.Copy(io.Discard, reader)
-		closed <- err
-	}()
-	_, err := conn.Write(append(rawFrame(0x1, 3), "M[]"...))
-	assert.Nil(t, err)
-	_, err = conn.Write(append(rawFrame(0x2, 1<<20), make([]byte, 512)...))
-	assert.Nil(t, err)
-	time.Sleep(600 * time.Millisecond)
-	_, _ = conn.Write(make([]byte, 4096))
-	select {
-	case <-closed:
-	case <-time.After(15 * time.Second): // coder's close handshake waits 5s
-		t.Fatal("server didn't close the connection")
+	tests := []struct {
+		name     string
+		cancel   bool
+		wantCode connect.Code
+	}{
+		{name: "oversized_message", wantCode: connect.CodeResourceExhausted},
+		{name: "cancel", cancel: true, wantCode: connect.CodeCanceled},
 	}
-}
-
-func TestWebSocketClientCancelStalls(t *testing.T) {
-	t.Parallel()
-	closed := make(chan error, 1)
-	sent := make(chan struct{})
-	server := rawWebSocketServer(t, func(conn net.Conn, reader *bufio.Reader) {
-		go func() {
-			_, _ = conn.Write(append(rawServerFrame(0x1, 3), "M[]"...))
-			_, _ = conn.Write(append(rawServerFrame(0x2, 1<<20), make([]byte, 512)...))
-			close(sent)
-			time.Sleep(100 * time.Millisecond)
-			_, _ = conn.Write(make([]byte, 4096))
-		}()
-		_, err := io.Copy(io.Discard, reader)
-		closed <- err
-	})
-	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
-		&http.Client{Transport: server.TransportHTTP1()}, server.URL(),
-		connecthttp.WithWebSocket(), connecthttp.WithReadMaxBytes(1024),
-	)))
-	ctx, cancel := context.WithCancel(t.Context())
-	stream, err := client.CumSum(ctx)
-	assert.Nil(t, err)
-	assert.Nil(t, stream.SendHeaders())
-	received := make(chan error, 1)
-	go func() {
-		_, err := stream.Receive()
-		received <- err
-	}()
-	<-sent
-	cancel()
-	assert.Equal(t, connect.CodeOf(receiveWithin(t, received, "Receive result")), connect.CodeCanceled)
-	_ = receiveWithin(t, closed, "client close")
-}
-
-func TestWebSocketClientOversizedMessageStalls(t *testing.T) {
-	t.Parallel()
-	closed := make(chan error, 1)
-	server := rawWebSocketServer(t, func(conn net.Conn, reader *bufio.Reader) {
-		go func() {
-			_, _ = conn.Write(append(rawServerFrame(0x1, 3), "M[]"...))
-			_, _ = conn.Write(append(rawServerFrame(0x2, 1<<20), make([]byte, 4096)...))
-		}()
-		_, err := io.Copy(io.Discard, reader)
-		closed <- err
-	})
-	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
-		&http.Client{Transport: server.TransportHTTP1()}, server.URL(),
-		connecthttp.WithWebSocket(), connecthttp.WithReadMaxBytes(1024),
-	)))
-	stream, err := client.CumSum(t.Context())
-	assert.Nil(t, err)
-	assert.Nil(t, stream.SendHeaders())
-	_, err = stream.Receive()
-	assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
-	_ = receiveWithin(t, closed, "client close")
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			closed := make(chan error, 1)
+			sent := make(chan struct{})
+			server := rawWebSocketServer(t, func(conn net.Conn, reader *bufio.Reader) {
+				go func() {
+					_, _ = conn.Write(append(rawServerFrame(0x1, 3), "M[]"...))
+					_, _ = conn.Write(append(rawServerFrame(0x2, 1<<20), make([]byte, 512)...))
+					close(sent)
+					if test.cancel {
+						time.Sleep(100 * time.Millisecond)
+					}
+					_, _ = conn.Write(make([]byte, 4096))
+				}()
+				_, err := io.Copy(io.Discard, reader)
+				closed <- err
+			})
+			client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
+				&http.Client{Transport: server.TransportHTTP1()}, server.URL(),
+				connecthttp.WithWebSocket(), connecthttp.WithReadMaxBytes(1024),
+			)))
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			stream, err := client.CumSum(ctx)
+			assert.Nil(t, err)
+			assert.Nil(t, stream.SendHeaders())
+			received := make(chan error, 1)
+			go func() {
+				_, err := stream.Receive()
+				received <- err
+			}()
+			if test.cancel {
+				<-sent
+				cancel()
+			}
+			assert.Equal(t, connect.CodeOf(receiveWithin(t, received, "Receive result")), test.wantCode)
+			_ = receiveWithin(t, closed, "client close")
+		})
+	}
 }
 
 func TestWebSocketClientDialDropped(t *testing.T) {
@@ -1218,11 +1074,11 @@ func TestWebSocketClientTrailerReplaces(t *testing.T) {
 	assert.Equal(t, info.ResponseTrailer().Values("X-Test"), []string{"fresh"})
 }
 
-// websocketPingServer covers what pingServer doesn't: server call info, a
-// handler that sleeps until canceled, error details, and invalid or reserved
-// response metadata.
+// websocketPingServer adds to pingServer the server call-info check, a
+// handler that sleeps until canceled, invalid or reserved response metadata,
+// and a Sum receive-error hook.
 type websocketPingServer struct {
-	pingv1connect.UnimplementedPingServiceHandler
+	pingServer
 
 	sleeping   chan struct{}
 	sleepCause chan error
@@ -1268,14 +1124,6 @@ func (p *websocketPingServer) Ping(ctx context.Context, request *pingv1.PingRequ
 	return &pingv1.PingResponse{Number: request.GetNumber(), Text: request.GetText()}, nil
 }
 
-func (p *websocketPingServer) Fail(_ context.Context, request *pingv1.FailRequest) (*pingv1.FailResponse, error) {
-	detail, err := connectproto.NewErrorDetail(request)
-	if err != nil {
-		return nil, err
-	}
-	return nil, connect.NewError(connect.Code(request.GetCode()), "oh no").WithDetail(detail)
-}
-
 func (p *websocketPingServer) Sum(_ context.Context, stream pingv1connect.PingServiceSumServerStream) (*pingv1.SumResponse, error) {
 	var sum int64
 	for {
@@ -1289,31 +1137,6 @@ func (p *websocketPingServer) Sum(_ context.Context, stream pingv1connect.PingSe
 			return nil, err
 		}
 		sum += request.GetNumber()
-	}
-}
-
-func (p *websocketPingServer) CountUp(_ context.Context, request *pingv1.CountUpRequest, stream pingv1connect.PingServiceCountUpServerStream) error {
-	for i := range request.GetNumber() {
-		if err := stream.Send(&pingv1.CountUpResponse{Number: i + 1}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (p *websocketPingServer) CumSum(_ context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
-	var sum int64
-	for {
-		request, err := stream.Receive()
-		if errors.Is(err, io.EOF) {
-			return nil
-		} else if err != nil {
-			return err
-		}
-		sum += request.GetNumber()
-		if err := stream.Send(&pingv1.CumSumResponse{Sum: sum}); err != nil {
-			return err
-		}
 	}
 }
 

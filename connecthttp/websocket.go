@@ -48,9 +48,10 @@ const (
 )
 
 var (
-	// A server closes with 1002 after a protocol error and a client with 3102.
+	// After a protocol error a server closes with 1002. A client closes with
+	// 3102.
 	errWebSocketProtocol = errors.New("protocol error")
-	// Both sides close with 1007, and a server sends no S.
+	// Both sides close with 1007. A server sends no S.
 	errWebSocketInvalidUTF8 = connect.NewError(connect.CodeInternal, "invalid UTF-8 in text message")
 	errWebSocketHTTPClient  = errors.New("HTTP client can't carry a WebSocket")
 	errWebSocketFinished    = connect.NewError(connect.CodeCanceled, "stream finished")
@@ -67,8 +68,8 @@ var (
 		}
 		return table
 	}()
-	// websocketValueBytes follows RFC 9110 Section 5.5 without obs-text, the
-	// bytes 0x80-0xFF, which a JSON string can't carry as bytes.
+	// websocketValueBytes follows RFC 9110 Section 5.5 without obs-text. A JSON
+	// string can't carry the bytes 0x80-0xFF.
 	//
 	//nolint:gochecknoglobals
 	websocketValueBytes = func() (table [256]bool) {
@@ -81,27 +82,27 @@ var (
 
 // WithWebSocket enables Connect over WebSocket.
 //
-// On [Mount], procedures accept WebSocket upgrades alongside the HTTP
-// protocols. On [NewTransport], clients use WebSocket instead of the HTTP
-// protocols. Use [WithConditionalOptions] to enable it for specific
-// procedures only.
+// With [Mount], procedures accept WebSocket upgrades as well as the HTTP
+// protocols. With [NewTransport], clients call over WebSocket instead of the
+// HTTP protocols. Use [WithConditionalOptions] to enable it for some
+// procedures.
 //
-// Request metadata travels in the first WebSocket message. Sending a
-// metadata key that is also a handshake header fails the RPC. Authenticate
-// RPCs in a [connect.ServerInterceptor] or procedure. HTTP middleware only
-// sees the initial handshake.
+// Request metadata travels in the first WebSocket message. A metadata key
+// that is also a handshake header fails the RPC. HTTP middleware sees only
+// the handshake. Authenticate RPCs in a [connect.ServerInterceptor] or in the
+// procedure.
 //
-// An [*http.Client] works as is, and its Timeout only bounds the handshake.
-// Use a context deadline to bound an RPC. Any other [HTTPClient] makes the
-// handshake request and must return the 101 response unchanged. Its
-// response body must be writable and implement [io.ReadWriteCloser]. Any
-// other [HTTPClient] with a Timeout fails the dial with
-// [connect.CodeInternal]. Buffering or wrapping the response body also fails
-// with [connect.CodeInternal].
+// The handshake uses HTTP/1.1. An HTTP/2-only client can't dial.
 //
-// The handshake uses HTTP/1.1, so an HTTP/2-only client cannot dial. The
-// [HTTPClient] follows redirects with its own policy, so it cannot follow
-// redirects to ws or wss URLs.
+// An [*http.Client] works as is. Its Timeout bounds only the handshake. Use
+// a context deadline to bound an RPC.
+//
+// Any other [HTTPClient] must return the 101 response with its body
+// unchanged. The body must implement [io.ReadWriteCloser]. A client that
+// buffers or wraps the body fails the dial with [connect.CodeInternal]. An
+// inner [*http.Client] with a Timeout wraps the body. The client follows
+// redirects with its own policy. It can't follow a redirect to a ws or wss
+// URL.
 func WithWebSocket() Option {
 	return websocketOption{}
 }
@@ -113,8 +114,8 @@ func (websocketOption) apply(opts *options) {
 	opts.websocket = true
 }
 
-// websocketReadMessage reads a whole message into dst, which can be recycled.
-// conn.Read allocates each message.
+// websocketReadMessage reads a whole message into dst. It reuses dst where
+// conn.Read allocates a new slice per message.
 func websocketReadMessage(ctx context.Context, conn *websocket.Conn, dst *bytes.Buffer) (websocket.MessageType, error) {
 	messageType, reader, err := conn.Reader(ctx)
 	if err != nil {
@@ -126,8 +127,8 @@ func websocketReadMessage(ctx context.Context, conn *websocket.Conn, dst *bytes.
 	return messageType, nil
 }
 
-// websocketParseMarker returns the marker of the message in buffer and
-// consumes it, leaving the payload.
+// websocketParseMarker removes the marker byte from buffer and returns it.
+// The payload stays in buffer.
 func websocketParseMarker(messageType websocket.MessageType, buffer *bytes.Buffer, codecName string) (byte, *connect.Error) {
 	data := buffer.Bytes()
 	text := messageType == websocket.MessageText
