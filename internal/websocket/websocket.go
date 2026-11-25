@@ -14,7 +14,8 @@
 
 // Package websocket implements the parts of RFC 6455 that Connect over
 // WebSocket needs. It reads whole messages, writes each message as one frame
-// and runs the close handshake. It starts no goroutines or timers and takes no
+// and runs the close handshake. It supports permessage-deflate (RFC 7692) only
+// without context takeover. It starts no goroutines or timers and takes no
 // contexts. Closing the Conn is the only way to interrupt a read or write.
 package websocket
 
@@ -101,6 +102,31 @@ type Options struct {
 	// Subprotocol is offered by Dial and echoed by Accept when the client
 	// offered it. Dial fails unless the server echoes it exactly.
 	Subprotocol string
+	// Compression enables permessage-deflate (RFC 7692) without context
+	// takeover. Dial offers it and Accept accepts the first acceptable offer.
+	// Accept always imposes no context takeover in both directions. Dial
+	// fails if the server's answer allows server context takeover. It
+	// accepts an answer without client_no_context_takeover, since this
+	// client never takes over. Dial's response holds the negotiated
+	// Sec-WebSocket-Extensions for a caller with a stricter policy. Each
+	// compressing WriteMessage holds a pooled compressor of about 475 KiB
+	// until its frame is written. ReadMessage's limit bounds each message,
+	// not the work per byte. A peer sending empty dynamic Huffman blocks
+	// costs about 6x the CPU and 250 bytes of garbage per wire byte, as with
+	// any compress/flate reader.
+	Compression bool
+	// CompressionThreshold is the smallest payload WriteMessage compresses.
+	// Zero or less means 512 bytes. A message whose compressed form isn't
+	// smaller goes uncompressed.
+	CompressionThreshold int
+}
+
+// compressionThreshold applies the default.
+func (o Options) compressionThreshold() int {
+	if o.CompressionThreshold <= 0 {
+		return defaultCompressionThreshold
+	}
+	return o.CompressionThreshold
 }
 
 // validCloseCode reports whether code may appear in a Close frame.

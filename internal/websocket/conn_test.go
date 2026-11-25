@@ -346,6 +346,57 @@ func BenchmarkPing(b *testing.B) {
 	}
 }
 
+// BenchmarkCompression sends JSON-like messages with and without
+// permessage-deflate.
+func BenchmarkCompression(b *testing.B) {
+	for _, mode := range []string{"plain", "deflate"} {
+		for _, writer := range []string{"client", "server"} {
+			for _, size := range []int{1 << 10, 64 << 10} {
+				b.Run(fmt.Sprintf("%s/%s_writes/%d", mode, writer, size), func(b *testing.B) {
+					client, server, _ := newPipePair(b)
+					for _, conn := range []*Conn{client, server} {
+						conn.deflate = mode == "deflate"
+						conn.threshold = defaultCompressionThreshold
+					}
+					from, to := client, server
+					if writer == "server" {
+						from, to = server, client
+					}
+					payload := jsonPayload(size)
+					var headerSpace [MaxHeaderSize]byte
+					writeErr := make(chan error, 1)
+					b.ReportAllocs()
+					b.SetBytes(int64(size))
+					b.ResetTimer()
+					go func() {
+						var frame bytes.Buffer
+						for range b.N {
+							frame.Reset()
+							frame.Write(headerSpace[:])
+							frame.Write(payload)
+							if err := from.WriteMessage(MessageText, frame.Bytes()); err != nil {
+								writeErr <- err
+								return
+							}
+						}
+						writeErr <- nil
+					}()
+					var dst bytes.Buffer
+					for range b.N {
+						dst.Reset()
+						if _, err := to.ReadMessage(&dst, -1); err != nil {
+							b.Fatal(err)
+						}
+					}
+					if err := <-writeErr; err != nil {
+						b.Fatal(err)
+					}
+				})
+			}
+		}
+	}
+}
+
 // newPipePair connects a client and a server Conn over net.Pipe. The channel
 // closes when the client starts a Write of at least 64 KiB.
 func newPipePair(tb testing.TB) (*Conn, *Conn, <-chan struct{}) {

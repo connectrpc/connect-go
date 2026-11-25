@@ -36,7 +36,12 @@ const (
 	maxGrow = 1 << 20
 )
 
-var errShortFrame = errors.New("websocket: frame is shorter than MaxHeaderSize")
+var (
+	errShortFrame = errors.New("websocket: frame is shorter than MaxHeaderSize")
+	// errDropped stops reading a message that arrived after this side's Close
+	// frame.
+	errDropped = errors.New("websocket: message arrived after close")
+)
 
 // Conn is a WebSocket connection. Every method is safe for concurrent use.
 // ReadMessage calls run one at a time.
@@ -44,10 +49,13 @@ type Conn struct {
 	transport io.ReadWriteCloser
 	reader    *bufio.Reader
 	client    bool
+	deflate   bool // permessage-deflate was negotiated
+	threshold int  // the smallest payload WriteMessage compresses
 
 	readMu sync.Mutex
 	// Guarded by readMu.
-	frame       frameReader
+	message     messageReader
+	inflate     inflater
 	readErr     error
 	drainNext   bool  // readErr sent a Close frame and the next call drains
 	maxLimit    int64 // the largest limit passed to ReadMessage
@@ -71,8 +79,10 @@ type Conn struct {
 
 // ReadMessage appends the next data message to dst and returns its type. A nil
 // dst discards the message without validating its UTF-8. limit bounds the
-// message's size, not counting bytes already in dst. A negative limit accepts
-// any size. On error dst may hold part of a message.
+// message's size, not counting bytes already in dst. For a compressed message
+// it bounds the inflated size, and the compressed payload may be at most
+// twice limit plus 1 KiB. A negative limit accepts any size. On error dst may
+// hold part of a message.
 //
 // ReadMessage answers PINGs, ignores PONGs and runs the close handshake on the
 // way. With no write in progress it writes the PONG itself, which blocks until
@@ -96,67 +106,39 @@ func (c *Conn) ReadMessage(dst *bytes.Buffer, limit int64) (MessageType, error) 
 		return 0, c.readErr
 	}
 	c.maxLimit = max(c.maxLimit, limit)
-	var messageType MessageType
-	var total int64
-	dropped := false
 	for {
-		hdr, err := readHeader(c.reader)
+		hdr, err := c.readDataHeader(false)
 		if err != nil {
-			return 0, c.readFailed(err)
-		}
-		c.frame.remaining = hdr.length
-		if err := hdr.check(c.client); err != nil {
-			err = fmt.Errorf("%w: %w", ErrProtocol, err)
-			if hdr.opcode == opClose {
-				// The peer has closed, which leaves nothing to drain.
-				_, _ = c.writeClose(StatusProtocolError, "")
-				_ = c.Close()
-				c.readErr = err
-				return 0, err
-			}
-			return 0, c.fail(StatusProtocolError, err)
-		}
-		if hdr.opcode.isControl() {
-			if err := c.readControl(hdr); err != nil {
-				return 0, err
-			}
-			continue
-		}
-		switch {
-		case hdr.opcode == opContinuation && messageType == 0:
-			return 0, c.fail(StatusProtocolError, fmt.Errorf("%w: continuation frame without a message", ErrProtocol))
-		case hdr.opcode != opContinuation && messageType != 0:
-			return 0, c.fail(StatusProtocolError, fmt.Errorf("%w: data frame inside a fragmented message", ErrProtocol))
-		case hdr.opcode != opContinuation:
-			messageType = MessageType(hdr.opcode)
-			c.frame.text = messageType == MessageText
-			c.frame.utf8 = utf8Validator{}
-		}
-		if c.closeSent.Load() {
-			dropped = true
-			if c.discarded += hdr.length; c.discarded > c.drainBudget() {
-				_ = c.Close()
-				c.readErr = fmt.Errorf("websocket: peer sent over %d bytes after Close: %w", c.drainBudget(), net.ErrClosed)
-				return 0, c.readErr
-			}
-		} else if limit >= 0 && hdr.length > limit-total {
-			return 0, c.fail(StatusMessageTooBig, fmt.Errorf("%w: limit is %d bytes", ErrMessageTooBig, limit))
-		}
-		total += hdr.length
-		if err := c.readPayload(dst, hdr, dst == nil || dropped); err != nil {
 			return 0, err
 		}
-		if !hdr.fin {
+		messageType := MessageType(hdr.opcode)
+		compressed := hdr.rsv&rsv1 != 0
+		c.message.begin(messageType == MessageText && !compressed, compressed, limit)
+		if err := c.startFrame(hdr); err != nil {
+			return 0, err
+		}
+		switch {
+		case dst == nil || c.message.dropped:
+			err = c.skipMessage()
+		case compressed:
+			err = c.inflateMessage(dst, messageType == MessageText, limit)
+		default:
+			err = c.readPlain(dst)
+		}
+		switch {
+		case err == nil && c.message.dropped:
+			continue
+		case err == nil:
+			return messageType, nil
+		case c.readErr != nil:
+			return 0, c.readErr
+		case c.message.dropped:
+			if err := c.skipMessage(); err != nil {
+				return 0, err
+			}
 			continue
 		}
-		if dropped {
-			messageType, total, dropped = 0, 0, false
-			continue
-		}
-		if dst != nil && c.frame.text && !c.frame.utf8.complete() {
-			return 0, c.fail(StatusInvalidPayloadData, ErrInvalidUTF8)
-		}
-		return messageType, nil
+		return 0, c.failMessage(err)
 	}
 }
 
@@ -166,6 +148,10 @@ func (c *Conn) ReadMessage(dst *bytes.Buffer, limit int64) (MessageType, error) 
 // the call. A frame shorter than MaxHeaderSize is an error. A failed write
 // closes the transport. Writes after a Close frame return an error wrapping
 // [net.ErrClosed].
+//
+// With compression negotiated, a payload of at least the threshold is
+// deflated into a pooled buffer before the write starts, and sent from there
+// if that made it smaller.
 func (c *Conn) WriteMessage(messageType MessageType, frame []byte) error {
 	if len(frame) < MaxHeaderSize {
 		return errShortFrame
@@ -173,16 +159,20 @@ func (c *Conn) WriteMessage(messageType MessageType, frame []byte) error {
 	if messageType != MessageText && messageType != MessageBinary {
 		return fmt.Errorf("websocket: invalid message type %d", messageType)
 	}
-	c.writeMu.Lock()
-	err := c.writeFrameLocked(opcode(messageType), frame)
-	c.unlockWrite()
-	return err
+	if c.deflate && len(frame)-MaxHeaderSize >= c.threshold {
+		compressor := getCompressor()
+		defer putCompressor(compressor)
+		if compressed, ok := compressor.compress(frame[MaxHeaderSize:]); ok {
+			return c.writeMessage(opcode(messageType), rsv1, compressed)
+		}
+	}
+	return c.writeMessage(opcode(messageType), 0, frame)
 }
 
 // Ping sends an empty PING. It doesn't wait for the PONG.
 func (c *Conn) Ping() error {
 	c.writeMu.Lock()
-	err := c.writeFrameLocked(opPing, c.controlWrite[:MaxHeaderSize])
+	err := c.writeFrameLocked(opPing, 0, c.controlWrite[:MaxHeaderSize])
 	c.unlockWrite()
 	return err
 }
@@ -228,16 +218,16 @@ func (c *Conn) discard(size int64) error {
 // budget runs out, then closes the transport. The caller holds readMu.
 func (c *Conn) drain() {
 	defer func() { _ = c.Close() }()
-	budget := c.drainBudget() - c.frame.remaining
-	if c.frame.remaining < 0 || budget < 0 {
+	budget := c.drainBudget() - c.message.remaining
+	if c.message.remaining < 0 || budget < 0 {
 		return
 	}
-	if c.discard(c.frame.remaining) != nil {
+	if c.discard(c.message.remaining) != nil {
 		return
 	}
 	for {
 		hdr, err := readHeader(c.reader)
-		if err != nil || hdr.check(c.client) != nil || hdr.opcode == opClose {
+		if err != nil || hdr.check(c.client, c.deflate) != nil || hdr.opcode == opClose {
 			return
 		}
 		if budget -= hdr.length; budget < 0 {
@@ -267,6 +257,20 @@ func (c *Conn) fail(code StatusCode, cause error) error {
 	return cause
 }
 
+// failMessage fails the connection for an error found in a message's
+// payload.
+func (c *Conn) failMessage(err error) error {
+	switch {
+	case errors.Is(err, ErrInvalidUTF8):
+		return c.fail(StatusInvalidPayloadData, ErrInvalidUTF8)
+	case errors.Is(err, ErrMessageTooBig):
+		return c.fail(StatusMessageTooBig, err)
+	default:
+		// Chromium also treats data that fails to inflate as a protocol error.
+		return c.fail(StatusProtocolError, fmt.Errorf("%w: inflate: %w", ErrProtocol, err))
+	}
+}
+
 // flushPongLocked writes the pending PONG. The caller holds writeMu.
 func (c *Conn) flushPongLocked() {
 	// Clearing the flag before the copy lets a PING that lands mid-copy set
@@ -277,7 +281,7 @@ func (c *Conn) flushPongLocked() {
 	c.pongMu.Lock()
 	frame := append(c.controlWrite[:MaxHeaderSize], c.pongPayload[:c.pongLength]...)
 	c.pongMu.Unlock()
-	_ = c.writeFrameLocked(opPong, frame)
+	_ = c.writeFrameLocked(opPong, 0, frame)
 }
 
 // queuePong records a PONG for payload and sends it unless a writer holds
@@ -303,7 +307,7 @@ func (c *Conn) readControl(hdr header) error {
 	if _, err := io.ReadFull(c.reader, payload); err != nil {
 		return c.readFailed(err)
 	}
-	c.frame.remaining = 0
+	c.message.remaining = 0
 	if hdr.masked {
 		mask(payload, hdr.maskKey, 0)
 	}
@@ -341,33 +345,6 @@ func (c *Conn) readFailed(err error) error {
 	return c.readErr
 }
 
-// readPayload appends a data frame's payload to dst, or discards it.
-func (c *Conn) readPayload(dst *bytes.Buffer, hdr header, discard bool) error {
-	if discard {
-		if err := c.discard(hdr.length); err != nil {
-			return c.readFailed(err)
-		}
-		c.frame.remaining = 0
-		return nil
-	}
-	if hdr.length == 0 {
-		return nil
-	}
-	c.frame.masked = hdr.masked
-	c.frame.maskKey = hdr.maskKey
-	c.frame.maskPos = 0
-	// The extra MinRead covers ReadFrom's first grow, which would otherwise
-	// reallocate a buffer grown to exactly the frame's length.
-	dst.Grow(int(min(hdr.length, maxGrow)) + bytes.MinRead)
-	if _, err := dst.ReadFrom(&c.frame); err != nil {
-		if errors.Is(err, ErrInvalidUTF8) {
-			return c.fail(StatusInvalidPayloadData, ErrInvalidUTF8)
-		}
-		return c.readFailed(err)
-	}
-	return nil
-}
-
 // unlockWrite sends a pending PONG before it lets go of writeMu, and takes it
 // back if a PING arrived after the check. Every path that takes writeMu
 // releases it here, which never loses a PONG.
@@ -399,19 +376,19 @@ func (c *Conn) writeClose(code StatusCode, reason string) (bool, error) {
 		frame = binary.BigEndian.AppendUint16(frame, uint16(code))
 		frame = append(frame, closeReason(reason)...)
 	}
-	err := c.writeFrameLocked(opClose, frame)
+	err := c.writeFrameLocked(opClose, 0, frame)
 	c.closeSent.Store(true)
 	return err == nil, err
 }
 
-// writeFrameLocked sends a final frame with one Write. The caller holds
-// writeMu.
-func (c *Conn) writeFrameLocked(frameOpcode opcode, frame []byte) error {
+// writeFrameLocked sends a final frame with one Write. rsv holds the
+// reserved bits to set. The caller holds writeMu.
+func (c *Conn) writeFrameLocked(frameOpcode opcode, rsv byte, frame []byte) error {
 	if c.closeSent.Load() || c.closed.Load() {
 		return fmt.Errorf("websocket: write: %w", net.ErrClosed)
 	}
 	payload := frame[MaxHeaderSize:]
-	start := putHeader(frame[:MaxHeaderSize], frameOpcode, len(payload), c.client)
+	start := putHeader(frame[:MaxHeaderSize], frameOpcode, rsv, len(payload), c.client)
 	if c.client {
 		mask(payload, [4]byte(frame[MaxHeaderSize-4:MaxHeaderSize]), 0)
 	}
@@ -426,50 +403,24 @@ func (c *Conn) writeFrameLocked(frameOpcode opcode, frame []byte) error {
 	return nil
 }
 
-// frameReader reads the payload of the current data frame, unmasking it and
-// validating text as it goes.
-type frameReader struct {
-	reader    *bufio.Reader
-	remaining int64
-	masked    bool
-	maskKey   [4]byte
-	maskPos   int
-	text      bool
-	utf8      utf8Validator
-}
-
-// Read returns io.EOF with the frame's last bytes, which ends
-// bytes.Buffer.ReadFrom without another grow. A transport that ends mid-frame
-// returns io.ErrUnexpectedEOF, which ReadFrom doesn't take for success.
-func (f *frameReader) Read(data []byte) (int, error) {
-	if f.remaining == 0 {
-		return 0, io.EOF
-	}
-	if int64(len(data)) > f.remaining {
-		data = data[:f.remaining]
-	}
-	size, err := f.reader.Read(data)
-	data = data[:size]
-	f.remaining -= int64(size)
-	if f.masked {
-		f.maskPos = mask(data, f.maskKey, f.maskPos)
-	}
-	if f.text && !f.utf8.valid(data) {
-		return size, ErrInvalidUTF8
-	}
-	switch {
-	case errors.Is(err, io.EOF) && f.remaining > 0:
-		return size, io.ErrUnexpectedEOF
-	case err != nil:
-		return size, err
-	case f.remaining == 0:
-		return size, io.EOF
-	}
-	return size, nil
+// writeMessage sends a data frame under writeMu.
+func (c *Conn) writeMessage(frameOpcode opcode, rsv byte, frame []byte) error {
+	c.writeMu.Lock()
+	err := c.writeFrameLocked(frameOpcode, rsv, frame)
+	c.unlockWrite()
+	return err
 }
 
 func newConn(transport io.ReadWriteCloser, reader *bufio.Reader, client bool) *Conn {
 	conn := &Conn{transport: transport, reader: reader, client: client}
-	conn.frame.reader = reader
+	conn.message.conn = conn
+	conn.message.reader = reader
+	return conn
+}
+
+func newDeflateConn(transport io.ReadWriteCloser, reader *bufio.Reader, client, deflate bool, opts Options) *Conn {
+	conn := newConn(transport, reader, client)
+	conn.deflate = deflate
+	conn.threshold = opts.compressionThreshold()
 	return conn
 }

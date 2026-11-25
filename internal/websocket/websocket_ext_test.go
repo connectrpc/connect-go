@@ -649,6 +649,14 @@ func readUntilError(conn *websocket.Conn) error {
 // tests that send arbitrary frames. Extra bytes go out with the handshake.
 func rawDial(t *testing.T, server *memhttp.Server, extra []byte) (net.Conn, *bufio.Reader) {
 	t.Helper()
+	netConn, reader, _ := rawDialHeader(t, server, "", extra)
+	return netConn, reader
+}
+
+// rawDialHeader is rawDial with extra header lines, each ending in CRLF. It
+// also returns the handshake response's header.
+func rawDialHeader(t *testing.T, server *memhttp.Server, header string, extra []byte) (net.Conn, *bufio.Reader, http.Header) {
+	t.Helper()
 	netConn, err := server.TransportHTTP1().DialContext(t.Context(), "tcp", "memhttp")
 	if err != nil {
 		t.Fatalf("dial: %v", err)
@@ -656,7 +664,7 @@ func rawDial(t *testing.T, server *memhttp.Server, extra []byte) (net.Conn, *buf
 	t.Cleanup(func() { _ = netConn.Close() })
 	handshake := "GET / HTTP/1.1\r\nHost: " + strings.TrimPrefix(server.URL(), "http://") + "\r\n" +
 		"Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\n" +
-		"Sec-WebSocket-Key: " + testKey + "\r\nSec-WebSocket-Protocol: " + testSubprotocol + "\r\n\r\n"
+		"Sec-WebSocket-Key: " + testKey + "\r\nSec-WebSocket-Protocol: " + testSubprotocol + "\r\n" + header + "\r\n"
 	if _, err := netConn.Write(append([]byte(handshake), extra...)); err != nil {
 		t.Fatalf("write handshake: %v", err)
 	}
@@ -667,7 +675,7 @@ func rawDial(t *testing.T, server *memhttp.Server, extra []byte) (net.Conn, *buf
 	}
 	assert.Equal(t, response.StatusCode, http.StatusSwitchingProtocols)
 	assert.Equal(t, response.Header.Get("Sec-WebSocket-Accept"), testAccept)
-	return netConn, reader
+	return netConn, reader, response.Header
 }
 
 // rawUpgradeHandler answers the handshake by hand, letting mutate change the

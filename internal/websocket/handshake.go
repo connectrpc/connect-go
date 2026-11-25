@@ -57,6 +57,13 @@ func Accept(responseWriter http.ResponseWriter, request *http.Request, opts Opti
 	if opts.Subprotocol != "" && slices.Contains(headerTokens(request.Header, "Sec-WebSocket-Protocol"), opts.Subprotocol) {
 		header.Set("Sec-WebSocket-Protocol", opts.Subprotocol)
 	}
+	deflate := false
+	if opts.Compression {
+		var extensions string
+		if extensions, deflate = negotiateDeflate(request.Header.Values("Sec-WebSocket-Extensions")); deflate {
+			header.Set("Sec-WebSocket-Extensions", extensions)
+		}
+	}
 	responseWriter.WriteHeader(http.StatusSwitchingProtocols)
 	netConn, readWriter, err := hijacker.Hijack()
 	if err != nil {
@@ -72,7 +79,7 @@ func Accept(responseWriter http.ResponseWriter, request *http.Request, opts Opti
 	} else {
 		readWriter.Reader.Reset(netConn)
 	}
-	return newConn(netConn, readWriter.Reader, false), nil
+	return newDeflateConn(netConn, readWriter.Reader, false, deflate, opts), nil
 }
 
 // Dial runs the client handshake for request, a GET to an http or https URL.
@@ -107,7 +114,11 @@ func Dial(httpClient HTTPClient, request *http.Request, opts Options) (*Conn, *h
 	request.Header.Set("Upgrade", "websocket")
 	request.Header.Set("Sec-WebSocket-Version", "13")
 	request.Header.Set("Sec-WebSocket-Key", key)
-	request.Header.Del("Sec-WebSocket-Extensions")
+	if opts.Compression {
+		request.Header.Set("Sec-WebSocket-Extensions", deflateOffer)
+	} else {
+		request.Header.Del("Sec-WebSocket-Extensions")
+	}
 	if opts.Subprotocol != "" {
 		request.Header.Set("Sec-WebSocket-Protocol", opts.Subprotocol)
 	} else {
@@ -125,7 +136,7 @@ func Dial(httpClient HTTPClient, request *http.Request, opts Options) (*Conn, *h
 	}
 	body := response.Body
 	response.Body = http.NoBody
-	err = checkUpgradeResponse(response, key, opts.Subprotocol)
+	deflate, err := checkUpgradeResponse(response, key, opts)
 	transport, ok := body.(io.ReadWriteCloser)
 	if err == nil && !ok {
 		err = fmt.Errorf("response body %T is not an io.ReadWriteCloser", body)
@@ -136,7 +147,7 @@ func Dial(httpClient HTTPClient, request *http.Request, opts Options) (*Conn, *h
 		}
 		return nil, response, fmt.Errorf("websocket: dial: %w", err)
 	}
-	return newConn(transport, bufio.NewReader(transport), true), response, nil
+	return newDeflateConn(transport, bufio.NewReader(transport), true, deflate, opts), response, nil
 }
 
 // checkUpgradeRequest validates the client's handshake, RFC 6455 Section
@@ -168,21 +179,29 @@ func checkUpgradeRequest(responseHeader http.Header, request *http.Request) (int
 }
 
 // checkUpgradeResponse validates the server's handshake, RFC 6455 Section
-// 4.2.2. It refuses any extension, since none was offered.
-func checkUpgradeResponse(response *http.Response, key string, subprotocol string) error {
+// 4.2.2, and reports whether it enabled compression. It refuses any
+// extension that wasn't offered.
+func checkUpgradeResponse(response *http.Response, key string, opts Options) (bool, error) {
 	if !headerHasToken(response.Header, "Connection", "upgrade") || !headerHasToken(response.Header, "Upgrade", "websocket") {
-		return errors.New("handshake response is not a WebSocket upgrade")
+		return false, errors.New("handshake response is not a WebSocket upgrade")
 	}
 	if accept := response.Header.Get("Sec-WebSocket-Accept"); accept != acceptKey(key) {
-		return fmt.Errorf("handshake response has Sec-WebSocket-Accept %q, expected %q", accept, acceptKey(key))
+		return false, fmt.Errorf("handshake response has Sec-WebSocket-Accept %q, expected %q", accept, acceptKey(key))
 	}
-	if extensions := response.Header.Get("Sec-WebSocket-Extensions"); extensions != "" {
-		return fmt.Errorf("handshake response has unrequested extensions %q", extensions)
+	extensions := response.Header.Values("Sec-WebSocket-Extensions")
+	deflate := false
+	if opts.Compression {
+		var err error
+		if deflate, err = verifyDeflateResponse(extensions); err != nil {
+			return false, err
+		}
+	} else if joined := strings.Join(extensions, ""); strings.TrimSpace(joined) != "" {
+		return false, fmt.Errorf("handshake response has unrequested extensions %q", strings.Join(extensions, ", "))
 	}
-	if got := response.Header.Get("Sec-WebSocket-Protocol"); got != subprotocol {
-		return fmt.Errorf("handshake response has subprotocol %q, expected %q", got, subprotocol)
+	if got := response.Header.Get("Sec-WebSocket-Protocol"); got != opts.Subprotocol {
+		return false, fmt.Errorf("handshake response has subprotocol %q, expected %q", got, opts.Subprotocol)
 	}
-	return nil
+	return deflate, nil
 }
 
 // checkOrigin refuses cross-site WebSocket hijacking. Browsers always send

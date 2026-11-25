@@ -51,7 +51,7 @@ const (
 // TestClient runs our client against the suite's fuzzing server.
 func TestClient(t *testing.T) {
 	t.Parallel()
-	excluded := excludedCases(t)
+	skipUnlessEnabled(t)
 	reports := reportsDir(t)
 	// The suite rejects a Host header whose port differs from the one it
 	// listens on, which rules out remapping the port.
@@ -61,7 +61,8 @@ func TestClient(t *testing.T) {
 		"url":           fmt.Sprintf("ws://127.0.0.1:%d", port),
 		"outdir":        "/reports/client",
 		"cases":         []string{"*"},
-		"exclude-cases": excluded,
+		// We never offer client_max_window_bits, which 13.3 to 13.6 need.
+		"exclude-cases": []string{"13.3.*", "13.4.*", "13.5.*", "13.6.*"},
 	})
 	runDocker(t, reports, "client", false,
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", port, port),
@@ -93,13 +94,13 @@ func TestClient(t *testing.T) {
 // TestServer runs the suite's fuzzing client against our echo server.
 func TestServer(t *testing.T) {
 	t.Parallel()
-	excluded := excludedCases(t)
+	skipUnlessEnabled(t)
 	reports := reportsDir(t)
 	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	assert.Nil(t, err)
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
-			conn, err := websocket.Accept(responseWriter, request, websocket.Options{})
+			conn, err := websocket.Accept(responseWriter, request, websocket.Options{Compression: true})
 			if err != nil {
 				return
 			}
@@ -127,7 +128,9 @@ func TestServer(t *testing.T) {
 			"url":   fmt.Sprintf("ws://%s:%d", host, tcpAddr.Port),
 		}},
 		"cases":         []string{"*"},
-		"exclude-cases": excluded,
+		// 13.3 and 13.5 offer server_max_window_bits below 15, which we
+		// decline.
+		"exclude-cases": []string{"13.3.*", "13.5.*"},
 	})
 	runDocker(t, reports, "server", true,
 		network,
@@ -168,7 +171,7 @@ func dial(ctx context.Context, url string) (*websocket.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	conn, response, err := websocket.Dial(http.DefaultClient, request, websocket.Options{})
+	conn, response, err := websocket.Dial(http.DefaultClient, request, websocket.Options{Compression: true})
 	if err != nil {
 		if response != nil {
 			_ = response.Body.Close()
@@ -178,14 +181,12 @@ func dial(ctx context.Context, url string) (*websocket.Conn, error) {
 	return conn, nil
 }
 
-// excludedCases skips the test unless AUTOBAHN is set. Compression is never
-// negotiated, which leaves sections 12 and 13 nothing to test.
-func excludedCases(t *testing.T) []string {
+// skipUnlessEnabled skips the test unless AUTOBAHN is set.
+func skipUnlessEnabled(t *testing.T) {
 	t.Helper()
 	if os.Getenv("AUTOBAHN") == "" {
 		t.Skip("set AUTOBAHN=1 to run the Autobahn suite")
 	}
-	return []string{"12.*", "13.*"}
 }
 
 func reportsDir(t *testing.T) string {

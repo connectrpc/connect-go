@@ -33,6 +33,9 @@ const (
 	opPong         opcode = 10
 
 	maxControlPayload = 125
+
+	// rsv1 marks a compressed message, RFC 7692 Section 6.
+	rsv1 byte = 0x40
 )
 
 // opcode is a frame opcode from RFC 6455 Section 5.2.
@@ -54,11 +57,16 @@ type header struct {
 }
 
 // check reports a header that fails the connection with 1002. A client
-// receives unmasked frames and a server masked ones.
-func (h *header) check(client bool) error {
+// receives unmasked frames and a server masked ones. With deflate, RSV1 may
+// mark the first frame of a data message.
+func (h *header) check(client, deflate bool) error {
 	switch {
-	case h.rsv != 0:
+	case h.rsv&^rsv1 != 0:
 		return fmt.Errorf("frame has reserved bits 0x%02x set", h.rsv)
+	case h.rsv != 0 && !deflate:
+		return errors.New("frame has RSV1 set without permessage-deflate")
+	case h.rsv != 0 && h.opcode != opText && h.opcode != opBinary:
+		return fmt.Errorf("frame with opcode %d has RSV1 set", h.opcode)
 	case h.opcode > opBinary && h.opcode < opClose, h.opcode > opPong:
 		return fmt.Errorf("frame has unknown opcode %d", h.opcode)
 	case client && h.masked:
@@ -162,9 +170,9 @@ func readHeader(reader *bufio.Reader) (header, error) {
 }
 
 // putHeader writes a final frame's header right-aligned into
-// space[:MaxHeaderSize] and returns where it starts. A client header ends
-// with a fresh mask key.
-func putHeader(space []byte, frameOpcode opcode, length int, client bool) int {
+// space[:MaxHeaderSize] and returns where it starts. rsv holds the reserved
+// bits to set. A client header ends with a fresh mask key.
+func putHeader(space []byte, frameOpcode opcode, rsv byte, length int, client bool) int {
 	end := MaxHeaderSize
 	var maskBit byte
 	if client {
@@ -186,7 +194,7 @@ func putHeader(space []byte, frameOpcode opcode, length int, client bool) int {
 		space[start+1] = maskBit | 127
 		binary.BigEndian.PutUint64(space[start+2:], uint64(length))
 	}
-	space[start] = 0x80 | byte(frameOpcode)
+	space[start] = 0x80 | rsv | byte(frameOpcode)
 	return start
 }
 

@@ -30,7 +30,7 @@ func TestPutHeaderRoundTrip(t *testing.T) {
 	for _, length := range []int{0, 1, 125, 126, 65535, 65536, 1 << 20} {
 		for _, client := range []bool{false, true} {
 			var space [MaxHeaderSize]byte
-			start := putHeader(space[:], opBinary, length, client)
+			start := putHeader(space[:], opBinary, 0, length, client)
 			wantSize := 2
 			switch {
 			case length > 65535:
@@ -63,7 +63,7 @@ func TestReadHeader(t *testing.T) {
 		hdr, err := readHeader(bufio.NewReader(bytes.NewReader([]byte{0x82, 0x7f, 0x80, 0, 0, 0, 0, 0, 0, 0})))
 		assert.Nil(t, err)
 		assert.True(t, hdr.length < 0)
-		assert.NotNil(t, hdr.check(true))
+		assert.NotNil(t, hdr.check(true, false))
 	})
 	t.Run("non_minimal_length", func(t *testing.T) {
 		t.Parallel()
@@ -83,17 +83,29 @@ func TestReadHeader(t *testing.T) {
 func TestHeaderCheck(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name   string
-		hdr    header
-		client bool
-		valid  bool
+		name    string
+		hdr     header
+		client  bool
+		deflate bool
+		valid   bool
 	}{
 		{name: "text", hdr: header{fin: true, opcode: opText, masked: true}, valid: true},
 		{name: "client_unmasked", hdr: header{fin: true, opcode: opText}, client: true, valid: true},
 		{name: "unmasked_from_client", hdr: header{fin: true, opcode: opText}},
 		{name: "masked_from_server", hdr: header{fin: true, opcode: opText, masked: true}, client: true},
 		{name: "rsv1", hdr: header{fin: true, rsv: 0x40, opcode: opText, masked: true}},
+		{name: "rsv1_binary", hdr: header{fin: true, rsv: 0x40, opcode: opBinary, masked: true}},
+		{name: "rsv1_text_deflate", hdr: header{fin: true, rsv: 0x40, opcode: opText, masked: true}, deflate: true, valid: true},
+		{name: "rsv1_binary_deflate", hdr: header{rsv: 0x40, opcode: opBinary, masked: true}, deflate: true, valid: true},
+		{name: "rsv1_client_deflate", hdr: header{fin: true, rsv: 0x40, opcode: opBinary}, client: true, deflate: true, valid: true},
+		{name: "rsv1_continuation_deflate", hdr: header{fin: true, rsv: 0x40, opcode: opContinuation, masked: true}, deflate: true},
+		{name: "rsv1_ping_deflate", hdr: header{fin: true, rsv: 0x40, opcode: opPing, masked: true}, deflate: true},
+		{name: "rsv1_pong_deflate", hdr: header{fin: true, rsv: 0x40, opcode: opPong, masked: true}, deflate: true},
+		{name: "rsv1_close_deflate", hdr: header{fin: true, rsv: 0x40, opcode: opClose, masked: true}, deflate: true},
+		{name: "rsv2_deflate", hdr: header{fin: true, rsv: 0x20, opcode: opText, masked: true}, deflate: true},
 		{name: "rsv3", hdr: header{fin: true, rsv: 0x10, opcode: opText, masked: true}},
+		{name: "rsv3_deflate", hdr: header{fin: true, rsv: 0x10, opcode: opText, masked: true}, deflate: true},
+		{name: "rsv12_deflate", hdr: header{fin: true, rsv: 0x60, opcode: opText, masked: true}, deflate: true},
 		{name: "opcode_3", hdr: header{fin: true, opcode: 3, masked: true}},
 		{name: "opcode_11", hdr: header{fin: true, opcode: 11, masked: true}},
 		{name: "fragmented_ping", hdr: header{opcode: opPing, masked: true}},
@@ -105,7 +117,7 @@ func TestHeaderCheck(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			err := test.hdr.check(test.client)
+			err := test.hdr.check(test.client, test.deflate)
 			assert.Equal(t, err == nil, test.valid, assert.Sprintf("error %v", err))
 		})
 	}
@@ -200,20 +212,28 @@ func TestValidCloseCode(t *testing.T) {
 	}
 }
 
-// FuzzReadMessage reads arbitrary bytes as frames from a peer. Reads must end
-// in an error without panicking, every message must respect the read limit and
-// UTF-8 rules, and the call after an error must return the same error.
+// FuzzReadMessage reads arbitrary bytes as frames from a peer, with and
+// without compression. Reads must end in an error without panicking, every
+// message must respect the read limit and UTF-8 rules, and the call after an
+// error must return the same error.
 func FuzzReadMessage(f *testing.F) {
 	const readLimit = 64
-	f.Add(false, maskedFrame(opText, "hi"))
-	f.Add(true, []byte{0x82, 0x03, 'a', 'b', 'c'})
-	f.Add(true, []byte{0x01, 0x01, 'a', 0x89, 0x00, 0x80, 0x01, 'b', 0x88, 0x02, 0x03, 0xe8})
-	f.Add(true, []byte{0x82, 0x7f, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff})
-	f.Add(true, []byte{0x81, 0x02, 0xc3, 0x28})
-	f.Add(false, []byte{0x88, 0x82, 0, 0, 0, 0, 0x03, 0xe8})
-	f.Fuzz(func(t *testing.T, client bool, data []byte) {
+	f.Add(false, false, maskedFrame(opText, "hi"))
+	f.Add(true, false, []byte{0x82, 0x03, 'a', 'b', 'c'})
+	f.Add(true, false, []byte{0x01, 0x01, 'a', 0x89, 0x00, 0x80, 0x01, 'b', 0x88, 0x02, 0x03, 0xe8})
+	f.Add(true, false, []byte{0x82, 0x7f, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff})
+	f.Add(true, false, []byte{0x81, 0x02, 0xc3, 0x28})
+	f.Add(false, false, []byte{0x88, 0x82, 0, 0, 0, 0, 0x03, 0xe8})
+	f.Add(true, true, []byte{0xc1, 0x07, 0xf2, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00})
+	f.Add(true, true, []byte{0x41, 0x03, 0xf2, 0x48, 0xcd, 0x89, 0x00, 0x80, 0x04, 0xc9, 0xc9, 0x07, 0x00})
+	f.Add(true, true, []byte{0xc1, 0x08, 0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00, 0x00, 0x82, 0x01, 'x'})
+	f.Add(true, true, []byte{0xc2, 0x00, 0xc1, 0x01, 0x00})
+	f.Add(true, true, []byte{0x41, 0x01, 0xf2, 0xc0, 0x01, 0x00})
+	f.Add(true, false, []byte{0xc1, 0x07, 0xf2, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00})
+	f.Add(false, true, []byte{0xc2, 0x85, 0, 0, 0, 0, 0x00, 0x00, 0x00, 0xff, 0xff})
+	f.Fuzz(func(t *testing.T, client, deflate bool, data []byte) {
 		transport := &fuzzTransport{Reader: bytes.NewReader(data)}
-		conn := newConn(transport, bufio.NewReader(transport), client)
+		conn := newDeflateConn(transport, bufio.NewReader(transport), client, deflate, Options{})
 		var dst bytes.Buffer
 		for {
 			dst.Reset()
@@ -250,7 +270,7 @@ func (f *fuzzTransport) Close() error {
 // maskedFrame builds a final masked frame with a zero mask key.
 func maskedFrame(op opcode, payload string) []byte {
 	var space [MaxHeaderSize]byte
-	start := putHeader(space[:], op, len(payload), true)
+	start := putHeader(space[:], op, 0, len(payload), true)
 	clear(space[MaxHeaderSize-4:])
 	return append(space[start:], payload...)
 }
