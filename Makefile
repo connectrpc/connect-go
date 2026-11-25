@@ -57,6 +57,11 @@ runconformance: build ## Run conformance test suite
 testmigrate: ## Run connect-go-v2-migrate test suite
 	cd ./cmd/connect-go-v2-migrate && go test ./...
 
+.PHONY: autobahn
+autobahn: AUTOBAHN_REPORTS ?= $(abspath .tmp/autobahn)
+autobahn: ## Run the Autobahn WebSocket suite, minus section 9, in Docker
+	cd ./internal/autobahn && AUTOBAHN=fast AUTOBAHN_REPORTS=$(AUTOBAHN_REPORTS) go test -count=1 ./...
+
 .PHONY: bench
 bench: BENCH ?= .*
 bench: build ## Run benchmarks for root package
