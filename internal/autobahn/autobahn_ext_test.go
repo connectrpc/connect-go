@@ -14,8 +14,8 @@
 
 // Package autobahn_test runs the Autobahn WebSocket test suite against
 // internal/websocket. It lives in its own module to keep Docker out of the
-// library's tests. Set AUTOBAHN=1 to run every case, or AUTOBAHN=fast to skip
-// the slow section 9. AUTOBAHN_REPORTS sets where reports are written.
+// library's tests. Set AUTOBAHN=1 to run it. AUTOBAHN_REPORTS sets where
+// reports are written.
 package autobahn_test
 
 import (
@@ -182,15 +182,10 @@ func dial(ctx context.Context, url string) (*websocket.Conn, error) {
 // negotiated, which leaves sections 12 and 13 nothing to test.
 func excludedCases(t *testing.T) []string {
 	t.Helper()
-	mode := os.Getenv("AUTOBAHN")
-	if mode == "" {
-		t.Skip("set AUTOBAHN=1 or AUTOBAHN=fast to run the Autobahn suite")
+	if os.Getenv("AUTOBAHN") == "" {
+		t.Skip("set AUTOBAHN=1 to run the Autobahn suite")
 	}
-	excluded := []string{"12.*", "13.*"}
-	if mode == "fast" {
-		excluded = append(excluded, "9.*")
-	}
-	return excluded
+	return []string{"12.*", "13.*"}
 }
 
 func reportsDir(t *testing.T) string {

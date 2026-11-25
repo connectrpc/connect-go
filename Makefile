@@ -59,8 +59,8 @@ testmigrate: ## Run connect-go-v2-migrate test suite
 
 .PHONY: autobahn
 autobahn: AUTOBAHN_REPORTS ?= $(abspath .tmp/autobahn)
-autobahn: ## Run the Autobahn WebSocket suite, minus section 9, in Docker
-	cd ./internal/autobahn && AUTOBAHN=fast AUTOBAHN_REPORTS=$(AUTOBAHN_REPORTS) go test -count=1 ./...
+autobahn: ## Run the Autobahn WebSocket suite in Docker
+	cd ./internal/autobahn && AUTOBAHN=1 AUTOBAHN_REPORTS=$(AUTOBAHN_REPORTS) go test -count=1 ./...
 
 .PHONY: bench
 bench: BENCH ?= .*
