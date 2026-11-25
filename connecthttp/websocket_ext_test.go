@@ -939,8 +939,7 @@ func TestWebSocketServerClientDropsBeforeReceive(t *testing.T) {
 func TestWebSocketServerPings(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		// sends are the times the handler sends, from M.
+		name   string
 		sends  []time.Duration
 		noPong bool
 		pings  int32
@@ -948,7 +947,6 @@ func TestWebSocketServerPings(t *testing.T) {
 		{name: "idle", pings: 3},
 		{name: "busy", sends: []time.Duration{10 * time.Second, 20 * time.Second, 30 * time.Second, 40 * time.Second, 50 * time.Second, 60 * time.Second, 70 * time.Second, 80 * time.Second, 90 * time.Second}},
 		{name: "send_then_idle", sends: []time.Duration{20 * time.Second}, pings: 2},
-		// A ping without a pong doesn't end the RPC.
 		{name: "unanswered", noPong: true, pings: 3},
 	}
 	for _, test := range tests {
@@ -1066,7 +1064,6 @@ func TestWebSocketServerOversizedMessage(t *testing.T) {
 		_, _, err := conn.Read(ctx)
 		readErr <- err
 	}()
-	// The server closes without reading the rest, which can fail the write.
 	_ = conn.Write(ctx, websocket.MessageBinary, append([]byte("B"), make([]byte, 4<<20)...))
 	assert.Equal(t, websocket.CloseStatus(<-readErr), websocket.StatusMessageTooBig)
 }
@@ -1082,7 +1079,6 @@ func TestWebSocketServerOversizedMessageStalls(t *testing.T) {
 		_, err := io.Copy(io.Discard, reader)
 		closed <- err
 	}()
-	// Announce 1 MiB, send past the limit, then stall with the socket open.
 	_, _ = conn.Write(append(rawFrame(0x2, 1<<20), make([]byte, 4096)...))
 	_ = receiveWithin(t, closed, "server close")
 }
@@ -1097,7 +1093,6 @@ func TestWebSocketServerFailedStalls(t *testing.T) {
 		_, err := io.Copy(io.Discard, reader)
 		closed <- err
 	}()
-	// An unknown marker fails the RPC. The client then stalls mid-message.
 	_, err := conn.Write(append(append(rawFrame(0x1, 3), "M[]"...), append(rawFrame(0x1, 1), 'Q')...))
 	assert.Nil(t, err)
 	_, _ = conn.Write(append(rawFrame(0x2, 1<<20), make([]byte, 16)...))
@@ -1119,8 +1114,6 @@ func TestWebSocketServerDeadlineStalls(t *testing.T) {
 	}()
 	_, err := conn.Write(append(rawFrame(0x1, 3), "M[]"...))
 	assert.Nil(t, err)
-	// The deadline passes mid-message, then the client crosses the read limit
-	// while the server closes, and stalls.
 	_, err = conn.Write(append(rawFrame(0x2, 1<<20), make([]byte, 512)...))
 	assert.Nil(t, err)
 	time.Sleep(600 * time.Millisecond)
@@ -1141,7 +1134,6 @@ func TestWebSocketClientCancelStalls(t *testing.T) {
 			_, _ = conn.Write(append(rawServerFrame(0x1, 3), "M[]"...))
 			_, _ = conn.Write(append(rawServerFrame(0x2, 1<<20), make([]byte, 512)...))
 			close(sent)
-			// After the cancel, cross the client's read limit and stall.
 			time.Sleep(100 * time.Millisecond)
 			_, _ = conn.Write(make([]byte, 4096))
 		}()
@@ -1173,7 +1165,6 @@ func TestWebSocketClientOversizedMessageStalls(t *testing.T) {
 	server := rawWebSocketServer(t, func(conn net.Conn, reader *bufio.Reader) {
 		go func() {
 			_, _ = conn.Write(append(rawServerFrame(0x1, 3), "M[]"...))
-			// Announce 1 MiB, send past the limit, then stall with the socket open.
 			_, _ = conn.Write(append(rawServerFrame(0x2, 1<<20), make([]byte, 4096)...))
 		}()
 		_, err := io.Copy(io.Discard, reader)
@@ -1401,7 +1392,6 @@ func dialWebSocket(t *testing.T, server *memhttp.Server, path, subprotocol strin
 	return conn
 }
 
-// dialWebSocketRaw upgrades by hand, for tests that write frames coder won't.
 func dialWebSocketRaw(t *testing.T, server *memhttp.Server, procedure string) (net.Conn, *bufio.Reader) {
 	t.Helper()
 	conn, err := server.TransportHTTP1().DialContext(t.Context(), "tcp", "example.com:80")
@@ -1419,8 +1409,6 @@ func dialWebSocketRaw(t *testing.T, server *memhttp.Server, procedure string) (n
 	return conn, reader
 }
 
-// rawWebSocketServer upgrades by hand, for tests that write frames coder
-// won't.
 func rawWebSocketServer(t *testing.T, serve func(net.Conn, *bufio.Reader)) *memhttp.Server {
 	t.Helper()
 	return memhttptest.NewServer(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
@@ -1439,7 +1427,6 @@ func rawWebSocketServer(t *testing.T, serve func(net.Conn, *bufio.Reader)) *memh
 	}))
 }
 
-// rawServerFrame is a final, unmasked server frame header.
 func rawServerFrame(opcode byte, length uint64) []byte {
 	return binary.BigEndian.AppendUint64([]byte{0x80 | opcode, 127}, length)
 }

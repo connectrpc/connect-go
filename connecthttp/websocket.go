@@ -243,7 +243,6 @@ func websocketValidateMetadata(key string, values []string, fromClient bool) *co
 	return nil
 }
 
-// websocketValidateTrailer checks S metadata like M, apart from case.
 func websocketValidateTrailer(key string, values []string) *connect.Error {
 	if !websocketIsMetadataKey(key) {
 		return newWebSocketProtocolError("S message key %q is not a valid header name", key)

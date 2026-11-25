@@ -56,9 +56,8 @@ type websocketServerStream struct {
 	singleRequest bool
 	messages      chan websocketMessage
 
-	peerGone atomic.Bool
-	// lastWrite is the UnixNano time of the last write, read by heartbeat.
-	lastWrite atomic.Int64
+	peerGone          atomic.Bool
+	lastWriteUnixNano atomic.Int64
 
 	receivedEnd bool
 	sentHeader  bool
@@ -152,10 +151,9 @@ func (s *websocketServerStream) writeHeader(ctx context.Context, responseHeader 
 	return nil
 }
 
-// write records the time for heartbeat, which pings only an idle connection.
 func (s *websocketServerStream) write(ctx context.Context, messageType websocket.MessageType, data []byte) error {
 	err := s.conn.Write(ctx, messageType, data)
-	s.lastWrite.Store(time.Now().UnixNano())
+	s.lastWriteUnixNano.Store(time.Now().UnixNano())
 	return err
 }
 
@@ -235,8 +233,7 @@ func (s *websocketServerStream) close(code websocket.StatusCode) {
 }
 
 // encodeEndStream writes S into buffer. Over sendMaxBytes it falls back to
-// only the error code and message, as on Connect. On error the caller must
-// not send buffer.
+// only the error code and message, as on Connect.
 func (s *websocketServerStream) encodeEndStream(buffer *bytes.Buffer, trailer http.Header, rpcErr error) error {
 	end := &connectEndStreamMessage{Trailer: trailer}
 	if rpcErr != nil {
@@ -434,11 +431,9 @@ func websocketServe(server *connect.Server, spec connect.Spec, opts *options, re
 	stream.finish(ctx, scrubHandlerError(server.Call(ctx, spec.Procedure, info, stream)))
 }
 
-// heartbeat pings the client after websocketPingInterval without a write,
-// which keeps intermediaries from closing an idle connection. Pinging only an
-// idle connection avoids competing with Send. coder closes the connection
-// when a ping can't be written within 5s, which Receive reports as a client
-// disconnect.
+// heartbeat pings the client after websocketPingInterval without a write.
+// coder closes the connection when a ping can't be written within 5s, which
+// Receive reports as a client disconnect.
 func (s *websocketServerStream) heartbeat() {
 	timer := time.NewTimer(websocketPingInterval)
 	defer timer.Stop()
@@ -448,7 +443,7 @@ func (s *websocketServerStream) heartbeat() {
 			return
 		case <-timer.C:
 		}
-		idle := time.Since(time.Unix(0, s.lastWrite.Load()))
+		idle := time.Since(time.Unix(0, s.lastWriteUnixNano.Load()))
 		if idle < websocketPingInterval {
 			timer.Reset(websocketPingInterval - idle)
 			continue
@@ -467,8 +462,6 @@ func (s *websocketServerStream) heartbeat() {
 	}
 }
 
-// websocketHijacker keeps the hijacked connection for
-// [websocketServerStream.close].
 type websocketHijacker struct {
 	http.ResponseWriter
 

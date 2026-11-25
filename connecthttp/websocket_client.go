@@ -217,7 +217,6 @@ func (s *websocketClientStream) handshake() (*websocket.Conn, error) {
 	metadata := websocketMetadata(s.info.RequestHeader())
 	handshakeHeader := websocketHandshakeHeader(s.info.RequestHeader(), metadata)
 	for key, values := range metadata {
-		// As with net/http, a client fails on metadata a server would drop.
 		if err := websocketValidateMetadata(key, values, true); err != nil {
 			return nil, err
 		}
@@ -375,7 +374,6 @@ func (s *websocketClientStream) release(closeCode websocket.StatusCode, reason s
 			// message with no deadline and hang on a server that stalls.
 			_ = conn.CloseNow()
 		} else {
-			// Don't make the caller wait for the close handshake.
 			go func() { _ = conn.Close(closeCode, reason) }()
 		}
 	}
