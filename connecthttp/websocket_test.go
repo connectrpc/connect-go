@@ -152,6 +152,7 @@ func TestWebSocketParseTimeout(t *testing.T) {
 		{name: "plus_sign", query: "connect-timeout-ms=%2B5", wantErr: "has non-digit characters"},
 		{name: "minus_sign", query: "connect-timeout-ms=-1", wantErr: "has non-digit characters"},
 		{name: "repeated", query: "connect-timeout-ms=1&connect-timeout-ms=1", wantErr: "more than one value"},
+		{name: "repeated_malformed", query: "connect-timeout-ms=1&connect-timeout-ms=%zz", wantErr: "invalid URL escape"},
 		{name: "malformed_escape", query: "connect-timeout-ms=1%zz", wantErr: "invalid URL escape"},
 	}
 	for _, test := range tests {

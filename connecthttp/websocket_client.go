@@ -45,6 +45,9 @@ func newWebSocketClientConfig(
 	codec connect.Codec,
 	opts *options,
 ) *websocketClientConfig {
+	// The handshake is recorded on ClientInfo by wrapping the Transport, which
+	// needs a copy of the caller's client. Unlike on the HTTP protocols, a
+	// change to the caller's client may not reach later WebSocket calls.
 	var client http.Client
 	if stdClient, ok := httpClient.(*http.Client); ok {
 		client = *stdClient
@@ -214,6 +217,7 @@ func (s *websocketClientStream) handshake() (*websocket.Conn, error) {
 	metadata := websocketMetadata(s.info.RequestHeader())
 	handshakeHeader := websocketHandshakeHeader(s.info.RequestHeader(), metadata)
 	for key, values := range metadata {
+		// As with net/http, a client fails on metadata a server would drop.
 		if err := websocketValidateMetadata(key, values, true); err != nil {
 			return nil, err
 		}

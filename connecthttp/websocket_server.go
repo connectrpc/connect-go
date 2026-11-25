@@ -132,7 +132,8 @@ func (s *websocketServerStream) receive(msg any) error {
 	return nil
 }
 
-// writeHeader fails the RPC for a connect- header, after sending M without it.
+// writeHeader sends M with the response headers if it hasn't been sent. A
+// connect- header is left out of M and then fails the RPC.
 func (s *websocketServerStream) writeHeader(ctx context.Context, responseHeader *connect.Header) error {
 	if s.sentHeader {
 		return nil
@@ -234,7 +235,8 @@ func (s *websocketServerStream) close(code websocket.StatusCode) {
 }
 
 // encodeEndStream writes S into buffer. Over sendMaxBytes it falls back to
-// only the error code and message, as on Connect.
+// only the error code and message, as on Connect. On error the caller must
+// not send buffer.
 func (s *websocketServerStream) encodeEndStream(buffer *bytes.Buffer, trailer http.Header, rpcErr error) error {
 	end := &connectEndStreamMessage{Trailer: trailer}
 	if rpcErr != nil {
@@ -253,6 +255,7 @@ func (s *websocketServerStream) encodeEndStream(buffer *bytes.Buffer, trailer ht
 	}
 	end = &connectEndStreamMessage{Error: newConnectWireError(rpcErr)}
 	end.Error.Details = nil
+	// Discard all but the marker byte.
 	buffer.Truncate(1)
 	return websocketAppendJSON(buffer, end)
 }
@@ -316,8 +319,7 @@ func (s *websocketServerStream) connectionEnded(err error) error {
 	return wrapIfContextError(context.Cause(s.ctx))
 }
 
-// receiveMetadata waits for M, failing the RPC when a client upgrades and goes
-// quiet.
+// receiveMetadata waits for M, failing the RPC if it doesn't arrive in time.
 func (s *websocketServerStream) receiveMetadata() (http.Header, error) {
 	timer := time.NewTimer(websocketFirstMessageTimeout)
 	defer timer.Stop()
@@ -479,8 +481,9 @@ func (h *websocketHijacker) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return conn, readWriter, err
 }
 
-// websocketRequestHeader builds the RPC's effective headers. Metadata can't
-// replace a handshake header, which a proxy may have set.
+// websocketRequestHeader validates the metadata and builds the RPC's
+// effective headers to present to the handler. Metadata can't replace a
+// handshake header, which a proxy may have set.
 func websocketRequestHeader(request *http.Request, metadata http.Header) (http.Header, *connect.Error) {
 	header := make(http.Header, len(request.Header)+len(metadata)+1)
 	for key, values := range request.Header {
@@ -500,9 +503,10 @@ func websocketRequestHeader(request *http.Request, metadata http.Header) (http.H
 	return header, nil
 }
 
-// websocketResponseMetadata builds M or S metadata. It drops entries a client
-// would reject, as net/http drops invalid header fields. A connect- key is
-// left out and fails the RPC, as spec Sections 7.4 and 9 require.
+// websocketResponseMetadata builds M or S metadata. A client fails the call on
+// invalid metadata but a server drops it, like a net/http server on HTTP/2. A
+// connect- key is left out and fails the RPC, as spec Sections 7.4 and 9
+// require.
 func websocketResponseMetadata(header *connect.Header, kind string) (http.Header, error) {
 	metadata := make(http.Header)
 	var err error
@@ -548,7 +552,8 @@ func websocketNegotiateCodec(header http.Header, codecs readOnlyCodecs) (connect
 
 func websocketParseTimeout(rawQuery string) (time.Duration, bool, error) {
 	// Scanned by hand, since ParseQuery skips a pair it can't unescape.
-	var values []string
+	var timeoutValue string
+	var found bool
 	for pair := range strings.SplitSeq(rawQuery, "&") {
 		key, value, _ := strings.Cut(pair, "=")
 		if key, err := url.QueryUnescape(key); err != nil || key != websocketTimeoutQueryParameter {
@@ -558,17 +563,18 @@ func websocketParseTimeout(rawQuery string) (time.Duration, bool, error) {
 		if err != nil {
 			return 0, false, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %s", err)
 		}
-		values = append(values, value)
+		if found {
+			return 0, false, connect.NewError(connect.CodeInvalidArgument, "parse timeout: more than one value supplied")
+		}
+		timeoutValue, found = value, true
 	}
 	switch {
-	case len(values) == 0:
+	case !found:
 		return 0, false, nil
-	case len(values) > 1:
-		return 0, false, connect.NewError(connect.CodeInvalidArgument, "parse timeout: more than one value supplied")
-	case values[0] == "":
+	case timeoutValue == "":
 		return 0, false, connect.NewError(connect.CodeInvalidArgument, "parse timeout: no value supplied")
 	}
-	timeout, err := connectParseTimeout(values[0])
+	timeout, err := connectParseTimeout(timeoutValue)
 	if err != nil {
 		return 0, false, err
 	}

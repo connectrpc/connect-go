@@ -54,6 +54,29 @@ var (
 	errWebSocketInvalidUTF8 = connect.NewError(connect.CodeInternal, "invalid UTF-8 in text message")
 	errWebSocketHTTPClient  = errors.New("HTTP client can't carry a WebSocket")
 	errWebSocketFinished    = connect.NewError(connect.CodeCanceled, "stream finished")
+
+	// httpTokenBytes follows RFC 9110 Section 5.6.2.
+	//
+	//nolint:gochecknoglobals
+	httpTokenBytes = func() (table [256]bool) {
+		for char := range table {
+			table[char] = ('a' <= char && char <= 'z') ||
+				('A' <= char && char <= 'Z') ||
+				('0' <= char && char <= '9') ||
+				strings.IndexByte("!#$%&'*+-.^_`|~", byte(char)) >= 0
+		}
+		return table
+	}()
+	// websocketValueBytes follows RFC 9110 Section 5.5 without obs-text, the
+	// bytes 0x80-0xFF, which a JSON string can't carry as bytes.
+	//
+	//nolint:gochecknoglobals
+	websocketValueBytes = func() (table [256]bool) {
+		for char := range table {
+			table[char] = char == '\t' || (' ' <= char && char <= '~')
+		}
+		return table
+	}()
 )
 
 // WithWebSocket enables Connect over WebSocket.
@@ -269,34 +292,25 @@ func websocketIsMetadataKey(key string) bool {
 		return false
 	}
 	for i := range len(key) {
-		if !isHTTPTokenByte(key[i]) {
+		if !httpTokenBytes[key[i]] {
 			return false
 		}
 	}
 	return true
 }
 
-// isHTTPTokenByte follows RFC 9110 Section 5.6.2.
-func isHTTPTokenByte(char byte) bool {
-	return (char >= 'a' && char <= 'z') ||
-		(char >= 'A' && char <= 'Z') ||
-		(char >= '0' && char <= '9') ||
-		(strings.IndexByte("!#$%&'*+-.^_`|~", char) >= 0)
-}
-
-// websocketIsMetadataValue follows RFC 9110 Section 5.5 without obs-text, the
-// bytes 0x80-0xFF, which a JSON string can't carry as bytes.
 func websocketIsMetadataValue(value string) bool {
 	for i := range len(value) {
-		if char := value[i]; (char < ' ' && char != '\t') || char > '~' {
+		if !websocketValueBytes[value[i]] {
 			return false
 		}
 	}
 	return true
 }
 
-// websocketReadLimit doesn't count the marker byte. -1 lifts coder's 32 KiB
-// default.
+// websocketReadLimit returns the message read limit for coder. readMaxBytes
+// caps the payload, and the message limit is one more for the marker byte.
+// readMaxBytes of zero or less means no limit, which coder spells -1.
 func websocketReadLimit(readMaxBytes int) int64 {
 	if readMaxBytes <= 0 {
 		return -1

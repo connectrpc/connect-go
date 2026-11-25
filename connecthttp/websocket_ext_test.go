@@ -1267,6 +1267,7 @@ func (p *websocketPingServer) Ping(ctx context.Context, request *pingv1.PingRequ
 			header.Add("X-Ok", "1")
 			header.Add("X-Ok", "bad\nvalue")
 			header.Add("X-Bad", "bad\nvalue")
+			header.Add("Bad Key", "1")
 		}
 	}
 	if value := info.RequestHeader().Get("X-Test"); value != "" {
