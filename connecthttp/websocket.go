@@ -220,6 +220,22 @@ func websocketValidateMetadata(key string, values []string, fromClient bool) *co
 	return nil
 }
 
+// websocketValidateTrailer checks S metadata like M, apart from case.
+func websocketValidateTrailer(key string, values []string) *connect.Error {
+	if !websocketIsMetadataKey(key) {
+		return newWebSocketProtocolError("S message key %q is not a valid header name", key)
+	}
+	if strings.HasSuffix(strings.ToLower(key), "-bin") {
+		return nil
+	}
+	for _, value := range values {
+		if !websocketIsMetadataValue(websocketTrimMetadataValue(value)) {
+			return newWebSocketProtocolError("S message value for key %q is not a valid header value", key)
+		}
+	}
+	return nil
+}
+
 // websocketIsReservedKey follows the three lists in spec Section 7.3.2.
 func websocketIsReservedKey(key string) bool {
 	switch key {

@@ -141,6 +141,31 @@ func TestConnectEndOfResponseCanonicalTrailers(t *testing.T) {
 	assert.Equal(t, unmarshaler.Trailer().Values("Canonical-Header"), []string{"c"})
 }
 
+func TestConnectEndStreamInvalidTrailers(t *testing.T) {
+	t.Parallel()
+	stream := &bytes.Buffer{}
+	marshaler := connectStreamingMarshaler{envelopeWriter: envelopeWriter{sender: writeSender{writer: stream}}}
+	trailer := http.Header{"Bad Key": {"1"}, "X-Bad": {"a\nb", "ok"}, "X-Ok": {"1"}}
+	assert.Nil(t, marshaler.MarshalEndStream(nil, trailer))
+	assert.Equal(t, len(trailer), 3)
+	unmarshaler := connectStreamingUnmarshaler{envelopeReader: envelopeReader{ctx: t.Context(), reader: stream}}
+	assert.ErrorIs(t, unmarshaler.Unmarshal(nil), errSpecialEnvelope)
+	assert.Equal(t, unmarshaler.Trailer(), http.Header{"X-Bad": {"ok"}, "X-Ok": {"1"}})
+
+	for _, data := range []string{`{"metadata":{"bad key":["1"]}}`, `{"metadata":{"x-bad":["a\nb"]}}`} {
+		stream.Reset()
+		frame := &bytes.Buffer{}
+		padEnvelope(frame)
+		frame.WriteString(data)
+		writer := envelopeWriter{sender: writeSender{writer: stream}}
+		assert.Nil(t, writer.Write(connectFlagEnvelopeEndStream, frame))
+		unmarshaler := connectStreamingUnmarshaler{envelopeReader: envelopeReader{ctx: t.Context(), reader: stream}}
+		err := unmarshaler.Unmarshal(nil)
+		assert.Equal(t, connect.CodeOf(err), connect.CodeInternal)
+		assert.True(t, strings.Contains(err.Error(), "protocol error"))
+	}
+}
+
 func TestConnectValidateUnaryResponseContentType(t *testing.T) {
 	t.Parallel()
 	testCases := []struct {

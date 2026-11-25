@@ -346,6 +346,9 @@ func (s *websocketClientStream) receiveEnd(payload []byte) error {
 	}
 	trailer := make(http.Header, len(end.Trailer))
 	for key, values := range end.Trailer {
+		if err := websocketValidateTrailer(key, values); err != nil {
+			return err
+		}
 		for _, value := range values {
 			trailer.Add(key, value)
 		}

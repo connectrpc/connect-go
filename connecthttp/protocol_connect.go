@@ -880,7 +880,7 @@ type connectStreamingMarshaler struct {
 }
 
 func (m *connectStreamingMarshaler) MarshalEndStream(err error, trailer http.Header) *connect.Error {
-	end := &connectEndStreamMessage{Trailer: trailer}
+	end := &connectEndStreamMessage{Trailer: connectValidTrailer(trailer)}
 	if err != nil {
 		end.Error = newConnectWireError(err)
 	}
@@ -937,6 +937,9 @@ func (u *connectStreamingUnmarshaler) Unmarshal(message any) *connect.Error {
 		return connect.Errorf(connect.CodeInternal, "unmarshal end stream message: %s", err).WithCause(err)
 	}
 	for name, value := range end.Trailer {
+		if err := connectValidateTrailer(name, value); err != nil {
+			return err
+		}
 		canonical := http.CanonicalHeaderKey(name)
 		if name != canonical {
 			delHeaderCanonical(end.Trailer, name)
@@ -1511,4 +1514,54 @@ func connectCheckProtocolVersion(request *http.Request, required bool) *connect.
 		return connect.Errorf(connect.CodeInvalidArgument, "unsupported method: %q", request.Method)
 	}
 	return nil
+}
+
+// connectValidTrailer drops the trailers a client rejects. A net/http server
+// drops invalid fields on HTTP/2 and invalid names on HTTP/1.
+func connectValidTrailer(trailer http.Header) http.Header {
+	var valid http.Header
+	for key, values := range trailer {
+		if connectValidateTrailer(key, values) == nil {
+			continue
+		}
+		if valid == nil {
+			valid = trailer.Clone()
+		}
+		delete(valid, key)
+		if !websocketIsMetadataKey(key) {
+			continue
+		}
+		for _, value := range values {
+			if isHTTPHeaderValue(value) {
+				valid[key] = append(valid[key], value)
+			}
+		}
+	}
+	if valid == nil {
+		return trailer
+	}
+	return valid
+}
+
+func connectValidateTrailer(key string, values []string) *connect.Error {
+	if !websocketIsMetadataKey(key) {
+		return connect.Errorf(connect.CodeInternal, "protocol error: end of stream trailer %q is not a valid header name", key)
+	}
+	for _, value := range values {
+		if !isHTTPHeaderValue(value) {
+			return connect.Errorf(connect.CodeInternal, "protocol error: end of stream trailer value for %q is not a valid header value", key)
+		}
+	}
+	return nil
+}
+
+// isHTTPHeaderValue follows net/http, which allows obs-text but no controls
+// other than tab.
+func isHTTPHeaderValue(value string) bool {
+	for i := range len(value) {
+		if char := value[i]; (char < ' ' && char != '\t') || char == 0x7f {
+			return false
+		}
+	}
+	return true
 }

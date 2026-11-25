@@ -508,6 +508,8 @@ func TestWebSocketClientProtocolErrors(t *testing.T) {
 		{name: "invalid_utf8", send: []websocketFrame{textFrame("M\xff")}, wantStatus: websocket.StatusInvalidFramePayloadData},
 		{name: "long_reason", send: []websocketFrame{textFrame(`M[["` + strings.Repeat("X", 200) + `","v"]]`)}, wantStatus: 3102},
 		{name: "non_ascii_metadata", send: []websocketFrame{textFrame(`M[["x-test","café"]]`), binaryFrame("B"), textFrame("S{}")}, wantStatus: 3102},
+		{name: "invalid_trailer_key", send: []websocketFrame{textFrame("M[]"), binaryFrame("B"), textFrame(`S{"metadata":{"bad key":["1"]}}`)}, wantStatus: 3102},
+		{name: "invalid_trailer_value", send: []websocketFrame{textFrame("M[]"), binaryFrame("B"), textFrame(`S{"metadata":{"x-test":["a\nb"]}}`)}, wantStatus: 3102},
 		{name: "unknown_marker", send: []websocketFrame{textFrame("M[]"), textFrame("X")}, wantStatus: 3102},
 		{name: "two_bodies", send: []websocketFrame{textFrame("M[]"), binaryFrame("B"), binaryFrame("B"), textFrame("S{}")}, wantCode: connect.CodeUnimplemented, wantStatus: 3102},
 		{name: "no_body", send: []websocketFrame{textFrame("M[]"), textFrame("S{}")}, wantCode: connect.CodeUnimplemented, wantStatus: websocket.StatusNormalClosure},
