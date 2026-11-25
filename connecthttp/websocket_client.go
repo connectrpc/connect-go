@@ -15,7 +15,6 @@
 package connecthttp
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,7 +24,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"connectrpc.com/connect/v2"
@@ -41,22 +39,35 @@ type websocketClientConfig struct {
 	sendMaxBytes int
 }
 
-func newWebSocketClientConfig(httpClient HTTPClient, procedureURL url.URL, opts *options) *websocketClientConfig {
-	client, ok := httpClient.(*http.Client)
-	if !ok {
+func newWebSocketClientConfig(
+	httpClient HTTPClient,
+	procedureURL url.URL,
+	codec connect.Codec,
+	opts *options,
+) *websocketClientConfig {
+	var client http.Client
+	if stdClient, ok := httpClient.(*http.Client); ok {
+		// Copy so the caller's client is left unchanged.
+		client = *stdClient
+	} else {
 		// coder only takes an *http.Client. The wrapped client follows
 		// redirects with its own policy.
-		client = &http.Client{
+		client = http.Client{
 			Transport: &websocketDoTransport{httpClient: httpClient},
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
 		}
 	}
+	next := client.Transport
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	client.Transport = &websocketRecordingTransport{next: next}
 	return &websocketClientConfig{
-		httpClient:   client,
+		httpClient:   &client,
 		url:          procedureURL,
-		codec:        newReadOnlyCodecs(opts.codecs).Get(opts.getSendCodecName()),
+		codec:        codec,
 		readLimit:    websocketReadLimit(opts.readMaxBytes),
 		sendMaxBytes: opts.sendMaxBytes,
 	}
@@ -69,21 +80,17 @@ type websocketClientStream struct {
 	cancel         context.CancelFunc
 	config         *websocketClientConfig
 	info           *connect.CallInfo
-	clientInfo     *ClientInfo
 	singleRequest  bool
 	singleResponse bool
-	closed         atomic.Bool
 
-	dialMu       sync.Mutex
-	conn         *websocket.Conn
-	dialErr      error
+	// dial runs the handshake once. It also publishes stopWatching.
+	dial         func() (*websocket.Conn, error)
 	stopWatching func() bool
 
 	sent           bool
 	sendClosed     bool
 	receivedHeader bool
 	receiveErr     error
-	released       bool
 }
 
 func newWebSocketClientStream(
@@ -91,26 +98,33 @@ func newWebSocketClientStream(
 	spec connect.Spec,
 	config *websocketClientConfig,
 	info *connect.CallInfo,
-	clientInfo *ClientInfo,
 ) *websocketClientStream {
 	info.Spec = spec
 	info.PeerAddr = config.url.Host
 	info.Protocol = protocolNameWebSocket
 	info.Codec = config.codec.Name()
 	info.RequestEncoding = connect.CompressionNameIdentity
+	info.ResponseEncoding = connect.CompressionNameIdentity
 	// Every path cancels ctx, which ends ioCtx, so its cancel is unneeded.
 	ctx, cancel := context.WithCancel(ctx)
 	ioCtx, _ := websocketGraceContext(ctx)
-	return &websocketClientStream{
+	stream := &websocketClientStream{
 		ctx:            ctx,
 		ioCtx:          ioCtx,
 		cancel:         cancel,
 		config:         config,
 		info:           info,
-		clientInfo:     clientInfo,
-		singleRequest:  spec.StreamType == connect.StreamTypeUnary || spec.StreamType == connect.StreamTypeServer,
-		singleResponse: spec.StreamType == connect.StreamTypeUnary || spec.StreamType == connect.StreamTypeClient,
+		singleRequest:  spec.StreamType&connect.StreamTypeClient == 0,
+		singleResponse: spec.StreamType&connect.StreamTypeServer == 0,
 	}
+	stream.dial = sync.OnceValues(func() (*websocket.Conn, error) {
+		conn, err := stream.handshake()
+		if err != nil {
+			cancel()
+		}
+		return conn, err
+	})
+	return stream
 }
 
 func (s *websocketClientStream) SendHeaders() error {
@@ -127,11 +141,11 @@ func (s *websocketClientStream) Send(msg any) error {
 		return io.EOF
 	}
 	// Marshal before dialing, so a message over the limit sends nothing.
-	body, err := marshalWebSocketBody(s.ctx, s.config.codec, msg, s.config.sendMaxBytes)
-	if err != nil {
+	body := bufferpool.Get()
+	defer bufferpool.Put(body)
+	if err := websocketMarshalBody(s.ctx, body, s.config.codec, msg, s.config.sendMaxBytes); err != nil {
 		return err
 	}
-	defer bufferpool.Put(body)
 	conn, err := s.dial()
 	if err != nil {
 		return err
@@ -142,8 +156,7 @@ func (s *websocketClientStream) Send(msg any) error {
 	}
 	if s.singleRequest {
 		// A unary request is always followed by C.
-		s.sendClosed = true
-		_ = writeWebSocketText(s.ioCtx, conn, websocketMarkerClientEndStream, nil)
+		_ = s.CloseSend()
 	}
 	return nil
 }
@@ -153,18 +166,13 @@ func (s *websocketClientStream) CloseSend() error {
 	if err != nil {
 		return err
 	}
-	if s.sendClosed {
-		return nil
-	}
-	select {
-	case <-s.ctx.Done():
-		// After S, or once the stream is canceled or failed, a client may
-		// send only a Close frame.
-		return nil
-	default:
+	// After S, or once the stream is canceled or failed, a client may send
+	// only a Close frame.
+	if s.sendClosed || s.ctx.Err() != nil {
+		return nil //nolint:nilerr // the context error is reported by Receive
 	}
 	s.sendClosed = true
-	_ = writeWebSocketText(s.ioCtx, conn, websocketMarkerClientEndStream, nil)
+	_ = conn.Write(s.ioCtx, websocket.MessageText, []byte{websocketMarkerClientEndStream})
 	return nil
 }
 
@@ -172,19 +180,18 @@ func (s *websocketClientStream) Receive(msg any) error {
 	if s.receiveErr != nil {
 		return s.receiveErr
 	}
-	conn, err := s.dial()
-	if err != nil {
+	if _, err := s.dial(); err != nil {
 		s.receiveErr = err
 		return err
 	}
-	receive := func(msg any) error { return s.receive(conn, msg) }
+	var err error
 	if s.singleResponse {
-		err = receiveExactlyOne(receive, msg, "response")
+		err = receiveExactlyOne(s.receive, msg, "response")
 		if err == nil {
 			s.receiveErr = io.EOF
 		}
 	} else {
-		err = receive(msg)
+		err = s.receive(msg)
 	}
 	if err != nil {
 		s.receiveErr = err
@@ -198,33 +205,18 @@ func (s *websocketClientStream) Receive(msg any) error {
 }
 
 func (s *websocketClientStream) Close() error {
-	s.closed.Store(true)
 	s.cancel()
 	return nil
 }
 
-func (s *websocketClientStream) dial() (*websocket.Conn, error) {
-	s.dialMu.Lock()
-	defer s.dialMu.Unlock()
-	if s.conn == nil && s.dialErr == nil {
-		s.conn, s.dialErr = s.connect()
-		if s.dialErr != nil {
-			s.cancel()
-		}
-	}
-	return s.conn, s.dialErr
-}
-
-func (s *websocketClientStream) connect() (*websocket.Conn, error) {
-	if s.closed.Load() {
-		return nil, connect.NewError(connect.CodeCanceled, "stream closed")
-	}
-	requestMetadata := websocketMetadata(s.info.RequestHeader())
-	handshakeHeader := websocketHandshakeHeader(s.info.RequestHeader(), requestMetadata)
+func (s *websocketClientStream) handshake() (*websocket.Conn, error) {
+	metadata := websocketMetadata(s.info.RequestHeader())
+	handshakeHeader := websocketHandshakeHeader(s.info.RequestHeader(), metadata)
 	// Check the metadata before dialing, so a bad key sends nothing.
-	metadata := encodeWebSocketMetadata(requestMetadata)
-	if _, err := decodeWebSocketMetadata(metadata, true); err != nil {
-		return nil, err
+	for key, values := range metadata {
+		if err := websocketValidateMetadata(key, values, true); err != nil {
+			return nil, err
+		}
 	}
 	requestURL := s.config.url
 	if deadline, ok := s.ctx.Deadline(); ok {
@@ -232,12 +224,9 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 			requestURL.RawQuery = url.Values{websocketTimeoutQueryParameter: {timeout}}.Encode()
 		}
 	}
-	// Copy so the caller's client is left unchanged.
-	httpClient := *s.config.httpClient
-	httpClient.Transport = &websocketRecordingTransport{next: httpClient.Transport, info: s.clientInfo}
 	subprotocol := websocketSubprotocolPrefix + s.config.codec.Name()
 	conn, response, err := websocket.Dial(s.ctx, requestURL.String(), &websocket.DialOptions{
-		HTTPClient:   &httpClient,
+		HTTPClient:   s.config.httpClient,
 		HTTPHeader:   handshakeHeader,
 		Subprotocols: []string{subprotocol},
 	})
@@ -249,7 +238,8 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 	}
 	// coder accepts no echo, or an echo that differs only in case.
 	if echoed := conn.Subprotocol(); echoed != subprotocol {
-		// The handshake failed, so there's no WebSocket to send a Close frame on.
+		// A missing or unoffered echo fails the handshake. Spec §4.3 has a
+		// non-browser client fail the connection without a Close frame.
 		_ = conn.CloseNow()
 		return nil, connect.Errorf(connect.CodeInternal, "server echoed subprotocol %q, expected %q", echoed, subprotocol)
 	}
@@ -257,7 +247,10 @@ func (s *websocketClientStream) connect() (*websocket.Conn, error) {
 	s.stopWatching = context.AfterFunc(s.ctx, func() {
 		_ = conn.Close(websocket.StatusNormalClosure, "")
 	})
-	if err := writeWebSocketText(s.ioCtx, conn, websocketMarkerLeadingMetadata, metadata); err != nil {
+	buffer := bufferpool.Get()
+	defer bufferpool.Put(buffer)
+	websocketMarshalMetadata(buffer, metadata)
+	if err := conn.Write(s.ioCtx, websocket.MessageText, buffer.Bytes()); err != nil {
 		s.stopWatching()
 		_ = conn.CloseNow()
 		return nil, s.readError(err)
@@ -278,65 +271,68 @@ func websocketHandshakeHeader(requestHeader *connect.Header, metadata http.Heade
 }
 
 func (s *websocketClientStream) dialError(response *http.Response, err error) error {
-	if errors.Is(err, errWebSocketHTTPClient) {
-		return connect.Errorf(connect.CodeInternal, "dial WebSocket: %s", err).WithCause(err)
+	cause := websocketCause(err)
+	// A 101 means coder rejected the upgrade, such as for an unoffered
+	// subprotocol.
+	if errors.Is(err, errWebSocketHTTPClient) || (response != nil && response.StatusCode == http.StatusSwitchingProtocols) {
+		return connect.Errorf(connect.CodeInternal, "dial WebSocket: %s", err).WithCause(cause)
 	}
 	if response == nil {
 		if connectErr, ok := asError(wrapIfContextDone(s.ctx, err)); ok {
 			return connectErr
 		}
-		return connect.Errorf(connect.CodeUnavailable, "dial WebSocket: %s", err).WithCause(err)
-	}
-	if response.StatusCode == http.StatusSwitchingProtocols {
-		// coder rejected the upgrade, such as for an unoffered subprotocol.
-		return connect.Errorf(connect.CodeInternal, "dial WebSocket: %s", err).WithCause(err)
+		return connect.Errorf(connect.CodeUnavailable, "dial WebSocket: %s", err).WithCause(cause)
 	}
 	// coder keeps the first 1024 bytes of the body.
 	var wireErr connectWireError
 	if body, readErr := io.ReadAll(response.Body); readErr == nil && json.Unmarshal(body, &wireErr) == nil && wireErr.Code != 0 {
 		return wireErr.asError()
 	}
-	return connect.Errorf(httpToCode(response.StatusCode), "dial WebSocket: HTTP status %d", response.StatusCode).WithCause(err)
+	return connect.Errorf(httpToCode(response.StatusCode), "dial WebSocket: HTTP status %d", response.StatusCode).WithCause(cause)
 }
 
-func (s *websocketClientStream) receive(conn *websocket.Conn, msg any) error {
-	bodyIsText := websocketBodyIsText(s.config.codec.Name())
+// receive runs after a successful dial.
+func (s *websocketClientStream) receive(msg any) error {
+	conn, _ := s.dial()
+	buffer := bufferpool.Get()
+	defer bufferpool.Put(buffer)
 	for {
-		messageType, data, err := conn.Read(s.ioCtx)
-		if err == nil {
-			// ioCtx outlives ctx, so a message can still arrive after cancel.
-			err = s.ctx.Err()
-		}
+		buffer.Reset()
+		messageType, err := websocketReadMessage(s.ioCtx, conn, buffer)
 		if err != nil {
 			return s.readError(err)
 		}
-		message, parseErr := parseWebSocketMessage(messageType, data, bodyIsText)
+		// ioCtx outlives ctx, so a message can still arrive after cancel.
+		if err := s.ctx.Err(); err != nil {
+			return wrapIfContextError(err)
+		}
+		marker, parseErr := websocketParseMarker(messageType, buffer, s.config.codec.Name())
 		if parseErr != nil {
 			return parseErr
 		}
-		if !s.receivedHeader && message.marker != websocketMarkerLeadingMetadata {
-			return newWebSocketProtocolError("first message is %c, expected M", message.marker)
+		if !s.receivedHeader && marker != websocketMarkerLeadingMetadata {
+			return newWebSocketProtocolError("first message is %c, expected M", marker)
 		}
-		switch message.marker {
+		switch marker {
 		case websocketMarkerLeadingMetadata:
 			if s.receivedHeader {
 				return newWebSocketProtocolError("second M message")
 			}
 			s.receivedHeader = true
-			header, err := decodeWebSocketMetadata(message.payload, false)
-			if err != nil {
-				return err
+			header, decodeErr := websocketDecodeMetadata(buffer.Bytes(), false)
+			if decodeErr != nil {
+				return decodeErr
 			}
 			fromHTTPHeader(s.info.ResponseHeader(), header)
 		case websocketMarkerBody:
-			if err := s.config.codec.UnmarshalRead(s.ctx, bytes.NewReader(message.payload), msg); err != nil {
+			if err := s.config.codec.UnmarshalRead(s.ctx, buffer, msg); err != nil {
 				return newWebSocketDecodeError(err)
 			}
 			return nil
 		case websocketMarkerServerEndStream:
-			return s.receiveEnd(message.payload)
+			return s.receiveEnd(buffer.Bytes())
 		default:
-			return newWebSocketProtocolError("unexpected %c message from server", message.marker)
+			return newWebSocketProtocolError("unexpected %c message from server", marker)
 		}
 	}
 }
@@ -365,29 +361,20 @@ func (s *websocketClientStream) receiveEnd(payload []byte) error {
 // release closes with the first code it's given. After S, Receive releases
 // again with the RPC's outcome, which must not replace 1000.
 func (s *websocketClientStream) release(closeCode websocket.StatusCode, reason string) {
-	if s.released {
-		return
+	// False once the context watcher or an earlier release has closed.
+	if s.stopWatching() {
+		conn, _ := s.dial()
+		// Don't make the caller wait for the close handshake, up to 5s in coder.
+		go func() { _ = conn.Close(closeCode, reason) }()
 	}
-	s.released = true
-	// Stop the context watcher first, so it can't close with 1000 instead.
-	s.stopWatching()
-	// Don't make the caller wait for the close handshake, up to 5s in coder.
-	conn := s.conn
-	go func() { _ = conn.Close(closeCode, reason) }()
 	s.cancel()
 }
 
 func (s *websocketClientStream) readError(err error) error {
-	if s.closed.Load() {
-		return connect.NewError(connect.CodeCanceled, "stream closed")
-	}
 	if ctxErr := s.ctx.Err(); ctxErr != nil {
 		return wrapIfContextError(ctxErr)
 	}
-	// A cause that wraps io.EOF would read as a clean end of stream.
-	if errors.Is(err, io.EOF) {
-		err = io.ErrUnexpectedEOF
-	}
+	err = websocketCause(err)
 	switch {
 	case errors.Is(err, websocket.ErrMessageTooBig), websocket.CloseStatus(err) == websocket.StatusMessageTooBig:
 		return connect.Errorf(connect.CodeResourceExhausted, "message too big: %s", err).WithCause(err)
@@ -398,24 +385,20 @@ func (s *websocketClientStream) readError(err error) error {
 	}
 }
 
+// websocketRecordingTransport records the handshake on the [ClientInfo] of
+// the RPC that dials, found through the request's context.
 type websocketRecordingTransport struct {
 	next http.RoundTripper
-	info *ClientInfo
 }
 
 func (t *websocketRecordingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	t.info.request.Store(request)
-	next := t.next
-	if next == nil {
-		next = http.DefaultTransport
+	info, _ := ClientInfoForContext(request.Context())
+	if info != nil {
+		info.request.Store(request)
 	}
-	response, err := next.RoundTrip(request)
-	if response != nil {
-		t.info.response.Store(&clientResponseInfo{
-			status: response.StatusCode,
-			proto:  response.Proto,
-			tls:    response.TLS,
-		})
+	response, err := t.next.RoundTrip(request)
+	if info != nil && response != nil {
+		info.storeResponse(response)
 	}
 	return response, err
 }
@@ -449,4 +432,30 @@ func (t *websocketDoTransport) RoundTrip(request *http.Request) (*http.Response,
 		return nil, fmt.Errorf("%w: the 101 response body %T can't be written", errWebSocketHTTPClient, response.Body)
 	}
 	return response, nil
+}
+
+// websocketMetadata converts request headers to M metadata. The caller
+// validates it.
+func websocketMetadata(header *connect.Header) http.Header {
+	metadata := make(http.Header)
+	for key, values := range userHeaders(header) {
+		key = strings.ToLower(key)
+		if len(values) == 0 || strings.HasPrefix(key, "connect-") {
+			continue
+		}
+		for _, value := range values {
+			metadata[key] = append(metadata[key], websocketTrimMetadataValue(value))
+		}
+	}
+	return metadata
+}
+
+// websocketCloseReason truncates reason to fit a Close frame. coder sends no
+// Close frame for a reason over 123 bytes.
+func websocketCloseReason(reason string) string {
+	const maxReasonBytes = 123
+	if len(reason) <= maxReasonBytes {
+		return reason
+	}
+	return strings.ToValidUTF8(reason[:maxReasonBytes], "")
 }

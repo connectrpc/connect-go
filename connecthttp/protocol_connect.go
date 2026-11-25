@@ -1362,6 +1362,8 @@ func connectCodeToHTTP(code connect.Code) int {
 	}
 }
 
+// connectParseTimeout parses a Connect timeout, a number of milliseconds
+// with at most ten digits.
 func connectParseTimeout(timeout string) (time.Duration, error) {
 	if len(timeout) > 10 {
 		return 0, connect.Errorf(connect.CodeInvalidArgument, "parse timeout: %q has >10 digits", timeout)

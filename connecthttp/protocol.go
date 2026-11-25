@@ -451,3 +451,21 @@ func httpToCode(httpCode int) connect.Code {
 		return connect.CodeUnknown
 	}
 }
+
+// receiveExactlyOne reads a unary message with receive and checks that the
+// stream ends after it. A missing or extra message fails with
+// [connect.CodeUnimplemented]. messageName names the message in the error.
+func receiveExactlyOne(receive func(any) error, msg any, messageName string) error {
+	err := receive(msg)
+	if errors.Is(err, io.EOF) {
+		return connect.Errorf(connect.CodeUnimplemented, "unary %s has zero messages", messageName)
+	} else if err != nil {
+		return err
+	}
+	if err := receive(msg); err == nil {
+		return connect.Errorf(connect.CodeUnimplemented, "unary %s has multiple messages", messageName)
+	} else if !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
+}

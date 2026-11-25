@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -27,7 +28,6 @@ import (
 	"unicode/utf8"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/internal/bufferpool"
 	"github.com/coder/websocket"
 )
 
@@ -53,8 +53,6 @@ var (
 	errWebSocketProtocol = errors.New("protocol error")
 	// Both sides close with 1007, and a server sends no S.
 	errWebSocketInvalidUTF8 = errors.New("invalid UTF-8 in text message")
-	// A server leaves the key out of M, then sends S and closes with 1000.
-	errWebSocketConnectKey = errors.New("connect- key in response metadata")
 	// An HTTPClient with a Timeout, or one that buffers or wraps the
 	// response body, can't carry a WebSocket.
 	errWebSocketHTTPClient = errors.New("HTTP client can't carry a WebSocket")
@@ -62,25 +60,27 @@ var (
 
 // WithWebSocket enables Connect over WebSocket.
 //
-// On [Mount] each procedure accepts WebSocket upgrades as well as the HTTP
-// protocols. On [NewTransport] clients use WebSocket in place of the Connect
-// protocol. Use [WithConditionalOptions] to enable it for some procedures
-// only.
+// On [Mount], procedures accept WebSocket upgrades alongside the HTTP
+// protocols. On [NewTransport], clients use WebSocket instead of the HTTP
+// protocols. Use [WithConditionalOptions] to enable it for specific
+// procedures only.
 //
-// Request metadata travels in the first WebSocket message, and a key that is
-// also a handshake header fails the RPC. Authenticate RPCs in an interceptor
-// or handler, not in HTTP middleware that only sees the handshake.
+// Request metadata travels in the first WebSocket message. Sending a
+// metadata key that is also a handshake header fails the RPC. Authenticate
+// RPCs in a [connect.ServerInterceptor] or procedure. HTTP middleware only
+// sees the initial handshake.
 //
 // An [*http.Client] works as is, and its Timeout only bounds the handshake.
 // Use a context deadline to bound an RPC. Any other [HTTPClient] makes the
-// handshake request and must return the 101 response unchanged, with a body
-// the connection can write to. A client with a Timeout, or one that buffers
-// or wraps the response body, fails the dial with [connect.CodeInternal].
-// It follows redirects with its own policy, so it can't follow a redirect to
-// a ws or wss URL.
-// The handshake is HTTP/1.1, so a client that only speaks HTTP/2 can't dial.
-// A server that answers with a bad upgrade can delay the dial error by up to
-// three seconds.
+// handshake request and must return the 101 response unchanged. Its
+// response body must be writable and implement [io.ReadWriteCloser]. Any
+// other [HTTPClient] with a Timeout fails the dial with
+// [connect.CodeInternal]. Buffering or wrapping the response body also fails
+// with [connect.CodeInternal].
+//
+// The handshake uses HTTP/1.1, so an HTTP/2-only client cannot dial. The
+// [HTTPClient] follows redirects with its own policy, so it cannot follow
+// redirects to ws or wss URLs.
 func WithWebSocket() Option {
 	return websocketOption{}
 }
@@ -92,75 +92,85 @@ func (websocketOption) apply(opts *options) {
 	opts.websocket = true
 }
 
-type websocketMessage struct {
-	marker  byte
-	payload []byte
+// websocketReadMessage reads a whole message into dst, which can be recycled.
+// conn.Read allocates each message.
+func websocketReadMessage(ctx context.Context, conn *websocket.Conn, dst *bytes.Buffer) (websocket.MessageType, error) {
+	messageType, reader, err := conn.Reader(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := dst.ReadFrom(reader); err != nil {
+		return 0, err
+	}
+	return messageType, nil
 }
 
-// parseWebSocketMessage leaves ordering and direction checks to the caller.
-func parseWebSocketMessage(messageType websocket.MessageType, data []byte, bodyIsText bool) (websocketMessage, *connect.Error) {
+// websocketParseMarker returns the marker of the message in buffer and
+// consumes it, leaving the payload. Ordering and direction checks are left to
+// the caller.
+func websocketParseMarker(messageType websocket.MessageType, buffer *bytes.Buffer, codecName string) (byte, *connect.Error) {
+	data := buffer.Bytes()
 	text := messageType == websocket.MessageText
 	if text && !utf8.Valid(data) {
-		return websocketMessage{}, connect.NewError(connect.CodeInternal, errWebSocketInvalidUTF8.Error()).WithCause(errWebSocketInvalidUTF8)
+		return 0, connect.NewError(connect.CodeInternal, errWebSocketInvalidUTF8.Error()).WithCause(errWebSocketInvalidUTF8)
 	}
 	if len(data) == 0 {
-		return websocketMessage{}, newWebSocketProtocolError("empty message")
+		return 0, newWebSocketProtocolError("empty message")
 	}
-	message := websocketMessage{marker: data[0], payload: data[1:]}
-	switch message.marker {
+	marker, payload := data[0], data[1:]
+	switch marker {
 	case websocketMarkerBody:
-		if text != bodyIsText {
-			return websocketMessage{}, newWebSocketProtocolError("B message in a %s frame, expected a %s frame", websocketFrameName(text), websocketFrameName(bodyIsText))
+		if bodyType := websocketBodyType(codecName); messageType != bodyType {
+			return 0, newWebSocketProtocolError("B message in a %s frame, expected a %s frame", websocketFrameName(messageType), websocketFrameName(bodyType))
 		}
 	case websocketMarkerLeadingMetadata, websocketMarkerServerEndStream, websocketMarkerClientEndStream:
 		if !text {
-			return websocketMessage{}, newWebSocketProtocolError("%c message in a binary frame, expected a text frame", message.marker)
+			return 0, newWebSocketProtocolError("%c message in a binary frame, expected a text frame", marker)
 		}
-		if message.marker == websocketMarkerClientEndStream && len(message.payload) > 0 {
-			return websocketMessage{}, newWebSocketProtocolError("C message has a payload")
+		if marker == websocketMarkerClientEndStream && len(payload) > 0 {
+			return 0, newWebSocketProtocolError("C message has a payload")
 		}
-		if message.marker != websocketMarkerClientEndStream && len(message.payload) == 0 {
-			return websocketMessage{}, newWebSocketProtocolError("%c message has no payload", message.marker)
+		if marker != websocketMarkerClientEndStream && len(payload) == 0 {
+			return 0, newWebSocketProtocolError("%c message has no payload", marker)
 		}
 	default:
-		return websocketMessage{}, newWebSocketProtocolError("unknown marker 0x%02x", message.marker)
+		return 0, newWebSocketProtocolError("unknown marker 0x%02x", marker)
 	}
-	return message, nil
+	buffer.Next(1)
+	return marker, nil
 }
 
-func websocketMetadata(header *connect.Header) http.Header {
-	metadata := make(http.Header)
-	for key, values := range userHeaders(header) {
-		key = strings.ToLower(key)
-		if len(values) == 0 || strings.HasPrefix(key, "connect-") {
-			continue
-		}
-		for _, value := range values {
-			metadata[key] = append(metadata[key], trimWebSocketMetadataValue(value))
-		}
-	}
-	return metadata
-}
-
-// trimWebSocketMetadataValue removes what RFC 9110 Section 5.5 says is not
+// websocketTrimMetadataValue removes what RFC 9110 Section 5.5 says is not
 // part of a field value.
-func trimWebSocketMetadataValue(value string) string {
+func websocketTrimMetadataValue(value string) string {
 	return strings.Trim(value, " \t")
 }
 
-func encodeWebSocketMetadata(metadata http.Header) []byte {
+// websocketMarshalMetadata writes an M message into buffer.
+func websocketMarshalMetadata(buffer *bytes.Buffer, metadata http.Header) {
+	buffer.WriteByte(websocketMarkerLeadingMetadata)
 	entries := make([][]string, 0, len(metadata))
 	for key, values := range metadata {
 		entries = append(entries, append([]string{key}, values...))
 	}
 	slices.SortFunc(entries, func(a, b []string) int { return strings.Compare(a[0], b[0]) })
-	payload, _ := json.Marshal(entries) //nolint:errchkjson // a slice of string slices always marshals
-	return payload
+	_ = websocketAppendJSON(buffer, entries) // a slice of string slices always encodes
 }
 
-// decodeWebSocketMetadata canonicalizes keys so they can be compared with
+// websocketAppendJSON encodes value into buffer, where json.Marshal would
+// allocate.
+func websocketAppendJSON(buffer *bytes.Buffer, value any) error {
+	if err := json.NewEncoder(buffer).Encode(value); err != nil {
+		return err
+	}
+	// Encode ends with a newline.
+	buffer.Truncate(buffer.Len() - 1)
+	return nil
+}
+
+// websocketDecodeMetadata canonicalizes keys so they can be compared with
 // handshake headers.
-func decodeWebSocketMetadata(payload []byte, fromClient bool) (http.Header, *connect.Error) {
+func websocketDecodeMetadata(payload []byte, fromClient bool) (http.Header, *connect.Error) {
 	// Pointers tell a JSON null apart from an empty string.
 	var entries [][]*string
 	if err := json.Unmarshal(payload, &entries); err != nil {
@@ -180,9 +190,9 @@ func decodeWebSocketMetadata(payload []byte, fromClient bool) (http.Header, *con
 		key := *entry[0]
 		values := make([]string, len(entry)-1)
 		for i, value := range entry[1:] {
-			values[i] = trimWebSocketMetadataValue(*value)
+			values[i] = websocketTrimMetadataValue(*value)
 		}
-		if err := validateWebSocketMetadata(key, values, fromClient); err != nil {
+		if err := websocketValidateMetadata(key, values, fromClient); err != nil {
 			return nil, err
 		}
 		canonical := http.CanonicalHeaderKey(key)
@@ -194,40 +204,16 @@ func decodeWebSocketMetadata(payload []byte, fromClient bool) (http.Header, *con
 	return header, nil
 }
 
-// dropInvalidWebSocketMetadata drops entries a peer would reject, as net/http
-// drops invalid header fields.
-func dropInvalidWebSocketMetadata(metadata http.Header) http.Header {
-	for key, values := range metadata {
-		if validateWebSocketMetadata(key, nil, false) != nil {
-			delete(metadata, key)
-			continue
-		}
-		if !strings.HasSuffix(key, "-bin") {
-			values = slices.DeleteFunc(values, func(value string) bool { return !isWebSocketMetadataValue(value) })
-		}
-		if len(values) == 0 {
-			delete(metadata, key)
-		} else {
-			metadata[key] = values
-		}
-	}
-	return metadata
-}
-
-func validateWebSocketMetadata(key string, values []string, fromClient bool) *connect.Error {
-	if key == "" {
+func websocketValidateMetadata(key string, values []string, fromClient bool) *connect.Error {
+	switch {
+	case key == "":
 		return newWebSocketProtocolError("M message has an empty key")
+	case !websocketIsMetadataKey(key):
+		return newWebSocketProtocolError("M message key %q is not a valid header name", key)
+	case strings.ToLower(key) != key:
+		return newWebSocketProtocolError("M message key %q is not lower-case", key)
 	}
-	for i := range len(key) {
-		char := key[i]
-		if char >= 'A' && char <= 'Z' {
-			return newWebSocketProtocolError("M message key %q is not lower-case", key)
-		}
-		if !isHTTPTokenByte(char) {
-			return newWebSocketProtocolError("M message key %q is not a valid header name", key)
-		}
-	}
-	if fromClient && isReservedWebSocketKey(key) {
+	if fromClient && websocketIsReservedKey(key) {
 		return newWebSocketProtocolError("M message key %q is reserved", key)
 	}
 	// Values of -bin keys are base64. Invalid base64 is reported when the
@@ -236,27 +222,34 @@ func validateWebSocketMetadata(key string, values []string, fromClient bool) *co
 		return nil
 	}
 	for _, value := range values {
-		if !isWebSocketMetadataValue(value) {
+		if !websocketIsMetadataValue(value) {
 			return newWebSocketProtocolError("M message value for key %q is not a valid header value", key)
 		}
 	}
 	return nil
 }
 
-// isReservedWebSocketKey lists the Fetch standard's forbidden request headers,
-// headers this protocol controls and headers proxies set.
-func isReservedWebSocketKey(key string) bool {
+// websocketIsReservedKey follows the three lists in spec Section 7.3.2.
+func websocketIsReservedKey(key string) bool {
 	switch key {
-	case "accept-charset", "accept-encoding", "access-control-request-headers",
+	case
+		// 1. Fetch forbidden request headers.
+		"accept-charset", "accept-encoding", "access-control-request-headers",
 		"access-control-request-method", "connection", "content-length", "cookie",
 		"cookie2", "date", "dnt", "expect", "host", "keep-alive", "origin",
 		"referer", "set-cookie", "te", "trailer", "transfer-encoding", "upgrade",
 		"via", "x-http-method", "x-http-method-override", "x-method-override",
-		"content-type", "content-encoding",
-		"forwarded", "x-real-ip":
+		// 2. Infrastructure deny list.
+		"forwarded", "x-real-ip",
+		// 3. Controlled by this protocol.
+		"content-type", "content-encoding":
 		return true
 	}
-	for _, prefix := range []string{"proxy-", "sec-", "connect-", "x-forwarded-"} {
+	for _, prefix := range []string{
+		"proxy-", "sec-", // 1. Fetch forbidden request headers.
+		"x-forwarded-", // 2. Infrastructure deny list.
+		"connect-",     // 3. Controlled by this protocol.
+	} {
 		if strings.HasPrefix(key, prefix) {
 			return true
 		}
@@ -264,29 +257,37 @@ func isReservedWebSocketKey(key string) bool {
 	return false
 }
 
-// isHTTPTokenByte follows RFC 9110 Section 5.6.2.
-func isHTTPTokenByte(char byte) bool {
-	switch {
-	case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
-		return true
-	default:
-		return strings.IndexByte("!#$%&'*+-.^_`|~", char) >= 0
+// websocketIsMetadataKey reports whether key is a valid HTTP field name. It
+// doesn't check case.
+func websocketIsMetadataKey(key string) bool {
+	if key == "" {
+		return false
 	}
-}
-
-// isWebSocketMetadataValue follows RFC 9110 Section 5.5 without obs-text, the
-// bytes 0x80-0xFF, which a JSON string can't carry as bytes.
-func isWebSocketMetadataValue(value string) bool {
-	for i := range len(value) {
-		if char := value[i]; (char < ' ' && char != '\t') || char > '~' {
+	for i := range len(key) {
+		if !isHTTPTokenByte(key[i]) {
 			return false
 		}
 	}
 	return true
 }
 
-func websocketBodyIsText(codecName string) bool {
-	return codecName == connect.CodecNameJSON
+// isHTTPTokenByte follows RFC 9110 Section 5.6.2.
+func isHTTPTokenByte(char byte) bool {
+	return (char >= 'a' && char <= 'z') ||
+		(char >= 'A' && char <= 'Z') ||
+		(char >= '0' && char <= '9') ||
+		(strings.IndexByte("!#$%&'*+-.^_`|~", char) >= 0)
+}
+
+// websocketIsMetadataValue follows RFC 9110 Section 5.5 without obs-text, the
+// bytes 0x80-0xFF, which a JSON string can't carry as bytes.
+func websocketIsMetadataValue(value string) bool {
+	for i := range len(value) {
+		if char := value[i]; (char < ' ' && char != '\t') || char > '~' {
+			return false
+		}
+	}
+	return true
 }
 
 // websocketReadLimit doesn't count the marker byte. -1 lifts coder's 32 KiB
@@ -298,44 +299,24 @@ func websocketReadLimit(readMaxBytes int) int64 {
 	return int64(readMaxBytes) + 1
 }
 
-// marshalWebSocketBody returns a pooled buffer. The caller must
-// bufferpool.Put it.
-func marshalWebSocketBody(ctx context.Context, codec connect.Codec, msg any, sendMaxBytes int) (*bytes.Buffer, error) {
-	buffer := bufferpool.Get()
-	buffer.WriteByte(websocketMarkerBody)
-	if err := codec.MarshalWrite(ctx, buffer, msg); err != nil {
-		bufferpool.Put(buffer)
-		return nil, connect.Errorf(connect.CodeInternal, "marshal message: %s", err).WithCause(err)
+// websocketMarshalBody writes a B message into dst.
+func websocketMarshalBody(ctx context.Context, dst *bytes.Buffer, codec connect.Codec, msg any, sendMaxBytes int) error {
+	dst.WriteByte(websocketMarkerBody)
+	if err := codec.MarshalWrite(ctx, dst, msg); err != nil {
+		return connect.Errorf(connect.CodeInternal, "marshal message: %s", err).WithCause(err)
 	}
-	if size := buffer.Len() - 1; sendMaxBytes > 0 && size > sendMaxBytes {
-		bufferpool.Put(buffer)
-		return nil, connect.Errorf(connect.CodeResourceExhausted, "message size %d exceeds sendMaxBytes %d", size, sendMaxBytes)
+	if size := dst.Len() - 1; sendMaxBytes > 0 && size > sendMaxBytes {
+		return connect.Errorf(connect.CodeResourceExhausted, "message size %d exceeds sendMaxBytes %d", size, sendMaxBytes)
 	}
-	return buffer, nil
+	return nil
 }
 
+// websocketBodyType sends only JSON as text.
 func websocketBodyType(codecName string) websocket.MessageType {
-	if websocketBodyIsText(codecName) {
+	if codecName == connect.CodecNameJSON {
 		return websocket.MessageText
 	}
 	return websocket.MessageBinary
-}
-
-func writeWebSocketText(ctx context.Context, conn *websocket.Conn, marker byte, payload []byte) error {
-	message := make([]byte, 0, len(payload)+1)
-	message = append(message, marker)
-	message = append(message, payload...)
-	return conn.Write(ctx, websocket.MessageText, message)
-}
-
-// websocketCloseReason truncates reason to fit a Close frame. coder sends no
-// Close frame for a reason over 123 bytes.
-func websocketCloseReason(reason string) string {
-	const maxReasonBytes = 123
-	if len(reason) <= maxReasonBytes {
-		return reason
-	}
-	return strings.ToValidUTF8(reason[:maxReasonBytes], "")
 }
 
 // websocketGraceContext ends [websocketCloseGrace] after ctx. coder drops the
@@ -357,25 +338,23 @@ func newWebSocketProtocolError(format string, args ...any) *connect.Error {
 	return connect.NewError(connect.CodeInternal, "protocol error: "+message).WithCause(errWebSocketProtocol)
 }
 
+// websocketCause stops a cause that wraps io.EOF from reading as a clean end
+// of stream.
+func websocketCause(err error) error {
+	if errors.Is(err, io.EOF) {
+		return io.ErrUnexpectedEOF
+	}
+	return err
+}
+
 // newWebSocketDecodeError is a protocol error, but it uses invalid_argument to
 // match Connect-over-HTTP.
 func newWebSocketDecodeError(err error) *connect.Error {
 	return connect.NewError(connect.CodeInvalidArgument, "protocol error: unmarshal message: "+err.Error()).WithCause(errWebSocketProtocol)
 }
 
-// websocketConnectKeyError reports a key the handler set that begins with
-// connect-, which a server must not send in M or S.
-func websocketConnectKeyError(header *connect.Header, kind string) error {
-	for key, values := range header.All() {
-		if len(values) > 0 && strings.HasPrefix(key, "Connect-") {
-			return connect.Errorf(connect.CodeInternal, "response %s %q is reserved for the protocol", kind, strings.ToLower(key)).WithCause(errWebSocketConnectKey)
-		}
-	}
-	return nil
-}
-
-func websocketFrameName(text bool) string {
-	if text {
+func websocketFrameName(messageType websocket.MessageType) string {
+	if messageType == websocket.MessageText {
 		return "text"
 	}
 	return "binary"
