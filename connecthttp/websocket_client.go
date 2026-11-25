@@ -183,7 +183,10 @@ func (s *websocketClientStream) Receive(msg any) error {
 	if err != nil {
 		s.receiveErr = err
 		closeCode := websocketStatusClientError
-		if errors.Is(err, errWebSocketInvalidUTF8) {
+		switch {
+		case errors.Is(err, websocket.ErrMessageTooBig):
+			closeCode = websocket.StatusMessageTooBig
+		case errors.Is(err, errWebSocketInvalidUTF8):
 			closeCode = websocket.StatusInvalidFramePayloadData
 		}
 		s.release(closeCode, websocketCloseReason(err.Error()))
@@ -358,8 +361,14 @@ func (s *websocketClientStream) receiveEnd(payload []byte) error {
 func (s *websocketClientStream) release(closeCode websocket.StatusCode, reason string) {
 	if s.stopWatching() {
 		conn, _ := s.dial()
-		// Don't make the caller wait for the close handshake, up to 5s in coder.
-		go func() { _ = conn.Close(closeCode, reason) }()
+		if closeCode == websocket.StatusMessageTooBig {
+			// coder already sent 1009. Close would drain the rest of the
+			// message with no deadline and hang on a server that stalls.
+			_ = conn.CloseNow()
+		} else {
+			// Don't make the caller wait for the close handshake.
+			go func() { _ = conn.Close(closeCode, reason) }()
+		}
 	}
 	s.cancel()
 }

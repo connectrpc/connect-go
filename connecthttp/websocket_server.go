@@ -167,9 +167,9 @@ func (s *websocketServerStream) finish(ctx context.Context, err error) {
 	}
 	switch {
 	case errors.Is(cause, websocket.ErrMessageTooBig):
-		// coder already sent 1009. Close drains the rest of the message, so
-		// the socket isn't reset with the Close frame unread.
-		_ = s.conn.Close(websocket.StatusMessageTooBig, "")
+		// coder already sent 1009. Close would drain the rest of the message
+		// with no deadline and hang on a client that stalls.
+		_ = s.conn.CloseNow()
 		return
 	case errors.Is(cause, errWebSocketInvalidUTF8):
 		_ = s.conn.Close(websocket.StatusInvalidFramePayloadData, "")

@@ -15,9 +15,14 @@
 package connecthttp_test
 
 import (
+	"bufio"
 	"context"
+	"crypto/sha1"
+	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1016,7 +1021,7 @@ func TestWebSocketServerReceiveAfterDecodeError(t *testing.T) {
 	}
 }
 
-func TestWebSocketServerDrainsOversizedMessage(t *testing.T) {
+func TestWebSocketServerOversizedMessage(t *testing.T) {
 	t.Parallel()
 	server := newWebSocketServer(t, &websocketPingServer{}, connecthttp.WithReadMaxBytes(1024))
 	conn := dialWebSocket(t, server, pingv1connect.PingServiceCumSumProcedure, "connectrpc.1+proto", nil)
@@ -1028,8 +1033,49 @@ func TestWebSocketServerDrainsOversizedMessage(t *testing.T) {
 		_, _, err := conn.Read(ctx)
 		readErr <- err
 	}()
-	assert.Nil(t, conn.Write(ctx, websocket.MessageBinary, append([]byte("B"), make([]byte, 4<<20)...)))
+	// The server closes without reading the rest, which can fail the write.
+	_ = conn.Write(ctx, websocket.MessageBinary, append([]byte("B"), make([]byte, 4<<20)...))
 	assert.Equal(t, websocket.CloseStatus(<-readErr), websocket.StatusMessageTooBig)
+}
+
+func TestWebSocketServerOversizedMessageStalls(t *testing.T) {
+	t.Parallel()
+	server := newWebSocketServer(t, &websocketPingServer{}, connecthttp.WithReadMaxBytes(1024))
+	conn, reader := dialWebSocketRaw(t, server, pingv1connect.PingServiceCumSumProcedure)
+	_, err := conn.Write(append(rawFrame(0x1, 3), "M[]"...))
+	assert.Nil(t, err)
+	closed := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(io.Discard, reader)
+		closed <- err
+	}()
+	// Announce 1 MiB, send past the limit, then stall with the socket open.
+	_, _ = conn.Write(append(rawFrame(0x2, 1<<20), make([]byte, 4096)...))
+	_ = receiveWithin(t, closed, "server close")
+}
+
+func TestWebSocketClientOversizedMessageStalls(t *testing.T) {
+	t.Parallel()
+	closed := make(chan error, 1)
+	server := rawWebSocketServer(t, func(conn net.Conn, reader *bufio.Reader) {
+		go func() {
+			_, _ = conn.Write(append(rawServerFrame(0x1, 3), "M[]"...))
+			// Announce 1 MiB, send past the limit, then stall with the socket open.
+			_, _ = conn.Write(append(rawServerFrame(0x2, 1<<20), make([]byte, 4096)...))
+		}()
+		_, err := io.Copy(io.Discard, reader)
+		closed <- err
+	})
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
+		&http.Client{Transport: server.TransportHTTP1()}, server.URL(),
+		connecthttp.WithWebSocket(), connecthttp.WithReadMaxBytes(1024),
+	)))
+	stream, err := client.CumSum(t.Context())
+	assert.Nil(t, err)
+	assert.Nil(t, stream.SendHeaders())
+	_, err = stream.Receive()
+	assert.Equal(t, connect.CodeOf(err), connect.CodeResourceExhausted)
+	_ = receiveWithin(t, closed, "client close")
 }
 
 func TestWebSocketClientDialDropped(t *testing.T) {
@@ -1239,4 +1285,54 @@ func dialWebSocket(t *testing.T, server *memhttp.Server, path, subprotocol strin
 	}
 	t.Cleanup(func() { _ = conn.CloseNow() })
 	return conn
+}
+
+// dialWebSocketRaw upgrades by hand, for tests that write frames coder won't.
+func dialWebSocketRaw(t *testing.T, server *memhttp.Server, procedure string) (net.Conn, *bufio.Reader) {
+	t.Helper()
+	conn, err := server.TransportHTTP1().DialContext(t.Context(), "tcp", "example.com:80")
+	assert.Nil(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	_, err = io.WriteString(conn, "GET "+procedure+" HTTP/1.1\r\nHost: example.com\r\n"+
+		"Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n"+
+		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: connectrpc.1+proto\r\n\r\n")
+	assert.Nil(t, err)
+	reader := bufio.NewReader(conn)
+	response, err := http.ReadResponse(reader, nil)
+	assert.Nil(t, err)
+	assert.Equal(t, response.StatusCode, http.StatusSwitchingProtocols)
+	assert.Nil(t, response.Body.Close())
+	return conn, reader
+}
+
+// rawWebSocketServer upgrades by hand, for tests that write frames coder
+// won't.
+func rawWebSocketServer(t *testing.T, serve func(net.Conn, *bufio.Reader)) *memhttp.Server {
+	t.Helper()
+	return memhttptest.NewServer(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		conn, readWriter, err := http.NewResponseController(response).Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		sum := sha1.Sum([]byte(request.Header.Get("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+		_, err = io.WriteString(conn, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"+
+			"Sec-WebSocket-Accept: "+base64.StdEncoding.EncodeToString(sum[:])+"\r\nSec-WebSocket-Protocol: connectrpc.1+proto\r\n\r\n")
+		if err != nil {
+			return
+		}
+		serve(conn, readWriter.Reader)
+	}))
+}
+
+// rawServerFrame is a final, unmasked server frame header.
+func rawServerFrame(opcode byte, length uint64) []byte {
+	return binary.BigEndian.AppendUint64([]byte{0x80 | opcode, 127}, length)
+}
+
+// rawFrame is a final client frame header with a zero mask key, which leaves
+// the payload as is.
+func rawFrame(opcode byte, length uint64) []byte {
+	header := binary.BigEndian.AppendUint64([]byte{0x80 | opcode, 0x80 | 127}, length)
+	return append(header, 0, 0, 0, 0)
 }

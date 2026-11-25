@@ -308,7 +308,8 @@ func websocketBodyType(codecName string) websocket.MessageType {
 
 // websocketGraceContext ends [websocketCloseGrace] after ctx. coder drops the
 // connection when a read or write context ends, so a nearly done write or
-// close handshake gets time to finish. coder bounds Close at 5s on its own.
+// close handshake gets time to finish. coder bounds the close handshake at 5s
+// but not the drain of a partly read frame.
 func websocketGraceContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	graceCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	stop := context.AfterFunc(ctx, func() {
