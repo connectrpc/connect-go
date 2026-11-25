@@ -561,10 +561,9 @@ func websocketParseTimeout(rawQuery string) (time.Duration, bool, error) {
 		}
 		timeoutValue, found = value, true
 	}
-	switch {
-	case !found:
+	if !found {
 		return 0, false, nil
-	case timeoutValue == "":
+	} else if timeoutValue == "" {
 		return 0, false, connect.NewError(connect.CodeInvalidArgument, "parse timeout: no value supplied")
 	}
 	timeout, err := connectParseTimeout(timeoutValue)

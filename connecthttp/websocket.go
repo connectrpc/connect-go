@@ -68,6 +68,42 @@ var (
 		}
 		return table
 	}()
+	// websocketReservedKeys follows the three lists in spec Section 7.3.2.
+	//
+	//nolint:gochecknoglobals
+	websocketReservedKeys = map[string]bool{
+		// 1. Fetch forbidden request headers.
+		"accept-charset":                 true,
+		"accept-encoding":                true,
+		"access-control-request-headers": true,
+		"access-control-request-method":  true,
+		"connection":                     true,
+		"content-length":                 true,
+		"cookie":                         true,
+		"cookie2":                        true,
+		"date":                           true,
+		"dnt":                            true,
+		"expect":                         true,
+		"host":                           true,
+		"keep-alive":                     true,
+		"origin":                         true,
+		"referer":                        true,
+		"set-cookie":                     true,
+		"te":                             true,
+		"trailer":                        true,
+		"transfer-encoding":              true,
+		"upgrade":                        true,
+		"via":                            true,
+		"x-http-method":                  true,
+		"x-http-method-override":         true,
+		"x-method-override":              true,
+		// 2. Infrastructure deny list.
+		"forwarded": true,
+		"x-real-ip": true,
+		// 3. Controlled by this protocol.
+		"content-type":     true,
+		"content-encoding": true,
+	}
 	// websocketValueBytes follows RFC 9110 Section 5.5 without obs-text. A JSON
 	// string can't carry the bytes 0x80-0xFF.
 	//
@@ -261,30 +297,9 @@ func websocketValidateTrailer(key string, values []string) *connect.Error {
 
 // websocketIsReservedKey follows the three lists in spec Section 7.3.2.
 func websocketIsReservedKey(key string) bool {
-	switch key {
-	case
-		// 1. Fetch forbidden request headers.
-		"accept-charset", "accept-encoding", "access-control-request-headers",
-		"access-control-request-method", "connection", "content-length", "cookie",
-		"cookie2", "date", "dnt", "expect", "host", "keep-alive", "origin",
-		"referer", "set-cookie", "te", "trailer", "transfer-encoding", "upgrade",
-		"via", "x-http-method", "x-http-method-override", "x-method-override",
-		// 2. Infrastructure deny list.
-		"forwarded", "x-real-ip",
-		// 3. Controlled by this protocol.
-		"content-type", "content-encoding":
-		return true
-	}
-	for _, prefix := range []string{
-		"proxy-", "sec-", // 1. Fetch forbidden request headers.
-		"x-forwarded-", // 2. Infrastructure deny list.
-		"connect-",     // 3. Controlled by this protocol.
-	} {
-		if strings.HasPrefix(key, prefix) {
-			return true
-		}
-	}
-	return false
+	return websocketReservedKeys[key] ||
+		strings.HasPrefix(key, "proxy-") || strings.HasPrefix(key, "sec-") ||
+		strings.HasPrefix(key, "x-forwarded-") || strings.HasPrefix(key, "connect-")
 }
 
 func websocketIsMetadataKey(key string) bool {
