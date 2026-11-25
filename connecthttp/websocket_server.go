@@ -35,7 +35,8 @@ import (
 const (
 	websocketFirstMessageTimeout = 10 * time.Second
 	websocketCloseTimeout        = 5 * time.Second
-	// Below the common 60s idle timeout of proxies and load balancers.
+	// The server pings after writing nothing for this long, below the common
+	// 60s idle timeout of proxies and load balancers.
 	websocketPingInterval = 30 * time.Second
 )
 
@@ -56,6 +57,8 @@ type websocketServerStream struct {
 	messages      chan websocketMessage
 
 	peerGone atomic.Bool
+	// lastWrite is the UnixNano time of the last write, read by heartbeat.
+	lastWrite atomic.Int64
 
 	receivedEnd bool
 	sentHeader  bool
@@ -95,7 +98,7 @@ func (s *websocketServerStream) Send(msg any) error {
 	if err := s.writeHeader(s.ioCtx, s.info.ResponseHeader()); err != nil {
 		return err
 	}
-	if err := s.conn.Write(s.ioCtx, websocketBodyType(s.codec.Name()), body.Bytes()); err != nil {
+	if err := s.write(s.ioCtx, websocketBodyType(s.codec.Name()), body.Bytes()); err != nil {
 		return s.writeError(err)
 	}
 	return nil
@@ -138,7 +141,7 @@ func (s *websocketServerStream) writeHeader(ctx context.Context, responseHeader 
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
 	websocketMarshalMetadata(buffer, header)
-	if err := s.conn.Write(ctx, websocket.MessageText, buffer.Bytes()); err != nil {
+	if err := s.write(ctx, websocket.MessageText, buffer.Bytes()); err != nil {
 		return s.writeError(err)
 	}
 	s.sentHeader = true
@@ -146,6 +149,13 @@ func (s *websocketServerStream) writeHeader(ctx context.Context, responseHeader 
 		return s.fail(headerErr)
 	}
 	return nil
+}
+
+// write records the time for heartbeat, which pings only an idle connection.
+func (s *websocketServerStream) write(ctx context.Context, messageType websocket.MessageType, data []byte) error {
+	err := s.conn.Write(ctx, messageType, data)
+	s.lastWrite.Store(time.Now().UnixNano())
+	return err
 }
 
 func (s *websocketServerStream) writeError(err error) error {
@@ -417,24 +427,37 @@ func websocketServe(server *connect.Server, spec connect.Spec, opts *options, re
 		stream.finish(ctx, headerErr)
 		return
 	}
-	go websocketHeartbeat(ioCtx, conn)
+	go stream.heartbeat() //nolint:contextcheck // the stream holds ctx
 	fromHTTPHeader(info.RequestHeader(), header)
 	stream.finish(ctx, scrubHandlerError(server.Call(ctx, spec.Procedure, info, stream)))
 }
 
-// websocketHeartbeat pings the client at websocketPingInterval intervals.
-func websocketHeartbeat(ctx context.Context, conn *websocket.Conn) {
-	ticker := time.NewTicker(websocketPingInterval)
-	defer ticker.Stop()
+// heartbeat pings the client after websocketPingInterval without a write,
+// which keeps intermediaries from closing an idle connection. Pinging only an
+// idle connection avoids competing with Send. coder closes the connection
+// when a ping can't be written within 5s, which Receive reports as a client
+// disconnect.
+func (s *websocketServerStream) heartbeat() {
+	timer := time.NewTimer(websocketPingInterval)
+	defer timer.Stop()
 	for {
 		select {
-		case <-ctx.Done():
+		case <-s.ioCtx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
-		// A PONG goes unread while read waits on Receive.
-		pingCtx, cancel := context.WithTimeout(ctx, websocketPingInterval)
-		err := conn.Ping(pingCtx)
+		idle := time.Since(time.Unix(0, s.lastWrite.Load()))
+		if idle < websocketPingInterval {
+			timer.Reset(websocketPingInterval - idle)
+			continue
+		}
+		// Reset before Ping, which can wait a whole interval for the pong.
+		timer.Reset(websocketPingInterval)
+		// Return pong frames may not be read if the handler is not calling
+		// Receive, or if the client is busy sending payloads. We ignore the
+		// deadline since it does not mean the client disappeared.
+		pingCtx, cancel := context.WithTimeout(s.ioCtx, websocketPingInterval)
+		err := s.conn.Ping(pingCtx)
 		cancel()
 		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 			return

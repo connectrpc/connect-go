@@ -936,34 +936,65 @@ func TestWebSocketServerClientDropsBeforeReceive(t *testing.T) {
 
 func TestWebSocketServerPings(t *testing.T) {
 	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		server := newWebSocketServer(t, &pluggablePingServer{
-			cumSum: func(ctx context.Context, _ pingv1connect.PingServiceCumSumServerStream) error {
-				<-ctx.Done()
-				return nil
-			},
+	tests := []struct {
+		name string
+		// sends are the times the handler sends, from M.
+		sends  []time.Duration
+		noPong bool
+		pings  int32
+	}{
+		{name: "idle", pings: 3},
+		{name: "busy", sends: []time.Duration{10 * time.Second, 20 * time.Second, 30 * time.Second, 40 * time.Second, 50 * time.Second, 60 * time.Second, 70 * time.Second, 80 * time.Second, 90 * time.Second}},
+		{name: "send_then_idle", sends: []time.Duration{20 * time.Second}, pings: 2},
+		// A ping without a pong doesn't end the RPC.
+		{name: "unanswered", noPong: true, pings: 3},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				server := newWebSocketServer(t, &pluggablePingServer{
+					cumSum: func(ctx context.Context, stream pingv1connect.PingServiceCumSumServerStream) error {
+						start := time.Now()
+						for _, at := range test.sends {
+							time.Sleep(time.Until(start.Add(at)))
+							if err := stream.Send(&pingv1.CumSumResponse{}); err != nil {
+								return err
+							}
+						}
+						<-ctx.Done()
+						return nil
+					},
+				})
+				var pings atomic.Int32
+				conn, response, err := websocket.Dial(t.Context(), server.URL()+pingv1connect.PingServiceCumSumProcedure, &websocket.DialOptions{
+					HTTPClient:   &http.Client{Transport: server.TransportHTTP1()},
+					Subprotocols: []string{"connectrpc.1+json"},
+					OnPingReceived: func(context.Context, []byte) bool {
+						pings.Add(1)
+						return !test.noPong
+					},
+				})
+				assert.Nil(t, err)
+				if response.Body != nil {
+					_ = response.Body.Close()
+				}
+				assert.Nil(t, writeFrames(t.Context(), conn, textFrame("M[]")))
+				go func() {
+					for {
+						if _, _, err := conn.Read(context.Background()); err != nil {
+							return
+						}
+					}
+				}()
+				time.Sleep(95 * time.Second)
+				assert.Equal(t, pings.Load(), test.pings)
+				_ = conn.CloseNow()
+				// Outlast coder's 5s close handshake before the bubble ends.
+				time.Sleep(10 * time.Second)
+			})
 		})
-		var pings atomic.Int32
-		conn, response, err := websocket.Dial(t.Context(), server.URL()+pingv1connect.PingServiceCumSumProcedure, &websocket.DialOptions{
-			HTTPClient:   &http.Client{Transport: server.TransportHTTP1()},
-			Subprotocols: []string{"connectrpc.1+json"},
-			OnPingReceived: func(context.Context, []byte) bool {
-				pings.Add(1)
-				return true
-			},
-		})
-		assert.Nil(t, err)
-		if response.Body != nil {
-			_ = response.Body.Close()
-		}
-		assert.Nil(t, writeFrames(t.Context(), conn, textFrame("M[]")))
-		go func() { _, _, _ = conn.Read(context.Background()) }()
-		time.Sleep(65 * time.Second)
-		assert.Equal(t, pings.Load(), 2)
-		_ = conn.CloseNow()
-		// Outlast coder's 5s close handshake before the bubble ends.
-		time.Sleep(10 * time.Second)
-	})
+	}
 }
 
 func TestWebSocketServerMetadataLimit(t *testing.T) {
