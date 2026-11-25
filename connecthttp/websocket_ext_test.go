@@ -1054,6 +1054,86 @@ func TestWebSocketServerOversizedMessageStalls(t *testing.T) {
 	_ = receiveWithin(t, closed, "server close")
 }
 
+func TestWebSocketServerFailedStalls(t *testing.T) {
+	t.Parallel()
+	server := newWebSocketServer(t, &websocketPingServer{})
+	conn, reader := dialWebSocketRaw(t, server, pingv1connect.PingServiceCumSumProcedure)
+	// Read first, or the server's writes block on the in-memory connection.
+	closed := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(io.Discard, reader)
+		closed <- err
+	}()
+	// An unknown marker fails the RPC. The client then stalls mid-message.
+	_, err := conn.Write(append(append(rawFrame(0x1, 3), "M[]"...), append(rawFrame(0x1, 1), 'Q')...))
+	assert.Nil(t, err)
+	_, _ = conn.Write(append(rawFrame(0x2, 1<<20), make([]byte, 16)...))
+	select {
+	case <-closed:
+	case <-time.After(15 * time.Second): // coder's close handshake waits 5s
+		t.Fatal("server didn't close the connection")
+	}
+}
+
+func TestWebSocketServerDeadlineStalls(t *testing.T) {
+	t.Parallel()
+	server := newWebSocketServer(t, &websocketPingServer{}, connecthttp.WithReadMaxBytes(1024))
+	conn, reader := dialWebSocketRaw(t, server, pingv1connect.PingServiceCumSumProcedure+"?connect-timeout-ms=200")
+	closed := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(io.Discard, reader)
+		closed <- err
+	}()
+	_, err := conn.Write(append(rawFrame(0x1, 3), "M[]"...))
+	assert.Nil(t, err)
+	// The deadline passes mid-message, then the client crosses the read limit
+	// while the server closes, and stalls.
+	_, err = conn.Write(append(rawFrame(0x2, 1<<20), make([]byte, 512)...))
+	assert.Nil(t, err)
+	time.Sleep(600 * time.Millisecond)
+	_, _ = conn.Write(make([]byte, 4096))
+	select {
+	case <-closed:
+	case <-time.After(15 * time.Second): // coder's close handshake waits 5s
+		t.Fatal("server didn't close the connection")
+	}
+}
+
+func TestWebSocketClientCancelStalls(t *testing.T) {
+	t.Parallel()
+	closed := make(chan error, 1)
+	sent := make(chan struct{})
+	server := rawWebSocketServer(t, func(conn net.Conn, reader *bufio.Reader) {
+		go func() {
+			_, _ = conn.Write(append(rawServerFrame(0x1, 3), "M[]"...))
+			_, _ = conn.Write(append(rawServerFrame(0x2, 1<<20), make([]byte, 512)...))
+			close(sent)
+			// After the cancel, cross the client's read limit and stall.
+			time.Sleep(100 * time.Millisecond)
+			_, _ = conn.Write(make([]byte, 4096))
+		}()
+		_, err := io.Copy(io.Discard, reader)
+		closed <- err
+	})
+	client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(
+		&http.Client{Transport: server.TransportHTTP1()}, server.URL(),
+		connecthttp.WithWebSocket(), connecthttp.WithReadMaxBytes(1024),
+	)))
+	ctx, cancel := context.WithCancel(t.Context())
+	stream, err := client.CumSum(ctx)
+	assert.Nil(t, err)
+	assert.Nil(t, stream.SendHeaders())
+	received := make(chan error, 1)
+	go func() {
+		_, err := stream.Receive()
+		received <- err
+	}()
+	<-sent
+	cancel()
+	assert.Equal(t, connect.CodeOf(receiveWithin(t, received, "Receive result")), connect.CodeCanceled)
+	_ = receiveWithin(t, closed, "client close")
+}
+
 func TestWebSocketClientOversizedMessageStalls(t *testing.T) {
 	t.Parallel()
 	closed := make(chan error, 1)

@@ -15,10 +15,12 @@
 package connecthttp
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -47,6 +49,7 @@ type websocketServerStream struct {
 	cancel        context.CancelCauseFunc
 	sendMaxBytes  int
 	conn          *websocket.Conn
+	netConn       net.Conn
 	codec         connect.Codec
 	info          *connect.CallInfo
 	singleRequest bool
@@ -172,7 +175,7 @@ func (s *websocketServerStream) finish(ctx context.Context, err error) {
 		_ = s.conn.CloseNow()
 		return
 	case errors.Is(cause, errWebSocketInvalidUTF8):
-		_ = s.conn.Close(websocket.StatusInvalidFramePayloadData, "")
+		s.close(websocket.StatusInvalidFramePayloadData)
 		return
 	}
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), websocketCloseTimeout)
@@ -202,14 +205,22 @@ func (s *websocketServerStream) finish(ctx context.Context, err error) {
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
 	if s.encodeEndStream(buffer, trailer, err) != nil {
-		_ = s.conn.Close(websocket.StatusInternalError, "")
+		s.close(websocket.StatusInternalError)
 		return
 	}
 	if writeErr := s.conn.Write(writeCtx, websocket.MessageText, buffer.Bytes()); writeErr != nil {
 		_ = s.conn.CloseNow()
 		return
 	}
-	_ = s.conn.Close(closeCode, "")
+	s.close(closeCode)
+}
+
+// close bounds the close handshake with a deadline on the connection. coder
+// otherwise waits with no deadline for the rest of a message the client is
+// sending.
+func (s *websocketServerStream) close(code websocket.StatusCode) {
+	_ = s.netConn.SetDeadline(time.Now().Add(websocketCloseTimeout))
+	_ = s.conn.Close(code, "")
 }
 
 // encodeEndStream writes S into buffer. Over sendMaxBytes it falls back to
@@ -240,7 +251,8 @@ func (s *websocketServerStream) encodeEndStream(buffer *bytes.Buffer, trailer ht
 // raises the read limit after M and closes messages at C. A message after C
 // fails the RPC, as RFC 008 Section 8.1 requires.
 func (s *websocketServerStream) read(readMaxBytes int) {
-	for receivedEnd := false; ; {
+	receivedEnd := false
+	for {
 		buffer := bufferpool.Get()
 		marker, err := s.readMessage(buffer)
 		if err == nil && receivedEnd {
@@ -347,8 +359,9 @@ func websocketServe(server *connect.Server, spec connect.Spec, opts *options, re
 		http.Error(responseWriter, "no supported Connect subprotocol offered", http.StatusBadRequest)
 		return
 	}
+	hijacker := &websocketHijacker{ResponseWriter: responseWriter}
 	// Accept checks the Origin and writes 403 for a cross-origin handshake.
-	conn, err := websocket.Accept(responseWriter, request, &websocket.AcceptOptions{
+	conn, err := websocket.Accept(hijacker, request, &websocket.AcceptOptions{
 		Subprotocols: []string{subprotocol},
 	})
 	if err != nil {
@@ -382,6 +395,7 @@ func websocketServe(server *connect.Server, spec connect.Spec, opts *options, re
 		cancel:        cancel,
 		sendMaxBytes:  opts.sendMaxBytes,
 		conn:          conn,
+		netConn:       hijacker.conn,
 		codec:         codec,
 		info:          info,
 		singleRequest: spec.StreamType&connect.StreamTypeClient == 0,
@@ -426,6 +440,20 @@ func websocketHeartbeat(ctx context.Context, conn *websocket.Conn) {
 			return
 		}
 	}
+}
+
+// websocketHijacker keeps the hijacked connection for
+// [websocketServerStream.close].
+type websocketHijacker struct {
+	http.ResponseWriter
+
+	conn net.Conn
+}
+
+func (h *websocketHijacker) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, readWriter, err := http.NewResponseController(h.ResponseWriter).Hijack()
+	h.conn = conn
+	return conn, readWriter, err
 }
 
 // websocketRequestHeader builds the RPC's effective headers. Metadata can't

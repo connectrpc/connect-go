@@ -244,8 +244,10 @@ func (s *websocketClientStream) handshake() (*websocket.Conn, error) {
 		return nil, connect.Errorf(connect.CodeInternal, "server echoed subprotocol %q, expected %q", echoed, subprotocol)
 	}
 	conn.SetReadLimit(s.config.readLimit)
+	// A canceled call doesn't wait for the close handshake. coder would read the
+	// rest of a message the server is sending with no deadline.
 	s.stopWatching = context.AfterFunc(s.ctx, func() {
-		_ = conn.Close(websocket.StatusNormalClosure, "")
+		_ = conn.CloseNow()
 	})
 	buffer := bufferpool.Get()
 	defer bufferpool.Put(buffer)
