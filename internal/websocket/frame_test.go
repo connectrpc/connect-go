@@ -17,23 +17,20 @@ package websocket
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"io"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"connectrpc.com/connect/v2/internal/assert"
 )
 
-func TestHeaderRoundTrip(t *testing.T) {
+func TestPutHeaderRoundTrip(t *testing.T) {
 	t.Parallel()
 	for _, length := range []int{0, 1, 125, 126, 65535, 65536, 1 << 20} {
-		for _, masked := range []bool{false, true} {
-			var key *[4]byte
-			if masked {
-				key = &[4]byte{1, 2, 3, 4}
-			}
-			encoded := appendHeader(nil, opBinary, length, key)
+		for _, client := range []bool{false, true} {
+			var space [MaxHeaderSize]byte
+			start := putHeader(space[:], opBinary, length, client)
 			wantSize := 2
 			switch {
 			case length > 65535:
@@ -41,19 +38,19 @@ func TestHeaderRoundTrip(t *testing.T) {
 			case length > 125:
 				wantSize += 2
 			}
-			if masked {
+			if client {
 				wantSize += 4
 			}
-			assert.Equal(t, len(encoded), wantSize, assert.Sprintf("length %d masked %t", length, masked))
-			hdr, err := readHeader(bufio.NewReader(bytes.NewReader(encoded)))
+			assert.Equal(t, MaxHeaderSize-start, wantSize, assert.Sprintf("length %d client %t", length, client))
+			hdr, err := readHeader(bufio.NewReader(bytes.NewReader(space[start:])))
 			assert.Nil(t, err)
 			assert.True(t, hdr.fin)
 			assert.Equal(t, hdr.rsv, 0)
 			assert.Equal(t, hdr.opcode, opBinary)
 			assert.Equal(t, hdr.length, int64(length))
-			assert.Equal(t, hdr.masked, masked)
-			if masked {
-				assert.Equal(t, hdr.maskKey, *key)
+			assert.Equal(t, hdr.masked, client)
+			if client {
+				assert.Equal(t, hdr.maskKey, [4]byte(space[MaxHeaderSize-4:]))
 			}
 		}
 	}
@@ -63,8 +60,10 @@ func TestReadHeader(t *testing.T) {
 	t.Parallel()
 	t.Run("length_msb", func(t *testing.T) {
 		t.Parallel()
-		_, err := readHeader(bufio.NewReader(bytes.NewReader([]byte{0x82, 0x7f, 0x80, 0, 0, 0, 0, 0, 0, 0})))
-		assert.ErrorIs(t, err, errFrameLength)
+		hdr, err := readHeader(bufio.NewReader(bytes.NewReader([]byte{0x82, 0x7f, 0x80, 0, 0, 0, 0, 0, 0, 0})))
+		assert.Nil(t, err)
+		assert.True(t, hdr.length < 0)
+		assert.NotNil(t, hdr.check(true))
 	})
 	t.Run("non_minimal_length", func(t *testing.T) {
 		t.Parallel()
@@ -100,6 +99,7 @@ func TestHeaderCheck(t *testing.T) {
 		{name: "fragmented_ping", hdr: header{opcode: opPing, masked: true}},
 		{name: "ping_125", hdr: header{fin: true, opcode: opPing, masked: true, length: 125}, valid: true},
 		{name: "ping_126", hdr: header{fin: true, opcode: opPing, masked: true, length: 126}},
+		{name: "negative_length", hdr: header{fin: true, opcode: opBinary, masked: true, length: -1}},
 		{name: "fragmented_text", hdr: header{opcode: opText, masked: true, length: 1 << 40}, valid: true},
 	}
 	for _, test := range tests {
@@ -156,42 +156,101 @@ func TestUTF8Validator(t *testing.T) {
 	}
 }
 
-// FuzzReadFrame reads arbitrary bytes as frames from a peer. Reads must end
-// in an error without panicking, and every message must respect the read
-// limit and UTF-8 rules.
-func FuzzReadFrame(f *testing.F) {
+func TestParseClose(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		payload  []byte
+		want     *CloseError
+		wantCode StatusCode
+	}{
+		{name: "empty", want: &CloseError{Code: StatusNoStatusReceived}},
+		{name: "one_byte", payload: []byte{3}, wantCode: StatusProtocolError},
+		{name: "normal", payload: []byte{0x03, 0xe8, 'o', 'k'}, want: &CloseError{Code: StatusNormalClosure, Reason: "ok"}},
+		{name: "1005", payload: []byte{0x03, 0xed}, wantCode: StatusProtocolError},
+		{name: "reason_utf8", payload: []byte{0x03, 0xe8, 0xff}, wantCode: StatusInvalidPayloadData},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			closeErr, code, err := parseClose(test.payload)
+			assert.Equal(t, closeErr, test.want)
+			assert.Equal(t, code, test.wantCode)
+			assert.Equal(t, err != nil, test.wantCode != 0)
+		})
+	}
+}
+
+func TestCloseReason(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, closeReason("bye"), "bye")
+	assert.Equal(t, closeReason("a\xffb"), "ab")
+	long := strings.Repeat("x", maxCloseReason-1) + "é"
+	assert.Equal(t, closeReason(long), strings.Repeat("x", maxCloseReason-1))
+	assert.Equal(t, len(closeReason(strings.Repeat("x", 200))), maxCloseReason)
+}
+
+func TestValidCloseCode(t *testing.T) {
+	t.Parallel()
+	for _, code := range []StatusCode{1000, 1001, 1002, 1003, 1007, 1011, 1014, 3000, 4999} {
+		assert.True(t, validCloseCode(code), assert.Sprintf("code %d", code))
+	}
+	for _, code := range []StatusCode{0, 999, 1004, 1005, 1006, 1015, 2999, 5000} {
+		assert.False(t, validCloseCode(code), assert.Sprintf("code %d", code))
+	}
+}
+
+// FuzzReadMessage reads arbitrary bytes as frames from a peer. Reads must end
+// in an error without panicking, every message must respect the read limit and
+// UTF-8 rules, and the call after an error must return the same error.
+func FuzzReadMessage(f *testing.F) {
 	const readLimit = 64
-	f.Add(false, appendHeader(nil, opText, 2, &[4]byte{}))
-	f.Add(true, append(appendHeader(nil, opBinary, 3, nil), "abc"...))
+	f.Add(false, maskedFrame(opText, "hi"))
+	f.Add(true, []byte{0x82, 0x03, 'a', 'b', 'c'})
 	f.Add(true, []byte{0x01, 0x01, 'a', 0x89, 0x00, 0x80, 0x01, 'b', 0x88, 0x02, 0x03, 0xe8})
 	f.Add(true, []byte{0x82, 0x7f, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff})
+	f.Add(true, []byte{0x81, 0x02, 0xc3, 0x28})
 	f.Add(false, []byte{0x88, 0x82, 0, 0, 0, 0, 0x03, 0xe8})
 	f.Fuzz(func(t *testing.T, client bool, data []byte) {
 		transport := &fuzzTransport{Reader: bytes.NewReader(data)}
-		conn := newConn(transport, bufio.NewReader(transport), bufio.NewWriter(io.Discard), client)
-		conn.SetReadLimit(readLimit)
+		conn := newConn(transport, bufio.NewReader(transport), client)
+		var dst bytes.Buffer
 		for {
-			messageType, message, err := conn.Read(context.Background())
+			dst.Reset()
+			messageType, err := conn.ReadMessage(&dst, readLimit)
 			if err != nil {
+				_, again := conn.ReadMessage(&dst, readLimit)
+				assert.ErrorIs(t, again, err)
 				break
 			}
-			assert.True(t, len(message) <= readLimit)
+			assert.True(t, dst.Len() <= readLimit)
 			if messageType == MessageText {
-				assert.True(t, utf8.Valid(message))
+				assert.True(t, utf8.Valid(dst.Bytes()))
 			}
 		}
-		_ = conn.CloseNow()
+		assert.True(t, transport.closed)
 	})
 }
 
 type fuzzTransport struct {
 	io.Reader
+
+	closed bool
 }
 
 func (*fuzzTransport) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
-func (*fuzzTransport) Close() error {
+func (f *fuzzTransport) Close() error {
+	f.closed = true
 	return nil
+}
+
+// maskedFrame builds a final masked frame with a zero mask key.
+func maskedFrame(op opcode, payload string) []byte {
+	var space [MaxHeaderSize]byte
+	start := putHeader(space[:], op, len(payload), true)
+	clear(space[MaxHeaderSize-4:])
+	return append(space[start:], payload...)
 }

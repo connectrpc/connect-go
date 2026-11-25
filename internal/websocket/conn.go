@@ -16,652 +16,460 @@ package websocket
 
 import (
 	"bufio"
-	"context"
-	"crypto/rand"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
-	"strconv"
 	"sync"
 	"sync/atomic"
-	"unicode/utf8"
 )
 
-// Conn is a WebSocket connection. Read and Reader must not be called
-// concurrently with each other. Every other method may be.
-//
-// Control frames are handled inside Read and Reader, so a connection must be
-// read for Ping and Close to see the peer's replies. A read or write whose
-// context ends closes the connection.
+const (
+	// minDrainBudget is the least data a Conn discards after sending a Close
+	// frame. The largest read limit seen raises it.
+	minDrainBudget = 64 << 10
+	// maxGrow caps how far ReadMessage grows dst ahead of a frame's payload,
+	// leaving a hostile length unable to force a large allocation.
+	maxGrow = 1 << 20
+)
+
+var errShortFrame = errors.New("websocket: frame is shorter than MaxHeaderSize")
+
+// Conn is a WebSocket connection. Every method is safe for concurrent use.
+// ReadMessage calls run one at a time.
 type Conn struct {
-	transport   io.ReadWriteCloser
-	reader      *bufio.Reader
-	writer      *bufio.Writer
-	client      bool
-	subprotocol string
-	onPing      func(context.Context, []byte) bool
-	abort       func()
+	transport io.ReadWriteCloser
+	reader    *bufio.Reader
+	client    bool
 
-	readLimit atomic.Int64
-	readMu    lock
+	readMu sync.Mutex
 	// Guarded by readMu.
-	readErr error
-	message messageReader
-	control [maxControlPayload]byte
+	frame       frameReader
+	readErr     error
+	drainNext   bool  // readErr sent a Close frame and the next call drains
+	maxLimit    int64 // the largest limit passed to ReadMessage
+	discarded   int64 // data bytes discarded after this side's Close frame
+	controlRead [maxControlPayload]byte
 
-	writeMu lock
+	writeMu sync.Mutex
 	// Guarded by writeMu.
-	headerBuf [maxHeaderSize]byte
+	controlWrite [MaxHeaderSize + maxControlPayload]byte
 
-	stateMu       sync.Mutex
-	closeSent     bool
-	closeReceived error
+	pongMu sync.Mutex
+	// Guarded by pongMu.
+	pongPayload [maxControlPayload]byte
+	pongLength  int
+	pongPending atomic.Bool
 
-	closing   atomic.Bool
-	closed    chan struct{}
+	closeSent atomic.Bool
+	closed    atomic.Bool
 	closeOnce sync.Once
-
-	pingCount atomic.Int64
-	pingsMu   sync.Mutex
-	pings     map[string]chan<- struct{}
 }
 
-// Close sends a Close frame with code and reason, waits for the peer's Close
-// frame, and closes the connection. Each wait is bounded at 5s. Later calls
-// return an error wrapping [net.ErrClosed].
-func (c *Conn) Close(code StatusCode, reason string) error {
-	if c.closing.Swap(true) {
-		<-c.closed
-		return fmt.Errorf("close: %w", net.ErrClosed)
-	}
-	err := c.closeHandshake(code, reason)
-	if closeErr := c.closeTransport(); err == nil {
-		err = closeErr
-	}
-	if err == nil || errors.Is(err, net.ErrClosed) {
-		return nil
-	}
-	return fmt.Errorf("close: %w", err)
-}
-
-// CloseNow closes the connection without a close handshake. It ends a Close
-// that is waiting on the peer.
-func (c *Conn) CloseNow() error {
-	alreadyClosing := c.closing.Swap(true)
-	err := c.closeTransport()
-	switch {
-	case alreadyClosing:
-		return fmt.Errorf("close: %w", net.ErrClosed)
-	case err != nil && !errors.Is(err, net.ErrClosed):
-		return fmt.Errorf("close: %w", err)
-	}
-	return nil
-}
-
-// Ping sends a ping and waits for the matching pong, which a concurrent read
-// receives. A context that ends while waiting doesn't close the connection.
-func (c *Conn) Ping(ctx context.Context) error {
-	payload := strconv.FormatInt(c.pingCount.Add(1), 10)
-	pong := make(chan struct{}, 1)
-	c.pingsMu.Lock()
-	c.pings[payload] = pong
-	c.pingsMu.Unlock()
-	defer func() {
-		c.pingsMu.Lock()
-		delete(c.pings, payload)
-		c.pingsMu.Unlock()
-	}()
-	if err := c.writeControl(ctx, opPing, []byte(payload)); err != nil {
-		return fmt.Errorf("ping: %w", err)
-	}
-	select {
-	case <-pong:
-		return nil
-	case <-c.closed:
-		return fmt.Errorf("ping: %w", net.ErrClosed)
-	case <-ctx.Done():
-		return fmt.Errorf("wait for pong: %w", ctx.Err())
-	}
-}
-
-// Read reads a whole message.
-func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
-	messageType, reader, err := c.Reader(ctx)
-	if err != nil {
-		return 0, nil, err
-	}
-	data, err := io.ReadAll(reader)
-	return messageType, data, err
-}
-
-// Reader waits for the next message and returns a reader for it, bounded by
-// ctx. The message must be read to EOF before the next call.
-func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
-	if err := c.readMu.acquire(ctx, c.closed); err != nil {
-		return 0, nil, fmt.Errorf("get reader: %w", err)
-	}
-	defer c.readMu.release()
-	if c.readErr != nil {
-		return 0, nil, c.readErr
-	}
-	if c.message.active {
-		return 0, nil, errors.New("previous message not read to completion")
-	}
-	hdr, err := c.nextFrame(ctx)
-	if err != nil {
-		return 0, nil, err
-	}
-	if hdr.opcode == opContinuation {
-		c.message.frameLeft = hdr.length
-		return 0, nil, c.fail(ctx, StatusProtocolError, errors.New("continuation frame without a message"))
-	}
-	c.message.start(ctx, hdr.opcode == opText)
-	if err := c.startFrame(ctx, hdr); err != nil {
-		return 0, nil, err
-	}
-	return MessageType(hdr.opcode), &c.message, nil
-}
-
-// SetReadLimit sets the largest message a read accepts. A larger message
-// closes the connection with [StatusMessageTooBig]. The default is 32768
-// bytes and -1 removes the limit.
-func (c *Conn) SetReadLimit(limit int64) {
-	c.readLimit.Store(max(limit, -1))
-}
-
-// Subprotocol returns the negotiated subprotocol, or "" for none.
-func (c *Conn) Subprotocol() string {
-	return c.subprotocol
-}
-
-// Write sends a message in one frame.
-func (c *Conn) Write(ctx context.Context, messageType MessageType, data []byte) error {
-	if messageType != MessageText && messageType != MessageBinary {
-		return fmt.Errorf("write: invalid message type %d", messageType)
-	}
-	if err := c.writeFrame(ctx, opcode(messageType), data); err != nil {
-		return fmt.Errorf("write message: %w", err)
-	}
-	return nil
-}
-
-// closeHandshake bounds each step itself, since Close takes no context, as
-// in coder/websocket. contextcheck reads the directive as an opt-out for
-// callers, which nolintlint doesn't see.
+// ReadMessage appends the next data message to dst and returns its type. A nil
+// dst discards the message without validating its UTF-8. limit bounds the
+// message's size, not counting bytes already in dst. A negative limit accepts
+// any size. On error dst may hold part of a message.
 //
-//nolint:contextcheck,nolintlint // see above
-func (c *Conn) closeHandshake(code StatusCode, reason string) error {
-	ctx := context.Background()
-	if err := c.writeClose(ctx, code, reason); err != nil {
-		return err
+// ReadMessage answers PINGs, ignores PONGs and runs the close handshake on the
+// way. With no write in progress it writes the PONG itself, which blocks until
+// the transport takes it or the Conn is closed. Once this side has sent a Close frame it discards data messages and
+// returns only when the connection ends.
+//
+// Every error leaves the Conn either closed or with a Close frame sent. When
+// the error sent a Close frame (ErrProtocol, ErrInvalidUTF8,
+// ErrMessageTooBig), the next call drains. It reads until the peer's Close
+// frame, the transport ends or a byte budget runs out, closes the transport
+// and returns the same error. After any other error, and on every later call,
+// it returns the error at once.
+func (c *Conn) ReadMessage(dst *bytes.Buffer, limit int64) (MessageType, error) {
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+	if c.readErr != nil {
+		if c.drainNext {
+			c.drainNext = false
+			c.drain()
+		}
+		return 0, c.readErr
 	}
-	err := c.waitCloseHandshake(ctx)
-	if CloseStatus(err) == code {
-		return nil
+	c.maxLimit = max(c.maxLimit, limit)
+	var messageType MessageType
+	var total int64
+	dropped := false
+	for {
+		hdr, err := readHeader(c.reader)
+		if err != nil {
+			return 0, c.readFailed(err)
+		}
+		c.frame.remaining = hdr.length
+		if err := hdr.check(c.client); err != nil {
+			err = fmt.Errorf("%w: %w", ErrProtocol, err)
+			if hdr.opcode == opClose {
+				// The peer has closed, which leaves nothing to drain.
+				_, _ = c.writeClose(StatusProtocolError, "")
+				_ = c.Close()
+				c.readErr = err
+				return 0, err
+			}
+			return 0, c.fail(StatusProtocolError, err)
+		}
+		if hdr.opcode.isControl() {
+			if err := c.readControl(hdr); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		switch {
+		case hdr.opcode == opContinuation && messageType == 0:
+			return 0, c.fail(StatusProtocolError, fmt.Errorf("%w: continuation frame without a message", ErrProtocol))
+		case hdr.opcode != opContinuation && messageType != 0:
+			return 0, c.fail(StatusProtocolError, fmt.Errorf("%w: data frame inside a fragmented message", ErrProtocol))
+		case hdr.opcode != opContinuation:
+			messageType = MessageType(hdr.opcode)
+			c.frame.text = messageType == MessageText
+			c.frame.utf8 = utf8Validator{}
+		}
+		if c.closeSent.Load() {
+			dropped = true
+			if c.discarded += hdr.length; c.discarded > c.drainBudget() {
+				_ = c.Close()
+				c.readErr = fmt.Errorf("websocket: peer sent over %d bytes after Close: %w", c.drainBudget(), net.ErrClosed)
+				return 0, c.readErr
+			}
+		} else if limit >= 0 && hdr.length > limit-total {
+			return 0, c.fail(StatusMessageTooBig, fmt.Errorf("%w: limit is %d bytes", ErrMessageTooBig, limit))
+		}
+		total += hdr.length
+		if err := c.readPayload(dst, hdr, dst == nil || dropped); err != nil {
+			return 0, err
+		}
+		if !hdr.fin {
+			continue
+		}
+		if dropped {
+			messageType, total, dropped = 0, 0, false
+			continue
+		}
+		if dst != nil && c.frame.text && !c.frame.utf8.complete() {
+			return 0, c.fail(StatusInvalidPayloadData, ErrInvalidUTF8)
+		}
+		return messageType, nil
 	}
+}
+
+// WriteMessage sends frame[MaxHeaderSize:] as one final frame with a single
+// Write to the transport. It writes the header into frame[:MaxHeaderSize].
+// A client masks the payload in place. The frame's bytes are unusable after
+// the call. A frame shorter than MaxHeaderSize is an error. A failed write
+// closes the transport. Writes after a Close frame return an error wrapping
+// [net.ErrClosed].
+func (c *Conn) WriteMessage(messageType MessageType, frame []byte) error {
+	if len(frame) < MaxHeaderSize {
+		return errShortFrame
+	}
+	if messageType != MessageText && messageType != MessageBinary {
+		return fmt.Errorf("websocket: invalid message type %d", messageType)
+	}
+	c.writeMu.Lock()
+	err := c.writeFrameLocked(opcode(messageType), frame)
+	c.unlockWrite()
 	return err
 }
 
-// closeTransport returns [net.ErrClosed] after the first call.
-func (c *Conn) closeTransport() error {
-	err := net.ErrClosed
+// Ping sends an empty PING. It doesn't wait for the PONG.
+func (c *Conn) Ping() error {
+	c.writeMu.Lock()
+	err := c.writeFrameLocked(opPing, c.controlWrite[:MaxHeaderSize])
+	c.unlockWrite()
+	return err
+}
+
+// WriteClose sends a Close frame with code and reason, truncating reason to
+// 123 bytes on a UTF-8 boundary. StatusNoStatusReceived sends a Close frame
+// without a code. If a Close frame was already sent it does nothing and
+// returns nil. It doesn't wait for the peer. ReadMessage completes the
+// handshake.
+func (c *Conn) WriteClose(code StatusCode, reason string) error {
+	_, err := c.writeClose(code, reason)
+	return err
+}
+
+// Close closes the transport at once, unblocking any read or write. It is
+// idempotent.
+func (c *Conn) Close() error {
+	var err error
 	c.closeOnce.Do(func() {
-		close(c.closed)
+		c.closed.Store(true)
 		err = c.transport.Close()
 	})
-	return err
-}
-
-// fail sends a Close frame for a protocol violation and makes reads return
-// the error. Close later drains the peer's frames.
-func (c *Conn) fail(ctx context.Context, code StatusCode, cause error) error {
-	_ = c.writeClose(ctx, code, closeReason(cause.Error()))
-	c.readErr = &failError{cause: cause}
-	return c.readErr
-}
-
-// failClose fails the connection for an invalid Close frame and closes the
-// transport. The peer won't send another Close, leaving nothing to wait for.
-func (c *Conn) failClose(ctx context.Context, code StatusCode, cause error) error {
-	err := c.fail(ctx, code, cause)
-	c.stateMu.Lock()
-	c.closeReceived = err
-	c.stateMu.Unlock()
-	if !c.closing.Swap(true) {
-		_ = c.closeTransport()
-	}
-	return err
-}
-
-func (c *Conn) handleControl(ctx context.Context, hdr header) error {
-	payload := c.control[:hdr.length]
-	stop := c.watch(ctx)
-	_, err := io.ReadFull(c.reader, payload)
-	stop()
 	if err != nil {
-		return c.readFailed(ctx, err)
+		return fmt.Errorf("websocket: close: %w", err)
 	}
+	return nil
+}
+
+// discard skips size bytes of the transport. It steps in chunks that fit an
+// int on 32-bit platforms, where converting a 64-bit frame length would wrap.
+func (c *Conn) discard(size int64) error {
+	for size > 0 {
+		step := int(min(size, math.MaxInt32))
+		if _, err := c.reader.Discard(step); err != nil {
+			return err
+		}
+		size -= int64(step)
+	}
+	return nil
+}
+
+// drain discards frames until the peer's Close, the transport ends or the
+// budget runs out, then closes the transport. The caller holds readMu.
+func (c *Conn) drain() {
+	defer func() { _ = c.Close() }()
+	budget := c.drainBudget() - c.frame.remaining
+	if c.frame.remaining < 0 || budget < 0 {
+		return
+	}
+	if c.discard(c.frame.remaining) != nil {
+		return
+	}
+	for {
+		hdr, err := readHeader(c.reader)
+		if err != nil || hdr.check(c.client) != nil || hdr.opcode == opClose {
+			return
+		}
+		if budget -= hdr.length; budget < 0 {
+			return
+		}
+		if c.discard(hdr.length) != nil {
+			return
+		}
+	}
+}
+
+// drainBudget is how much data the Conn discards after its Close frame.
+func (c *Conn) drainBudget() int64 {
+	return max(minDrainBudget, c.maxLimit)
+}
+
+// fail sends a Close frame with code and makes the next ReadMessage drain.
+// If this side already sent one it closes the transport instead.
+func (c *Conn) fail(code StatusCode, cause error) error {
+	sent, _ := c.writeClose(code, "")
+	c.readErr = cause
+	if sent {
+		c.drainNext = true
+	} else {
+		_ = c.Close()
+	}
+	return cause
+}
+
+// flushPongLocked writes the pending PONG. The caller holds writeMu.
+func (c *Conn) flushPongLocked() {
+	// Clearing the flag before the copy lets a PING that lands mid-copy set
+	// it again for the next turn of unlockWrite.
+	if !c.pongPending.Swap(false) || c.closeSent.Load() {
+		return
+	}
+	c.pongMu.Lock()
+	frame := append(c.controlWrite[:MaxHeaderSize], c.pongPayload[:c.pongLength]...)
+	c.pongMu.Unlock()
+	_ = c.writeFrameLocked(opPong, frame)
+}
+
+// queuePong records a PONG for payload and sends it unless a writer holds
+// writeMu, in which case that writer sends it before it unlocks. A newer PING
+// replaces an unsent PONG, as RFC 6455 Section 5.5.3 allows.
+func (c *Conn) queuePong(payload []byte) {
+	if c.closeSent.Load() {
+		return
+	}
+	c.pongMu.Lock()
+	c.pongLength = copy(c.pongPayload[:], payload)
+	c.pongMu.Unlock()
+	c.pongPending.Store(true)
+	if c.writeMu.TryLock() {
+		c.unlockWrite()
+	}
+}
+
+// readControl reads a control frame's payload and acts on it. The caller
+// holds readMu.
+func (c *Conn) readControl(hdr header) error {
+	payload := c.controlRead[:hdr.length]
+	if _, err := io.ReadFull(c.reader, payload); err != nil {
+		return c.readFailed(err)
+	}
+	c.frame.remaining = 0
 	if hdr.masked {
 		mask(payload, hdr.maskKey, 0)
 	}
-	switch hdr.opcode { //nolint:exhaustive // check admits only control opcodes
-	case opPing:
-		if c.onPing != nil && !c.onPing(ctx, payload) {
-			return nil
+	if hdr.opcode == opPing {
+		c.queuePong(payload)
+		return nil
+	}
+	if hdr.opcode == opPong {
+		return nil
+	}
+	closeErr, failCode, err := parseClose(payload)
+	if err != nil {
+		// The peer has closed, which leaves nothing to drain.
+		_, _ = c.writeClose(failCode, "")
+		_ = c.Close()
+		c.readErr = err
+		return err
+	}
+	_, _ = c.writeClose(closeErr.Code, "")
+	_ = c.Close()
+	c.readErr = closeErr
+	return closeErr
+}
+
+// readFailed records a transport error and closes the transport.
+func (c *Conn) readFailed(err error) error {
+	switch {
+	case c.closed.Load():
+		err = net.ErrClosed
+	case errors.Is(err, io.EOF):
+		err = io.ErrUnexpectedEOF
+	}
+	c.readErr = fmt.Errorf("websocket: read: %w", err)
+	_ = c.Close()
+	return c.readErr
+}
+
+// readPayload appends a data frame's payload to dst, or discards it.
+func (c *Conn) readPayload(dst *bytes.Buffer, hdr header, discard bool) error {
+	if discard {
+		if err := c.discard(hdr.length); err != nil {
+			return c.readFailed(err)
 		}
-		if err := c.writeControl(ctx, opPong, payload); err != nil && !errors.Is(err, net.ErrClosed) {
-			return err
+		c.frame.remaining = 0
+		return nil
+	}
+	if hdr.length == 0 {
+		return nil
+	}
+	c.frame.masked = hdr.masked
+	c.frame.maskKey = hdr.maskKey
+	c.frame.maskPos = 0
+	// The extra MinRead covers ReadFrom's first grow, which would otherwise
+	// reallocate a buffer grown to exactly the frame's length.
+	dst.Grow(int(min(hdr.length, maxGrow)) + bytes.MinRead)
+	if _, err := dst.ReadFrom(&c.frame); err != nil {
+		if errors.Is(err, ErrInvalidUTF8) {
+			return c.fail(StatusInvalidPayloadData, ErrInvalidUTF8)
 		}
-	case opPong:
-		c.pingsMu.Lock()
-		pong, ok := c.pings[string(payload)]
-		c.pingsMu.Unlock()
-		if ok {
-			select {
-			case pong <- struct{}{}:
-			default:
-			}
-		}
-	default:
-		return c.receiveClose(ctx, payload)
+		return c.readFailed(err)
 	}
 	return nil
 }
 
-func (c *Conn) isClosed() bool {
-	select {
-	case <-c.closed:
-		return true
-	default:
-		return false
-	}
-}
-
-// nextFrame reads frames until a data frame, handling control frames on the
-// way. The caller holds readMu.
-func (c *Conn) nextFrame(ctx context.Context) (header, error) {
+// unlockWrite sends a pending PONG before it lets go of writeMu, and takes it
+// back if a PING arrived after the check. Every path that takes writeMu
+// releases it here, which never loses a PONG.
+func (c *Conn) unlockWrite() {
 	for {
-		c.stateMu.Lock()
-		received := c.closeReceived
-		c.stateMu.Unlock()
-		if received != nil {
-			return header{}, received
+		if c.pongPending.Load() {
+			c.flushPongLocked()
 		}
-		stop := c.watch(ctx)
-		hdr, err := readHeader(c.reader)
-		stop()
-		if errors.Is(err, errFrameLength) {
-			return hdr, c.fail(ctx, StatusProtocolError, err)
-		} else if err != nil {
-			return hdr, c.readFailed(ctx, err)
-		}
-		if err := hdr.check(c.client); err != nil {
-			if hdr.opcode == opClose {
-				return hdr, c.failClose(ctx, StatusProtocolError, err)
-			}
-			c.message.frameLeft = hdr.length
-			return hdr, c.fail(ctx, StatusProtocolError, err)
-		}
-		if !hdr.opcode.isControl() {
-			return hdr, nil
-		}
-		if err := c.handleControl(ctx, hdr); err != nil {
-			return hdr, err
+		c.writeMu.Unlock()
+		if !c.pongPending.Load() || !c.writeMu.TryLock() {
+			return
 		}
 	}
 }
 
-// readFailed reports a read error from the transport, preferring the reason
-// the transport closed.
-func (c *Conn) readFailed(ctx context.Context, err error) error {
+// writeClose sends a Close frame unless one was sent, and reports whether it
+// sent one.
+func (c *Conn) writeClose(code StatusCode, reason string) (bool, error) {
+	if code != StatusNoStatusReceived && !validCloseCode(code) {
+		return false, fmt.Errorf("websocket: invalid close code %d", code)
+	}
+	c.writeMu.Lock()
+	defer c.unlockWrite()
+	if c.closeSent.Load() {
+		return false, nil
+	}
+	frame := c.controlWrite[:MaxHeaderSize]
+	if code != StatusNoStatusReceived {
+		frame = binary.BigEndian.AppendUint16(frame, uint16(code))
+		frame = append(frame, closeReason(reason)...)
+	}
+	err := c.writeFrameLocked(opClose, frame)
+	c.closeSent.Store(true)
+	return err == nil, err
+}
+
+// writeFrameLocked sends a final frame with one Write. The caller holds
+// writeMu.
+func (c *Conn) writeFrameLocked(frameOpcode opcode, frame []byte) error {
+	if c.closeSent.Load() || c.closed.Load() {
+		return fmt.Errorf("websocket: write: %w", net.ErrClosed)
+	}
+	payload := frame[MaxHeaderSize:]
+	start := putHeader(frame[:MaxHeaderSize], frameOpcode, len(payload), c.client)
+	if c.client {
+		mask(payload, [4]byte(frame[MaxHeaderSize-4:MaxHeaderSize]), 0)
+	}
+	if _, err := c.transport.Write(frame[start:]); err != nil {
+		// A partial frame poisons the stream.
+		if c.closed.Load() {
+			err = net.ErrClosed
+		}
+		_ = c.Close()
+		return fmt.Errorf("websocket: write: %w", err)
+	}
+	return nil
+}
+
+// frameReader reads the payload of the current data frame, unmasking it and
+// validating text as it goes.
+type frameReader struct {
+	reader    *bufio.Reader
+	remaining int64
+	masked    bool
+	maskKey   [4]byte
+	maskPos   int
+	text      bool
+	utf8      utf8Validator
+}
+
+// Read returns io.EOF with the frame's last bytes, which ends
+// bytes.Buffer.ReadFrom without another grow. A transport that ends mid-frame
+// returns io.ErrUnexpectedEOF, which ReadFrom doesn't take for success.
+func (f *frameReader) Read(data []byte) (int, error) {
+	if f.remaining == 0 {
+		return 0, io.EOF
+	}
+	if int64(len(data)) > f.remaining {
+		data = data[:f.remaining]
+	}
+	size, err := f.reader.Read(data)
+	data = data[:size]
+	f.remaining -= int64(size)
+	if f.masked {
+		f.maskPos = mask(data, f.maskKey, f.maskPos)
+	}
+	if f.text && !f.utf8.valid(data) {
+		return size, ErrInvalidUTF8
+	}
 	switch {
-	case ctx.Err() != nil:
-		err = ctx.Err()
-	case c.isClosed():
-		err = net.ErrClosed
-	}
-	c.readErr = fmt.Errorf("read: %w", err)
-	return c.readErr
-}
-
-func (c *Conn) readPayload(ctx context.Context, data []byte) (int, error) {
-	stop := c.watch(ctx)
-	size, err := c.reader.Read(data)
-	stop()
-	if err != nil {
-		return size, c.readFailed(ctx, err)
+	case errors.Is(err, io.EOF) && f.remaining > 0:
+		return size, io.ErrUnexpectedEOF
+	case err != nil:
+		return size, err
+	case f.remaining == 0:
+		return size, io.EOF
 	}
 	return size, nil
 }
 
-// receiveClose echoes the peer's Close frame and closes the transport, unless
-// a Close call is waiting to do it.
-func (c *Conn) receiveClose(ctx context.Context, payload []byte) error {
-	closeErr, code, err := parseClose(payload)
-	if err != nil {
-		return c.failClose(ctx, code, err)
-	}
-	received := fmt.Errorf("received close frame: %w", closeErr)
-	c.stateMu.Lock()
-	c.closeReceived = received
-	sent := c.closeSent
-	c.stateMu.Unlock()
-	if !sent {
-		_ = c.writeClose(ctx, closeErr.Code, closeErr.Reason)
-	}
-	if !c.closing.Swap(true) {
-		_ = c.closeTransport()
-	}
-	return received
-}
-
-// startFrame begins reading a data frame's payload, enforcing the read limit
-// from its header.
-func (c *Conn) startFrame(ctx context.Context, hdr header) error {
-	message := &c.message
-	message.fin = hdr.fin
-	message.frameLeft = hdr.length
-	message.maskKey = hdr.maskKey
-	message.maskPos = 0
-	if limit := c.readLimit.Load(); limit >= 0 && hdr.length > limit-message.total {
-		cause := fmt.Errorf("%w: read limited at %d bytes", ErrMessageTooBig, limit)
-		return c.fail(ctx, StatusMessageTooBig, cause)
-	}
-	message.total += hdr.length
-	return nil
-}
-
-// waitCloseHandshake discards data until the peer's Close frame arrives.
-func (c *Conn) waitCloseHandshake(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, closeTimeout)
-	defer cancel()
-	if err := c.readMu.acquire(ctx, c.closed); err != nil {
-		return err
-	}
-	defer c.readMu.release()
-	// A read of a message cut short here must fail rather than end in EOF.
-	if c.readErr == nil && c.message.active && (c.message.frameLeft > 0 || !c.message.fin) {
-		c.readErr = fmt.Errorf("read: %w", net.ErrClosed)
-	}
-	for {
-		stop := c.watch(ctx)
-		_, err := io.CopyN(io.Discard, c.reader, c.message.frameLeft)
-		stop()
-		c.message.frameLeft = 0
-		if err != nil {
-			return c.readFailed(ctx, err)
-		}
-		hdr, err := c.nextFrame(ctx)
-		if err != nil {
-			return err
-		}
-		c.message.frameLeft = hdr.length
-	}
-}
-
-// watch closes the transport when ctx ends, which unblocks pending I/O.
-func (c *Conn) watch(ctx context.Context) func() bool {
-	if ctx.Done() == nil {
-		return noStop
-	}
-	return context.AfterFunc(ctx, c.abort)
-}
-
-// writeClose isn't bounded by ctx, which may have ended a read.
-func (c *Conn) writeClose(ctx context.Context, code StatusCode, reason string) error {
-	var payload []byte
-	if code != StatusNoStatusRcvd {
-		if !validCloseCode(code) {
-			return fmt.Errorf("status code %d can't be sent", code)
-		}
-		if len(reason) > maxCloseReason {
-			return fmt.Errorf("close reason of %d bytes exceeds %d", len(reason), maxCloseReason)
-		}
-		payload = binary.BigEndian.AppendUint16(make([]byte, 0, 2+len(reason)), uint16(code)) //nolint:gosec // validCloseCode bounds code
-		payload = append(payload, reason...)
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), closeTimeout)
-	defer cancel()
-	// The frame may be lost to a concurrent close, which the handshake
-	// tolerates.
-	if err := c.writeFrame(ctx, opClose, payload); err != nil && !errors.Is(err, net.ErrClosed) {
-		return err
-	}
-	return nil
-}
-
-func (c *Conn) writeControl(ctx context.Context, frameOpcode opcode, payload []byte) error {
-	ctx, cancel := context.WithTimeout(ctx, closeTimeout)
-	defer cancel()
-	return c.writeFrame(ctx, frameOpcode, payload)
-}
-
-func (c *Conn) writeFrame(ctx context.Context, frameOpcode opcode, payload []byte) error {
-	if err := c.writeMu.acquire(ctx, c.closed); err != nil {
-		return err
-	}
-	defer c.writeMu.release()
-	c.stateMu.Lock()
-	sent := c.closeSent
-	c.stateMu.Unlock()
-	if sent {
-		return fmt.Errorf("close frame already sent: %w", net.ErrClosed)
-	}
-	stop := c.watch(ctx)
-	err := c.writeFrameLocked(frameOpcode, payload)
-	stop()
-	if err != nil {
-		switch {
-		case ctx.Err() != nil:
-			err = ctx.Err()
-		case c.isClosed():
-			err = net.ErrClosed
-		}
-		// A partial frame leaves the stream unusable.
-		_ = c.closeTransport()
-		return fmt.Errorf("write frame: %w", err)
-	}
-	if frameOpcode == opClose {
-		c.stateMu.Lock()
-		c.closeSent = true
-		received := c.closeReceived != nil
-		c.stateMu.Unlock()
-		if received && !c.closing.Swap(true) {
-			_ = c.closeTransport()
-		}
-	}
-	return nil
-}
-
-// writeFrameLocked masks a client's payload as it copies it into the write
-// buffer, leaving the caller's slice untouched.
-func (c *Conn) writeFrameLocked(frameOpcode opcode, payload []byte) error {
-	var maskKey *[4]byte
-	var key [4]byte
-	if c.client {
-		_, _ = rand.Read(key[:]) // never fails, see crypto/rand.Read
-		maskKey = &key
-	}
-	if _, err := c.writer.Write(appendHeader(c.headerBuf[:0], frameOpcode, len(payload), maskKey)); err != nil {
-		return err
-	}
-	if !c.client {
-		if _, err := c.writer.Write(payload); err != nil {
-			return err
-		}
-		return c.writer.Flush()
-	}
-	pos := 0
-	for len(payload) > 0 {
-		if c.writer.Available() == 0 {
-			if err := c.writer.Flush(); err != nil {
-				return err
-			}
-		}
-		chunk := c.writer.AvailableBuffer()
-		size := min(len(payload), cap(chunk))
-		chunk = append(chunk, payload[:size]...)
-		pos = mask(chunk, key, pos)
-		if _, err := c.writer.Write(chunk); err != nil {
-			return err
-		}
-		payload = payload[size:]
-	}
-	return c.writer.Flush()
-}
-
-// failError is a read error that failed the connection. It doesn't wrap the
-// CloseError sent, which CloseStatus would mistake for the peer's.
-type failError struct {
-	cause error
-}
-
-func (e *failError) Error() string {
-	return "failed the connection: " + e.cause.Error()
-}
-
-func (e *failError) Unwrap() error {
-	return e.cause
-}
-
-// lock is a mutex whose acquisition gives up when ctx ends or the connection
-// closes.
-type lock chan struct{}
-
-func (l lock) acquire(ctx context.Context, closed <-chan struct{}) error {
-	select {
-	case <-closed:
-		return net.ErrClosed
-	case <-ctx.Done():
-		return fmt.Errorf("acquire lock: %w", ctx.Err())
-	case l <- struct{}{}:
-	}
-	// The send may win over a closed connection.
-	select {
-	case <-closed:
-		l.release()
-		return net.ErrClosed
-	default:
-		return nil
-	}
-}
-
-func (l lock) release() {
-	<-l
-}
-
-// messageReader reads the message Reader returned. Its fields are guarded by
-// the connection's readMu.
-type messageReader struct {
-	conn *Conn
-	ctx  context.Context //nolint:containedctx // Reader's ctx bounds its message, as in coder/websocket
-
-	active    bool
-	text      bool
-	fin       bool
-	total     int64
-	frameLeft int64
-	maskKey   [4]byte
-	maskPos   int
-	utf8      utf8Validator
-}
-
-func (m *messageReader) Read(data []byte) (int, error) {
-	conn := m.conn
-	if err := conn.readMu.acquire(m.ctx, conn.closed); err != nil {
-		return 0, fmt.Errorf("read: %w", err)
-	}
-	defer conn.readMu.release()
-	if conn.readErr != nil {
-		return 0, conn.readErr
-	}
-	if !m.active {
-		return 0, io.EOF
-	}
-	for m.frameLeft == 0 {
-		if m.fin {
-			m.active = false
-			if m.text && !m.utf8.complete() {
-				return 0, conn.fail(m.ctx, StatusInvalidFramePayloadData, fmt.Errorf("%w: message ends inside a sequence", ErrInvalidUTF8))
-			}
-			return 0, io.EOF
-		}
-		hdr, err := conn.nextFrame(m.ctx)
-		if err != nil {
-			return 0, err
-		}
-		if hdr.opcode != opContinuation {
-			m.frameLeft = hdr.length
-			return 0, conn.fail(m.ctx, StatusProtocolError, errors.New("data frame inside a fragmented message"))
-		}
-		if err := conn.startFrame(m.ctx, hdr); err != nil {
-			return 0, err
-		}
-	}
-	if int64(len(data)) > m.frameLeft {
-		data = data[:m.frameLeft]
-	}
-	size, err := conn.readPayload(m.ctx, data)
-	data = data[:size]
-	m.frameLeft -= int64(size)
-	if !conn.client {
-		m.maskPos = mask(data, m.maskKey, m.maskPos)
-	}
-	if m.text && !m.utf8.valid(data) {
-		return size, conn.fail(m.ctx, StatusInvalidFramePayloadData, ErrInvalidUTF8)
-	}
-	return size, err
-}
-
-func (m *messageReader) start(ctx context.Context, text bool) {
-	m.ctx = ctx
-	m.active = true
-	m.text = text
-	m.total = 0
-	m.utf8 = utf8Validator{}
-}
-
-func newConn(transport io.ReadWriteCloser, reader *bufio.Reader, writer *bufio.Writer, client bool) *Conn {
-	conn := &Conn{
-		transport: transport,
-		reader:    reader,
-		writer:    writer,
-		client:    client,
-		readMu:    make(lock, 1),
-		writeMu:   make(lock, 1),
-		closed:    make(chan struct{}),
-		pings:     make(map[string]chan<- struct{}),
-	}
-	conn.message.conn = conn
-	conn.abort = func() { _ = conn.closeTransport() }
-	conn.readLimit.Store(defaultReadLimit)
+func newConn(transport io.ReadWriteCloser, reader *bufio.Reader, client bool) *Conn {
+	conn := &Conn{transport: transport, reader: reader, client: client}
+	conn.frame.reader = reader
 	return conn
-}
-
-// parseClose parses a Close frame's payload. On failure it returns the code
-// to fail the connection with.
-func parseClose(payload []byte) (CloseError, StatusCode, error) {
-	if len(payload) == 0 {
-		return CloseError{Code: StatusNoStatusRcvd}, 0, nil
-	}
-	if len(payload) == 1 {
-		return CloseError{}, StatusProtocolError, errors.New("close frame payload of 1 byte")
-	}
-	closeErr := CloseError{
-		Code:   StatusCode(binary.BigEndian.Uint16(payload)),
-		Reason: string(payload[2:]),
-	}
-	if !validCloseCode(closeErr.Code) {
-		return CloseError{}, StatusProtocolError, fmt.Errorf("close frame has invalid status code %d", closeErr.Code)
-	}
-	if !utf8.ValidString(closeErr.Reason) {
-		return CloseError{}, StatusInvalidFramePayloadData, errors.New("close reason is not valid UTF-8")
-	}
-	return closeErr, 0, nil
-}
-
-func noStop() bool {
-	return false
 }

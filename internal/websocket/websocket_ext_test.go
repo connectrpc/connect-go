@@ -17,7 +17,6 @@ package websocket_test
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/binary"
@@ -27,7 +26,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"testing/iotest"
 	"testing/synctest"
 	"time"
 
@@ -52,12 +50,19 @@ const (
 	opPong   = 0xa
 )
 
+// httpClientFunc adapts a function to [websocket.HTTPClient].
+type httpClientFunc func(*http.Request) (*http.Response, error)
+
+func (f httpClientFunc) Do(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
 func TestAccept(t *testing.T) {
 	t.Parallel()
 	server := memhttptest.NewServer(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		conn, err := websocket.Accept(response, request, &websocket.AcceptOptions{Subprotocols: []string{"b", "a"}})
+		conn, err := websocket.Accept(response, request, websocket.Options{Subprotocol: "b"})
 		if err == nil {
-			_ = conn.CloseNow()
+			_ = conn.Close()
 		}
 	}))
 	host := strings.TrimPrefix(server.URL(), "http://")
@@ -80,8 +85,8 @@ func TestAccept(t *testing.T) {
 		{name: "version_12", header: map[string]string{"Sec-WebSocket-Version": "12"}, wantStatus: http.StatusBadRequest},
 		{name: "no_key", header: map[string]string{"Sec-WebSocket-Key": ""}, wantStatus: http.StatusBadRequest},
 		{name: "short_key", header: map[string]string{"Sec-WebSocket-Key": "c2hvcnQ="}, wantStatus: http.StatusBadRequest},
-		{name: "subprotocol", header: map[string]string{"Sec-WebSocket-Protocol": "x, A, b"}, wantStatus: http.StatusSwitchingProtocols, wantProtocol: "b"},
-		{name: "subprotocol_spelling", header: map[string]string{"Sec-WebSocket-Protocol": "x, A"}, wantStatus: http.StatusSwitchingProtocols, wantProtocol: "A"},
+		{name: "subprotocol", header: map[string]string{"Sec-WebSocket-Protocol": "x, a, b"}, wantStatus: http.StatusSwitchingProtocols, wantProtocol: "b"},
+		{name: "subprotocol_case", header: map[string]string{"Sec-WebSocket-Protocol": "x, B"}, wantStatus: http.StatusSwitchingProtocols},
 		{name: "subprotocol_unsupported", header: map[string]string{"Sec-WebSocket-Protocol": "x"}, wantStatus: http.StatusSwitchingProtocols},
 	}
 	for _, test := range tests {
@@ -135,35 +140,21 @@ func TestAcceptBufferedFrame(t *testing.T) {
 
 func TestDial(t *testing.T) {
 	t.Parallel()
-	t.Run("subprotocol", func(t *testing.T) {
-		t.Parallel()
-		server := memhttptest.NewServer(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-			conn, err := websocket.Accept(response, request, &websocket.AcceptOptions{Subprotocols: []string{"b"}})
-			if err == nil {
-				_ = conn.CloseNow()
-			}
-		}))
-		conn := dial(t, server, &websocket.DialOptions{Subprotocols: []string{"a", "b"}})
-		assert.Equal(t, conn.Subprotocol(), "b")
-	})
-	t.Run("ws_scheme", func(t *testing.T) {
+	t.Run("subprotocol_refused", func(t *testing.T) {
 		t.Parallel()
 		server := newServer(t, echo)
-		conn, response, err := websocket.Dial(t.Context(), "ws"+strings.TrimPrefix(server.URL(), "http"), &websocket.DialOptions{ //nolint:bodyclose // no body on success
-			HTTPClient: &http.Client{Transport: server.TransportHTTP1()},
-		})
-		assert.Nil(t, err)
-		assert.Nil(t, response.Body)
-		assert.Nil(t, conn.CloseNow())
+		request := newRequest(t, server.URL())
+		_, response, err := websocket.Dial(&http.Client{Transport: server.TransportHTTP1()}, request, websocket.Options{Subprotocol: "other"}) //nolint:bodyclose // Dial set it to http.NoBody
+		assert.NotNil(t, err)
+		assert.Equal(t, response.StatusCode, http.StatusSwitchingProtocols)
+		assert.Equal(t, response.Body, io.ReadCloser(http.NoBody))
 	})
 	t.Run("http_error", func(t *testing.T) {
 		t.Parallel()
 		server := memhttptest.NewServer(t, http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 			http.Error(response, "nope", http.StatusTeapot)
 		}))
-		_, response, err := websocket.Dial(t.Context(), server.URL(), &websocket.DialOptions{
-			HTTPClient: &http.Client{Transport: server.TransportHTTP1()},
-		})
+		_, response, err := websocket.Dial(&http.Client{Transport: server.TransportHTTP1()}, newRequest(t, server.URL()), websocket.Options{})
 		assert.NotNil(t, err)
 		assert.Equal(t, response.StatusCode, http.StatusTeapot)
 		body, readErr := io.ReadAll(response.Body)
@@ -171,11 +162,41 @@ func TestDial(t *testing.T) {
 		assert.Equal(t, string(body), "nope\n")
 		assert.Nil(t, response.Body.Close())
 	})
-	t.Run("unsupported_scheme", func(t *testing.T) {
+	t.Run("invalid_request", func(t *testing.T) {
 		t.Parallel()
-		_, response, err := websocket.Dial(t.Context(), "ftp://example.com", nil) //nolint:bodyclose // no body on success
+		requests := map[string]*http.Request{
+			"ws_scheme": newRequest(t, "ws://example.com"),
+			"post":      newRequest(t, "http://example.com"),
+		}
+		requests["post"].Method = http.MethodPost
+		for name, request := range requests {
+			_, response, err := websocket.Dial(http.DefaultClient, request, websocket.Options{}) //nolint:bodyclose // no response
+			assert.NotNil(t, err, assert.Sprintf("%s", name))
+			assert.Nil(t, response)
+		}
+	})
+	t.Run("broken_http_client", func(t *testing.T) {
+		t.Parallel()
+		// An HTTPClient other than *http.Client may return no response, or a
+		// 101 without a body.
+		noResponse := httpClientFunc(func(*http.Request) (*http.Response, error) {
+			return nil, nil //nolint:nilnil // a broken HTTPClient
+		})
+		_, response, err := websocket.Dial(noResponse, newRequest(t, "http://example.com"), websocket.Options{}) //nolint:bodyclose // no response
 		assert.NotNil(t, err)
 		assert.Nil(t, response)
+		noBody := httpClientFunc(func(request *http.Request) (*http.Response, error) {
+			hash := sha1.Sum([]byte(request.Header.Get("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+			header := http.Header{
+				"Upgrade":              {"websocket"},
+				"Connection":           {"Upgrade"},
+				"Sec-Websocket-Accept": {base64.StdEncoding.EncodeToString(hash[:])},
+			}
+			return &http.Response{StatusCode: http.StatusSwitchingProtocols, Header: header}, nil
+		})
+		_, response, err = websocket.Dial(noBody, newRequest(t, "http://example.com"), websocket.Options{}) //nolint:bodyclose // Dial set it to http.NoBody
+		assert.NotNil(t, err)
+		assert.Equal(t, response.StatusCode, http.StatusSwitchingProtocols)
 	})
 	tests := []struct {
 		name    string
@@ -183,7 +204,7 @@ func TestDial(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "valid", mutate: func(http.Header) {}},
-		{name: "no_subprotocol", mutate: func(header http.Header) { header.Del("Sec-WebSocket-Protocol") }},
+		{name: "no_subprotocol", mutate: func(header http.Header) { header.Del("Sec-WebSocket-Protocol") }, wantErr: true},
 		{name: "wrong_accept", mutate: func(header http.Header) { header.Set("Sec-WebSocket-Accept", testAccept) }, wantErr: true},
 		{name: "no_upgrade", mutate: func(header http.Header) { header.Del("Upgrade") }, wantErr: true},
 		{name: "no_connection", mutate: func(header http.Header) { header.Set("Connection", "close") }, wantErr: true},
@@ -196,20 +217,15 @@ func TestDial(t *testing.T) {
 			server := memhttptest.NewServer(t, rawUpgradeHandler(test.mutate, func(netConn net.Conn, _ *bufio.Reader) {
 				_, _ = io.Copy(io.Discard, netConn)
 			}))
-			conn, response, err := websocket.Dial(t.Context(), server.URL(), &websocket.DialOptions{
-				HTTPClient:   &http.Client{Transport: server.TransportHTTP1()},
-				Subprotocols: []string{testSubprotocol},
-			})
+			conn, response, err := websocket.Dial(&http.Client{Transport: server.TransportHTTP1()}, newRequest(t, server.URL()), websocket.Options{Subprotocol: testSubprotocol}) //nolint:bodyclose // Dial set it to http.NoBody
 			assert.Equal(t, response.StatusCode, http.StatusSwitchingProtocols)
+			assert.Equal(t, response.Body, io.ReadCloser(http.NoBody))
 			if test.wantErr {
 				assert.NotNil(t, err)
-				assert.Nil(t, response.Body.Close())
 				return
 			}
 			assert.Nil(t, err)
-			assert.Nil(t, response.Body)
-			assert.Equal(t, conn.Subprotocol(), response.Header.Get("Sec-WebSocket-Protocol"))
-			assert.Nil(t, conn.CloseNow())
+			assert.Nil(t, conn.Close())
 		})
 	}
 }
@@ -218,61 +234,67 @@ func TestDialTimeoutBoundsHandshake(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		server := newServer(t, echo)
-		conn := dial(t, server, &websocket.DialOptions{
-			HTTPClient: &http.Client{Transport: server.TransportHTTP1(), Timeout: time.Second},
-		})
+		conn := dial(t, server, &http.Client{Transport: server.TransportHTTP1(), Timeout: time.Second})
 		time.Sleep(2 * time.Second)
-		assert.Nil(t, conn.Write(t.Context(), websocket.MessageText, []byte("late")))
-		_, data, err := conn.Read(t.Context())
+		assert.Nil(t, conn.WriteMessage(websocket.MessageText, frameOf("late")))
+		var dst bytes.Buffer
+		_, err := conn.ReadMessage(&dst, -1)
 		assert.Nil(t, err)
-		assert.Equal(t, string(data), "late")
+		assert.Equal(t, dst.String(), "late")
 	})
 }
 
 func TestMessageSizes(t *testing.T) {
 	t.Parallel()
-	server := newServer(t, func(ctx context.Context, conn *websocket.Conn) {
-		conn.SetReadLimit(-1)
-		echo(ctx, conn)
-	})
+	server := newServer(t, echo)
 	conn := dial(t, server, nil)
-	conn.SetReadLimit(-1)
+	var dst bytes.Buffer
 	for _, size := range []int{0, 1, 125, 126, 127, 65535, 65536, 70000} {
 		for _, messageType := range []websocket.MessageType{websocket.MessageText, websocket.MessageBinary} {
-			data := bytes.Repeat([]byte("é"), size/2)
+			data := strings.Repeat("é", size/2)
 			if size%2 == 1 {
-				data = append(data, 'x')
+				data += "x"
 			}
-			assert.Nil(t, conn.Write(t.Context(), messageType, data))
-			gotType, got, err := conn.Read(t.Context())
+			assert.Nil(t, conn.WriteMessage(messageType, frameOf(data)))
+			dst.Reset()
+			gotType, err := conn.ReadMessage(&dst, -1)
 			assert.Nil(t, err)
 			assert.Equal(t, gotType, messageType)
-			assert.Equal(t, len(got), size)
-			assert.True(t, bytes.Equal(got, data), assert.Sprintf("size %d", size))
+			assert.Equal(t, dst.Len(), size)
+			assert.True(t, dst.String() == data, assert.Sprintf("size %d", size))
 		}
 	}
 }
 
-func TestReader(t *testing.T) {
+func TestReadMessageAppends(t *testing.T) {
 	t.Parallel()
-	server := newServer(t, func(ctx context.Context, conn *websocket.Conn) {
-		_ = conn.Write(ctx, websocket.MessageText, []byte("first"))
-		_ = conn.Write(ctx, websocket.MessageBinary, []byte("second"))
-		_, _, _ = conn.Read(ctx)
+	server := newServer(t, func(conn *websocket.Conn) {
+		_ = conn.WriteMessage(websocket.MessageText, frameOf("skipped"))
+		_ = conn.WriteMessage(websocket.MessageBinary, frameOf("first"))
+		_ = conn.WriteMessage(websocket.MessageBinary, frameOf("second"))
+		_ = readUntilError(conn)
 	})
 	conn := dial(t, server, nil)
-	messageType, reader, err := conn.Reader(t.Context())
+	// A nil dst discards the message but still reports its type.
+	messageType, err := conn.ReadMessage(nil, -1)
 	assert.Nil(t, err)
 	assert.Equal(t, messageType, websocket.MessageText)
-	_, _, err = conn.Reader(t.Context())
-	assert.NotNil(t, err)
-	data, err := io.ReadAll(iotest.OneByteReader(reader))
+	dst := bytes.NewBufferString("kept:")
+	_, err = conn.ReadMessage(dst, 5)
 	assert.Nil(t, err)
-	assert.Equal(t, string(data), "first")
-	messageType, data, err = conn.Read(t.Context())
+	// The limit doesn't count bytes already in dst.
+	_, err = conn.ReadMessage(dst, 6)
 	assert.Nil(t, err)
-	assert.Equal(t, messageType, websocket.MessageBinary)
-	assert.Equal(t, string(data), "second")
+	assert.Equal(t, dst.String(), "kept:firstsecond")
+}
+
+func TestWriteMessageErrors(t *testing.T) {
+	t.Parallel()
+	server := newServer(t, echo)
+	conn := dial(t, server, nil)
+	assert.NotNil(t, conn.WriteMessage(websocket.MessageBinary, make([]byte, websocket.MaxHeaderSize-1)))
+	assert.NotNil(t, conn.WriteMessage(websocket.MessageType(3), frameOf("")))
+	assert.Nil(t, conn.WriteMessage(websocket.MessageBinary, frameOf("")))
 }
 
 func TestFragmentedMessage(t *testing.T) {
@@ -280,6 +302,7 @@ func TestFragmentedMessage(t *testing.T) {
 	server := newServer(t, echo)
 	netConn, reader := rawDial(t, server, nil)
 	var frames []byte
+	// The é is split across fragments, with control frames between them.
 	frames = appendFrame(frames, opText, []byte("h\xc3"), true)
 	frames = appendFrame(frames, finBit|opPing, []byte("ping"), true)
 	frames = appendFrame(frames, opCont, []byte("\xa9l"), true)
@@ -304,40 +327,44 @@ func TestProtocolErrors(t *testing.T) {
 		name       string
 		frames     [][]byte
 		wantStatus websocket.StatusCode
-		tooBig     bool
-		badUTF8    bool
+		wantErr    error
 	}{
-		{name: "rsv1", frames: [][]byte{textFrame(finBit|0x40|opText, "a")}, wantStatus: websocket.StatusProtocolError},
-		{name: "opcode_3", frames: [][]byte{textFrame(finBit|0x3, "a")}, wantStatus: websocket.StatusProtocolError},
-		{name: "opcode_11", frames: [][]byte{textFrame(finBit|0xb, "")}, wantStatus: websocket.StatusProtocolError},
-		{name: "unmasked", frames: [][]byte{appendFrame(nil, finBit|opText, []byte("a"), false)}, wantStatus: websocket.StatusProtocolError},
-		{name: "long_ping", frames: [][]byte{textFrame(finBit|opPing, strings.Repeat("p", 126))}, wantStatus: websocket.StatusProtocolError},
-		{name: "fragmented_ping", frames: [][]byte{textFrame(opPing, "p")}, wantStatus: websocket.StatusProtocolError},
-		{name: "lone_continuation", frames: [][]byte{textFrame(finBit|opCont, "a")}, wantStatus: websocket.StatusProtocolError},
-		{name: "interleaved_message", frames: [][]byte{textFrame(opText, "a"), textFrame(finBit|opText, "b")}, wantStatus: websocket.StatusProtocolError},
-		{name: "length_msb", frames: [][]byte{{finBit | opBinary, 0xff, 0x80, 0, 0, 0, 0, 0, 0, 1}}, wantStatus: websocket.StatusProtocolError},
-		{name: "close_one_byte", frames: [][]byte{closeFrame([]byte{3})}, wantStatus: websocket.StatusProtocolError},
-		{name: "close_999", frames: [][]byte{closeFrame(closePayload(999, ""))}, wantStatus: websocket.StatusProtocolError},
-		{name: "close_1004", frames: [][]byte{closeFrame(closePayload(1004, ""))}, wantStatus: websocket.StatusProtocolError},
-		{name: "close_1005", frames: [][]byte{closeFrame(closePayload(1005, ""))}, wantStatus: websocket.StatusProtocolError},
-		{name: "close_1006", frames: [][]byte{closeFrame(closePayload(1006, ""))}, wantStatus: websocket.StatusProtocolError},
-		{name: "close_1015", frames: [][]byte{closeFrame(closePayload(1015, ""))}, wantStatus: websocket.StatusProtocolError},
-		{name: "close_2999", frames: [][]byte{closeFrame(closePayload(2999, ""))}, wantStatus: websocket.StatusProtocolError},
-		{name: "close_5000", frames: [][]byte{closeFrame(closePayload(5000, ""))}, wantStatus: websocket.StatusProtocolError},
-		{name: "close_reason_utf8", frames: [][]byte{closeFrame(closePayload(1000, "\xff"))}, wantStatus: websocket.StatusInvalidFramePayloadData},
-		{name: "text_utf8", frames: [][]byte{textFrame(finBit|opText, "a\xffb")}, wantStatus: websocket.StatusInvalidFramePayloadData, badUTF8: true},
-		{name: "text_ends_in_rune", frames: [][]byte{textFrame(opText, "a"), textFrame(finBit|opCont, "\xc3")}, wantStatus: websocket.StatusInvalidFramePayloadData, badUTF8: true},
-		{name: "too_big", frames: [][]byte{textFrame(finBit|opBinary, strings.Repeat("x", readLimit+1))}, wantStatus: websocket.StatusMessageTooBig, tooBig: true},
-		{name: "too_big_fragments", frames: [][]byte{textFrame(opBinary, "0123456789"), textFrame(finBit|opCont, "0123456789")}, wantStatus: websocket.StatusMessageTooBig, tooBig: true},
+		{name: "rsv1", frames: [][]byte{textFrame(finBit|0x40|opText, "a")}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "opcode_3", frames: [][]byte{textFrame(finBit|0x3, "a")}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "opcode_11", frames: [][]byte{textFrame(finBit|0xb, "")}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "unmasked", frames: [][]byte{appendFrame(nil, finBit|opText, []byte("a"), false)}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "long_ping", frames: [][]byte{textFrame(finBit|opPing, strings.Repeat("p", 126))}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "fragmented_ping", frames: [][]byte{textFrame(opPing, "p")}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "lone_continuation", frames: [][]byte{textFrame(finBit|opCont, "a")}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "interleaved_message", frames: [][]byte{textFrame(opText, "a"), textFrame(finBit|opText, "b")}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "length_msb", frames: [][]byte{{finBit | opBinary, 0xff, 0x80, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0}}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "close_one_byte", frames: [][]byte{closeFrame([]byte{3})}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "close_999", frames: [][]byte{closeFrame(closePayload(999, ""))}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "close_1004", frames: [][]byte{closeFrame(closePayload(1004, ""))}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "close_1005", frames: [][]byte{closeFrame(closePayload(1005, ""))}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "close_1006", frames: [][]byte{closeFrame(closePayload(1006, ""))}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "close_1015", frames: [][]byte{closeFrame(closePayload(1015, ""))}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "close_2999", frames: [][]byte{closeFrame(closePayload(2999, ""))}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "close_5000", frames: [][]byte{closeFrame(closePayload(5000, ""))}, wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "close_reason_utf8", frames: [][]byte{closeFrame(closePayload(1000, "\xff"))}, wantStatus: websocket.StatusInvalidPayloadData, wantErr: websocket.ErrInvalidUTF8},
+		{name: "text_utf8", frames: [][]byte{textFrame(finBit|opText, "a\xffb")}, wantStatus: websocket.StatusInvalidPayloadData, wantErr: websocket.ErrInvalidUTF8},
+		{name: "text_ends_in_rune", frames: [][]byte{textFrame(opText, "a"), textFrame(finBit|opCont, "\xc3")}, wantStatus: websocket.StatusInvalidPayloadData, wantErr: websocket.ErrInvalidUTF8},
+		{name: "too_big", frames: [][]byte{textFrame(finBit|opBinary, strings.Repeat("x", readLimit+1))}, wantStatus: websocket.StatusMessageTooBig, wantErr: websocket.ErrMessageTooBig},
+		{name: "too_big_fragments", frames: [][]byte{textFrame(opBinary, "0123456789"), textFrame(finBit|opCont, "0123456789")}, wantStatus: websocket.StatusMessageTooBig, wantErr: websocket.ErrMessageTooBig},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			readErr := make(chan error, 1)
-			server := newServer(t, func(ctx context.Context, conn *websocket.Conn) {
-				conn.SetReadLimit(readLimit)
-				readErr <- readUntilError(ctx, conn)
-				_ = conn.Close(websocket.StatusNormalClosure, "")
+			readErrs := make(chan [2]error, 1)
+			server := newServer(t, func(conn *websocket.Conn) {
+				var dst bytes.Buffer
+				var errs [2]error
+				for errs[0] == nil {
+					_, errs[0] = conn.ReadMessage(&dst, readLimit)
+				}
+				// The call after the error drains, then returns it again.
+				_, errs[1] = conn.ReadMessage(&dst, readLimit)
+				readErrs <- errs
 			})
 			netConn, reader := rawDial(t, server, nil)
 			go func() {
@@ -349,54 +376,19 @@ func TestProtocolErrors(t *testing.T) {
 			}()
 			code, _ := readCloseFrame(t, reader)
 			assert.Equal(t, code, test.wantStatus)
-			err := <-readErr
+			// Answer the Close, which ends the drain. A server that already
+			// received a Close has closed the connection.
+			_, _ = netConn.Write(appendFrame(nil, finBit|opClose, closePayload(code, ""), true))
+			_, err := io.Copy(io.Discard, reader)
+			assert.Nil(t, err)
+			errs := <-readErrs
+			assert.ErrorIs(t, errs[0], test.wantErr)
+			assert.ErrorIs(t, errs[1], errs[0])
 			// The code this side sent isn't the peer's Close.
-			assert.Equal(t, websocket.CloseStatus(err), -1, assert.Sprintf("error %v", err))
-			assert.Equal(t, errors.Is(err, websocket.ErrMessageTooBig), test.tooBig)
-			assert.Equal(t, errors.Is(err, websocket.ErrInvalidUTF8), test.badUTF8)
+			_, isCloseErr := errors.AsType[*websocket.CloseError](errs[0])
+			assert.False(t, isCloseErr)
 		})
 	}
-}
-
-func TestReadLimit(t *testing.T) {
-	t.Parallel()
-	const defaultLimit = 32768
-	t.Run("default", func(t *testing.T) {
-		t.Parallel()
-		readErr := make(chan error, 1)
-		server := newServer(t, func(ctx context.Context, conn *websocket.Conn) {
-			_, data, err := conn.Read(ctx)
-			if err == nil && len(data) == defaultLimit {
-				_, _, err = conn.Read(ctx)
-			}
-			readErr <- err
-			// Close drains the rest of the oversized message.
-			_ = conn.Close(websocket.StatusMessageTooBig, "")
-		})
-		conn := dial(t, server, nil)
-		clientErr := make(chan error, 1)
-		go func() {
-			_, _, err := conn.Read(t.Context())
-			clientErr <- err
-		}()
-		assert.Nil(t, conn.Write(t.Context(), websocket.MessageBinary, make([]byte, defaultLimit)))
-		assert.Nil(t, conn.Write(t.Context(), websocket.MessageBinary, make([]byte, 1<<20)))
-		assert.Equal(t, websocket.CloseStatus(<-clientErr), websocket.StatusMessageTooBig)
-		assert.ErrorIs(t, <-readErr, websocket.ErrMessageTooBig)
-	})
-	t.Run("unlimited", func(t *testing.T) {
-		t.Parallel()
-		server := newServer(t, func(ctx context.Context, conn *websocket.Conn) {
-			conn.SetReadLimit(-1)
-			echo(ctx, conn)
-		})
-		conn := dial(t, server, nil)
-		conn.SetReadLimit(-1)
-		assert.Nil(t, conn.Write(t.Context(), websocket.MessageBinary, make([]byte, 1<<20)))
-		_, data, err := conn.Read(t.Context())
-		assert.Nil(t, err)
-		assert.Equal(t, len(data), 1<<20)
-	})
 }
 
 func TestClientProtocolErrors(t *testing.T) {
@@ -405,10 +397,10 @@ func TestClientProtocolErrors(t *testing.T) {
 		name       string
 		frame      []byte
 		wantStatus websocket.StatusCode
-		badUTF8    bool
+		wantErr    error
 	}{
-		{name: "masked", frame: appendFrame(nil, finBit|opText, []byte("a"), true), wantStatus: websocket.StatusProtocolError},
-		{name: "text_utf8", frame: appendFrame(nil, finBit|opText, []byte("M\xff"), false), wantStatus: websocket.StatusInvalidFramePayloadData, badUTF8: true},
+		{name: "masked", frame: appendFrame(nil, finBit|opText, []byte("a"), true), wantStatus: websocket.StatusProtocolError, wantErr: websocket.ErrProtocol},
+		{name: "text_utf8", frame: appendFrame(nil, finBit|opText, []byte("M\xff"), false), wantStatus: websocket.StatusInvalidPayloadData, wantErr: websocket.ErrInvalidUTF8},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -420,11 +412,12 @@ func TestClientProtocolErrors(t *testing.T) {
 				gotStatus <- code
 			}))
 			conn := dial(t, server, nil)
-			_, _, err := conn.Read(t.Context())
-			// The server didn't close, the client failed the connection.
-			assert.Equal(t, websocket.CloseStatus(err), -1, assert.Sprintf("error %v", err))
-			assert.Equal(t, errors.Is(err, websocket.ErrInvalidUTF8), test.badUTF8)
+			_, err := conn.ReadMessage(&bytes.Buffer{}, -1)
+			assert.ErrorIs(t, err, test.wantErr)
 			assert.Equal(t, <-gotStatus, test.wantStatus)
+			// The server hangs up, which ends the drain.
+			_, again := conn.ReadMessage(&bytes.Buffer{}, -1)
+			assert.ErrorIs(t, again, err)
 		})
 	}
 }
@@ -432,31 +425,33 @@ func TestClientProtocolErrors(t *testing.T) {
 func TestReceiveClose(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		payload []byte
-		want    websocket.CloseError
+		name     string
+		payload  []byte
+		want     websocket.CloseError
+		wantEcho []byte
 	}{
-		{name: "normal", payload: closePayload(1000, "bye"), want: websocket.CloseError{Code: 1000, Reason: "bye"}},
-		{name: "no_status", want: websocket.CloseError{Code: websocket.StatusNoStatusRcvd}},
-		{name: "service_restart", payload: closePayload(1012, ""), want: websocket.CloseError{Code: 1012}},
-		{name: "application", payload: closePayload(3000, "é"), want: websocket.CloseError{Code: 3000, Reason: "é"}},
-		{name: "private", payload: closePayload(4999, ""), want: websocket.CloseError{Code: 4999}},
+		{name: "normal", payload: closePayload(1000, "bye"), want: websocket.CloseError{Code: 1000, Reason: "bye"}, wantEcho: closePayload(1000, "")},
+		{name: "no_status", want: websocket.CloseError{Code: websocket.StatusNoStatusReceived}},
+		{name: "service_restart", payload: closePayload(1012, ""), want: websocket.CloseError{Code: 1012}, wantEcho: closePayload(1012, "")},
+		{name: "application", payload: closePayload(3000, "é"), want: websocket.CloseError{Code: 3000, Reason: "é"}, wantEcho: closePayload(3000, "")},
+		{name: "private", payload: closePayload(4999, ""), want: websocket.CloseError{Code: 4999}, wantEcho: closePayload(4999, "")},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			readErr := make(chan error, 1)
-			server := newServer(t, func(ctx context.Context, conn *websocket.Conn) {
-				readErr <- readUntilError(ctx, conn)
+			server := newServer(t, func(conn *websocket.Conn) {
+				readErr <- readUntilError(conn)
 			})
 			netConn, reader := rawDial(t, server, nil)
 			go func() { _, _ = netConn.Write(appendFrame(nil, finBit|opClose, test.payload, true)) }()
 			first, echoed := readRawFrame(t, reader)
 			assert.Equal(t, first, finBit|opClose)
-			assert.True(t, bytes.Equal(echoed, test.payload))
-			var closeErr websocket.CloseError
-			assert.True(t, errors.As(<-readErr, &closeErr))
-			assert.Equal(t, closeErr, test.want)
+			assert.Equal(t, len(echoed), len(test.wantEcho))
+			assert.True(t, bytes.Equal(echoed, test.wantEcho))
+			closeErr, ok := errors.AsType[*websocket.CloseError](<-readErr)
+			assert.True(t, ok)
+			assert.Equal(t, *closeErr, test.want)
 		})
 	}
 }
@@ -465,287 +460,186 @@ func TestCloseHandshake(t *testing.T) {
 	t.Parallel()
 	t.Run("client_closes", func(t *testing.T) {
 		t.Parallel()
-		synctest.Test(t, func(t *testing.T) {
-			readErr := make(chan error, 1)
-			server := newServer(t, func(ctx context.Context, conn *websocket.Conn) {
-				readErr <- readUntilError(ctx, conn)
-			})
-			conn := dial(t, server, nil)
-			start := time.Now()
-			assert.Nil(t, conn.Close(websocket.StatusNormalClosure, "bye"))
-			assert.Equal(t, time.Since(start), 0)
-			var closeErr websocket.CloseError
-			assert.True(t, errors.As(<-readErr, &closeErr))
-			assert.Equal(t, closeErr, websocket.CloseError{Code: websocket.StatusNormalClosure, Reason: "bye"})
-			assert.ErrorIs(t, conn.Close(websocket.StatusNormalClosure, ""), net.ErrClosed)
-			assert.ErrorIs(t, conn.CloseNow(), net.ErrClosed)
+		readErr := make(chan error, 1)
+		server := newServer(t, func(conn *websocket.Conn) {
+			readErr <- readUntilError(conn)
 		})
+		conn := dial(t, server, nil)
+		assert.Nil(t, conn.WriteClose(websocket.StatusNormalClosure, "bye"))
+		_, err := conn.ReadMessage(&bytes.Buffer{}, -1)
+		assert.Equal(t, err, error(&websocket.CloseError{Code: websocket.StatusNormalClosure}))
+		assert.Equal(t, <-readErr, error(&websocket.CloseError{Code: websocket.StatusNormalClosure, Reason: "bye"}))
+		// The handshake is over and the transport closed.
+		_, again := conn.ReadMessage(&bytes.Buffer{}, -1)
+		assert.Equal(t, again, err)
+		assert.ErrorIs(t, conn.WriteMessage(websocket.MessageText, frameOf("")), net.ErrClosed)
+		assert.ErrorIs(t, conn.Ping(), net.ErrClosed)
+		assert.Nil(t, conn.WriteClose(websocket.StatusGoingAway, ""))
+		assert.Nil(t, conn.Close())
+		assert.Nil(t, conn.Close())
 	})
 	t.Run("server_closes", func(t *testing.T) {
 		t.Parallel()
-		synctest.Test(t, func(t *testing.T) {
-			closeErr := make(chan error, 1)
-			server := newServer(t, func(_ context.Context, conn *websocket.Conn) {
-				closeErr <- conn.Close(websocket.StatusGoingAway, "bye")
-			})
-			conn := dial(t, server, nil)
-			_, _, err := conn.Read(t.Context())
-			assert.Equal(t, websocket.CloseStatus(err), websocket.StatusGoingAway)
-			assert.Nil(t, <-closeErr)
-			_, _, err = conn.Read(t.Context())
-			assert.ErrorIs(t, err, net.ErrClosed)
-			assert.ErrorIs(t, conn.Write(t.Context(), websocket.MessageText, nil), net.ErrClosed)
+		readErr := make(chan error, 1)
+		server := newServer(t, func(conn *websocket.Conn) {
+			if err := conn.WriteClose(websocket.StatusGoingAway, "bye"); err != nil {
+				readErr <- err
+				return
+			}
+			// Data the client sent before it saw the Close is discarded.
+			var dst bytes.Buffer
+			_, err := conn.ReadMessage(&dst, -1)
+			assert.Equal(t, dst.Len(), 0)
+			readErr <- err
 		})
-	})
-	t.Run("peer_never_echoes", func(t *testing.T) {
-		t.Parallel()
-		synctest.Test(t, func(t *testing.T) {
-			server := memhttptest.NewServer(t, rawUpgradeHandler(func(http.Header) {}, func(netConn net.Conn, _ *bufio.Reader) {
-				_, _ = io.Copy(io.Discard, netConn)
-			}))
-			conn := dial(t, server, nil)
-			start := time.Now()
-			assert.NotNil(t, conn.Close(websocket.StatusNormalClosure, ""))
-			assert.Equal(t, time.Since(start), 5*time.Second)
-		})
-	})
-	t.Run("peer_never_reads", func(t *testing.T) {
-		t.Parallel()
-		synctest.Test(t, func(t *testing.T) {
-			release := make(chan struct{})
-			server := memhttptest.NewServer(t, rawUpgradeHandler(func(http.Header) {}, func(net.Conn, *bufio.Reader) {
-				<-release
-			}))
-			defer close(release)
-			conn := dial(t, server, nil)
-			start := time.Now()
-			assert.NotNil(t, conn.Close(websocket.StatusNormalClosure, ""))
-			assert.Equal(t, time.Since(start), 5*time.Second)
-		})
-	})
-	t.Run("close_now_ends_close", func(t *testing.T) {
-		t.Parallel()
-		synctest.Test(t, func(t *testing.T) {
-			server := memhttptest.NewServer(t, rawUpgradeHandler(func(http.Header) {}, func(netConn net.Conn, _ *bufio.Reader) {
-				_, _ = io.Copy(io.Discard, netConn)
-			}))
-			conn := dial(t, server, nil)
-			start := time.Now()
-			closed := make(chan error, 1)
-			go func() { closed <- conn.Close(websocket.StatusNormalClosure, "") }()
-			time.Sleep(time.Second)
-			assert.ErrorIs(t, conn.CloseNow(), net.ErrClosed)
-			<-closed
-			assert.Equal(t, time.Since(start), time.Second)
-		})
-	})
-	t.Run("concurrent_write", func(t *testing.T) {
-		t.Parallel()
-		synctest.Test(t, func(t *testing.T) {
-			server := newServer(t, func(ctx context.Context, conn *websocket.Conn) {
-				conn.SetReadLimit(-1)
-				_ = readUntilError(ctx, conn)
-			})
-			conn := dial(t, server, nil)
-			writeErr := make(chan error, 1)
-			wrote := make(chan struct{})
-			go func() {
-				for i := 0; ; i++ {
-					if err := conn.Write(t.Context(), websocket.MessageBinary, make([]byte, 1<<16)); err != nil {
-						writeErr <- err
-						return
-					}
-					if i == 0 {
-						close(wrote)
-					}
+		conn := dial(t, server, nil)
+		writing := make(chan struct{})
+		go func() {
+			defer close(writing)
+			for {
+				if err := conn.WriteMessage(websocket.MessageText, frameOf("ignored")); err != nil {
+					return
 				}
-			}()
-			<-wrote
-			assert.Nil(t, conn.Close(websocket.StatusNormalClosure, ""))
-			assert.ErrorIs(t, <-writeErr, net.ErrClosed)
+			}
+		}()
+		_, err := conn.ReadMessage(&bytes.Buffer{}, -1)
+		assert.Equal(t, err, error(&websocket.CloseError{Code: websocket.StatusGoingAway, Reason: "bye"}))
+		assert.Equal(t, <-readErr, error(&websocket.CloseError{Code: websocket.StatusGoingAway}))
+		<-writing
+	})
+	t.Run("no_status", func(t *testing.T) {
+		t.Parallel()
+		readErr := make(chan error, 1)
+		server := newServer(t, func(conn *websocket.Conn) {
+			readErr <- readUntilError(conn)
 		})
+		conn := dial(t, server, nil)
+		assert.NotNil(t, conn.WriteClose(1006, ""))
+		assert.Nil(t, conn.WriteClose(websocket.StatusNoStatusReceived, strings.Repeat("ignored", 10)))
+		_, err := conn.ReadMessage(&bytes.Buffer{}, -1)
+		assert.Equal(t, err, error(&websocket.CloseError{Code: websocket.StatusNoStatusReceived}))
+		assert.Equal(t, <-readErr, error(&websocket.CloseError{Code: websocket.StatusNoStatusReceived}))
 	})
-	t.Run("invalid_peer_close", func(t *testing.T) {
+	t.Run("long_reason", func(t *testing.T) {
 		t.Parallel()
-		payloads := map[string][]byte{
-			"one_byte": {3},
-			"too_long": closePayload(websocket.StatusNormalClosure, strings.Repeat("x", 124)),
-		}
-		for name, payload := range payloads {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-				synctest.Test(t, func(t *testing.T) {
-					server := newServer(t, func(ctx context.Context, conn *websocket.Conn) {
-						_ = readUntilError(ctx, conn)
-						_ = conn.Close(websocket.StatusNormalClosure, "")
-					})
-					netConn, reader := rawDial(t, server, nil)
-					start := time.Now()
-					_, err := netConn.Write(appendFrame(nil, finBit|opClose, payload, true))
-					assert.Nil(t, err)
-					code, _ := readCloseFrame(t, reader)
-					assert.Equal(t, code, websocket.StatusProtocolError)
-					// The peer's Close already arrived, leaving the server no
-					// reason to wait before closing the connection.
-					_, err = reader.ReadByte()
-					assert.ErrorIs(t, err, io.EOF)
-					assert.Equal(t, time.Since(start), 0)
-				})
-			})
-		}
-	})
-	t.Run("invalid_close", func(t *testing.T) {
-		t.Parallel()
-		server := newServer(t, func(ctx context.Context, conn *websocket.Conn) { _ = readUntilError(ctx, conn) })
-		assert.NotNil(t, dial(t, server, nil).Close(websocket.StatusAbnormalClosure, ""))
-		assert.NotNil(t, dial(t, server, nil).Close(websocket.StatusNormalClosure, strings.Repeat("x", 124)))
+		readErr := make(chan error, 1)
+		server := newServer(t, func(conn *websocket.Conn) {
+			readErr <- readUntilError(conn)
+		})
+		conn := dial(t, server, nil)
+		assert.Nil(t, conn.WriteClose(3000, strings.Repeat("é", 100)))
+		_, _ = conn.ReadMessage(nil, -1)
+		closeErr, ok := errors.AsType[*websocket.CloseError](<-readErr)
+		assert.True(t, ok)
+		assert.Equal(t, closeErr.Reason, strings.Repeat("é", 61))
 	})
 }
 
-func TestPing(t *testing.T) {
+func TestReadLimit(t *testing.T) {
 	t.Parallel()
-	t.Run("pong", func(t *testing.T) {
+	t.Run("too_big", func(t *testing.T) {
 		t.Parallel()
-		server := newServer(t, func(ctx context.Context, conn *websocket.Conn) { _ = readUntilError(ctx, conn) })
-		conn := dial(t, server, nil)
-		go func() { _ = readUntilError(t.Context(), conn) }()
-		for range 3 {
-			assert.Nil(t, conn.Ping(t.Context()))
-		}
-	})
-	t.Run("no_pong", func(t *testing.T) {
-		t.Parallel()
-		synctest.Test(t, func(t *testing.T) {
-			pingErr := make(chan error, 1)
-			server := newServer(t, func(ctx context.Context, conn *websocket.Conn) {
-				go func() { _ = readUntilError(ctx, conn) }()
-				pingCtx, cancel := context.WithTimeout(ctx, time.Second)
-				defer cancel()
-				pingErr <- conn.Ping(pingCtx)
-				// The ended ping left the connection open.
-				_ = conn.Write(ctx, websocket.MessageText, []byte("after"))
-				_ = conn.Close(websocket.StatusNormalClosure, "")
-			})
-			pings := 0
-			conn := dial(t, server, &websocket.DialOptions{
-				OnPingReceived: func(context.Context, []byte) bool {
-					pings++
-					return false
-				},
-			})
-			_, data, err := conn.Read(t.Context())
-			assert.Nil(t, err)
-			assert.Equal(t, string(data), "after")
-			assert.Equal(t, pings, 1)
-			assert.ErrorIs(t, <-pingErr, context.DeadlineExceeded)
+		readErrs := make(chan [2]error, 1)
+		server := newServer(t, func(conn *websocket.Conn) {
+			var errs [2]error
+			_, errs[0] = conn.ReadMessage(&bytes.Buffer{}, 4)
+			_, errs[1] = conn.ReadMessage(nil, -1)
+			readErrs <- errs
 		})
+		conn := dial(t, server, nil)
+		// The server stops reading mid-frame, which blocks this write on the
+		// pipe until the server's drain gives up and closes.
+		writeErr := make(chan error, 1)
+		go func() { writeErr <- conn.WriteMessage(websocket.MessageBinary, frameOf(strings.Repeat("x", 1<<20))) }()
+		_, err := conn.ReadMessage(nil, -1)
+		assert.Equal(t, err, error(&websocket.CloseError{Code: websocket.StatusMessageTooBig}))
+		assert.NotNil(t, <-writeErr)
+		errs := <-readErrs
+		assert.ErrorIs(t, errs[0], websocket.ErrMessageTooBig)
+		assert.ErrorIs(t, errs[1], errs[0])
 	})
-	t.Run("closed", func(t *testing.T) {
+	t.Run("unlimited", func(t *testing.T) {
 		t.Parallel()
 		server := newServer(t, echo)
 		conn := dial(t, server, nil)
-		assert.Nil(t, conn.CloseNow())
-		assert.NotNil(t, conn.Ping(t.Context()))
+		assert.Nil(t, conn.WriteMessage(websocket.MessageBinary, frameOf(strings.Repeat("x", 1<<20))))
+		var dst bytes.Buffer
+		_, err := conn.ReadMessage(&dst, -1)
+		assert.Nil(t, err)
+		assert.Equal(t, dst.Len(), 1<<20)
 	})
 }
 
-func TestContextEndClosesConn(t *testing.T) {
+func TestCloseErrorString(t *testing.T) {
 	t.Parallel()
-	t.Run("read", func(t *testing.T) {
-		t.Parallel()
-		synctest.Test(t, func(t *testing.T) {
-			readErr := make(chan error, 1)
-			server := newServer(t, func(ctx context.Context, conn *websocket.Conn) {
-				readErr <- readUntilError(ctx, conn)
-			})
-			conn := dial(t, server, nil)
-			ctx, cancel := context.WithCancel(t.Context())
-			go func() {
-				synctest.Wait()
-				cancel()
-			}()
-			_, _, err := conn.Read(ctx)
-			assert.ErrorIs(t, err, context.Canceled)
-			assert.ErrorIs(t, conn.Write(t.Context(), websocket.MessageText, nil), net.ErrClosed)
-			assert.Equal(t, websocket.CloseStatus(<-readErr), -1)
-		})
-	})
-	t.Run("write", func(t *testing.T) {
-		t.Parallel()
-		synctest.Test(t, func(t *testing.T) {
-			release := make(chan struct{})
-			server := newServer(t, func(ctx context.Context, conn *websocket.Conn) {
-				<-release
-				_ = readUntilError(ctx, conn)
-			})
-			defer close(release)
-			conn := dial(t, server, nil)
-			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-			defer cancel()
-			err := conn.Write(ctx, websocket.MessageBinary, make([]byte, 1<<16))
-			assert.ErrorIs(t, err, context.DeadlineExceeded)
-			_, _, err = conn.Read(t.Context())
-			assert.ErrorIs(t, err, net.ErrClosed)
-		})
-	})
+	closeErr := &websocket.CloseError{Code: websocket.StatusGoingAway, Reason: "bye"}
+	assert.Equal(t, closeErr.Error(), `websocket: peer closed with 1001 "bye"`)
 }
 
-func TestCloseStatus(t *testing.T) {
-	t.Parallel()
-	assert.Equal(t, websocket.CloseStatus(nil), -1)
-	assert.Equal(t, websocket.CloseStatus(errors.New("x")), -1)
-	closeErr := websocket.CloseError{Code: websocket.StatusGoingAway, Reason: "bye"}
-	assert.Equal(t, websocket.CloseStatus(closeErr), websocket.StatusGoingAway)
-	assert.Equal(t, closeErr.Error(), `status = 1001 and reason = "bye"`)
-}
-
-func newServer(t *testing.T, handle func(context.Context, *websocket.Conn)) *memhttp.Server {
+func newServer(t *testing.T, handle func(*websocket.Conn)) *memhttp.Server {
 	t.Helper()
 	return memhttptest.NewServer(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		conn, err := websocket.Accept(response, request, &websocket.AcceptOptions{Subprotocols: []string{testSubprotocol}})
+		conn, err := websocket.Accept(response, request, websocket.Options{Subprotocol: testSubprotocol})
 		if err != nil {
 			return
 		}
-		defer func() { _ = conn.CloseNow() }()
-		handle(context.WithoutCancel(request.Context()), conn)
+		defer func() { _ = conn.Close() }()
+		handle(conn)
 	}))
 }
 
-func dial(t *testing.T, server *memhttp.Server, opts *websocket.DialOptions) *websocket.Conn {
+func newRequest(t *testing.T, url string) *http.Request {
 	t.Helper()
-	if opts == nil {
-		opts = &websocket.DialOptions{}
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
 	}
-	if opts.HTTPClient == nil {
-		opts.HTTPClient = &http.Client{Transport: server.TransportHTTP1()}
+	return request
+}
+
+func dial(t *testing.T, server *memhttp.Server, httpClient *http.Client) *websocket.Conn {
+	t.Helper()
+	if httpClient == nil {
+		httpClient = &http.Client{Transport: server.TransportHTTP1()}
 	}
-	if opts.Subprotocols == nil {
-		opts.Subprotocols = []string{testSubprotocol}
-	}
-	conn, response, err := websocket.Dial(t.Context(), server.URL(), opts) //nolint:bodyclose // no body on success
+	conn, response, err := websocket.Dial(httpClient, newRequest(t, server.URL()), websocket.Options{Subprotocol: testSubprotocol}) //nolint:bodyclose // Dial set it to http.NoBody
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	assert.Nil(t, response.Body)
-	t.Cleanup(func() { _ = conn.CloseNow() })
+	assert.Equal(t, response.Body, io.ReadCloser(http.NoBody))
+	assert.Equal(t, response.Header.Get("Sec-WebSocket-Protocol"), testSubprotocol)
+	t.Cleanup(func() { _ = conn.Close() })
 	return conn
 }
 
-func echo(ctx context.Context, conn *websocket.Conn) {
+func frameOf(payload string) []byte {
+	return append(make([]byte, websocket.MaxHeaderSize, websocket.MaxHeaderSize+len(payload)), payload...)
+}
+
+// echo writes each message back until the connection ends. The read buffer
+// starts with the header space, which makes the echo copy nothing.
+func echo(conn *websocket.Conn) {
+	var headerSpace [websocket.MaxHeaderSize]byte
+	var frame bytes.Buffer
 	for {
-		messageType, data, err := conn.Read(ctx)
+		frame.Reset()
+		frame.Write(headerSpace[:])
+		messageType, err := conn.ReadMessage(&frame, -1)
 		if err != nil {
+			_, _ = conn.ReadMessage(nil, -1)
 			return
 		}
-		if err := conn.Write(ctx, messageType, data); err != nil {
+		if err := conn.WriteMessage(messageType, frame.Bytes()); err != nil {
 			return
 		}
 	}
 }
 
-func readUntilError(ctx context.Context, conn *websocket.Conn) error {
+func readUntilError(conn *websocket.Conn) error {
+	var dst bytes.Buffer
 	for {
-		if _, _, err := conn.Read(ctx); err != nil {
+		dst.Reset()
+		if _, err := conn.ReadMessage(&dst, -1); err != nil {
 			return err
 		}
 	}
@@ -870,13 +764,13 @@ func readCloseFrame(t *testing.T, reader *bufio.Reader) (websocket.StatusCode, s
 	for {
 		first, payload := readRawFrame(t, reader)
 		if first == 0 {
-			return -1, ""
+			return 0, ""
 		}
 		if first&0x0f != opClose {
 			continue
 		}
 		if len(payload) < 2 {
-			return websocket.StatusNoStatusRcvd, ""
+			return websocket.StatusNoStatusReceived, ""
 		}
 		return websocket.StatusCode(binary.BigEndian.Uint16(payload)), string(payload[2:])
 	}

@@ -16,6 +16,7 @@ package websocket
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -32,11 +33,7 @@ const (
 	opPong         opcode = 10
 
 	maxControlPayload = 125
-	// The longest header has a 64-bit length and a mask key.
-	maxHeaderSize = 14
 )
-
-var errFrameLength = errors.New("frame length has the most significant bit set")
 
 // opcode is a frame opcode from RFC 6455 Section 5.2.
 type opcode byte
@@ -52,7 +49,8 @@ type header struct {
 	opcode  opcode
 	masked  bool
 	maskKey [4]byte
-	length  int64
+	// length is negative when the 64-bit length has its top bit set.
+	length int64
 }
 
 // check reports a header that fails the connection with 1002. A client
@@ -67,6 +65,8 @@ func (h *header) check(client bool) error {
 		return errors.New("masked frame from server")
 	case !client && !h.masked:
 		return errors.New("unmasked frame from client")
+	case h.length < 0:
+		return errors.New("frame length has the most significant bit set")
 	case h.opcode.isControl() && !h.fin:
 		return errors.New("fragmented control frame")
 	case h.opcode.isControl() && h.length > maxControlPayload:
@@ -131,24 +131,25 @@ func readHeader(reader *bufio.Reader) (header, error) {
 	hdr.rsv = first & 0x70
 	hdr.opcode = opcode(first & 0x0f)
 	hdr.masked = second&0x80 != 0
+	var size int
 	switch length := second & 0x7f; length {
 	case 126:
-		value, err := readUint(reader, 2)
-		if err != nil {
-			return hdr, err
-		}
-		hdr.length = int64(value) //nolint:gosec // two bytes
+		size = 2
 	case 127:
-		value, err := readUint(reader, 8)
-		if err != nil {
-			return hdr, err
-		}
-		if value > math.MaxInt64 {
-			return hdr, errFrameLength
-		}
-		hdr.length = int64(value)
+		size = 8
 	default:
 		hdr.length = int64(length)
+	}
+	if size > 0 {
+		var value uint64
+		for range size {
+			next, err := reader.ReadByte()
+			if err != nil {
+				return hdr, err
+			}
+			value = value<<8 | uint64(next)
+		}
+		hdr.length = int64(value) // check rejects a negative length
 	}
 	if hdr.masked {
 		for i := range hdr.maskKey {
@@ -160,40 +161,33 @@ func readHeader(reader *bufio.Reader) (header, error) {
 	return hdr, nil
 }
 
-func readUint(reader *bufio.Reader, size int) (uint64, error) {
-	var value uint64
-	for range size {
-		next, err := reader.ReadByte()
-		if err != nil {
-			return 0, err
-		}
-		value = value<<8 | uint64(next)
-	}
-	return value, nil
-}
-
-// appendHeader appends a final frame's header with the shortest length
-// encoding. A nil maskKey leaves the frame unmasked.
-func appendHeader(dst []byte, op opcode, length int, maskKey *[4]byte) []byte {
-	dst = append(dst, 0x80|byte(op))
+// putHeader writes a final frame's header right-aligned into
+// space[:MaxHeaderSize] and returns where it starts. A client header ends
+// with a fresh mask key.
+func putHeader(space []byte, frameOpcode opcode, length int, client bool) int {
+	end := MaxHeaderSize
 	var maskBit byte
-	if maskKey != nil {
+	if client {
+		end -= 4
 		maskBit = 0x80
+		_, _ = rand.Read(space[end:MaxHeaderSize]) // never fails, see crypto/rand.Read
 	}
+	var start int
 	switch {
 	case length <= maxControlPayload:
-		dst = append(dst, maskBit|byte(length)) //nolint:gosec // at most 125
+		start = end - 2
+		space[start+1] = maskBit | byte(length) //nolint:gosec // at most 125
 	case length <= math.MaxUint16:
-		dst = append(dst, maskBit|126)
-		dst = binary.BigEndian.AppendUint16(dst, uint16(length))
+		start = end - 4
+		space[start+1] = maskBit | 126
+		binary.BigEndian.PutUint16(space[start+2:], uint16(length))
 	default:
-		dst = append(dst, maskBit|127)
-		dst = binary.BigEndian.AppendUint64(dst, uint64(length))
+		start = end - 10
+		space[start+1] = maskBit | 127
+		binary.BigEndian.PutUint64(space[start+2:], uint64(length))
 	}
-	if maskKey != nil {
-		dst = append(dst, maskKey[:]...)
-	}
-	return dst
+	space[start] = 0x80 | byte(frameOpcode)
+	return start
 }
 
 // mask XORs data with key, starting pos bytes into the key, and returns the
@@ -215,4 +209,23 @@ func mask(data []byte, key [4]byte, pos int) int {
 		pos++
 	}
 	return pos & 3
+}
+
+// parseClose validates a Close frame's payload. On failure it returns the
+// code to fail the connection with.
+func parseClose(payload []byte) (*CloseError, StatusCode, error) {
+	switch len(payload) {
+	case 0:
+		return &CloseError{Code: StatusNoStatusReceived}, 0, nil
+	case 1:
+		return nil, StatusProtocolError, fmt.Errorf("%w: close frame payload of 1 byte", ErrProtocol)
+	}
+	code := StatusCode(binary.BigEndian.Uint16(payload))
+	if !validCloseCode(code) {
+		return nil, StatusProtocolError, fmt.Errorf("%w: invalid close code %d", ErrProtocol, code)
+	}
+	if !utf8.Valid(payload[2:]) {
+		return nil, StatusInvalidPayloadData, fmt.Errorf("%w: close reason", ErrInvalidUTF8)
+	}
+	return &CloseError{Code: code, Reason: string(payload[2:])}, 0, nil
 }

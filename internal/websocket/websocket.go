@@ -13,93 +13,100 @@
 // limitations under the License.
 
 // Package websocket implements the parts of RFC 6455 that Connect over
-// WebSocket needs. Its API is a subset of github.com/coder/websocket with
-// the same semantics. It doesn't support extensions, and each Write sends one
-// unfragmented frame.
+// WebSocket needs. It reads whole messages, writes each message as one frame
+// and runs the close handshake. It starts no goroutines or timers and takes no
+// contexts. Closing the Conn is the only way to interrupt a read or write.
 package websocket
 
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
-	"time"
+	"unicode/utf8"
 )
 
-// MessageType constants follow the data frame opcodes.
-const (
-	// MessageText is a message of UTF-8 text.
-	MessageText MessageType = MessageType(opText)
-	// MessageBinary is a message of binary data.
-	MessageBinary MessageType = MessageType(opBinary)
-)
-
-// StatusCode constants are from RFC 6455 Section 7.4.1. Applications may use
-// 3000-4999.
-const (
-	StatusNormalClosure   StatusCode = 1000
-	StatusGoingAway       StatusCode = 1001
-	StatusProtocolError   StatusCode = 1002
-	StatusUnsupportedData StatusCode = 1003
-	// StatusNoStatusRcvd is reported for a Close frame without a code. It is
-	// never sent.
-	StatusNoStatusRcvd StatusCode = 1005
-	// StatusAbnormalClosure is never sent or reported. A connection that ends
-	// without a Close frame returns an error without a CloseError.
-	StatusAbnormalClosure         StatusCode = 1006
-	StatusInvalidFramePayloadData StatusCode = 1007
-	StatusPolicyViolation         StatusCode = 1008
-	StatusMessageTooBig           StatusCode = 1009
-	StatusMandatoryExtension      StatusCode = 1010
-	StatusInternalError           StatusCode = 1011
-)
+// MaxHeaderSize is the space WriteMessage needs in front of the payload. It
+// fits the longest frame header, with a 64-bit length and a mask key.
+const MaxHeaderSize = 14
 
 const (
-	defaultReadLimit = 32768
-	// closeTimeout bounds writing a Close frame and waiting for the peer's.
-	closeTimeout = 5 * time.Second
-	// maxCloseReason leaves room for the code in a control frame.
-	maxCloseReason = maxControlPayload - 2
+	// MessageText is UTF-8 text. ReadMessage validates it as it arrives.
+	MessageText MessageType = 1
+	// MessageBinary is binary data.
+	MessageBinary MessageType = 2
 )
+
+// StatusCode constants are from RFC 6455 Section 7.4.1.
+const (
+	StatusNormalClosure StatusCode = 1000
+	StatusGoingAway     StatusCode = 1001
+	// StatusProtocolError is sent by ReadMessage with ErrProtocol.
+	StatusProtocolError StatusCode = 1002
+	// StatusNoStatusReceived is reported for a Close frame without a code.
+	// It never goes on the wire. WriteClose sends it as a Close frame without
+	// a code.
+	StatusNoStatusReceived StatusCode = 1005
+	// StatusInvalidPayloadData is sent by ReadMessage with ErrInvalidUTF8.
+	StatusInvalidPayloadData StatusCode = 1007
+	// StatusMessageTooBig is sent by ReadMessage with ErrMessageTooBig.
+	StatusMessageTooBig StatusCode = 1009
+	StatusInternalError StatusCode = 1011
+)
+
+// maxCloseReason leaves room for the code in a control frame.
+const maxCloseReason = maxControlPayload - 2
 
 var (
-	// ErrMessageTooBig is wrapped by the error a read returns for a message
-	// over the read limit.
-	ErrMessageTooBig = errors.New("websocket: message too big")
-	// ErrInvalidUTF8 is wrapped by the error a read returns for a text message
-	// that isn't valid UTF-8.
+	// ErrProtocol is wrapped by ReadMessage's error when the peer broke RFC
+	// 6455 framing. The Conn has already sent a Close frame with 1002.
+	ErrProtocol = errors.New("websocket: protocol error")
+	// ErrInvalidUTF8 is wrapped by ReadMessage's error for a text message that
+	// isn't valid UTF-8. The Conn has already sent a Close frame with 1007.
 	ErrInvalidUTF8 = errors.New("websocket: invalid UTF-8 in text message")
+	// ErrMessageTooBig is wrapped by ReadMessage's error for a message over its
+	// limit. The Conn read none of the oversized frame's payload and has
+	// already sent a Close frame with 1009.
+	ErrMessageTooBig = errors.New("websocket: message too big")
 )
 
 // MessageType is the type of a data message.
-type MessageType int
+type MessageType byte
 
-// StatusCode is a Close frame's status code.
-type StatusCode int
+// StatusCode is a Close frame's status code. Applications may use 3000-4999.
+type StatusCode uint16
 
-// CloseError is a Close frame's code and reason. Reads return an error
-// wrapping it after the peer closes. When a read fails the connection itself,
-// its error doesn't wrap the CloseError it sent, as in coder/websocket.
+// CloseError is the peer's Close frame. ReadMessage returns it after the close
+// handshake completes and the transport is closed.
 type CloseError struct {
 	Code   StatusCode
 	Reason string
 }
 
-func (e CloseError) Error() string {
-	return fmt.Sprintf("status = %d and reason = %q", e.Code, e.Reason)
+// Error reports the code and reason.
+func (e *CloseError) Error() string {
+	return fmt.Sprintf("websocket: peer closed with %d %q", e.Code, e.Reason)
 }
 
-// CloseStatus returns the code of the CloseError that err wraps, or -1.
-func CloseStatus(err error) StatusCode {
-	if closeErr, ok := errors.AsType[CloseError](err); ok {
-		return closeErr.Code
-	}
-	return -1
+// HTTPClient makes the handshake request. [*http.Client] implements it. The
+// response to a successful handshake must keep its 101 body, which must be an
+// [io.ReadWriteCloser], as [http.Transport] returns it.
+type HTTPClient interface {
+	Do(request *http.Request) (*http.Response, error)
+}
+
+// Options configures Accept and Dial. The zero value offers and accepts no
+// subprotocol and no extension.
+type Options struct {
+	// Subprotocol is offered by Dial and echoed by Accept when the client
+	// offered it. Dial fails unless the server echoes it exactly.
+	Subprotocol string
 }
 
 // validCloseCode reports whether code may appear in a Close frame.
 func validCloseCode(code StatusCode) bool {
 	switch {
-	case code == 1004, code == StatusNoStatusRcvd, code == StatusAbnormalClosure:
+	case code == 1004, code == StatusNoStatusReceived, code == 1006:
 		return false
 	case code >= StatusNormalClosure && code <= 1014:
 		return true
@@ -108,10 +115,14 @@ func validCloseCode(code StatusCode) bool {
 	}
 }
 
-// closeReason fits text into a Close frame.
+// closeReason fits text into a Close frame as valid UTF-8, cutting it on a
+// rune boundary.
 func closeReason(text string) string {
-	if len(text) <= maxCloseReason {
+	if len(text) > maxCloseReason {
+		text = text[:maxCloseReason]
+	}
+	if utf8.ValidString(text) {
 		return text
 	}
-	return strings.ToValidUTF8(text[:maxCloseReason], "")
+	return strings.ToValidUTF8(text, "")
 }
