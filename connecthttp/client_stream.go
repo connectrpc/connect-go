@@ -96,16 +96,7 @@ func (s *connectUnaryClientStream) Receive(dst any) error {
 // receiveUnaryResponse reads the single response message, mapping a cardinality
 // violation to CodeUnimplemented, then syncs trailers and closes the response.
 func receiveUnaryResponse(conn streamingClientConn, dst any, info *connect.CallInfo) error {
-	err := wrapIfUncoded(conn.Receive(dst))
-	if err == nil {
-		if drainErr := wrapIfUncoded(conn.Receive(dst)); drainErr == nil {
-			err = connect.Errorf(connect.CodeUnimplemented, "unary stream has multiple messages")
-		} else if !errors.Is(drainErr, io.EOF) {
-			err = drainErr
-		}
-	} else if errors.Is(err, io.EOF) {
-		err = connect.Errorf(connect.CodeUnimplemented, "unary stream has zero messages")
-	}
+	err := wrapIfUncoded(receiveExactlyOne(conn.Receive, dst, "stream"))
 	if info != nil {
 		fromHTTPHeader(info.ResponseHeader(), conn.ResponseHeader())
 		fromHTTPHeader(info.ResponseTrailer(), conn.ResponseTrailer())

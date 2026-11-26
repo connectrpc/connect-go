@@ -16,7 +16,6 @@ package connecthttp
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 
@@ -62,18 +61,7 @@ func (s *handlerStream) Receive(dst any) error {
 		return io.EOF
 	}
 	s.rxEnd = true
-	if err := s.conn.Receive(dst); err != nil {
-		if errors.Is(err, io.EOF) {
-			return connect.Errorf(connect.CodeUnimplemented, "unary request has zero messages")
-		}
-		return err
-	}
-	if err := s.conn.Receive(dst); err == nil {
-		return connect.Errorf(connect.CodeUnimplemented, "unary request has multiple messages")
-	} else if !errors.Is(err, io.EOF) {
-		return err
-	}
-	return nil
+	return receiveExactlyOne(s.conn.Receive, dst, "request")
 }
 
 func (s *handlerStream) SendHeaders() error {
@@ -116,7 +104,7 @@ func newServerHandlerConfig(spec connect.Spec, opts *options) *handlerConfig {
 // negotiates the wire protocol (reusing the v1 [Handler.ServeHTTP] skeleton)
 // and dispatches through [connect.Server.Call].
 func newProcedureHandler(server *connect.Server, spec connect.Spec, opts *options) http.Handler {
-	handlerCfg := newServerHandlerConfig(spec, opts.forSpec(spec))
+	handlerCfg := newServerHandlerConfig(spec, opts)
 	protocolHandlers := handlerCfg.newProtocolHandlers()
 	unary := spec.StreamType == connect.StreamTypeUnary
 	singleRequest := unary || spec.StreamType == connect.StreamTypeServer

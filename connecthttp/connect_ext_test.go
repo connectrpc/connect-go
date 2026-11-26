@@ -62,9 +62,9 @@ const errorMessage = "oh no"
 // client doesn't set a header, and the server sets headers and trailers on the
 // response.
 const (
-	clientHeader                = "Connect-Client-Header"
-	handlerHeader               = "Connect-Handler-Header"
-	handlerTrailer              = "Connect-Handler-Trailer"
+	clientHeader                = "X-Client-Header"
+	handlerHeader               = "X-Handler-Header"
+	handlerTrailer              = "X-Handler-Trailer"
 	clientMiddlewareErrorHeader = "Connect-Trigger-HTTP-Error"
 )
 
@@ -1112,6 +1112,12 @@ func TestMountUnknownMethod(t *testing.T) {
 		err = stream.Receive(&pingv1.PingResponse{})
 		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
 	})
+	t.Run("http1/websocket_client", func(t *testing.T) {
+		t.Parallel()
+		client := connect.NewClient(connecthttp.NewTransport(httpClients["http1"], server.URL(), connecthttp.WithWebSocket()))
+		err := client.CallUnary(t.Context(), unknownSpec, &pingv1.PingRequest{}, &pingv1.PingResponse{})
+		assert.Equal(t, connect.CodeOf(err), connect.CodeUnimplemented)
+	})
 	t.Run("registered_method", func(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL())))
@@ -1360,7 +1366,7 @@ func TestHandlerErrorScrub(t *testing.T) {
 	mux := http.NewServeMux()
 	srv := connect.NewServer()
 	pingv1connect.RegisterPingServiceHandler(srv, pingServer)
-	connecthttp.Mount(mux, srv)
+	connecthttp.Mount(mux, srv, connecthttp.WithWebSocket())
 	server := memhttptest.NewServer(t, mux)
 
 	assertScrubbed := func(t *testing.T, err error, wantCode connect.Code) {
@@ -1415,6 +1421,12 @@ func TestHandlerErrorScrub(t *testing.T) {
 	t.Run("grpc-web", func(t *testing.T) {
 		t.Parallel()
 		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), connecthttp.WithGRPCWeb())))
+		testCases(t, client)
+	})
+	t.Run("websocket", func(t *testing.T) {
+		t.Parallel()
+		httpClient := &http.Client{Transport: server.TransportHTTP1()}
+		client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(httpClient, server.URL(), connecthttp.WithWebSocket())))
 		testCases(t, client)
 	})
 }
@@ -3364,10 +3376,13 @@ func TestUserAgent(t *testing.T) {
 	protocols := []struct {
 		name string
 		opts []connecthttp.Option
+		// http1 uses an HTTP/1.1 client, which WebSocket needs.
+		http1 bool
 	}{
-		{"connect", nil},
-		{"grpc", []connecthttp.Option{connecthttp.WithGRPC()}},
-		{"grpcweb", []connecthttp.Option{connecthttp.WithGRPCWeb()}},
+		{"connect", nil, false},
+		{"grpc", []connecthttp.Option{connecthttp.WithGRPC()}, false},
+		{"grpcweb", []connecthttp.Option{connecthttp.WithGRPCWeb()}, false},
+		{"websocket", []connecthttp.Option{connecthttp.WithWebSocket()}, true},
 	}
 	headers := []struct {
 		name string
@@ -3433,10 +3448,14 @@ func TestUserAgent(t *testing.T) {
 						return &pingv1.PingResponse{Number: req.GetNumber()}, nil
 					},
 				})
-				connecthttp.Mount(mux, srv)
+				connecthttp.Mount(mux, srv, connecthttp.WithWebSocket())
 
 				server := memhttptest.NewServer(t, mux)
-				client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(server.Client(), server.URL(), protocol.opts...)))
+				httpClient := server.Client()
+				if protocol.http1 {
+					httpClient = &http.Client{Transport: server.TransportHTTP1()}
+				}
+				client := pingv1connect.NewPingServiceClient(connect.NewClient(connecthttp.NewTransport(httpClient, server.URL(), protocol.opts...)))
 				ctx := t.Context()
 				if header.set != nil {
 					var callInfo *connect.CallInfo
