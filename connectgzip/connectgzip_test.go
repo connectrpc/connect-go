@@ -105,6 +105,98 @@ func TestUseAfterClose(t *testing.T) {
 	}
 }
 
+// TestUseAfterCloseAfterPoolReuse verifies that stale handles stay closed
+// after the underlying gzip writer or reader is recycled to another caller.
+func TestUseAfterCloseAfterPoolReuse(t *testing.T) {
+	t.Parallel()
+	t.Run("writer", func(t *testing.T) {
+		t.Parallel()
+		comp := connectgzip.New()
+		for range 8 {
+			var buf1, buf2 bytes.Buffer
+			writer1, err := comp.Compress(&buf1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := writer1.Write([]byte("first")); err != nil {
+				t.Fatal(err)
+			}
+			if err := writer1.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			writer2, err := comp.Compress(&buf2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := writer2.Write([]byte("second")); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := writer1.Write([]byte("stale")); err == nil {
+				t.Fatal("stale writer Write succeeded after pool reuse")
+			}
+			flusher1, ok := writer1.(interface{ Flush() error })
+			if !ok {
+				t.Fatal("writer does not implement Flush")
+			}
+			if err := flusher1.Flush(); err == nil {
+				t.Fatal("stale writer Flush succeeded after pool reuse")
+			}
+			if err := writer1.Close(); err != nil {
+				t.Fatalf("stale writer second Close returned %v", err)
+			}
+
+			if _, err := writer2.Write([]byte("-tail")); err != nil {
+				t.Fatalf("active writer Write failed after stale Close: %v", err)
+			}
+			if err := writer2.Close(); err != nil {
+				t.Fatalf("active writer Close failed: %v", err)
+			}
+			if got := decompress(t, comp, buf2.Bytes()); string(got) != "second-tail" {
+				t.Fatalf("active writer output = %q, want %q", got, "second-tail")
+			}
+		}
+	})
+
+	t.Run("reader", func(t *testing.T) {
+		t.Parallel()
+		comp := connectgzip.New()
+		compressed1 := compress(t, comp, []byte("alpha"))
+		compressed2 := compress(t, comp, []byte("bravo-payload"))
+		for range 8 {
+			reader1, err := comp.Decompress(bytes.NewReader(compressed1))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := reader1.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			reader2, err := comp.Decompress(bytes.NewReader(compressed2))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := reader1.Read(make([]byte, 4)); err == nil {
+				t.Fatal("stale reader Read succeeded after pool reuse")
+			}
+			if err := reader1.Close(); err != nil {
+				t.Fatalf("stale reader second Close returned %v", err)
+			}
+			got, err := io.ReadAll(reader2)
+			if err != nil {
+				t.Fatalf("active reader ReadAll failed after stale Close: %v", err)
+			}
+			if string(got) != "bravo-payload" {
+				t.Fatalf("active reader output = %q, want %q", got, "bravo-payload")
+			}
+			if err := reader2.Close(); err != nil {
+				t.Fatalf("active reader Close failed: %v", err)
+			}
+		}
+	})
+}
+
 // TestStreamingDecompressStopsEarly verifies that a bounded consumer can
 // abandon a huge payload without materializing it: only the bytes read
 // are decompressed.
