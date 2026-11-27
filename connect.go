@@ -277,9 +277,15 @@ func (c *Client) CallServerStream(ctx context.Context, spec Spec, req any) (Clie
 	// Send reports io.EOF when the server has already ended the RPC. Return the
 	// stream so the caller's Receive reports the server's error.
 	if err := stream.Send(req); err != nil && !errors.Is(err, io.EOF) {
+		if closeErr := stream.Close(); closeErr != nil {
+			return nil, errors.Join(err, closeErr)
+		}
 		return nil, err
 	}
 	if err := stream.CloseSend(); err != nil {
+		if closeErr := stream.Close(); closeErr != nil {
+			return nil, errors.Join(err, closeErr)
+		}
 		return nil, err
 	}
 	return stream, nil
