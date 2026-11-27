@@ -67,13 +67,12 @@ func New(opts ...Option) *Compressor {
 func (c *Compressor) Name() string { return connect.CompressionNameGzip }
 
 // Compress returns a pooled writer that gzip-encodes everything written
-// to it onto dst. Close flushes the gzip stream and recycles the writer.
-// The writer also implements Flush() error, like [gzip.Writer.Flush].
+// to it onto dst. Close flushes the gzip stream and recycles the underlying
+// writer. The writer also implements Flush() error, like [gzip.Writer.Flush].
 func (c *Compressor) Compress(dst io.Writer) (io.WriteCloser, error) {
-	if pooled, ok := c.writers.Get().(*compressWriter); ok {
-		pooled.writer.Reset(dst)
-		pooled.closed = false
-		return pooled, nil
+	if gzWriter, ok := c.writers.Get().(*gzip.Writer); ok {
+		gzWriter.Reset(dst)
+		return &compressWriter{compressor: c, writer: gzWriter}, nil
 	}
 	gzWriter, err := gzip.NewWriterLevel(dst, c.level)
 	if err != nil {
@@ -84,16 +83,15 @@ func (c *Compressor) Compress(dst io.Writer) (io.WriteCloser, error) {
 
 // Decompress returns a pooled reader yielding the gzip-decoded form of
 // src. The gzip header is read from src before Decompress returns. Close
-// recycles the reader without closing src. It is safe to close a reader
-// that was not fully consumed.
+// recycles the underlying reader without closing src. It is safe to close a
+// reader that was not fully consumed.
 func (c *Compressor) Decompress(src io.Reader) (io.ReadCloser, error) {
-	if pooled, ok := c.readers.Get().(*decompressReader); ok {
-		if err := pooled.reader.Reset(src); err != nil {
+	if gzReader, ok := c.readers.Get().(*gzip.Reader); ok {
+		if err := gzReader.Reset(src); err != nil {
 			// Pool poisoning risk on Reset failure: drop state, do not return.
 			return nil, fmt.Errorf("connectgzip: open reader: %w", err)
 		}
-		pooled.closed = false
-		return pooled, nil
+		return &decompressReader{compressor: c, reader: gzReader}, nil
 	}
 	gzReader, err := gzip.NewReader(src)
 	if err != nil {
@@ -106,18 +104,17 @@ type optionFunc func(*Compressor)
 
 func (f optionFunc) apply(c *Compressor) { f(c) }
 
-// compressWriter is a pooled gzip writer. Close returns it to the owning
-// [Compressor]'s pool. The gzip writer is not reset on Close: Compress
-// resets it onto the next destination, so resetting here would
+// compressWriter wraps a pooled [*gzip.Writer]. Close detaches the writer and
+// returns it to the owning [Compressor]'s pool. The gzip writer is not reset on
+// Close: Compress resets it onto the next destination, so resetting here would
 // reinitialize the deflate state twice per payload.
 type compressWriter struct {
 	compressor *Compressor
 	writer     *gzip.Writer
-	closed     bool
 }
 
 func (w *compressWriter) Write(p []byte) (int, error) {
-	if w.closed {
+	if w.writer == nil {
 		return 0, errClosed
 	}
 	n, err := w.writer.Write(p)
@@ -128,7 +125,7 @@ func (w *compressWriter) Write(p []byte) (int, error) {
 }
 
 func (w *compressWriter) Flush() error {
-	if w.closed {
+	if w.writer == nil {
 		return errClosed
 	}
 	if err := w.writer.Flush(); err != nil {
@@ -138,30 +135,30 @@ func (w *compressWriter) Flush() error {
 }
 
 func (w *compressWriter) Close() error {
-	if w.closed {
+	if w.writer == nil {
 		return nil
 	}
-	w.closed = true
-	if err := w.writer.Close(); err != nil {
+	gzWriter := w.writer
+	w.writer = nil
+	if err := gzWriter.Close(); err != nil {
 		// Pool poisoning risk: drop state, do not return to pool.
 		return fmt.Errorf("connectgzip: close writer: %w", err)
 	}
-	w.compressor.writers.Put(w)
+	w.compressor.writers.Put(gzWriter)
 	return nil
 }
 
-// decompressReader is a pooled gzip reader. Close returns it to the
-// owning [Compressor]'s pool. Reset on the next Decompress fully
-// reinitializes the inflate state, so a half-consumed reader is safe to
+// decompressReader wraps a pooled [*gzip.Reader]. Close detaches the reader and
+// returns it to the owning [Compressor]'s pool. Reset on the next Decompress
+// fully reinitializes the inflate state, so a half-consumed reader is safe to
 // recycle.
 type decompressReader struct {
 	compressor *Compressor
 	reader     *gzip.Reader
-	closed     bool
 }
 
 func (r *decompressReader) Read(p []byte) (int, error) {
-	if r.closed {
+	if r.reader == nil {
 		return 0, errClosed
 	}
 	n, err := r.reader.Read(p)
@@ -172,14 +169,15 @@ func (r *decompressReader) Read(p []byte) (int, error) {
 }
 
 func (r *decompressReader) Close() error {
-	if r.closed {
+	if r.reader == nil {
 		return nil
 	}
-	r.closed = true
-	if err := r.reader.Close(); err != nil {
+	gzReader := r.reader
+	r.reader = nil
+	if err := gzReader.Close(); err != nil {
 		// Pool poisoning risk: drop state, do not return to pool.
 		return fmt.Errorf("connectgzip: close reader: %w", err)
 	}
-	r.compressor.readers.Put(r)
+	r.compressor.readers.Put(gzReader)
 	return nil
 }
